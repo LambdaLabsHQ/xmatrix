@@ -1054,10 +1054,9 @@ async fn finished_daemon_child_terminates_owned_job_before_reporting_exit() {
     let descendant = {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if let Ok(value) = std::fs::read_to_string(&pid_file) {
-                if let Ok(pid) = value.trim().parse::<u32>() {
-                    break pid;
-                }
+            if let Ok(value) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = value.trim().parse::<u32>() {
+                break pid;
             }
             assert!(
                 std::time::Instant::now() < deadline,
@@ -1527,6 +1526,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         handoff_transfer: false,
         handoff_source_instance_id: None,
         handoff_source_resume_session_key: None,
+        handoff_context: None,
         goal: None,
         run_worktree: false,
         remote_repo: None,
@@ -2402,6 +2402,26 @@ async fn generic_acp_session_retries_auth_with_advertised_method() {
     })
     .await
     .expect("cursor_login ACP fixture should not hang");
+}
+
+/// Qwen Code without a configured provider answers authRequired, then refuses
+/// the only method it advertises: the start fails as a sign-in problem, in the
+/// harness's own words, whatever its error code.
+#[tokio::test]
+async fn generic_acp_refused_credentials_read_as_signed_out() {
+    require_node_fixture_runtime();
+    let mut session = spawn_generic_acp_fixture("acp-missing-key", "qwen").await;
+    let refused = tokio::time::timeout(
+        Duration::from_secs(10),
+        session.initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false, None),
+    )
+    .await
+    .expect("missing-key ACP fixture should not hang")
+    .expect_err("no provider means no session");
+    session.shutdown().await;
+    let detail = refused.to_string();
+    assert!(crate::harness_signed_out_error(&detail), "{detail}");
+    assert!(detail.contains("Missing API key for openai auth"), "{detail}");
 }
 
 #[test]

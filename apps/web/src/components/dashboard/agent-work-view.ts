@@ -1,4 +1,4 @@
-import type { AgentRuntimeIssue, AgentRuntimeNotice, AgentRuntimeWaiting, ChannelSnapshot } from "@xmatrix/protocol";
+import type { AgentRuntimeIssue, AgentRuntimeNotice, AgentRuntimeWaiting, ChannelSnapshot, FaceOf } from "@xmatrix/protocol";
 import { agentInstanceBranchLabel, type AgentWorkItem } from "./workspace-shell-message-model";
 import { agentInstanceDisplayStatus, presenceStatusLabel } from "./workspace-shell-presence";
 import type { UsageLimitSummary } from "./workspace-shell-domain-types";
@@ -12,8 +12,7 @@ export type AgentWorkView = Readonly<{
   label: string;
   instanceLabel?: string;
   agentLabel: string;
-  avatarKind: "agent" | "system";
-  avatarUrl?: string;
+  face: FaceOf;
   displayStatus: string;
   intent?: string;
   waiting?: AgentRuntimeWaiting;
@@ -39,7 +38,7 @@ export function agentWorkDisplayStatus(item: AgentWorkItem): string {
 }
 
 export function agentWorkCanReborn(item: AgentWorkItem): boolean {
-  if (item.canStop === false || item.avatarKind === "system") return false;
+  if (item.canStop === false || item.face.kind === "system") return false;
   const channelInstanceId = item.instance.channelInstanceId?.trim();
   return Boolean(channelInstanceId && /^[1-9]\d*$/.test(channelInstanceId));
 }
@@ -53,7 +52,7 @@ function project(item: AgentWorkItem): AgentWorkView {
   return {
     key: item.key, agentId: item.agentId, instanceId: item.instance.id,
     label: item.label, instanceLabel: item.instance.label, agentLabel: item.agentLabel,
-    avatarKind: item.avatarKind || "agent", avatarUrl: item.avatarUrl,
+    face: item.face,
     displayStatus, intent: item.intent, waiting,
     issue: item.instance.runtimeState?.issue, notice: item.instance.runtimeState?.notice,
     usageLimit: limit && { label: limit.label, severity: limit.severity, title: limit.title },

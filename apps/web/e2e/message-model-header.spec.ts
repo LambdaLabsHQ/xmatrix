@@ -443,7 +443,7 @@ test("hub system notices keep the xMatrix identity instead of the owning user's 
         channelId: "channel-general",
         sequence: 1,
         // The hub appends this notice under the machine owner's principal.
-        body: "Stopped @codex-legend on Devs-MacBook-Pro.local. The Workstation confirmed the process tree is terminated.",
+        body: "Stopped @codex-legend on Devs-MacBook-Pro.local. The Machine confirmed the process tree is terminated.",
         sentAt: E2E_NOW,
         from: {
           identityId: "user:owner-legend",
@@ -459,7 +459,7 @@ test("hub system notices keep the xMatrix identity instead of the owning user's 
   );
 
   const row = page.locator(".app-message-row", {
-    hasText: "The Workstation confirmed the process tree is terminated.",
+    hasText: "The Machine confirmed the process tree is terminated.",
   });
   await expect(row).toBeVisible();
   await expect(row.locator(".message-author-avatar img")).toHaveAttribute(

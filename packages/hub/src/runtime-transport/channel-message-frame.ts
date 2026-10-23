@@ -17,6 +17,7 @@ import {
   CHANNEL_ACTIVITY_PROVENANCE,
   supersededByOf,
   questionnaireStateOf,
+  commandResultOf,
   mentionAddressTokens,
   scanMentionAddresses,
   filterOperationalMentions,
@@ -266,6 +267,7 @@ export function channelMessage(
   // Only the Hub's own judgment crosses; other annotations stay out of frames.
   const supersededBy = recalledAt ? undefined : boundedId(supersededByOf(input.annotations));
   const questionnaireState = recalledAt ? undefined : questionnaireStateOf(input.annotations);
+  const commandResult = recalledAt ? undefined : commandResultOf(input.annotations);
   return {
     messageId,
     channelId,
@@ -312,5 +314,6 @@ export function channelMessage(
       : {}),
     ...(supersededBy ? { supersededBy } : {}),
     ...(questionnaireState ? { questionnaireState } : {}),
+    ...(commandResult ? { commandResult } : {}),
   };
 }

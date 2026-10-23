@@ -77,10 +77,47 @@ The initial presentation references are `mention.v1`, `launch.v1`, `handoff.v1`,
 `reborn.v1`, `stop.v1`, `runtime-control.v1`, `connector.v1` and `launch-choice.v1`.
 Web rendering consumes these contracts separately from the execution adapters.
 
+A command's answer is drawn on the command, the way a summon's progress is drawn
+on its `@`, and it is not a message. When the Hub answers a model or effort
+switch, a stop that fenced no Run, or a refused reborn or handoff, it records the
+answer as a system annotation (`xmatrix.command-result`) on the message that
+wrote the command: `controls` holds one outcome per statement, in order, and
+each `note` holds one fact in the Hub's words (a stop note that settles the stop
+carries `stopOutcome`). Messages carry the merged `commandResult`, and a
+`channel_message_interactions_updated` event applies a new annotation to every
+client that holds the message. Because it is not a message, the answer neither
+previews in the conversation list, counts as unread, nor wakes an Agent.
+
+Live annotations and history snapshots merge by fact, through the protocol's
+same command-result reducer. A partial snapshot retains notes absent from it;
+each note's annotation id deduplicates replay, and its recording time keeps a
+late read or event from undoing a newer wording. Equal-time notes sort by id.
+A notes-only snapshot retains the command's statement-ordered control answer.
+A recalled message still clears its judgments. The wire shape is unchanged;
+older clients continue to read the same result fields.
+
+What the Hub asks of one Agent Instance (continue a turn a switch cancelled,
+retry a turn capacity cut short, co-write a page) is an instruction to that
+Instance, not something said in the Channel. A switch continuation goes as an
+`agent_switch_continuation` frame on the Instance's own socket to a runtime that
+lists `switch_continuation_frame`. The rest, and a continuation for an older
+runtime, are committed in the Channel log as its durable inbox (a resting or
+reconnecting Instance still reads them), with a kind in
+`AGENT_INSTRUCTION_MESSAGE_KINDS`: no person reads them, so they never preview in
+the conversation list, count as unread, or take a timeline row.
+
+Machine facts about a Run a message asked for answer on that message too: a
+summoned Run's failed start or fallback is a note on the summon (shown on its
+chip by `runId`), and a channel stop's failed or cleanup result is a note on the
+stop command. A Run nothing in the Channel asked for still posts its notice.
+
 ## First-message choice
 
-The current choice remains three seconds, including the existing display-time
-extension capped at ten seconds after sending. The stored database deadline is
+The author has three seconds to choose, counted from when they see Jev's reading
+rather than from sending (`FIRST_MESSAGE_LAUNCH_WINDOW_MS`, plus
+`FIRST_MESSAGE_LAUNCH_SEEN_MS` for the reading to reach their screen). The window
+never closes later than thirty seconds after sending
+(`FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS`). The stored database deadline is
 authoritative. An author can claim only before it; Jev can claim only at or after
 it. Both contend on the same row, so only one decision wins. The winning harness
 is summoned by an `@<harness>` reply whose id derives from the first message, so

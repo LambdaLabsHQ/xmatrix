@@ -1,11 +1,24 @@
 # Channel context for Agent reads
 
 `xmatrix channel history` and a newly launched Agent's read-only history bootstrap
-include the stored Channel Summary and opened-thread references before the
-transcript. Each reference carries `rootMessageId`, the thread's `channelId`,
-and its current name. History entries include message IDs so the reference
+include opened-thread references before the transcript. `xmatrix channel
+history` also includes the stored Channel Summary; the launch bootstrap includes
+it only when its transcript was cut to fit, because beside the whole transcript
+a Summary derived from it adds nothing and can only lag it. Each reference
+carries `rootMessageId`, the thread's `channelId`, and its current name. History
+entries include message IDs, and a reply its `replyToMessageId`, so the reference
 identifies an exact parent message even when two messages have identical text. The Summary is labeled as derived context
 that may lag recent messages; a missing Summary is reported as unavailable.
+
+The launch bootstrap states what the Channel holds and gives no reading of it:
+no line tells the Agent which messages to answer or ignore. What is open, done
+or addressed to someone else is in the messages and their replies. The message a
+Run was started for follows the transcript in the same form as every later turn's
+message — its Channel, `messageId`, `replyToMessageId`, sender and reply context —
+so a summon xMatrix posted in reply to a first message is read together with the
+question it answers. Messages that reached a Run without starting a turn (stops,
+model switches, summons of other Agents, Hub notices) are listed in front of its
+next turn the same way.
 
 Thread references are derived from the current authorized, active Channel catalog.
 A child must have `metadata.kind = "thread"`, a nonempty `threadRootMessageId`,

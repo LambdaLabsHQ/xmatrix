@@ -36,6 +36,16 @@ test("receipt recovery requires the exact run, tag, SHA, scope, and selected sur
   }
 });
 
+test("a receipt's Web is the one its channel deploys", () => {
+  const beta = { ...expected, tag: "xmatrix-v1.3.1-beta.7" };
+  const betaReceipt = { ...receipt, releaseTag: beta.tag, version: "1.3.1-beta.7" };
+  for (const webUrl of ["https://beta.xmatrix.sh", "https://xmatrix.sh"]) {
+    assert.equal(verifyProductionDeploymentReceipt({ ...betaReceipt, webUrl }, beta).webUrl, webUrl);
+  }
+  // A stable never claims the beta Web.
+  assert.throws(() => verifyProductionDeploymentReceipt({ ...receipt, webUrl: "https://beta.xmatrix.sh" }, expected));
+});
+
 test("verified receipt command exits successfully after reading R2 materialized JSON", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "xmatrix-receipt-check-"));
   try {

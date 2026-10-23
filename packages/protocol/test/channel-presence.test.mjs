@@ -23,7 +23,10 @@ test("legacy grouped Instances decode once without copying a sibling's aggregate
   assert.equal(entries[1].usage, undefined);
   assert.equal(entries[1].lastSeenAt, at);
   assert.equal("avatarUrl" in entries[1], false);
-  assert.equal(encodeChannelSnapshot(channel).memberPresence.b.avatarUrl, "/agent-vendors/claude.svg");
+  // A face is drawn from the registration's harness (faces.ts); presence carries no picture of its own.
+  const encoded = encodeChannelSnapshot(channel).memberPresence.b;
+  assert.equal(encoded.registration.harness, "claude");
+  assert.equal("avatarUrl" in encoded, false);
 });
 
 test("canonical Instance entry wins over a cached sender alias in either input order", () => {
@@ -32,7 +35,7 @@ test("canonical Instance entry wins over a cached sender alias in either input o
   for (const entries of [[alias, canonical], [canonical, alias]]) {
     const decoded = decodeChannelSnapshot(wire(Object.fromEntries(entries)));
     assert.equal(decoded.presence.instances.size, 1);
-    assert.equal(encodeChannelSnapshot(decoded).memberPresence.a.avatarUrl, "/agent-vendors/claude.svg");
+    assert.equal(encodeChannelSnapshot(decoded).memberPresence.a.registration.harness, "claude");
     assert.deepEqual(Object.keys(encodeChannelSnapshot(decoded).memberPresence), ["a"]);
   }
 });

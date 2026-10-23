@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   api,
   bumpVersion,
   checkStable,
+  codeqlLanguages,
+  COMPONENTS,
   inflightRef,
   intentRef,
   nextBetaVersion,
@@ -48,11 +51,20 @@ test("a scope is canonical, unique and keeps desktop with its cli", () => {
   }
 });
 
-test("a stable scope names clients only; hub and web ship with every beta", () => {
-  assert.deepEqual(normalizeScope("all", "stable"), ["cli", "desktop", "android", "ios"]);
-  assert.deepEqual(normalizeScope("ios,cli", "stable"), ["cli", "ios"]);
-  for (const bad of ["hub", "cli,web", "desktop", ""]) {
-    assert.throws(() => normalizeScope(bad, "stable"), /hub and web ship with every beta/u, bad);
+test("no component ships unscanned; the workflows that release it are scanned too", () => {
+  for (const component of COMPONENTS) {
+    const [workflows, language, ...rest] = codeqlLanguages([component]);
+    assert.equal(workflows, "actions", component);
+    assert.equal(typeof language, "string", component);
+    assert.deepEqual(rest, [], component);
+  }
+});
+
+test("a stable scope names the stable Web and clients; the hub ships with every beta", () => {
+  assert.deepEqual(normalizeScope("all", "stable"), ["web", "cli", "desktop", "android", "ios"]);
+  assert.deepEqual(normalizeScope("ios,web,cli", "stable"), ["web", "cli", "ios"]);
+  for (const bad of ["hub", "cli,hub", "desktop", ""]) {
+    assert.throws(() => normalizeScope(bad, "stable"), /the hub ships with every beta/u, bad);
   }
 });
 
@@ -201,7 +213,10 @@ test("planner GitHub reads retry network failures and 5xx, not client errors", a
   const realFetch = globalThis.fetch;
   try {
     let calls = 0;
-    globalThis.fetch = async () => {
+    globalThis.fetch = async (_url, options) => {
+      assert.equal(options.headers["cache-control"], "no-cache");
+      assert.equal(options.cache, "no-store");
+      assert.ok(options.signal instanceof AbortSignal);
       calls += 1;
       if (calls === 1) throw new TypeError("fetch failed");
       if (calls === 2) return new Response("", { status: 502 });
@@ -257,6 +272,67 @@ function releaseRepository() {
   };
   return { directory, root, commitMain, release, push: () => run(["push", "--quiet", "origin", "main"]) };
 }
+
+test("the train distinguishes unavailable production evidence from a failed candidate", async (t) => {
+  const successful = { id: 20, status: "completed", conclusion: "success" };
+  const cases = [
+    { name: "missing then visible", responses: [[], [successful]], ships: true, reads: 2 },
+    { name: "still missing", responses: [[]], reads: 120 },
+    { name: "evidence deadline", responses: [[]], advanceMs: 600_000, reads: 1 },
+    { name: "still active", responses: [[{ ...successful, status: "in_progress", conclusion: null }]], reads: 1 },
+    { name: "API denied", responses: [403], reads: 1 },
+    { name: "API unavailable", responses: [502], reads: 5 },
+    { name: "latest run failed", responses: [[successful, { id: 21, status: "completed", conclusion: "failure" }]],
+      invalid: true, reads: 1 },
+  ];
+  for (const scenario of cases) await t.test(scenario.name, () => {
+    const repo = releaseRepository();
+    t.after(() => rmSync(repo.directory, { recursive: true, force: true }));
+    mkdirSync(path.join(repo.root, "docs/releases"), { recursive: true });
+    writeFileSync(path.join(repo.root, "docs/releases/1.0.1.md"), "# xMatrix 1.0.1\n\nUser-facing fixes.\n");
+    const source = repo.commitMain("candidate");
+    const candidate = "xmatrix-v1.0.1-beta.1";
+    const beta = repo.release(source, "1.0.1-beta.1", { scope: "hub,web", source, channel: "beta" });
+    repo.push();
+    const stableRef = intentRef("77", ["web"], { candidate, bump: "patch" });
+    const betaRef = intentRef("88", ["hub"]);
+    const git = (...args) => execFileSync("git", args, { cwd: repo.root, encoding: "utf8", stdio: "pipe" }).trim();
+    git("push", "origin", `${beta}:${stableRef}`, `${source}:${betaRef}`);
+    const preload = path.join(repo.directory, "github.mjs");
+    const callsFile = path.join(repo.directory, "reads.json");
+    // Only the HTTP transport and clock are replaced; the real CLI reconciles
+    // actual remote refs, verifies tags/notes/ancestry and claims the version.
+    writeFileSync(preload, `
+      import { writeFileSync } from "node:fs";
+      const responses = ${JSON.stringify(scenario.responses)};
+      let reads = 0;
+      const now = Date.now;
+      let elapsed = 0;
+      Date.now = () => now() + elapsed;
+      globalThis.setTimeout = (callback) => { elapsed += ${scenario.advanceMs ?? 0}; queueMicrotask(callback); };
+      globalThis.fetch = async () => {
+        const reply = responses[Math.min(reads++, responses.length - 1)];
+        return typeof reply === "number"
+          ? new Response("", { status: reply })
+          : new Response(JSON.stringify({ workflow_runs: reply }));
+      };
+      process.on("exit", () => writeFileSync(${JSON.stringify(callsFile)}, JSON.stringify(reads)));
+    `);
+    const result = spawnSync(process.execPath,
+      ["--import", preload, fileURLToPath(new URL("./release-train.mjs", import.meta.url)), "plan"], {
+        cwd: repo.root, encoding: "utf8", timeout: 15_000,
+        env: { ...process.env, GITHUB_REPOSITORY: "test/repo", GITHUB_TOKEN: "test-token",
+          GITHUB_SHA: source, GITHUB_RUN_ID: "1234", GITHUB_OUTPUT: "" },
+      });
+    assert.equal(result.status, scenario.ships || scenario.invalid ? 0 : 1, result.stderr + result.stdout);
+    const refs = git("ls-remote", "origin", "refs/release-intents/*", "refs/release-inflight/*");
+    assert.equal(refs.includes(betaRef), !scenario.invalid, "only a definitive refusal may fall through to a beta");
+    assert.equal(refs.includes(stableRef), !scenario.ships && !scenario.invalid,
+      "unavailable evidence cannot delete the stable decision");
+    assert.equal(refs.includes("refs/release-inflight/xmatrix-v1.0.1/77/web/patch/" + candidate), Boolean(scenario.ships));
+    assert.equal(JSON.parse(readFileSync(callsFile, "utf8")), scenario.reads);
+  });
+});
 
 test("a stable ships only a delivered beta that covers its clients and moves no stable source back", async (t) => {
   const repo = releaseRepository();

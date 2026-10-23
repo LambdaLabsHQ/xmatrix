@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { matchInteractionGrammar, parseMessageInteraction, MessageInteractionRegistry,
-  parseConnectorActionCommand, parseConnectorInvocation, parseAgentControlCommands, parseAgentStopCommand, parseAgentStopInvocation,
+  parseConnectorActionCommand, parseConnectorInvocation, parseAgentControlCommands, parseAgentControlInvocations, parseAgentStopCommand, parseAgentStopInvocation,
   summarizeStopReceipts, agentInteractionTarget, connectorInteractionTarget,
   humanInteractionTarget, interactionRegistry } from "../dist/index.js";
 
@@ -112,6 +112,17 @@ test("a connector invocation spans its whole first-line statement", () => {
   assert.equal(parseConnectorInvocation("> @github:comment:x hi"), undefined);
 });
 
+test("a zero-width escape after the @ is the command the Hub runs, so it is highlighted too", () => {
+  const body = "@\u200Bcloudflare:query_database:acct/nomadcafe-d1 SELECT 1\nLIMIT 3";
+  assert.deepEqual(parseConnectorActionCommand("cloudflare", body), {
+    actionId: "query_database", statement: { target: "acct/nomadcafe-d1", text: "SELECT 1\nLIMIT 3" } });
+  const invocation = parseConnectorInvocation(body);
+  assert.equal(invocation.text, "@\u200Bcloudflare:query_database:acct/nomadcafe-d1 SELECT 1");
+  assert.equal(body.slice(invocation.start, invocation.commandEnd), "@\u200Bcloudflare:query_database:acct/nomadcafe-d1");
+  assert.equal(body.slice(invocation.target.start, invocation.target.end), "acct/nomadcafe-d1");
+  assert.equal(parseConnectorInvocation("\u200B ＠\u200B\u200DGitHub:Policy").text, "＠\u200B\u200DGitHub:Policy");
+});
+
 test("a stop invocation is the command span the chip hangs on", () => {
   const exact = parseAgentStopInvocation("@claude:1:stop");
   assert.equal(exact.start, 0);
@@ -143,4 +154,42 @@ test("stop receipts summarize without treating acceptance as confirmation", () =
   assert.equal(confirmed.confirmed, 2);
   assert.equal(confirmed.machineName, "build-box-1");
   assert.equal(summarizeStopReceipts([stop("confirmed", "a"), stop("confirmed", "b")]).machineName, undefined);
+});
+
+test("control statements report the span each was written at", () => {
+  const body = "@claude:1 /model fable\n  @claude:1 /effort  ";
+  assert.deepEqual(parseAgentControlInvocations(body), [
+    { kind: "model", target: "claude:1", value: "fable", start: 0, end: 22, text: "@claude:1 /model fable" },
+    { kind: "effort", target: "claude:1", start: 25, end: 42, text: "@claude:1 /effort" },
+  ]);
+  assert.deepEqual(parseAgentControlInvocations("@claude:1 /effort max please"), []);
+});
+
+test("a command's recorded result merges its outcomes and notes from Hub annotations only", async () => {
+  const { commandResultOf, mergeCommandResult } = await import("../dist/index.js");
+  const hub = (id, payload) => ({ id, namespace: "xmatrix.command-result", authorUserId: "system:xmatrix", payload });
+  const controls = [{ kind: "effort", target: "claude:1", status: "switched", selected: "max" }];
+  const result = commandResultOf([
+    hub("r:controls", { controls }),
+    hub("r:stop", { note: { text: "Stopped @claude:1.", at: "2026-10-21T22:00:02Z", stopOutcome: "stopped" } }),
+    hub("r:cleanup", { note: { text: "Host cleanup pending.", at: "2026-10-21T22:00:01Z" } }),
+    { ...hub("forged", { controls: [] }), authorUserId: "user:1" },
+  ]);
+  assert.deepEqual(result.controls, controls);
+  assert.deepEqual(result.notes.map((note) => [note.id, note.stopOutcome]), [["r:cleanup", undefined], ["r:stop", "stopped"]]);
+  const replayed = mergeCommandResult(result, "r:stop", { note: { text: "Stopped again.", at: "2026-10-21T22:00:03Z" } });
+  assert.equal(replayed.notes.length, 2);
+  assert.equal(commandResultOf([]), undefined);
+});
+
+test("Hub instructions to one Agent Instance are recognized; notices people read are not", async () => {
+  const { isAgentInstruction } = await import("../dist/index.js");
+  const notice = { xmatrixSystemNotice: true, xmatrixProvenance: "system_fact" };
+  assert.equal(isAgentInstruction({ ...notice, xmatrixSwitchContinuation: { version: 1 } }), true);
+  assert.equal(isAgentInstruction({ ...notice, xmatrixPageCoWrite: { version: 1 } }), true);
+  assert.equal(isAgentInstruction({ ...notice, xmatrixTurnRetry: { version: 1, state: "issued" } }), true);
+  // The people-facing retry notice and a caller's look-alike metadata are not instructions.
+  assert.equal(isAgentInstruction({ ...notice, xmatrixTurnRetry: { state: "waiting", attempt: 1 } }), false);
+  assert.equal(isAgentInstruction({ xmatrixPageCoWrite: { version: 1 } }), false);
+  assert.equal(isAgentInstruction(undefined), false);
 });

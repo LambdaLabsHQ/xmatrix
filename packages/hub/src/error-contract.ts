@@ -1,4 +1,5 @@
 import { ControlError, DetailedControlError } from "@xmatrix/db";
+import { reportPostgresConflict } from "./postgres-conflict-diagnostic";
 
 import { DURABLE_OBJECT_RETRY_AFTER_SECONDS, transientDurableObjectFailure } from "./durable-object-failure";
 import {
@@ -66,7 +67,7 @@ export function transientFailure(error: unknown): RequestFailure | null {
       headers: { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) } };
   }
   if (postgresTransactionConflict(error)) {
-    console.error("PostgreSQL transaction lost a conflict", error);
+    reportPostgresConflict(error);
     return { status: 503, body: { ...TRANSACTION_CONFLICT, retryable: true },
       headers: { "retry-after": String(postgresRetryAfterSeconds(error)) } };
   }

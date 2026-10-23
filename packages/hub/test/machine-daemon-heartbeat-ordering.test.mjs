@@ -89,3 +89,23 @@ test("unauthenticated and disconnected sockets cannot use the heartbeat fast pat
   assert.match(connected.sent.at(-1).message, /authenticate/u);
   assert.equal(runtime.isRouteReachable(principal), false);
 });
+
+test("a probe that wakes the Runtime checks the catalog once per interval, across hibernation", async () => {
+  const confirmed = [];
+  const backend = { async confirmOnline(session) { confirmed.push(session.connectionEpoch); } };
+  const awake = transport(backend);
+  const socket = new FakeSocket();
+  awake.accept(socket);
+  await awake.handleFrame(socket, connect());
+  await awake.handleFrame(socket, frame("ping", { requestId: "probe-1" }));
+  await awake.handleFrame(socket, frame("ping", { requestId: "probe-2" }));
+  assert.deepEqual(confirmed, [1]);
+
+  // Every probe wakes a hibernated object into a fresh transport; the check it
+  // already made rides the socket's attachment instead of being repeated.
+  const woken = transport(backend);
+  assert.equal(woken.rehydrate(socket, awake.hibernationAttachment(socket)), true);
+  await woken.handleFrame(socket, frame("ping", { requestId: "probe-3" }));
+  assert.deepEqual(confirmed, [1]);
+  assert.equal(socket.sent.at(-1).type, "pong");
+});

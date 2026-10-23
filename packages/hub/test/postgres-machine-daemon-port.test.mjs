@@ -464,6 +464,30 @@ test("causal snapshot evidence is connection-fenced and produces a stable lifecy
   assert.equal(calls.length, before, "invalid causal evidence must fail before Authority mutation");
 });
 
+test("a partial snapshot is offered without a replay; a full snapshot or a named report keeps one", async () => {
+  const calls = [];
+  const background = [];
+  const port = authorityPort({ commands: recordingCommands(calls), keepAlive: (task) => background.push(task) });
+  const causal = { ...session, capabilities: ["machine_run_snapshot_causal_v1"] };
+  const snapshot = (snapshotComplete, registrySequence) => ({ type: "machine_run_snapshot", snapshotComplete,
+    registryConnectionEpoch: 7, registrySequence, capturedAt: new Date().toISOString(), runs: [] });
+  // The minute load report, from a daemon with causal snapshots and from one without.
+  await port.execute(causal, snapshot(false, 3));
+  await port.execute(session, { type: "machine_run_snapshot", snapshotComplete: false, runs: [] });
+  await port.execute(causal, snapshot(true, 4));
+  await port.execute(session, { type: "machine_run_exited", requestId: "exit-1", runId: "run-1",
+    executionKey: "execution-1" });
+  await Promise.all(background);
+  const reports = calls.filter((call) => call.input.action === "report" && !call.input.runLifecycleReplica);
+  assert.deepEqual(reports.map((call) => call.input.replayable), [false, false, undefined, undefined]);
+});
+
+test("a partial snapshot is answered, so the daemon's minute report also proves its session", async () => {
+  const port = authorityPort({ commands: recordingCommands([]), keepAlive: () => undefined });
+  assert.deepEqual(await port.execute(session, { type: "machine_run_snapshot", snapshotComplete: false, runs: [] }),
+    { type: "machine_run_snapshot_acked" });
+});
+
 test("a partial snapshot reconciles only its Runs' Channels in its frame; a full one fans out off the socket", async () => {
   const reconciled = [];
   const background = [];

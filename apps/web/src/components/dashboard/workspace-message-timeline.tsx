@@ -2,7 +2,7 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { messageMachineIdentity, registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
-import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
+import { AttachmentLightbox, ImageGalleryLightbox, LIGHTBOX_BUTTON_CLASS, type GalleryImage } from "./attachment-lightbox";
 import { attachmentMediaType } from "./attachment-media-type";
 import { MediaPlayer } from "./media-player";
 import { AgentIdentityLabels } from "./agent-identity-labels";
@@ -32,7 +32,7 @@ import { RealtimeMessageAvatar } from "./realtime-message-avatar";
 import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
 import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
-import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { LiquidGlassPill, PaperPopover } from "@/components/ui/material-surfaces";
 import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
@@ -93,7 +93,6 @@ import {
   goalStatusBadgeLabel,
   MachineRunFailureNotice,
   StatusChipBadge,
-  avatarInitials,
   buildAgentWorkItems,
   formatFileSize,
   formatTime,
@@ -161,7 +160,6 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
-  ChevronRight,
   Copy,
   Download,
   FileText,
@@ -169,7 +167,6 @@ import {
   Loader2,
   Maximize2,
   MessageSquare,
-  MessageSquarePlus,
   Paperclip,
   Pencil,
   RefreshCw,
@@ -185,7 +182,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import {
   MESSAGE_AUTHOR_NAME_CLASS_NAME,
   MESSAGE_AVATAR_CLASS_NAME,
@@ -220,13 +217,12 @@ import { PageReferenceScopeProvider } from "@/components/dashboard/page-referenc
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation } from "@xmatrix/protocol";
 import { UnpublishedTurnState } from "./unpublished-turn-status";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
-import { launchChoiceOffered, launchChoicePollInterval, launchChoiceView } from "./first-message-launch-choice-state";
+import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { InvocationAccessError, invocationSourceMessages, isInvocationSource, loadInvocationPages } from "./mention-invocation-query";
-import { invocationPollInterval } from "./mention-invocation-state";
 import {
   buildMentionReadIndex, machineOfflineMentionSubjects, withInvocationMentionTargets,
   type MentionReadIndex,
@@ -383,8 +379,6 @@ function useChannelAgentLaunches(channel: ChannelSnapshot | null, token: string 
     }
     return (askedRef.current = { channelId, ids: shownMessageIds, revisions: shownRevisionKey });
   }, [channelId, shownMessageIds, shownRevisionKey]);
-  const newestSourceAt = launchSourceMessages.reduce((latest, message) =>
-    Math.max(latest, Date.parse(message.sentAt) || 0), 0);
   return useQuery<AgentInvocationQueryPage>({
     queryKey: ["agent-launches", channel?.id, viewerIdentity, sourceMessageIds,
       sourceRevisionKey],
@@ -416,19 +410,7 @@ function useChannelAgentLaunches(channel: ChannelSnapshot | null, token: string 
         return response.json();
       },
     }),
-    refetchInterval: (query) => {
-      const base = invocationPollInterval(query.state.data?.launches ?? [],
-        newestSourceAt, Date.now(), query.state.status === "error", query.state.data?.continuations ?? [],
-        query.state.data?.executions ?? [], query.state.data?.stops ?? []);
-      // A first message's launch choice lasts seconds: follow it closely.
-      const now = Date.now();
-      const choice = launchChoicePollInterval([
-        ...(query.state.data?.launchChoices ?? []).map(record => launchChoiceView(firstMessageDecisionWindow(record, []), {}, now)),
-        ...launchSourceMessages.filter(message => offersLaunchChoice(message, channel))
-          .map(message => launchChoiceView(undefined, { sentAt: message.sentAt }, now)),
-      ]);
-      return choice === undefined ? base : base === false ? choice : Math.min(base, choice);
-    },
+    // Nothing polls: the Hub pushes `channel_invocations_changed` when any of these records moves.
   });
 }
 
@@ -506,6 +488,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId,
   threadRootMessage,
   threadRootChannel,
+  foldsDiscussionHead = false,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -540,6 +523,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
+  /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
+  foldsDiscussionHead?: boolean;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1169,6 +1154,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
+                  foldsDiscussionHead={foldsDiscussionHead}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
                   token={token}
@@ -1400,17 +1386,17 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
     <div className={cn("fixed z-50", !below && "-translate-y-full")}
       style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 128)),
         top: below ? passage.rect.bottom + 6 : passage.rect.top - 6 }}>
-      <div role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
-        className="flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 text-popover-foreground">
+      <PaperPopover role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
+        className="flex items-center p-1">
         <button type="button" onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             onDiscuss(passage.messageId, passage.quote);
             document.getSelection()?.removeAllRanges();
           }}
-          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
-          <MessageSquarePlus /> Discuss
+          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
+          <MessageSquare /> Discuss
         </button>
-      </div>
+      </PaperPopover>
     </div>,
     document.body,
   );
@@ -1680,7 +1666,8 @@ function NamedMachineRunFailureNotice({ body, metadata, spaceId, token }: {
   const machineId = typeof metadata?.machineId === "string" ? metadata.machineId : undefined;
   const ownerUserId = typeof metadata?.machineOwnerUserId === "string" ? metadata.machineOwnerUserId : undefined;
   return <MachineRunFailureNotice body={body}
-    machineName={registrationMachineName(catalog.data?.registrations ?? [], machineId, ownerUserId)} />;
+    machineName={registrationMachineName(catalog.data?.registrations ?? [], machineId, ownerUserId)}
+    {...(typeof metadata?.harness === "string" && metadata.harness ? { harness: metadata.harness } : {})} />;
 }
 
 export const MessageRow = memo(function MessageRow({
@@ -1702,6 +1689,7 @@ export const MessageRow = memo(function MessageRow({
   onLaunchChoice,
   contextOnly = false,
   initiallyExpanded = false,
+  foldsDiscussionHead = false,
   currentUserIdentityId,
   channel,
   token,
@@ -1748,6 +1736,8 @@ export const MessageRow = memo(function MessageRow({
   contextOnly?: boolean;
   /** Keep the opening context of a thread readable before folding later long messages. */
   initiallyExpanded?: boolean;
+  /** Its thread's head already shows a page discussion's passage. */
+  foldsDiscussionHead?: boolean;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
   onOpenHumanProfile: (userId: string) => void;
 } & MessageRowProps) {
@@ -1783,6 +1773,8 @@ export const MessageRow = memo(function MessageRow({
   const [rebornSenderArmed, setRebornSenderArmed] = useState(false);
   const [rebornToolbarPosition, setRebornToolbarPosition] = useState<CSSProperties>({ left: 0, top: 0 });
   const actionsRef = useRef<HTMLDivElement | null>(null);
+  // Images open out of their thumbnails here and return into them.
+  const attachmentGridRef = useRef<HTMLDivElement | null>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageAvatarRef = useRef<HTMLDivElement | null>(null);
   const rebornToolbarRef = useRef<HTMLDivElement | null>(null);
@@ -1795,8 +1787,10 @@ export const MessageRow = memo(function MessageRow({
   const humanSenderUserId = message.senderKind === "user" && message.senderId
     ? message.senderId.replace(/^user:/, "")
     : null;
-  // A page discussion's first message shows what was written; its passage is the thread's anchor.
-  const displayBody = normalizeMessageBodyForDisplay(foldedDiscussionBody(message.body), message.senderKind);
+  // A page discussion's first message shows only what was written where its thread's head shows the
+  // passage; anywhere else the passage and its link back open the conversation.
+  const displayBody = normalizeMessageBodyForDisplay(
+    foldsDiscussionHead ? foldedDiscussionBody(message.body) : message.body, message.senderKind);
   const nonOperationalRanges = useMemo(() => /[@＠]/u.test(displayBody) ? nonOperationalMentionRanges(displayBody) : [], [displayBody]);
   const markdownComponents = useMemo(
     () => createMessageMarkdownComponents(onOpenInternalAppLink),
@@ -1807,12 +1801,17 @@ export const MessageRow = memo(function MessageRow({
   // The Hub runs a connector command once, on send; an edit or a quote of it runs nothing.
   const connectorInvocation = useMemo(() => contextOnly || message.editedAt ? undefined : parseConnectorInvocation(displayBody),
     [contextOnly, message.editedAt, displayBody]);
+  // Model and effort statements answer on the statement, as a stop does.
+  const controlInvocations = useMemo(() => contextOnly || message.editedAt ? [] : parseAgentControlInvocations(displayBody),
+    [contextOnly, message.editedAt, displayBody]);
   const mentionReadMessageScope = useMemo<MentionReadMessageScope>(() => ({
     launches: contextOnly || message.editedAt ? [] : agentLaunches,
     // A thread root is a quote of the command. An edit no longer matches the fenced body.
     ...(contextOnly || message.editedAt ? {} : { stops: agentStops, stopReceiptsLoaded }),
     rejections: contextOnly ? [] : invocationRejections,
     ...(connectorInvocation ? { connector: connectorInvocation } : {}),
+    ...(controlInvocations.length ? { controls: controlInvocations } : {}),
+    ...(!contextOnly && message.commandNotices ? { notices: message.commandNotices } : {}),
     continuations: contextOnly || message.editedAt ? [] : continuationInvocations,
     executions: contextOnly || message.editedAt ? [] : messageTargetEvidence?.executions,
     sourceBody: displayBody,
@@ -1824,7 +1823,7 @@ export const MessageRow = memo(function MessageRow({
     ...(!contextOnly && !message.editedAt ? { sentAt: message.sentAt } : {}),
     ...(message.sequence ? { sequence: message.sequence } : {}),
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
-  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, connectorInvocation, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
+  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, connectorInvocation, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   const questionnaire = questionnaireMetadata(message.metadata);
   const onboardingStage = onboardingStageOf(message.metadata);
   const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
@@ -1980,20 +1979,15 @@ export const MessageRow = memo(function MessageRow({
     return () => document.removeEventListener("click", closeOnOutsideClick);
   }, [actionsOpen]);
 
-  const stableNavigateOpenImage = useStableCallback(navigateOpenImage);
   const stableCopyAttachment = useStableCallback(copyAttachment);
 
   useEffect(() => {
     if (!openAttachment) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      // The image viewer closes itself on Escape, animating back to the thumbnail.
+      if (event.key === "Escape" && openAttachment.kind !== "image") {
         setOpenAttachment(null);
-        return;
-      }
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        void stableNavigateOpenImage(event.key === "ArrowLeft" ? -1 : 1);
         return;
       }
       // Lightbox has no text selection target; bind Ctrl/Cmd+C to image copy.
@@ -2017,7 +2011,7 @@ export const MessageRow = memo(function MessageRow({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [openAttachment, stableNavigateOpenImage, stableCopyAttachment]);
+  }, [openAttachment, stableCopyAttachment]);
 
   useEffect(() => {
     if (!editing) return;
@@ -2065,11 +2059,90 @@ export const MessageRow = memo(function MessageRow({
     }
   }
 
-  async function navigateOpenImage(direction: -1 | 1) {
-    if (!openAttachment || openAttachment.kind !== "image" || imageAttachments.length < 2) return;
-    const currentIndex = imageAttachments.findIndex((attachment) => attachment.id === openAttachment.id);
-    const nextIndex = (Math.max(0, currentIndex) + direction + imageAttachments.length) % imageAttachments.length;
-    await openMessageAttachment(imageAttachments[nextIndex]);
+  /** The message's images as the viewer pages through them, each with its source once loaded. */
+  function galleryImages(open: ChannelAttachment): GalleryImage[] {
+    const images = imageAttachments.map((attachment) => {
+      const identity = relayV2AttachmentMediaIdentity(attachment);
+      const resolved = (identity ? mediaStore.resolved.get(identity) : undefined)
+        ?? (attachment.id === open.id ? open : attachment);
+      return { id: attachment.id, name: attachment.name, src: attachmentSource(resolved) };
+    });
+    return images.some((image) => image.id === open.id)
+      ? images
+      : [{ id: open.id, name: open.name, src: attachmentSource(open) }];
+  }
+
+  function attachmentThumbnail(id: string) {
+    return attachmentGridRef.current?.querySelector<HTMLElement>(`[data-lightbox-origin="${CSS.escape(id)}"]`) ?? null;
+  }
+
+  /** The open attachment's full-screen view: images in the zoomable gallery, video and Markdown in a plain frame. */
+  function attachmentLightbox(open: ChannelAttachment) {
+    const actions = (
+      <>
+        <a
+          href={attachmentDownloadHref(open)}
+          download={attachmentDownloadName(open)}
+          title={`Download ${open.name}`}
+          aria-label={`Download ${open.name}`}
+          className={cn("app-attachment-lightbox-download absolute left-1 top-1 size-10", LIGHTBOX_BUTTON_CLASS)}
+        >
+          <Download className="size-5" />
+        </a>
+        {open.kind === "image" && (
+          <button
+            type="button"
+            title={
+              attachmentCopyLabel(open.name, failedAttachmentCopyId === open.id, copiedAttachmentId === open.id)
+            }
+            aria-label={
+              attachmentCopyLabel(open.name, failedAttachmentCopyId === open.id, copiedAttachmentId === open.id)
+            }
+            onClick={() => void copyAttachment(open)}
+            className={cn(
+              "app-attachment-lightbox-copy absolute left-12 top-1 size-10",
+              LIGHTBOX_BUTTON_CLASS,
+              failedAttachmentCopyId === open.id && "bg-destructive/85 hover:bg-destructive"
+            )}
+          >
+            {copiedAttachmentId === open.id ? <Check className="size-5" /> : <Copy className="size-5" />}
+          </button>
+        )}
+      </>
+    );
+    if (open.kind === "image") {
+      return (
+        <ImageGalleryLightbox
+          images={galleryImages(open)}
+          activeId={open.id}
+          onActiveChange={(id) => {
+            const next = imageAttachments.find((attachment) => attachment.id === id);
+            if (next) void openMessageAttachment(next);
+          }}
+          onClose={() => setOpenAttachment(null)}
+          originFor={attachmentThumbnail}
+          actions={actions}
+        />
+      );
+    }
+    return (
+      <AttachmentLightbox label={open.name} onRequestClose={() => setOpenAttachment(null)} actions={actions}>
+        {open.kind === "video" ? (
+          <MediaPlayer
+            kind="video"
+            name={open.name}
+            src={attachmentSource(open)}
+            poster={open.thumbnailUrl}
+            className="max-h-[94dvh] max-w-[96vw] bg-black object-contain"
+            autoPlay
+          />
+        ) : open.kind === "markdown" ? (
+          <MarkdownAttachmentViewer attachment={open} />
+        ) : (
+          <MediaSkeleton label="Loading attachment" className="app-media-skeleton-stage" />
+        )}
+      </AttachmentLightbox>
+    );
   }
 
   async function downloadMessageAttachment(attachment: ChannelAttachment) {
@@ -2317,24 +2390,11 @@ export const MessageRow = memo(function MessageRow({
         }}
       >
         <RealtimeMessageAvatar
+          of={message.face}
           channelId={message.channelId}
           instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
           senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
-          kind={
-            message.reservedSystemAgent
-              ? "system"
-              : message.senderKind === "agent"
-              ? "agent"
-              : message.senderKind === "app"
-                ? "app"
-                : message.senderKind === "system"
-                  ? "system"
-                  : "human"
-          }
-          label={message.author}
           status={message.senderStatus}
-          imageUrl={message.avatarUrl}
-          initials={avatarInitials(message.author)}
           size="md"
           showKindBadge={false}
           glass={false}
@@ -2351,6 +2411,7 @@ export const MessageRow = memo(function MessageRow({
                   name: message.author,
                   status: message.senderStatus,
                   goal: message.senderGoal,
+                  face: message.face,
                 })
               : humanSenderUserId
                 ? () => onOpenHumanProfile(humanSenderUserId)
@@ -2675,7 +2736,7 @@ export const MessageRow = memo(function MessageRow({
           </button>
         )}
         {!recalled && message.attachments && message.attachments.length > 0 && (
-          <div className="mt-2 grid w-full max-w-[min(42rem,100%)] min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
+          <div ref={attachmentGridRef} className="mt-2 grid w-full max-w-[min(42rem,100%)] min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
             {message.attachments.map((attachment) => {
               const mediaIdentity = relayV2AttachmentMediaIdentity(attachment);
               const baseAttachment = mediaIdentity
@@ -2705,7 +2766,7 @@ export const MessageRow = memo(function MessageRow({
                   )}
                 >
                   {attachmentMediaType(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
-                    <div className="rounded-md border border-border bg-muted/45 p-3">
+                    <div className="app-paper-tile p-3">
                       <div className="mb-2 truncate text-sm font-medium">{displayAttachment.name}</div>
                       {source ? (
                         <MediaPlayer kind="audio" src={source} name={displayAttachment.name} />
@@ -2760,9 +2821,9 @@ export const MessageRow = memo(function MessageRow({
                       title={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
                       aria-label={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
                       onClick={() => void (displayAttachment.kind === "markdown" ? openMessageAttachment : downloadMessageAttachment)(displayAttachment)}
-                      className="flex w-full min-w-0 items-center gap-3 rounded-md border border-border bg-muted/45 px-3 py-3 text-left transition hover:bg-muted"
+                      className="app-paper-tile flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left transition-colors"
                     >
-                      <span className="flex size-10 shrink-0 items-center justify-center rounded bg-background text-muted-foreground">
+                      <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
                         {displayAttachment.kind === "markdown" ? <FileText className="size-5" /> : <Paperclip className="size-5" />}
                       </span>
                       <span className="min-w-0 flex-1">
@@ -2779,6 +2840,7 @@ export const MessageRow = memo(function MessageRow({
                       title={`Open ${displayAttachment.name}`}
                       aria-label={`Open ${displayAttachment.name}`}
                       onClick={() => void openMessageAttachment(displayAttachment)}
+                      data-lightbox-origin={displayAttachment.id}
                       className="message-image-attachment block max-w-[18rem] overflow-hidden rounded-[0.75rem] border border-border bg-transparent text-left"
                     >
                       {source ? (
@@ -2847,8 +2909,7 @@ export const MessageRow = memo(function MessageRow({
           <div className="app-thread-reply-preview mt-2 max-w-xl space-y-2 border-l-2 border-border pl-3">
             {message.threadReplies.map((reply) => (
               <div key={reply.id} className="flex w-full items-start gap-2 p-1 text-left text-xs">
-                <IdentityAvatar kind="human" label={reply.author} imageUrl={reply.avatarUrl}
-                  initials={avatarInitials(reply.author)} size="xs" shape="circle" showKindBadge={false} />
+                <Face of={reply.face} size="xs" shape="circle" showKindBadge={false} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-bold">{reply.author}</span>
                   <span className="line-clamp-2 whitespace-pre-wrap break-words text-muted-foreground">{reply.body}</span>
@@ -2869,12 +2930,9 @@ export const MessageRow = memo(function MessageRow({
             {message.threadReplyParticipants?.length ? (
               <span aria-hidden="true" className="app-thread-participant-stack flex shrink-0 -space-x-1.5">
                 {message.threadReplyParticipants.map((participant) => (
-                  <IdentityAvatar
+                  <Face
                     key={participant.id}
-                    kind="human"
-                    label={participant.author}
-                    imageUrl={participant.avatarUrl}
-                    initials={avatarInitials(participant.author)}
+                    of={participant.face}
                     size="xs"
                     shape="circle"
                     showKindBadge={false}
@@ -2960,113 +3018,7 @@ export const MessageRow = memo(function MessageRow({
           </MobileInlineActions>
         )}
       </div>
-      {openAttachment &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            className="app-attachment-lightbox fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 text-white backdrop-blur-md sm:p-5"
-            role="presentation"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) setOpenAttachment(null);
-            }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={openAttachment.name}
-              className="app-attachment-lightbox-dialog relative flex h-full max-h-[94dvh] w-full max-w-[96vw] flex-col items-center justify-center"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) setOpenAttachment(null);
-              }}
-            >
-              <button
-                type="button"
-                title="Close attachment"
-                aria-label="Close attachment"
-                autoFocus
-                onClick={() => setOpenAttachment(null)}
-                className="app-attachment-lightbox-close absolute right-1 top-1 z-20 flex size-10 items-center justify-center bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-              >
-                <X className="size-5" />
-              </button>
-              <a
-                href={attachmentDownloadHref(openAttachment)}
-                download={attachmentDownloadName(openAttachment)}
-                title={`Download ${openAttachment.name}`}
-                aria-label={`Download ${openAttachment.name}`}
-                className="app-attachment-lightbox-download absolute left-1 top-1 z-20 flex size-10 items-center justify-center bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-              >
-                <Download className="size-5" />
-              </a>
-              {openAttachment.kind === "image" && (
-                <button
-                  type="button"
-                  title={
-                    attachmentCopyLabel(openAttachment.name, failedAttachmentCopyId === openAttachment.id, copiedAttachmentId === openAttachment.id)
-                  }
-                  aria-label={
-                    attachmentCopyLabel(openAttachment.name, failedAttachmentCopyId === openAttachment.id, copiedAttachmentId === openAttachment.id)
-                  }
-                  onClick={() => void copyAttachment(openAttachment)}
-                  className={cn(
-                    "app-attachment-lightbox-copy absolute left-12 top-1 z-20 flex size-10 items-center justify-center bg-black/55 text-white shadow-lg transition hover:bg-black/75",
-                    failedAttachmentCopyId === openAttachment.id && "bg-destructive/85 hover:bg-destructive"
-                  )}
-                >
-                  {copiedAttachmentId === openAttachment.id ? <Check className="size-5" /> : <Copy className="size-5" />}
-                </button>
-              )}
-              {openAttachment.kind === "image" && imageAttachments.length > 1 && (
-                <>
-                  <button
-                    type="button"
-                    title="Previous image"
-                    aria-label="Previous image"
-                    onClick={() => void navigateOpenImage(-1)}
-                    className="app-attachment-lightbox-previous absolute left-1 top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                  >
-                    <ChevronLeft className="size-6" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Next image"
-                    aria-label="Next image"
-                    onClick={() => void navigateOpenImage(1)}
-                    className="app-attachment-lightbox-next absolute right-1 top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                  >
-                    <ChevronRight className="size-6" />
-                  </button>
-                  <div className="absolute bottom-1 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-xs font-bold">
-                    {imageAttachments.findIndex((attachment) => attachment.id === openAttachment.id) + 1} / {imageAttachments.length}
-                  </div>
-                </>
-              )}
-              {openAttachment.kind === "video" ? (
-                <MediaPlayer
-                  kind="video"
-                  name={openAttachment.name}
-                  src={attachmentSource(openAttachment)}
-                  poster={openAttachment.thumbnailUrl}
-                  className="max-h-[94dvh] max-w-[96vw] bg-black object-contain"
-                  autoPlay
-                />
-              ) : openAttachment.kind === "markdown" ? (
-                <MarkdownAttachmentViewer attachment={openAttachment} />
-              ) : !attachmentSource(openAttachment) ? (
-                <MediaSkeleton label="Loading attachment" className="app-media-skeleton-stage" />
-              ) : (
-                <ZoomableAttachmentImage
-                  src={attachmentSource(openAttachment)}
-                  alt={openAttachment.name}
-                  resetKey={openAttachment.id}
-                  onRequestClose={() => setOpenAttachment(null)}
-                  onNavigate={(direction) => void navigateOpenImage(direction)}
-                />
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
+      {openAttachment && attachmentLightbox(openAttachment)}
     </div>
   );
 });
@@ -3884,12 +3836,9 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       }}
       className="app-agent-work-avatar relative flex shrink-0 items-center justify-center rounded-full outline-none"
     >
-      <IdentityAvatar
-        kind={item.avatarKind || "agent"}
-        label={item.agentLabel}
+      <Face
+        of={item.face}
         status={displayStatus}
-        imageUrl={item.avatarUrl}
-        initials={avatarInitials(item.agentLabel)}
         size="md"
         showKindBadge={false}
         glass={false}

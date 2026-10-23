@@ -4,7 +4,6 @@ import { useState } from "react";
 import { AlertTriangle, Check, ChevronDown, HardDrive } from "lucide-react";
 import {
   AGENT_PRESETS,
-  agentPresetAvatarUrl,
   type SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -17,7 +16,7 @@ import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { cn } from "@/lib/utils";
 
 import { DialogButton, DialogInset } from "./centered-dialog-shell";
-import { IdentityAvatar } from "./identity-avatar";
+import { Face } from "./face";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { AgentRoutingDeclarationEditor } from "./agent-routing-declaration-editor";
 import { SpaceRegistrationPanel } from "./space-registration-panel";
@@ -125,11 +124,8 @@ export function AgentConfigPage({
 
           <LiquidGlassCard className="app-form-page-card app-setup-hero mt-5 rounded-[22px] p-5">
             <div className="flex items-center gap-3">
-              <IdentityAvatar
-                kind="agent"
-                label={selectedPreset.displayName}
-                imageUrl={agentPresetAvatarUrl(selectedPreset.id)}
-                initials={selectedPreset.displayName.slice(0, 2)}
+              <Face
+                of={{ kind: "agent", name: selectedPreset.displayName, harness: selectedPreset.id }}
                 size="md"
                 className="app-space-agent-vendor-avatar shrink-0"
               />
@@ -209,11 +205,8 @@ export function AgentConfigPage({
                         onChange={() => applyPreset(preset.id)}
                         className="sr-only"
                       />
-                      <IdentityAvatar
-                        kind="agent"
-                        label={preset.displayName}
-                        imageUrl={agentPresetAvatarUrl(preset.id)}
-                        initials={preset.displayName.slice(0, 2)}
+                      <Face
+                        of={{ kind: "agent", name: preset.displayName, harness: preset.id }}
                         size="sm"
                         className="app-space-agent-vendor-avatar shrink-0"
                       />

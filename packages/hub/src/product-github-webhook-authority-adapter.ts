@@ -46,11 +46,11 @@ export interface ProductGitHubWebhookDependencies {
  * linker no longer administers, reaches no Channel of that Space.
  */
 export async function githubSpaceRepositoryDelegated(env: Env, input: { spaceId: string; actorUserId: string;
-  installationId: string; owner: string; repo: string }): Promise<boolean> {
+  installationId: string; owner: string; repo: string; readScope?: "code-scanning" }): Promise<boolean> {
   const connection = await findAppConnection(env, { spaceId: input.spaceId, providerId: "github",
     actorUserId: input.actorUserId });
   return connection?.status === "configured" &&
-    await githubRepositoryDelegated(env, connection, input.installationId, input.owner, input.repo);
+    await githubRepositoryDelegated(env, connection, input.installationId, input.owner, input.repo, input.readScope);
 }
 
 /**
@@ -92,7 +92,8 @@ export async function dispatchProductGitHubWebhook(input: {
   const delegated = new Map<string, Promise<boolean>>();
   for (const route of resolved) {
     if (!delegated.has(route.spaceId)) delegated.set(route.spaceId, delegatedTo(input.env, { spaceId: route.spaceId,
-      actorUserId: route.authorityRootUserId, installationId, owner: repository.owner, repo: repository.repo })
+      actorUserId: route.authorityRootUserId, installationId, owner: repository.owner, repo: repository.repo,
+      ...(feature === "code-scanning" ? { readScope: "code-scanning" as const } : {}) })
       .catch(() => false));
   }
   const routes = [];

@@ -95,8 +95,8 @@ function freeMark(billing: SpacePlanBilling): SpacePlanMark {
       label: "Free",
       state: "blocked",
       title: limit === null
-        ? "Free — the message allowance is used up, this Space cannot send until it upgrades"
-        : `Free — all ${limit} messages used, this Space cannot send until it upgrades`,
+        ? "Free — the allowance is used up, this Space cannot send messages or edit pages until it upgrades"
+        : `Free — all ${limit} messages and page edits used, this Space cannot write until it upgrades`,
     };
   }
 
@@ -106,7 +106,7 @@ function freeMark(billing: SpacePlanBilling): SpacePlanMark {
     state: "active",
     title: remaining === null || limit === null
       ? "This Space is on Free"
-      : `Free — ${remaining} of ${limit} messages left`,
+      : `Free — ${remaining} of ${limit} messages and page edits left`,
   };
 }
 

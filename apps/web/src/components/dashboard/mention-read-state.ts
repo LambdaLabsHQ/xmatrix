@@ -15,6 +15,7 @@ import { channelPresenceInstances } from "@xmatrix/protocol";
 import type {
   ChannelMentionReadState,
   ChannelMentionReadStatus,
+  FaceOf,
   SerializedAgentLaunch,
   ChannelSnapshot,
 } from "@xmatrix/protocol";
@@ -22,13 +23,15 @@ import { MENTION_BROADCAST_NAMES, isChannelResidentInstance, isOperationalMentio
   parseHarnessCapabilityMentions, scanMentionAddresses } from "@xmatrix/protocol";
 
 import type { MentionCandidate } from "./mention-complete";
+import { addressedAgentFace, launchFace } from "./mention-invocation-state";
 
 export type MentionReadTarget = {
   /** Durable subject identity used by delivery cursors. */
   subjectId: string;
   kind: "user" | "agent";
   label: string;
-  avatarUrl?: string;
+  /** Whose face the chip shows (protocol faces.ts). */
+  face: FaceOf;
   /** A written lifecycle phrase the Channel index could not resolve yet. It
       still gets the `@` highlight, but it must never borrow a real member's
       read cursor, so its read state is always `unknown`. */
@@ -104,16 +107,17 @@ function mentionReadTarget(candidate: MentionCandidate): MentionReadTarget | und
   const label = candidate.name?.trim();
   if (!label) return undefined;
   if (candidate.kind === "user") {
-    // Human candidates already carry the channel identity form `user:<id>`.
+    // Human candidates already carry the channel identity form `user:<id>`, which names their account.
     const subjectId = candidate.id.startsWith("user:") ? candidate.id : `user:${candidate.id}`;
-    return { subjectId, kind: "user", label, ...(candidate.avatarUrl ? { avatarUrl: candidate.avatarUrl } : {}) };
+    return { subjectId, kind: "user", label,
+      face: candidate.face ?? { kind: "user", id: subjectId.slice("user:".length), name: label } };
   }
   if (candidate.kind !== "agent" || !candidate.id) return undefined;
   return {
     subjectId: candidate.id.startsWith("agent:") ? candidate.id : `agent:${candidate.id}`,
     kind: "agent",
     label,
-    ...(candidate.avatarUrl ? { avatarUrl: candidate.avatarUrl } : {}),
+    face: candidate.face ?? { kind: "agent", name: label },
   };
 }
 
@@ -253,7 +257,7 @@ export function withInvocationMentionTargets(index: MentionReadIndex,
   if (launches.length === 0) return index;
   const byToken = new Map(index.byToken);
   const ambiguous = new Set(index.tokens.filter(token => !byToken.has(token)));
-  const launchByToken = new Map<string, { profile: string; label: string; avatarUrl?: string }>();
+  const launchByToken = new Map<string, { profile: string; label: string; face: FaceOf }>();
   const launchConflict = new Set<string>();
   for (const launch of launches) {
     if (!launch.targetName) continue;
@@ -272,11 +276,7 @@ export function withInvocationMentionTargets(index: MentionReadIndex,
         launchConflict.add(token);
         continue;
       }
-      launchByToken.set(token, {
-        profile,
-        label: launch.targetName,
-        ...(launch.targetAvatarUrl ? { avatarUrl: launch.targetAvatarUrl } : {}),
-      });
+      launchByToken.set(token, { profile, label: launch.targetName, face: launchFace(launch, launch.targetName) });
     }
   }
   for (const token of launchConflict) {
@@ -286,12 +286,7 @@ export function withInvocationMentionTargets(index: MentionReadIndex,
   for (const [token, bound] of launchByToken) {
     if (launchConflict.has(token)) continue;
     ambiguous.delete(token);
-    byToken.set(token, {
-      subjectId: bound.profile,
-      kind: "agent",
-      label: bound.label,
-      ...(bound.avatarUrl ? { avatarUrl: bound.avatarUrl } : {}),
-    });
+    byToken.set(token, { subjectId: bound.profile, kind: "agent", label: bound.label, face: bound.face });
   }
   return { byToken, tokens: mentionAddressTokens([...byToken.keys(), ...ambiguous]) };
 }
@@ -312,7 +307,8 @@ export function withWrittenInvocationTargets(index: MentionReadIndex, text: stri
   for (const shout of parseHarnessCapabilityMentions(text)) {
     const token = shout.text.replace(/^[@＠]/u, "").trim().toLowerCase();
     if (!token || byToken.has(token) || MENTION_BROADCAST_NAMES.includes(token)) continue;
-    byToken.set(token, { subjectId: `written:${token}`, kind: "agent", label: token, unresolved: true });
+    byToken.set(token, { subjectId: `written:${token}`, kind: "agent", label: token,
+      face: addressedAgentFace({ name: token, address: shout.text }), unresolved: true });
     ambiguous.delete(token);
   }
   return { byToken, tokens: mentionAddressTokens([...byToken.keys(), ...ambiguous]) };

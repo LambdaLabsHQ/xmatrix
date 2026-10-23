@@ -83,7 +83,7 @@ pub(crate) fn classify_socket_command_admission(
     }
 }
 
-pub(crate) use xmatrix_cli_core::error::describe_error_chain;
+pub use xmatrix_cli_core::error::describe_error_chain;
 
 #[cfg(test)]
 mod tests {
@@ -194,7 +194,7 @@ mod tests {
     fn an_answered_refusal_does_not_retry_the_same_lease_generation() {
         assert!(matches!(
             classify_socket_command_admission(Err(crate::error::CliError::Launch(
-                "The command lease is stale or no longer held by this Workstation".into(),
+                "The command lease is stale or no longer held by this Machine".into(),
             ))),
             DaemonAdmissionOutcome::Failed(_),
         ));

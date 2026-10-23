@@ -3,17 +3,22 @@
 The production lifecycle maintenance broker runs daily and dispatches the
 existing bounded executor from the latest successful immutable production tag
 of the line that deploys the Hub: the newest beta (a stable rebuilds an older
-beta's source for clients only, so it is never the target).
+beta's source and never deploys the Hub, so it is never the target).
 For an immediate report, dispatch `production-postgres-lifecycle-maintenance-request.yml`
 with `dry_run=true` and `max_rows=10000`. Inspect its secret-free JSON artifacts
 before dispatching the same broker with `dry_run=false`.
 
 The executor visits the primary database and every configured shard. Deletion
 uses batches of at most 1,000 rows, a per-relation ceiling (10,000 by default,
-100,000 for the existing daily schedule), a shared time budget, a five-second
-statement timeout and `FOR UPDATE SKIP LOCKED`. Each batch commits separately;
-repeating a pass resumes from the remaining eligible rows. Before/after reports
-include row counts, relation sizes and capped eligibility counts, never content.
+1,000,000 for the daily schedule), a 240-second time budget per database, a
+five-second statement timeout and `FOR UPDATE SKIP LOCKED`. Each batch is one
+statement and its own transaction; repeating a pass resumes from the remaining
+eligible rows. The relations take the budget in turns, one batch each per
+round, so no relation goes without: when each ran to the end in a fixed order,
+the outbox and sign-in sessions used the whole 30-second budget from
+2026-10-18 and the scoped replay table, run last, kept ~390,000 expired rows
+and grew from 3.1 GB to 4.1 GB. Before/after reports include row counts,
+relation sizes and eligibility counts capped at 100,001, never content.
 
 Expired idempotency keys, sequence reservations, Agent message executions,
 connector install attempts and scoped command replays retain their existing
@@ -30,6 +35,14 @@ is refused by the epoch fence before its replay is read, every report has a
 fresh command id, and the snapshot head refuses an older registry sequence,
 so neither replay answers anything after the sender's own prompt retries.
 Rows written before the change expire on their original 30-day schedule.
+
+Since 2026-10-22 two daemon commands store no replay at all, because nothing
+asks for their result again and applying them twice is harmless: an online
+confirmation, and a partial Run snapshot (the minute load report, Run progress
+and harness inventory). A partial snapshot carries a causal id but is sent once
+and never answered. These snapshots were about 70,000 of the roughly 80,000
+replay rows written on 2026-10-22. Reports the daemon names (exits, stop
+results), full snapshots and every other command keep theirs.
 
 Expired sign-in sessions (`control.auth_sessions` past `expires_at`) are
 removed in the same bounded batches. Every sign-in check already refuses them;

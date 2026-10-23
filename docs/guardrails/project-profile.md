@@ -26,19 +26,29 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 GitHub repository subscriptions include `code-scanning`: signed alert lifecycle
 events reach a subscribed private-content Channel and wake its resting Agent,
-without periodic polling. The App's effective Code scanning alerts read grant is
-required; see [App connectors](../operations/app-connectors.md).
+without periodic polling. The exact installation's effective Code scanning alerts
+read grant is checked on subscription and again before every delivery; see
+[App connectors](../operations/app-connectors.md).
 
 Page discussions and conversations started from selected message passages use
-the ordinary first-message automatic summon and author choice window while
-retaining their preset titles. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
+the ordinary first-message automatic summon and author choice window. Passage
+discussions are named after the first message's text rather than its quote;
+section discussions keep the section name. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
 
 Human Space owners/admins can confirm Channel deletion in its actions or
-details. Retirement revokes access immediately; a durable job erases the exact
-Channel closure in bounded, retryable passes while keeping linked Pages and
+details. Active work prompts a second confirmation to stop the Channel's
+Agents, then automatically retries deletion after daemon termination. Retirement
+revokes access immediately; a durable job erases the exact
+Channel closure in bounded, retryable passes that checkpoint a plan-bound cursor
+before the transaction deadline, while keeping linked Pages and
 other Channels. Account deletion remains separately available in Settings.
 See [Channel deletion](../operations/channel-deletion.md) and
 [account deletion](../operations/account-deletion.md) for recovery and retained-data limits.
+
+Exact-tag expand migrations can build non-unique indexes concurrently while
+ordinary production writes continue. Durable, checksum-bound reservations own
+interrupted builds; the existing migration ledger records completion after
+index verification. See [online index migrations](../operations/postgres-online-index-migrations.md).
 
 Connector action receipts resume only the exact authenticated calling Instance,
 queueing behind an active turn; subscribed App events reach existing Channel
@@ -67,9 +77,9 @@ Pages type committed Agent edits in as people type: the structure goes in
 first, then the words as small CRDT insertions, a few at a time. Several Agents
 and people type at once, and every moment of the page reads back from Markdown
 as itself. Stored typing lets a restarted session finish a committed edit while
-keeping human typing. Choosing a page co-writer immediately acknowledges the
-selection; desktop feedback offers its conversation and explains to continue
-writing in the page. See [live documents](../design/pages-live-document.md).
+keeping human typing. Co-writing conversations stay in the page's existing margin
+and conversation list, without an additional banner above the document. See
+[live documents](../design/pages-live-document.md).
 
 Live co-writing records bounded, content-free diagnostics for first CRDT text
 and turn outcomes, including quiet-turn timeouts. Hub clock timings distinguish
@@ -164,6 +174,13 @@ Runtime delivery errors retain the sending cause chain and report the original
 receiving exception before it crosses a Durable Object boundary. Reporting
 preserves rejection and never replays a potentially partial broadcast. See
 [Runtime delivery errors](../operations/runtime-delivery-errors.md).
+Routed failures also retain invocation-local ingress, hop roles, route, phase
+and attempt diagnostics as fixed labels, without cell or recipient identities.
+
+Agent turn failures share one reconnect-safe lifecycle reporter across native,
+ACP, stream and headless adapters. Channel notices retain credential-redacted
+HTTP, upstream, WebSocket and process evidence when exposed, and explicitly mark
+missing HTTP evidence. See [Agent turn failures](../operations/agent-turn-failures.md).
 Daemon catch-up retires lost socket bindings and attempts to release all unsent
 leases, preserving sent leases, successor connections and Authority epoch fences.
 Orphan terminal reports recover exact identities only from a matching retained
@@ -173,6 +190,10 @@ and log artifacts cannot replay the exit on reconnect. See
 
 Sentry issue reads retain bounded generated script locations alongside mapped
 exception callers, plus issue occurrence totals and first/last-seen UTC times.
+Harness release watch failures distinguish Runtime fetch, body and contract
+phases with bounded duration, HTTP status and platform flags; the pass is never
+blindly replayed after a lost response, while its target lookup retries as a
+single read on a fresh connection.
 Generated locations exclude URL credentials, queries, fragments and inline code;
 source context, locals and request data remain private. See
 [connector operations](../operations/app-connectors.md).
@@ -277,7 +298,10 @@ reply. The daemon exports the exact retained checkout or its eviction snapshot
 without a live child registry row, preserving uncommitted work under the pool
 guard. This requires the updated CLI; stale retained authority is refused.
 Stop issuance failures refuse the handoff; a durable stop may still
-await its daemon report. See [instance handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine).
+await its daemon report. Carried conversations and legacy pointer snapshots
+share a fresh, owner-only local bundle per attempt, using the existing private
+journal writer; a failed materialization supplies no bundle. See
+[instance handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine).
 
 Handoff stops execution while retaining the source Instance and provider session.
 An explicit reborn may resume it while the successor runs in the same directory;
@@ -338,3 +362,10 @@ Channel deliveries, last activity and subscriptions. Activity includes every
 caller in that Space; delivery counts are per Channel and do not claim raw
 webhook HTTP attempts. Reads remain audited and metadata only. Older Hubs leave
 usage unknown. See [platform admin](../operations/platform-admin-overview.md#connector-activity-in-user-details).
+
+Hub-authored turn-failure notices use the existing unmetered system message
+kind while preserving Run authorization and replay identity. Registration launch
+and PostgreSQL conflict reports retain the original exception, correlated
+bounded query evidence and, for deadlocks, a content-free wait graph readable
+through Sentry. See [Agent turn failures](../operations/agent-turn-failures.md)
+and [Runtime delivery errors](../operations/runtime-delivery-errors.md).

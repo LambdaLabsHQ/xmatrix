@@ -14,6 +14,7 @@ import { boundedOccurrenceAt } from "./bounded-occurrence-time";
 import { summonDecisionEvaluator } from "./summon-decision-content";
 import { meterJev, type JevFeature, type UsageCostEnv } from "./usage-cost-metering";
 import type { Env } from "./types";
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 
 /** What Runs, Instances and their launches need from the Worker. */
 export interface RuntimeEnv extends PostgresAuthorityFleetEnv, AppConnectorEnv, UsageCostEnv {
@@ -42,10 +43,12 @@ export function runtimeRepository(
 }
 
 /** Moves an Agent Launch along as its daemon reports admission, spawn or failure. */
-export function updateAgentLaunch(env: PostgresAuthorityFleetEnv, input: Omit<
+export async function updateAgentLaunch(env: PostgresAuthorityFleetEnv, input: Omit<
   Parameters<PostgresRuntimeRepository["updateAgentLaunch"]>[0], "requestId" | "at"> & { at?: unknown }) {
-  return runtimeRepository(env).updateAgentLaunch({ ...input, requestId: crypto.randomUUID(),
+  const updated = await runtimeRepository(env).updateAgentLaunch({ ...input, requestId: crypto.randomUUID(),
     at: boundedOccurrenceAt(input.at) });
+  await publishChannelInvocationsChanged(env as Env, input.channelId);
+  return updated;
 }
 
 /** A launch decision's databases: the Space shards and the registration directory. */

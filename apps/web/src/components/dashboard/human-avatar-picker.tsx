@@ -6,6 +6,7 @@ import { Camera, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { HumanAvatarCropDialog } from "@/components/dashboard/human-avatar-crop-dialog";
+import { Face, useFace, type FaceOf } from "@/components/dashboard/face";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { HUMAN_AVATAR_ACCEPT, type PreparedAvatar } from "@/lib/human-avatar-image";
 import { cn } from "@/lib/utils";
@@ -16,16 +17,17 @@ import { cn } from "@/lib/utils";
  * paste, because a person choosing their own face is choosing a file.
  */
 export function HumanAvatarPicker({
+  userId,
   displayName,
-  avatarUrl,
   editable,
   busy,
   onSelect,
   onRemove,
   onError,
 }: {
+  /** Whose face it is: drawn as everywhere else, read by id (face.tsx). */
+  userId: string;
   displayName: string;
-  avatarUrl?: string;
   editable: boolean;
   busy?: boolean;
   onSelect: (blob: Blob, mimeType: string) => Promise<void> | void;
@@ -35,6 +37,8 @@ export function HumanAvatarPicker({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
+  const of: FaceOf = { kind: "user", id: userId, name: displayName };
+  const face = useFace(of);
 
   /* The preview is an object URL for the encoded blob, so it must outlive the
      upload but not the component. Revoking on replacement as well as unmount
@@ -43,14 +47,14 @@ export function HumanAvatarPicker({
     if (preview) URL.revokeObjectURL(preview);
   }, [preview]);
 
-  // A confirmed server URL supersedes the local preview; without this the
+  // A confirmed picture supersedes the local preview; without this the
   // optimistic image would sit on top of the real one forever.
   useEffect(() => {
     setPreview((current) => {
       if (current) URL.revokeObjectURL(current);
       return null;
     });
-  }, [avatarUrl]);
+  }, [face.imageUrl]);
 
   function pick(file: File | undefined) {
     if (!file) return;
@@ -76,21 +80,10 @@ export function HumanAvatarPicker({
     }
   }
 
-  const shown = preview ?? avatarUrl;
+  const shown = preview ?? face.imageUrl;
 
   if (!editable) {
-    return (
-      <IdentityAvatar
-        kind="human"
-        label={displayName}
-        imageUrl={shown}
-        initials={displayName.slice(0, 2)}
-        size="lg"
-        shape="circle"
-        showKindBadge={false}
-        className="shrink-0"
-      />
-    );
+    return <Face of={of} size="lg" shape="circle" showKindBadge={false} className="shrink-0" />;
   }
 
   return (
@@ -117,15 +110,13 @@ export function HumanAvatarPicker({
           busy && "cursor-progress",
         )}
       >
-        <IdentityAvatar
-          kind="human"
-          label={displayName}
-          imageUrl={shown}
-          initials={displayName.slice(0, 2)}
-          size="lg"
-          shape="circle"
-          showKindBadge={false}
-        />
+        {/* The picture just cropped shows at once, before it is the face everyone sees. */}
+        {preview ? (
+          <IdentityAvatar kind="human" label={displayName} imageUrl={preview} initials={face.initials} size="lg"
+            shape="circle" showKindBadge={false} />
+        ) : (
+          <Face of={of} size="lg" shape="circle" showKindBadge={false} />
+        )}
         <span
           aria-hidden="true"
           className={cn(

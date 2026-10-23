@@ -31,8 +31,13 @@ Reading xMatrix content, presence, heartbeats and retries of an already committe
 write cost nothing. X reads are paid upstream operations. A replayed command is answered from its receipt and is not charged
 again.
 
-Free Spaces keep their existing allowance (three people, 500 lifetime messages
-from anyone); paid X operations require Pro. The deployment's platform admin Space
+Free Spaces keep their own allowance: three people and 500 lifetime writes from
+anyone, where a write is an accepted Channel message or a committed page revision
+(edits, suggestions, accepted suggestions and restores; a new page is its first
+revision). Both count on the one `space_billing_usage.free_message_count`
+counter, which deletion never lowers; after the 500th, messages and page
+revisions are refused with `402 payment_required` and reading is unaffected.
+Paid X operations require Pro. The deployment's platform admin Space
 (`PLATFORM_ADMIN_SPACE_ID`, the operator's own) is not charged for messages or
 page revisions or X calls; its cost is still visible in per-Space cost metering.
 
@@ -40,7 +45,7 @@ page revisions or X calls; its cost is still visible in per-Space cost metering.
 
 - Each purchased seat includes **5,000 credits per calendar month (UTC)**. The
   allowance is pooled across the Space: a Space with three seats has 15,000.
-- **Credit packs** add 10,000 credits for $10. Pack credits do not expire while
+- **Credit packs** add 5,000 credits for $10. Pack credits do not expire while
   the Space exists and are used only after the month's included credits.
 - When both are used up, Agents keep working through a **grace** of half the
   included allowance (2,500 per seat), so a busy month never stops work without
@@ -78,7 +83,9 @@ says it instead.
 
 In a live page session a refused Agent commit keeps its text pending in the
 session and tells everyone on the page; the next person's edit commits it, as
-people write for free. A refused commit never stops the session from
+people write for free. In a Free Space that has used its allowance, or a
+past-due Space in its read-only grace, every commit is refused the same way and
+its text stays pending until the plan admits it. A refused commit never stops the session from
 re-authorizing open connections.
 
 Settings → Billing shows the month's usage, the pack balance and the grace.
@@ -89,8 +96,10 @@ Settings → Billing shows the month's usage, the pack balance and the grace.
   that publishes the message (`MessageAdmission`: `$13` is the author kind, `$14`
   whether the Space is waived), so the counter row is locked only for that
   statement and a refused write commits nothing.
-- **Page revisions.** The policy's `agentWrite` hook charges in the page commit
-  transaction before the revision is written.
+- **Page revisions.** The policy's `durableWrite` hook runs for every revision,
+  in the page commit transaction before the revision is written: it advances a
+  Free Space's counter, charges an Agent's credit in a paid Space, and refuses
+  any revision during a past-due grace.
 - **State.** `data.space_credit_state` holds one row per Space: the current
   period, the three counters, the pack balance and the highest notice level sent.
   A write in a new month resets the counters in the same upsert. Seats come from
@@ -163,7 +172,7 @@ allocation/replay/refunds, and fake-provider tests cover pre-HTTP admission.
 
 ## Pack purchases
 
-The Space owner buys one 10,000-credit pack for $10 (plus applicable tax) in
+The Space owner buys one 5,000-credit pack for $10 (plus applicable tax) in
 Settings → Billing on the web. A current active/trialing Pro subscription is
 required. Prices and credit quantities come only from the server policy and
 its purchase row, never request parameters. Packs are a one-time card payment;

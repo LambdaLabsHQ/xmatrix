@@ -195,8 +195,8 @@ integration("Chat connection error is readable only for Check; disconnected room
   });
 });
 
-integration("Chat expiry maintenance is bounded and cannot change a live grant or revive retired authority", async () => {
-  await fixture(async ({ repo, sql, spaces, app, begin, confirm, current }) => {
+integration("Chat expiry recovery skips locks, stays bounded and cannot change a live grant or revive retired authority (HUB-9B)", async () => {
+  await fixture(async ({ repo, database, sql, spaces, app, begin, confirm, current }) => {
     const bound = await confirm(await begin());
     const pending = await begin(1, { chatSpace: "spaces/Another" });
     await sql(`UPDATE data.app_googlechat_link_attempts SET started_at=statement_timestamp()-interval '4 minutes',
@@ -205,9 +205,34 @@ integration("Chat expiry maintenance is bounded and cannot change a live grant o
     await sql(`INSERT INTO data.app_googlechat_room_lifecycle(app_identity,chat_space,removed_at)
       VALUES ($1,'spaces/OldA',now()-interval '2 days'),($1,'spaces/OldB',now()-interval '2 days'),
         ($1,'spaces/Fresh',now())`, [identity]);
+    let release, locked;
+    const holding = new Promise(resolve => { locked = resolve; });
+    const finish = new Promise(resolve => { release = resolve; });
+    const lost = database.transaction({ requestId: crypto.randomUUID(), operation: "chat-test.lost-cleanup" }, async tx => {
+      await tx.query({ name: "chat_test_attempt_lock_v1", text: `SELECT connection_id FROM data.app_googlechat_link_attempts
+        WHERE space_id=$1 FOR UPDATE`, values: [spaces[1]], maxRows: 1 });
+      await tx.query({ name: "chat_test_fence_lock_v1", text: `SELECT chat_space FROM data.app_googlechat_room_lifecycle
+        WHERE app_identity=$1 AND chat_space='spaces/OldA' FOR UPDATE`, values: [identity], maxRows: 1 });
+      locked();
+      await finish;
+    });
+    let calls = 0;
+    const replaying = new PostgresGoogleChatRoomRepository({ cacheMode: "disabled", transaction: (context, callback) =>
+      calls++ === 0 ? Promise.reject(new Error("Query read timeout")) : database.transaction(context, callback) });
+    try {
+      await Promise.race([holding, lost]);
+      await replaying.cleanup({ requestId: crypto.randomUUID(), limit: 1 });
+      assert.equal(calls, 2, "replay once after losing a pre-COMMIT response");
+      assert.equal((await sql("SELECT count(*) FROM data.app_googlechat_link_attempts WHERE space_id=$1", [spaces[1]])).rows[0].count, "1");
+      assert.equal((await sql("SELECT count(*) FROM data.app_googlechat_room_lifecycle WHERE app_identity=$1", [identity])).rows[0].count, "2");
+      assert.equal(await current(bound), true);
+    } finally {
+      release();
+      await lost;
+    }
     await repo.cleanup({ requestId: crypto.randomUUID(), limit: 1 });
     assert.equal((await sql("SELECT count(*) FROM data.app_googlechat_link_attempts WHERE space_id=$1", [spaces[1]])).rows[0].count, "0");
-    assert.equal((await sql("SELECT count(*) FROM data.app_googlechat_room_lifecycle WHERE app_identity=$1", [identity])).rows[0].count, "2");
+    assert.equal((await sql("SELECT count(*) FROM data.app_googlechat_room_lifecycle WHERE app_identity=$1", [identity])).rows[0].count, "1");
     assert.equal(await current(bound), true);
     await assert.rejects(repo.confirm({ requestId: crypto.randomUUID(), app, chatSpace: "spaces/Another", nonce: pending.nonce,
       eventTime: new Date().toISOString() }), invalid);

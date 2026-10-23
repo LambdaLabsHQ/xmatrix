@@ -32,7 +32,8 @@ export interface SerializedAgentContinuation extends AgentContinuationSource {
   runId: string;
   channelId: string;
   targetName: string;
-  targetAvatarUrl?: string;
+  /** The harness of the Agent it starts, which gives its face (faces.ts). */
+  targetHarness?: string;
   /** When the continuation was accepted. */
   createdAt: string;
   /** When the successor Run was created; absent until it exists. */

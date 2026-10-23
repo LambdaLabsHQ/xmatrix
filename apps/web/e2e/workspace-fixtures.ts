@@ -5,6 +5,7 @@ import {
   fixtureChannelCatalog,
   fixtureChannelCreate,
   fixtureJson,
+  fixtureFaces,
   fixtureRequestBodies,
   fixtureRequests,
   fixtureRule,
@@ -29,6 +30,8 @@ export {
 export const E2E_NOW = "2026-07-01T00:00:00.000Z";
 
 export type WorkspaceStubFixtures = {
+  /** People's and Agent Instances' pictures, keyed `user:<id>` / `agent:<instanceId>`, as the faces read answers them. */
+  faces?: Record<string, string>;
   spaces?: unknown[];
   channels?: unknown[];
   /** The Space's Agent registrations; each Agent a composer can start. */
@@ -117,6 +120,22 @@ export async function routeHumanSocket(
     });
   });
   return { connections: () => connections };
+}
+
+/**
+ * Routes the Human socket so a test can say what the Hub says when a
+ * Channel's launches, stops, continuations, executions or launch choices move:
+ * the chips re-read their records then, and only then. Nothing polls.
+ */
+export async function routeInvocationPush(page: Page, channelId = "channel-general") {
+  const sockets: Array<(message: unknown) => void> = [];
+  await routeHumanSocket(page, (frame, reply) => { if (frame.type === "human_connect") sockets.push(reply); });
+  return async () => {
+    await expect.poll(() => sockets.length).toBeGreaterThan(0);
+    for (const send of sockets) send({ type: "observable_event", event: { id: `invocations-${Date.now()}`,
+      type: "channel_invocations_changed", channelId, workspaceUserId: "system:xmatrix",
+      timestamp: new Date().toISOString(), metadata: {} } });
+  };
 }
 
 /** Enabled, routing-ready registrations of these harnesses on one machine, as the Space's catalog lists them. */
@@ -272,6 +291,7 @@ export async function installWorkspaceStubs(
     spaces: fixtures.spaces ?? [],
   });
   await fixtureSpaceResources(page);
+  await fixtureFaces(page, fixtures.faces);
   const registrations = (fixtures.registrations ?? []).map((registration) => ({
     displayName: registration.key.harness, ownerName: "Owner", machineName: registration.key.machineId,
     version: 1, state: "enabled", models: [], routingReady: true, canManageOwnerGrant: false,

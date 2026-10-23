@@ -20,7 +20,7 @@ function sharedHostnameSuffix(left: string, right: string): string | undefined {
 }
 
 export function resolveAuthCookieDomain(
-  env: Pick<Env, "APP_URL" | "HUB_URL" | "AUTH_COOKIE_DOMAIN">,
+  env: Pick<Env, "APP_URL" | "APP_BETA_URL" | "HUB_URL" | "AUTH_COOKIE_DOMAIN">,
 ): string | undefined {
   const appOrigin = deploymentOrigin(env.APP_URL, "APP_URL");
   const hubOrigin = deploymentOrigin(env.HUB_URL, "HUB_URL");
@@ -39,6 +39,13 @@ export function resolveAuthCookieDomain(
     throw new Error(
       `AUTH_COOKIE_DOMAIN must equal the narrowest shared APP_URL/HUB_URL suffix (${expected ?? "none"})`,
     );
+  }
+  // The beta Web shares the session, so it has to sit inside the same domain.
+  if (env.APP_BETA_URL?.trim()) {
+    const betaOrigin = deploymentOrigin(env.APP_BETA_URL, "APP_BETA_URL");
+    if (betaOrigin.protocol !== "https:" || !`.${betaOrigin.hostname}`.endsWith(configured)) {
+      throw new Error(`APP_BETA_URL must be an HTTPS origin inside AUTH_COOKIE_DOMAIN (${configured})`);
+    }
   }
   return configured;
 }

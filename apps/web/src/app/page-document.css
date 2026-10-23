@@ -34,6 +34,7 @@
   padding: 0.75em 1em;
   overflow-x: auto;
   white-space: pre;
+  position: relative;
 }
 .page-document pre code { background: none; padding: 0; font-size: inherit; }
 .page-document pre[data-markdown] { color: var(--muted-foreground); }
@@ -94,12 +95,17 @@
 }
 .page-document .page-md-syntax[data-edit-link] { pointer-events: auto; cursor: pointer; }
 .page-document[data-editable="false"] .page-md-syntax { display: none; }
+/* The caret's fence stands in its block's corner: a line of its own, coming and going with the caret, would
+   move the text under the pointer. */
 .page-document pre.page-md-open::before {
   content: "```" attr(data-language);
-  display: block;
-  margin-bottom: 0.35em;
+  position: absolute;
+  top: 0.35em;
+  right: 0.75em;
+  line-height: 1;
   color: var(--muted-foreground);
   font-size: 0.8em;
+  pointer-events: none;
 }
 .page-document[data-editable="false"] pre.page-md-open::before { content: none; }
 .page-document .page-placeholder::before {
@@ -172,18 +178,6 @@
   user-select: none;
 }
 .page-section-present:empty { display: none; }
-/* Who has taken the section: its holder, and the pull request doing the work. */
-.page-section-claim {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 6px;
-  border-radius: 9999px;
-  background: color-mix(in oklab, var(--primary) 12%, transparent);
-  color: var(--foreground);
-  text-decoration: none;
-}
-a.page-section-claim:hover { text-decoration: underline; }
 /* The Agents working in conversations about the section, on the page or not: idle ones dimmed. */
 .page-section-agents { display: inline-flex; align-items: center; gap: 3px; }
 .page-section-working { opacity: 0.55; }
@@ -195,7 +189,7 @@ a.page-section-claim:hover { text-decoration: underline; }
   color: var(--muted-foreground);
 }
 .page-section-talk:hover { color: var(--foreground); }
-/* What a heading offers, at the row's right edge while it is hovered or holds the cursor. */
+/* What a heading offers on a phone, at the row's right edge while its section holds the cursor. */
 .page-heading-tools {
   float: right;
   display: inline-flex;
@@ -221,10 +215,6 @@ a.page-section-claim:hover { text-decoration: underline; }
   color: var(--muted-foreground);
 }
 .page-heading-tools button:hover { background: var(--accent); color: var(--foreground); }
-/* On a desktop they show only while the reader is there: hovering the heading, or typing in its section.
-   A page someone only reads, or watches others write, carries none. */
-.page-document :is(h1, h2, h3, h4, h5, h6):hover .page-heading-tools,
-.page-document.ProseMirror-focused .page-heading-current .page-heading-tools,
 .page-document .page-heading-current .page-heading-tools.is-phone,
 .page-heading-tools:focus-within { opacity: 1; pointer-events: auto; }
 /* On a phone the heading of the section the reader is in carries one quiet "⋯"; its menu names each action. */
@@ -275,6 +265,13 @@ a.page-section-claim:hover { text-decoration: underline; }
 }
 /* A conversation about the page is a comment: its card, and the line under an Agent at work, start with its icon. */
 .page-comment-icon { flex: none; fill: #f2b632; }
+/* What the margin holds out of view, at its top or bottom edge: a card in the cards' tint, floating over the ones
+   under it as the card being read is lifted, so the cards scroll under it. */
+.page-margin-edge,
+.page-margin-edge:hover {
+  background: var(--card);
+  box-shadow: 0 1px 3px oklch(0.3 0.02 60 / 0.18), 0 2px 8px 2px oklch(0.3 0.02 60 / 0.1);
+}
 .page-margin-open {
   background: var(--card);
   box-shadow: 0 1px 3px oklch(0.3 0.02 60 / 0.22), 0 4px 10px 3px oklch(0.3 0.02 60 / 0.12);
@@ -285,6 +282,35 @@ a.page-section-claim:hover { text-decoration: underline; }
   height: 1.5rem;
   font-size: 0.625rem;
 }
+
+/* Who is in a conversation, on its card: each Agent's Instance card from the conversation at a comment's size, a
+   capsule of the card's own paper, a shade deeper: its vendor's face, whose status dot says whether it works, its
+   name, and its dots while it works. */
+.page-margin-instance {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 8px 0 2px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+.page-margin-card .page-margin-instance .identity-avatar-face,
+.page-margin-instance .identity-avatar-face {
+  width: 18px;
+  height: 18px;
+  background: var(--card);
+}
+.page-margin-instance-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.page-margin-instance .page-writer-dots { color: var(--primary); }
+.page-margin-instance .page-writer-dots i { width: 3px; height: 3px; }
 
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-surface {
   margin: 0 !important;
@@ -300,6 +326,13 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-mes
   gap: 0.5rem !important;
   padding: 0.5rem 0.75rem 0.25rem !important;
   background: transparent !important;
+}
+/* Same inset and avatar column as a comment in this card. Set on the row only: the card's composer
+   also reads these tokens, and a smaller size there pulls its caret out of the capsule. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-activity-row {
+  padding: 0.5rem 0.75rem 0.25rem !important;
+  --app-message-avatar-size: 1.5rem;
+  --app-message-avatar-gap: 0.5rem;
 }
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar {
   width: 1.5rem !important;
@@ -364,53 +397,74 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-emp
   margin: 0;
   font-size: 0.75rem;
 }
-/* The reply box: one flat line, as under a comment. */
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer {
-  padding: 0.25rem 0.75rem 0.75rem !important;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-shell {
-  gap: 0.25rem !important;
-  align-items: center !important;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-attach {
-  display: none !important;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card) {
-  min-height: 2.25rem !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 1.125rem !important;
-  background: var(--card) !important;
-  box-shadow: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card):focus-within {
-  border-color: var(--ring) !important;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-input-row {
-  min-height: 2.125rem !important;
-  gap: 0.125rem !important;
-  padding: 0 0.25rem 0 0.75rem !important;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card) .composer-textarea {
-  min-height: 2rem !important;
-  padding: 0.45rem 0 !important;
-  font-size: 0.8125rem !important;
-  line-height: 1.35 !important;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-inline-actions .app-composer-inline-icon {
-  width: 1.75rem !important;
-  height: 1.75rem !important;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-send {
-  width: 2rem !important;
-  height: 2rem !important;
+/* The comment box is a card of paper (§4.2) and nothing else: the composer inside it is a bare line on that paper,
+   with no pill, glass or field of its own, and its send is an ink arrow, not a button laid on the card. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app-composer, .app-composer-shell,
+  .app-composer-box, .composer-input-row, .composer-textarea),
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app-composer, .app-composer-shell,
+  .app-composer-box, .composer-input-row, .composer-textarea) {
+  min-height: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-send svg {
+/* The capsule's glass is drawn from the liquid tokens; on the paper they draw nothing. */
+.xmatrix-app .page-comment-box,
+.xmatrix-app .page-comment-box .app-composer-box {
+  --app-liquid-surface-bg: transparent !important;
+  --app-liquid-shared-surface-bg: transparent !important;
+  --app-liquid-specular-lead: transparent !important;
+  --app-liquid-specular-trail: transparent !important;
+  --app-liquid-float-shadow: transparent !important;
+  --app-liquid-fill-tint: transparent !important;
+  --app-liquid-rim-layers: 0 0 transparent !important;
+  --app-liquid-edge-meniscus: 0 0 transparent !important;
+  --app-glass-edge: none !important;
+}
+/* The themes pin the capsule's glass with long selectors; the paper outweighs them here. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .page-comment-box.page-comment-box
+  .app-composer-box.app-composer-box:not(.app-agent-work-card).app-material-liquid-pill {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  contain: none;
+  --app-liquid-backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box::before,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-box::after {
+  display: none !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer {
+  padding: 0 !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .composer-attach {
+  display: none !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .composer-textarea {
+  padding: 0.5rem 0 !important;
+  font-size: 0.875rem !important;
+  line-height: 1.4 !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app-composer-send, .app-composer-send-ready) {
+  width: 1.75rem !important;
+  height: 1.75rem !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  color: var(--muted-foreground) !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-send-ready {
+  color: var(--foreground) !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-send svg {
   width: 1rem;
   height: 1rem;
 }
@@ -644,17 +698,6 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 }
 .page-document .page-reader-removed.is-block { display: block; }
 .page-document .page-reader-removed:not(.is-block) + .page-reader-change:not(.is-block) { margin-left: 0.25em; }
-
-/* Someone out of view (§3.2): the dot beside their name pulses while they write. */
-@keyframes page-offscreen-typing {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-.page-offscreen-typing { animation: page-offscreen-typing 1.2s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) {
-  .page-offscreen-typing { animation: none; }
-}
-
 
 /* The Agent a page is written with, on a phone: its own face on its glass disc, floating at the right
    edge where Agents on the page show; the small ink "+" says a tap calls it. */
@@ -976,3 +1019,22 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   border-radius: 999px;
   background: var(--page-suggest-color);
 }
+
+/* The page's byline (pages-live-document.md §3.2): its authors under its title, face and name, a hairline between.
+   The title keeps the byline's room in the preview as in the editor, so nothing moves when the authors arrive. */
+.page-byline-room .page-document > h1:first-child { margin-bottom: 46px; }
+.page-byline-rule {
+  width: 1px;
+  height: 14px;
+  margin: 0 14px;
+  background: color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+.page-byline-writing { animation: page-byline-breathe 1.8s ease-in-out infinite; }
+@keyframes page-byline-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 0%, transparent); }
+  50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 24%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-byline-writing { animation: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 24%, transparent); }
+}
+::highlight(page-author) { background-color: color-mix(in oklab, var(--primary) 16%, transparent); }

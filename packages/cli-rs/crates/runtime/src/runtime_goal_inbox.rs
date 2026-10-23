@@ -35,19 +35,19 @@ use xmatrix_cli_core::protocol;
 
 /// Path of this live instance's goal inbox, exported by the wrapper onto the
 /// runtime child so every nested `xmatrix` call inherits it.
-pub const GOAL_INBOX_ENV: &str = "XMATRIX_AGENT_GOAL_INBOX";
+pub(crate) const GOAL_INBOX_ENV: &str = "XMATRIX_AGENT_GOAL_INBOX";
 
 /// Claude Code rejects conditions longer than this, so refuse them at the CLI
 /// edge where the operator still sees the error.
-pub const GOAL_CONDITION_MAX_CHARS: usize = 4_000;
+pub(crate) const GOAL_CONDITION_MAX_CHARS: usize = 4_000;
 
-pub const GOAL_ACTION_SET: &str = "set";
-pub const GOAL_ACTION_CLEAR: &str = "clear";
+pub(crate) const GOAL_ACTION_SET: &str = "set";
+pub(crate) const GOAL_ACTION_CLEAR: &str = "clear";
 
 /// One queued goal mutation. Serialized as a single JSON line so concurrent
 /// appends from separate `xmatrix goal` processes stay whole.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GoalInboxRecord {
+pub(crate) struct GoalInboxRecord {
     /// [`GOAL_ACTION_SET`] or [`GOAL_ACTION_CLEAR`].
     pub action: String,
     /// The completion condition; present for `set`.
@@ -58,7 +58,7 @@ pub struct GoalInboxRecord {
 }
 
 impl GoalInboxRecord {
-    pub fn set(condition: &str, issued_at_millis: u64) -> Self {
+    pub(crate) fn set(condition: &str, issued_at_millis: u64) -> Self {
         Self {
             action: GOAL_ACTION_SET.to_string(),
             condition: Some(condition.to_string()),
@@ -66,7 +66,7 @@ impl GoalInboxRecord {
         }
     }
 
-    pub fn clear(issued_at_millis: u64) -> Self {
+    pub(crate) fn clear(issued_at_millis: u64) -> Self {
         Self {
             action: GOAL_ACTION_CLEAR.to_string(),
             condition: None,
@@ -77,7 +77,7 @@ impl GoalInboxRecord {
     /// The condition to hand a runtime, or `None` for a clear. Returns `None`
     /// for a `set` whose condition is missing or blank so a malformed line can
     /// never be mistaken for a clear.
-    pub fn condition_for_set(&self) -> Option<&str> {
+    pub(crate) fn condition_for_set(&self) -> Option<&str> {
         if !self.action.eq_ignore_ascii_case(GOAL_ACTION_SET) {
             return None;
         }
@@ -87,14 +87,14 @@ impl GoalInboxRecord {
             .filter(|condition| !condition.is_empty())
     }
 
-    pub fn is_clear(&self) -> bool {
+    pub(crate) fn is_clear(&self) -> bool {
         self.action.eq_ignore_ascii_case(GOAL_ACTION_CLEAR)
     }
 }
 
 /// The goal the wrapper is actually working toward, published for `status`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GoalInboxState {
+pub(crate) struct GoalInboxState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub condition: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -106,7 +106,7 @@ pub struct GoalInboxState {
 }
 
 impl GoalInboxState {
-    pub fn is_active(&self) -> bool {
+    pub(crate) fn is_active(&self) -> bool {
         self.condition
             .as_deref()
             .map(str::trim)
@@ -116,12 +116,12 @@ impl GoalInboxState {
 
 /// Inbox path for one live instance, under the same runs directory the daemon
 /// already uses for run status markers.
-pub fn goal_inbox_path(runs_dir: &Path, instance_id: &str) -> PathBuf {
+pub(crate) fn goal_inbox_path(runs_dir: &Path, instance_id: &str) -> PathBuf {
     runs_dir.join(format!("{}.goal.jsonl", sanitize_id(instance_id)))
 }
 
 /// Sibling file holding the published goal state for the same instance.
-pub fn goal_state_path(inbox_path: &Path) -> PathBuf {
+pub(crate) fn goal_state_path(inbox_path: &Path) -> PathBuf {
     let mut path = inbox_path.to_path_buf();
     path.set_extension("state.json");
     path
@@ -142,7 +142,7 @@ fn sanitize_id(id: &str) -> String {
 }
 
 /// This process's inbox, when it was launched inside a managed agent run.
-pub fn goal_inbox_path_from_env() -> Option<PathBuf> {
+pub(crate) fn goal_inbox_path_from_env() -> Option<PathBuf> {
     std::env::var_os(GOAL_INBOX_ENV)
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
@@ -150,7 +150,7 @@ pub fn goal_inbox_path_from_env() -> Option<PathBuf> {
 
 /// Appends one queued mutation. `O_APPEND` keeps a single short line whole, so
 /// two `xmatrix goal` processes racing inside one turn cannot interleave.
-pub fn append_goal_command(path: &Path, record: &GoalInboxRecord) -> std::io::Result<()> {
+pub(crate) fn append_goal_command(path: &Path, record: &GoalInboxRecord) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -162,7 +162,7 @@ pub fn append_goal_command(path: &Path, record: &GoalInboxRecord) -> std::io::Re
     file.flush()
 }
 
-pub fn write_goal_state(path: &Path, state: &GoalInboxState) -> std::io::Result<()> {
+pub(crate) fn write_goal_state(path: &Path, state: &GoalInboxState) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -175,7 +175,7 @@ pub fn write_goal_state(path: &Path, state: &GoalInboxState) -> std::io::Result<
     file.flush()
 }
 
-pub fn read_goal_state(path: &Path) -> Option<GoalInboxState> {
+pub(crate) fn read_goal_state(path: &Path) -> Option<GoalInboxState> {
     let raw = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -226,7 +226,7 @@ const GOAL_INBOX_POLL_INTERVAL: Duration = Duration::from_millis(750);
 /// The canonical slash command for one queued record, so the wrapper reuses the
 /// same `/goal` parsing and per-runtime rewriting that a channel-sent command
 /// goes through instead of growing a second goal grammar.
-pub fn goal_command_text(record: &GoalInboxRecord) -> Option<String> {
+pub(crate) fn goal_command_text(record: &GoalInboxRecord) -> Option<String> {
     if let Some(condition) = record.condition_for_set() {
         return Some(format!("/goal {condition}"));
     }
@@ -240,7 +240,7 @@ static BOUND_GOAL_INBOX_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 /// Resolves and remembers this wrapper's inbox path. Returns `None` when the
 /// process has no instance id to key one by, in which case `xmatrix goal` stays
 /// unavailable rather than writing to a file nobody drains.
-pub fn bind_goal_inbox_path(instance_id: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn bind_goal_inbox_path(instance_id: Option<&str>) -> Option<PathBuf> {
     BOUND_GOAL_INBOX_PATH
         .get_or_init(|| goal_inbox_path_for_instance(instance_id))
         .clone()
@@ -248,7 +248,7 @@ pub fn bind_goal_inbox_path(instance_id: Option<&str>) -> Option<PathBuf> {
 
 /// The already-bound inbox path, for code that runs after [`bind_goal_inbox_path`]
 /// (such as spawning the runtime child that must inherit it).
-pub fn bound_goal_inbox_path() -> Option<PathBuf> {
+pub(crate) fn bound_goal_inbox_path() -> Option<PathBuf> {
     BOUND_GOAL_INBOX_PATH.get().cloned().flatten()
 }
 
@@ -273,7 +273,7 @@ fn goal_inbox_path_for_instance(instance_id: Option<&str>) -> Option<PathBuf> {
 /// is what keeps this serial: the delivery loop already processes one event at
 /// a time and parks anything that arrives mid-turn, so a goal the model set
 /// during its turn is applied once that turn finishes.
-pub fn spawn_goal_inbox_poller(
+pub(crate) fn spawn_goal_inbox_poller(
     path: PathBuf,
     events: mpsc::UnboundedSender<AgentInstanceConnectionEvent>,
 ) -> tokio::task::JoinHandle<()> {
@@ -341,7 +341,7 @@ fn require_goal_inbox() -> Result<PathBuf> {
 /// inside the very turn that runs this command, and only drains the inbox once
 /// that turn ends. Say so in the output so the caller does not read the
 /// immediate return as "the goal is already active".
-pub fn cmd_goal(command: GoalCliCommand) -> Result<()> {
+pub(crate) fn cmd_goal(command: GoalCliCommand) -> Result<()> {
     match command {
         GoalCliCommand::Set { condition } => {
             let condition = condition.join(" ").trim().to_string();
@@ -405,7 +405,7 @@ pub fn cmd_goal(command: GoalCliCommand) -> Result<()> {
 /// Only whole lines are consumed, so a line still being flushed by a nested
 /// `xmatrix goal` is re-read on the next poll instead of being parsed in half.
 #[derive(Debug)]
-pub struct GoalInboxWatcher {
+pub(crate) struct GoalInboxWatcher {
     path: Option<PathBuf>,
     offset: u64,
 }
@@ -424,7 +424,7 @@ impl GoalInboxWatcher {
     }
 
     /// Every command queued since the last poll, oldest first.
-    pub fn poll(&mut self) -> Vec<GoalInboxRecord> {
+    pub(crate) fn poll(&mut self) -> Vec<GoalInboxRecord> {
         let Some(path) = self.path.as_ref() else {
             return Vec::new();
         };

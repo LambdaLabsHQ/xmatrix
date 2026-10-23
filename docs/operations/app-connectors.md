@@ -336,7 +336,19 @@ credentials, queries, fragments or inline script schemes. Issue occurrence
 count and first/last-seen UTC times support recurrence checks; these are issue
 totals, not release-specific counts. Only frame names, paths and positions are returned; local variables,
 source context, requests and breadcrumbs remain excluded. The full receipt
-still has the shared 12,000-character context limit.
+still has the shared 12,000-character context limit. When the Worker reporter
+could only retain a capture stack for a stackless platform Error, its fixed
+mechanism label is shown as `stack=capture boundary (origin unavailable)`;
+arbitrary mechanism data remains excluded. See [runtime delivery errors](runtime-delivery-errors.md).
+
+Scheduled Harness release watch failures retain the original rejection and
+distinguish the Runtime fetch, response body and response contract phases.
+`read_issue` exposes only their bounded duration, HTTP status (or unavailable)
+and the platform's retryable/overloaded flags. A lost response never replays
+the entire pass: notices may already have committed, so the next scheduled
+pass reads current targets again. The target lookup is a `single_read`, whose
+lost SQL response can be retried once on a fresh checkout independently of
+notice issuance. Request, registry, daemon and response content stay private.
 
 Gmail search/read answer in the Channel receipt that replies to the command,
 like every other action, so everyone who can read the Channel reads the mail.
@@ -582,9 +594,9 @@ deployment profile (`deploy/profiles/production.json` → `hub.vars`) and ships
 with each release. Connect answers 503 and names every `GITHUB_APP_*` value a
 deployment left unset; it does not look any of them up at runtime.
 
-The page claim check (`xmatrix/claim`, see
+Pull requests that name page blocks (pre-review and owed updates, see
 [`pages-and-conversations.md`](../design/pages-and-conversations.md) §5.6)
-needs these GitHub App settings:
+need these GitHub App settings:
 - the **Checks: write** and **Pull requests: read** repository permissions
   (pre-review reads the change and posts `xmatrix/pre-review`);
 - the **Email addresses: read** account permission;
@@ -655,7 +667,10 @@ fixed, or closed by a user). The GitHub App must have **Code scanning alerts:
 read** (`security_events`) and subscribe to **Code scanning alert**; existing
 installations must accept the permission upgrade on GitHub. The subscription
 requires the installation's effective permission, not a retained connection
-capability. Alert messages contain only the alert reference and lifecycle action;
+capability. Each delivery rechecks that exact installation with a token narrowed
+to the repository and `security_events:read`; revoked or unconfirmed access
+blocks the message and Agent wake, even if another linked installation has access.
+Alert messages contain only the alert reference and lifecycle action;
 the Agent fetches details through its current repository grant. Security alerts
 reach only Channels allowed to carry private content, including for public
 repositories. Delivery uses the existing idempotent append and wakes resting

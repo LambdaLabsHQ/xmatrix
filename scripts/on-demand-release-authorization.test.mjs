@@ -9,8 +9,11 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const sha = "a".repeat(40);
 
 function scriptFrom(workflow, stepName) {
-  const step = Object.values(parse(workflow).jobs).flatMap(job => job?.steps ?? [])
-    .find(step => step.name === stepName);
+  const parsed = parse(workflow);
+  const steps = parsed.jobs
+    ? Object.values(parsed.jobs).flatMap(job => job?.steps ?? [])
+    : parsed.runs?.steps ?? [];
+  const step = steps.find(step => step.name === stepName);
   assert.equal(typeof step?.with?.script, "string", `Missing workflow script ${stepName}`);
   return new AsyncFunction("github", "context", "core", "process", "require", "setTimeout", step.with.script);
 }
@@ -19,8 +22,10 @@ const intent = await readFile(new URL("../.github/workflows/production-release-i
 const record = scriptFrom(intent, "Record the intent and wake the train");
 const authorize = scriptFrom(production, "Require successful exact-SHA selected request evidence");
 const server = await readFile(new URL("../.github/workflows/server-release.yml", import.meta.url), "utf8");
-const hub = scriptFrom(server, "Reverify exact selected request before reusing its test result");
-const web = scriptFrom(server, "Reverify exact selected request before reusing the Web test result");
+const gateAction = await readFile(new URL("../.github/actions/reverify-release-gate/action.yml", import.meta.url), "utf8");
+const gate = scriptFrom(gateAction, "Reverify exact selected request before reusing its test result");
+const hub = gate;
+const web = gate;
 
 async function runIntent(env) {
   const failures = [];
@@ -74,8 +79,8 @@ const fakeRequire = (name) => {
 };
 
 async function runAuthorization({ scope = "web", overrides = {}, authorityScope = scope, authorityConclusion = "success",
-  authorityStatus = "completed", authorityCount = 1, requestSha = sha, deploySha = sha, lagging = 0, reader = authorize,
-  tag = "xmatrix-v0.16.339", authorityTag = tag, channel = "beta" } = {}) {
+  authorityStatus = "completed", authorityCount = 1, requestSha = sha, deploySha = sha, lagging = 0, laggingGates = 0, reader = authorize,
+  tag = "xmatrix-v0.16.339", authorityTag = tag, channel = "beta", laggingRuns = 0, otherProductionRuns = [], capture } = {}) {
   const failures = [];
   // The request's own `gates` job stands for every gate its scope selected;
   // ci.yml's job names (`ci / hub (1/6)`, ...) are not part of the evidence.
@@ -86,6 +91,7 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
   jobs.push(...Array.from({ length: authorityCount }, () => authority));
   jobs.push({ name: "authorize-and-dispatch", status: "completed", conclusion: "success", steps: [] });
   let reads = 0;
+  let runReads = 0;
   const listRuns = () => {};
   const listJobs = () => {};
   const github = {
@@ -103,17 +109,29 @@ async function runAuthorization({ scope = "web", overrides = {}, authorityScope 
     },
     // The first `lagging` reads lack the authorization job conclusion;
     // no step metadata is available even after every job completes.
-    paginate: async (method) => {
-      if (method === listRuns) return [{ id: 456, head_sha: deploySha }];
+    paginate: async (method, parameters) => {
+      if (capture) capture.push(parameters);
+      if (method === listRuns) {
+        runReads += 1;
+        return [...(runReads <= laggingRuns ? [] : [{ id: 456, head_sha: deploySha }]), ...otherProductionRuns];
+      }
       reads += 1;
-      return reads > lagging ? jobs : jobs.map((job) => job === authority
-        ? { ...job, status: "in_progress", conclusion: null } : job);
+      return jobs.map(job => {
+        if ((job === authority && reads <= lagging) ||
+            (["plan", "gates"].includes(job.name) && reads <= laggingGates)) {
+          return { ...job, status: "in_progress", conclusion: null };
+        }
+        return job;
+      });
     },
   };
   await reader(github, {
     repo: { owner: "LambdaLabsHQ", repo: "xmatrix" }, ref: `refs/tags/${tag}`, runId: 456,
   }, { setFailed: (message) => failures.push(message) }, {
-    env: { DEPLOY_SHA: deploySha, REQUEST_RUN_ID: "123", RELEASE_SCOPE: scope, RELEASE_CHANNEL: channel },
+    env: {
+      DEPLOY_SHA: deploySha, REQUEST_RUN_ID: "123", RELEASE_SCOPE: scope, RELEASE_CHANNEL: channel,
+      GATE_COMPONENT: scope === "hub" || scope === "web" ? scope : "web",
+    },
   }, fakeRequire, (resolve) => { resolve(); });
   return failures;
 }
@@ -147,8 +165,80 @@ test("a stable preflight accepts the cut of a revision its request contains, nev
   assert.notDeepEqual(await runAuthorization({ ...stable, authorityTag: "xmatrix-v1.0.606-beta.3" }), []);
 });
 
+test("hub and web reuse a stable cut of a revision the request contains", async () => {
+  const jobs = parse(server).jobs;
+  const gateScript = parse(gateAction).runs.steps.find((step) => step.with?.script).with.script;
+  assert.match(gateScript, /RELEASE_CHANNEL === "stable" \? "verify-cut" : "verify"/);
+  for (const [job, component] of [[jobs.hub, "hub"], [jobs.web, "web"]]) {
+    const channel = job.steps.find((step) => step.id === "release-channel");
+    const reverify = job.steps.find((step) => String(step.name).startsWith("Reverify exact selected request"));
+    assert.equal(channel.run, 'echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"');
+    assert.equal(reverify.uses, "./.github/actions/reverify-release-gate");
+    assert.equal(reverify.with.component, component);
+    assert.equal(reverify.with.release_channel, "${{ steps.release-channel.outputs.channel }}");
+  }
+  for (const [reader, scope] of [[hub, "hub"], [web, "web"]]) {
+    const stable = { reader, scope, tag: "xmatrix-v1.1.0", channel: "stable", deploySha: "d".repeat(40) };
+    assert.deepEqual(await runAuthorization(stable), []);
+    assert.notDeepEqual(await runAuthorization({ ...stable, deploySha: "c".repeat(40) }), [],
+      `${scope} rejects a beta release commit as a stable cut`);
+    assert.notDeepEqual(await runAuthorization({ ...stable, requestSha: "b".repeat(40) }), []);
+  }
+});
+
 test("tagged preflight re-reads exact authorization whose conclusion is not yet reported", async () => {
   assert.deepEqual(await runAuthorization({ lagging: 1 }), []);
+});
+
+test("evidence reads bust the jobs-list cache on every poll", async () => {
+  const capture = [];
+  assert.deepEqual(await runAuthorization({ lagging: 2, capture }), []);
+  const busts = capture.map((parameters) => parameters?.cachebust);
+  assert.ok(busts.length >= 3);
+  assert.ok(busts.every((bust) => /^(runs|jobs)-\d+-\d+$/.test(bust)));
+  assert.equal(new Set(busts).size, busts.length);
+  const reuse = [];
+  assert.deepEqual(await runAuthorization({ reader: hub, scope: "hub", capture: reuse }), []);
+  assert.match(reuse[0]?.cachebust, /^\d+-1$/);
+});
+
+test("tagged preflight waits for its own run without accepting an older duplicate", async () => {
+  assert.deepEqual(await runAuthorization({ laggingRuns: 80 }), []);
+  assert.deepEqual(await runAuthorization({ laggingRuns: 80, otherProductionRuns: [{ id: 457, head_sha: sha }] }), []);
+  assert.notDeepEqual(await runAuthorization({ laggingRuns: Infinity }), [], "a missing own run never authorizes deployment");
+  assert.notDeepEqual(await runAuthorization({ otherProductionRuns: [{ id: 455, head_sha: sha }] }), [],
+    "a known older run remains authoritative");
+  assert.deepEqual(await runAuthorization({ otherProductionRuns: [{ id: 1, head_sha: "b".repeat(40) }] }), []);
+});
+
+test("tagged preflight waits several minutes for the complete gate and authorization evidence", async () => {
+  assert.deepEqual(await runAuthorization({ lagging: 80 }), []);
+  assert.deepEqual(await runAuthorization({ laggingGates: 80 }), [],
+    "a published authority cannot substitute for gates whose success is still missing");
+  for (const delayed of [{ lagging: Infinity }, { laggingGates: Infinity }]) {
+    assert.notDeepEqual(await runAuthorization(delayed), [], "unreported success never authorizes deployment");
+  }
+});
+
+test("tagged preflight expires its evidence window even before exhausting the read budget", async t => {
+  let elapsed = 0;
+  t.mock.method(Date, "now", () => {
+    elapsed += 60_000;
+    return elapsed;
+  });
+  assert.notDeepEqual(await runAuthorization({ lagging: 20 }), [],
+    "evidence that would arrive after the deadline cannot authorize deployment");
+});
+
+test("own-run discovery and request conclusions share the same evidence deadline", async t => {
+  let elapsed = 0;
+  t.mock.method(Date, "now", () => { elapsed += 6_000; return elapsed; });
+  assert.deepEqual(await runAuthorization({ laggingRuns: 80 }), []);
+  elapsed = 0;
+  assert.deepEqual(await runAuthorization({ lagging: 80 }), []);
+  elapsed = 0;
+  assert.notDeepEqual(await runAuthorization({ laggingRuns: 80, lagging: 80 }), [],
+    "discovery cannot grant a second ten-minute window for job conclusions");
 });
 
 

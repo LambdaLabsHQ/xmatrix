@@ -28,7 +28,7 @@ impl HarnessPolicy {
         Self::read(&Self::path()).unwrap_or_default()
     }
 
-    pub(crate) fn read(path: &Path) -> Result<Self, String> {
+    pub fn read(path: &Path) -> Result<Self, String> {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -55,7 +55,7 @@ impl HarnessPolicy {
 
     /// Fails closed on a malformed file instead of overwriting the owner's
     /// other entries with a fresh document.
-    pub(crate) fn record(path: &Path, preset_id: &str, enabled: bool) -> Result<(), String> {
+    pub fn record(path: &Path, preset_id: &str, enabled: bool) -> Result<(), String> {
         let parent = path
             .parent()
             .ok_or_else(|| "policy has no parent directory".to_string())?;

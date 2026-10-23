@@ -31,6 +31,7 @@ test("production configuration cannot enable mock auth or reference test resourc
   assert.deepEqual({ ...hub.placement }, { region: "aws:ap-southeast-1" });
   assert.deepEqual(hub.routes.map((route) => ({ ...route })), [{ pattern: "xmatrix-hub.xmatrix.sh", custom_domain: true }]);
   assert.equal(hub.vars.APP_URL, "https://xmatrix.sh");
+  assert.equal(hub.vars.APP_BETA_URL, "https://beta.xmatrix.sh");
   assert.equal(hub.vars.HUB_URL, "https://xmatrix-hub.xmatrix.sh");
   assert.equal(binding(hub, "analytics_engine_datasets", "XMATRIX_USAGE_COST_AE").dataset, "xmatrix_usage_cost");
 });
@@ -48,4 +49,12 @@ test("production refuses over-limit requests and bounds Jev spend, each limiter 
 test("production Web serves its custom domain", () => {
   assert.equal(web.name, "xmatrix-web");
   assert.deepEqual(web.routes, [{ pattern: "xmatrix.sh", custom_domain: true }]);
+});
+
+test("the production beta Web is its own Worker on beta.xmatrix.sh, with no other public host", async () => {
+  const beta = JSON.parse(await renderComponent("web-beta", production));
+  assert.equal(beta.name, "xmatrix-web-beta");
+  assert.deepEqual(beta.routes, [{ pattern: "beta.xmatrix.sh", custom_domain: true }]);
+  assert.equal(beta.workers_dev, false);
+  assert.equal(beta.preview_urls, false);
 });

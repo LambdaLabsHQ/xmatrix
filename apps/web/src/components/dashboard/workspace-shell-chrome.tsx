@@ -10,6 +10,7 @@ import { LiquidGlassCard, LiquidGlassPill, WoodPanel } from "@/components/ui/mat
 import type { CreateAction } from "./list-create";
 import { useGlobalSearchClearance } from "./global-search-clearance";
 import { StarAsk, openRepositoryToStar, useStarPrompt } from "./star-prompt";
+import { BetaTag } from "./status-tag";
 
 import {
   agentInstanceDisplayName,
@@ -37,13 +38,10 @@ import {
 } from "./workspace-shell-navigation";
 
 import {
-  avatarInitials,
   channelOnlineAgentAvatarItems,
   formatMember,
-  initialsFor,
   memberPresence,
   memberPresenceSummary,
-  presenceAvatarUrl,
   spaceRoleFor,
   visibleHumanChannelMembers,
 } from "./workspace-shell-recovered";
@@ -91,7 +89,6 @@ import {
   Plus,
   Settings,
   Share,
-  Share2,
   Shield,
   Star,
   Trash2,
@@ -110,7 +107,7 @@ import {
 
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 
 
 import {
@@ -124,13 +121,14 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import type {
-  ChannelMemberPresence,
-  ObservabilityEvent,
-  SerializedAgentInstance,
-  HumanProfile,
-  ChannelSnapshot,
-  SerializedSpace,
+import {
+  faceInitials,
+  type ChannelMemberPresence,
+  type ObservabilityEvent,
+  type SerializedAgentInstance,
+  type HumanProfile,
+  type ChannelSnapshot,
+  type SerializedSpace,
 } from "@xmatrix/protocol";
 
 // Semantic module extracted from workspace-app-shell (AST-safe)
@@ -181,16 +179,14 @@ export const WorkspaceRail = memo(function WorkspaceRail({
         onClick={onOpenProfile}
         className="flex size-11 items-center justify-center rounded-full"
       >
-        <IdentityAvatar
-          kind="human"
-          label={profile.displayName}
-          imageUrl={profile.avatarUrl}
-          initials={profile.displayName.slice(0, 2)}
+        <Face
+          of={{ kind: "user", id: profile.userId, name: profile.displayName }}
           size="md"
           showKindBadge={false}
           className="app-rail-user-avatar"
         />
       </button>
+      <BetaTag className="mt-2" />
       <div className="mt-5 flex flex-1 flex-col items-center gap-2">
         <RailButton active={activeView === "pages"} icon={BookOpen} label="Pages" onClick={() => onChangeView("pages")} />
         <RailButton
@@ -870,6 +866,17 @@ function SpinningLoader({ className }: { className?: string }) {
   return <AnimatedIcon icon={Loader2} className={cn(className, "animate-spin")} />;
 }
 
+function createUpdateArrowEffects(element: HTMLElement): readonly KeyframeEffect[] {
+  const arrow = element.querySelector(".app-rail-update-arrow");
+  return arrow ? [new KeyframeEffect(arrow, [
+    { offset: 0, transform: "translateY(0)", opacity: 1, easing: "cubic-bezier(0.5, 0, 0.9, 0.4)" },
+    { offset: 0.1, transform: "translateY(-26px)", opacity: 0 },
+    { offset: 0.1001, transform: "translateY(26px)", opacity: 0, easing: "cubic-bezier(0.2, 0.8, 0.3, 1)" },
+    { offset: 0.26, transform: "translateY(0)", opacity: 1 },
+    { offset: 1, transform: "translateY(0)", opacity: 1 },
+  ], { duration: 4200, delay: 1000, iterations: Infinity })] : [];
+}
+
 /**
  * The rail's update button. The desktop app checks and downloads in the
  * background, so the rail only asks for the one step that needs the person:
@@ -884,6 +891,8 @@ export function DesktopUpdateRailButton({
   onInstall: () => void;
 }) {
   const state = status?.state;
+  // Observe the fixed window: the arrow itself leaves its clip each cycle.
+  const arrowRef = useDecorationAnimationGroup(createUpdateArrowEffects, state === "downloaded" || state === "available");
   // "available" comes only from shells that do not download on their own;
   // the button downloads first there.
   if (state !== "downloaded" && state !== "available" && state !== "installing") return null;
@@ -910,8 +919,10 @@ export function DesktopUpdateRailButton({
       {state === "installing"
         ? <SpinningLoader className="size-[18px]" />
         : (
-          <span className="app-rail-update-window">
-            <AnimatedIcon icon={ArrowUp} className="app-rail-update-arrow size-[18px]" strokeWidth={2.25} />
+          <span ref={arrowRef} className="app-rail-update-window">
+            <span className="app-rail-update-arrow inline-flex size-[18px]">
+              <ArrowUp className="size-full" strokeWidth={2.25} />
+            </span>
           </span>
         )}
     </LiquidGlassPill>
@@ -1032,7 +1043,7 @@ export function ChannelTitleActions({
     <>
       <button type="button" title={copyLabel} aria-label={copyLabel} aria-live="polite"
         onClick={() => void handleCopy()} className={channelTitleIconClassName}>
-        {copied ? <Check className="size-4 text-primary" /> : <Share2 className="size-4" />}
+        {copied ? <Check className="size-4 text-primary" /> : <Share className="size-4" />}
       </button>
       {onDelete && (
         <button type="button" title="Delete Channel…" aria-label={`Delete #${title}…`}
@@ -1256,16 +1267,12 @@ export function ChannelPresenceAvatars({
       onClick={(event) => event.stopPropagation()}
     >
       {visibleHumans.map((member) => {
-        const presence = memberPresence(channel, member);
         const label = formatMember(channel, member);
         return (
-          <IdentityAvatar
+          <Face
             key={member}
-            kind="human"
-            label={label}
+            of={member.startsWith("user:") ? { kind: "user", id: member.slice(5), name: label } : { kind: "external", name: label }}
             status="online"
-            imageUrl={presenceAvatarUrl(presence)}
-            initials={avatarInitials(label)}
             size="sm"
             showKindBadge={false}
             className="app-channel-human-avatar rounded-full"
@@ -1277,16 +1284,12 @@ export function ChannelPresenceAvatars({
         if (presence.kind !== "agent") return null;
         const label = agentInstanceDisplayName(item.instance);
         const status = channelAgentAvatarStatus(channel, item.member, presence, events, item.instance);
-        const imageUrl = presenceAvatarUrl(presence);
 
         return (
-          <IdentityAvatar
+          <Face
             key={item.key}
-            kind="agent"
-            label={label}
+            of={{ kind: "agent", name: label, harness: presence.registration?.harness ?? null, id: item.instance.id }}
             status={status}
-            imageUrl={imageUrl}
-            initials={imageUrl ? avatarInitials(label) : undefined}
             size="sm"
             showKindBadge={false}
             className="app-channel-agent-avatar rounded-full"
@@ -1356,7 +1359,7 @@ export function SpaceAvatar({ space }: { space: SerializedSpace }) {
       style={spaceAvatarStyle(space)}
       aria-hidden="true"
     >
-      {initialsFor(space.name) || "W"}
+      {faceInitials(space.name)}
     </span>
   );
 }

@@ -42,6 +42,9 @@ thread_local! {
     static TEST_MANIFEST_SAVE_TICK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static TEST_FAIL_WORKTREE_UNLOCK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static TEST_FAIL_WORKTREE_REMOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    // What `git worktree remove --force` does when a writer races the delete:
+    // the admin directory goes, the work tree stays, and the command fails.
+    static TEST_UNREGISTER_THEN_FAIL_WORKTREE_REMOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // --- stable error codes (never raw git stderr with credentials) ---
@@ -1500,7 +1503,7 @@ pub async fn retained_binding_for_session_at(
 ) -> Result<RetainedLease, PoolError> {
     let retained = retained_authority_for_session_at(layout, session_key).await?;
     let slot_id = SlotId::parse(&retained.authority.slot_id)?;
-    if !layout.slot_path(&slot_id)?.join(".git").is_file() {
+    if !is_formal_linked_worktree(&layout.slot_path(&slot_id)?) {
         return Err(PoolError::new(
             PoolErrorCode::WorktreeMissing,
             "retained worktree missing",
@@ -2018,7 +2021,7 @@ async fn lease_under_lock(
             // leftover: detach it from that foreign parent and continue. Trees
             // that still belong to this pool parent but fail ownership stay
             // quarantined (foreign lock, verify drift).
-            if !path.join(".git").is_file() {
+            if !is_formal_linked_worktree(&path) {
                 discard_broken_idle_slot(
                     layout,
                     base_repo,
@@ -2214,7 +2217,7 @@ fn broken_retained_slots(layout: &RepoPoolLayout, manifest: &RepoPoolManifest) -
             layout
                 .slot_path_for_id(id)
                 .ok()
-                .is_some_and(|path| path.exists() && !path.join(".git").is_file())
+                .is_some_and(|path| path.exists() && !is_formal_linked_worktree(&path))
         })
         .map(|(id, _)| id.clone())
         .collect()
@@ -2763,7 +2766,7 @@ async fn discard_foreign_parent_idle_slot(
         GIT_MUTATION_TIMEOUT,
     )
     .await;
-    if path.join(".git").is_file() {
+    if is_formal_linked_worktree(path) {
         return Ok(false);
     }
     discard_broken_idle_slot(layout, base_repo, pool_root, manifest, slot_id, path).await?;
@@ -3661,6 +3664,32 @@ fn read_linked_worktree_admin_pointer(worktree: &Path) -> Result<PathBuf, PoolEr
     Ok(path)
 }
 
+/// Git dropped this tree's registration while its repository is still there:
+/// the `.git` pointer names `<common-dir>/worktrees/<id>`, that admin directory
+/// is gone, and the common dir exists. `git worktree remove --force` leaves a
+/// tree in this state when the work-tree delete fails (a writer still in it)
+/// because it deletes the admin directory regardless. Such a tree is files, not
+/// a linked worktree. An unreadable pointer, or one whose repository is gone
+/// too, is no evidence of that and answers `false`.
+fn git_dropped_linked_worktree(worktree: &Path) -> bool {
+    let Ok(admin) = read_linked_worktree_admin_pointer(worktree) else {
+        return false;
+    };
+    let Some(worktrees) = admin.parent() else {
+        return false;
+    };
+    if worktrees.file_name().and_then(|name| name.to_str()) != Some("worktrees") {
+        return false;
+    }
+    !admin.exists() && worktrees.parent().is_some_and(Path::is_dir)
+}
+
+/// A slot tree git still knows as a linked worktree (or that is not provably
+/// anything else).
+fn is_formal_linked_worktree(worktree: &Path) -> bool {
+    worktree.join(".git").is_file() && !git_dropped_linked_worktree(worktree)
+}
+
 // --- path safety ---
 
 /// Strip Windows extended-length prefixes without corrupting UNC roots.
@@ -4124,9 +4153,12 @@ async fn registered_base_repo_for_worktree(worktree: &Path) -> Result<PathBuf, P
 }
 
 /// Product-owned leftover at `poolRoot/slots/<slotId>` that is not a formal
-/// linked worktree (`.git` pointer missing or the directory is already gone).
-/// Layout containment and a non-symlink slot directory are required before
-/// any recursive delete. `git worktree prune` drops the stale registration.
+/// linked worktree (`.git` pointer missing, pointing at an admin directory git
+/// already dropped, or the directory is already gone). Layout containment and
+/// a non-symlink slot directory are required before any recursive delete.
+/// `git worktree prune` drops the stale registration. A process still writing
+/// into the tree can refill a directory between its unlink and rmdir, so the
+/// delete is retried briefly before it fails naming the slot path.
 async fn remove_leftover_idle_slot_directory(
     layout: &RepoPoolLayout,
     base_repo: &Path,
@@ -4152,24 +4184,43 @@ async fn remove_leftover_idle_slot_directory(
         ));
     }
     reject_reparse(worktree)?;
-    if worktree.join(".git").is_file() {
+    if is_formal_linked_worktree(worktree) {
         return Err(PoolError::new(
             PoolErrorCode::WorktreeCleanupFailed,
             "refusing leftover delete of a formal linked worktree",
         ));
     }
-    std::fs::remove_dir_all(worktree).map_err(|_| {
-        PoolError::new(
-            PoolErrorCode::WorktreeCleanupFailed,
-            "failed to remove leftover idle slot directory",
-        )
-    })
+    let mut last_error = None;
+    for attempt in 1..=LEFTOVER_REMOVE_ATTEMPTS {
+        match std::fs::remove_dir_all(worktree) {
+            Ok(()) => return Ok(()),
+            Err(_) if !worktree.exists() => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        if attempt < LEFTOVER_REMOVE_ATTEMPTS {
+            tokio::time::sleep(LEFTOVER_REMOVE_BACKOFF * attempt).await;
+        }
+    }
+    Err(PoolError::new(
+        PoolErrorCode::WorktreeCleanupFailed,
+        format!(
+            "failed to remove leftover slot directory {} after {LEFTOVER_REMOVE_ATTEMPTS} attempts ({})",
+            worktree.display(),
+            last_error.map_or_else(|| "unknown".to_string(), |error| error.kind().to_string()),
+        ),
+    ))
 }
+
+const LEFTOVER_REMOVE_ATTEMPTS: u32 = 5;
+const LEFTOVER_REMOVE_BACKOFF: Duration = Duration::from_millis(100);
 
 /// Safe cleanup for a tree created in this operation. Never `remove_dir_all`.
 /// Requires layout containment + common-dir + validated admin. Unlocks only our
 /// reason; foreign lock → fail-closed without unlock/remove.
 /// On remove failure after unlock: re-apply exact owned lock (fail-closed if relock fails).
+/// When the failed remove already dropped git's registration (it deletes the
+/// admin directory even when the work-tree delete stops), there is nothing left
+/// to relock: the tree is leftover files and the delete is finished here.
 async fn try_safe_remove_created_worktree(
     layout: &RepoPoolLayout,
     base_repo: &Path,
@@ -4181,7 +4232,7 @@ async fn try_safe_remove_created_worktree(
     }
     ensure_path_inside_layout(layout, worktree)?;
     if worktree.join(".git").is_file() {
-        let _admin = resolve_validated_worktree_admin(base_repo, worktree).await?;
+        let admin = resolve_validated_worktree_admin(base_repo, worktree).await?;
         let expected = pool_worktree_lock_reason(layout, slot_id);
         let mut unlocked_owned = false;
         if let Some(reason) = read_worktree_lock_reason(base_repo, worktree).await? {
@@ -4225,14 +4276,27 @@ async fn try_safe_remove_created_worktree(
             ));
         }
         let path_arg = worktree.display().to_string();
-        if git(
-            base_repo,
-            &["worktree", "remove", "--force", &path_arg],
-            GIT_MUTATION_TIMEOUT,
-        )
-        .await
-        .is_err()
-        {
+        #[cfg(test)]
+        let injected_unregister = TEST_UNREGISTER_THEN_FAIL_WORKTREE_REMOVE.with(|c| c.get());
+        #[cfg(not(test))]
+        let injected_unregister = false;
+        let removed = if injected_unregister {
+            std::fs::remove_dir_all(&admin)
+                .map_err(|_| PoolError::new(PoolErrorCode::Io, "injected unregister failed"))?;
+            false
+        } else {
+            git(
+                base_repo,
+                &["worktree", "remove", "--force", &path_arg],
+                GIT_MUTATION_TIMEOUT,
+            )
+            .await
+            .is_ok()
+        };
+        if !removed {
+            if git_dropped_linked_worktree(worktree) {
+                return remove_leftover_idle_slot_directory(layout, base_repo, worktree).await;
+            }
             if unlocked_owned {
                 // Remove failed after unlock: restore owned lock (fail-closed if cannot).
                 lock_pool_worktree(base_repo, worktree, layout, slot_id)

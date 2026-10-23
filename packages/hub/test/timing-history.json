@@ -1250,7 +1250,7 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/github-claim-check.test.mjs": {
+    "test/github-pull-request-blocks.test.mjs": {
       "durationMs": 2140,
       "peakRssBytes": 227151872,
       "peakFdCount": 16,
@@ -1274,7 +1274,7 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/github-claim-check.e2e.mjs": {
+    "test/github-pull-request-blocks.e2e.mjs": {
       "durationMs": 5220,
       "peakRssBytes": 470970368,
       "peakFdCount": 67,

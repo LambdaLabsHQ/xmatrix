@@ -6,7 +6,9 @@ import { Client } from "pg";
 import { createAuthorityDatabase } from "../dist/index.js";
 
 import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
-import { readPageConversations } from "../dist/page-conversations.js";
+import { describePageConversations } from "../dist/page-conversations.js";
+import { keepSectionChanges, walkSectionChanges } from "../dist/page-section-changes.js";
+import { keepBlames, walkBlame } from "../dist/page-blame.js";
 
 
 
@@ -523,21 +525,26 @@ integration("public pages: an owner publishes a page every member reads, and any
   }
 });
 
-integration("claims: one holder per block, renewed by its holder, open for competition on an owner's word", async () => {
+/** A Roadmap page with a Search section, and what every call on it shares. */
+async function searchRoadmap(pages, ids, owner) {
+  const r = () => crypto.randomUUID();
+  const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
+    title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" });
+  return { r, base: { spaceId: ids.space, pageId: page.pageId } };
+}
+
+integration("claims: they lock nothing, each told of the others, renewed by their holder", async () => {
   const { client, ids, pages, owner, member, viewer, agent } = await pageTest("claims");
   try {
-    const r = () => crypto.randomUUID();
-    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
-      title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" });
-    const base = { spaceId: ids.space, pageId: page.pageId };
+    const { r, base } = await searchRoadmap(pages, ids, owner);
     const claim = (principal, extra = {}) => pages.claim({ requestId: r(), ...base, principal, blockId: "search", ...extra });
     const list = () => pages.claims({ requestId: r(), ...base, principal: member });
 
     const first = (await claim(agent, { minutes: 30 })).claim;
     assert.deepEqual(first.holder, { kind: "agent", id: ids.instance, label: "claude:1" });
     assert.equal(first.ownerUserId, ids.member, "an Agent's claim counts against its owner");
-    await assert.rejects(claim(owner), (error) => error.code === "page_block_claimed"
-      && error.message === "claude:1 is on this");
+    const beside = await claim(owner);
+    assert.deepEqual(beside.others.map((c) => c.claimId), [first.claimId], "a second claim is taken, told who is there");
     await assert.rejects(claim(viewer), code("page_edit_forbidden"));
     await assert.rejects(claim(agent, { minutes: 1 }), code("invalid_request"));
     assert.equal((await claim(owner, { blockId: "" })).claim.blockId, "", "the whole page is its own block");
@@ -550,6 +557,7 @@ integration("claims: one holder per block, renewed by its holder, open for compe
       code("page_competition_admin_only"));
     await pages.setCompetition({ requestId: r(), ...base, principal: owner, blockId: "search", open: true });
     const rival = (await claim(owner)).claim;
+    assert.equal(rival.claimId, beside.claim.claimId, "its holder renews it");
     assert.deepEqual((await list()).competitiveBlocks, ["search"]);
     assert.deepEqual((await list()).claims.map((c) => c.claimId).sort(),
       [first.claimId, rival.claimId, (await list()).claims.find((c) => c.blockId === "").claimId].sort());
@@ -563,6 +571,25 @@ integration("claims: one holder per block, renewed by its holder, open for compe
     assert.deepEqual((await list()).claims.map((c) => c.blockId), [""], "an expired claim is no longer in force");
     await pages.setCompetition({ requestId: r(), ...base, principal: owner, blockId: "search", open: false });
     assert.equal((await claim(agent)).claim.holder.id, ids.instance, "a lapsed claim frees the block");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("claims: an ended Instance's claims in its conversation end with it, and leave the unwritten section owed", async () => {
+  const { client, ids, pages, owner, agent } = await pageTest("claims-end");
+  try {
+    const { r, base } = await searchRoadmap(pages, ids, owner);
+    await pages.claim({ requestId: r(), ...base, principal: agent, blockId: "search", conversationId: ids.open });
+    const end = () => pages.endInstanceClaims({ requestId: r(), conversationId: ids.open, instanceIds: [ids.instance] });
+    assert.deepEqual(await pages.endInstanceClaims({ requestId: r(), conversationId: ids.closed,
+      instanceIds: [ids.instance] }), { ended: 0 }, "only the claims it held in its own conversation");
+    assert.deepEqual(await end(), { ended: 1 });
+    assert.deepEqual(await end(), { ended: 0 }, "ending them again changes nothing");
+    assert.deepEqual((await pages.claims({ requestId: r(), ...base, principal: owner })).claims, []);
+    const owed = (await pages.blockUpdates({ requestId: r(), ...base, principal: owner })).owed.get("search");
+    assert.equal(owed?.reason, "lapsed", "the section it left unwritten owes an update");
   } finally {
     await cleanup(client, ids);
     await client.end();
@@ -634,6 +661,198 @@ integration("page awareness finishes its database snapshot before comparing a la
   }
 });
 
+/** A page written as `bodies`, one revision each, by the Space's owner. */
+async function writtenPage(fixture, bodies) {
+  const { ids, pages, owner } = fixture;
+  const base = { spaceId: ids.space, principal: owner };
+  const { page } = await pages.create({ requestId: crypto.randomUUID(), ...base, title: "Launch", body: bodies[0] });
+  for (const [index, body] of bodies.slice(1).entries()) {
+    await pages.edit({ requestId: crypto.randomUUID(), ...base, pageId: page.pageId, baseRevision: index + 1, body });
+  }
+  return page;
+}
+
+integration("a section's last change reads the same once its revisions' changes are kept, and a purge forgets them", async () => {
+  const fixture = await pageTest("section-changes");
+  const { client, ids, pages, owner } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const base = { spaceId: ids.space, principal: owner };
+    const page = await writtenPage(fixture, [
+      "# Launch\n\n## Secret plan\n\nShip in May.\n\n## Notes\n\n* none\n",
+      "# Launch\n\n## Secret plan\n\nShip in June.\n\n## Notes\n\n* none\n",
+      // Markdown style alone is no change: the list marker differs, the document does not.
+      "# Launch\n\n## Secret plan\n\nShip in June.\n\n## Notes\n\n- none\n",
+      "# Launch\n\n## Secret plan\n\nShip in June.\n\n## Notes\n\n- none\n- more\n",
+    ]);
+    const read = async () => {
+      const result = await pages.blockUpdates({ requestId: r(), ...base, pageId: page.pageId });
+      return { order: result.order, updated: Object.fromEntries([...result.updates].map(([id, update]) => [id, update.revision])) };
+    };
+    const kept = async () => (await client.query(`SELECT revision, changed_blocks FROM data.page_revisions
+      WHERE space_id=$1 AND page_id=$2 ORDER BY revision`, [ids.space, page.pageId])).rows
+      .map((row) => [Number(row.revision), row.changed_blocks]);
+    const expected = { order: ["launch", "secret-plan", "notes"], updated: { "notes": 4, "secret-plan": 2, "launch": 1 } };
+    assert.deepEqual(await read(), expected, "derived from the bodies");
+    assert.deepEqual(await kept(), [[1, null], [2, ["secret-plan"]], [3, []], [4, ["notes"]]],
+      "what each revision changed against the one before it is kept");
+    assert.deepEqual(await read(), expected, "read again from what was kept");
+
+    await pages.purge({ requestId: r(), ...base, pageId: page.pageId, needle: "Secret plan", replacement: "Plan" });
+    assert.deepEqual(await kept(), [[1, null], [2, null], [3, null], [4, null]],
+      "a purge forgets every derivation, which may name the removed text's headings");
+    assert.deepEqual(await read(), { order: ["launch", "plan", "notes"], updated: { "notes": 4, "plan": 2, "launch": 1 } },
+      "derived again from the redacted bodies");
+    assert.ok((await kept()).every(([, changed]) => !changed?.includes("secret-plan")));
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("a section change derived from a body that changed before it was kept is not kept", async () => {
+  const fixture = await pageTest("section-changes-race");
+  const { client, ids } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const page = await writtenPage(fixture, ["# Launch\n\n## Plan\n\nShip in May.\n", "# Launch\n\n## Plan\n\nShip in June.\n"]);
+    const rows = [{ revision: 2, changed_blocks: null }, { revision: 1, changed_blocks: null }];
+    const bodies = new Map();
+    const { derived } = await walkSectionChanges(rows, ["launch", "plan"], async (revisions) => {
+      const read = await client.query(`SELECT revision, body FROM data.page_revisions
+        WHERE space_id=$1 AND page_id=$2 AND revision = ANY($3::bigint[])`, [ids.space, page.pageId, revisions]);
+      for (const row of read.rows) bodies.set(Number(row.revision), row.body);
+      return bodies;
+    });
+    assert.deepEqual(derived, [{ revision: 2, previous: 1, changed: ["plan"] }]);
+    // A purge rewrites the earlier body between the read and the keep.
+    await client.query(`UPDATE data.page_revisions SET body=replace(body, 'May', '[redacted]')
+      WHERE space_id=$1 AND page_id=$2 AND revision=1`, [ids.space, page.pageId]);
+    const db = database(client);
+    const keep = () => db.transaction({ requestId: r(), operation: "test.keep" }, (tx) =>
+      keepSectionChanges(tx, ids.space, page.pageId, derived, bodies));
+    assert.equal(await keep(), 0, "a derivation from a body since rewritten is not kept");
+    bodies.set(1, (await client.query(`SELECT body FROM data.page_revisions WHERE space_id=$1 AND page_id=$2
+      AND revision=1`, [ids.space, page.pageId])).rows[0].body);
+    assert.equal(await keep(), 1, "from the bodies as they are now, it is");
+    assert.equal(await keep(), 0, "and kept once");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+/** The body a blame covers, cut into `[text, revision]` at its runs. */
+const blamed = ({ body, runs }) => {
+  let start = 0;
+  return Array.from({ length: runs.length / 2 }, (_, run) => [body.slice(start, start += runs[2 * run]), runs[2 * run + 1]]);
+};
+
+integration("who wrote each piece of a page reads the same once kept, and a purge forgets it", async () => {
+  const fixture = await pageTest("blame");
+  const page = await writtenPage(fixture, [
+    "# Launch\n\nShip in May with Secret plan.\n",
+    "# Launch\n\nShip in June with Secret plan.\n",
+    "# Launch\n\nShip in June with Secret plan.\n\nThen measure.\n",
+  ]);
+  const { client, ids, pages, owner } = fixture;
+  const base = { spaceId: ids.space, principal: owner };
+  const r = () => crypto.randomUUID();
+  try {
+    const read = async () => blamed(await pages.blame({ requestId: r(), ...base, pageId: page.pageId }));
+    const kept = async () => (await client.query(`SELECT revision, blame FROM data.page_revisions
+      WHERE space_id=$1 AND page_id=$2 ORDER BY revision`, [ids.space, page.pageId])).rows
+      .map((row) => [Number(row.revision), row.blame !== null]);
+    const expected = [["# Launch\n\nShip in ", 1], ["June", 2], [" with Secret plan.\n", 1], ["\nThen measure.\n", 3]];
+    assert.deepEqual(await read(), expected, "derived from the bodies");
+    assert.deepEqual(await kept(), [[1, true], [2, true], [3, true]], "each revision's blame is kept");
+    const result = await pages.blame({ requestId: r(), ...base, pageId: page.pageId });
+    assert.deepEqual(result.revisions.map((revision) => [revision.revision, revision.authors[0].id]).sort(),
+      [[1, ids.owner], [2, ids.owner], [3, ids.owner]], "with who wrote each revision it names");
+    assert.deepEqual(await read(), expected, "read again from what was kept");
+
+    await pages.edit({ requestId: r(), ...base, pageId: page.pageId, baseRevision: 3,
+      body: "# Launch\n\nShip in June with Secret plan.\n\nThen measure twice.\n" });
+    assert.deepEqual((await read()).at(-2), [" twice", 4], "a new revision is derived from the kept one before it");
+
+    await pages.purge({ requestId: r(), ...base, pageId: page.pageId, needle: "Secret plan", replacement: "the plan" });
+    assert.deepEqual(await kept(), [[1, false], [2, false], [3, false], [4, false]],
+      "a purge forgets every blame, which measures the text it rewrote");
+    assert.deepEqual(await read(), [["# Launch\n\nShip in ", 1], ["June", 2], [" with the plan.\n", 1],
+      ["\nThen measure", 3], [" twice", 4], [".\n", 3]], "derived again from the redacted bodies");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("a blame derived from a body, or a base blame, that changed before it was kept is not kept", async () => {
+  const fixture = await pageTest("blame-race");
+  const { client, ids } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const page = await writtenPage(fixture, ["# Plan\n\nShip in May.\n", "# Plan\n\nShip in June.\n"]);
+    const readBodies = async (revisions) => {
+      const read = await client.query(`SELECT revision, body FROM data.page_revisions
+        WHERE space_id=$1 AND page_id=$2 AND revision = ANY($3::bigint[])`, [ids.space, page.pageId, revisions]);
+      return new Map(read.rows.map((row) => [Number(row.revision), row.body]));
+    };
+    const batches = [];
+    await walkBlame([{ revision: 1, blame: null }, { revision: 2, blame: null }], readBodies, async (derived) => {
+      batches.push(derived);
+    });
+    assert.equal(batches.length, 1);
+    const [derived] = batches;
+    // A purge rewrites the earlier body between the read and the keep.
+    await client.query(`UPDATE data.page_revisions SET body=replace(body, 'Plan', 'Goal')
+      WHERE space_id=$1 AND page_id=$2 AND revision=1`, [ids.space, page.pageId]);
+    const db = database(client);
+    const keep = (item) => db.transaction({ requestId: r(), operation: "test.keep" }, (tx) =>
+      keepBlames(tx, ids.space, page.pageId, item));
+    assert.equal(await keep(derived), 0, "a blame derived from a body since rewritten is not kept");
+    const bodies = await readBodies([1, 2]);
+    assert.equal(await keep({ ...derived, bodies }), 2, "from the bodies as they are now, it is");
+    // A base whose kept blame is no longer the one derived from: a purge forgot it, or it was derived again.
+    await client.query(`UPDATE data.page_revisions SET blame=NULL WHERE space_id=$1 AND page_id=$2 AND revision=2`,
+      [ids.space, page.pageId]);
+    const next = { base: { revision: 1, runs: [999, 1] }, blames: [{ revision: 2, runs: [1, 2] }], bodies };
+    assert.equal(await keep(next), 0, "not from a base blame that is not the kept one");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("a revision's moment is its conversation's newest message by then, for readers of that conversation", async () => {
+  const fixture = await pageTest("blame-moment");
+  const { client, ids, pages, owner, agent } = fixture;
+  try {
+    const r = () => crypto.randomUUID();
+    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Goals",
+      body: "# Goals\n\nNext.\n" });
+    const message = (id, sequence, sentAt) => client.query(`INSERT INTO data.messages
+      (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,
+       message_kind,content_hash,payload_kind,payload_ref,sent_at,updated_at,search_rank_sequence,legacy_body,created_at)
+      VALUES ($1,$2,$3,$4,1,'user',$5,'message','hash','inline','inline',$6,$6,$3,'hello',$6)`,
+    [ids.space, ids.open, id, sequence, ids.member, sentAt]);
+    await message("asked", 1, new Date(Date.now() - 60_000));
+    await pages.edit({ requestId: r(), spaceId: ids.space, pageId: page.pageId, principal: agent, baseRevision: 1,
+      conversationIds: [ids.open], body: "# Goals\n\nShipped.\n" });
+    await message("later", 2, new Date(Date.now() + 60_000));
+    const moment = (principal, conversationId, revision = 2) => pages.revisionMoment({ requestId: r(),
+      spaceId: ids.space, pageId: page.pageId, principal, revision, conversationId });
+    assert.deepEqual(await moment(owner, ids.open), { conversationId: ids.open, messageId: "asked", sequence: 1 });
+    assert.equal(await moment(owner, ids.open, 1), null, "revision 1 did not come from that conversation");
+    assert.equal(await moment(owner, ids.closed), null);
+    const blame = await pages.blame({ requestId: r(), spaceId: ids.space, pageId: page.pageId, principal: owner });
+    assert.deepEqual(blame.conversations, [{ conversationId: ids.open, name: ids.open }],
+      "the blame names the conversations its revisions came from");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
 integration("a released claim owes an update unless its conversation wrote the section while holding it", async () => {
   const { client, ids, pages, owner, agent } = await pageTest("claims-owed");
   try {
@@ -699,9 +918,10 @@ integration("an Automation occurrence's claim passes to the Run in its conversat
 
     const held = (await opened("search")).claim;
     assert.deepEqual(held.holder, { kind: "user", id: ids.owner, label: "Daily audit" });
-    await assert.rejects(pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.closed })),
-      (error) => error.code === "page_block_claimed" && error.message === "Daily audit is on this",
-      "a Run elsewhere stands down for it");
+    const elsewhere = await pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.closed }));
+    assert.deepEqual(elsewhere.others.map((c) => c.holder.label), ["Daily audit"],
+      "a Run elsewhere is not refused, and is told the occurrence is there");
+    await pages.releaseClaim(call({ principal: t.agent, claimId: elsewhere.claim.claimId }));
     const taken = (await pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.open }))).claim;
     assert.equal(taken.claimId, held.claimId, "the Run in its conversation takes the same claim over");
     assert.deepEqual(taken.holder, { kind: "agent", id: ids.instance, label: "claude:1" });
@@ -736,11 +956,14 @@ integration("an Automation occurrence's claim passes to the Run in its conversat
 });
 
 integration("a page's conversations are described to readers only, with their newest message and live Agents", async () => {
-  const { client, ids } = await pageTest("page-conversations");
+  const { client, ids, pages, owner } = await pageTest("page-conversations");
   try {
-    const db = database(client);
-    const read = (userId, conversationIds) => readPageConversations(db, { requestId: crypto.randomUUID(),
-      spaceId: ids.space, principal: { kind: "user", id: userId }, conversationIds });
+    const { page } = await pages.create({ requestId: crypto.randomUUID(), spaceId: ids.space, principal: owner,
+      title: "Margin" });
+    // As a page's margin reads them: with its links, as the reader the links' transaction found.
+    const read = async (userId, conversationIds) => (await pages.links({ requestId: crypto.randomUUID(),
+      spaceId: ids.space, principal: { kind: "user", id: userId }, pageId: page.pageId,
+      describe: (tx, reader) => describePageConversations(tx, ids.space, reader, conversationIds) })).described;
     for (const [sequence, body] of [[1, "First"], [2, "Ship it"]]) {
       await client.query(`INSERT INTO data.messages
         (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,

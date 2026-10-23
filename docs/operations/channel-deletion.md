@@ -1,11 +1,20 @@
 # Channel deletion
 
 A Human Space owner or admin chooses **Delete Channel…** from the conversation
-actions or details, types its current name and acknowledges deletion for every
-member. Stop the Channel's Agents first. The Hub rejects Agent credentials,
-ordinary members, a mismatched Space, changed names and active or stopping Runs,
-unreleased allocations and pending launches. All verification uses isolated data;
-never delete a real person's production Channel to test this feature.
+actions or details and confirms deletion for every member. If the Hub reports
+active work, the dialog asks separately to **Stop Agents and Delete**. Cancelling
+leaves the Agents running. Confirming posts the existing `/stop all` command to
+that exact Channel, then retries deletion for up to 30 seconds while the daemon
+confirms termination and allocations and pending launches are released. An
+uncertain stop append reuses its message ID on retry. A refusal or timeout keeps
+the dialog open with an actionable error; it never reports deletion as complete.
+
+The Hub still rejects Agent credentials, ordinary members, a mismatched Space,
+changed names and active or stopping Runs, unreleased allocations and pending
+launches. These server checks remain the authority for retirement. Older clients
+can continue to stop Agents manually before retrying. All verification uses
+isolated data; never delete a real person's production Channel to test this
+feature.
 
 ## Authority and recovery
 
@@ -34,13 +43,27 @@ added before a retained progress marker are still processed after an upgrade.
 Immutable Apple purchase ownership and content-free secret-access audits remain.
 
 Each pass deletes at most 100 restricted objects and mutates at most 2,000 rows
-in batches of 500, then commits its progress. Storage failures leave the cursor
+in batches of 500. Row cleanup makes at most eight table-delete calls and stops
+starting more after two seconds of SQL work, then commits its next step with a digest of the
+ordered table/predicate plan. Missing or changed digests restart the dependency
+plan, so an upgrade cannot skip a newly inserted earlier step. This bounds empty
+table round trips as well as deleted rows under the unchanged transaction
+deadline; a lost commit is reconciled from the saved journal on a later pass.
+Storage failures leave the object cursor
 unchanged; a restart retries the same exact keys. Failed jobs yield their
 admission slots to pending peers on the next pass. Every restricted key is parsed
 and checked against the deleted Channel before deletion. Content-addressed
 `objects/<sha256>` bytes can be shared with other Channels or Spaces and remain
 under the existing content retention/collection policy. Removing a Channel
 removes its references, not another Channel's bytes.
+
+Replay and outbox erasure uses narrow GIN indexes over the native Channel scope
+or aggregate identity and the four retained JSON Channel identity locations.
+The array-containment predicate matches those expressions; adding an unindexed
+OR branch would force full receipt scans and can roll back every batch at the
+query deadline. The indexes contain identities only, not complete payloads.
+Their initial build uses the exact-tag migrator's [online index mode](postgres-online-index-migrations.md)
+so a large replay history does not require blocking production writers.
 
 Cleanup removes Channel messages, message replay copies, metadata history,
 attachments, schedules, linked execution records, grants, Page links and its pins.

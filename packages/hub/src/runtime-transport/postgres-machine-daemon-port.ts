@@ -280,6 +280,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     if (message.type === "machine_run_snapshot" && message.registryConnectionEpoch !== undefined &&
         message.registrySequence !== undefined) {
       machineControlInput.commandId = await causalSnapshotCommandId(session, message);
+      // A full snapshot reconciles every Run, so it keeps its replay. A partial
+      // one is sent once and never answered, so nothing asks for it again.
+      if (message.snapshotComplete === true) delete machineControlInput.replayable;
     }
     const result = await this.dependencies.daemonCommand(machineControlInput);
     if (message.type === "machine_quota_probe_result") {
@@ -390,6 +393,11 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     if (message.type === "machine_run_exited" && requestId && runId) {
       return { type: "machine_run_report_acked", requestId, runId };
     }
+    // A partial snapshot is the daemon's minute report: answered, it proves this
+    // session too, so the daemon need not also probe it (each probe wakes us).
+    if (message.type === "machine_run_snapshot" && message.snapshotComplete !== true) {
+      return { type: "machine_run_snapshot_acked" };
+    }
     return message.type === "unregister"
       ? { type: "unregistered", requestId: message.requestId }
       : undefined;
@@ -475,6 +483,10 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
 
   async disconnected(session: Readonly<MachineDaemonRuntimeSession>): Promise<void> {
     await this.dependencies.daemonCommand(sessionCommand(session, "unregister"));
+  }
+
+  async confirmOnline(session: Readonly<MachineDaemonRuntimeSession>): Promise<void> {
+    await this.dependencies.daemonCommand(sessionCommand(session, "confirm-online"));
   }
 
   connected(
@@ -755,7 +767,7 @@ function machineCommand(
 
 function sessionCommand(
   session: Readonly<MachineDaemonRuntimeSession>,
-  action: "report" | "complete" | "unregister" | "renew" | "activation_begin" | "activation_prepare" | "activation_advance",
+  action: "report" | "complete" | "unregister" | "renew" | "confirm-online" | "activation_begin" | "activation_prepare" | "activation_advance",
   message?: ExecutableMessage,
   relayLease?: MachineCommandLease,
 ): Record<string, unknown> {
@@ -768,6 +780,9 @@ function sessionCommand(
   const payload = message ? redactAuditPayload(message) : {};
   return {
     commandId: runtimeCommandId(`machine-${action}`, requestId),
+    // Without the daemon's request id no caller asks for this command's result
+    // again; Authority decides what may then skip a replay.
+    ...(requestId === undefined ? { replayable: false } : {}),
     action,
     ...(action === "complete" ? {
       controlId: requestId,

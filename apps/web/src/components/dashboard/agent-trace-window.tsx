@@ -29,7 +29,7 @@ import {
   X,
 } from "lucide-react";
 import type { ChannelMessage } from "@xmatrix/protocol";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass } from "@/components/ui/status-tone";
 import { cn } from "@/lib/utils";
@@ -49,7 +49,7 @@ import { CenteredDialogShell, DialogButton } from "./centered-dialog-shell";
 import { RichMessageContent } from "./workspace-shell-rich-message";
 import { AGENT_BUSY_TRACE_STALE_MS } from "./workspace-shell-constants";
 import { tagsFromUsage, traceBlockText, traceFieldValue, traceToolPreviewText } from "./workspace-shell-formatters";
-import { avatarInitials, formatTime, isOlderThan, relativeTime, shortId, traceUsage } from "./workspace-shell-recovered";
+import { formatTime, isOlderThan, relativeTime, shortId, traceUsage } from "./workspace-shell-recovered";
 import {
   TagRow,
   agentTraceGroupsForTarget,
@@ -877,14 +877,9 @@ export function AgentInstanceWindowShell({
     >
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <IdentityAvatar
-            kind="agent"
-            label={target.name}
-            status={target.status}
-            imageUrl={target.avatarUrl}
-            initials={avatarInitials(target.name)}
-            size="sm"
-          />
+          {/* Opened from where its face is known, it keeps it; else the exact Instance it traces names it. */}
+          <Face of={target.face ?? { kind: "agent", name: target.name, id: target.instanceId ?? null }}
+            status={target.status} size="sm" />
           <div className="min-w-0">
             <h2 id={labelledBy} className="truncate text-sm font-black">{target.name}</h2>
             <p className="truncate text-xs text-muted-foreground" title={headerContext}>

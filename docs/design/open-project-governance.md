@@ -71,9 +71,9 @@ person's role is their level, and the capabilities follow from it.
 
 ## 5. Pull requests
 
-- A pull request names the block it works on; the `xmatrix/claim` check passes
-  when its author holds a claim there (§5.6 of the pages design).
-- A participant cannot claim, so their pull request fails the check with
-  the way in: talk in their intake conversation, or ask a contributor to
-  claim the block. Once merged, it promotes them (§2).
-- Pre-review runs before a maintainer sees claimed work (§5.6).
+- A pull request names the block it works on (§5.6 of the pages design).
+  Naming it gates nothing: anyone may open one, and there is no claim check
+  (decided 2026-10-19).
+- A participant's pull request is reviewed by the maintainers. Once merged,
+  it promotes them (§2).
+- Pre-review runs before a maintainer sees a member's work (§5.6).

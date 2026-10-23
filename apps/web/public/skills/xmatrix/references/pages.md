@@ -86,7 +86,10 @@ xmatrix page done -m "the fix did not change how things stand"
 ```
 
 Link a page, or one of its sections, to a conversation, and claim a section
-while you work on it so others see it is taken (claims lapse on their own):
+while you work on it so other Agents see who is on what (claims lapse on their
+own). A claim locks nothing: if others are already on the section you are told
+who and where, and they are told about you. Talk to them there, pick other
+work, or carry on side by side.
 
 ```sh
 xmatrix page link <page-id> [--block <section-slug>] [--conversation <id>]
@@ -95,5 +98,6 @@ xmatrix page release <page-id> --block <section-slug>
 xmatrix page claims <page-id>
 ```
 
-A pull request that names a claimed section by its link passes the
-`xmatrix/claim` check for its author.
+A pull request names the section it works on by its link. Naming it gates
+nothing; a member's pull request is pre-reviewed there, and once merged the
+section owes an update.

@@ -1,4 +1,5 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
+import { agentFailureEvidence, agentFailureStatusLines, safeAgentFailureDetail } from "./agent-failure-detail.js";
 export const DEFAULT_HUB_URL = "https://xmatrix-hub.xmatrix.sh";
 
 export * from "./agent-status-tags.js";
@@ -12,13 +13,13 @@ import type {
 } from "./authority-runtime.js";
 
 import { AGENT_PRESETS, agentPresetForLauncher } from "./agent-presets.js";
+import { agentFaceUrl } from "./faces.js";
 
 export {
   AGENT_PRESETS,
   agentHarnessSpec,
   agentLaunchExecutable,
   withMachineSpawnHarness,
-  agentPresetAvatarUrl,
   agentPresetById,
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
@@ -53,7 +54,8 @@ export function agentAvatarUrlFromMetadata(
       AGENT_PRESETS.find(
         (item) => item.backend === candidate && item.backend !== "acp" && item.backend !== "pty",
       );
-    if (preset?.avatarUrl) return preset.avatarUrl;
+    const face = agentFaceUrl(preset?.id);
+    if (face) return face;
   }
 
   return undefined;
@@ -381,6 +383,9 @@ export const HUB_ROUTES = {
     `/api/spaces/${encodeURIComponent(spaceId)}/governance${subpath ? `/${subpath}` : ""}`,
   space_page_links: (spaceId: string, subpath = "") =>
     `/api/spaces/${encodeURIComponent(spaceId)}/page-links${subpath ? `/${subpath}` : ""}`,
+  /** The pictures of people and Agent Instances (faces.ts), read by id. */
+  space_faces: (spaceId: string, subpath = "") =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/faces${subpath ? `/${subpath}` : ""}`,
 } as const;
 
 export const WEB_PROXY_ROUTES = {
@@ -396,6 +401,7 @@ export const WEB_PROXY_ROUTES = {
   space_page_promote: (spaceId: string, pageId: string, revision: number) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pageId)}/revisions/${revision}/promote`,
   space_page_links: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/page-links`,
+  space_faces: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/faces`,
   space_page_migration: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/page-migration`,
   space_governance: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/governance`,
   login: "/api/xmatrix/login",
@@ -866,11 +872,12 @@ export function agentTurnFailureNoticeBody(input: {
   detail?: string | null;
 }): string {
   const name = input.agentName.trim() || "agent";
-  const detail = boundAgentTurnFailureDetail(input.detail);
-  if (!detail) {
-    return `xMatrix could not complete this ${name} turn.`;
-  }
-  return `xMatrix could not complete this ${name} turn: ${detail}`;
+  const detail = boundAgentTurnFailureDetail(safeAgentFailureDetail(input.detail));
+  const cause = detail
+    ? `xMatrix could not complete this ${name} turn: ${detail}`
+    : `xMatrix could not complete this ${name} turn.`;
+  return [cause, ...(!detail ? ["The harness supplied no error detail."] : []),
+    ...agentFailureStatusLines(agentFailureEvidence(input.detail))].join("\n");
 }
 
 export interface AgentLifecycleSnapshot {

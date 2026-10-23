@@ -1,10 +1,8 @@
 "use client";
 
-import { agentPresetAvatarUrl, normalizeAgentPresetRuntime } from "@xmatrix/protocol";
-
 import type { AgentListGroup } from "./agent-list-groups";
 import { HarnessProfileSection } from "./harness-profile-section";
-import { IdentityAvatar } from "./identity-avatar";
+import { Face } from "./face";
 import { MachineGlyph } from "./machine-glyph";
 import { machineOs } from "./machine-os";
 import { ToolDetail, ToolDetailSection } from "./tool-split";
@@ -30,8 +28,7 @@ export function AgentHarnessDetail({ group, token, onBack, onOpenLocation, onSav
       onBack={onBack}
       backLabel="Agents"
       context={<span className="flex items-center gap-1.5">
-        <IdentityAvatar kind="agent" label={harness}
-          imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(harness))} initials={harness.slice(0, 2)} size="xs" />
+        <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
         <span>Agent</span>
       </span>}
       title={harness}

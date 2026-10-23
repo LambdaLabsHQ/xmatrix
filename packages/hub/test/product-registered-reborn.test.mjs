@@ -12,7 +12,7 @@ function port(overrides) {
   const calls = [];
   return { calls, port: new Proxy({
     getRebornTarget: async () => ({ ...target }),
-    publishSystemNotice: async value => { calls.push(["notice", value.body]); },
+    recordResult: async (_channelId, text) => { calls.push(["notice", text]); },
     ...overrides,
   }, { get(object, name) {
     if (name in object) return object[name];

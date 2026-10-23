@@ -50,13 +50,12 @@ export function humanProfileRefusal(code: string): string | undefined {
  * reported, never typed: a zone someone picked from a list is right until they
  * travel and then silently wrong, and nobody thinks to come back and fix it.
  */
-type HumanProfileDraft = Required<Omit<HumanProfileEdit, "timeZone">>;
+type HumanProfileDraft = Required<Omit<HumanProfileEdit, "timeZone" | "avatarUrl">>;
 
 function initialDraft(profile: HumanProfile): HumanProfileDraft {
   return {
     displayName: profile.displayName,
     handle: profile.handle ?? "",
-    avatarUrl: profile.avatarUrl ?? "",
     bio: profile.bio ?? "",
   };
 }
@@ -99,12 +98,11 @@ export function HumanProfileEditor({
       return;
     }
     setDraft((current) => ({ ...current, displayName, handle }));
-    /* avatarUrl is carried through unchanged: the photo is set by the picker
-       above this form, and omitting the field would clear it on every save. */
+    /* No avatarUrl: the photo is the picker's above this form, and a field left out is left as it is. Sending
+       back a copy of it would put back a photo removed since that copy was taken. */
     await onSave({
       displayName,
       handle,
-      avatarUrl: draft.avatarUrl.trim(),
       bio: draft.bio.trim(),
     });
   }

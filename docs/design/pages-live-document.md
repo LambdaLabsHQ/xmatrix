@@ -104,10 +104,33 @@ Each block's awareness has four layers.
 | Intent | Who has taken this? | Claims, with their conversation and pull request |
 
 Revision attribution reads the authorized head, bounded revision history and
-owed claims before releasing its database transaction. It then compares the
-immutable documents, yielding between uncached section parses so large pages
-do not hold a PostgreSQL connection or block other requests for the whole
-comparison. Markdown style alone remains no document change.
+owed claims before releasing its database transaction. What each revision
+changed against the one before it is derived from the two immutable documents
+once and kept on the revision (`page_revisions.changed_blocks`), so a read
+compares only revisions not derived yet. A derivation reads its bodies outside
+the attribution transaction and yields between uncached section parses, so
+large pages do not hold a PostgreSQL connection or block other requests for the
+whole comparison; it is kept only while both bodies are still the ones
+compared. A purge rewrites bodies and so forgets every derivation on the page,
+which could name the removed text's headings. Markdown style alone remains no
+document change. The Web reads a page's sections alone
+(`GET …/awareness?scope=sections`): claims, discussions and presence reach it
+live on their own.
+
+Who wrote each passage is the same attribution read finer: every character of
+a revision is owed to the first revision in the page's line that put it there,
+as `git blame` walks commits (`page-blame.ts`). A revision's blame is derived
+from the revision before it, comparing markdown lines and then the words of the
+lines that changed, never parsed documents, so marking words bold leaves them
+with whoever wrote them and moved text reads as its mover's. It is derived once
+and kept on the revision (`page_revisions.blame`), batch by batch, each batch
+kept only while its bodies and the blame it was derived from are still the ones
+read; a purge forgets it with `changed_blocks`. The Web draws the head's blame on
+the head's document through the markdown's source positions and carries it to
+the live document, so what is typed since reads as being written. A paragraph
+rested on shows its writers in the margin. Selecting text leaves attribution
+hidden so it does not obscure the passage or compete with its discussion
+controls. Revision history retains the conversations each revision came from.
 
 - **Intent line.** An Agent on a block publishes one line of what it is
   doing: the note on its claim, or else the title of the conversation its Run
@@ -155,16 +178,31 @@ it concerns. There is no panel of lists beside the document: a list repeats
 what the document already shows, and it separates each fact from the text the
 fact is about.
 
-- **Header**: the save state, and everyone on the page as a stack of
-  avatars. The page's name is the document's opening heading (§4.1), so the
-  header never shows it. A document that opens without one reads "Untitled"
-  in its place, as the editor's own h1; clicking it starts that heading. Hovering an
-  avatar says who it is, what they are doing, where and in which
-  conversation; clicking one scrolls to them. Idle people are dimmed. Beside
-  the avatars: the page's conversation count (§4.4), History and Share. There
-  is no ⋯ menu: each setting sits where it acts (§7). As Google Docs does with its clock icon, hovering History says
-  who changed the page last and when, and a dot on it means the page changed
-  since this person last read it.
+- **Header** (decided by Daniel 2026-10-23): History and Share, and
+  nothing else that is always there. It names no one, keeps no conversation
+  count and offers no Co-write: who is where shows in the text, the
+  conversations stand beside what they are about, and an Agent is called
+  with `@` in the text. It speaks of saving only when something is wrong:
+  edits held while the session is away (*Offline*), a session still
+  connecting after two seconds, and a page the reader may only read. The
+  page's name is the document's opening heading (§4.1), so the header never
+  shows it. A document that opens without one reads "Untitled" in its place,
+  as the editor's own h1; clicking it starts that heading. There is no ⋯
+  menu: each setting sits where it acts (§7). As Google Docs does with its
+  clock icon, hovering History says who changed the page last and when, and
+  a dot on it means the page changed since this person last read it.
+- **Byline** (decided by Daniel 2026-10-23): under the title, as a column
+  names its writers, each author of the page by face and name, a hairline
+  between them, and no other words. An author is whoever has words in the
+  page now, from its blame (most words first); someone whose words were all
+  taken out is no longer one. Pointing at an author marks their words in the
+  text, and an author changing the page now breathes. The title keeps the
+  byline's room in the preview as in the editor, so nothing moves when the
+  authors arrive.
+  The saved blame is carried to the live document: edits before the next
+  revision immediately move each author's highlighted words and remove
+  authors whose words have gone. The byline retains the pointed-at identity,
+  never positions from an earlier document; live edits need no new blame read.
 - **Cursors**, as in Google Docs: a line in the person's colour with their
   name above it. The name shows while they move or type and hides about five
   seconds later, leaving a square at the caret's top; hovering the caret
@@ -184,10 +222,15 @@ fact is about.
   arrive as well as a person's typing. The session writes an Agent's edit
   under the Agent's awareness id, which is how the editor knows whose text it
   is.
-- **The top and bottom edges** of a long page name who is out of view above
-  or below, placed by their cursor where they have one and by their section
-  otherwise: "claude:2 is editing below". Clicking scrolls to the nearest of
-  them; clicking an avatar in the header does the same.
+- **The top and bottom of the margin** tell what it holds out of view above
+  or below (decided 2026-10-21: one source with the margin, in its style).
+  Only what the margin draws and who is editing count, by where each card and
+  pill is drawn: a card in the cards' style says "2 conversations below", its
+  working line "claude:2 · Working", and "Ada · Editing" for a person editing
+  there. Someone only reading is not drawn, and an Agent
+  at rest is its card's "Idle" line; neither is told at the edges. Without a
+  margin, the same card at the right edge tells of people editing out of view,
+  since each Agent is its own face there. Clicking scrolls to the nearest.
 - **Beside a wide page, an Agent at work stands in the margin** (decided
   2026-10-19): its pill, solid in its colour with its face, its name and what
   it is doing (its dots, or *thinking 12s*), level with the line it writes and
@@ -200,34 +243,40 @@ fact is about.
   the pill opens the channel right under it, on the same left edge, the pill
   staying put, with what may be done to the Agent (stop, undo, write with
   another) beside the pill. An idle Agent leaves the margin and its channel is
-  a card again (§4.4). Only a solid pill means an Agent at work.
+  a card again (§4.4). An Agent at work for a discussion is the exception: the
+  discussion stays a card beside its passage, and its pill, with no channel
+  under it, opens the discussion there (decided 2026-10-21). Only a solid pill
+  means an Agent at work.
 - **On a phone, and beside a page without room for the margin, Agents are at
   the right edge.** Each Agent on the page is its face beside the line it is at, travelling with the text as the page scrolls
   and waiting at the top or bottom of the edge, a chevron pointing to the
   line, while the line is out of view; a tap goes back to it, or, beside its
-  line, says what it is doing and opens its conversation. The header's avatar
-  stack names only the people. While no Agent is on the page, the bottom
+  line, says what it is doing and opens its conversation. While no Agent is on the page, the bottom
   right holds the face of the Agent this person co-writes with (§4.2).
 - **Headings** carry who is on the section: the people and Agents in it, and
   the Agents working in a conversation linked to it even when they do not
-  have the page open, each with its state; the claim flag with its holder and
-  pull request; *Update owed* where claimed work ended and nobody wrote it
-  back (§5.3); its conversation count (§4.4); and the freshness mark (§5.4).
-  Hovering a heading, or
-  editing in its section, offers Discuss, Copy link, Claim (Release on your
-  own claim) and Attach at the heading's right edge (§6). A phone has no hover:
-  the heading of the section the reader is in carries one ⋯ whose menu names
-  each action, *Co-write with ‹Agent›* first.
+  have the page open, each with its state; *Update owed* where work ended
+  and nobody wrote it back (§5.3); its conversation count (§4.4); and the
+  freshness mark (§5.4). Who has taken a section is the Agents' to know
+  (`page read`) and is not drawn for people, and a person neither claims nor
+  releases (decided 2026-10-19: coordination is lock-free, and what an Agent
+  intends is felt only through what it writes). A heading carries no row of
+  tools (removed 2026-10-23 at Daniel's request): discussion starts from a
+  selection (§4.2), and Automations are written into the section (§6.1). On
+  a phone the heading of the section the reader is in carries one ⋯ whose
+  menu offers *Co-write with ‹Agent›*.
 - **No change log in the text.** As in Google Docs, who changed a section
-  and when is not written under it. *Show editors* on a selection says who
-  last changed that section, when and in which conversation, with a link to
-  History (parent §4.2).
+  and when is not written under it. History says who changed each part,
+  when and in which conversation (parent §4.2).
 - **Margin**: the conversations about the page, each beside what it is about
   (§4.4).
 - **The scrollbar** marks where others are, where discussions are and which
   sections owe an update.
-- **What changed since this person last read the page** is shown to them as
-  a diff, in place. Read means seen: what has been on their screen a moment
+- **What changed since this person last read the page** is offered to them,
+  not shown: the page always opens as it is now, and the first card in the
+  margin, a card of paper, (above the page where there is no margin) says how many changes there
+  are since they last read it and offers *Show changes*, which shows them as a
+  diff, in place. Read means seen: what has been on their screen a moment
   (1.5 s, tab in front) is read as it was then, and nothing else is. So what
   an Agent writes while they watch is read as it arrives, marked only by the
   Agent's own ink, and what it writes out of view or while they are away is
@@ -245,12 +294,12 @@ fact is about.
   changed lines next to each other one bar and empty lines left out; inside a
   line that changed in part, new words underlined in brass and text taken out
   struck through in faint ink where it stood. Nothing is animated and nothing
-  fades: the diff stays for that visit until its reader ticks *Viewed* above
-  the page, which reads all of it and shows the page as it is, or writes on
-  the page, which only stops marking it; unticking shows the diff again. On a
-  phone the diff is walked from the right edge instead: a mark beside the
-  change in front of the reader counts the changes, steps to the next and says
-  *Viewed*. A first visit shows nothing as changed. Agents have no read state.
+  fades: once opened, the diff stays until its reader clicks *Hide changes*,
+  which keeps offering it, or *Done*, which reads all of it and
+  shows the page as it is, or writes on the page, which only stops marking it.
+  On a phone the opened diff is walked from the right edge instead: a mark
+  beside the change in front of the reader counts the changes, steps to the
+  next and says *Viewed*. A first visit shows nothing as changed. Agents have no read state.
 - **Opening a page draws it as the editor will.** Until the live session has
   synced, the page shows its prefetched document rendered from the same
   document schema and list item view as the editor, with the margin's room
@@ -297,34 +346,79 @@ fact is about.
   delimiter drops that mark. Shortcuts still apply marks. A typed URL followed
   by a space becomes a link.
   Clicking a link's visible destination edits the address.
-- **Table controls** appear only while the cursor is in a table.
-- **Selection menu**: *Discuss*, *Ask AI*, *Claim*, *Show editors*,
-  *Copy link*.
-  - *Discuss* starts a conversation anchored to the selection (§4.3).
-  - *Ask AI* starts the same discussion with its composer already addressed
-    to xMatrix (`@auto`), which picks the Agent. The question is written
-    there, beside the page (§4.4), where the answer arrives; asking for a
-    change is asking in words, and the Agent edits the page as the page lets
-    it. There is no second input over the page.
-- **`/` insert**: heading, list, task list, table, page reference, live
-  reference, mention.
+- **What the caret shows never moves the text under the pointer.** Markers
+  stay as they were while the button is down and follow the caret once it is
+  up; if the markers it leaves took lines, the page scrolls by that much so
+  the selection stays under the pointer. A code fence shows in its block's
+  corner, not on a line of its own.
+- **Table controls** appear only while the cursor is in a table, floating
+  above it rather than taking room in the page.
+- **A selection opens a comment box** (decided by Daniel 2026-10-21). A
+  passage selected with the mouse opens the product's own message box, the
+  caret already in it, in the margin level with the passage, as a comment
+  card stands (under the passage where the page has no margin). It lies on a
+  card of paper (`PaperPopover`), as the page's menus do, and the composer in
+  it writes on that paper without glass of its own (decided by Daniel
+  2026-10-21: the margin, and paper, for this box and the changes card); the
+  passage is marked in the comment colour while it is
+  written about. Typing is the comment, Enter sends it, and the caret goes
+  back into the page after the passage, so writing and commenting go on
+  side by side. ⌘⌥M (Ctrl+Alt+M) comments on the selection, or on the
+  caret's paragraph. A selection made from the keyboard or by touch is being
+  edited: it shows the selection menu, whose *Comment* opens the same box.
+  Until something is typed, Backspace, copy, cut and the mark shortcuts act
+  on the passage. Escape, or a click anywhere else, closes the box and the
+  passage is no longer selected; a comment closed unsent comes back when the
+  same passage is selected again.
+  - A comment is a discussion of the passage (§4.3) whose first message is
+    the comment. An Agent the comment mentions takes it at once. One that
+    names nobody goes to the Agent already at work on the page, nearest the
+    passage first, among those in conversations the reader can write in: its
+    Instance card stands under the box, as under a conversation's composer,
+    while the comment is written (decided by Daniel 2026-10-22: the existing
+    Agent first, a new one only when there is none). Its Instance lives in its
+    own conversation, so the comment calls it there with
+    `@<name>:<n> A comment for you: channel:<discussion>`; it answers in the
+    discussion, and a reply to its answer is relayed back to it (a
+    cross-Channel link). With none there it goes to xMatrix (`@auto`), and an
+    Agent started for it shows on its card once sent.
+  - Its Agent starts at once in a private managed directory, as a
+    co-writer's does, unless the comment names a repository (`repo:`,
+    `pwd:`), and writes its change into the page, where its card says it is
+    at work (one pill, in the card, not a second one above it).
+  - People and Agents meet in a discussion alike, so there is no separate
+    *Ask AI*. What acts on the whole section (copying its link) is the
+    heading's, not a passage's; *Show editors* gave way to History, and
+    *Claim* is not a person's to make.
+- **`/` insert**: heading, list, task list, table, divider, GitHub file.
+- **`[[`, `#` and `@` complete as in the composer** (and `【【`, `＃`, `＠`
+  from a Chinese input method). `[[` picks a page, `[[page#` one of its
+  sections, `#` a channel: the page keeps `page:<id>#<section>` /
+  `channel:<id>` and draws it as a chip. `@` picks an Agent: `@<name>` stays
+  in the text, like everything picked, and calls the Agent into co-writing
+  as the face tap does, except that its one message is only
+  `@<name> launch:force page:<id>#<section>`: nothing tells it what to write
+  (decided by Daniel 2026-10-21). `#` opening a paragraph is the heading being typed.
 - **Co-writing is live, as with a person** (decided 2026-10-15). A person
   starts an Agent writing the page from the page itself, typing nothing: one
   tap on the face of the Agent to write with. The Agent is then on the page
   like a colleague in a shared document, until it is stopped or the people
-  leave: its face in the header, its caret in its colour with what it is doing
+  leave (two minutes after the last person's connection closes, the page's
+  session ends its co-writing and tells its Agent so; its Run then rests and
+  sleeps as any other): its caret in its colour with what it is doing
   (watching, thinking, writing, waiting), and its words arriving as its harness
   writes them.
-  - **Selection feedback.** Choosing an Agent immediately shows that it is
-    starting, including while a new empty page is being made. The desktop
-    header disables another call while that request is pending. Once sent,
-    desktop feedback explains to write in the page and offers the co-writing
-    conversation, where launch results can be inspected. A failed request clears
-    the pending state and shows its reason on the page.
+  - **Selection feedback.** A call disables another while its request is
+    pending. Launch results and the conversation stay in
+    the existing margin card (or the page's conversation list in a narrow
+    window); no banner is inserted above the document. The phone's existing
+    Agent button shows the called Agent until it appears on the page. A failed
+    request clears the pending state and shows its reason on the page.
   - **At once.** The Agent a co-writing conversation calls starts in a private
     managed directory, ready the moment its process does: a launch in a
-    conversation that co-writes a page reads no repository and checks none out,
-    unless its message names one (`repo:`, `pwd:`).
+    conversation that co-writes a page, or comments on a passage of one,
+    reads no repository and checks none out, unless its message names one
+    (`repo:`, `pwd:`).
   - **Any Agent.** The co-writer is the Agent's own Run, whatever its harness:
     the runtime already drives every harness through a structured session
     (Claude stream-json, Codex app-server, ACP and the others), each able to
@@ -483,7 +577,13 @@ or joining one never leaves the page.
 - **An Agent at work comes first.** While one of a conversation's Agents is
   at work on the page, the conversation hangs under that Agent's pill beside
   the line it writes (§3.2) instead of sitting at its own anchor, and opens
-  there; when the Agent goes idle, it is a card at its anchor again.
+  there; when the Agent goes idle, it is a card at its anchor again. A
+  discussion is about the passage it was started on, so it stays at its
+  passage whoever works for it (decided 2026-10-21).
+- **Opening brings it into view once.** Opening a conversation scrolls the
+  page to where it opens. While it stays open, its Agent going busy or idle,
+  or its live session leaving and coming back, moves it in the margin but never
+  scrolls the page (decided 2026-10-21).
 - **Where it sits.** A discussion sits beside its passage. A conversation
   linked to a section sits beside the section's heading, and one linked to
   the whole page beside the title.
@@ -523,13 +623,12 @@ or joining one never leaves the page.
   work dock work there; per-message tags and actions, attachments and the
   full header stay in *Open in Conversations*, which gives it the whole
   window.
-- **The conversation list.** The header's conversation count, a heading's
-  count open the list of every
+- **The conversation list.** A heading's count opens the list of every
   conversation linked to the page, grouped by section, including resolved
   discussions and sunk conversations; open discussions resolve from it too.
-- **Starting one.** *Discuss* on a selection or a heading, and *Ask AI*,
-  create the conversation already linked there and open it beside the page
-  with its composer focused.
+- **Starting one.** A comment on a selection (§4.2) creates the conversation
+  already linked there with the comment as its first message, and the page
+  stays in front of the reader.
 - **Narrow windows** have no margin: when the page has no room for a full
   document column beside it, passages stay highlighted with a bubble and
   headings count their conversations and mark the Agents working in them
@@ -543,6 +642,13 @@ or joining one never leaves the page.
   read position and the Agents live in it, and realtime events keep them
   current. A conversation the reader cannot open does not appear (parent
   §7).
+
+The page tree's Agent activity and page conversation lists use lock-free,
+independent `single_read` statements on one request session, including their
+access checks and conversation descriptions. Each statement retains its
+placement fence and READ COMMITTED snapshot. A lost response destroys that
+checkout and retries the read once on a fresh connection; repeated loss and
+answered SQL failures propagate. These reads need no enclosing BEGIN/COMMIT.
 
 ## 5. Keeping pages current in time
 
@@ -570,7 +676,7 @@ when it was written back.
 
 | Event | Section | Derived from |
 |---|---|---|
-| A pull request that names the section is merged | The section it names | The claim it completed |
+| A pull request that names the section is merged | The section it names | The record of its work, made at the merge whether or not anyone claimed the section |
 | A claim is released or lapses | The claimed section | The claim |
 | An Automation occurrence that starts an Agent ends, or never starts, without the section written | Its section | The claim the occurrence opened (§6.1) |
 | A live reference in the section changes state (§5.4) | That section | The reference |
@@ -661,9 +767,8 @@ section it keeps true, and it is written there:
   read` lists it under `live:` like every live reference.
 - **Deleting the reference pauses the Automation** (reason `detached`); it is
   not deleted. Putting the reference back, by undo or by restoring a
-  revision, resumes one that was paused only for that reason. A heading's
-  *Attach* offers the page's detached Automations with *Put back here*; the
-  Space's Schedules list every Automation, with *Delete*. The edit says so
+  revision, resumes one that was paused only for that reason. The Space's
+  Schedules list every Automation, with *Delete*. The edit says so
   when it happens: its result names each Automation it detached or resumed
   and each top section it removed, `page edit` prints a line for each, and
   people on the page see a notice. A resumed Automation that never ran gets
@@ -746,7 +851,9 @@ Access follows the page, for people and Agents alike:
   whose author is the editor (an Agent's author is its owner), and the
   reference in the body is rewritten to the new id in the same page revision.
   Every change is a page revision, so History shows who changed which
-  Automation, in which conversation.
+  Automation, in which conversation. An Agent's reference edits are attributed
+  to its actual Run conversation. The Automation's timer conversation remains
+  independently private; authoring does not grant the Agent access to it.
 
 Agents use `xmatrix page automation list|create|edit|pause|resume|delete
 <page-id>`, with `--block <heading-slug>` choosing the section for create and
@@ -862,18 +969,18 @@ There is no side panel. What its tabs held is shown where it acts:
 
 | Was | Now |
 |---|---|
-| Now: presence, claims, running Agents | Header avatars, cursors, and each heading's avatars and claim flag (§3.2) |
+| Now: presence, claims, running Agents | Cursors, the margin's Agents and each heading's avatars (§3.2) |
 | Discussions | Cards beside their passages and the conversation list (§4.4) |
-| Attached: Automations | Chips in the section they keep true (§6.1); *Attach* on a heading adds one or puts a detached one back; the Space's Schedules list them all |
-| Attached: connectors | A conversation linked to its section, a card like any other; *Attach* on the heading adds one |
+| Attached: Automations | Chips in the section they keep true (§6.1), written there by an Agent; the Space's Schedules list them all |
+| Attached: connectors | A conversation linked to its section, a card like any other |
 | History | A mode of the page: the margin lists revisions, and the document shows the chosen one's changes colored by author, with restore |
 | Settings: publishing, suggestion mode | The Share dialog from the header |
 | Settings: project governance | Open participation on the Space in Team; the governance page in Share ("Space rules": only owners and admins edit it, every Agent follows it), both for Space owners and admins |
 | The move to pages | A notice on the page while an Agent's draft waits for an owner or admin |
 
-A phone shows the same things on the page itself: avatars and the
-conversation count in the header, headings and bubbles in the text,
-and Share and History in the page's top bar.
+A phone shows the same things on the page itself: the byline under the
+title, headings and bubbles in the text, and Share and History in the
+page's top bar.
 
 Creating a page works as in Notion: the desktop list's + and Ctrl/⌘+N, the
 phone's FAB, the empty list and a parent row's sub-page + each open a new page
@@ -881,7 +988,7 @@ at once, with no dialog or browser prompt, on its title, on a phone as on a
 desktop. The title is the document's first line, drawn as its h1 with an
 "Untitled" placeholder; there is no title field, so a new page looks exactly
 like any page. A new page is an ordinary page on screen, with the same editor
-and header, Co-write included (§4.2), and there is no draft: it is made by its
+and header, and there is no draft: it is made by its
 first write, like copy-on-write. Until then its live document exists only in
 the browser, and one opened and left empty is not kept anywhere. The first
 write is a keystroke (letters typed on the first line make it the opening
@@ -890,7 +997,7 @@ as it stands. The Hub keeps the document's markdown as revision 1 and starts
 the page's live session from the same Yjs document, so the editor joins that
 session without reloading and goes on syncing what is typed meanwhile. Enter after
 the name goes on into the text; left without one the page stays unnamed. Until it is made, the header
-shows only Co-write. A failed make says so on the page, and the next write
+is empty. A failed make says so on the page, and the next write
 tries again.
 
 ## 8. Build order
@@ -904,8 +1011,8 @@ Shipped:
 2. Awareness: per-block aggregation, `page read` front matter; Now bar,
    heading avatars, follow, section footer (v0.16.467); `page read --since`
    (v0.16.470).
-3. Anchored discussions with resolve, and Ask AI on a selection
-   (v0.16.470; Ask AI opens the discussion itself since 2026-10-19).
+3. Anchored discussions with resolve (v0.16.470; Ask AI on a selection
+   was folded into Discuss on 2026-10-19).
 4. Owed updates derived from ended claims, GitHub's write-back request on a
    merged pull request, the Focus scan treating owed sections first
    (v0.16.470).

@@ -78,7 +78,7 @@ impl ProfileManager {
         &self.generation
     }
 
-    pub(crate) fn installation(&self) -> &InstallationRoot {
+    pub fn installation(&self) -> &InstallationRoot {
         &self.installation
     }
 
@@ -258,7 +258,7 @@ pub(crate) struct DaemonHostProfileCommand {
 }
 
 impl DaemonHostControlServer {
-    pub(crate) async fn spawn(
+    pub async fn spawn(
         manager: ProfileManager,
     ) -> Result<(Self, tokio::sync::mpsc::Receiver<DaemonHostProfileCommand>)> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

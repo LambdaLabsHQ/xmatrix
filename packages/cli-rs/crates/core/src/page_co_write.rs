@@ -19,7 +19,7 @@ use crate::websocket::{self, ClientWebSocket, connection_host};
 
 /// A frame carrying co-writing JSON, after the session's sync (0), awareness
 /// (1) and notices (2).
-pub const PAGE_MESSAGE_CO_WRITE: u64 = 3;
+pub(crate) const PAGE_MESSAGE_CO_WRITE: u64 = 3;
 /// Answered by the session's host without waking it; a socket that sends it
 /// now and then stays open while the Agent is quiet.
 pub const PAGE_SESSION_HEARTBEAT_PING: &str = "ping";

@@ -7,8 +7,8 @@ import * as Y from "yjs";
 
 import { expect, test } from "./fixtures";
 import {
-  CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureCreatedChannelId, fixtureJson, fixtureRequestBodies, fixtureRequestRecords,
-  fixtureRule, releaseFixture,
+  CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureCreatedChannelId, fixtureFaces, fixtureJson, fixtureRequestBodies,
+  fixtureRequestRecords, fixtureRule, releaseFixture,
 } from "./in-page-api-fixtures";
 import { editPageMarkdown, pageDocument, pageMarkdown, startedMarkdown } from "./page-document-fixture";
 import {
@@ -36,7 +36,7 @@ async function stubPages(browser: Page, pages: ReturnType<typeof page>[], channe
   await fixtureJson(browser, "page-claims", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/claims$/u, {
     claims: [], competitiveBlocks: [],
   });
-  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness$/u, {
+  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
     pageId: "p-relay", headRevision: 3, blocks: [],
   });
   await fixtureJson(browser, "page-automations", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/automations$/u, {
@@ -118,6 +118,8 @@ const SUGGEST_BODY = "# Relay\n\n## Status\n\nShipped this week.\n\n## Plan\n\nM
 
 /** One suggestion waiting on the page, revision 5 against revision 3, and the review that ends its wait. */
 async function stubSuggestion(browser: Page) {
+  // The suggesting Agent's face is read by its Instance.
+  await fixtureFaces(browser, { "agent:a-claude": "/agent-vendors/claude.svg" });
   await fixtureJson(browser, "page-suggestions", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/suggestions$/u, { suggestions: [
     { revision: 5, kind: "suggestion", basedOnRevision: 3, authors: [{ kind: "agent", id: "a-claude", label: "claude:2" }],
       conversationIds: [E2E_CHANNEL.id], createdAt: NOW }] }, { method: "GET" });
@@ -134,7 +136,7 @@ async function stubSuggestion(browser: Page) {
 async function stubClaudeWritingNotes(browser: Page) {
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
     pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
-      conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", avatarUrl: "/agent-vendors/claude.svg" }] }],
+      conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", harness: "claude" }] }],
   });
 }
 
@@ -216,7 +218,7 @@ test("a page is co-edited live and shows an Agent working on a section it claime
     links: [{ linkId: "l1", conversationId: E2E_CHANNEL.id, pageId: "p-relay", blockId: "status", source: "edit",
       createdAt: NOW, lastSeenAt: NOW }],
   });
-  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness$/u, {
+  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
     pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "notes", claims: [], present: [], updated: {
       revision: 2, authors: [{ kind: "agent", id: "a1", label: "claude:1" }], conversationIds: [E2E_CHANNEL.id],
       createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString() },
@@ -253,7 +255,7 @@ test("a page is co-edited live and shows an Agent working on a section it claime
         encoding.writeVarUint(aware, 1);
         encoding.writeVarUint8Array(aware, encoding.toUint8Array(agent));
         send(encoding.toUint8Array(aware));
-        // It claims the section, and everyone on the page sees it at once.
+        // It claims the section, which is for the Agents: the page draws nothing of it for people.
         const claims = encoding.createEncoder();
         encoding.writeVarUint(claims, 2);
         encoding.writeVarString(claims, JSON.stringify({ type: "claims", claims: [{ claimId: "c1", pageId: "p-relay",
@@ -286,19 +288,16 @@ test("a page is co-edited live and shows an Agent working on a section it claime
 
   const editor = browser.getByTestId("page-editor");
   await expect(editor).toContainText("Shipped");
-  // Who has taken a section and what is said about it are on its heading, not in a list beside it.
+  // What is said about a section is on its heading, not in a list beside it. Who has taken it is the
+  // Agents' to know: a person is offered no claim and sees no claim's flag.
   const status = editor.locator("h2", { hasText: "Status" });
-  await expect(status.getByTestId("page-claim")).toHaveText("claude:2");
   await expect(status.getByRole("button", { name: "1 conversation about this section" })).toBeVisible();
-  await expect(status.getByRole("button", { name: /^Claim/u }), "a claimed section is not offered to claim").toHaveCount(0);
-  await expect(editor.locator("h2", { hasText: "Notes" }).getByRole("button", { name: /^Claim/u })).toHaveCount(1);
+  await expect(status.getByTestId("page-claim")).toHaveCount(0);
+  await expect(editor.getByRole("button", { name: /^(Claim|Release)/u })).toHaveCount(0);
   await expect(browser.getByTestId("page-outline"), "there is no side panel").toHaveCount(0);
 
-  // Who is on the page, and where, is in its header; a click follows them.
-  const now = browser.getByTestId("page-now");
-  await expect(now.getByRole("button", { name: `claude:2, editing · Status · in ${E2E_CHANNEL.name}` })).toBeVisible();
-  await expect(now.getByRole("button", { name: `codex:1, viewing · Notes · in ${E2E_CHANNEL.name}` })).toBeVisible();
-  // The header already says who is where; the headings do not draw them again.
+  // The header names no one: who is where shows in the text, and the headings do not draw them again.
+  await expect(browser.getByTestId("page-now")).toHaveCount(0);
   await expect(editor.locator(".page-section-present [title*='viewing'], .page-section-present [title*='editing']"))
     .toHaveCount(0);
   // As in Google Docs the text carries no change log: who changed the page last is on History's button.
@@ -315,24 +314,20 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await browser.keyboard.press("End");
   await browser.keyboard.type(" and verified");
   await expect.poll(() => pageMarkdown(server)).toContain("Shipped and verified");
-  // Selecting text offers collaboration on the passage. Formatting is typed, or a shortcut.
+  // Selecting text offers collaboration on the passage. Formatting is typed, or a shortcut. Selected from the
+  // keyboard, it is being edited: the menu offers a comment rather than opening the box.
   await browser.keyboard.press("Shift+Home");
   const selection = browser.getByTestId("page-selection-menu");
-  await expect(selection.getByRole("button", { name: "Discuss" })).toBeVisible();
+  await expect(selection.getByRole("button", { name: "Comment" })).toBeVisible();
+  // A comment is all a passage offers: asking an Agent is commenting, and what acts on the whole section is the
+  // heading's.
+  await expect(selection.getByRole("button")).toHaveText(["Comment"]);
+  await expect(browser.getByTestId("page-comment-box")).toHaveCount(0);
   await expect(browser.getByRole("button", { name: "Bold" })).toHaveCount(0);
   await expect(browser.getByTestId("page-toolbar")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-selection-menu.png") });
   await browser.keyboard.press("ControlOrMeta+b");
   await expect.poll(() => pageMarkdown(server)).toContain("**Shipped and verified**");
-  // Who changed a passage is asked of the passage, as Show editors does in Google Docs.
-  await selectLine(browser, "none");
-  await selection.getByRole("button", { name: "Show editors" }).click();
-  const editors = browser.getByTestId("page-editors");
-  await expect(editors).toContainText("claude:1");
-  await expect(editors).toContainText("2h ago");
-  await expect(editors.getByRole("button", { name: E2E_CHANNEL.name })).toBeVisible();
-  await expect(editors.getByRole("button", { name: "See version history" })).toBeVisible();
-  await browser.keyboard.press("Escape");
   expect(clientUpdates.length).toBeGreaterThan(0);
   expect(connections, "the page keeps one live session while it is open").toBe(1);
   await browser.screenshot({ path: test.info().outputPath("pages-live.png") });
@@ -356,7 +351,7 @@ async function openChannelTouchingRelay(browser: import("@playwright/test").Page
   });
   await fixtureJson(browser, "page-relay", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, editedPageDocument(relay, 3));
   await fixtureJson(browser, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, { pages: [relay] });
-  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness$/u, {
+  await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
     pageId: "p-relay", headRevision: 3, blocks: [],
   });
   await stubs?.();
@@ -398,7 +393,7 @@ test("a page bookmark preserves and renders leading bold in its status and hover
 test("a bookmark says in small type what the last change to its section did", async ({ page: browser }) => {
   await openChannelTouchingRelay(browser, undefined, async () => {
     // claude's revision 3 turned the section's "Planned" into "In progress".
-    await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/awareness$/u, {
+    await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/awareness(?:\?.*)?$/u, {
       pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "status", claims: [], present: [], discussions: [],
         owed: null, updated: { revision: 3, authors: [{ kind: "agent", id: "a1", label: "claude" }],
           conversationIds: [E2E_CHANNEL.id], createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString() } }],
@@ -417,38 +412,60 @@ test("a bookmark says in small type what the last change to its section did", as
   await expect(card).not.toContainText("Planned");
 });
 
-for (const refused of [false, true]) {
-  test(`desktop co-writing acknowledges the selection while its request is pending (${refused ? "refused" : "accepted"})`, async ({ page: browser }) => {
+for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
+  test(`desktop co-writing keeps startup feedback out of the document at ${width}px (${refused ? "refused" : "accepted"})`, async ({ page: browser }) => {
+    await browser.setViewportSize({ width, height: 900 });
     await stubCoWriting(browser, "");
     await stubWriters(browser, ["claude", "codex"]);
     if (refused) {
       await fixtureRule(browser, { id: "writer-create", pattern: /\/api\/xmatrix\/channels$/u, method: "POST",
         responder: { kind: "deferred", status: 403, json: { error: "forbidden" } } });
     } else {
-      await fixtureChannelCreate(browser, "writer-create", { ...E2E_CHANNEL, name: "Co-writing Relay" }, { held: true });
+      await fixtureChannelCreate(browser, "writer-create", { ...E2E_CHANNEL, name: "Co-writing Relay" });
+      await fixtureRule(browser, { id: "writer-co-writing", pattern: /\/pages\/p-relay\/co-writing$/u, method: "POST",
+        responder: { kind: "deferred", json: { startedAt: NOW } } });
     }
-    await openLivePage(browser);
+    const editor = await openLivePage(browser);
+    await expect(editor).toContainText("In progress");
+    const titleTop = (await editor.locator("h1").first().boundingBox())!.y;
     const controls = browser.getByTestId("page-controls");
-    await controls.getByRole("button", { name: /Co-write$/u }).click();
-    await browser.getByTestId("page-write-with").getByRole("button", { name: "codex" }).click();
-    await expect(browser.getByTestId("page-write-with")).toBeHidden();
-    const feedback = browser.getByRole("status").filter({ hasText: "codex is starting" });
-    await expect(feedback).toBeVisible();
-    await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeDisabled();
-    await releaseFixture(browser, "writer-create");
+    // On a desktop an Agent is called from the text: `@` and its name.
+    await expect(controls.getByRole("button", { name: /Co-write/u })).toHaveCount(0);
+    await editor.getByText("In progress").click();
+    await browser.keyboard.press("End");
+    await browser.keyboard.type(" @cod");
+    await browser.getByTestId("page-agent-menu").getByRole("option", { name: /codex/u }).click();
+    const article = browser.getByTestId("pages-view").locator("article");
+    await expect(article.getByRole("status")).toHaveCount(0);
+    expect((await editor.locator("h1").first().boundingBox())!.y).toBe(titleTop);
+    if (!refused) {
+      const writing = await fixtureCreatedChannelId(browser, "writer-create");
+      const now = new Date().toISOString();
+      await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [{
+        linkId: "l-write", conversationId: writing, pageId: "p-relay", blockId: "", source: "manual",
+        createdAt: now, lastSeenAt: now, anchor: null, resolvedAt: null,
+      }] });
+    }
+    await releaseFixture(browser, refused ? "writer-create" : "writer-co-writing");
+    await expect(controls.getByRole("status")).toHaveCount(0);
     if (refused) {
-      await expect(feedback).toBeHidden();
       await expect(browser.getByText(/Couldn't start the Agent/u)).toBeVisible();
-      await expect(controls.getByRole("button", { name: /Co-write$/u })).toBeEnabled();
       expect(await fixtureRequestBodies(browser, "write-message")).toEqual([]);
       return;
     }
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body)
-      .toMatch(/^@codex launch:force You're co-writing page:p-relay/u);
-    await expect(feedback).toContainText("Write in the page");
+      .toMatch(/^@codex launch:force page:p-relay/u);
+    await expect(browser.getByText("Write in the page; your Agent responds here.", { exact: false })).toHaveCount(0);
     await expect(browser).not.toHaveURL(/conversation=/u);
-    await feedback.getByRole("button", { name: "Conversation", exact: true }).click();
-    await expect(browser).toHaveURL(new RegExp(`conversation=${await fixtureCreatedChannelId(browser, "writer-create")}`, "u"));
+    expect((await editor.locator("h1").first().boundingBox())!.y).toBe(titleTop);
+    await browser.screenshot({ path: test.info().outputPath(`co-writing-${width}.png`) });
+    if (width === 1600) {
+      const card = browser.getByTestId("page-margin").getByTestId("page-margin-card");
+      await expect(card).toHaveCount(1);
+      await expect(card).toBeVisible();
+      await card.click();
+      await expect(browser).toHaveURL(new RegExp(`conversation=${await fixtureCreatedChannelId(browser, "writer-create")}`, "u"));
+    }
   });
 }
 
@@ -473,6 +490,11 @@ test.describe("on a phone", () => {
     const editor = await openChangedPage(browser);
     // A phone opens on the list of pages.
     await browser.getByRole("button", { name: /^Relay/u }).click();
+    // The page opens as it is; the changes are walked once the reader asks for them.
+    await expect(editor).toContainText("Shipped this week");
+    await expect(editor.locator(".page-reader-change")).toHaveCount(0);
+    await expect(browser.getByTestId("page-reader-diff")).toContainText("5 changes since you last read this page");
+    await browser.getByTestId("page-reader-diff").getByRole("button", { name: "Show changes" }).click();
     const mark = browser.getByRole("toolbar", { name: "Changes since you last read this page" });
     await expect(mark).toContainText("1/4");
     // It stands at the right edge beside the first change, not in a bar across the bottom.
@@ -500,8 +522,10 @@ test.describe("on a phone", () => {
   });
 
   test("co-writing starts with one tap on an Agent's face, and the reader stays on the page", async ({ page: browser }) => {
+    await browser.setViewportSize({ width: 390, height: 844 });
     await stubCoWriting(browser, "");
     await stubWriters(browser, ["claude", "codex"]);
+    await fixtureChannelCreate(browser, "channel-create", { ...E2E_CHANNEL, name: "Co-writing Relay" }, { held: true });
     await expect(await openRelayOnPhone(browser, pageDocument(BODY))).toContainText("In progress");
 
     // The page's button is the face of the Agent the reader writes with, on glass.
@@ -513,6 +537,8 @@ test.describe("on a phone", () => {
     await expect(picker.locator("textarea, input")).toHaveCount(0);
     await picker.getByRole("button", { name: "codex" }).click();
 
+    await expect(browser.getByTestId("pages-view").locator("article").getByRole("status")).toHaveCount(0);
+    await releaseFixture(browser, "channel-create");
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
       /^@codex launch:force You're co-writing page:p-relay with me live\./u);
     const writing = await fixtureCreatedChannelId(browser, "channel-create");
@@ -522,6 +548,7 @@ test.describe("on a phone", () => {
     await expect(picker).toBeHidden();
     await expect(browser).not.toHaveURL(/conversation=/u);
     await expect(browser.getByRole("status")).toHaveText(/codex is starting/u);
+    await browser.screenshot({ path: test.info().outputPath("co-writing-phone.png") });
     // The one picked is the one the button offers next time.
     expect(await browser.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
   });
@@ -549,17 +576,16 @@ test.describe("on a phone", () => {
       "Write the first line here. @claude writes the next.", { timeout: 20_000 });
   });
 
-  test("a heading's actions are named in one menu, and Co-write starts on that section", async ({ page: browser }) => {
+  test("a heading's one action is named in a menu, and Co-write starts on that section", async ({ page: browser }) => {
     await stubCoWriting(browser, "status");
     await stubWriters(browser, ["claude"]);
     const editor = await openRelayOnPhone(browser, pageDocument(BODY));
     const status = editor.locator("h2", { hasText: "Status" });
     await status.click();
-    // No row of bare icons by the heading: one "⋯", whose menu names each action.
-    await expect(status.getByRole("button", { name: "Copy a link to this section" })).toHaveCount(0);
+    // No row of bare icons by the heading: one "⋯", whose menu names the action.
     await status.getByRole("button", { name: "Actions for Status" }).click();
     const menu = browser.getByRole("menu", { name: "Actions for Status" });
-    await expect(menu.getByRole("menuitem")).toHaveText(["Co-write with claude", "Discuss", "Copy link", "Claim", "Schedule"]);
+    await expect(menu.getByRole("menuitem")).toHaveText(["Co-write with claude"]);
     await browser.screenshot({ path: test.info().outputPath("pages-heading-menu-phone.png") });
 
     await menu.getByRole("menuitem", { name: "Co-write with claude" }).click();
@@ -618,14 +644,14 @@ test.describe("on a phone", () => {
   test("an Agent on the page is its face at the right edge, not again on its section's heading", async ({ page: browser }) => {
     const plan = { ...E2E_CHANNEL, id: "channel-plan", name: "Plan the move" };
     await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, plan]);
-    const talk = (conversationId: string, name: string, agent: { instanceId: string; name: string }) => ({
+    const talk = (conversationId: string, name: string, agent: { instanceId: string; name: string; harness: string }) => ({
       conversationId, name, activityAt: NOW, headSequence: 1, readSequence: 1, lastMessage: null,
       agents: [{ ...agent, status: "busy" }] });
     await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
       links: [E2E_CHANNEL.id, plan.id].map((conversationId) => ({ linkId: `l-${conversationId}`, conversationId,
         pageId: "p-relay", blockId: "notes", source: "edit", createdAt: NOW, lastSeenAt: NOW })),
-      conversations: [talk(E2E_CHANNEL.id, E2E_CHANNEL.name, { instanceId: "i-claude", name: "claude:2" }),
-        talk(plan.id, plan.name, { instanceId: "i-codex", name: "codex:1" })],
+      conversations: [talk(E2E_CHANNEL.id, E2E_CHANNEL.name, { instanceId: "i-claude", name: "claude:2", harness: "claude" }),
+        talk(plan.id, plan.name, { instanceId: "i-codex", name: "codex:1", harness: "codex" })],
     });
     await stubClaudeWritingNotes(browser);
     const editor = await openRelayOnPhone(browser, pageDocument(BODY));
@@ -661,7 +687,7 @@ test.describe("on a phone", () => {
     const face = (await away.boundingBox())!;
     expect(face.x + face.width, "at the right edge").toBeGreaterThan(393 - 8);
     // It is not named twice: no edge pill for it, and no button to call another while it writes.
-    await expect(browser.getByTestId("page-people-below")).toHaveCount(0);
+    await expect(browser.getByTestId("page-offscreen-below")).toHaveCount(0);
     await expect(browser.getByRole("button", { name: /^Write with/u })).toHaveCount(0);
     await browser.screenshot({ path: test.info().outputPath("pages-pen-away.png") });
 
@@ -868,26 +894,17 @@ test("a page is typed like Typora: the caret's line shows its markers", async ({
       if (!marker) return null;
       const headingStyle = getComputedStyle(heading);
       const markerStyle = getComputedStyle(marker);
-      const text = Array.from(heading.childNodes).find((node) =>
-        node.nodeType === Node.TEXT_NODE && node.textContent?.includes("Lambda"));
-      const range = document.createRange();
-      if (text) range.selectNodeContents(text);
-      const textBox = text ? range.getBoundingClientRect() : null;
-      const tools = heading.querySelector(".page-heading-tools")?.getBoundingClientRect() ?? null;
-      const box = heading.getBoundingClientRect();
+      // Nothing but the heading's own content sits on its row: no tools beside a title.
+      const tools = heading.querySelectorAll(".page-heading-tools button").length;
       return {
         sameSize: markerStyle.fontSize === headingStyle.fontSize,
         sameFamily: markerStyle.fontFamily === headingStyle.fontFamily,
-        toolsClearOfTitle: tools && textBox ? tools.left - textBox.right : null,
-        toolsAtEnd: tools ? box.right - tools.right : null,
-        sameLine: tools && textBox ? Math.abs(tools.top - textBox.top) < 24 : false,
+        tools,
       };
     });
     expect(markerFit?.sameSize, `the # uses the heading's size at ${width}`).toBe(true);
     expect(markerFit?.sameFamily, `the # uses the heading's font at ${width}`).toBe(true);
-    expect(markerFit?.sameLine, `section actions stay on the title's row at ${width}`).toBe(true);
-    expect(markerFit?.toolsClearOfTitle ?? 0, `section actions sit clear of the title at ${width}`).toBeGreaterThan(16);
-    expect(markerFit?.toolsAtEnd ?? 99, `section actions sit at the row's right edge at ${width}`).toBeLessThan(8);
+    if (width === 1280) expect(markerFit?.tools, "a desktop heading carries no tools").toBe(0);
     if (width === 1280) await expect(browser.getByTestId("page-title"), "the heading already is the title").toHaveCount(0);
   }
   await expect(editor).not.toContainText("|---|");
@@ -945,7 +962,18 @@ test("a page: reference in a page's text is a chip with the page's title that op
   await expect(editor.locator(".page-reference-source")).toBeHidden();
   await expect(editor.locator("code")).toHaveText(`page:${planId}`);
   await expect(editor).toContainText(`See page:${unseenId} too.`);
-  await chip.click();
+
+  // `[[` on the page completes a page as in the composer, and the pick is a chip again.
+  await editor.getByText("too.").click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.type(" Next: [[Laun");
+  await expect(browser.getByTestId("page-page-menu")).toContainText("Launch plan");
+  await browser.keyboard.press("Enter");
+  await expect(browser.getByTestId("page-page-menu")).toHaveCount(0);
+  await expect(chip).toHaveCount(2);
+  await expect(chip.nth(1)).toHaveText("Launch plan");
+
+  await chip.first().click();
   await expect(browser).toHaveURL(new RegExp(`/pages\\?page=${planId}`, "u"));
 });
 
@@ -997,9 +1025,19 @@ async function openChangedPage(browser: Page, before = "# Relay\n\n## Status\n\n
   return openLivePage(browser, after);
 }
 
-test("what changed since the reader last read the page stays as a diff until it is ticked viewed, while what is on screen is read", async ({ page: browser }) => {
+test("the page opens as it is, and what changed since the reader last read it is a diff only when they ask for it", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
   const editor = await openChangedPage(browser);
   const added = editor.locator(".page-reader-change");
+  // Opened, the page is as it is now, and the margin's first card only says how much changed since the reader last read it.
+  const offer = browser.getByTestId("page-margin").getByTestId("page-reader-diff");
+  await expect(offer).toContainText("5 changes since you last read this page");
+  await expect(editor).toContainText("Shipped this week");
+  await expect(added).toHaveCount(0);
+  await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
+  await expect(browser.getByTestId("page-reader-gutter")).toHaveCount(0);
+  await browser.screenshot({ path: test.info().outputPath("pages-reader-offer.png") });
+  await offer.getByRole("button", { name: "Show changes" }).click();
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
   // Lines changed next to each other are barred once in the margin, left of the text: the changed status line
@@ -1017,15 +1055,18 @@ test("what changed since the reader last read the page stays as a diff until it 
   expect(first.y + first.height).toBeGreaterThanOrEqual(second.y + second.height / 2);
   await expect(editor.locator(".page-reader-removed")).toContainText("Planned for next");
   await browser.screenshot({ path: test.info().outputPath("pages-reader-changes.png") });
-  // The diff does not play out or fade. The page, all of it on screen a moment, is read whole meanwhile.
-  const viewed = browser.getByTestId("page-reader-diff");
-  await expect(viewed).toContainText("since you last read this page");
+  // Hidden again, it is still offered; the diff does not play out or fade, and the page, all of it on screen a
+  // moment, is read whole meanwhile.
+  await offer.getByRole("button", { name: "Hide changes" }).click();
+  await expect(added).toHaveCount(0);
+  await offer.getByRole("button", { name: "Show changes" }).click();
   await browser.waitForTimeout(2_500);
   await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
   expect(await added.first().evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
   await expect.poll(async () => await fixtureRequestBodies(browser, "page-mark-read")).toContainEqual({ revision: 3, seen: null });
-  // Ticked viewed, the page is as it is.
-  await viewed.getByRole("checkbox").check();
+  // Done, the page is as it is and nothing is offered any more.
+  await offer.getByRole("button", { name: "Done" }).click();
+  await expect(offer).toHaveCount(0);
   await expect(added).toHaveCount(0);
   await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
   await expect(editor).toContainText("Shipped this week");
@@ -1037,7 +1078,7 @@ test("what the reader has not had on screen stays unread, as they last saw it, t
   const filler = Array.from({ length: 40 }, (_, index) => `Filler line ${index + 1}`).join("\n\n");
   const editor = await openChangedPage(browser, `# Relay\n\nPlanned\n\n${filler}\n\nOld ending\n`,
     `# Relay\n\nShipped\n\n${filler}\n\nNew ending\n`);
-  await expect(editor.locator(".page-reader-change", { hasText: "Shipped" })).toBeVisible();
+  await expect(browser.getByTestId("page-reader-diff")).toContainText("4 changes since you last read this page");
   // The top was on screen, so it is read as it is; the ending below the fold is kept as the reader last saw it.
   await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).at(-1)).toEqual({ revision: 2,
     seen: `# Relay\n\nShipped\n\n${filler}\n\nOld ending\n` });
@@ -1049,6 +1090,7 @@ test("what the reader has not had on screen stays unread, as they last saw it, t
 
 test("writing on a page that changed while its reader was away stops marking the diff over the writing", async ({ page: browser }) => {
   const editor = await openChangedPage(browser);
+  await browser.getByTestId("page-reader-diff").getByRole("button", { name: "Show changes" }).click();
   await expect(browser.getByTestId("page-reader-gutter").locator(".page-reader-bar")).toHaveCount(2);
   await editor.getByText("none", { exact: true }).click();
   await browser.keyboard.press("End");
@@ -1079,65 +1121,174 @@ test("an editor that meets a Hub still keeping pages as text waits instead of sh
   expect(sockets, "it never joins the old session").toBe(0);
 });
 
-test("selecting a passage starts a discussion anchored to it, drawn beside the text until it is resolved", async ({ page: browser }) => {
+test("a passage dragged past the text's edge opens the comment box as one dragged within it", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const editor = await openLivePage(browser);
+  const line = (await editor.getByText("In progress", { exact: true }).boundingBox())!;
+  const text = (await editor.locator(".page-document").boundingBox())!;
+  // The button comes up beyond the editor, to the right of the line's end.
+  await browser.mouse.move(line.x + 1, line.y + line.height / 2);
+  await browser.mouse.down();
+  await browser.mouse.move(text.x + text.width + 12, line.y + line.height / 2, { steps: 8 });
+  expect(await browser.evaluate(([x, y]) => Boolean(document.elementFromPoint(x!, y!)?.closest(".page-document")),
+    [text.x + text.width + 12, line.y + line.height / 2]), "the drag ends outside the editor").toBe(false);
+  await browser.mouse.up();
+  const box = browser.getByTestId("page-comment-box");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+  await expect(editor.locator(".page-discussion")).toHaveText("In progress");
+});
+
+test("a drag that starts in code or bold text selects the passage, its markdown markers held until the button is up", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const editor = await openLivePage(browser,
+    "# Relay\n\n## Status\n\n`past_due` has a grace week.\n\n## Notes\n\n**Seats** are paid by people.\n");
+  const box = browser.getByTestId("page-comment-box");
+  for (const [start, marker, passage] of [["code", "`", "ast_due has a grace week."], ["strong", "**", "eats are paid by people."]] as const) {
+    const from = (await editor.locator(start).boundingBox())!;
+    const line = (await editor.locator("p", { has: browser.locator(start) }).boundingBox())!;
+    const y = from.y + from.height / 2;
+    await browser.mouse.move(from.x + 12, y);
+    await browser.mouse.down();
+    await browser.mouse.move(from.x + 40, y, { steps: 4 });
+    // Drawn under the pointer, the markers would replace the text the drag is anchored in.
+    await expect(editor.locator(".page-md-syntax", { hasText: marker })).toHaveCount(0);
+    await browser.mouse.move(line.x + line.width - 2, y, { steps: 8 });
+    await browser.mouse.up();
+    await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+    await expect.poll(async () => (await editor.locator(".page-discussion").allTextContents()).join("")).toBe(passage);
+    await browser.keyboard.press("Escape");
+    await expect(box).toHaveCount(0);
+  }
+});
+
+test("a drag selects the line under the pointer, wherever the caret was: nothing the caret shows moves the text", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1280, height: 720 });
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const address = `https://example.com/${"long/path/".repeat(14)}end`;
+  const filler = (from: number) => Array.from({ length: 12 }, (_, index) => `Filler line ${from + index}.`).join("\n\n");
+  const editor = await openLivePage(browser, `# Relay\n\n## Status\n\n${filler(1)}\n\nSee [the guide](${address}) for the rollout.\n\n` +
+    `Under the link.\n\n\`\`\`\ncode one\n\`\`\`\n\nUnder the code.\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n| Billing | Planned |\n\n` +
+    `Under the table.\n\n${filler(13)}\n`);
+  const top = (text: string) => editor.locator("p, td", { hasText: text }).first().evaluate((node) => node.getBoundingClientRect().top);
+  const selected = () => browser.evaluate(() => window.getSelection()?.toString() ?? "");
+  // Presses on `text`, drags along its line and lets go; where the line stood is where it stays.
+  const drag = async (text: string, by: number) => {
+    const line = (await editor.locator("p, td", { hasText: text }).first().boundingBox())!;
+    const y = line.y + line.height / 2;
+    const before = await top(text);
+    await browser.mouse.move(line.x + 2, y);
+    await browser.mouse.down();
+    expect(await top(text), `pressing on "${text}" leaves it under the pointer`).toBe(before);
+    await browser.mouse.move(line.x + by, y, { steps: 6 });
+    await browser.mouse.up();
+    const passage = await selected();
+    expect(passage.length > 2 && text.startsWith(passage), `"${passage}" is from "${text}"`).toBe(true);
+    // Scrolling lands on whole pixels.
+    await expect.poll(async () => Math.abs(await top(text) - before) < 1, `"${text}" stays under the pointer once the button is up`)
+      .toBe(true);
+    await browser.keyboard.press("Escape");
+  };
+  // Room to scroll either way, as on a long page.
+  await editor.getByText("Under the code.").evaluate((node) => node.scrollIntoView({ block: "center" }));
+  const guide = (await editor.locator("a", { hasText: "the guide" }).boundingBox())!;
+  await browser.mouse.click(guide.x + 8, guide.y + guide.height / 2);
+  await drag("Under the link.", 400);
+  await editor.getByText("code one").click();
+  await drag("Under the code.", 400);
+  await drag("Billing", 30);
+  await drag("Under the table.", 400);
+});
+
+test("selecting a passage opens a comment box beside it in the margin; sent, the comment is a discussion anchored there", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   const pageLinks = /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u;
   await fixtureJson(browser, "page-links", pageLinks, { links: [] });
-  const discussion = { ...E2E_CHANNEL, name: "“In progress”" };
+  const discussion = { ...E2E_CHANNEL, name: "Is this still accurate?" };
   await stubPageConversation(browser, discussion, { linkId: "l-discuss", blockId: "status" });
   // The Hub is slow to create it.
   await fixtureChannelCreate(browser, "channel-create", discussion, { held: true });
+  await fixtureJson(browser, "discuss-message", /\/api\/xmatrix\/channels\/[^/]+\/messages$/u, { message: {} },
+    { method: "POST" });
   const editor = await openLivePage(browser);
   await selectLine(browser, "In progress");
-  await browser.getByTestId("page-selection-menu").getByRole("button", { name: "Discuss" }).click();
-  // It opens beside the page at once, ready to write in, its passage marked, before the Hub has made it;
-  // the page stays where it was.
-  await expect(browser).toHaveURL(new RegExp(`page=p-relay&conversation=${CREATED_CHANNEL_ID}`, "u"), { timeout: 1_000 });
-  await expect(browser.getByTestId("page-conversation")).toBeVisible({ timeout: 1_000 });
-  await expect(editor.locator(".page-discussion")).toHaveText("In progress", { timeout: 1_000 });
-  expect(await fixtureRequestBodies(browser, "link-create")).toEqual([]);
+  // Selected with the mouse, the reply box opens in the margin, level with the passage, with the caret in it, the
+  // passage marked.
+  const box = browser.getByTestId("page-comment-box");
+  await expect(box).toBeVisible();
+  const [boxAt, passageAt] = [(await box.boundingBox())!, (await editor.getByText("In progress").boundingBox())!];
+  expect(boxAt.x).toBeGreaterThan(passageAt.x + passageAt.width);
+  expect(Math.abs(boxAt.y - passageAt.y)).toBeLessThan(24);
+  await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+  await expect(browser.getByTestId("page-selection-menu")).toHaveCount(0);
+  await expect(editor.locator(".page-discussion")).toHaveText("In progress");
+  await browser.keyboard.type("Is this still accurate?");
+  await browser.screenshot({ path: test.info().outputPath("pages-comment-box.png") });
+  // A click anywhere else closes it, the passage no longer selected; what was typed comes back with the passage.
+  await editor.getByText("none", { exact: true }).click();
+  await expect(box).toHaveCount(0);
+  await expect(editor.locator(".page-discussion")).toHaveCount(0);
+  await selectLine(browser, "In progress");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toHaveValue("Is this still accurate?");
+  await browser.mouse.click(1100, 700);
+  await expect(box).toHaveCount(0);
+  await selectLine(browser, "In progress");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toHaveValue("Is this still accurate?");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+  await browser.keyboard.press("Enter");
+  // Sent, the box goes and the page stays in front of the reader; nothing opens over it.
+  await expect(box).toHaveCount(0);
+  await expect(browser.getByTestId("page-conversation")).toHaveCount(0);
+  await expect(editor.locator(".page-document"), "the caret is back in the page").toBeFocused();
+  // The comment is on its card the moment it is sent, as a message in a conversation is, while the Hub is still
+  // making the conversation.
+  await expect(browser.getByTestId("page-margin-card").filter({ hasText: "Is this still accurate?" })).toBeVisible();
+  // Its card and the passage's bubble come with the link.
+  await fixtureJson(browser, "link-resolve", /\/page-links\/l-discuss\/resolution$/u, { link: {} }, { method: "PUT" });
   await releaseFixture(browser, "channel-create");
   const created = await fixtureCreatedChannelId(browser, "channel-create");
-  expect(browser.url()).toContain(`conversation=${created}`);
   await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
     conversationId: created, pageId: "p-relay", blockId: "status", anchor: { quote: "In progress" } });
-  expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "a discussion is named by its passage")
-    .toBe("“In progress”");
-  await expect(editor).toContainText("In progress");
-  // Its composer opens empty: the passage is the thread's anchor, marked in the text and heading the thread,
-  // and its first message carries it, with a link back, for the Agents that read the conversation.
-  const composer = browser.locator("textarea.composer-textarea").first();
-  await expect(composer).toHaveValue(/^\u200B?$/u);
-  await expect(browser.getByTestId("composer-quote")).toHaveCount(0);
-  await browser.screenshot({ path: test.info().outputPath("pages-discussion-open.png") });
-  await fixtureJson(browser, "discuss-message", new RegExp(`/api/xmatrix/channels/${created}/messages$`, "u"),
-    { message: {} }, { method: "POST" });
-  await composer.fill("Is this still accurate?");
-  await composer.press("Enter");
+  expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "a discussion is named by what was written")
+    .toBe("Is this still accurate?");
+  // Its first message carries the passage, with a link back, and the comment, which names nobody: no Agent is at
+  // work on the page, so xMatrix gives it to one.
   await expect.poll(async () => (await fixtureRequestBodies(browser, "discuss-message"))[0]?.body)
-    .toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)\n\nIs this still accurate\?$/u);
+    .toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)\n\n@auto Is this still accurate\?$/u);
   const [sent] = await fixtureRequestBodies(browser, "discuss-message");
 
-  // Closed again, the passage is marked and its bubble opens the discussion.
+  // The passage stays marked and its bubble opens the discussion, where the margin has no room.
+  await browser.setViewportSize(E2E_DESKTOP_CONTEXT.viewport);
   const anchor = (await fixtureRequestBodies(browser, "link-create"))[0]!.anchor;
   await fixtureJson(browser, "page-links", pageLinks, { links: [{ linkId: "l-discuss", conversationId: E2E_CHANNEL.id,
     pageId: "p-relay", blockId: "status", source: "manual", createdAt: NOW, lastSeenAt: NOW, anchor, resolvedAt: null }] });
-  await fixtureJson(browser, "link-resolve", /\/page-links\/l-discuss\/resolution$/u, { link: {} }, { method: "PUT" });
-  await browser.getByRole("button", { name: "Close the conversation" }).click();
-  await expect(browser.getByTestId("page-conversation")).toBeHidden();
-  await expect(browser).not.toHaveURL(/conversation=/u);
+  await browser.reload();
   await expect(editor.locator(".page-discussion")).toHaveText("In progress");
   await expect(editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` })).toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("pages-discussion.png") });
-  // Opened again, its thread shows what was written: the passage heads it and is not quoted again in it.
+  // Opened again where the margin has no room, it is docked and nothing heads it: its first message opens
+  // with the passage and its link back.
   await fixtureJson(browser, "discussion-history", `**/api/xmatrix/channels/${E2E_CHANNEL.id}/history**`, {
     messages: [{ messageId: "m-asked", channelId: E2E_CHANNEL.id, sequence: 1, body: String(sent!.body), sentAt: NOW,
       reactions: [], annotations: [], attachments: [], from: E2E_USER_SENDER }], hasMore: false, historyHeadSequence: 1 });
   await editor.getByRole("button", { name: `Open the discussion ${E2E_CHANNEL.name}` }).click();
   const thread = browser.getByTestId("page-conversation");
-  await expect(thread.locator("[data-message-body='m-asked']")).toHaveText("Is this still accurate?");
+  const opening = thread.locator("[data-message-body='m-asked']");
+  await expect(opening.locator("blockquote")).toHaveText("In progress");
+  await expect(opening).toContainText("Is this still accurate?");
+  await browser.screenshot({ path: test.info().outputPath("pages-discussion-docked.png") });
+  // Opened with room in the margin, the passage heads its thread there and is not quoted again in it.
+  await browser.getByRole("button", { name: "Close the conversation" }).click();
+  await expect(thread).toBeHidden();
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  await browser.getByTestId("page-margin").getByRole("button", { name: /^Open .* beside the page$/u }).first().click();
+  await expect(opening).toHaveText("@auto Is this still accurate?");
   await expect(thread.locator("blockquote")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-discussion-thread.png") });
+  await browser.setViewportSize(E2E_DESKTOP_CONTEXT.viewport);
   await browser.getByRole("button", { name: "Close the conversation" }).click();
   await expect(browser.getByTestId("page-conversation")).toBeHidden();
   // The section's conversations list it, and resolve it once its outcome is in the page.
@@ -1148,7 +1299,7 @@ test("selecting a passage starts a discussion anchored to it, drawn beside the t
   await expect.poll(async () => fixtureRequestBodies(browser, "link-resolve")).toEqual([{ resolved: true }]);
 });
 
-test("a page's Automations are chips in their sections, listed from its menu and attached from a heading", async ({ page: browser }) => {
+test("a page's Automations are chips in their sections", async ({ page: browser }) => {
   const nextRunAt = new Date(Date.now() + 3 * 3_600_000).toISOString();
   const release = { id: "auto-release", version: 1, ownerUserId: "e2e-user", authorityRootUserId: "e2e-user",
     name: "Release check", channelId: E2E_CHANNEL.id, pageId: "p-relay", spaceId: E2E_SPACE.id, blockId: "status",
@@ -1158,58 +1309,23 @@ test("a page's Automations are chips in their sections, listed from its menu and
     message: { body: "check the release" }, intervalMinutes: 1440, enabled: true,
     triggers: [{ kind: "merged", repository: "acme/widgets", installationId: "1" }],
     createdAt: NOW, updatedAt: NOW, nextRunAt, runCount: 0, deliveryCount: 0 };
-  const detached = { ...release, id: "auto-sweep", name: "Old sweep", blockId: undefined, enabled: false,
-    detachedAt: NOW, capabilities: { ...release.capabilities, pause: false } };
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  const automations = /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/automations$/u;
-  await fixtureJson(browser, "page-automations", automations, { automations: [release, detached] }, { method: "GET" });
-  await fixtureJson(browser, "automation-create", automations, { automation: { ...release, id: "auto-weekly" } },
-    { method: "POST" });
-  await fixtureJson(browser, "automation-reference", /\/automations\/auto-sweep\/reference$/u,
-    { automation: { ...detached, detachedAt: undefined, enabled: true, blockId: "notes" } }, { method: "POST" });
+  await fixtureJson(browser, "page-automations", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/automations$/u,
+    { automations: [release] }, { method: "GET" });
   const editor = await openLivePage(browser,
     "# Relay\n\n## Status\n\nIn progress\n\n[Release check](xmatrix:automation/auto-release)\n\n## Notes\n\nnone\n");
   // The reference reads as a chip whose state comes from the Automation, not from the page's text.
   await expect(editor.locator(".page-automation-chip")).toHaveText("Release check");
   await expect(editor.locator(".page-automation-status")).toHaveText("daily · next in 3 h");
   await browser.screenshot({ path: test.info().outputPath("pages-automation-chip.png") });
-
-  // There is no page-wide list: a running one is its chip, and a detached one is put back from a heading.
+  // There is no page-wide list, and a heading offers nothing to attach: a running one is its chip.
   await expect(browser.getByTestId("pages-view").getByRole("button", { name: "Page menu" })).toHaveCount(0);
   const notes = editor.locator("h2", { hasText: "Notes" });
   await notes.hover();
-  await notes.getByRole("button", { name: "Attach a schedule or a repository to this section" }).click();
-  const putBack = browser.getByRole("dialog", { name: "Attach to Notes" }).getByTestId("page-attached");
-  await expect(putBack.getByTestId("page-automation")).toHaveCount(1);
-  await expect(putBack).toContainText("Old sweep");
-  await expect(putBack).toContainText("paused, its reference left the page");
-  await putBack.getByRole("button", { name: "Put back here" }).click();
-  await expect.poll(async () => fixtureRequestBodies(browser, "automation-reference")).toEqual([{ blockId: "notes" }]);
-  await expect(browser.getByRole("dialog", { name: "Attach to Notes" })).toBeHidden();
-
-  // Attaching starts from the section it is for.
-  await notes.hover();
-  await notes.getByRole("button", { name: "Attach a schedule or a repository to this section" }).click();
-  const attach = browser.getByRole("dialog", { name: "Attach to Notes" });
-  const attached = attach.getByTestId("page-attached");
-  await attached.getByRole("button", { name: "Schedule" }).click();
-  await expect(attached.getByRole("combobox", { name: "Section" }), "the heading already said where").toHaveCount(0);
-  await attached.getByLabel("Name").fill("Weekly review");
-  await attached.getByLabel("What to do each time").fill("@auto review the notes and update them");
-  await attached.getByRole("combobox", { name: "How often" }).click();
-  await browser.getByRole("option", { name: "Weekly" }).click();
-  await attached.getByRole("combobox", { name: "Also run" }).click();
-  await browser.getByRole("option", { name: "Also when a pull request merges" }).click();
-  await attached.getByLabel("Repository to watch").fill("acme/widgets");
-  await attached.getByRole("button", { name: "Schedule", exact: true }).click();
-  await expect.poll(async () => (await fixtureRequestBodies(browser, "automation-create"))[0]).toEqual({
-    name: "Weekly review", instruction: "@auto review the notes and update them", intervalMinutes: 10080,
-    blockId: "notes", triggers: [{ kind: "merged", repository: "acme/widgets" }] });
-  // The page stays open: what was scheduled works in its own conversation.
-  await expect(attach).toBeHidden();
-  await expect(browser.getByTestId("pages-view")).toBeVisible();
+  await expect(notes.getByRole("button")).toHaveCount(0);
 });
+
 
 test("a page's conversations sit beside what they are about, and one opens there among the others", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
@@ -1217,6 +1333,8 @@ test("a page's conversations sit beside what they are about, and one opens there
   const quiet = { ...E2E_CHANNEL, id: "channel-quiet", name: "Last month's notes" };
   const plan = { ...E2E_CHANNEL, id: "channel-plan", name: "Changelog wording" };
   await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, release, quiet, plan]);
+  // The listing names its Agent by its Instance, whose face is read.
+  await fixtureFaces(browser, { "agent:i-1": "/agent-vendors/claude.svg" });
   const recent = new Date(Date.now() - 5 * 60_000).toISOString();
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
     links: [
@@ -1258,16 +1376,19 @@ test("a page's conversations sit beside what they are about, and one opens there
   const card = cards.filter({ hasText: "Release notes" });
   await expect(card).toContainText("claude:1");
   await expect(card).toContainText("Drafted the notes; checking the changelog.");
-  await expect(card).toContainText("claude:1 · Working");
+  // Its Agent is its Instance card at a comment's size: the vendor's face, whose status dot says it works.
+  const instance = card.locator(".page-margin-instance");
+  await expect(instance).toHaveText("claude:1");
+  await expect(instance).toHaveAttribute("data-status", "busy");
+  await expect(instance.locator(".identity-avatar-face img")).toHaveAttribute("src", /agent-vendors\/claude/u);
   const status = editor.locator("h2", { hasText: "Status" });
   await expect.poll(async () => Math.abs((await card.boundingBox())!.y - (await status.boundingBox())!.y),
     { message: "the card is level with its section's heading" }).toBeLessThan(4);
   // The Agent works in that conversation, not on the page, and the section says so.
   await expect(status.locator(".page-section-working")).toHaveAttribute("title", "claude:1 · Working · in Release notes");
-  // A conversation gone quiet leaves the margin and the text; the header's count still lists it,
-  // as Google Docs keeps older comments behind its comment history.
-  await expect(browser.getByTestId("pages-view").getByRole("button", { name: "3 conversations about this page" }))
-    .toBeVisible();
+  // A conversation gone quiet leaves the margin and the text; the header counts none of them.
+  await expect(browser.getByTestId("pages-view").getByRole("button", { name: /conversations about this page/u }))
+    .toHaveCount(0);
   await expect(editor).not.toContainText("quiet conversation");
   await browser.screenshot({ path: test.info().outputPath("pages-margin.png") });
 
@@ -1306,6 +1427,46 @@ test("a page's conversations sit beside what they are about, and one opens there
   await expect(browser).toHaveURL(/page=p-relay$/u);
 });
 
+test("a page's conversation missing from the loaded list is read while its card is rested on, and opens beside the page", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  // An older conversation: not among the conversations loaded, and its id's last group starts with "c".
+  const older = { ...E2E_CHANNEL, id: "6f1d2a3b-4c5d-4e6f-8a9b-c0d1e2f3a4b5", name: "Older notes" };
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL]);
+  await fixtureRule(browser, { id: "older-resolve", pattern: /\/api\/xmatrix\/channels\/resolve(?:\?.*)?$/u, method: "POST",
+    responder: { kind: "channelCatalog", channels: [E2E_CHANNEL, older], held: true } });
+  const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+    links: [{ linkId: "l-older", conversationId: older.id, pageId: "p-relay", blockId: "status", source: "edit",
+      createdAt: NOW, lastSeenAt: recent }],
+    conversations: [{ conversationId: older.id, name: older.name, activityAt: recent, headSequence: 1, readSequence: 1,
+      lastMessage: { from: { kind: "user", label: "Yiming Hu" }, bodyPreview: "Keep the old plan.", sentAt: recent },
+      agents: [] }],
+  });
+  await fixtureJson(browser, "older-history", `**/api/xmatrix/channels/${older.id}/history**`, {
+    messages: [{ messageId: "older-1", channelId: older.id, sequence: 1, body: "Keep the old plan.", sentAt: recent,
+      reactions: [], annotations: [], attachments: [], from: E2E_USER_SENDER }],
+    hasMore: false, historyHeadSequence: 1 });
+  await openLivePage(browser);
+  const card = browser.getByTestId("page-margin").getByTestId("page-margin-card");
+  await expect(card).toContainText("Keep the old plan.");
+
+  // Resting on the card reads the conversation, before it is opened.
+  await card.hover();
+  await expect.poll(async () => (await fixtureRequestRecords(browser, "older-resolve"))
+    .some((record) => record.body?.includes(older.id)), { message: "the conversation is read ahead" }).toBe(true);
+  await releaseFixture(browser, "older-resolve");
+  await card.click();
+  const open = browser.getByTestId("page-margin").getByTestId("page-margin-open");
+  await expect(open.getByTestId("page-conversation")).toContainText("Keep the old plan.");
+
+  // Its link opens it beside the page from a cold start too: the id names it.
+  await expect(browser).toHaveURL(new RegExp(`conversation=${older.id}`, "u"));
+  await browser.goto(browser.url(), { waitUntil: "domcontentloaded" });
+  await releaseFixture(browser, "older-resolve");
+  await expect(browser.getByTestId("page-margin").getByTestId("page-margin-open").getByTestId("page-conversation"))
+    .toContainText("Keep the old plan.");
+});
+
 test("a page's conversations stand beside its sections while the live session is still syncing", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
   const release = { ...E2E_CHANNEL, id: "channel-release", name: "Release notes" };
@@ -1333,39 +1494,6 @@ test("a page's conversations stand beside its sections while the live session is
     { message: "the card stays level with its section in the editor" }).toBeLessThan(4);
 });
 
-test("Ask AI on a passage opens its discussion addressed to xMatrix, where the question is written and answered", async ({ page: browser }) => {
-  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
-  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  await stubPageConversation(browser, { ...E2E_CHANNEL, name: "“In progress”" }, { linkId: "l-ask", blockId: "status" });
-  await fixtureJson(browser, "ask-message", new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"), { message: {} },
-    { method: "POST" });
-  await openLivePage(browser);
-  await selectLine(browser, "In progress");
-  const menu = browser.getByTestId("page-selection-menu");
-  // One way to discuss a passage and one to ask about it; asking for a change is asking in words.
-  await expect(menu.getByRole("button", { name: "Discuss" })).toBeVisible();
-  await expect(menu.getByRole("button", { name: /change/iu })).toHaveCount(0);
-  await menu.getByRole("button", { name: "Ask AI" }).click();
-  const created = await fixtureCreatedChannelId(browser, "channel-create");
-  await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
-    conversationId: created, blockId: "status", anchor: { quote: "In progress" } });
-  expect((await fixtureRequestBodies(browser, "channel-create"))[0]!.name, "it is named by its passage, as any discussion")
-    .toBe("“In progress”");
-  // It opens beside the page with its composer addressed to xMatrix: no second input over the page.
-  await expect(browser).toHaveURL(new RegExp(`conversation=${created}`, "u"));
-  await expect(browser.getByTestId("page-conversation")).toBeVisible();
-  const composer = browser.locator("textarea.composer-textarea").first();
-  await expect(composer).toHaveValue("@auto ");
-  await expect(composer).toBeFocused();
-  await composer.press("End");
-  await composer.pressSequentially("what is left");
-  await browser.screenshot({ path: test.info().outputPath("pages-ask.png") });
-  await composer.press("Enter");
-  // Its first message carries the passage for the Agent, and only the person's words besides.
-  await expect.poll(async () => (await fixtureRequestBodies(browser, "ask-message"))[0]?.body)
-    .toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)\n\n@auto what is left$/u);
-});
-
 test("a page's history shows what each revision changed, colored, and the conversation it came from", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
@@ -1390,6 +1518,83 @@ test("a page's history shows what each revision changed, colored, and the conver
   await browser.screenshot({ path: test.info().outputPath("pages-version-history.png") });
 });
 
+test("paragraph attribution stays in the margin and selecting text leaves only discussion controls", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  // Daniel wrote the page; claude, in a conversation, wrote "In progress".
+  const at = BODY.indexOf("In progress");
+  const daniel = { kind: "user", id: "u-daniel", label: "Daniel" };
+  const claude = { kind: "agent", id: "a", label: "claude:1" };
+  const written = (n: number, author: typeof daniel, conversationIds: string[], hoursAgo: number) => ({ revision: n,
+    kind: "edit", authors: [author], conversationIds, basedOnRevision: n - 1,
+    createdAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString() });
+  await fixtureJson(browser, "page-blame", /\/pages\/p-relay\/blame$/u, {
+    pageId: "p-relay", revision: 3, body: BODY,
+    runs: [at, 1, "In progress".length, 2, BODY.length - at - "In progress".length, 1],
+    revisions: [written(1, daniel, [], 72), written(2, claude, [E2E_CHANNEL.id], 2)],
+    conversations: [{ conversationId: E2E_CHANNEL.id, name: E2E_CHANNEL.name }],
+  });
+  // Their faces: Daniel's own picture, and the mark of the harness claude:1's Instance runs.
+  await fixtureFaces(browser, { "user:u-daniel": "/role-avatars/default.svg", "agent:a": "/agent-vendors/claude.svg" });
+  const live = pageDocument(BODY);
+  const editor = await openLivePage(browser, live);
+
+  // Under the title, its authors by face and name, most words first, as a column's byline.
+  const byline = browser.getByTestId("page-byline");
+  await expect(byline).toHaveText("Danielclaude:1");
+  await expect(byline.locator(".identity-avatar-face img").first()).toHaveAttribute("src", "/role-avatars/default.svg");
+  const [titleBox, bylineBox] = [(await editor.locator("h1").first().boundingBox())!, (await byline.boundingBox())!];
+  expect(bylineBox.y).toBeGreaterThan(titleBox.y + titleBox.height);
+  expect(Math.abs(bylineBox.x - titleBox.x)).toBeLessThan(2);
+  const firstLine = (await editor.locator("h1 + *").first().boundingBox())!;
+  expect(firstLine.y).toBeGreaterThan(bylineBox.y + bylineBox.height);
+  await browser.screenshot({ path: test.info().outputPath("pages-byline.png") });
+
+  // Resting on a paragraph names who wrote it, level with it in the margin.
+  await editor.getByText("none", { exact: true }).hover();
+  const line = browser.getByTestId("page-blame-line");
+  await expect(line).toContainText("Daniel");
+  await expect(line).toContainText("3d ago");
+  const [lineAt, noneAt] = [(await line.boundingBox())!, (await editor.getByText("none", { exact: true }).boundingBox())!];
+  expect(lineAt.x).toBeGreaterThan(noneAt.x + noneAt.width);
+  expect(Math.abs(lineAt.y - noneAt.y)).toBeLessThan(12);
+
+  // Selecting text clears attribution and leaves the existing discussion controls available.
+  await selectLine(browser, "In progress");
+  await expect(line).toHaveCount(0);
+  await expect(browser.getByTestId("page-comment-box")).toBeVisible();
+  // Wait beyond the old selection-note delay; selecting text must not add another overlay.
+  await browser.waitForTimeout(400);
+  await expect(browser.getByTestId("page-blame-note")).toHaveCount(0);
+  await browser.screenshot({ path: test.info().outputPath("pages-selection-without-blame.png") });
+
+  // Moving over the selected paragraph must not bring attribution back.
+  await editor.getByText("In progress", { exact: true }).hover();
+  await browser.waitForTimeout(700);
+  await expect(line).toHaveCount(0);
+  await expect(browser.getByTestId("page-blame-note")).toHaveCount(0);
+
+  // Collapsing the selection restores the ordinary paragraph hover.
+  await editor.getByText("none", { exact: true }).click();
+  await editor.getByText("none", { exact: true }).hover();
+  await expect(line).toContainText("Daniel");
+
+  // A live edit can move or remove an author's words before there is a new saved revision.
+  // Hovering must resolve against the document on screen, without another blame request.
+  editPageMarkdown(live, () => BODY.replace("In progress", "Waiting for review. In progress"), "agent");
+  await expect(editor).toContainText("Waiting for review. In progress");
+  await byline.getByText("claude:1", { exact: true }).hover();
+  await expect.poll(() => browser.evaluate(() =>
+    [...(CSS.highlights.get("page-author") ?? [])].map((range) => range.toString()).join("")))
+    .toBe("In progress");
+  editPageMarkdown(live, () => BODY.replace("In progress", "Waiting for review."), "agent");
+  await expect(editor).not.toContainText("In progress");
+  await expect(byline).toHaveText("Daniel");
+  await expect.poll(() => browser.evaluate(() => CSS.highlights.has("page-author"))).toBe(false);
+  expect((await fixtureRequestRecords(browser, "page-blame")).length).toBe(1);
+});
+
 test("two people co-edit a page live: each sees the other's typing and cursor, and the session gets both", async ({ page: first, browser }) => {
   const server = pageDocument(BODY);
   const second = await browser.newContext({ ...E2E_DESKTOP_CONTEXT, baseURL: test.info().project.use.baseURL });
@@ -1397,6 +1602,7 @@ test("two people co-edit a page live: each sees the other's typing and cursor, a
   try {
     for (const person of [first, other]) {
       await stubPages(person, [page("p-relay", null, "Relay", "V")]);
+      await fixtureFaces(person, { "user:e2e-user": "/role-avatars/default.svg" });
       await fixtureJson(person, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
       await servePageSession(person, server);
       await person.goto("/app", { waitUntil: "domcontentloaded" });
@@ -1421,35 +1627,40 @@ test("two people co-edit a page live: each sees the other's typing and cursor, a
     await expect(first.locator(".ProseMirror-yjs-cursor")).toHaveCount(1);
     await expect(other.locator(".ProseMirror-yjs-cursor")).toHaveCount(1);
     await expect(first.locator(".ProseMirror-yjs-cursor")).toContainText("E2E Tester");
-    await expect(first.getByTestId("page-save-state")).toHaveText("All changes saved");
+    // Edits are kept as they are made: the header does not speak of saving.
+    await expect(first.getByTestId("page-save-state")).toHaveText("");
     await first.screenshot({ path: test.info().outputPath("pages-coediting.png") });
   } finally {
     await second.close();
   }
 });
 
-/** Someone's presence on the page, as the session relays it; `caret` is the text their caret follows. */
-function awarenessFrom(server: Y.Doc, clientId: number, clock: number, state: Record<string, unknown>,
+/** Where `passage` starts, or ends, in the session's text, as the page keeps a position. */
+function positionAt(server: Y.Doc, passage: string, end: boolean): unknown {
+  const walk = (type: Y.XmlFragment | Y.XmlElement): Y.XmlText | null => {
+    for (const child of type.toArray()) {
+      if (child instanceof Y.XmlText && child.toString().includes(passage)) return child;
+      if (child instanceof Y.XmlElement) { const found = walk(child); if (found) return found; }
+    }
+    return null;
+  };
+  const text = walk(server.getXmlFragment("prosemirror"))!;
+  return Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(text, text.toString().indexOf(passage)
+    + (end ? passage.length : 0)));
+}
+
+/**
+ * Someone's presence on the page, as the session relays it; `caret` is the text their caret follows. A null state
+ * is their client leaving the page.
+ */
+function awarenessFrom(server: Y.Doc, clientId: number, clock: number, state: Record<string, unknown> | null,
   caret?: string): Uint8Array {
-  let cursor: unknown = null;
-  if (caret) {
-    const walk = (type: Y.XmlFragment | Y.XmlElement): Y.XmlText | null => {
-      for (const child of type.toArray()) {
-        if (child instanceof Y.XmlText && child.toString().includes(caret)) return child;
-        if (child instanceof Y.XmlElement) { const found = walk(child); if (found) return found; }
-      }
-      return null;
-    };
-    const text = walk(server.getXmlFragment("prosemirror"))!;
-    const at = Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(text, text.toString().indexOf(caret)
-      + caret.length));
-    cursor = { anchor: at, head: at };
-  }
+  const at = caret ? positionAt(server, caret, true) : null;
   const update = encoding.createEncoder();
   encoding.writeVarUint(update, 1);
   encoding.writeVarUint(update, clientId);
   encoding.writeVarUint(update, clock);
-  encoding.writeVarString(update, JSON.stringify({ ...state, ...(cursor ? { cursor } : {}) }));
+  encoding.writeVarString(update, JSON.stringify(state && { ...state, ...(at ? { cursor: { anchor: at, head: at } } : {}) }));
   const message = encoding.createEncoder();
   encoding.writeVarUint(message, 1);
   encoding.writeVarUint8Array(message, encoding.toUint8Array(update));
@@ -1460,13 +1671,13 @@ function awarenessFrom(server: Y.Doc, clientId: number, clock: number, state: Re
 const AGENT_CLIENT = 1_234_567;
 
 /** A long page, Status at its top and Notes far below, open live; `stub` serves more before it opens. */
-async function openLongPage(browser: Page, stub: () => Promise<void> = async () => {}) {
+async function openLongPage(browser: Page, stub: (server: Y.Doc) => Promise<void> = async () => {}) {
   const filler = Array.from({ length: 60 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
   const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
   let send: (data: Uint8Array) => void = () => {};
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-  await stub();
+  await stub(server);
   await servePageSession(browser, server, { connect: (next) => { send = next; } });
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
@@ -1601,6 +1812,77 @@ test("an Agent at work stands in the margin beside its line, its channel under i
   await browser.screenshot({ path: test.info().outputPath("writer-on-phone.png") });
 });
 
+/** A long page whose conversation `link` names, with claude:2 at work for it and writing in the Notes far below. */
+async function openLongPageWithClaudeWriting(browser: Page, link: (server: Y.Doc) => Record<string, unknown>) {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  const opened = await openLongPage(browser, async (server) => {
+    await stubClaudeWritingNotes(browser);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+      links: [{ linkId: "l-claude", conversationId: E2E_CHANNEL.id, pageId: "p-relay", source: "edit", createdAt: NOW,
+        lastSeenAt: recent, anchor: null, resolvedAt: null, ...link(server) }],
+      conversations: [{ conversationId: E2E_CHANNEL.id, name: E2E_CHANNEL.name, activityAt: recent, headSequence: 0,
+        readSequence: 0, lastMessage: null, agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy", harness: "claude" }] }],
+    });
+  });
+  agentWrites(opened.server, opened.push, 1, "none", "none yet, shipping Friday", "editing", "shipping Friday");
+  const pill = browser.getByTestId("page-margin").getByRole("button", { name: /^claude:2 is writing/u });
+  await expect(pill).toBeAttached();
+  return { ...opened, pill, article: browser.locator(".app-page-article") };
+}
+
+test("an Agent's open channel brings the reader to it once, not again as its Agent comes and goes", async ({ page: browser }) => {
+  const { server, push, pill, article } = await openLongPageWithClaudeWriting(browser, () => ({ blockId: "notes" }));
+  // The reader opens the Agent's channel under its pill, far down the page, then scrolls back up to the Status.
+  await pill.click();
+  await expect(browser.getByTestId("page-margin").getByTestId("page-margin-open")).toBeVisible();
+  await article.evaluate((element) => { element.scrollTop = 0; });
+  // The Agent's live session leaves while its Run still works: its channel moves from under one pill to another.
+  push(awarenessFrom(server, AGENT_CLIENT, 2, null));
+  await expect(browser.locator(`.ProseMirror-yjs-cursor[data-client="${AGENT_CLIENT}"]`)).toHaveCount(0);
+  // Nothing takes the reader back down: the page stays where they scrolled it.
+  await browser.waitForTimeout(1_000);
+  expect(await article.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
+test("a discussion opens beside its passage, not under its Agent writing elsewhere on the page", async ({ page: browser }) => {
+  const passage = "Background paragraph 3.";
+  const { editor } = await openLongPageWithClaudeWriting(browser, (server) => ({ blockId: "status",
+    anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } }));
+  // The reader opens the discussion near the top of the page; its Agent works far below.
+  const margin = browser.getByTestId("page-margin");
+  await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
+  const open = margin.getByTestId("page-margin-open");
+  await expect(open).toBeInViewport();
+  await expect(editor.getByText(passage, { exact: true })).toBeInViewport();
+});
+
+test("beside a long page, the margin tells what it holds out of view, and only that", async ({ page: browser }) => {
+  const { server, push, pill, article } = await openLongPageWithClaudeWriting(browser, () => ({ blockId: "notes" }));
+  // Someone only reading the Status is not work to scroll to; the margin does not tell of them.
+  push(awarenessFrom(server, 7_654_321, 1, { user: { name: "Ada", color: "#4b6382", kind: "user" },
+    activity: "viewing", block: "status" }, "In progress"));
+  await article.evaluate((element) => { element.scrollTop = 0; });
+  const margin = browser.getByTestId("page-margin");
+  // The Agent writing the Notes far below, and its channel under it, are told at the margin's bottom edge.
+  const below = browser.getByTestId("page-offscreen-below");
+  await expect(below).toBeInViewport();
+  await expect(below).toContainText("1 conversation below");
+  await expect(below.locator(".page-margin-instance[data-status='busy']")).toHaveText("claude:2");
+  await expect(browser.getByTestId("page-offscreen-above")).toHaveCount(0);
+  // It stands in the margin, on the cards' edges.
+  const [edge, column] = [(await below.boundingBox())!, (await margin.boundingBox())!];
+  expect(Math.abs(edge.x - column.x), "on the margin's left edge").toBeLessThan(1);
+  expect(Math.abs(edge.width - column.width), "as wide as a card").toBeLessThan(1);
+  await browser.screenshot({ path: test.info().outputPath("margin-offscreen-below.png") });
+
+  // Pressed, it brings the reader to the Agent, and nothing is out of view below then; Ada, reading above, is not told.
+  await below.click();
+  await expect(pill).toBeInViewport();
+  await expect(below).toHaveCount(0);
+  await expect(browser.getByTestId("page-offscreen-above")).toHaveCount(0);
+});
+
 test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {
   const { server, editor, push } = await openLongPage(browser, () => fixtureJson(browser, "page-agents",
     /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
@@ -1608,16 +1890,16 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
         conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes" }] }],
     }));
 
-  // Someone reads the Status at the top; an Agent edits the Notes far below, writing as its own client.
+  // Someone edits the Status at the top; an Agent edits the Notes far below, writing as its own client.
   push(awarenessFrom(server, 7_654_321, 1, { user: { name: "Ada", color: "#4b6382", kind: "user" },
-    activity: "viewing", block: "status" }, "In progress"));
+    activity: "editing", block: "status" }, "In progress"));
   agentWrites(server, push, 1, "none", "none yet, shipping Friday", "editing", "shipping Friday");
 
   // The Agent is its face at the right edge, as on a phone, waiting at the bottom and pointing down to its line.
   const below = browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing, below" });
   await expect(below).toBeVisible();
-  await expect(browser.getByTestId("page-people-below"), "an Agent is not named in the middle of the page").toHaveCount(0);
-  await expect(browser.getByTestId("page-people-above"), "Ada is in view").toHaveCount(0);
+  await expect(browser.getByTestId("page-offscreen-below"), "an Agent is not named in the middle of the page").toHaveCount(0);
+  await expect(browser.getByTestId("page-offscreen-above"), "Ada is in view").toHaveCount(0);
   // The Agent's new words are tinted in its colour, and the whole paragraph is highlighted as its own.
   const tinted = editor.locator(`.page-remote-change[data-client="${AGENT_CLIENT}"]`);
   await expect(tinted.first()).toBeAttached();
@@ -1635,9 +1917,13 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await expect(browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing", exact: true }))
     .toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("pages-agent-pen-beside.png") });
-  await expect(browser.getByTestId("page-people-above")).toHaveText(/Ada is reading above/u);
+  await expect(browser.getByTestId("page-offscreen-above")).toHaveText(/Ada · Editing/u);
+  // It stands on the right, with the other marks of people at work, never centred over the text.
+  const chip = (await browser.getByTestId("page-offscreen-above").boundingBox())!;
+  const viewport = browser.viewportSize()!;
+  expect(chip.x, "the chip is on the right").toBeGreaterThan(viewport.width / 2);
   await browser.screenshot({ path: test.info().outputPath("pages-people-above.png") });
-  await browser.getByTestId("page-people-above").click();
+  await browser.getByTestId("page-offscreen-above").click();
   await expect(editor.getByText("In progress")).toBeInViewport();
 
   // The words' tint fades once they are a few seconds old; the paragraph stays highlighted for longer.
@@ -1666,7 +1952,6 @@ test("on a long page, who works out of view shows at its edges, and what an Agen
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, { pages: [] });
   push(committed(6));
   await expect(caret).toHaveCount(0);
-  await expect(browser.getByTestId("page-now").getByRole("button", { name: /^claude:2/u })).toHaveCount(0);
 });
 
 test("an Agent writing above what the reader sees waits under the page's controls, clear of the window's search", async ({ page: browser }) => {
@@ -1894,4 +2179,74 @@ test("on a keyboard, Tab takes the suggested change in front of the reader and E
   await expect(editor).not.toContainText("drain the queue");
   await expect(editor).toContainText("DNS is ready.");
   await expect.poll(async () => fixtureRequestBodies(browser, "suggestion-review")).toEqual([{ through: 5 }]);
+});
+
+test("a discussion near the page's end opens at its passage without lengthening the page, its thread scrolling", async ({ page: browser }) => {
+  const passage = "Background paragraph 52.";
+  const { editor, article } = await openLongPageWithClaudeWriting(browser, (server) => ({ blockId: "status",
+    anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } }));
+  const margin = browser.getByTestId("page-margin");
+  const length = () => article.evaluate((element) => element.scrollHeight);
+  await editor.getByText(passage, { exact: true }).scrollIntoViewIfNeeded();
+  const before = await length();
+  await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
+  const open = margin.getByTestId("page-margin-open");
+  await expect(open).toBeInViewport();
+  // It stays level with its passage, no taller than the room left, its messages scrolling inside; the Agent's pill after
+  // it fits before the text's end or waits until it closes. The page is as long as before, with no blank stretch below.
+  await expect.poll(async () => Math.abs((await open.boundingBox())!.y
+    - (await editor.getByText(passage, { exact: true }).boundingBox())!.y)).toBeLessThan(24);
+  await expect.poll(async () => {
+    const [column, text] = [(await margin.boundingBox())!, (await editor.locator(".page-document").boundingBox())!];
+    return column.y + column.height - (text.y + text.height);
+  }).toBeLessThanOrEqual(1);
+  expect((await open.boundingBox())!.height).toBeLessThan(34 * 16);
+  expect(await length()).toBeLessThanOrEqual(before + 1);
+  await browser.screenshot({ path: test.info().outputPath("margin-open-at-end.png") });
+  // Closed, the pill is back beside its line.
+  await open.getByRole("button", { name: "Close the conversation" }).click();
+  await expect(browser.getByTestId("page-margin").getByRole("button", { name: /^claude:2 is writing/u })).toBeVisible();
+  expect(await length()).toBeLessThanOrEqual(before + 1);
+});
+
+test("a discussion with many conversations above it opens level with its passage, not down the page", async ({ page: browser }) => {
+  const passage = "Background paragraph 6.";
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  const others = Array.from({ length: 8 }, (_, index) => `c-above-${index}`);
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const { editor } = await openLongPage(browser, async (server) => {
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+      links: [
+        ...others.map((conversationId) => ({ linkId: `l-${conversationId}`, conversationId, pageId: "p-relay",
+          source: "edit", createdAt: NOW, lastSeenAt: recent, anchor: null, resolvedAt: null, blockId: "status" })),
+        { linkId: "l-passage", conversationId: E2E_CHANNEL.id, pageId: "p-relay", source: "discuss", createdAt: NOW,
+          lastSeenAt: recent, resolvedAt: null, blockId: "status",
+          anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } },
+      ],
+      conversations: [...others, E2E_CHANNEL.id].map((conversationId) => ({ conversationId,
+        name: conversationId === E2E_CHANNEL.id ? E2E_CHANNEL.name : `Above ${conversationId}`, activityAt: recent,
+        headSequence: 1, readSequence: 1, agents: [],
+        lastMessage: { from: { kind: "user", label: "Yiming Hu" }, bodyPreview: "A note about the status.", sentAt: recent } })),
+    });
+  });
+  const article = browser.locator(".app-page-article");
+  const margin = browser.getByTestId("page-margin");
+  const text = editor.getByText(passage, { exact: true });
+  const button = margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` });
+  await expect(button).toBeVisible();
+  // Reach the closed card before measuring what opening it does. It can sit
+  // below the viewport while the cards above it are still being measured;
+  // Playwright's click would otherwise include its own scroll in this delta.
+  await button.scrollIntoViewIfNeeded();
+  const scrolled = await article.evaluate((element) => element.scrollTop);
+  await button.click();
+  const open = margin.getByTestId("page-margin-open");
+  await expect(open).toBeVisible();
+  // The cards that have no room above it wait; the open one does not take the column, and the reader, down the page.
+  await expect.poll(async () => Math.abs((await open.boundingBox())!.y - (await text.boundingBox())!.y)).toBeLessThan(24);
+  // At most it is brought into view where it sits: the passage stays on screen beside it.
+  await browser.waitForTimeout(500);
+  expect(await article.evaluate((element) => element.scrollTop) - scrolled).toBeLessThan(300);
+  await expect(text).toBeInViewport();
+  await expect(open.getByRole("button", { name: "Close the conversation" })).toBeInViewport();
 });

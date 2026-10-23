@@ -1,3 +1,4 @@
+import { runtimeDeliveryFetchIngress, withRuntimeDeliveryIngress } from "./runtime-transport/runtime-delivery-diagnostics";
 import { TURN_RETRY_RUNTIME_PATH } from "./agent-turn-retry-policy";
 import { plainDeliveryRecord as plainObject } from "./runtime-transport/delivery-record";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
@@ -40,7 +41,7 @@ import {
 } from "./runtime-transport/runtime-route-directory-locator";
 import { legacyClientCompatibilityAdmissionEnabled } from "./client-compatibility-gate";
 import { RELAY_RUNTIME_HUMAN_PRESENCE_PATH } from "./runtime-transport/human-presence-fanout";
-import { RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH } from "./product-agent-model-effort";
+import { RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH, RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH } from "./product-agent-model-effort";
 import { RELAY_RUNTIME_AGENT_PRESENCE_PATH } from "./runtime-transport/agent-presence-snapshot";
 import {
   parseChannelAgentPresenceDelivery,
@@ -152,6 +153,14 @@ function relayRuntimeProductFactoryFromEnv(
 /** The sole live relay runtime Durable Object implementation. */
 
 const RELAY_RUNTIME_OWNER_CELL_KEY = "runtime-owner-cell";
+const DURABLE_OBJECT_STORAGE_RESET = "Internal error in Durable Object storage caused object to be reset";
+
+function durableObjectStorageReset(error: unknown): boolean {
+  if (error instanceof Error) return error.message.includes(DURABLE_OBJECT_STORAGE_RESET);
+  if (!error || typeof error !== "object" || !("message" in error)) return false;
+  const message = (error as { message: unknown }).message;
+  return typeof message === "string" && message.includes(DURABLE_OBJECT_STORAGE_RESET);
+}
 
 export class RelayRuntimeLive extends DurableObject<Env> {
   private readonly productAdapter: RelayRuntimeProductCallbackAdapter | undefined;
@@ -163,8 +172,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    // The web heartbeat is answered without waking this object (and without
-    // ending its hibernation), so the web can find a dead socket in seconds.
+    // The heartbeat of the web and of Agent Instances is answered without waking
+    // this object (and without ending its hibernation), so a dead socket is
+    // found in seconds and an idle one costs nothing.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG));
     const productFactory = relayRuntimeProductFactoryFromEnv(
       env,
@@ -198,19 +208,21 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    try {
-      return await this.routeFetch(request);
-    } catch (error) {
-      // Record the receiving stack before the platform transports the exception
-      // to another DO. A failed delivery may already have reached some sockets.
+    return withRuntimeDeliveryIngress(runtimeDeliveryFetchIngress(request), async () => {
       try {
-        reportError(error, { operation: "RelayRuntime.fetch" });
-        this.ctx.waitUntil(sendErrorReports());
-      } catch {
-        // Reporting must not replace the originating delivery failure.
+        return await this.routeFetch(request);
+      } catch (error) {
+        // Record the receiving stack before the platform transports the exception
+        // to another DO. A failed delivery may already have reached some sockets.
+        try {
+          reportError(error, { operation: "RelayRuntime.fetch" });
+          this.ctx.waitUntil(sendErrorReports());
+        } catch {
+          // Reporting must not replace the originating delivery failure.
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 
   private async routeFetch(request: Request): Promise<Response> {
@@ -301,6 +313,20 @@ export class RelayRuntimeLive extends DurableObject<Env> {
         return Response.json({ error: "Invalid retry delivery" }, { status: 400 });
       return Response.json({ delivered: this.productAdapter?.deliverAgentTurnRetry(payload as unknown as
         Parameters<RelayRuntimeProductCallbackAdapter["deliverAgentTurnRetry"]>[0]) ?? false });
+    }
+    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH) {
+      const payload = plainObject(await request.json().catch(() => undefined));
+      const channelId = boundedId(payload?.channelId, 180);
+      const instanceId = boundedId(payload?.instanceId, 200);
+      const requestIds = Array.isArray(payload?.requestIds) && payload.requestIds.length > 0 && payload.requestIds.length <= 16
+        ? payload.requestIds.map((id) => boundedId(id, 200)) : [];
+      const prompt = typeof payload?.prompt === "string" && payload.prompt.length <= 4_000 ? payload.prompt : undefined;
+      if (!channelId || !instanceId || !prompt || requestIds.length === 0 || requestIds.some((id) => !id)) {
+        return Response.json({ error: "Invalid switch continuation" }, { status: 400, headers: { "cache-control": "no-store" } });
+      }
+      return Response.json({ delivered: this.productAdapter?.deliverSwitchContinuation({
+        channelId, instanceId, requestIds: requestIds as string[], prompt }) ?? false },
+      { headers: { "cache-control": "no-store" } });
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH) {
       const payload = plainObject(await request.json().catch(() => undefined));
@@ -481,26 +507,32 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (!this.productAdapter?.owns(socket)) {
-      socket.close(1008, "Runtime accepts only product sockets");
-      return;
-    }
-    await this.productAdapter.webSocketMessage(socket, message);
-    this.refreshProductOccupancy();
+    return withRuntimeDeliveryIngress("socket_message", async () => {
+      if (!this.productAdapter?.owns(socket)) {
+        socket.close(1008, "Runtime accepts only product sockets");
+        return;
+      }
+      await this.productAdapter.webSocketMessage(socket, message);
+      this.refreshProductOccupancy();
+    });
   }
 
   async webSocketClose(socket: WebSocket, code?: number, reason?: string, wasClean?: boolean): Promise<void> {
-    if (!this.productAdapter?.owns(socket)) return;
-    await this.productAdapter.webSocketClose(socket, code, reason, wasClean);
-    this.refreshProductOccupancy();
+    return withRuntimeDeliveryIngress("socket_close", async () => {
+      if (!this.productAdapter?.owns(socket)) return;
+      await this.productAdapter.webSocketClose(socket, code, reason, wasClean);
+      this.refreshProductOccupancy();
+    });
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
-    if (this.productAdapter?.owns(socket)) {
-      await this.productAdapter.webSocketError(socket);
-      return;
-    }
-    socket.close(1011, "Runtime socket error");
+    return withRuntimeDeliveryIngress("socket_error", async () => {
+      if (this.productAdapter?.owns(socket)) {
+        await this.productAdapter.webSocketError(socket);
+        return;
+      }
+      socket.close(1011, "Runtime socket error");
+    });
   }
 
   /** The Worker names the owner cell it routed a socket to; remember it. */
@@ -533,15 +565,55 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     scopeIds: readonly string[],
   ): void {
     if (scopeIds.length === 0 || !this.env.RELAY_RUNTIME_ROUTE_DIRECTORY) return;
-    const task = this.mutateRouteDirectory(action, cellName, scopeIds).catch((error: unknown) => {
-      console.error(`Runtime route-directory ${action} failed`, error);
-    });
+    const task = this.applyRouteDirectoryMutation(action, cellName, scopeIds);
     try {
       this.ctx.waitUntil(task);
     } catch (error) {
       // A test or platform shim may refuse task registration. The socket path
       // remains independent of this replaceable delivery projection.
       console.error(`Runtime route-directory ${action} scheduling failed`, error);
+    }
+  }
+
+  /**
+   * A directory storage reset aborts that object's in-flight write. Register
+   * and unregister are idempotent, so the lost write is replayed once on the
+   * reset object. An answered rejection is not replayed. A failure that
+   * remains leaves local occupancy ahead of the directory; putting those
+   * scopes back makes the next socket refresh try again.
+   */
+  private applyRouteDirectoryMutation(
+    action: "register" | "unregister",
+    cellName: RuntimeRouteDirectoryCell,
+    scopeIds: readonly string[],
+  ): Promise<void> {
+    return this.mutateRouteDirectory(action, cellName, scopeIds).catch(async (error: unknown) => {
+      if (durableObjectStorageReset(error)) {
+        try {
+          await this.mutateRouteDirectory(action, cellName, scopeIds);
+          return;
+        } catch (retryError) {
+          this.revertRouteDirectoryBookkeeping(action, scopeIds);
+          console.error(`Runtime route-directory ${action} failed`, retryError);
+          return;
+        }
+      }
+      this.revertRouteDirectoryBookkeeping(action, scopeIds);
+      console.error(`Runtime route-directory ${action} failed`, error);
+    });
+  }
+
+  private revertRouteDirectoryBookkeeping(
+    action: "register" | "unregister",
+    scopeIds: readonly string[],
+  ): void {
+    const occupied = this.productAdapter ? new Set(this.productAdapter.occupiedChannelIds()) : null;
+    for (const scopeId of scopeIds) {
+      if (action === "register") {
+        if (!occupied || occupied.has(scopeId)) this.productOccupiedScopes.delete(scopeId);
+      } else if (!occupied || !occupied.has(scopeId)) {
+        this.productOccupiedScopes.add(scopeId);
+      }
     }
   }
 

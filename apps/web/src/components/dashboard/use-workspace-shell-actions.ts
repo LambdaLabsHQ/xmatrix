@@ -52,7 +52,6 @@ import {
 } from "@/components/dashboard/mention-complete";
 import {
   clearChannelComposerDraft,
-  writeChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
 import { useAgentTraceHistorySync } from "@/components/dashboard/use-agent-trace-history-sync";
 import {
@@ -1512,21 +1511,18 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setSelectedPageId: s.setSelectedPageId, setSelectedChannelId, setBrowserPath,
     focusComposer: () => setComposerAutoFocusRequest((current) => current + 1),
     seedComposer,
+    jumpToMessage: queueMessageJump,
+    deliver: (channel, body) => deliverOutgoingMessage(channel,
+      { body, attachments: [], appMentions: parseAppMentions(body, APP_CONNECTORS) }),
   });
 
   function seedQuote(conversationId: string, quote: DiscussionQuote) {
     s.setDiscussionQuotes((current) => new Map(current).set(conversationId, quote));
   }
 
-  /**
-   * A new conversation's composer, ready before it opens. Ask AI's starts with
-   * `@auto` written out, which the Hub routes to an enabled harness as it does
-   * any typed `@auto`.
-   */
-  function seedComposer(conversationId: string, seed: { quote?: DiscussionQuote; askAi?: boolean }) {
+  /** A new conversation's composer, ready before it opens with the passage it discusses. */
+  function seedComposer(conversationId: string, seed: { quote?: DiscussionQuote }) {
     if (seed.quote) seedQuote(conversationId, seed.quote);
-    if (seed.askAi) writeChannelComposerDraft(s.channelComposerDraftsRef.current, conversationId,
-      { text: "@auto ", workspaceTarget: null, attachments: [] });
   }
 
   function dropDiscussionQuote(conversationId: string) {
@@ -1542,7 +1538,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    * A conversation started from a passage of a message (selection-discussion.ts).
    * It opens holding the passage and a link back to the message, is as open as
    * the conversation it came from, and is linked to the same pages, so it
-   * inherits their context as that conversation does.
+   * inherits their context as that conversation does. Its first message names
+   * it by what was written; until then the passage does.
    */
   async function discussMessagePassage(message: TimelineItem, quote: string) {
     const sourceId = message.channelId ?? s.selectedChannelIdRef.current;
@@ -1554,7 +1551,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const messageId = message.messageId;
       const { channel, created } = await beginConversation({ spaceId: source.spaceId,
         memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote), mode: source.mode,
-        metadata: { fromChannelId: source.id, fromMessageId: messageId } });
+        metadata: { fromChannelId: source.id, fromMessageId: messageId, autoName: true } });
       const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(messageId)}`;
       seedQuote(channel.id, discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }, false));
       // Beside a page it opens beside the page, as a discussion of the page does.
@@ -1990,7 +1987,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         userId: member.userId,
         email: member.email,
         name: member.name,
-        avatarUrl: member.avatarUrl,
         role,
       },
     });

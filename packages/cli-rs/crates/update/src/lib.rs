@@ -592,7 +592,7 @@ pub async fn install_cli_update_for_daemon_restart(
             hub_url,
             token_override,
         )?;
-        return Ok(installed);
+        Ok(installed)
     }
 
     #[cfg(not(windows))]

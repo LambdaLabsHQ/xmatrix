@@ -172,13 +172,15 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { tagClass } from "./status-tag";
+import { BetaTag, tagClass } from "./status-tag";
+import canonicalVersion from "../../../../../version.json" with { type: "json" };
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField, requireJson } from "@/lib/query/api-client";
+import { hubReadResponse } from "@/lib/query/hub-read";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
-import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, HUB_ROUTES, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
 
 import type {
   ChannelAttentionSnapshot,
@@ -259,7 +261,7 @@ export function SettingsView({
   onInstallDesktopUpdate,
   onLogout,
 }: {
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   /** The Space whose secrets this lists; secrets belong to a Space. */
   space: { id: string; name: string } | null;
   projectedProfile: HumanProfile;
@@ -662,11 +664,15 @@ export function SettingsView({
     { key: "desktop", label: "Desktop app", icon: Monitor, summary: desktopAvailable ? "Connected" : "Browser", content: (
         <div className="app-settings-section min-w-0 space-y-10">
           <ToolDetailSection title="This app" action={
-            <span className={tagClass()}>
-              {desktopAvailable ? "Connected" : "Browser"}
+            <span className="flex items-center gap-1.5">
+              <BetaTag />
+              <span className={tagClass()}>
+                {desktopAvailable ? "Connected" : "Browser"}
+              </span>
             </span>
           }>
             <div className="py-2 text-sm">
+              <DetailRow label="Web version" value={canonicalVersion.version} />
               <DetailRow label="App version" value={desktopContext?.version || "-"} />
               <DetailRow label="Platform" value={desktopContext ? desktopContext.platform : "-"} />
               <DetailRow label="Updates" value={desktopUpdateLabel(desktopUpdateStatus, desktopAvailable, desktopUpdateBridgeAvailable)} />
@@ -828,7 +834,7 @@ export function TeamView({
   onSelectSpace,
 }: {
   token?: string;
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   currentSpace: SerializedSpace | null;
   error: string | null;
   joinRequestsBySpace: Record<string, SpaceJoinRequest[]>;
@@ -1803,9 +1809,11 @@ export async function fetchChannelHistory(
   if (options.afterSequence !== undefined) {
     params.set("afterSequence", String(options.afterSequence));
   }
-  const res = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
+  // From the Hub straight when it answers this page (lib/query/hub-read.ts), else through the Web.
+  const res = await hubReadResponse({
+    hubPath: `${HUB_ROUTES.channel_history(channelId)}?${params.toString()}`,
+    webUrl: `${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`,
+    token,
     signal: options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS)])
       : AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS),

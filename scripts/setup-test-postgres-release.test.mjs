@@ -21,7 +21,9 @@ test("tagged Hub deployment reuses only its exact request gate before production
   const proof = workflow.indexOf("name: Reverify exact selected request before reusing its test result");
   const deploy = workflow.indexOf("name: Deploy tagged Hub to production");
   assert.ok(tagged >= 0 && proof > tagged && deploy > proof);
-  assert.match(workflow.slice(proof, deploy), /scripts\/release-commit\.mjs", "verify", process\.env\.DEPLOY_SHA, requestRun\.head_sha\]/u);
+  assert.match(workflow.slice(proof, deploy), /uses: \.\/\.github\/actions\/reverify-release-gate[\s\S]*component: hub/u);
+  const reuse = readFileSync(new URL("../.github/actions/reverify-release-gate/action.yml", import.meta.url), "utf8");
+  assert.match(reuse, /scripts\/release-commit\.mjs", process\.env\.RELEASE_CHANNEL === "stable" \? "verify-cut" : "verify",/u);
   assert.doesNotMatch(workflow, /node scripts\/ci\.mjs hub|run: bash scripts\/setup-test-postgres\.sh/u);
   assert.doesNotMatch(workflow.slice(tagged, deploy), /continue-on-error|CLOUDFLARE_API_TOKEN/u);
 });

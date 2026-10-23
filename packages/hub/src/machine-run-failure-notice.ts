@@ -1,11 +1,16 @@
 import { publicMachineStartupFailure, sha256Hex, type RepositoryBaseline } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
+import { recordCommandResult } from "./command-result";
 import { humanizeMachineRunFailureDetail, machineStopFailureCode } from "./machine-run-failure";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import type { Env } from "./types";
 
 export interface MachineRunFailureNotice {
   runId: string; channelId: string; agentName: string; detail: string; phase?: string;
+  /** The Agent's harness, which gives the notice its face (protocol faces.ts). */
+  harness?: string;
+  /** The summon that started the Run: the failure answers on its chip. */
+  sourceMessageId?: string;
   ownerUserId: string; ownerEmail: string; machineId: string; hostId: string;
   /** The owner's name for the Machine; the notice names nothing else. */
   machineName?: string;
@@ -40,12 +45,29 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
       source: "machine_run_failure", runId: input.runId, machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
       failureCode: humanized.code, failureDetail: humanized.summary,
+      ...(input.harness ? { harness: input.harness } : {}),
       ...(input.phase ? { statusPhase: input.phase } : {}) } },
   };
 }
 
 export async function publishMachineRunFailureNotice(env: Env, input: MachineRunFailureNotice): Promise<void> {
-  await appendChannelMessage(env, input.channelId, await machineRunFailureNoticeCommand(input));
+  await deliverMachineNotice(env, await machineRunFailureNoticeCommand(input), input, "startup-failure");
+}
+
+/**
+ * A Machine fact about a Run a message asked for answers on that message's
+ * chip, recorded on the message, never posted as another one. A Run nothing in
+ * the Channel asked for (a stop from elsewhere, an Automation) still says it
+ * as a notice, because nothing else would.
+ */
+async function deliverMachineNotice(env: Env, command: Record<string, unknown> & { channelId: string; body: string },
+  input: { runId: string; sourceMessageId?: string }, key: string): Promise<void> {
+  if (!input.sourceMessageId) {
+    await appendChannelMessage(env, command.channelId, command);
+    return;
+  }
+  await recordCommandResult(env, { channelId: command.channelId, messageId: input.sourceMessageId,
+    key: `${key}:${input.runId}`, entry: { note: { text: command.body, runId: input.runId } } });
 }
 
 /** The same message went to another Agent after a failed start. Stable per
@@ -64,8 +86,9 @@ export async function startupFallbackNoticeCommand(input: {
   };
 }
 
-export async function publishStartupFallbackNotice(env: Env, input: Parameters<typeof startupFallbackNoticeCommand>[0]): Promise<void> {
-  await appendChannelMessage(env, input.channelId, await startupFallbackNoticeCommand(input));
+export async function publishStartupFallbackNotice(env: Env,
+  input: Parameters<typeof startupFallbackNoticeCommand>[0] & { sourceMessageId?: string }): Promise<void> {
+  await deliverMachineNotice(env, await startupFallbackNoticeCommand(input), input, "startup-fallback");
 }
 
 export interface MachineStopResultNotice {
@@ -73,6 +96,40 @@ export interface MachineStopResultNotice {
   ownerUserId: string; ownerEmail: string; machineId: string; hostId: string;
   machineName?: string;
   startupFailed?: boolean;
+  /** The stop command that asked for this stop: the result answers on its chip. */
+  sourceMessageId?: string;
+  /** Why a stop nothing in the Channel asked for happened. */
+  cause?: MachineStopCause;
+}
+
+/** A stop's cause as the Run's shard recorded it: a registration withdrawal's
+ * code (`registration_<reason>`) or `instance_deleted`, with the people involved. */
+export interface MachineStopCause { code: string; actorName?: string; ownerName?: string; launcherName?: string }
+
+/** The cause in words, naming who did it where the Space knows them. An
+ * unknown code says nothing rather than guess. */
+export function machineStopCauseText(cause: MachineStopCause | undefined): string | undefined {
+  if (!cause) return undefined;
+  const actor = cause.actorName ?? "Someone", owner = cause.ownerName ?? "Its owner";
+  switch (cause.code) {
+    case "registration_disabled": return `${actor} turned this Agent off in this Space.`;
+    case "registration_revoked": return `${cause.actorName ?? owner} withdrew this Agent from this Space.`;
+    case "registration_not_granted": return "This Agent is no longer granted to this Space.";
+    case "registration_environment_disabled": return `${owner} turned this Agent off on its Machine.`;
+    case "registration_membership":
+      return `${cause.ownerName ?? "This Agent's owner"} is no longer a member of this Space, so it can't run here.`;
+    case "registration_caller":
+      return `${cause.launcherName ?? "Whoever started it"} can no longer start Agents in this Space.`;
+    case "registration_stale_authorization":
+      return `${actor} changed this Agent's access in this Space, so this Run can't continue.`;
+    case "registration_resources":
+      return `${actor} narrowed what this Agent may use in this Space below what this Run uses.`;
+    case "registration_run_terminal": return "Its Run had already ended; this cleaned up the process left behind.";
+    case "instance_deleted": return `${owner} deleted this Instance.`;
+    case "channel_not_found": return "Its Channel no longer exists.";
+    default: return cause.code.startsWith("channel_")
+      ? `${cause.launcherName ?? "Whoever started it"} no longer has access to this Channel.` : undefined;
+  }
 }
 
 /** Stable per stop and outcome. The daemon's error passes the same boundary
@@ -84,9 +141,10 @@ export async function machineStopResultNoticeCommand(input: MachineStopResultNot
   const body = input.ok
     ? input.startupFailed
       ? `Startup failed for @${input.agentName}${onMachine(input)}. Cleanup confirmed no process remains. See the startup failure notice or invocation details for the cause.`
-      : `Stopped @${input.agentName}${onMachine(input)}. The Workstation confirmed the process tree is terminated.`
-    : [`Couldn't stop @${input.agentName}${onMachine(input)}.`, "",
-      publicMachineStartupFailure(input.detail)?.summary ?? "The Workstation reported the stop failed without an error.", "",
+      : [`Stopped @${input.agentName}${onMachine(input)}.`, machineStopCauseText(input.cause),
+        "The Machine confirmed the process tree is terminated."].filter(Boolean).join(" ")
+    : [[`Couldn't stop @${input.agentName}${onMachine(input)}.`, machineStopCauseText(input.cause)].filter(Boolean).join(" "), "",
+      publicMachineStartupFailure(input.detail)?.summary ?? "The Machine reported the stop failed without an error.", "",
       "The process may still be running. Retry the stop."].join("\n");
   return {
     commandId: `machine-stop-result-notice:${digest}`.slice(0, 200),
@@ -95,12 +153,13 @@ export async function machineStopResultNoticeCommand(input: MachineStopResultNot
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
       source: "machine_stop_result", runId: input.runId, machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
       stopOutcome: outcome, ...(input.startupFailed ? { startupFailed: true } : {}),
+      ...(input.cause ? { stopCause: input.cause.code } : {}),
       ...(input.ok ? {} : { stopFailureCode: machineStopFailureCode(String(input.detail || "").trim()) }) } },
   };
 }
 
 export async function publishMachineStopResultNotice(env: Env, input: MachineStopResultNotice): Promise<void> {
-  await appendChannelMessage(env, input.channelId, await machineStopResultNoticeCommand(input));
+  await deliverMachineNotice(env, await machineStopResultNoticeCommand(input), input, "stop-result");
 }
 
 /** Once per checkout/base in this Channel, including report replays and later

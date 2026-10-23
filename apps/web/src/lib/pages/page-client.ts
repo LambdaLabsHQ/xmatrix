@@ -1,15 +1,15 @@
 import {
-  DEFAULT_HUB_URL, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
+  DEFAULT_HUB_URL, HUB_ROUTES, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
   spaceVisibilityScope,
-  type AutomationTrigger, type PageAutomationAnchorChange, type PageAwareness, type PageClaim, type PageConversation, type PageDocument,
+  type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageClaim, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
-  type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeActivity, type PageTreeAgent,
+  type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
 
 export type {
-  PageAwareness, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
-  PageSummary, PageTreeActivity, PageTreeAgent,
+  PageAwareness, PageBlame, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
+  PageRevisionMoment, PageSummary, PageTreeActivity, PageTreeAgent,
 };
 import * as decoding from "lib0/decoding";
 import { encodePageSync, encodePageAwareness, readPageSyncReply } from "./page-sync-codec";
@@ -17,6 +17,7 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { xmatrixHubRead } from "@/lib/query/hub-read";
 import { commitBlobRef, prepareMessageAttachmentUpload } from "@/lib/relay-v2/message-attachment-upload-client";
 import { ReconnectingSocket } from "@/lib/connectivity/reconnecting-socket";
 
@@ -26,17 +27,24 @@ export interface SpaceGovernance {
   governancePageId: string | null;
 }
 
+/** A page's Hub route, or one of its own: where the Web's `WEB_PROXY_ROUTES.space_page` routes forward. */
+const hubPage = (spaceId: string, pageId: string, subpath = "") =>
+  HUB_ROUTES.space_pages(spaceId, `${encodeURIComponent(pageId)}${subpath ? `/${subpath}` : ""}`);
 
+// Reads go to the Hub straight when it answers this page (lib/query/hub-read.ts); writes go through the Web.
 export const pageApi = {
   tree: (spaceId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ pages: PageSummary[] }>({ url: WEB_PROXY_ROUTES.space_pages(spaceId), token, signal }),
+    xmatrixHubRead<{ pages: PageSummary[] }>({ hubPath: HUB_ROUTES.space_pages(spaceId),
+      webUrl: WEB_PROXY_ROUTES.space_pages(spaceId), token, signal }),
   /** The pages that changed last and what each change was, for the list's Recent changes. */
   recentChanges: (spaceId: string, token: string, limit: number, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ changes: PageRecentChange[] }>({
-      url: `${WEB_PROXY_ROUTES.space_pages(spaceId)}/recent-changes?limit=${limit}`, token, signal }),
+    xmatrixHubRead<{ changes: PageRecentChange[] }>({
+      hubPath: `${HUB_ROUTES.space_pages(spaceId, "recent-changes")}?limit=${limit}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_pages(spaceId)}/recent-changes?limit=${limit}`, token, signal }),
   read: (spaceId: string, pageId: string, token: string, revision?: number, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ page: PageDocument }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`, token, signal,
+    xmatrixHubRead<{ page: PageDocument }>({
+      hubPath: `${hubPage(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`, token, signal,
     }),
   /**
    * Makes a page from a name and markdown, or from `document`, the Yjs state of a page someone has
@@ -58,8 +66,8 @@ export const pageApi = {
    * as they have seen it when they saw part of it past that (null when it is that revision's text).
    */
   readState: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ revision: number | null; seen?: string | null }>({
-      url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token, signal }),
+    xmatrixHubRead<{ revision: number | null; seen?: string | null }>({ hubPath: hubPage(spaceId, pageId, "read"),
+      webUrl: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token, signal }),
   markRead: (spaceId: string, pageId: string, token: string, revision: number, seen: string | null) =>
     xmatrixApiRequest<{ revision: number }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
       method: "PUT", body: { revision, seen } }),
@@ -77,18 +85,24 @@ export const pageApi = {
   githubFile: (spaceId: string, pageId: string, token: string, href: string, signal?: AbortSignal) =>
     xmatrixApiRequest<PageGitHubFile>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/github-file?href=${encodeURIComponent(href)}`, token, signal }),
+  /**
+   * When and where each section last changed and what it owes. The page reads its claims, discussions and who
+   * is on it on their own, live, so this asks the Hub for the sections alone.
+   */
   awareness: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<PageAwareness>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness`, token, signal }),
-  claims: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ claims: PageClaim[]; competitiveBlocks: string[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims`, token, signal }),
-  claim: (spaceId: string, pageId: string, token: string, blockId: string) =>
-    xmatrixApiRequest<{ claim: PageClaim }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims`,
-      token, method: "POST", body: { blockId } }),
-  releaseClaim: (spaceId: string, pageId: string, token: string, claimId: string) =>
-    xmatrixApiRequest<{ released: boolean }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims/${encodeURIComponent(claimId)}`,
-      token, method: "DELETE" }),
+    xmatrixHubRead<PageAwareness>({ hubPath: `${hubPage(spaceId, pageId, "awareness")}?scope=sections`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness?scope=sections`, token, signal }),
+  /** Who wrote each piece of the page's newest revision (page-blame.ts). */
+  blame: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<PageBlame>({ hubPath: hubPage(spaceId, pageId, "blame"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/blame`, token, signal }),
+  /** The message `conversationId` was at when `revision` was written, to open it there; null when not readable. */
+  revisionMoment: (spaceId: string, pageId: string, token: string, revision: number, conversationId: string) => {
+    const query = `?conversation=${encodeURIComponent(conversationId)}`;
+    return xmatrixHubRead<{ moment: PageRevisionMoment | null }>({
+      hubPath: `${hubPage(spaceId, pageId, `revisions/${revision}/moment`)}${query}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/revisions/${revision}/moment${query}`, token });
+  },
   governance: (spaceId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<SpaceGovernance>({ url: WEB_PROXY_ROUTES.space_governance(spaceId), token, signal }),
   setGovernance: (spaceId: string, token: string, change: Partial<SpaceGovernance>) =>
@@ -121,37 +135,33 @@ export const pageApi = {
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing/${encodeURIComponent(conversationId)}/undo`,
       token, method: "POST", body: {} }),
   suggestions: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ suggestions: PageRevision[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions`, token, signal }),
+    xmatrixHubRead<{ suggestions: PageRevision[] }>({ hubPath: hubPage(spaceId, pageId, "suggestions"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions`, token, signal }),
   reviewSuggestions: (spaceId: string, pageId: string, token: string, through: number) =>
     xmatrixApiRequest<{ reviewedThrough: number }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions/review`, token, method: "POST",
       body: { through } }),
   /** A page's links come with the conversations they name, as this reader sees them (§4.4). */
-  links: (spaceId: string, token: string, query: { pageId?: string; conversationId?: string }, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ links: PageLink[]; conversations?: PageConversation[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}?${new URLSearchParams(query as Record<string, string>)}`,
-      token, signal,
-    }),
+  links: (spaceId: string, token: string, query: { pageId?: string; conversationId?: string }, signal?: AbortSignal) => {
+    const search = new URLSearchParams(query as Record<string, string>);
+    return xmatrixHubRead<{ links: PageLink[]; conversations?: PageConversation[] }>({
+      hubPath: `${HUB_ROUTES.space_page_links(spaceId)}?${search}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}?${search}`, token, signal });
+  },
   agents: (spaceId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ pages: PageTreeActivity[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
+    xmatrixHubRead<{ pages: PageTreeActivity[] }>({ hubPath: HUB_ROUTES.space_page_links(spaceId, "agents"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
   // A page's Automations (docs/design/pages-live-document.md §6).
   automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ automations: SerializedAutomation[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
-  createAutomation: (spaceId: string, pageId: string, token: string, input: { name: string; instruction: string;
-    intervalMinutes: number; blockId: string; triggers?: AutomationTrigger[] }) =>
-    xmatrixApiRequest<{ automation: SerializedAutomation }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, method: "POST", body: input }),
+    xmatrixHubRead<{ automations: SerializedAutomation[] }>({ hubPath: hubPage(spaceId, pageId, "automations"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
   changeAutomation: (spaceId: string, pageId: string, token: string, automation: SerializedAutomation,
-    action: "pause" | "resume" | "run" | "reference" | "delete", blockId?: string) =>
+    action: "pause" | "resume" | "run" | "delete") =>
     xmatrixApiRequest<{ automation?: SerializedAutomation }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations/${encodeURIComponent(automation.id)}${
         action === "delete" ? `?expectedVersion=${automation.version}` : `/${action}`}`,
       token, method: action === "delete" ? "DELETE" : "POST",
-      ...(action === "delete" ? {} : { body: action === "reference" ? { blockId: blockId ?? "" }
-        : { expectedVersion: automation.version } }) }),
+      ...(action === "delete" ? {} : { body: { expectedVersion: automation.version } }) }),
   link: (spaceId: string, token: string, input: { conversationId: string; pageId: string; blockId?: string;
     anchor?: PageLinkAnchor }) =>
     xmatrixApiRequest<{ link: PageLink }>({ url: WEB_PROXY_ROUTES.space_page_links(spaceId), token,
@@ -181,7 +191,8 @@ export function pageChildren(pages: readonly PageSummary[]): Map<string | null, 
 
 
 export interface PagePresenceState {
-  user?: { name: string; color: string; kind?: "user" | "agent"; conversationId?: string | null };
+  /** Who: a person by their account, so others draw their own face; an Agent by the conversation it works from. */
+  user?: { name: string; color: string; kind?: "user" | "agent"; id?: string; conversationId?: string | null };
   /** A person views or edits; an Agent co-writing live watches, thinks, writes or waits for someone. */
   activity?: "viewing" | "editing" | "watching" | "thinking" | "writing" | "waiting";
   block?: string;
@@ -271,7 +282,7 @@ export class PageLiveSession {
   private readonly listeners = new Set<(notice: PageSessionNotice | { type: "status"; connected: boolean }) => void>();
 
   constructor(private readonly input: { spaceId: string; pageId: string | null; token: string;
-    user: { name: string; color: string };
+    user: { id?: string; name: string; color: string };
     /**
      * For a new page: makes it from this document as it stands (its Yjs state), when this person
      * first writes on it. Like copy-on-write, nothing is kept until then.
@@ -381,9 +392,11 @@ export class PageLiveSession {
   }
 
   private async open(): Promise<WebSocket> {
-    const session = await xmatrixApiRequest<{ protocol: string; socketPath: string; canEdit: boolean;
+    // From the Hub straight when it answers this page, as the socket itself is (lib/query/hub-read.ts).
+    const session = await xmatrixHubRead<{ protocol: string; socketPath: string; canEdit: boolean;
       heartbeat?: string }>({
-      url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.pageId!), token: this.token,
+      hubPath: hubPage(this.input.spaceId, this.pageId!, "live"),
+      webUrl: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.pageId!), token: this.token,
       method: "POST", body: { document: PAGE_DOCUMENT_FRAGMENT },
       // A ticket request stuck on a dead connection must not stop every later attempt.
       signal: AbortSignal.timeout(PAGE_TICKET_TIMEOUT_MS),

@@ -43,9 +43,30 @@ test("turn-failure append is an agent-attributed system_fact, not a new task", (
   assert.match(command.body, /unknown certificate verification error/);
   assert.equal(command.payload.principal.kind, "agent");
   assert.equal(command.payload.principal.id, "agent-1");
+  assert.equal(command.payload.messageKind, "xmatrix.system.runtime-failure",
+    "a Hub-authored lifecycle fact must remain writable when the Space's allowance is exhausted");
   assert.equal(command.payload.residual.appMetadata.xmatrixProvenance, "system_fact");
   assert.equal(command.payload.residual.appMetadata.xmatrixTurnFailure, true);
   assert.equal(command.payload.agentRunProof.runId, "run-1");
+  assert.equal(command.messageId,
+    "turn-failure:instance-1:xMatrix could not complete this opencode turn: Internal error: unknown certificate verification error");
+});
+
+test("every harness gets correlated HTTP evidence without changing notice replay authority", () => {
+  for (const agentName of ["codex", "claude", "custom-acp", "terminal-agent"]) {
+    const input = { runId: "run-1", instanceId: "instance-1", executionKey: "exec-1",
+      agentId: "agent-1", agentName, ownerUserId: "owner", channelId: "channel-1",
+      noticeId: "failure-123", senderSnapshot: {}, detail: "code=access_denied; httpStatusCode=403; requestId=req-safe" };
+    const command = agentTurnFailureAppendCommand(input);
+    assert.match(command.body, /HTTP status: 403/u);
+    assert.match(command.body, /Failure reference: failure-123/u);
+    assert.deepEqual(command.payload.residual.appMetadata.xmatrixFailureEvidence, {
+      version: 1, category: "http", httpStatuses: [403], codes: ["access_denied"],
+      requestIds: ["req-safe"], websocketCloseCodes: [], exitCodes: [],
+    });
+    assert.equal(agentTurnFailureAppendCommand(input).messageId, command.messageId);
+    assert.equal(command.payload.residual.appMetadata.xmatrixProvenance, "system_fact");
+  }
 });
 
 test("background interruption is a scoped idempotent fact without claiming task failure", () => {

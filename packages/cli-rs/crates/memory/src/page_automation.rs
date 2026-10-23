@@ -18,7 +18,7 @@ use crate::page::{PAGE_TEXT_ROUTES, enc, page_route, resolve_space};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PageAutomation {
+pub(crate) struct PageAutomation {
     pub id: String,
     pub version: u64,
     pub name: String,
@@ -40,7 +40,7 @@ pub struct PageAutomation {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct PageAutomationExpression {
+pub(crate) struct PageAutomationExpression {
     pub text: String,
 }
 
@@ -55,7 +55,7 @@ struct OneResponse {
 }
 
 /// How often, in words.
-pub fn render_cadence(minutes: u64) -> String {
+pub(crate) fn render_cadence(minutes: u64) -> String {
     match minutes {
         1440 => "daily".into(),
         m if m % 1440 == 0 => format!("every {} days", m / 1440),
@@ -67,7 +67,7 @@ pub fn render_cadence(minutes: u64) -> String {
 
 /// One line per Automation: id and version to act on it, where it is, how
 /// often, whether it runs; then what it does each time.
-pub fn render_page_automation(automation: &PageAutomation) -> String {
+pub(crate) fn render_page_automation(automation: &PageAutomation) -> String {
     let place = match automation.block_id.as_deref() {
         None => "(detached)".to_string(),
         Some("") => "(top of page)".to_string(),
@@ -112,7 +112,7 @@ pub fn render_page_automation(automation: &PageAutomation) -> String {
 }
 
 /// A trigger as `--on` spells it.
-pub fn render_trigger(trigger: &Value) -> String {
+pub(crate) fn render_trigger(trigger: &Value) -> String {
     let field = |name: &str| {
         trigger
             .get(name)
@@ -280,7 +280,7 @@ fn automations_route(space: &str, page: &str) -> String {
 }
 
 /// A page's Automations, for `page read`'s header; none when they cannot be read.
-pub async fn page_automations(
+pub(crate) async fn page_automations(
     hub_url: &str,
     token: &str,
     space: &str,
@@ -294,7 +294,7 @@ pub async fn page_automations(
 }
 
 /// The `automations:` lines of `page read`'s header.
-pub fn render_page_automations_header(automations: &[PageAutomation]) -> String {
+pub(crate) fn render_page_automations_header(automations: &[PageAutomation]) -> String {
     if automations.is_empty() {
         return String::new();
     }
@@ -361,7 +361,7 @@ async fn set_running(
     Ok(())
 }
 
-pub async fn cmd_page_automation(
+pub(crate) async fn cmd_page_automation(
     hub_url: &str,
     token: &str,
     command: PageAutomationCommand,

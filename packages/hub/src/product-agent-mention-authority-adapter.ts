@@ -1,5 +1,6 @@
 /** PostgreSQL-backed port for agent mention orchestration. */
 
+import { recordCommandResult } from "./command-result";
 import type { ChannelAttachment } from "@xmatrix/protocol";
 import type { HubAuthorityEnv } from "./postgres-authority-fleet";
 import { appendChannelMessage } from "./channel-messages";
@@ -92,6 +93,7 @@ export async function dispatchProductAgentSystemNotice(input: {
     messageId,
     channelId: input.channelId,
     body: input.body,
+    messageKind: "xmatrix.system.runtime-failure",
     principal: { kind: "user", id: input.actorUserId },
     senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId),
     residual: {
@@ -241,10 +243,9 @@ export function createProductAgentMentionAuthorityPort(input: {
       return this.getRebornTarget(input);
     },
 
-    async publishSystemNotice(channelId, body) {
-      await dispatchProductAgentSystemNotice({ env: input.env,
-        actorUserId: input.actorUserId, sourceMessageId: input.sourceMessageId,
-        channelId, body });
+    async recordResult(channelId, text, key) {
+      await recordCommandResult(input.env as Env, { channelId, messageId: input.sourceMessageId,
+        key, entry: { note: { text } } });
     },
 
     reportDiagnostic({ stage, error, ...where }) {

@@ -1,3 +1,4 @@
+import { publishChannelInvocationsChanged } from "../channel-live-judgment";
 import { reportAgentTurnRetry } from "../agent-turn-retry";
 import { postgresSettleQuestionnaire } from "../postgres-message-authority";
 import { INSTANCE_IDLE_SLEEP_MS, presenceRests } from "../instance-idle-sleep";
@@ -18,6 +19,7 @@ import {
   AGENT_USAGE_LIMIT_LIFECYCLE_REASON,
   agentUsageLimitFromError,
   boundAgentTurnFailureDetail,
+  safeAgentFailureDetail,
   callerMessageMetadata,
   ChannelActivityInvalid,
   CHANNEL_ACTIVITY_MESSAGE_KIND,
@@ -152,6 +154,8 @@ export interface PostgresAgentInstancePortDependencies {
   /** Settle a questionnaire card once (postgresSettleQuestionnaire). */
   settleQuestionnaire?(input: Parameters<typeof postgresSettleQuestionnaire>[1]): ReturnType<typeof postgresSettleQuestionnaire>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
+  /** Tell the Channel's people its summon chips changed (publishChannelInvocationsChanged). */
+  invocationsChanged?(channelId: string): Promise<void>;
 }
 
 export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
@@ -206,6 +210,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       observeAgentLaunchStage: (stage, outcome, durationMs) => recordAgentLaunchStage({
         env: input.env, stage, outcome, durationMs,
       }),
+      invocationsChanged: (channelId) => publishChannelInvocationsChanged(input.env, channelId),
       ...(input.env.RELAY_RUNTIME
         ? { runtimeCells: (ownerUserId: string) => relayRuntimeCellsForOwners(input.env, [ownerUserId]) }
         : {}),
@@ -544,6 +549,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         if (connectionVersion < 1) throw new Error("Agent connection version is invalid");
         if (this.dependencies.atomicInstanceConnect) this.dependencies.observeAgentLaunchStage?.(
           "instance_connect", "ok", performance.now() - connectStarted);
+        // Connected is the summon's next step: its chip reads it now.
+        const connectedChannelId = typeof value.channelId === "string" ? value.channelId : undefined;
+        const pushed = connectedChannelId ? this.dependencies.invocationsChanged?.(connectedChannelId) : undefined;
+        if (pushed) this.dependencies.runInBackground?.(pushed);
       } catch (error) {
         if (this.dependencies.atomicInstanceConnect) this.dependencies.observeAgentLaunchStage?.(
           "instance_connect", "error", performance.now() - connectStarted);
@@ -1204,6 +1213,9 @@ function requiredNonnegativeInteger(value: unknown, field: string): number {
 
 /** Hub reads a usage limit from the original error, whatever the host said. */
 function classifiedTurnFailure(message: Message<"agent_lifecycle">): Message<"agent_lifecycle"> {
+  if (shouldPersistAgentTurnFailureNotice(message)) {
+    message = { ...message, detail: safeAgentFailureDetail(message.detail) };
+  }
   if (message.layer !== AGENT_TURN_FAILURE_LIFECYCLE_LAYER || message.status !== AGENT_TURN_FAILURE_LIFECYCLE_STATUS ||
       message.reason !== AGENT_TURN_FAILURE_LIFECYCLE_REASON) return message;
   const limit = agentUsageLimitFromError(message.detail);
@@ -1214,7 +1226,7 @@ function classifiedTurnFailure(message: Message<"agent_lifecycle">): Message<"ag
 function turnFailureLifecycle(channelId: string, error: string): Message<"agent_lifecycle"> {
   return classifiedTurnFailure({ type: "agent_lifecycle", channelId,
     layer: AGENT_TURN_FAILURE_LIFECYCLE_LAYER, status: AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
-    reason: AGENT_TURN_FAILURE_LIFECYCLE_REASON, detail: boundAgentTurnFailureDetail(error),
+    reason: AGENT_TURN_FAILURE_LIFECYCLE_REASON, detail: safeAgentFailureDetail(error),
     snapshot: { run: "failed", process: "online" } });
 }
 

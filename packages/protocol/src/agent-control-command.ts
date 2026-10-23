@@ -24,6 +24,22 @@ function parseControlStatement(line: string): AgentControlCommand | undefined {
   return undefined;
 }
 
+/** One statement as it was written, so a client can hang its result on that
+ * span instead of the Hub posting another message. Offsets are UTF-16
+ * positions in the body. */
+export interface AgentControlInvocation extends AgentControlCommand {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/** What one statement came to, in statement order on the Hub's receipt. */
+export type AgentControlOutcomeRecord = Pick<AgentControlCommand, "kind" | "target"> & (
+  | { status: "switched"; selected: string }
+  | { status: "catalog"; current?: string; options: string[] }
+  | { status: "no_instance" }
+  | { status: "error"; message: string });
+
 /**
  * Every statement in the message, or none at all.
  *
@@ -32,25 +48,30 @@ function parseControlStatement(line: string): AgentControlCommand | undefined {
  * while delivering the other half as work would be two different answers to
  * the same message.
  */
-export function parseAgentControlCommands(
+export function parseAgentControlInvocations(
   body: string,
-): AgentControlCommand[] {
+): AgentControlInvocation[] {
   if (body.length > MESSAGE_INTERACTION_LIMITS.bodyLength) return [];
   const lines = body.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
   if (lines.length === 0 || lines.length > AGENT_CONTROL_STATEMENT_LIMIT) return [];
-  const commands: AgentControlCommand[] = [];
-  for (const line of lines) {
-    const command = parseControlStatement(line);
-    if (!command) return [];
-    commands.push(command);
+  const invocations: AgentControlInvocation[] = [];
+  let offset = 0;
+  for (const line of body.split(/\n/u)) {
+    const text = line.trim();
+    if (text) {
+      const command = parseControlStatement(text);
+      if (!command) return [];
+      const start = offset + line.search(/\S/u);
+      invocations.push({ ...command, start, end: start + text.length, text });
+    }
+    offset += line.length + 1;
   }
   // The Markdown context check parses the whole body, so it runs only for a
   // message whose every line already reads as a statement.
   const ranges = nonOperationalMentionRanges(body);
-  let offset = 0;
-  for (const line of body.split(/\n/u)) {
-    if (line.trim() && !isOperationalMentionStart(offset + line.search(/\S/u), ranges)) return [];
-    offset += line.length + 1;
-  }
-  return commands;
+  return invocations.every((invocation) => isOperationalMentionStart(invocation.start, ranges)) ? invocations : [];
+}
+
+export function parseAgentControlCommands(body: string): AgentControlCommand[] {
+  return parseAgentControlInvocations(body).map(({ kind, target, value }) => ({ kind, target, ...(value ? { value } : {}) }));
 }

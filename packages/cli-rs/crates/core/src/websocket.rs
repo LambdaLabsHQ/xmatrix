@@ -8,7 +8,7 @@ use crate::backoff::Backoff;
 use crate::error::{CliError, Result};
 use crate::http;
 
-pub type ClientWebSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
+pub(crate) type ClientWebSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Per-address TCP budget for a Happy Eyeballs race. Families are tried in
 /// parallel, so an unroutable AAAA cannot stall IPv4 and an IPv6-only network
@@ -237,7 +237,7 @@ pub(crate) fn domain_connection_url(hub_url: &str, path: &str) -> String {
 
 /// Hub routes `/ws/*?owner=<id>` onto `user-<id>` only for this charset.
 /// Any other id is left off, and the socket stays on the single cell.
-pub fn with_runtime_owner(url: String, owner_user_id: &str) -> String {
+pub(crate) fn with_runtime_owner(url: String, owner_user_id: &str) -> String {
     if !runtime_owner_id(owner_user_id) {
         return url;
     }

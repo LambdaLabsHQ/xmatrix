@@ -18,14 +18,14 @@
 //      returns disk.
 
 /// How many idle slots a repo pool keeps warm for reuse.
-pub const REPO_POOL_IDLE_KEEP_ENV: &str = "XMATRIX_REPO_POOL_IDLE_KEEP";
+pub(crate) const REPO_POOL_IDLE_KEEP_ENV: &str = "XMATRIX_REPO_POOL_IDLE_KEEP";
 /// How long a stranded lease must sit before liveness is trusted to demote it.
-pub const REPO_POOL_ORPHAN_MIN_AGE_SECS_ENV: &str = "XMATRIX_REPO_POOL_ORPHAN_MIN_AGE_SECS";
+pub(crate) const REPO_POOL_ORPHAN_MIN_AGE_SECS_ENV: &str = "XMATRIX_REPO_POOL_ORPHAN_MIN_AGE_SECS";
 /// How long a slot tree must sit untouched before its disk may be taken.
-pub const REPO_POOL_EVICT_MIN_IDLE_SECS_ENV: &str = "XMATRIX_REPO_POOL_EVICT_MIN_IDLE_SECS";
+pub(crate) const REPO_POOL_EVICT_MIN_IDLE_SECS_ENV: &str = "XMATRIX_REPO_POOL_EVICT_MIN_IDLE_SECS";
 /// How long a resting session's tree must sit untouched before the sweep may
 /// reclaim it behind a rehydrate record (docs/instance-sleep.md §6).
-pub const REPO_POOL_RESTING_EVICT_SECS_ENV: &str = "XMATRIX_REPO_POOL_RESTING_EVICT_SECS";
+pub(crate) const REPO_POOL_RESTING_EVICT_SECS_ENV: &str = "XMATRIX_REPO_POOL_RESTING_EVICT_SECS";
 
 /// A slot is a full checkout plus whatever the build leaves behind — `target/`
 /// and `node_modules/` survive the `git clean -ffd` on reuse by design — so a
@@ -281,7 +281,7 @@ async fn record_lost_checkouts(
         let Ok(path) = layout.slot_path_for_id(&id) else {
             continue;
         };
-        if path.join(".git").is_file() || live.claims(&id, &path) {
+        if is_formal_linked_worktree(&path) || live.claims(&id, &path) {
             continue;
         }
         match record_lost_checkout(layout, &base_repo, manifest, &id).await {
@@ -420,62 +420,14 @@ async fn reclaim_pool_slots_one(
         .into_iter()
         .filter(|slot_id| !demoted_now.contains(slot_id))
     {
-        let parsed = SlotId::parse(&slot_id)?;
-        let worktree = layout.slot_path(&parsed)?;
-        if worktree.exists() {
-            // Eviction used to be reachable only for Available slots, which had
-            // just been reset onto origin, so removal could be unconditional.
-            // Retained and Quarantined trees hold whatever a real session left
-            // behind, and `git worktree remove --force` would discard it, so
-            // pin it to `refs/xmatrix/snapshot/<slotId>/<uuid>` in the shared
-            // repository first. Fail closed: a slot whose work cannot be
-            // preserved keeps its disk.
-            if linked_repository_is_gone(&worktree) {
-                // Its repository (often another user's clone) no longer
-                // exists, so no snapshot can ever succeed. Keep the files,
-                // outside the pool, and stop retrying every sweep.
-                if let Err(error) = archive_orphaned_slot(layout, &worktree, &slot_id) {
-                    eprintln!(
-                        "repo pool reclaim: keeping slot {slot_id}; its repository is gone and it could not be archived ({error})"
-                    );
-                    continue;
-                }
-            } else {
-                let snapshot = match snapshot_if_needed(&worktree, &slot_id).await {
-                    Ok(snapshot) => snapshot,
-                    Err(error) => {
-                        eprintln!(
-                            "repo pool reclaim: keeping slot {slot_id}; un-landed work could not be preserved ({error})"
-                        );
-                        continue;
-                    }
-                };
-                // A bound session can still wake: write down its checkout before
-                // the tree goes, or keep the tree.
-                let binding = manifest
-                    .bindings
-                    .iter()
-                    .find(|binding| binding.slot_id == slot_id)
-                    .cloned();
-                if let (Some(binding), Some(slot)) = (binding, manifest.slots.get(&slot_id)) {
-                    let recorded =
-                        match capture_rehydrate_record(&worktree, &binding, slot, snapshot).await {
-                            Ok(record) => load_rehydrate_records(layout).and_then(|mut records| {
-                                remember_shared_rehydrate_records(&mut records, &manifest, record)?;
-                                save_rehydrate_records(layout, &records)
-                            }),
-                            Err(error) => Err(error),
-                        };
-                    if let Err(error) = recorded {
-                        eprintln!(
-                            "repo pool reclaim: keeping slot {slot_id}; its session could not be recorded for rehydrate ({error})"
-                        );
-                        continue;
-                    }
-                }
-                let base_repo = registered_base_repo_for_worktree(&worktree).await?;
-                // Honors foreign worktree locks.
-                try_safe_remove_created_worktree(layout, &base_repo, &worktree, &parsed).await?;
+        // One slot that cannot be evicted keeps its disk; it must not stop the
+        // sweep from returning every other slot's.
+        match evict_slot(layout, &manifest, &slot_id).await {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                eprintln!("repo pool reclaim: keeping slot {slot_id}; eviction failed ({error})");
+                continue;
             }
         }
         manifest.slots.remove(&slot_id);
@@ -490,11 +442,106 @@ async fn reclaim_pool_slots_one(
     Ok(outcome)
 }
 
+/// Take one slot's tree off disk. `Ok(true)` when it is gone and the caller
+/// drops the slot; `Ok(false)` when it was kept for a reason already logged.
+async fn evict_slot(
+    layout: &RepoPoolLayout,
+    manifest: &RepoPoolManifest,
+    slot_id: &str,
+) -> Result<bool, PoolError> {
+    let parsed = SlotId::parse(slot_id)?;
+    let worktree = layout.slot_path(&parsed)?;
+    if !worktree.exists() {
+        return Ok(true);
+    }
+    // Eviction used to be reachable only for Available slots, which had
+    // just been reset onto origin, so removal could be unconditional.
+    // Retained and Quarantined trees hold whatever a real session left
+    // behind, and `git worktree remove --force` would discard it, so
+    // pin it to `refs/xmatrix/snapshot/<slotId>/<uuid>` in the shared
+    // repository first. Fail closed: a slot whose work cannot be
+    // preserved keeps its disk.
+    if linked_repository_is_gone(&worktree) {
+        // Its repository (often another user's clone) no longer
+        // exists, so no snapshot can ever succeed. Keep the files,
+        // outside the pool, and stop retrying every sweep.
+        if let Err(error) = archive_orphaned_slot(layout, &worktree, slot_id) {
+            eprintln!(
+                "repo pool reclaim: keeping slot {slot_id}; its repository is gone and it could not be archived ({error})"
+            );
+            return Ok(false);
+        }
+        return Ok(true);
+    }
+    let snapshot = match snapshot_if_needed(&worktree, slot_id).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            eprintln!(
+                "repo pool reclaim: keeping slot {slot_id}; un-landed work could not be preserved ({error})"
+            );
+            return Ok(false);
+        }
+    };
+    // A bound session can still wake: write down its checkout before
+    // the tree goes, or keep the tree.
+    let binding = manifest
+        .bindings
+        .iter()
+        .find(|binding| binding.slot_id == slot_id)
+        .cloned();
+    let mut recorded_over = None;
+    if let (Some(binding), Some(slot)) = (binding, manifest.slots.get(slot_id)) {
+        let recorded = match capture_rehydrate_record(&worktree, &binding, slot, snapshot).await {
+            Ok(record) => load_rehydrate_records(layout).and_then(|mut records| {
+                let previous = records.clone();
+                remember_shared_rehydrate_records(&mut records, manifest, record)?;
+                save_rehydrate_records(layout, &records)?;
+                Ok(previous)
+            }),
+            Err(error) => Err(error),
+        };
+        match recorded {
+            Ok(previous) => recorded_over = Some(previous),
+            Err(error) => {
+                eprintln!(
+                    "repo pool reclaim: keeping slot {slot_id}; its session could not be recorded for rehydrate ({error})"
+                );
+                return Ok(false);
+            }
+        }
+    }
+    let removed = match registered_base_repo_for_worktree(&worktree).await {
+        // Honors foreign worktree locks. Finishes a delete that git
+        // unregistered but could not complete.
+        Ok(base_repo) => {
+            try_safe_remove_created_worktree(layout, &base_repo, &worktree, &parsed).await
+        }
+        Err(error) => Err(error),
+    };
+    if let Err(error) = removed {
+        // The session still lives in an intact tree: a record would send its
+        // next wake to rebuild a checkout it still has. A tree git already
+        // unregistered keeps the record; it is how that session wakes.
+        if let Some(previous) = recorded_over
+            && is_formal_linked_worktree(&worktree)
+            && let Err(retract_error) = save_rehydrate_records(layout, &previous)
+        {
+            eprintln!(
+                "repo pool reclaim: slot {slot_id} kept its tree but its rehydrate record could not be retracted ({retract_error})"
+            );
+        }
+        return Err(error);
+    }
+    Ok(true)
+}
+
 /// Where reclaim moves trees whose repository no longer exists.
 const ORPHANED_DIR: &str = "orphaned";
 
 /// A linked tree whose `.git` names an admin directory that is gone (its
-/// repository was deleted or belongs to another account's clone).
+/// repository was deleted or belongs to another account's clone, or git
+/// dropped the registration and nothing recorded the files). A tree an
+/// eviction already recorded is cleared by `record_lost_checkouts` first.
 fn linked_repository_is_gone(worktree: &Path) -> bool {
     read_linked_worktree_admin_pointer(worktree).is_ok_and(|admin| !admin.exists())
 }

@@ -414,7 +414,15 @@ async fn recreate_rehydrated_tree(
 // lost tree becomes a rehydrate record like a reclaimed one, and reborn
 // recreates the checkout at the same path. Uncommitted edits went with the
 // directory; when the admin entry is gone too, the slot's last base is the
-// commit the session continues from.
+// commit the session continues from. A checkout the sweep already recorded
+// before an eviction it could not finish keeps that record: it is exact,
+// including a dirty tree's snapshot.
+//
+// A tree whose `.git` still points at an admin entry git dropped is lost the
+// same way, but its files are still there and nothing says they were
+// preserved. It is only cleared when an eviction record covers it (the sweep
+// snapshotted it, then `git worktree remove` dropped the registration and
+// failed on the files); otherwise it is kept and the error names why.
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct LostCheckoutHead {
@@ -491,9 +499,10 @@ async fn record_lost_checkout(
 ) -> Result<bool, PoolError> {
     let parsed = SlotId::parse(slot_id)?;
     let path = layout.slot_path(&parsed)?;
-    if path.join(".git").is_file() {
+    if is_formal_linked_worktree(&path) {
         return Ok(false);
     }
+    let unregistered_tree = path.join(".git").is_file();
     let Some(slot) = manifest
         .slots
         .get(slot_id)
@@ -516,29 +525,46 @@ async fn record_lost_checkout(
             "lost checkout slot missing its base",
         ));
     };
-    let head = lost_checkout_head(layout, base_repo, &parsed, &path)
-        .await
-        .unwrap_or_else(|| LostCheckoutHead {
-            head_oid: last_base_oid.clone(),
-            branch: None,
-        });
-    let record = RehydrateRecord {
-        session_key: binding.session_key.clone(),
-        instance_id: binding.instance_id.clone(),
-        run_id: binding.run_id.clone(),
-        execution_key: binding.execution_key.clone(),
-        slot_id: slot_id.to_string(),
-        head_oid: head.head_oid,
-        branch: head.branch,
-        dirty_snapshot: false,
-        last_base_ref,
-        last_base_oid,
-        evicted_at: now_rfc3339(),
-    };
-    validate_rehydrate_record(&record)?;
     let mut records = load_rehydrate_records(layout)?;
-    remember_shared_rehydrate_records(&mut records, manifest, record)?;
-    save_rehydrate_records(layout, &records)?;
+    // The sweep retracts its record when an eviction leaves the tree intact,
+    // so a record for this bound session and slot means the eviction got past
+    // its snapshot and git lost the tree under it.
+    let evicted_record = records
+        .iter()
+        .any(|record| record.session_key == binding.session_key && record.slot_id == slot_id);
+    if unregistered_tree && !evicted_record {
+        return Err(PoolError::new(
+            PoolErrorCode::WorktreeCleanupFailed,
+            format!(
+                "slot tree {} points at a git worktree registration that is gone and no eviction record covers its files; keeping it",
+                path.display()
+            ),
+        ));
+    }
+    if !evicted_record {
+        let head = lost_checkout_head(layout, base_repo, &parsed, &path)
+            .await
+            .unwrap_or_else(|| LostCheckoutHead {
+                head_oid: last_base_oid.clone(),
+                branch: None,
+            });
+        let record = RehydrateRecord {
+            session_key: binding.session_key.clone(),
+            instance_id: binding.instance_id.clone(),
+            run_id: binding.run_id.clone(),
+            execution_key: binding.execution_key.clone(),
+            slot_id: slot_id.to_string(),
+            head_oid: head.head_oid,
+            branch: head.branch,
+            dirty_snapshot: false,
+            last_base_ref,
+            last_base_oid,
+            evicted_at: now_rfc3339(),
+        };
+        validate_rehydrate_record(&record)?;
+        remember_shared_rehydrate_records(&mut records, manifest, record)?;
+        save_rehydrate_records(layout, &records)?;
+    }
     // Free the path for the rehydrated tree: git's entry first, then residue.
     let path_arg = path.display().to_string();
     let _ = git(

@@ -36,7 +36,6 @@ const ORDERING_FUNCTIONS = [
   "mergeChannelPresence",
   "removeChannelAgentInstancePresence",
   "channelsAfterAgentInstanceOffline",
-  "historicalSenderAvatarUrl",
   "patchChannelAgentPresenceFromMessage",
 ];
 
@@ -52,7 +51,6 @@ const {
   mergeChannelPresence,
   removeChannelAgentInstancePresence,
   channelsAfterAgentInstanceOffline,
-  historicalSenderAvatarUrl,
   patchChannelAgentPresenceFromMessage,
   commitCatalogChannels,
 } = functions;
@@ -301,7 +299,8 @@ test("a message updates its exact catalog Instance under a different member key"
   const presence = firstChannelInstance(next);
   assert.equal(channelInstances(next).length, 1);
   assert.equal(presence.status, "busy");
-  assert.equal(legacyChannelMembers(next)[presence.id].avatarUrl, "/agent-vendors/claude.svg");
+  // Its face comes from the registration's harness (faces.ts), not a picture the presence carries.
+  assert.equal(legacyChannelMembers(next)[presence.id].registration.harness, "claude");
 
   // A message from an unknown identity cannot create another Instance.
   const other = patchChannelAgentPresenceFromMessage(next, { ...entry,
@@ -317,16 +316,6 @@ test("unknown or stopped Instance messages and cross-Channel links cannot create
   assert.equal(patchChannelAgentPresenceFromMessage(channel, { ...entry,
     from: { ...entry.from, originChannelId: "other-channel" } }), channel);
   assert.throws(() => removeChannelAgentInstancePresence(channel, { agentId: "unused", channelInstanceId: "1" }), TypeError);
-});
-
-test("an immutable message avatar wins over live presence", () => {
-  assert.equal(
-    historicalSenderAvatarUrl({
-      snapshotAvatarUrl: "/avatars/reviewer-v1.png",
-      presenceAvatarUrl: "/agent-vendors/openai.svg",
-    }),
-    "/avatars/reviewer-v1.png",
-  );
 });
 
 function avatarItem(partial) {

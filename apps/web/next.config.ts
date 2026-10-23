@@ -94,6 +94,10 @@ const nextConfig: NextConfig = {
             key: "Strict-Transport-Security",
             value: "max-age=31536000; includeSubDomains; preload",
           },
+          // Only the stable Web is indexed; the beta Web serves the same pages.
+          ...(process.env.NEXT_PUBLIC_XMATRIX_WEB_CHANNEL === "beta"
+            ? [{ key: "X-Robots-Tag", value: "noindex, nofollow" }]
+            : []),
         ],
       },
       ...["/connect/sentry", "/connect/wecom", "/connect/dingtalk"].map(source => ({ source, headers: [

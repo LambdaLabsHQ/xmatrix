@@ -138,7 +138,8 @@ test("a database outage in the cell is answered as retryable; a defect still fai
   const defect = new TypeError("target.presetId is undefined");
   await assert.rejects(answerHarnessReleaseWatch({}, async () => { throw defect; }), (error) => error === defect);
   const refused = runtimeNamespace(() => Response.json({ error: "Not found" }, { status: 404 }));
-  await assert.rejects(watchHarnessReleasesBesidePostgres({ RELAY_RUNTIME: refused }), /answered 404: Not found/u);
+  await assert.rejects(watchHarnessReleasesBesidePostgres({ RELAY_RUNTIME: refused }),
+    (error) => /answered 404: Not found/u.test(error.cause?.message));
 });
 
 test("a cell still on the previous release is waited out; a missing route on this release fails the pass", async () => {
@@ -150,7 +151,7 @@ test("a cell still on the previous release is waited out; a missing route on thi
   const same = runtimeNamespace(() => Response.json({ error: "Not found", workerVersion: "new-version" },
     { status: 404 }));
   await assert.rejects(watchHarnessReleasesBesidePostgres({ ...deployed, RELAY_RUNTIME: same }),
-    /answered 404: Not found/u);
+    (error) => /answered 404: Not found/u.test(error.cause?.message));
 });
 
 test("the Runtime cell's 404 names the release it runs", async () => {

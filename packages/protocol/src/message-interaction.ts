@@ -1,6 +1,5 @@
 import type { AutoLaunchMention } from "./agent-auto-mention.js";
 import type { SerializedFirstMessageLaunchChoice } from "./agent-launch.js";
-import { agentAvatarUrlFromMetadata } from "./authority-foundation.js";
 import { parseAutoLaunchMentions, hasRetiredAgentLaunchMention } from "./agent-auto-mention.js";
 import { parseAgentControlCommands, type AgentControlCommand } from "./agent-control-command.js";
 import { parseRebornInstanceMentions, parseHandoffInstanceMentions,
@@ -38,10 +37,10 @@ export interface InteractionLaunchOption {
   targetId: string;
   descriptorRevision: string;
   operationId: "launch";
+  /** The harness it starts; its face is that harness's (faces.ts). */
   harness: string;
-  /** What the option shows: its name and the icon that names its harness. */
+  /** The name the option shows. */
   displayName: string;
-  iconRef?: string;
   /** Explicit to prevent a new catalog entry from enabling paid consumption. */
   funding: { kind: "owner-subscription" } | { kind: "service"; serviceId: string; catalogRevision: string };
 }
@@ -61,11 +60,10 @@ export interface InteractionDecisionWindow {
   failureCode?: string;
 }
 
-/** A launch option for a harness the reader may start in this Space; its icon is the harness preset's. */
+/** A launch option for a harness the reader may start in this Space. */
 export function harnessLaunchOption(harness: string, displayName = harness): InteractionLaunchOption {
-  const iconRef = agentAvatarUrlFromMetadata({ presetId: harness }, harness);
   return { optionId: harness, targetId: `harness:${harness}`, descriptorRevision: "registration-catalog",
-    operationId: "launch", harness, displayName, ...(iconRef ? { iconRef } : {}), funding: { kind: "owner-subscription" } };
+    operationId: "launch", harness, displayName, funding: { kind: "owner-subscription" } };
 }
 
 /**

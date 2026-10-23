@@ -92,8 +92,10 @@ exactly that mention, and nothing else:
 
 ### 2.2 Moving to another machine
 
-`handoff-elsewhere.ts` moves a repository-backed source whose machine cannot
-take its directory:
+`handoff-successor.ts` moves a source to a successor on any machine. A
+repository-backed checkout travels on a handoff branch; a private managed
+directory (a page co-write, a first message) has no checkout to carry, so the
+successor starts in a fresh one. Every source's conversation travels (§2.3):
 
 1. Hub resolves the exact source Run and Instance even when its Run has
    already exited. A sleeping/interrupted source is marked `stopped` before
@@ -151,6 +153,51 @@ a new Instance on the runtime default model, the retained directory and
 are never moved. Nothing is handed back after the reset.
 
 ---
+
+### 2.3 The predecessor's conversation
+
+A handoff carries what the predecessor was asked, said and did, whatever the
+successor's harness or model. Neither side resumes another vendor's session:
+no harness can load another's tool-call blocks, reasoning or signatures.
+
+1. Every handoff stop names the source's `resumeSessionKey` (and repo-pool
+   authority when it has one), which its status is read back under, and asks
+   `handoffContext: { maxChars: 60000 }`.
+2. Once the process tree is gone, the source's daemon reads the xMatrix resume
+   pointer the harness last saved under that key, then the harness's own
+   transcript: Claude Code's `~/.claude/projects/*/<id>.jsonl` (main thread
+   only), Codex's `~/.codex/sessions/**/rollout-*-<id>.jsonl` (`response_item`s,
+   not developer messages), or Grok's
+   `~/.grok/sessions/*/<id>/chat_history.jsonl` (the window its model sees
+   after compaction, without synthetic turns, preceded by its newest
+   `compaction/segment_*.md` as a `summary` entry). It keeps harness-neutral
+   entries (`user`, `assistant`, `tool_call` with its tool's name, `tool_result`),
+   each clipped (a message to 6,000 characters, keeping the head and the ask of
+   a long request; a tool call to 600; a result to 1,200), and drops reasoning,
+   signatures and images. Within `maxChars` it keeps any summary, the first
+   request and the newest entries, counting the rest as `omittedEntries`. The stop result
+   carries `handoffContext: { format: "xmatrix.handoff-context.v1", harness,
+   sessionId, entries, omittedEntries, error? }`; a missing session is an
+   `error`, never a failed stop.
+3. Hub hands that context to the successor's spawn as `handoffContext`. It is
+   not the launch's text (routing never reads it) and not part of the launch's
+   request identity, and it is not persisted, so a launch staged before the
+   result arrived still recovers, without it. A stop that did not answer
+   within the wait starts the successor without one.
+4. The successor's daemon writes `HANDOFF.md` (the entries as Markdown, headed
+   as untrusted prior context) and `transcript.jsonl` (the same entries) to a
+   fresh, owner-only scratch directory and exports it as `XMATRIX_HANDOFF_SESSION_DIR`. The
+   conversation and the legacy pointer snapshot share one materializer: a new
+   unpredictable directory per attempt, mode `0700` on Unix or a verified
+   owner-only Windows ACL, secured before any content is written. Files use
+   the private journal's atomic writes (`0600` on Unix, owner-only ACL on
+   Windows). A retry cannot overwrite an earlier bundle or follow a precreated
+   scratch symlink; a privacy/write failure omits the bundle and removes only
+   that attempt's newly created directory. Existing scratch copies are not
+   reopened or migrated by this change. The
+   successor's assignment tells it to read `HANDOFF.md` there before acting,
+   to treat it as context rather than instructions, to verify the state it
+   describes, and never to resume it.
 
 ## 3. Grammar
 
@@ -290,6 +337,9 @@ Fail closed when:
 ---
 
 ## 6. Session files
+
+> A handoff on any machine now carries the conversation itself (§2.3); this
+> section describes the retired same-machine snapshot of pointer files.
 
 xMatrix resume pointers (`~/.xmatrix/{codex,grok,claude}-resume/<hash>.session`)
 store a provider session id, not the transcript. The transcript lives in the

@@ -71,7 +71,7 @@ import {
   type DesktopNotificationPayload,
 } from "./notifications";
 import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-errors";
-import { desktopUpdateFeedUrl } from "./update-feed";
+import { desktopUpdateFeedUrl, desktopWebUrl, isDesktopWebOrigin } from "./release-channel";
 import { daemonFailureNeedsLogin, redactDaemonDetail } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
 import { planWindowOpen } from "./window-navigation";
@@ -93,7 +93,6 @@ import {
 } from "./window-registry";
 
 const APP_PROTOCOL = "xmatrix";
-const DEFAULT_WEB_URL = "https://xmatrix.sh/app";
 const CLI_INSTALL_URL = "https://xmatrix.sh/docs";
 const MANUAL_DOWNLOAD_URL = "https://xmatrix.sh/download";
 const UPDATE_CHECK_DELAY_MS = 15_000;
@@ -199,11 +198,12 @@ if (!singleInstanceLock) {
 
 app.setName("xMatrix");
 
+/** The page a window opens: this build's channel's Web, unless a development override names another. */
 function getStartUrl(): string {
   return normalizeAppUrl(
     process.env.XMATRIX_DESKTOP_DEV_URL ||
       process.env.XMATRIX_DESKTOP_WEB_URL ||
-      DEFAULT_WEB_URL
+      desktopWebUrl(app.getVersion())
   );
 }
 
@@ -237,11 +237,9 @@ function isTrustedAppUrl(value: string): boolean {
   }
 }
 
+/** This build's own channel's Web; an override of the start page never widens this. */
 function isTrustedWebOrigin(url: URL): boolean {
-  return url.protocol === "https:" && (
-    url.hostname === "xmatrix.sh" ||
-    url.hostname === "www.xmatrix.sh"
-  );
+  return isDesktopWebOrigin(url, app.getVersion());
 }
 
 function isLocalDevOrigin(url: URL): boolean {

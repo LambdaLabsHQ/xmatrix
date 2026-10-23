@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,9 +36,12 @@ export async function generatedBetaReleaseNotes({ repository, tag, token }) {
     for (let attempt = 0; ; attempt++) {
       let response;
       try {
-        response = await fetch(`https://api.github.com/repos/${repository}/releases${suffix}`, {
+        const url = new URL(`https://api.github.com/repos/${repository}/releases${suffix}`);
+        if (!body) url.searchParams.set("_xmatrix_read", randomUUID());
+        response = await fetch(url.toString(), {
           method: body ? "POST" : "GET",
-          headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json", "Cache-Control": "no-cache" },
+          cache: "no-store",
           ...(body ? { body: JSON.stringify(body) } : {}),
           signal: AbortSignal.timeout(15_000),
         });

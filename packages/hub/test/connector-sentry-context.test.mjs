@@ -145,11 +145,11 @@ test("a stackless event retains bounded provenance without copying private paylo
       { key: "user.email", value: "private-user-tag" }, { key: "request", value: "private-request-tag" }],
     entries: [{ type: "exception", data: { values: [{ type: "Error", value: "Request Canceled",
       mechanism: { type: "auto.browser.global_handlers.onunhandledrejection", handled: false, synthetic: true,
-        data: { secret: "private-mechanism-data" }, meta: { secret: "private-mechanism-meta" } } }] } }] };
+        data: { secret: "private-mechanism-data", stack_origin: "capture_boundary" }, meta: { secret: "private-mechanism-meta" } } }] } }] };
   const { result, calls } = await run([{ body: issue }, { body: diagnosticEvent }], undefined, "123");
   for (const expected of ["Event time: 2026-10-09T09:59:39.498000Z", "Release: xmatrix-v1.0.149",
     "Component: web", "Environment: production", "SDK: sentry.javascript.browser 11.4.0",
-    "Mechanism: auto.browser.global_handlers.onunhandledrejection · handled=false · synthetic=true"]) {
+    "Mechanism: auto.browser.global_handlers.onunhandledrejection · handled=false · synthetic=true · stack=capture boundary (origin unavailable)"]) {
     assert.ok(result.summary.includes(expected), expected);
   }
   assert.doesNotMatch(result.summary, /private-|Frame:/);
@@ -161,7 +161,7 @@ test("malformed or oversized diagnostic metadata is omitted and does not fail an
     release: "x".repeat(161), sdk: { name: "private-sdk\nsecret", version: "private-version" },
     tags: [{ key: "component", value: "private-component" }, { key: "environment", value: "private-environment\nsecret" }],
     entries: [{ type: "exception", data: { values: [{ type: "Error", value: "Request Canceled",
-      mechanism: { type: "x".repeat(161), handled: "private-handled", synthetic: "private-synthetic" } }] } }],
+      mechanism: { type: "x".repeat(161), handled: "private-handled", synthetic: "private-synthetic", data: { stack_origin: "private-origin" } } }] } }],
   } }], undefined, "123");
   assert.match(result.summary, /Request Canceled/);
   assert.doesNotMatch(result.summary, /private-|Event time:|Release:|SDK:|Component:|Environment:|Mechanism:/);
@@ -342,5 +342,44 @@ test("an issue list Sentry answered but that cannot be read is refused, never re
   for (const body of [[{ shortId: "../x", title: "An actual matching issue" }], [{ shortId: "HUB-2" }],
     [good, { shortId: "HUB-3", title: 7 }]]) {
     await assert.rejects(listIssues([{ body }], "*", "firstRelease:xmatrix-v1.1.0"), /unreadable issue/u, JSON.stringify(body));
+  }
+});
+
+// HUB-9N/9P/9Q/9R/9S/9T/9V/9W: read_issue must expose the new
+// diagnostics at the actual connector boundary without opening arbitrary extras.
+test("scheduled failures expose bounded retry phases and keep unrelated event extras private", async () => {
+  const failure = { operation: "app.gmail-routing.finish", shardId: "shard-0", statement: "transaction",
+    phase: "begin", queryName: "database_phase_begin_v1", code: "QUERY_READ_TIMEOUT", durationMs: 5000 };
+  const { result } = await run([{ body: issue }, { body: { ...event,
+    tags: [{ key: "operation", value: "scheduled: Gmail notification recovery and renewal" }],
+    context: { database_failure_attempts: JSON.stringify([failure, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
+      user: "private-user", sql: "private-sql", arguments: ["private-argument"] },
+  } }], undefined, "123");
+  assert.match(result.summary, /Scheduled task: Gmail notification recovery and renewal/);
+  assert.match(result.summary, /Database failure 1: app.gmail-routing.finish · shard-0 · transaction · begin · database_phase_begin_v1 · QUERY_READ_TIMEOUT · 5000 ms/);
+  assert.match(result.summary, /Database failure 2: .* · commit · database_phase_commit_v1/);
+  assert.doesNotMatch(result.summary, /private-/);
+  for (const invalid of ["private-invalid-json", JSON.stringify(Array(5).fill(failure)),
+    JSON.stringify([{ ...failure, sql: "private-sql" }]), JSON.stringify([{ ...failure, code: "private-code" }]),
+    JSON.stringify([{ ...failure, durationMs: Infinity }]), JSON.stringify([{ ...failure, phase: "private-phase" }])]) {
+    const { result: malformed } = await run([{ body: issue }, { body: { ...event,
+      tags: [{ key: "operation", value: "scheduled: private-task" }], context: { database_failure_attempts: invalid },
+    } }], undefined, "123");
+    assert.doesNotMatch(malformed.summary, /Database failure|Scheduled task:|private-/);
+  }
+});
+
+test("harness watch transport stages are readable without arbitrary extras or response content", async () => {
+  const evidence = { phase: "runtime_fetch", durationMs: 123, responseStatus: 0, retryable: true, overloaded: false };
+  for (const [value, valid] of [[evidence, true], [{ ...evidence, phase: "response_body", responseStatus: 200 }, true],
+    [{ ...evidence, body: "private-body" }, false], [{ ...evidence, phase: "private-phase" }, false],
+    [{ ...evidence, responseStatus: 999 }, false], [{ ...evidence, durationMs: -1 }, false],
+    [{ ...evidence, durationMs: 120001 }, false], [{ ...evidence, retryable: "private-flag" }, false]]) {
+    const { result } = await run([{ body: issue }, { body: { ...event, context: {
+      harness_release_watch_failure: JSON.stringify(value), body: "private-body", daemon: "private-daemon" },
+    } }], undefined, "123");
+    assert.equal(result.summary.includes("Harness release watch failure:"), valid);
+    if (valid) assert.match(result.summary, /Harness release watch failure: (runtime_fetch|response_body) · 123 ms · HTTP (unavailable|200) · retryable=true · overloaded=false/);
+    assert.doesNotMatch(result.summary, /private-/);
   }
 });

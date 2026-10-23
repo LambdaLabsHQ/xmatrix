@@ -20,6 +20,7 @@ integration("parallel allocations across Spaces are unrestricted and terminal ev
     await setup.query(`CREATE TABLE ${schema}.machine_daemons
       (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,connection_epoch bigint)`);
     await setup.query(`CREATE TABLE ${schema}.machine_run_routes (run_id text,owner_user_id text,machine_id text,terminal_at timestamptz)`);
+    await setup.query(`CREATE TABLE ${schema}.machines (owner_user_id text,machine_id text,retired_at timestamptz)`);
     await setup.query(`INSERT INTO ${schema}.machine_daemons VALUES ('daemon','owner','machine','host','online',1)`);
     await setup.query(`INSERT INTO ${schema}.agent_registrations VALUES ('owner','machine','codex',1,now(),now())`);
     const database = postgresConnections(5000, { rewrite, checkContext: context => assert.equal(context.placement, undefined) });
@@ -80,12 +81,24 @@ integration("parallel allocations across Spaces are unrestricted and terminal ev
       error => error.code === "allocation_model_mismatch");
     assert.equal((await capacity.admit(admission)).runtimeModel, "provider/model");
     assert.equal((await capacity.admit(admission)).reused, true);
+    await setup.query(`UPDATE ${schema}.machine_daemons SET connection_epoch=2`);
+    assert.equal((await capacity.admit({ ...admission, connectionEpoch: 2 })).state, "admitted",
+      "the same daemon's retry after a reconnect admits the Run on its current connection");
+    await assert.rejects(() => capacity.admit(admission), error => error.code === "allocation_daemon_reconnected");
+    await setup.query(`INSERT INTO ${schema}.machine_daemons VALUES ('other','owner','machine','host','online',2)`);
+    await assert.rejects(() => capacity.admit({ ...admission, daemonId: "other", connectionEpoch: 2 }),
+      error => error.code === "allocation_daemon_changed");
+    await setup.query(`DELETE FROM ${schema}.machine_daemons WHERE daemon_id='other'`);
+    await setup.query(`UPDATE ${schema}.machine_daemons SET connection_epoch=1`);
+    assert.equal((await capacity.admit(admission)).state, "admitted");
     const continuation = { ...admission, requestId: "continue" };
     await setup.query(`UPDATE ${schema}.machine_daemons SET connection_epoch=2`);
     assert.equal((await capacity.requireContinuation(continuation)).state, "admitted",
       "a daemon reconnect does not allocate a new slot for an existing Run");
-    await assert.rejects(() => capacity.requireContinuation({ ...continuation, hostId: "other-host" }),
-      error => error.code === "allocation_daemon_changed");
+    await setup.query(`UPDATE ${schema}.machine_daemons SET daemon_id='replaced' WHERE daemon_id='daemon'`);
+    await assert.rejects(() => capacity.requireContinuation(continuation), error => error.code === "allocation_daemon_changed",
+      "a Run admitted by a daemon the machine no longer has does not continue");
+    await setup.query(`UPDATE ${schema}.machine_daemons SET daemon_id='daemon' WHERE daemon_id='replaced'`);
     await assert.rejects(() => capacity.requireContinuation({ ...continuation, authorizationDigest: "b".repeat(64) }),
       error => error.code === "allocation_not_admitted");
     await setup.query(`UPDATE ${schema}.machine_daemons SET connection_epoch=1`);

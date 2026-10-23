@@ -15,6 +15,7 @@ import type {
   AgentInvocationSelections,
   DraftSummonIntent,
   AgentRuntimeState,
+  FaceOf,
   ChannelAttachment,
   ChannelMessage,
   ChannelReaction,
@@ -28,6 +29,7 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from "react";
 import { UserFacingProblem } from "../../lib/user-facing-error";
+import type { CommandNotice } from "./command-notices";
 
 export type ComposerSendSnapshot = {
   body: string;
@@ -60,8 +62,8 @@ export type AgentWorkItem = {
   label: string;
   agentLabel: string;
   status: string;
-  avatarUrl?: string;
-  avatarKind?: "agent" | "system";
+  /** Whose face the dock draws for it (protocol faces.ts). */
+  face: FaceOf;
   activity?: string;
   intent?: string;
   files?: string[];
@@ -185,7 +187,8 @@ export type AgentTraceTarget = AgentTraceTargetLike & {
   activity?: string;
   gitBranch?: string;
   goal?: AgentGoalStatus;
-  avatarUrl?: string;
+  /** Whose face heads its trace; an Agent known only by its Instance is drawn from that. */
+  face?: FaceOf;
   runtimeState?: AgentRuntimeState;
   usage?: LlmUsage;
 };
@@ -193,7 +196,7 @@ export type AgentTraceTarget = AgentTraceTargetLike & {
 export type ThreadReplyParticipant = {
   id: string;
   author: string;
-  avatarUrl?: string;
+  face: FaceOf;
 };
 
 export type TimelineItem = {
@@ -225,7 +228,8 @@ export type TimelineItem = {
   editedAt?: string;
   recalledAt?: string;
   sentAt: string;
-  avatarUrl?: string;
+  /** Whose face the row is drawn with: its sender's, built once from the message (protocol faces.ts). */
+  face: FaceOf;
   own?: boolean;
   isEvent?: boolean;
   eventType?: ObservabilityEvent["type"];
@@ -250,6 +254,8 @@ export type TimelineItem = {
   supersededBy?: string;
   /** A questionnaire card's state as the Hub settled it: answered or withdrawn. */
   questionnaireState?: QuestionnaireState;
+  /** Hub receipts for the command this message wrote, drawn on that command (command-notices.ts). */
+  commandNotices?: CommandNotice[];
   /**
    * A folded row: the activity entries and superseded reports of one run of the
    * same sender, oldest first (conversation-activity-rows.ts). Never a message.

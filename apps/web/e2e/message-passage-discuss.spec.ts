@@ -40,7 +40,8 @@ test("selecting a passage of a message starts a conversation holding it, linked 
 
   await expect.poll(() => fixtureRequestBodies(page, "conversation-create")).toEqual([expect.objectContaining({
     spaceId: E2E_SPACE.id, name: "“Retries back off too slowly.”", mode: "open",
-    metadata: { createdBy: "web", fromChannelId: E2E_CHANNEL.id, fromMessageId: "m-relay" },
+    // Named by the passage only until its first message says something (#870).
+    metadata: { createdBy: "web", fromChannelId: E2E_CHANNEL.id, fromMessageId: "m-relay", autoName: true },
   })]);
   const createdId = new RegExp(`^${CREATED_CHANNEL_ID}$`, "u");
   await expect.poll(() => fixtureRequestBodies(page, "link-create")).toEqual([

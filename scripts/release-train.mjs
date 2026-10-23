@@ -21,10 +21,10 @@
 //                         verified and the patch, minor or major bump its
 //                         changes call for. The train rebuilds exactly that
 //                         beta's source at the stable version and ships only
-//                         the clients named, to their stable channel and App
-//                         Review; Hub and Web already run every beta. It never
-//                         rides with betas, never takes newer main content and
-//                         never moves a stable source back.
+//                         what it names: the stable Web, and clients to their
+//                         stable channel and App Review. The Hub runs every
+//                         beta. It never rides with betas, never takes newer
+//                         main content and never moves a stable source back.
 //
 //   open beta:   refs/release-intents/<intent-run>/<scope>                         -> main SHA
 //   open stable: refs/release-intents/<intent-run>/<scope>/<bump>/<beta tag>       -> beta commit
@@ -59,9 +59,19 @@ import {
 } from "./release-version-order.mjs";
 
 export const COMPONENTS = Object.freeze(["hub", "web", "cli", "desktop", "android", "ios"]);
-// Hub and Web are single production services that every beta deploys.
-export const STABLE_COMPONENTS = Object.freeze(["cli", "desktop", "android", "ios"]);
+// The Hub is the single production service every beta deploys; a beta
+// deploys the beta Web and a stable the stable Web.
+export const STABLE_COMPONENTS = Object.freeze(["web", "cli", "desktop", "android", "ios"]);
 export const BUMPS = Object.freeze(["patch", "minor", "major"]);
+// The CodeQL language each component is written in.
+const CODEQL_LANGUAGE = Object.freeze({
+  hub: "javascript-typescript",
+  web: "javascript-typescript",
+  cli: "rust",
+  desktop: "javascript-typescript",
+  android: "java-kotlin",
+  ios: "swift",
+});
 const OPEN_PREFIX = "refs/release-intents/";
 const INFLIGHT_PREFIX = "refs/release-inflight/";
 const RUN_ID = /^[1-9]\d*$/u;
@@ -69,7 +79,8 @@ const RELEASE_TAG_PREFIX = /^(?:cli|desktop|android|xmatrix)-v/u;
 
 /**
  * Canonical component list from `hub,web` or `all`; desktop requires cli. A
- * stable release names clients only, and `all` means every client.
+ * stable release names the stable Web and clients only, and `all` means all
+ * of them.
  */
 export function normalizeScope(requested, channel = "beta") {
   const allowed = channel === "stable" ? STABLE_COMPONENTS : COMPONENTS;
@@ -77,10 +88,18 @@ export function normalizeScope(requested, channel = "beta") {
   if (!items.length || items.some((item) => !allowed.includes(item)) || new Set(items).size !== items.length ||
       (items.includes("desktop") && !items.includes("cli"))) {
     throw new Error(channel === "stable"
-      ? "a stable release names unique clients (cli, desktop, android, ios); hub and web ship with every beta; desktop requires cli"
+      ? "a stable release names unique components among web, cli, desktop, android and ios; the hub ships with every beta; desktop requires cli"
       : "release_components must name unique supported components; desktop requires cli");
   }
   return COMPONENTS.filter((item) => items.includes(item));
+}
+
+/**
+ * The CodeQL languages a train scans before it ships `scope`: those its
+ * components are written in, and the workflows that release them.
+ */
+export function codeqlLanguages(scope) {
+  return [...new Set(["actions", ...scope.map((component) => CODEQL_LANGUAGE[component])])];
 }
 
 function isBetaTag(tag) {
@@ -317,7 +336,9 @@ export async function api(pathname, token, { attempts = 5, delayMs = 2_000 } = {
     let response;
     try {
       response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${pathname}`, {
-        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
+        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "cache-control": "no-cache" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
       });
     } catch (error) {
       if (attempt >= attempts) throw new Error(`GitHub ${pathname}: ${error.message}`);
@@ -332,13 +353,23 @@ export async function api(pathname, token, { attempts = 5, delayMs = 2_000 } = {
 
 /** "success", "failed", "active" or "none" for the latest Production Release of `tag`. */
 async function productionStateOf(tag, token) {
-  const { workflow_runs: runs } = await api(
-    `/actions/workflows/production-release.yml/runs?branch=${encodeURIComponent(tag)}&event=workflow_dispatch&per_page=20`, token);
-  const latest = [...runs].sort((left, right) => right.id - left.id)[0];
-  if (!latest) return "none";
-  if (latest.status !== "completed") return "active";
-  return latest.conclusion === "success" ? "success" : "failed";
+  // The list can temporarily omit a run that the intent already verified.
+  // Never turn that first empty response into a lost stable or a duplicate beta.
+  const deadline = Date.now() + 10 * 60_000;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 5_000));
+    if (Date.now() >= deadline) break;
+    const { workflow_runs: runs } = await api(
+      `/actions/workflows/production-release.yml/runs?branch=${encodeURIComponent(tag)}&event=workflow_dispatch&per_page=20`, token);
+    const latest = [...runs].sort((left, right) => right.id - left.id)[0];
+    if (!latest) continue;
+    if (latest.status !== "completed") return "active";
+    return latest.conclusion === "success" ? "success" : "failed";
+  }
+  return "none";
 }
+
+class ProductionEvidenceUnavailable extends Error {}
 
 /**
  * Whether a stable intent may ship, and as what. The candidate must be the
@@ -352,7 +383,15 @@ export async function checkStable(root, { candidate, bump, scope, sha }, { tagNa
   }
   const record = tagRecord(root, candidate);
   if (sha && record.commit !== sha) throw new Error(`${candidate} no longer points at ${sha}`);
-  const state = await productionState(candidate);
+  let state;
+  try {
+    state = await productionState(candidate);
+  } catch (error) {
+    throw new ProductionEvidenceUnavailable(`${candidate}'s Production Release could not be read: ${error.message}`);
+  }
+  if (state === "none" || state === "active") {
+    throw new ProductionEvidenceUnavailable(`${candidate}'s Production Release is ${state}, not success; retry this train when its evidence is available`);
+  }
   if (state !== "success") throw new Error(`${candidate}'s Production Release is ${state}, not success`);
   const missing = scope.filter((component) => !record.scope.includes(component));
   if (missing.length) {
@@ -404,6 +443,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   output("tag", tag);
   output("channel", channel);
   output("source_sha", sourceSha);
+  output("codeql_languages", JSON.stringify(codeqlLanguages(scope)));
   output("intents", intents.map((intent) => intent.id).join(","));
 }
 
@@ -455,6 +495,9 @@ async function plan(root) {
       stable = await checkStable(root, { ...intent.stable, scope: intent.scope, sha: intent.sha },
         { tagNames, mainSha: trainSha, productionState });
     } catch (error) {
+      // An intent was checked before it was recorded. Temporary absence of
+      // that proof is not a new decision to discard it or ship a beta instead.
+      if (error instanceof ProductionEvidenceUnavailable) throw error;
       console.log(`::error::Stable intent ${intent.id} for ${intent.stable.candidate} refused: ${error.message}`);
       pushUpdates(root, [{ delete: intent.ref }]);
       continue;

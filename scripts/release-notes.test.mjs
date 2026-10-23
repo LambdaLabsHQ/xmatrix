@@ -29,14 +29,22 @@ test("stable notes are version-specific, nonempty and cannot carry transaction m
   assert.throws(() => authoredReleaseNotes(root, "../../outside"), /version/iu);
 });
 
-test("beta generation names the previous published version explicitly, excluding newer versions and drafts", async (t) => {
+test("beta generation bypasses stale release lists and names the previous published version, excluding newer versions and drafts", async (t) => {
   const original = global.fetch;
   t.after(() => { global.fetch = original; });
   global.fetch = async (url, options) => {
-    if (url.endsWith("?per_page=100")) return Response.json([
-      { tag_name: "xmatrix-v1.1.1-beta.9" }, { tag_name: "xmatrix-v1.1.1-beta.2" },
-      { tag_name: "xmatrix-v1.1.1-beta.3", draft: true }, { tag_name: "xmatrix-v1.1.0" }, { tag_name: "cli-dev" },
-    ]);
+    const request = new URL(url);
+    if (request.pathname.endsWith("/releases")) {
+      // An intermediary can retain the old first-page response even after a
+      // newer beta is published. Its old baseline expands the whole history.
+      const fresh = request.searchParams.has("_xmatrix_read") &&
+        options.headers["Cache-Control"] === "no-cache" && options.cache === "no-store";
+      if (!fresh) return Response.json([{ tag_name: "xmatrix-v1.0.0" }]);
+      return Response.json([
+        { tag_name: "xmatrix-v1.1.1-beta.9" }, { tag_name: "xmatrix-v1.1.1-beta.2" },
+        { tag_name: "xmatrix-v1.1.1-beta.3", draft: true }, { tag_name: "xmatrix-v1.1.0" }, { tag_name: "cli-dev" },
+      ]);
+    }
     assert.equal(url, "https://api.github.com/repos/LambdaLabsHQ/xmatrix/releases/generate-notes");
     assert.deepEqual(JSON.parse(options.body), { tag_name: "xmatrix-v1.1.1-beta.4", previous_tag_name: "xmatrix-v1.1.1-beta.2" });
     return Response.json({ body: "Changes since the previous beta." });

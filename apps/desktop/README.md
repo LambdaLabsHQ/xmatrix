@@ -1,6 +1,6 @@
 # xMatrix Desktop
 
-The desktop app is an Electron shell for `https://xmatrix.sh/app` with native macOS and Windows integration. Links that request a new window open in the operating system's default browser instead of replacing the app inside the Electron shell.
+The desktop app is an Electron shell for the xMatrix Web of its own channel, with native macOS and Windows integration. The app's version names the channel: a beta `X.Y.Z-beta.N` loads `https://beta.xmatrix.sh/app` and a stable `X.Y.Z` loads `https://xmatrix.sh/app`. Only that exact https origin may navigate the window in place and call the bridge; the stable Web is also trusted under `www.xmatrix.sh`. `XMATRIX_DESKTOP_DEV_URL` or `XMATRIX_DESKTOP_WEB_URL` changes the page a development build opens, but never what it trusts. Links that request a new window open in the operating system's default browser instead of replacing the app inside the Electron shell.
 
 ## Release
 

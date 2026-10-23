@@ -50,7 +50,7 @@ impl Default for ToolWaits {
 }
 
 impl ToolWaits {
-    pub(crate) fn new(threshold: Duration) -> Self {
+    pub fn new(threshold: Duration) -> Self {
         Self {
             open: HashMap::new(),
             threshold,

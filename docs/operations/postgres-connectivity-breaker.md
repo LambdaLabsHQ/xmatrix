@@ -26,3 +26,33 @@ pool fills with stalled sessions, and recovery is slower.
 Retryable PostgreSQL failures answer `503` with `retryable: true` and a
 `Retry-After` header: the breaker's remaining cooldown when it refused, else
 2 seconds. Non-retryable defects stay `500` without `Retry-After`.
+
+## Diagnosing a refusal
+
+A refusal is not another failed connection attempt. Query and session telemetry
+preserve `DATABASE_CIRCUIT_OPEN` rather than collapsing it to `DATABASE_ERROR`.
+The refused checkout's query point in `postgres_substrate_observability_v4`
+keeps the requested operation in `blob11` and adds:
+
+| Slots | Meaning |
+| --- | --- |
+| `blob12` | `open` cooldown or `half_open` probe in flight |
+| `blob13` | Last counted connectivity failure's normalized code |
+| `blob14`, `blob15` | That failure's code-defined operation and query/phase name |
+| `double5`, `double6`, `double7` | Retry delay, age of that failure (ms), counted failure streak |
+
+These additional slots apply only to refused **query** points; session timing
+slots retain their existing meanings. Unknown or malformed dimensions collapse
+to bounded buckets. No request ids, SQL, parameters, result rows, identities or
+connection strings are recorded. A successful statement clears the evidence
+along with the breaker; each rejection carries a snapshot from its own isolate
+and shard, so a coincident failure in another isolate is not mistaken for its
+cause. The last counted failure identifies the opening or failed probe path,
+not a complete trace of every failure in the streak.
+
+For the next HUB-9M event, select `blob6='DATABASE_CIRCUIT_OPEN'` query points
+around its UTC timestamp. Compare the refused operation with the last failure's
+operation, phase, code and age, and distinguish cooldown from an in-flight
+probe before changing a business path's recovery. A refused session performs
+no SQL; pre-commit recovery remains bounded to its existing one replay, and
+unknown commits still require reconciliation.

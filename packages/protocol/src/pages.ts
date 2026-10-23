@@ -1,6 +1,7 @@
 /** Wire types of the page authority (docs/design/pages-and-conversations.md). */
 
 import type { LiveAgentStatus } from "./authority-foundation.js";
+import type { MessageSender } from "./authority-runtime.js";
 import { externalAppSource, type ExternalAppSource } from "./external-app-source.js";
 
 export interface PageSummary {
@@ -127,7 +128,8 @@ export interface PageTreeAgent {
   name: string;
   /** Live Instance status — same set as `isLiveAgentStatus`, not a second enum. */
   status: LiveAgentStatus;
-  avatarUrl?: string;
+  /** The harness its Run was registered with, which gives its face (faces.ts). */
+  harness?: string;
   conversationId: string;
   /** What its Run last did on the page. */
   activity: "viewing" | "editing";
@@ -174,13 +176,16 @@ export interface PageConversation {
   headSequence: number;
   readSequence: number;
   lastMessage: {
-    /** `avatarUrl` is the one its message carried, so the preview shows the face the conversation does. */
-    from: { kind: "user" | "agent" | "app" | "system"; label: string; avatarUrl?: string };
+    /**
+     * Who wrote it, as its message names them, for `faceOfSender` (faces.ts): a person and an Agent are drawn by
+     * these ids. `avatarUrl` is the one the message carried, the face only of an author no account stands behind.
+     */
+    from: Pick<MessageSender, "kind" | "label" | "userId" | "identityId" | "instanceId" | "registration" | "avatarUrl">;
     bodyPreview: string;
     sentAt: string;
   } | null;
   /** Agents live in it now. */
-  agents: Array<{ instanceId: string; name: string; status: LiveAgentStatus; avatarUrl?: string }>;
+  agents: Array<{ instanceId: string; name: string; status: LiveAgentStatus; harness?: string }>;
 }
 
 /** Someone on the page right now, and the section they are in. */
@@ -219,6 +224,27 @@ export interface PageChanges {
   /** The revisions after `since`, oldest first. */
   revisions: PageRevision[];
   diff: Array<{ kind: "same" | "removed" | "added"; lines: string[] }>;
+}
+
+/**
+ * Who wrote each piece of a page's newest revision (pages-live-document.md §3, Facts; page-blame.ts): `runs`
+ * are `[length, revision, …]` over `body`, and `revisions` says who wrote each revision they name, from
+ * which conversations, and when. `conversations` names those of them the reader can read.
+ */
+export interface PageBlame {
+  pageId: string;
+  revision: number;
+  body: string;
+  runs: number[];
+  revisions: PageRevision[];
+  conversations: Array<{ conversationId: string; name: string }>;
+}
+
+/** The message a revision's conversation was at when the revision was written, to open it there. */
+export interface PageRevisionMoment {
+  conversationId: string;
+  messageId: string;
+  sequence: number;
 }
 
 export interface PageAwareness {

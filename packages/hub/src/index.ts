@@ -3,7 +3,7 @@ import "./error-reporting";
 import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 import { maintainChannelDeletions } from "./channel-deletion-maintenance";
-import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
+import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
 import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
 import { connectorGoogleChatRoomRepository, connectorFeishuRoomRepository, connectorTelegramRoomRepository, connectorTeamsRoomRepository } from "./connectors/credentials";
@@ -32,7 +32,7 @@ import { registerGooglePickerRoutes } from "./index-routes-google-picker";
 import { registerGmailMailboxRoutes } from "./index-routes-gmail-mailboxes";
 import { registerCloudflareLoginRoutes } from "./index-routes-cloudflare-logins";
 import { redirectInsecureRequest } from "./https-redirect";
-import { retryablePostgresFailure } from "./postgres-error-classification";
+import { scheduledTaskFailed } from "./scheduled-task-failure";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestErrorResponse } from "./index-shared";
@@ -80,6 +80,7 @@ import { registerAppSignInRoutes } from "./index-routes-app-sign-in";
 import { countAuthMetricsIn } from "./auth-observability";
 import { registerAuthSessionRoutes } from "./index-routes-auth-sessions";
 import { registerIndexRoutesHumanAvatar } from "./index-routes-human-avatar";
+import { registerFaceRoutes } from "./index-routes-faces";
 import { registerIndexRoutesMachineDaemonAdmission } from "./index-routes-machine-daemon-admission";
 import { registerIndexRoutesAppleBilling } from "./index-routes-apple-billing";
 import { registerIndexRoutesPush } from "./index-routes-push";
@@ -87,6 +88,7 @@ import { registerIndexRoutesBilling } from "./index-routes-billing";
 import { registerIndexRoutesJev } from "./index-routes-jev";
 import { registerSearchRerankRoutes } from "./index-routes-search-rerank";
 import { registerClientCompatibilityGate } from "./client-compatibility-gate";
+import { registerDirectReadCors } from "./direct-read-cors";
 import { registerRequestBodyLimit } from "./request-body-limit";
 import { registerRequestRateLimit } from "./request-rate-limit";
 import { registerIndexRoutesPostgresReadiness } from "./postgres-readiness";
@@ -98,6 +100,8 @@ const app = new Hono<{ Bindings: Env }>();
 app.onError((error, c) => error instanceof HTTPException ? error.getResponse() : requestErrorResponse(c, error));
 registerRequestRateLimit(app);
 registerRequestBodyLimit(app);
+// Before the compatibility gate, so its refusal of a direct read reaches the app too.
+registerDirectReadCors(app);
 registerClientCompatibilityGate(app);
 registerIndexRoutesPostgresReadiness(app);
 registerIndexRoutesAdmin(app);
@@ -139,6 +143,7 @@ registerOnboardingFunnelRoutes(app);
 registerIndexRoutesHumanProfile(app);
 registerAuthSessionRoutes(app);
 registerIndexRoutesHumanAvatar(app);
+registerFaceRoutes(app);
 registerAccountDeletionRoutes(app);
 
 export default {
@@ -165,9 +170,3 @@ export default {
   },
   queue: (batch: MessageBatch<unknown>) => ackRetiredExportQueue(batch),
 } satisfies ExportedHandler<Env>;
-
-/** A failed cron task names its cause; a database outage is logged, a defect is also reported. */
-function scheduledTaskFailed(name: string, error: unknown): void {
-  console.error(`${name} failed`, error);
-  if (!retryablePostgresFailure(error)) reportError(error, { operation: `scheduled: ${name}` });
-}

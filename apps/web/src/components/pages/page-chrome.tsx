@@ -2,19 +2,16 @@
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
+import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type FaceOf, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import {
   CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
-import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
+import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { Button } from "@/components/ui/button";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
-import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -37,7 +34,8 @@ export interface PresentPerson {
   name: string;
   color: string;
   agent: boolean;
-  avatarUrl?: string;
+  /** Their face: a person's own picture, an Agent's vendor mark. */
+  face: FaceOf;
   /** What they are doing, where, and in which conversation. */
   detail: string;
   blockId: string;
@@ -61,82 +59,6 @@ export interface PresentPerson {
   thinking?: boolean;
   /** How long it has thought, as briefly as a face's tag can say it: "19s", "2m". */
   brief?: string;
-}
-
-/** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
-export function PresenceStack({ people, onFollow }: { people: PresentPerson[]; onFollow: (person: PresentPerson) => void }) {
-  if (people.length === 0) return null;
-  const shown = people.slice(0, 5);
-  return (
-    <div className="flex items-center -space-x-0.5" data-testid="page-now" aria-label="On this page now">
-      {shown.map((person) => (
-        <button key={person.key} type="button" onClick={() => onFollow(person)}
-          title={`${person.name} · ${person.detail}`} aria-label={`${person.name}, ${person.detail}`}
-          className={cn("inline-flex rounded-full focus-visible:outline-2 focus-visible:outline-primary",
-            person.idle && "opacity-45")}
-          // Ringed in the colour of their caret in the text.
-          style={{ boxShadow: `0 0 0 2px var(--background), 0 0 0 3.5px ${person.color}` }}>
-          <IdentityAvatar kind={person.agent ? "agent" : "human"} label={person.name} title={`${person.name} · ${person.detail}`}
-            imageUrl={person.avatarUrl} initials={!person.agent || person.avatarUrl ? avatarInitials(person.name) : undefined}
-            size="xs" shape="circle" className="rounded-full" />
-        </button>
-      ))}
-      {people.length > shown.length && (
-        <span className={cn("app-overflow-count inline-flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-bold",
-          COUNT_CHIP_MATERIAL_CLASS)}>
-          +{people.length - shown.length}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Someone out of view, and which way to scroll to them. */
-export interface OffscreenPerson { person: PresentPerson; distance: number }
-
-/**
- * Who is working above or below what this person can see (§3.2), at the top
- * and bottom edges of the page as in Google Docs; clicking scrolls to the
- * nearest of them.
- */
-export function PageOffscreenPeople({ above, below, onJump }: {
-  above: OffscreenPerson[]; below: OffscreenPerson[]; onJump: (person: PresentPerson) => void;
-}) {
-  const edge = (side: "above" | "below", entries: OffscreenPerson[]) => {
-    if (entries.length === 0) return null;
-    const sorted = [...entries].sort((a, b) => a.distance - b.distance);
-    const people = sorted.map((entry) => entry.person);
-    const nearest = people[0]!;
-    const verb = nearest.editing ? "editing" : "reading";
-    const label = people.length === 1 ? `${nearest.name} is ${verb} ${side}`
-      : `${nearest.name} and ${people.length - 1} ${people.length === 2 ? "other" : "others"} ${side}`;
-    const Arrow = side === "above" ? ArrowUp : ArrowDown;
-    return (
-      <div className={cn("pointer-events-none absolute inset-x-0 z-20 flex justify-center",
-        side === "above" ? "top-2" : "bottom-3")}>
-        <button type="button" onClick={() => onJump(nearest)} data-testid={`page-people-${side}`}
-          title={people.map((person) => `${person.name} · ${person.detail}`).join("\n")}
-          className={actionClass({ variant: "secondary", size: "sm" },
-            "page-offscreen-people pointer-events-auto max-w-[min(22rem,90%)] rounded-full")}>
-          <span className="flex -space-x-1">
-            {people.slice(0, 3).map((person) => (
-              <span key={person.key} className="inline-flex rounded-full"
-                style={{ boxShadow: `0 0 0 1.5px var(--background), 0 0 0 3px ${person.color}` }}>
-                <IdentityAvatar kind={person.agent ? "agent" : "human"} label={person.name} imageUrl={person.avatarUrl}
-                  initials={!person.agent || person.avatarUrl ? avatarInitials(person.name) : undefined}
-                  size="xs" shape="circle" className="rounded-full" />
-              </span>
-            ))}
-          </span>
-          {nearest.editing && <span className="page-offscreen-typing size-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: nearest.color }} aria-hidden="true" />}
-          <span className="truncate">{label}</span>
-          <Arrow className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        </button>
-      </div>
-    );
-  };
-  return <>{edge("above", above)}{edge("below", below)}</>;
 }
 
 /** Room a face needs to carry its name beside it. */
@@ -349,7 +271,7 @@ export function ConversationList({ conversations, blocks, onOpen, focusBlockId =
                     )}
                     {conversation.lastMessage && (
                       <span className="block truncate text-xs text-muted-foreground">
-                        {conversation.lastMessage.from.label}: {conversation.lastMessage.bodyPreview}
+                        {conversation.lastMessage.label}: <InlineRowPreview text={conversation.lastMessage.bodyPreview} />
                       </span>
                     )}
                     {conversation.agents.length > 0 && (

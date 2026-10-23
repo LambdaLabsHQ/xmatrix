@@ -87,8 +87,21 @@ export interface HarnessInventoryItem {
   latestVersion?: string;
   /** Effective automatic updating on this machine: native control or the daemon's own update. */
   autoUpdate?: "enabled" | "disabled" | "unknown";
-  /** The harness's own sign-in status, when its preset has a status command. */
+  /** The harness's own sign-in status: its status command's answer, or for an ACP harness without one,
+   * whether it opened a session when started the way a launch starts it. */
   login?: HarnessLoginState;
+  /** Why a harness started the way a launch starts it refused to open a session, in its own words. */
+  loginDetail?: string;
+  /** When this item alone was probed again after the inventory's `capturedAt`, by an action on it
+   * such as a sign-in. Absent, the item is as old as the inventory. */
+  observedAt?: string;
+}
+
+/** When this item was last observed: its own re-probe, else the whole inventory's capture. */
+export function harnessItemObservedAt(inventory: HarnessInventory, item: HarnessInventoryItem): number {
+  const captured = Date.parse(inventory.capturedAt);
+  const observed = item.observedAt === undefined ? Number.NaN : Date.parse(item.observedAt);
+  return Number.isFinite(observed) && observed > captured ? observed : captured;
 }
 
 export const HARNESS_LOGIN_STATES = ["signed_in", "signed_out", "unknown"] as const;
@@ -106,10 +119,12 @@ const STATUSES = new Set(["ok", "missing", "unsupported", "timeout", "failed", "
 const ID = /^[a-z][a-z0-9-]{0,63}$/u;
 
 /** Fail closed, strip unknown keys, and keep daemon output out of persisted metadata. */
+const TIMESTAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/u;
+
 export function parseHarnessInventory(value: unknown): HarnessInventory | undefined {
   const input = record(value);
   if (!input || input.schemaVersion !== 1 || typeof input.capturedAt !== "string" ||
-      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/u.test(input.capturedAt) ||
+      !TIMESTAMP.test(input.capturedAt) ||
       !Number.isFinite(Date.parse(input.capturedAt)) ||
       !Array.isArray(input.items) || input.items.length > 64) return undefined;
   const ids = new Set<string>();
@@ -121,7 +136,7 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
         !STATUSES.has(item.probeStatus)) return undefined;
     if (item.autoUpdate !== undefined && !AUTO_UPDATE_STATES.has(item.autoUpdate as string)) return undefined;
     if (item.login !== undefined && !(HARNESS_LOGIN_STATES as readonly unknown[]).includes(item.login)) return undefined;
-    for (const [key, max] of [["path", 4096], ["version", 128], ["latestVersion", 128]] as const) {
+    for (const [key, max] of [["path", 4096], ["version", 128], ["latestVersion", 128], ["loginDetail", 300]] as const) {
       if (item[key] !== undefined && (typeof item[key] !== "string" ||
           item[key].length === 0 || item[key].length > max || hasControlCharacter(item[key]))) return undefined;
     }
@@ -136,6 +151,9 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
       ...(item.latestVersion === undefined ? {} : { latestVersion: item.latestVersion as string }),
       ...(item.autoUpdate === undefined ? {} : { autoUpdate: item.autoUpdate as HarnessInventoryItem["autoUpdate"] }),
       ...(item.login === undefined ? {} : { login: item.login as HarnessLoginState }),
+      ...(item.loginDetail === undefined || item.login !== "signed_out" ? {} : { loginDetail: item.loginDetail as string }),
+      ...(typeof item.observedAt === "string" && TIMESTAMP.test(item.observedAt) && Number.isFinite(Date.parse(item.observedAt))
+        ? { observedAt: item.observedAt } : {}),
     });
   }
   const inventory: HarnessInventory = { schemaVersion: 1, capturedAt: input.capturedAt, items };

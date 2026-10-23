@@ -182,7 +182,7 @@ pub(crate) struct ClaudeStreamLaunch<'a> {
 
 /// The state a stream process's reader and watchdog share with its session.
 pub(crate) struct ClaudeStreamShared {
-    pub(crate) relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
+    pub relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     pub(crate) agent: protocol::SerializedAgent,
     pub(crate) active: Arc<AsyncMutex<Option<ActiveStreamTurn>>>,
     pub(crate) alive: Arc<AtomicBool>,
@@ -1238,7 +1238,7 @@ pub(crate) fn claude_result_answer(value: &Value, visible_assistant_text: &str) 
         let answer = result.unwrap_or_else(|| visible_assistant_text.trim());
         return (answer.to_string(), false);
     }
-    let mut parts: Vec<String> = Vec::new();
+    let mut parts = crate::runtime_failure_detail::error_metadata(value);
     // An error result can still carry subtype "success" (an authentication
     // failure does): it names nothing, so only another subtype is kept.
     if let Some(subtype) = value
@@ -1249,10 +1249,11 @@ pub(crate) fn claude_result_answer(value: &Value, visible_assistant_text: &str) 
         parts.push(subtype.to_string());
     }
     if let Some(errors) = value.get("errors").and_then(Value::as_array) {
-        parts.extend(errors.iter().map(|error| match error.as_str() {
-            Some(text) => text.to_string(),
-            None => error.to_string(),
-        }));
+        parts.extend(
+            errors
+                .iter()
+                .map(crate::runtime_failure_detail::provider_error_detail),
+        );
     }
     if let Some(result) = result {
         parts.push(result.to_string());

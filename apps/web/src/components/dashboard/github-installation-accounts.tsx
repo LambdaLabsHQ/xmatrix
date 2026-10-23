@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { GitPullRequest, Link2, Plus, Unlink } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
+import { Face } from "./face";
 import { actionClass } from "@/components/ui/action-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { readGitHubGrant } from "@/lib/github-connect-return";
@@ -155,10 +156,9 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthori
 function AccountRow({ account, children }: { account: GitHubInstallationAccount; children: ReactNode }) {
   return (
     <li className="flex flex-wrap items-center gap-2" data-testid="github-installation-account">
-      {account.avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element -- GitHub avatars are remote and tiny.
-        <img src={account.avatarUrl} alt="" referrerPolicy="no-referrer" className="size-6 rounded-full" />
-      ) : null}
+      {/* A GitHub account has no xMatrix account: its face is the picture GitHub gives. */}
+      <Face of={{ kind: "external", name: account.login, imageUrl: account.avatarUrl ?? null }} size="xs" shape="circle"
+        glass={false} className="size-6 [&_.identity-avatar-face]:size-6" />
       <span className="min-w-0 flex-1 text-sm">
         <span className="font-bold">{account.login}</span>
         <span className="ml-1.5 text-xs text-muted-foreground">

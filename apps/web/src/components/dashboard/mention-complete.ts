@@ -13,8 +13,9 @@ import type {
   ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedSpace,
+  FaceOf,
 } from "@xmatrix/protocol";
-import { agentPresetAvatarUrl, channelPresenceInstances, presenceInstanceId, harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
+import { channelPresenceInstances, presenceInstanceId, harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
 import {
   agentInteractionTarget,
   connectorInteractionTarget,
@@ -27,7 +28,6 @@ import {
   MENTION_COMMAND_COMPLETION_SCHEMA,
   MENTION_BROADCAST_NAMES,
   canonicalMentionToken,
-  agentAvatarUrlFromMetadata,
   HANDOFF_INSTANCE_MENTION_AT_CARET_RE,
   isHandoffSuccessorName,
 } from "@xmatrix/protocol";
@@ -60,7 +60,9 @@ export type MentionCandidate = {
   kind: "agent" | "user" | "app" | "service" | "launch";
   status: SerializedAgent["status"];
   email?: string;
-  avatarUrl?: string;
+  /** Whose face the row shows (protocol faces.ts): set on every row that is a person or an Agent, none on a
+   *  command, an App or a launch condition. */
+  face?: FaceOf;
   agentId?: string;
   /** Existing alternate Human address, retained for compatibility. */
   handle?: string;
@@ -179,9 +181,9 @@ const MENTION_QUERY_RE = /(?:^|\s)@(\S*)$/;
 const COMPOSABLE_AGENT_MENTION_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,123}$/;
 const AGENT_COMMAND_QUERY_RE = /^\S+\s+\/.*$/;
 
-function agentRegistryAvatarUrl(agent: SerializedAgent | undefined): string | undefined {
-  if (!agent) return undefined;
-  return agent.avatarUrl || agentAvatarUrlFromMetadata(agent.metadata, agent.type);
+/** An Agent's face: the harness its registration names (`type`), on the Instance it is. */
+function agentFace(agent: SerializedAgent, instanceId = agent.instanceId): FaceOf {
+  return { kind: "agent", name: agent.name, harness: agent.type || null, id: instanceId ?? null };
 }
 
 export function connectorCompletionErrorMessage(message: string): string {
@@ -232,7 +234,7 @@ export function channelAgents(channel: ChannelSnapshot): SerializedAgent[] {
       name: instance.agentName, type: instance.registration.harness, lifetime: "short",
       email: instance.email || "", metadata: { machineId: instance.registration.machineId },
       connectedAt: instance.connectedAt, lastSeenAt: instance.lastSeenAt, status: instance.status,
-      avatarUrl: agentPresetAvatarUrl(instance.registration.harness), instances: [instance] });
+      instances: [instance] });
   }
   return agents;
 }
@@ -393,7 +395,7 @@ function channelTargetEntries(
       kind: "user",
       status: humanPresence?.status || "offline",
       email: directoryMember.email,
-      avatarUrl: directoryMember.avatarUrl,
+      face: { kind: "user", id: directoryMember.userId, name },
       ...(handle ? { handle } : {}),
       mention,
       completionSuffix: " ",
@@ -411,7 +413,7 @@ function channelTargetEntries(
       kind: "agent",
       status: AGENT_IDENTITY_NEUTRAL_STATUS,
       email: agent.email,
-      avatarUrl: agentRegistryAvatarUrl(agent),
+      face: agentFace(agent),
       mention,
       local: isLocalAgentCandidate(localMachineKeys, agent),
       description: agentTargetDescription,
@@ -627,7 +629,7 @@ function resolveHandoffSuccessorCompletion(
     name: harness,
     kind: "agent",
     status: AGENT_IDENTITY_NEUTRAL_STATUS,
-    avatarUrl: agentAvatarUrlFromMetadata({}, harness),
+    face: { kind: "agent", name: harness, harness },
     mention: `${sourceMention}:handoff:@${harness}`,
     action: "handoff-instance",
     description: `Hand off @${sourceMention} to a new @${harness} instance`,
@@ -1101,7 +1103,7 @@ function agentReferenceCandidates(
       kind: "agent" as const,
       status: instance.status,
       email: member.email,
-      avatarUrl: agentRegistryAvatarUrl(member),
+      face: agentFace(member, instance.id),
     };
     const mention = agentInstanceMentionLabel(instance.channelInstanceId ? member.name : reference, instance);
     candidates.push({

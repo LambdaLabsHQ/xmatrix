@@ -169,7 +169,7 @@ pub(crate) fn add_choice_metadata(
 }
 
 /// ACP supplies a complete replacement snapshot, including future finite controls.
-pub(crate) fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParameter> {
+pub fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParameter> {
     let mut seen = std::collections::HashSet::new();
     options
         .iter()
@@ -340,7 +340,7 @@ fn schema_choices(node: &Value, root: &Value, depth: usize) -> Option<Vec<Value>
     None
 }
 
-pub(crate) fn schema_parameters(schema: &Value) -> Vec<protocol::HarnessParameter> {
+pub fn schema_parameters(schema: &Value) -> Vec<protocol::HarnessParameter> {
     schema
         .get("properties")
         .and_then(Value::as_object)
@@ -526,7 +526,7 @@ pub(crate) fn model_parameters(
 
 /// Provider notices belong in textual controls too, including disabled
 /// switches that intentionally have no visible status chip.
-pub(crate) fn parameter_status(parameter: &protocol::HarnessParameter) -> String {
+pub fn parameter_status(parameter: &protocol::HarnessParameter) -> String {
     format!(
         "{}: {}; choices: {}{}",
         parameter.label,
@@ -540,7 +540,7 @@ pub(crate) fn parameter_status(parameter: &protocol::HarnessParameter) -> String
     )
 }
 
-pub(crate) fn validate<'a>(
+pub fn validate<'a>(
     parameters: &'a [protocol::HarnessParameter],
     id: &str,
     value: &str,

@@ -1,12 +1,12 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import type { FaceOf } from "@xmatrix/protocol";
+import { Face } from "@/components/dashboard/face";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 
 /** An Agent as the page's button shows it: its face and name. */
-export interface DockAgent { name: string; avatarUrl?: string }
+export interface DockAgent { name: string; face: FaceOf }
 
 /**
  * The bottom right of a page on a phone, under the thumb and on the edge where Agents on the page show:
@@ -33,8 +33,7 @@ export function PagePhoneDock({ caller, starting, onCall }: {
           )}
           <button type="button" onClick={onCall} className="page-agent-button pointer-events-auto relative rounded-full"
             aria-label={starting ? `${caller.name} is starting` : `Write with ${caller.name}`}>
-            <IdentityAvatar kind="agent" label={caller.name} imageUrl={caller.avatarUrl} title={`Write with ${caller.name}`}
-              initials={caller.avatarUrl ? avatarInitials(caller.name) : undefined} size="lg" shape="circle"
+            <Face of={caller.face} title={`Write with ${caller.name}`} size="lg" shape="circle"
               className="pointer-events-none rounded-full" />
             {!starting && (
               <span className="page-agent-button-add" aria-hidden="true"><Plus className="size-3" strokeWidth={3} /></span>

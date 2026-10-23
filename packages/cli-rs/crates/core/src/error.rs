@@ -259,7 +259,8 @@ impl CliError {
         }
     }
 
-    pub fn http_status(&self) -> Option<&HttpStatusError> {
+    #[cfg(test)]
+    pub(crate) fn http_status(&self) -> Option<&HttpStatusError> {
         match self {
             Self::HttpStatus(error) => Some(error),
             _ => None,

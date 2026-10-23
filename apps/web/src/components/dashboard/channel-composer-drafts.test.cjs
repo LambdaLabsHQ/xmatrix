@@ -6,7 +6,7 @@ require("./typescript-require.cjs").installTypeScriptRequire();
 const { selectComposerInvocation, updateComposerInvocationDraft, composerSendDraft, selectComposerReference } =
   require("./composer-invocation-bindings.ts");
 const { registrationMentionCandidates } = require("./registration-mention-candidates.ts");
-const { parseAgentInvocationSelections } = require("@xmatrix/protocol");
+const { parseAgentInvocationSelections, staticFace } = require("@xmatrix/protocol");
 
 const {
   clearChannelComposerDraft,
@@ -197,9 +197,9 @@ test("normal completion has one capability per harness and explicit locations re
   const selected = registrationMentionCandidates(existing, catalog, "codex/mac");
   assert.equal(selected.length, 1);
   assert.deepEqual(selected[0].invocationTarget, { kind: "registration", key: locations[1].key });
-  // A harness row and its locations carry the harness preset icon, not initials.
-  assert.equal(candidates[0].avatarUrl, "/agent-vendors/openai.svg");
-  assert.equal(selected[0].avatarUrl, "/agent-vendors/openai.svg");
+  // A harness row and its locations show the harness's face, not initials.
+  assert.equal(staticFace(candidates[0].face).imageUrl, "/agent-vendors/openai.svg");
+  assert.equal(staticFace(selected[0].face).imageUrl, "/agent-vendors/openai.svg");
   // An Agent its owner disabled is not offered, as a location or through its harness.
   const disabled = locations.map(location => ({ ...location, routingReady: false, routingBlocker: "owner_environment_disabled" }));
   assert.deepEqual(registrationMentionCandidates(existing, [{ harness: "codex", locations: disabled }], "codex/mac"), []);
