@@ -4,7 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { messageMachineIdentity, registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { AttachmentLightbox, ImageGalleryLightbox, LIGHTBOX_BUTTON_CLASS, type GalleryImage } from "./attachment-lightbox";
 import { attachmentMediaType } from "./attachment-media-type";
-import { MediaPlayer } from "./media-player";
+import { MediaDownloadProgress, MediaPlayer } from "./media-player";
 import { AgentIdentityLabels } from "./agent-identity-labels";
 import { BranchBadge, tagClass } from "./status-tag";
 import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin } from "./message-link-origin";
@@ -18,7 +18,9 @@ import { sameValue, shareByKey } from "../../lib/same-value";
 import { MESSAGE_SURFACE_METRICS_EVENT, messageSurfaceOf } from "./message-surface-metrics";
 
 import {
+  clearMessageAttachmentMediaProgress,
   commitMessageAttachmentMedia,
+  noteMessageAttachmentMediaProgress,
   holdMessageAttachmentMediaStore,
   letGoMessageAttachmentMediaStore,
   messageAttachmentMediaStoreFor,
@@ -1884,7 +1886,11 @@ export const MessageRow = memo(function MessageRow({
         attachmentId: attachment.id,
       };
       load = (async () => {
-        const result = await productMessageAttachmentMediaClient.loadMessageAttachment(token, loadRef);
+        const result = await productMessageAttachmentMediaClient.loadMessageAttachment(
+          token,
+          loadRef,
+          (received, total) => noteMessageAttachmentMediaProgress(mediaStore, identity, received, total ?? (attachment.size || null)),
+        );
         if (!mediaStore.active || mediaStore.released) {
           throw new Error("Attachment view was closed");
         }
@@ -1911,6 +1917,7 @@ export const MessageRow = memo(function MessageRow({
         throw error;
       }).finally(() => {
         mediaStore.loads.delete(identity);
+        clearMessageAttachmentMediaProgress(mediaStore, identity);
       });
       mediaStore.loads.set(identity, load);
     }
@@ -1932,6 +1939,13 @@ export const MessageRow = memo(function MessageRow({
       attachmentMediaMountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    mediaStore.progressListeners.add(refreshAttachmentMedia);
+    return () => {
+      mediaStore.progressListeners.delete(refreshAttachmentMedia);
+    };
+  }, [mediaStore, refreshAttachmentMedia]);
 
   useLayoutEffect(() => {
     // A lightbox holds a resolved attachment separately from the row. Close it
@@ -2078,6 +2092,8 @@ export const MessageRow = memo(function MessageRow({
 
   /** The open attachment's full-screen view: images in the zoomable gallery, video and Markdown in a plain frame. */
   function attachmentLightbox(open: ChannelAttachment) {
+    const openIdentity = relayV2AttachmentMediaIdentity(open);
+    const openProgress = openIdentity ? mediaStore.progress.get(openIdentity) : undefined;
     const actions = (
       <>
         <a
@@ -2127,7 +2143,13 @@ export const MessageRow = memo(function MessageRow({
     }
     return (
       <AttachmentLightbox label={open.name} onRequestClose={() => setOpenAttachment(null)} actions={actions}>
-        {open.kind === "video" ? (
+        {open.kind === "video" && !attachmentSource(open) ? (
+          <MediaDownloadProgress
+            label="Downloading video"
+            progress={openProgress}
+            className="app-media-skeleton-stage bg-black text-white/90"
+          />
+        ) : open.kind === "video" ? (
           <MediaPlayer
             kind="video"
             name={open.name}
@@ -2754,6 +2776,7 @@ export const MessageRow = memo(function MessageRow({
               const mediaLoadFailed = mediaIdentity
                 ? mediaStore.failures.has(mediaIdentity)
                 : !source;
+              const mediaProgress = mediaIdentity ? mediaStore.progress.get(mediaIdentity) : undefined;
               const attachmentCopied = copiedAttachmentId === attachment.id;
               const attachmentCopyFailed = failedAttachmentCopyId === attachment.id;
               return (
@@ -2773,7 +2796,7 @@ export const MessageRow = memo(function MessageRow({
                       ) : mediaLoadFailed ? (
                         <AttachmentMediaUnavailable />
                       ) : (
-                        <MediaSkeleton label="Loading audio" />
+                        <MediaDownloadProgress label="Downloading audio" progress={mediaProgress} className="min-h-16 text-muted-foreground" />
                       )}
                       <button type="button" className="mt-2 text-xs text-primary underline" onClick={() => void downloadMessageAttachment(displayAttachment)}>
                         Download {displayAttachment.name}
@@ -2792,7 +2815,7 @@ export const MessageRow = memo(function MessageRow({
                       ) : mediaLoadFailed ? (
                         <AttachmentMediaUnavailable />
                       ) : (
-                        <MediaSkeleton label="Loading video" className="absolute inset-0 min-h-0" />
+                        <MediaDownloadProgress label="Downloading video" progress={mediaProgress} />
                       )}
                       <button
                         type="button"

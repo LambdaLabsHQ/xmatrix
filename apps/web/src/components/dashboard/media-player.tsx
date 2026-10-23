@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 import { directMediaLink } from "./attachment-media-type";
+import type { MessageAttachmentMediaProgress } from "./message-attachment-media-store";
+import { formatFileSize } from "./workspace-shell-recovered";
 
 /** Uses the host browser's decoder, including Chromium in the Electron shell. */
 export function MediaPlayer({ kind, src, name, poster, className, autoPlay = false }: {
@@ -43,5 +46,41 @@ export function MediaLink({ href, children }: { href: string; children: ReactNod
         <MediaPlayer kind={kind} src={href} name="Linked media" className="max-h-[28rem] max-w-full bg-black object-contain" />
       </span>}
     </>}
+  </span>;
+}
+
+/**
+ * Media whose body is still downloading. Shows how far along it is so a large
+ * video reads as on its way rather than as a frozen black box.
+ */
+export function MediaDownloadProgress({ label, progress, className }: {
+  label: string;
+  progress?: MessageAttachmentMediaProgress;
+  className?: string;
+}) {
+  const total = progress?.total ?? null;
+  const received = progress?.received ?? 0;
+  const percent = total ? Math.min(100, Math.floor((received / total) * 100)) : null;
+  const detail = !progress
+    ? undefined
+    : total ? `${formatFileSize(received)} / ${formatFileSize(total)}` : formatFileSize(received);
+  return <span
+    role="progressbar"
+    aria-label={label}
+    aria-valuemin={0}
+    aria-valuemax={100}
+    aria-valuenow={percent ?? undefined}
+    aria-valuetext={detail}
+    className={cn("media-download-progress", className)}
+  >
+    <span className="text-sm font-medium tabular-nums">{percent === null ? label : `${label} ${percent}%`}</span>
+    <span className="media-download-progress-track">
+      <span
+        className="media-download-progress-bar"
+        data-indeterminate={percent === null || undefined}
+        style={percent === null ? undefined : { width: `${percent}%` }}
+      />
+    </span>
+    {detail && <span className="text-xs tabular-nums opacity-70">{detail}</span>}
   </span>;
 }

@@ -164,3 +164,27 @@ test("a new viewer releases the stores the previous one left behind", async () =
   assert.equal(before.released, true);
   releaseMessageAttachmentMediaStores();
 });
+
+test("progress redraws views once per visible step and stops after release", async () => {
+  const {
+    createMessageAttachmentMediaStore,
+    noteMessageAttachmentMediaProgress,
+    clearMessageAttachmentMediaProgress,
+    releaseMessageAttachmentMediaStore,
+  } = await loadStore();
+  const store = createMessageAttachmentMediaStore(SCOPE);
+  let redraws = 0;
+  store.progressListeners.add(() => { redraws += 1; });
+  noteMessageAttachmentMediaProgress(store, "a", 0, 1000);
+  noteMessageAttachmentMediaProgress(store, "a", 5, 1000);
+  noteMessageAttachmentMediaProgress(store, "a", 10, 1000);
+  noteMessageAttachmentMediaProgress(store, "a", 500, 1000);
+  assert.equal(redraws, 3);
+  assert.deepEqual(store.progress.get("a"), { received: 500, total: 1000 });
+  clearMessageAttachmentMediaProgress(store, "a");
+  assert.equal(store.progress.has("a"), false);
+  releaseMessageAttachmentMediaStore(store);
+  noteMessageAttachmentMediaProgress(store, "a", 1000, 1000);
+  assert.equal(store.progress.size, 0);
+  assert.equal(redraws, 3);
+});

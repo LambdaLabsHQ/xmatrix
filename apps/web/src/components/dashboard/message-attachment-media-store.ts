@@ -42,12 +42,21 @@ export interface MessageAttachmentMediaStore {
   objectUrls: Set<string>;
   /** Why media could not be loaded, by attachment identity. */
   failures: Map<string, string>;
+  /** Bytes received so far for each in-flight load, by attachment identity. */
+  progress: Map<string, MessageAttachmentMediaProgress>;
+  /** Views redrawn when a load's progress moves; every row showing it follows the same load. */
+  progressListeners: Set<() => void>;
   /** Loaded images, held so a remounted row paints them without reloading. */
   images: HTMLImageElement[];
   /** Bytes of the media this store holds, for the recent-store budget. */
   bytes: number;
   /** Mounted views using this store; only an unused store can be evicted. */
   users: number;
+}
+
+export interface MessageAttachmentMediaProgress {
+  received: number;
+  total: number | null;
 }
 
 /* Recent stores, least recently used first. A few channels' worth of media
@@ -134,6 +143,8 @@ export function createMessageAttachmentMediaStore(
     loads: new Map(),
     objectUrls: new Set(),
     failures: new Map(),
+    progress: new Map(),
+    progressListeners: new Set(),
     images: [],
     bytes: 0,
     users: 0,
@@ -170,6 +181,8 @@ export function releaseMessageAttachmentMediaStore(
   store.resolved.clear();
   store.loads.clear();
   store.failures.clear();
+  store.progress.clear();
+  store.progressListeners.clear();
   store.images = [];
   store.bytes = 0;
 }
@@ -195,4 +208,33 @@ export function commitMessageAttachmentMedia(
     store.images.push(image);
   }
   return true;
+}
+
+/**
+ * Record a load's progress. Views redraw once per visible step — a whole
+ * percent, or each MiB while the size is unknown — not on every network chunk.
+ */
+export function noteMessageAttachmentMediaProgress(
+  store: MessageAttachmentMediaStore,
+  identity: string,
+  received: number,
+  total: number | null,
+): void {
+  if (!store.active || store.released) return;
+  const previous = store.progress.get(identity);
+  store.progress.set(identity, { received, total });
+  if (previous && progressStep(previous) === progressStep({ received, total })) return;
+  for (const listener of store.progressListeners) listener();
+}
+
+/** A load finished or failed: it no longer has progress to show. */
+export function clearMessageAttachmentMediaProgress(
+  store: MessageAttachmentMediaStore,
+  identity: string,
+): void {
+  store.progress.delete(identity);
+}
+
+function progressStep({ received, total }: MessageAttachmentMediaProgress): number {
+  return total ? Math.floor((received / total) * 100) : Math.floor(received / (1024 * 1024));
 }
