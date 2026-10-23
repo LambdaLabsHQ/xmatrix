@@ -14,7 +14,7 @@ const expected = {
 };
 const owned = () => ({ ...structuredClone(expected), id: ruleId });
 const entrypoint = rules => ({ id: ruleset, kind: "zone", phase: "http_request_firewall_custom", rules });
-const zones = () => [{ id: zone, name: "example.com", account: { id: account } }];
+const zones = () => [{ hostname: "hub.example.com", zone_name: "example.com", zone_id: zone }];
 
 function cloudflare({ existing = null, zoneRows = zones(), lostReply = false } = {}) {
   const calls = [];
@@ -24,7 +24,11 @@ function cloudflare({ existing = null, zoneRows = zones(), lostReply = false } =
     const body = init.body ? JSON.parse(init.body) : undefined;
     calls.push({ path, method: init.method, body });
     assert.equal(init.headers.Authorization, "Bearer private-token");
-    if (path.endsWith("/zones")) return Response.json({ success: true, result: zoneRows });
+    if (path.endsWith("/domains")) {
+      assert.equal(path, `/client/v4/accounts/${account}/workers/domains`);
+      assert.equal(new URL(url).searchParams.get("hostname"), "hub.example.com");
+      return Response.json({ success: true, result: zoneRows });
+    }
     if (init.method === "GET") return current ? Response.json({ success: true, result: current })
       : Response.json({ success: false }, { status: 404 });
     if (path.endsWith("/rules")) current = entrypoint([...current.rules, { ...body, id: ruleId }]);
@@ -57,7 +61,7 @@ test("an absent entrypoint is created once; a lost response settles by readback"
 });
 
 test("ambiguous or foreign zones and cross-zone origins fail before a write", async () => {
-  for (const zoneRows of [[], [...zones(), ...zones()], [{ ...zones()[0], account: { id: "f".repeat(32) } }]]) {
+  for (const zoneRows of [[], [...zones(), ...zones()], [{ ...zones()[0], zone_name: "foreign.test" }]]) {
     const cf = cloudflare({ zoneRows });
     await assert.rejects(ensureMcpEdgePolicy({ ...options, fetchImpl: cf.fetchImpl }), /deployment-owned zone/u);
     assert.equal(cf.calls.some(call => call.method !== "GET"), false);

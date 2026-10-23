@@ -72,13 +72,16 @@ export async function ensureMcpEdgePolicy({ accountId, token, hubOrigin, appOrig
     }
     return decoded.result;
   };
-  const query = new URLSearchParams({ name: app.hostname, "account.id": accountId, per_page: "2" });
-  const zones = await request(`/zones?${query}`);
-  if (!Array.isArray(zones) || zones.length !== 1 || zones[0].name !== app.hostname ||
-      zones[0].account?.id !== accountId || !/^[a-f0-9]{32}$/u.test(zones[0].id ?? "")) {
+  // Read the domain just attached by this account's tagged Worker deployment.
+  // This uses its existing Workers grant, without adding Zone Read privileges.
+  const query = new URLSearchParams({ hostname: hub.hostname });
+  const domains = await request(`/accounts/${accountId}/workers/domains?${query}`);
+  if (!Array.isArray(domains) || domains.length !== 1 || domains[0].hostname !== hub.hostname ||
+      domains[0].zone_name !== app.hostname || !/^[a-f0-9]{32}$/u.test(domains[0].zone_id ?? "")) {
     throw new Error("MCP edge policy could not identify exactly one deployment-owned zone");
   }
-  const base = `/zones/${zones[0].id}/rulesets`;
+  const zoneId = domains[0].zone_id;
+  const base = `/zones/${zoneId}/rulesets`;
   const entrypoint = `${base}/phases/${PHASE}/entrypoint`;
   const expected = desiredRule(hub.hostname);
   const before = await request(entrypoint, "GET", undefined, true);
@@ -100,7 +103,7 @@ export async function ensureMcpEdgePolicy({ accountId, token, hubOrigin, appOrig
     if (!rule) throw mutationError ?? new Error("MCP edge policy was not present after creation");
   }
   if (!/^[a-f0-9]{32}$/u.test(rule.id ?? "")) throw new Error("MCP edge policy has no verified rule id");
-  return { zoneId: zones[0].id, rulesetId: before?.id ?? null, ruleId: rule.id, ref: REF };
+  return { zoneId, ruleId: rule.id, ref: REF };
 }
 
 /** An anonymous Python-style client must reach OAuth, never bypass it. */
