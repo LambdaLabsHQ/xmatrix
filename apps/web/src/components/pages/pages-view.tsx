@@ -1051,7 +1051,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }, [canEdit, pageId, spaceId, suggesting, token, waiting]);
   // The selection is acknowledged before any network request, including making an empty page.
   const startingWriter = useRef(false);
-  const [starting, setStarting] = useState<{ pageId: string; harness: string } | null>(null);
   // An Agent just called, from the moment it is asked until it shows on the page.
   const [called, setCalled] = useState<{ pageId: string; harness: string; conversationId: string; blockId: string | null;
     at: number } | null>(null);
@@ -1286,14 +1285,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (!page || startingWriter.current) return;
     coWriting();
     startingWriter.current = true;
-    setStarting({ pageId: page.pageId, harness });
     setNotice(null);
     const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
     try {
       writers.choose(harness);
       // Calling an Agent to write a new page is writing on it: it makes the page.
       const writing = pending && session ? await session.make() : page.pageId;
-      setStarting({ pageId: writing, harness });
       const where = `page:${writing}${blockId ? ` (section #${blockId})` : ""}`;
       // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
       const firstMessage = mentioned ? `@${harness} launch:force ${pageReferenceToken(writing, blockId)}`
@@ -1310,7 +1307,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       setNotice(userErrorMessage(cause, "Couldn't start the Agent"));
     } finally {
       startingWriter.current = false;
-      setStarting(null);
     }
   };
   coWriteRef.current = coWrite;
