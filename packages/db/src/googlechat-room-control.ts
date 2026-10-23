@@ -4,6 +4,7 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { AppControlError } from "./app-control.js";
 import { appRequestText as text } from "./app-request-text.js";
+import { retryBeforeCommit } from "./transaction-recovery.js";
 
 const ROOM = /^spaces\/[A-Za-z0-9_-]{1,128}$/u;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
@@ -390,7 +391,9 @@ export class PostgresBotRoomRepository {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) {
       throw new AppControlError("invalid_app_request", 400, "Invalid Chat maintenance bound");
     }
-    await this.database.transaction({ requestId: text(input.requestId, "requestId", 200), operation: `app.${this.provider}.cleanup` }, async tx => {
+    // Only database effects: close the lost session before replaying once.
+    // SKIP LOCKED leaves any rows still held by it for a later cleanup pass.
+    await retryBeforeCommit(() => this.database.transaction({ requestId: text(input.requestId, "requestId", 200), operation: `app.${this.provider}.cleanup` }, async tx => {
       await tx.query({ name: this.query("googlechat_expired_attempts_v1"), text: `DELETE FROM data.${this.tables.attempts}
         WHERE connection_id IN (SELECT connection_id FROM data.${this.tables.attempts}
           WHERE expires_at < clock_timestamp() ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED)`,
@@ -401,7 +404,7 @@ export class PostgresBotRoomRepository {
         WHERE (app_identity,chat_space) IN (SELECT app_identity,chat_space FROM data.${this.tables.lifecycle}
           WHERE removed_at < clock_timestamp()-interval '1 day' ORDER BY removed_at LIMIT $1 FOR UPDATE SKIP LOCKED)`,
       values: [limit], maxRows: 0 });
-    });
+    }));
   }
 }
 

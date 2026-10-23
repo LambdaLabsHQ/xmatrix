@@ -1,9 +1,12 @@
 import { connectorDatabase, integration } from "./postgres-database.fixture.mjs";
+import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
 import assert from "node:assert/strict";
 
 import {
   AppControlError,
+  createAuthorityDatabase,
   PostgresAppActionPolicyRepository,
+  PostgresAppActionRequestRepository,
   PostgresAppCredentialRepository,
   PostgresAppRepository,
   PostgresSpaceControlRepository,
@@ -26,9 +29,9 @@ async function withDatabase(run) {
   const { client, database, sql } = await connectorDatabase("app-credential-test");
   const space = `credential-space-${crypto.randomUUID()}`;
   const cleanup = async () => {
-    for (const table of ["app_connector_action_policies", "app_connector_credentials", "app_source_relations",
+    for (const table of ["app_connector_action_requests", "app_connector_action_policies", "app_connector_credentials", "app_source_relations",
       "app_connector_connections",
-      "channels", "space_members"]) await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
+      "channels", "space_members", "app_slack_workspace_claims"]) await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
   };
   try {
     await sql(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at) VALUES
@@ -100,6 +103,115 @@ integration("a connection's member read shows credential names, and deleting it 
       principal: { kind: "user", id: "owner" } }, "delete");
     assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_connector_credentials WHERE space_id=$1", [space])).rows[0].n, 0);
   });
+});
+
+integration("connector grants resolve only from the requested Space and reject transplanted ciphertext", async () => {
+  await withDatabase(async a => {
+    await withDatabase(async b => {
+      const credentials = new PostgresAppCredentialRepository(a.database, material);
+      for (const [spaceId, apiToken] of [[a.space, "space-a-token"], [b.space, "space-b-token"]]) {
+        await credentials.put({ requestId: crypto.randomUUID(), spaceId, providerId: "webhook",
+          actorUserId: "owner", fields: { apiToken }, policy, at });
+      }
+      const resolve = spaceId => credentials.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "webhook" });
+      assert.equal((await resolve(a.space)).values.apiToken, "space-a-token");
+      assert.equal((await resolve(b.space)).values.apiToken, "space-b-token");
+      assert.equal(await resolve(`absent-${crypto.randomUUID()}`), null, "there is no owner-level or global grant fallback");
+      await a.sql(`UPDATE data.app_connector_credentials target SET encrypted_value_json=source.encrypted_value_json
+        FROM data.app_connector_credentials source WHERE target.connection_id=$1 AND source.connection_id=$2`,
+      [`${b.space}:webhook`, `${a.space}:webhook`]);
+      await assert.rejects(resolve(b.space), error => error.code === "secret_authority_corrupt");
+      assert.equal((await resolve(a.space)).values.apiToken, "space-a-token");
+    });
+  });
+});
+
+// Open-project governance §2: a participant writes in their intake, but the
+// Space's connected apps act with its credentials, which, like its secrets,
+// are for members. Reading the connection there is unchanged.
+integration("a participant cannot use the Space's connected apps, even in their own intake", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await sql(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at) VALUES
+      ($2,'participant','participant',1,$1,$1),($2,'viewer','viewer',1,$1,$1)`, [at, space]);
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      metadata_json,created_at,updated_at) VALUES ($2||':intake',$2,'intake','intake','open',$2||':rank-intake',1,
+      '{"intakeOf":"participant"}'::jsonb,$1,$1)`, [at, space]);
+    const apps = new PostgresAppRepository(database);
+    const channelId = `${space}:intake`, connectionId = `${space}:webhook`;
+    const connection = (actorUserId, use) => apps.getConnection({ requestId: crypto.randomUUID(), connectionId,
+      actorUserId, channelId, use });
+    const command = (actorUserId, kind, input) => apps.command({ commandId: crypto.randomUUID(), connectionId, channelId,
+      principal: { kind: "user", id: actorUserId }, ...input }, kind);
+    const subscribe = (actorUserId) => command(actorUserId, "put-relation", { sourceKind: "repository",
+      sourceRef: "webhook:deploys", features: ["delivery"] });
+    const refused = (error) => error instanceof AppControlError && error.code === "channel_not_found";
+    // Without a Channel too: what the Space's credentials read (its private repository catalog) is a member's.
+    const spaceRefused = (error) => error instanceof AppControlError && error.code === "space_not_found";
+    for (const actorUserId of ["participant", "viewer"]) {
+      assert.equal((await connection(actorUserId)).connection.id, connectionId, `a ${actorUserId} still reads it`);
+      await assert.rejects(connection(actorUserId, true), (error) => refused(error) || spaceRefused(error));
+      await assert.rejects(apps.getConnection({ requestId: crypto.randomUUID(), connectionId, actorUserId, use: true }),
+        spaceRefused);
+      await assert.rejects(apps.listConnections({ requestId: crypto.randomUUID(), spaceId: space, actorUserId, use: true,
+        limit: 10 }), spaceRefused);
+      await assert.rejects(subscribe(actorUserId), refused);
+      await assert.rejects(command(actorUserId, "record-execution", { executionId: `run-${actorUserId}-${space}`,
+        messageId: "message-1", actionId: "post" }), refused);
+    }
+    assert.equal((await connection("member", true)).connection.id, connectionId, "a member uses it there");
+    assert.equal((await apps.getConnection({ requestId: crypto.randomUUID(), connectionId, actorUserId: "member",
+      use: true })).connection.id, connectionId, "and in the Space");
+    assert.equal((await subscribe("member")).relation.channelId, channelId);
+  });
+});
+
+// A subscription made while its creator could subscribe stays, but delivers
+// only while they still can: one a member made in what became their intake
+// stops when they become a participant, and nothing is deleted.
+integration("a subscription delivers only while its creator may still use the Space's connected apps", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      metadata_json,created_at,updated_at) VALUES ($2||':mine',$2,'mine','mine','open',$2||':rank-mine',1,
+      '{"intakeOf":"member"}'::jsonb,$1,$1)`, [at, space]);
+    await sql(`INSERT INTO data.app_source_relations (relation_id,connection_id,space_id,channel_id,source_kind,
+      source_ref,features_json,version,created_by,created_at,updated_at) VALUES
+      ($2||':r',$2||':webhook',$2,$2||':mine','repository','webhook:deploys','["delivery"]',1,'member',$1,$1)`,
+    [at, space]);
+    const routes = () => new PostgresAppRepository(database).connectorEventRoutes({ requestId: crypto.randomUUID(),
+      connectionId: `${space}:webhook`, sourceRef: "webhook:deploys", limit: 10 });
+    assert.equal((await routes()).length, 1);
+    await sql("UPDATE data.space_members SET role='participant' WHERE space_id=$1 AND user_id='member'", [space]);
+    assert.deepEqual(await routes(), []);
+    assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_source_relations WHERE space_id=$1", [space]))
+      .rows[0].n, 1, "the subscription itself is kept");
+  });
+});
+
+// The same holds for the Agents a participant brings: an Agent principal acts
+// with the Space's connected apps only while its Run's owner is a member.
+integration("a participant's own Agent cannot use the Space's connected apps either", async () => {
+  const fixture = await spaceSecretFixture();
+  const { ids, client } = fixture;
+  try {
+    await addConnection((text, values) => client.query(text, values), ids.space, "webhook", "Webhook");
+    await client.query(`UPDATE data.channels SET metadata_json=jsonb_build_object('intakeOf',$2::text)
+      WHERE channel_id=$1`, [ids.channel, ids.owner]);
+    const apps = new PostgresAppRepository(createAuthorityDatabase({ connectionString: process.env.XMATRIX_TEST_POSTGRES_URL,
+      shardId: "shard-0", applicationName: "app-agent-owner-role", statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000 }));
+    const subscribe = (sourceRef) => apps.command({ commandId: crypto.randomUUID(), connectionId: `${ids.space}:webhook`,
+      channelId: ids.channel, principal: { kind: "agent", id: ids.instance }, sourceKind: "repository", sourceRef,
+      features: ["delivery"] }, "put-relation");
+    assert.equal((await subscribe("webhook:member")).relation.channelId, ids.channel, "a member's Agent subscribes");
+    await client.query("UPDATE data.space_members SET role='participant' WHERE space_id=$1 AND user_id=$2",
+      [ids.space, ids.owner]);
+    await assert.rejects(subscribe("webhook:participant"),
+      (error) => error instanceof AppControlError && error.code === "channel_not_found");
+  } finally {
+    for (const table of ["app_source_relations", "app_connector_connections"]) {
+      await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]);
+    }
+    await fixture.close();
+  }
 });
 
 integration("event routes are the configured connection's Channels subscribed to the source", async () => {
@@ -227,17 +339,21 @@ integration("action policy is admin-written per Channel, read at execution, and 
     assert.equal(await read(), null);
     await policies.set({ ...base, requestId: "p1", mode: "allow", actorUserId: "owner" });
     assert.equal(await read(), "allow");
-    await policies.set({ ...base, requestId: "p2", mode: "deny", actorUserId: "owner" });
-    assert.equal(await read(), "deny");
+    await policies.set({ ...base, requestId: "p2", mode: "disallow", actorUserId: "owner" });
+    assert.equal(await read(), "disallow");
     await assert.rejects(policies.set({ ...base, requestId: "p3", mode: "allow", actorUserId: "member" }),
       (error) => error instanceof AppControlError && error.status === 404);
     await assert.rejects(policies.set({ ...base, requestId: "p4", channelId: "elsewhere", mode: "allow", actorUserId: "owner" }),
       (error) => error instanceof AppControlError && error.code === "channel_not_found");
     assert.deepEqual((await policies.list({ requestId: "l1", spaceId: space, providerId: "webhook", actorUserId: "member" }))
       .map(({ channelId, actionId, mode }) => ({ channelId, actionId, mode })),
-    [{ channelId: `${space}:a`, actionId: "post", mode: "deny" }], "members see the Channel overrides");
+    [{ channelId: `${space}:a`, actionId: "post", mode: "disallow" }], "members see the Channel overrides");
     await assert.rejects(policies.list({ requestId: "l2", spaceId: space, providerId: "webhook", actorUserId: "stranger" }),
       (error) => error instanceof AppControlError && error.status === 404);
+    await policies.set({ ...base, requestId: "ask", mode: "ask", actorUserId: "owner" });
+    assert.equal(await read(), "ask");
+    await sql("UPDATE data.app_connector_action_policies SET mode='deny',version=version+1 WHERE space_id=$1", [space]);
+    assert.equal(await read(), "disallow", "legacy deny remains restrictive");
     await policies.set({ ...base, requestId: "p5", mode: null, actorUserId: "owner" });
     assert.equal(await read(), null);
     await policies.set({ ...base, requestId: "p6", mode: "allow", actorUserId: "owner" });
@@ -252,13 +368,16 @@ async function useSlack(sql, space) {
   await sql(`UPDATE data.app_connector_connections SET connection_id=$1||':slack',provider_id='slack',
     provider_name='Slack',auth_mode='oauth' WHERE space_id=$1`, [space]);
 }
-const oauthPolicy = { allowed: ['botToken', 'ingressKey', 'signingSecret'] };
+const oauthPolicy = { allowed: ['botToken', 'ingressKey', 'signingSecret'], generated: ['ingressKey'] };
 const oauthInput = (space, installationId = 'T1') => ({ requestId: crypto.randomUUID(), spaceId: space,
   providerId: 'slack', actorUserId: 'owner', fields: { botToken: `fixture-${installationId}` },
   policy: oauthPolicy, oauthInstallation: { appClientId: 'app-1', installationId },
   initialize: { ingressKey: `fixture-key-${installationId}` }, at });
-const readOAuth = (apps, extra = {}) => apps.oauthEventConnections({ requestId: crypto.randomUUID(),
-  providerId: 'slack', appClientId: 'app-1', installationId: 'T1', limit: 50, ...extra });
+// Slack dates each event; one well after every fixture's Connect.
+const later = '2100-01-01T00:00:00.000Z';
+const readOAuth = async (apps, extra = {}) => (await apps.oauthEventConnections({ requestId: crypto.randomUUID(),
+  providerId: 'slack', appClientId: 'app-1', installationId: 'T1', limit: 50, eventAt: later, ...extra }))
+  .map(({ connectionId, spaceId }) => ({ connectionId, spaceId }));
 
 async function useVercel(sql, space) {
   await sql(`UPDATE data.app_connector_connections SET connection_id=$1||':vercel',provider_id='vercel',
@@ -348,6 +467,13 @@ integration('OAuth installation binding is atomic with credentials and invalidat
     await credentials.put(oauthInput(space));
     const expected = [{ connectionId: `${space}:slack`, spaceId: space }];
     assert.deepEqual(await readOAuth(apps), expected);
+    // Each route names the credential version its binding is for, so a delivery can be fenced to it.
+    assert.deepEqual((await apps.oauthEventConnections({ requestId: crypto.randomUUID(), providerId: 'slack',
+      appClientId: 'app-1', installationId: 'T1', limit: 50, eventAt: later })).map((row) => row.credentialVersion), [1]);
+    // A Slack event is fenced to the claim current when Slack dates it: undated or older, it routes nowhere.
+    assert.deepEqual(await readOAuth(apps, { eventAt: undefined }), []);
+    assert.deepEqual(await readOAuth(apps, { eventAt: '2026-10-01T00:00:00.000Z' }), []);
+    assert.deepEqual(await readOAuth(apps, { eventAt: at }), expected);
     const read = () => credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
     const before = await read();
     await assert.rejects(credentials.put({ ...oauthInput(space, 'T2'), fields: { invalidField: 'bad' } }), /Unsupported/);
@@ -366,7 +492,18 @@ integration('OAuth installation binding is atomic with credentials and invalidat
     await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
       fields: { signingSecret: 'admin-signature-edit' } });
     assert.deepEqual(await readOAuth(apps, { installationId: 'T2' }), [], 'manual credentials require new grant evidence');
+    const manual = await read();
+    assert.equal(manual.oauthGrant, undefined);
+    assert.equal(manual.values.botToken, undefined, "leaving the grant leaves its bot behind, never as a manual token");
+    assert.deepEqual([manual.values.signingSecret, manual.values.ingressKey], ['admin-signature-edit', before.values.ingressKey]);
     await credentials.put(oauthInput(space));
+    const bound = await read();
+    await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
+      fields: { ingressKey: 'regenerated-key' } });
+    assert.deepEqual(await readOAuth(apps), expected, 'regenerating a Hub-minted field keeps the grant bound');
+    const regenerated = await read();
+    assert.deepEqual([regenerated.values.botToken, regenerated.values.ingressKey], [bound.values.botToken, 'regenerated-key']);
+    assert.deepEqual(regenerated.oauthGrant, bound.oauthGrant);
     await apps.command({ commandId: `delete-oauth-${space}`, spaceId: space, providerId: 'slack',
       principal: { kind: 'user', id: 'owner' } }, 'delete');
     assert.equal((await sql('SELECT count(*)::int AS n FROM data.app_connector_oauth_installations WHERE space_id=$1', [space])).rows[0].n, 0);
@@ -395,13 +532,101 @@ integration('OAuth routing scopes by provider, application, workspace and curren
       assert.deepEqual(await readOAuth(apps, { appClientId: 'retired-app' }), []);
       await otherSql(`UPDATE data.app_connector_connections SET metadata_json='{"installationId":"T1"}' WHERE space_id=$1`, [other]);
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }], 'caller metadata never widens delivery');
+      // One Slack workspace speaks for one Space: its bot reads the channels it
+      // was invited into, so another Space's Connect is refused while this one holds it.
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }]);
+      // A failed check is not a disconnect: the workspace stays this Space's, and it is not delivered to meanwhile.
+      await sql("UPDATE data.app_connector_connections SET status='error' WHERE space_id=$1", [space]);
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      assert.deepEqual(await readOAuth(apps), []);
+      // Nor is a disconnect in xMatrix: the bot stays in the channels it joined, so the claim stays.
+      await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      // A workspace no claim names is held by a current binding (a disconnected one no longer holds):
+      await sql("DELETE FROM data.app_slack_workspace_claims WHERE app_client_id='app-1'");
       await otherCredentials.put(oauthInput(other));
-      assert.equal((await readOAuth(apps)).length, 2, 'two Spaces may explicitly authorize the same workspace');
+      assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
+      // Older bindings of two Spaces sharing a workspace are contested (a claim
+      // naming no Space): neither reads it, acts with its bot or can claim it.
+      await sql("UPDATE data.app_connector_connections SET status='configured' WHERE space_id=$1", [space]);
+      await sql("UPDATE data.app_slack_workspace_claims SET space_id=NULL WHERE app_client_id='app-1'");
+      assert.deepEqual(await readOAuth(apps), []);
+      const shared = async (repository, id) => (await repository.resolve({ requestId: crypto.randomUUID(), spaceId: id,
+        providerId: 'slack' })).oauthGrant.workspaceShared;
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, true]);
+      await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
+      for (const [repository, id] of [[otherCredentials, other], [credentials, space]]) {
+        await assert.rejects(repository.put(oauthInput(id)), (error) => error.code === 'workspace_connected_elsewhere',
+          'a local disconnect of one contested binding hands the shared bot to no one');
+      }
+      await sql("UPDATE data.app_connector_connections SET status='configured' WHERE space_id=$1", [space]);
+      // Regenerating the ingress key cannot launder the shared bot into an unbound manual token.
+      await credentials.put({ ...oauthInput(space), oauthInstallation: undefined, initialize: undefined,
+        fields: { ingressKey: 'regenerated-key' } });
+      assert.equal(await shared(credentials, space), true);
+      // Once claimed (after an uninstall, by its next Connect), the claimant alone reads it and acts with its bot.
+      await otherSql("UPDATE data.app_slack_workspace_claims SET space_id=$1 WHERE app_client_id='app-1'", [other]);
+      assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
+      // A binding made before grant generations existed is still a binding of the workspace.
+      await otherSql('UPDATE data.app_connector_oauth_installations SET grant_generation=NULL WHERE space_id=$1', [other]);
+      assert.deepEqual([await shared(credentials, space), await shared(otherCredentials, other)], [true, false]);
       await assert.rejects(readOAuth(apps, { limit: 1 }), /exceeds its bound/, 'overflow fails closed, never partially routes');
       await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
       assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
       await otherSql('UPDATE data.app_connector_credentials SET version=version+1 WHERE space_id=$1', [other]);
       assert.deepEqual(await readOAuth(apps), [], 'mismatched credential versions never route');
+  });
+});
+
+integration('concurrent Connects of one Slack workspace from two Spaces bind exactly one', async () => {
+  await withSlackDatabasePair(async ({ database, space }, { database: otherDb, space: other }) => {
+    const apps = new PostgresAppRepository(database);
+    const results = await Promise.allSettled([new PostgresAppCredentialRepository(database, material).put(oauthInput(space)),
+      new PostgresAppCredentialRepository(otherDb, material).put(oauthInput(other))]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.find((result) => result.status === 'rejected').reason.code, 'workspace_connected_elsewhere');
+    assert.equal((await readOAuth(apps)).length, 1);
+  });
+});
+
+// Slack's own word that the app left the workspace (signature-verified by the
+// Hub) retires every binding of it: they disconnect, keeping their encrypted
+// credentials, and the workspace may be connected again by any Space. A revoked
+// bot token disconnects them too, but its workspace stays this Space's.
+integration('a verified Slack uninstall retires the workspace so it can be connected again', async () => {
+  await withSlackDatabasePair(async ({ sql, database, space }, { database: otherDb, space: other }) => {
+    const apps = new PostgresAppRepository(database);
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    await credentials.put(oauthInput(space));
+    const before = await credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
+    const retire = (overrides = {}) => apps.retireSlackWorkspace({ requestId: crypto.randomUUID(), appClientId: 'app-1',
+      installationId: 'T1', at, eventAt: '2026-10-03T00:00:00.000Z', limit: 50, uninstalled: true, ...overrides });
+    assert.equal(await retire({ installationId: 'T9' }), 0);
+    assert.equal(await retire({ appClientId: 'other-app' }), 0);
+    // Slack's event predates this Connect (at is 2026-10-02): a delayed or replayed uninstall spares a newer grant.
+    assert.equal(await retire({ eventAt: '2026-10-01T00:00:00.000Z' }), 0);
+    assert.deepEqual(await readOAuth(apps), [{ connectionId: `${space}:slack`, spaceId: space }]);
+    const otherCredentials = new PostgresAppCredentialRepository(otherDb, material);
+    assert.equal(await retire({ uninstalled: false }), 1, 'tokens_revoked disconnects the binding');
+    assert.deepEqual(await readOAuth(apps), []);
+    await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere',
+      'a revoked token leaves the bot in place, so the workspace is not released');
+    await credentials.put(oauthInput(space));
+    // A delayed uninstall dated before this Space's own reconnect spares the renewed claim.
+    await credentials.put({ ...oauthInput(space), at: '2026-10-04T00:00:00.000Z' });
+    assert.equal(await retire({ eventAt: '2026-10-03T12:00:00.000Z' }), 0);
+    await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+    assert.equal(await retire({ eventAt: '2026-10-05T00:00:00.000Z' }), 1);
+    assert.equal(await retire(), 0, 'idempotent');
+    assert.deepEqual(await readOAuth(apps), []);
+    const after = await credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: 'slack' });
+    assert.equal(after.status, 'disconnected');
+    assert.deepEqual(after.values, before.values, 'credential evidence is kept until an admin reconnects');
+    await otherCredentials.put(oauthInput(other));
+    assert.deepEqual(await readOAuth(apps), [{ connectionId: `${other}:slack`, spaceId: other }]);
+    assert.equal((await sql('SELECT count(*)::int AS n FROM data.app_connector_oauth_installations WHERE space_id=$1',
+      [space])).rows[0].n, 0);
   });
 });
 
@@ -417,8 +642,15 @@ integration('subscription route reads recheck OAuth bindings after the initial i
       source_ref,features_json,version,created_by,created_at,updated_at) VALUES
       ($2||':r1',$2||':slack',$2,$2||':a','repository','slack:c1','["messages"]',1,'owner',$1,$1)`, [at, space]);
     const routes = () => apps.connectorEventRoutes({ requestId: crypto.randomUUID(), connectionId: `${space}:slack`,
-      sourceRef: 'slack:c1', limit: 10, oauthBinding: { providerId: 'slack', appClientId: 'app-1', installationId: 'T1' } });
+      sourceRef: 'slack:c1', limit: 10, oauthBinding: { providerId: 'slack', appClientId: 'app-1', installationId: 'T1', eventAt } });
+    let eventAt = later;
     assert.equal((await routes()).length, 1);
+    // Routes keep the claim fence: an event dated before the claim, or undated, reaches no subscription.
+    eventAt = '2026-10-01T00:00:00.000Z';
+    assert.deepEqual(await routes(), []);
+    eventAt = undefined;
+    assert.deepEqual(await routes(), []);
+    eventAt = later;
     await credentials.put(oauthInput(space, 'T2'));
     assert.deepEqual(await routes(), [], 'old workspace events cannot reach newly authorized workspace subscriptions');
   });
@@ -452,17 +684,22 @@ integration('scheduled Space deletion excludes OAuth delivery, restoration resto
       const otherCredentials = new PostgresAppCredentialRepository(otherDb, material);
       const apps = new PostgresAppRepository(database);
       await credentials.put(oauthInput(space));
-      await otherCredentials.put(oauthInput(other));
       const ids = async () => (await readOAuth(apps)).map(row => row.spaceId).sort();
-      assert.deepEqual(await ids(), [space, other].sort());
+      assert.deepEqual(await ids(), [space]);
       const remove = () => spaces.mutateSpace({ requestId: crypto.randomUUID(), commandId: crypto.randomUUID(),
         actorUserId: 'owner', at: new Date().toISOString(), kind: 'space_delete', spaceId: space });
       await remove();
-      assert.deepEqual(await ids(), [other], 'scheduled deletion immediately blocks incoming delivery');
+      assert.deepEqual(await ids(), [], 'scheduled deletion immediately blocks incoming delivery');
       await spaces.restoreSpace({ requestId: crypto.randomUUID(), commandId: crypto.randomUUID(), actorUserId: 'owner',
         spaceId: space, at: new Date().toISOString() });
-      assert.deepEqual(await ids(), [space, other].sort());
+      assert.deepEqual(await ids(), [space]);
       const again = await remove();
+      // Deleting the Space leaves its bot in the workspace's channels: the claim holds until Slack uninstalls the app.
+      await assert.rejects(otherCredentials.put(oauthInput(other)), (error) => error.code === 'workspace_connected_elsewhere');
+      assert.equal(await apps.retireSlackWorkspace({ requestId: crypto.randomUUID(), appClientId: 'app-1', installationId: 'T1',
+        at, eventAt: new Date(Date.now() + 60_000).toISOString(), limit: 50, uninstalled: true }), 1);
+      await otherCredentials.put(oauthInput(other));
+      assert.deepEqual(await ids(), [other]);
       const due = new Date(Date.parse(again.deletion.purgeAfter)+1000).toISOString();
       let status;
       for (let guard=0; guard<500; guard++) {
@@ -882,6 +1119,33 @@ const githubPolicy = { id: "github", name: "GitHub", authMode: "oauth", scopes: 
   secretRefs: [], capabilities: [], metadataFields: ["repository", "installationId", "installationIds",
     "commentWriteChannelId"] };
 
+// Who handed an installation to the Space is a fact only GitHub Connect
+// records: a Space admin, for installations the Space links now; a link it
+// no longer has loses its record, and the connection view carries the rest.
+integration("only an admin's GitHub Connect records who linked an installation, and only while it is linked", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    const apps = new PostgresAppRepository(database);
+    const upsert = (body) => apps.upsert({ commandId: crypto.randomUUID(), spaceId: space, actorUserId: "owner",
+      provider: githubPolicy, body, at });
+    await upsert({ status: "configured", authMode: "oauth", metadata: { installationIds: ["111", "222"] } });
+    const record = (actorUserId, installationIds, githubUserId = 77) => apps.recordGitHubInstallationLinks({
+      requestId: crypto.randomUUID(), spaceId: space, actorUserId, githubUserId, installationIds, at });
+    const links = async () => (await apps.getConnection({ requestId: crypto.randomUUID(),
+      connectionId: `${space}:github`, actorUserId: "member" })).connection.githubLinks;
+    try {
+      await assert.rejects(record("member", ["111"]), (error) => error.code === "space_not_found");
+      assert.deepEqual(await links(), []);
+      assert.deepEqual((await record("owner", ["111", "333"])).recorded, ["111"], "an installation not linked here is not recorded");
+      assert.deepEqual(await links(), [{ installationId: "111", githubUserId: 77 }]);
+      await upsert({ metadata: { installationIds: ["222"] } });
+      assert.deepEqual((await record("owner", ["222"], 88)).recorded, ["222"]);
+      assert.deepEqual(await links(), [{ installationId: "222", githubUserId: 88 }], "the unlinked one's record is gone");
+    } finally {
+      await sql("DELETE FROM data.app_github_installation_links WHERE space_id=$1", [space]);
+    }
+  });
+});
+
 integration("a GitHub install appends its installation and keeps every other installation and config", async () => {
   await withDatabase(async ({ database, space }) => {
     const apps = new PostgresAppRepository(database);
@@ -944,5 +1208,330 @@ integration("an imported PR subscription keeps its identity through update, rout
     assert.equal((await apps.command(input, "remove-relation")).reused, true);
     assert.equal((await sql("SELECT relation_id FROM data.app_source_relations WHERE channel_id=$1", [channelId]))
       .rows.length, 0);
+  });
+});
+
+
+// The owning PostgreSQL boundary must freeze private input, enforce current admin/account authority,
+// and consume once under concurrent decisions. Mocked provider tests cannot protect these durable facts.
+integration("action approvals freeze encrypted input and consume exactly once under concurrent decisions", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      created_at,updated_at) VALUES ($2||':approval',$2,'approval','approval','open',$2||':approval-rank',1,$1,$1)`, [at, space]);
+    const requests = new PostgresAppActionRequestRepository(database, material);
+    const scope = { spaceId: space, channelId: `${space}:approval`, actorUserId: "owner" };
+    const payload = { messageId: "m1", senderKind: "user", statement: { target: "ops@example.test", text: "Private subject\nPrivate body" },
+      prepared: { to: "ops@example.test", subject: "Private subject", body: "Private body" }, preview: { to: "ops@example.test", body: "Private body" } };
+    const create = { requestId: `approval:${space}`, connectionId: `${space}:webhook`, channelId: scope.channelId,
+      providerId: "webhook", actionId: "post", requestedBy: "owner", payload };
+    const request = await requests.create(create);
+    assert.equal(request.status, "pending");
+    assert.equal((await requests.create(create)).requestId, request.requestId, "the same request does not enqueue twice");
+    const stored = (await sql("SELECT * FROM data.app_connector_action_requests WHERE request_id=$1", [request.requestId])).rows[0];
+    assert.doesNotMatch(JSON.stringify(stored), /Private body|Private subject|ops@example/u);
+    await assert.rejects(requests.create({ ...create, payload: { ...payload, preview: { body: "changed" } } }), /content changed/);
+    await assert.rejects(requests.pending({ ...scope, actorUserId: "member" }), /Space admin/);
+    assert.deepEqual((await requests.pending(scope))[0].preview, payload.preview);
+    const decide = { ...scope, requestId: request.requestId, allow: true };
+    await assert.rejects(requests.decide({ ...decide, actorUserId: "member" }), /Space admin/);
+    await assert.rejects(requests.decide({ ...decide, channelId: "another" }), /not found/);
+    const results = await Promise.all([requests.decide(decide), requests.decide(decide)]);
+    assert.equal(results.filter(result => result.claimed).length, 1, "one decision wins before provider I/O");
+    assert.deepEqual(results.find(result => result.claimed).payload, payload);
+    await requests.authorize(request.requestId, create.connectionId, create.channelId);
+    await requests.settle(request.requestId, "completed");
+    assert.equal((await requests.decide(decide)).claimed, false, "completed requests cannot dispatch again");
+    await assert.rejects(requests.authorize(request.requestId, create.connectionId, create.channelId), /cannot execute/);
+    assert.equal((await sql("SELECT encrypted_value_json FROM data.app_connector_action_requests WHERE request_id=$1", [request.requestId])).rows[0].encrypted_value_json, null);
+    const next = { ...create, requestId: `${create.requestId}:next`, payload: { ...payload, messageId: "m2" } };
+    await requests.create(next);
+    assert.equal((await requests.pending(scope)).length, 1, "the next request still asks");
+    await requests.decide({ ...decide, requestId: next.requestId, allow: false });
+    assert.equal((await requests.decide({ ...decide, requestId: next.requestId })).claimed, false, "denial is final");
+    const changed = { ...create, requestId: `${create.requestId}:changed` };
+    await requests.create(changed);
+    await sql("UPDATE data.app_connector_connections SET search_rank_sequence=search_rank_sequence||'-reconnected' WHERE connection_id=$1", [create.connectionId]);
+    await assert.rejects(requests.decide({ ...decide, requestId: changed.requestId }), /Connected account changed/);
+    await requests.decide({ ...decide, requestId: changed.requestId, allow: false });
+    const expired = { ...create, requestId: `${create.requestId}:expired` };
+    await requests.create(expired);
+    await sql("UPDATE data.app_connector_action_requests SET created_at=now()-interval '2 days',expires_at=now()-interval '1 day' WHERE request_id=$1", [expired.requestId]);
+    await assert.rejects(requests.decide({ ...decide, requestId: expired.requestId }), /expired/);
+    const revoked = { ...create, requestId: `${create.requestId}:revoked` };
+    await requests.create(revoked);
+    await requests.decide({ ...decide, requestId: revoked.requestId });
+    await sql("UPDATE data.space_members SET role='member' WHERE space_id=$1 AND user_id='owner'", [space]);
+    await assert.rejects(requests.authorize(revoked.requestId, create.connectionId, create.channelId), /Space admin/);
+  });
+});
+
+// Existing installation tests fence provider-specific callbacks and Hub refreshes of populated
+// envelopes. They do not protect generic empty-envelope initialization or Human expectedVersion
+// writes; only real concurrent transactions can prove that one original X snapshot commits once.
+integration("X credential initialization and Human CAS fence concurrent grants and delayed refresh ABA", async () => {
+  const provider = { id: "x", name: "X", authMode: "oauth", scopes: [], secretRefs: [], capabilities: [], metadataFields: [] };
+  const xPolicy = { allowed: ["accounts"] };
+  const inXSpace = (run) => withDatabase(async ({ database, space }) => {
+    const apps = new PostgresAppRepository(database);
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    const configure = (name, status) => apps.upsert({ commandId: `${space}:${name}`, spaceId: space,
+      actorUserId: "owner", provider, body: { status }, at });
+    await configure("create-x", "configured");
+    const input = { spaceId: space, providerId: "x", actorUserId: "owner", policy: xPolicy, at };
+    const read = () => credentials.resolveForAdmin({ ...input, requestId: crypto.randomUUID() });
+    await run({ apps, credentials, space, configure, input, read });
+  });
+
+  await inXSpace(async ({ credentials, input, read }) => {
+    const empty = await credentials.installationSnapshot({ ...input, requestId: "x-empty-snapshot" });
+    assert.equal(empty.credentialVersion, 0);
+    assert.equal(await read(), null);
+    const expectedGrant = { version: empty.credentialVersion, connectionVersion: empty.connectionVersion,
+      connectionGeneration: empty.connectionGeneration };
+    const contenders = ['["first-grant"]', '["second-grant"]'];
+    const results = await Promise.allSettled(contenders.map((accounts, index) => credentials.put({ ...input,
+      requestId: `x-first-${index}`, expectedGrant, fields: { accounts } })));
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1, "one empty-snapshot writer commits");
+    const rejected = results.find(result => result.status === "rejected");
+    assert.ok(rejected.reason instanceof AppControlError);
+    assert.equal(rejected.reason.code, "credential_changed");
+    assert.equal(rejected.reason.status, 409);
+    const winner = await read();
+    assert.equal(winner.version, 1);
+    assert.deepEqual(winner.values, { accounts: contenders[results.findIndex(result => result.status === "fulfilled")] });
+
+    await credentials.put({ ...input, requestId: "x-human-current", expectedVersion: winner.version,
+      fields: { accounts: '["human-replacement"]' } });
+    const replacement = await read();
+    await assert.rejects(credentials.put({ ...input, requestId: "x-human-stale", expectedVersion: winner.version,
+      fields: { accounts: '["stale-human-overwrite"]' } }),
+    error => error instanceof AppControlError && error.code === "credential_changed" && error.status === 409);
+    assert.deepEqual(await read(), replacement, "a stale Human version cannot replace the newer encrypted grant");
+  });
+
+  for (const lifecycle of ["disconnect", "delete-recreate"]) await inXSpace(async ({ apps, credentials, space, configure, input, read }) => {
+    await credentials.put({ ...input, requestId: "x-original", expectedVersion: 0, fields: { accounts: '["original-grant"]' } });
+    const original = await read();
+    if (lifecycle === "disconnect") await configure("disconnect-x", "disconnected");
+    else {
+      await apps.command({ commandId: `${space}:delete-x`, spaceId: space, providerId: "x",
+        principal: { kind: "user", id: "owner" } }, "delete");
+      await configure("recreate-x", "configured");
+      await credentials.put({ ...input, requestId: "x-recreated", expectedVersion: 0, fields: { accounts: '["recreated-grant"]' } });
+    }
+    const current = await read();
+    assert.equal(current.version, original.version, "credential version alone cannot distinguish the lifecycle change");
+    if (lifecycle === "delete-recreate") {
+      assert.equal(current.connectionVersion, original.connectionVersion, "recreation repeats both numeric revisions");
+      assert.notEqual(current.connectionGeneration, original.connectionGeneration);
+    } else assert.equal(current.status, "disconnected");
+    await assert.rejects(credentials.put({ ...input, requestId: "x-delayed-refresh", actorUserId: "hub:oauth-refresh",
+      asHub: true, expectedVersion: original.version, expectedGrant: original, fields: { accounts: '["stale-refresh"]' } }),
+    error => error instanceof AppControlError && error.code === "credential_changed" && error.status === 409);
+    assert.deepEqual(await read(), current, `${lifecycle} cannot be undone by a delayed refresh with a repeated credential version`);
+  });
+});
+
+// The generic approval test owns consume-once and admin authority. It cannot prove that X's
+// per-account approvals survive unrelated envelope writes while exact grant replacements fail.
+integration("X approvals survive token rotation and other accounts while fencing the selected grant", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    const requests = new PostgresAppActionRequestRepository(database, material);
+    const apps = new PostgresAppRepository(database);
+    const provider = { id: "x", name: "X", authMode: "oauth", scopes: [], secretRefs: [], capabilities: [], metadataFields: [] };
+    const configure = (suffix) => apps.upsert({ commandId: `${space}:${suffix}`, spaceId: space,
+      actorUserId: "owner", provider, body: { status: "configured" }, at });
+    await configure("create-x-approvals");
+    const channelId = `${space}:x-approval`;
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      created_at,updated_at) VALUES ($2,$3,'x-approval','x-approval','open',$2||':rank',1,$1,$1)`, [at, channelId, space]);
+    const binding = { id: "101", generation: crypto.randomUUID(), ownerUserId: "owner", accessToken: "private-initial-access" };
+    const other = { id: "202", generation: crypto.randomUUID(), ownerUserId: "owner" };
+    const write = (accounts, extra = {}) => credentials.put({ requestId: crypto.randomUUID(), spaceId: space,
+      providerId: "x", actorUserId: "owner", fields: { accounts: JSON.stringify(accounts) }, policy: { allowed: ["accounts"] }, at, ...extra });
+    const read = () => credentials.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x" });
+    const payload = (account) => ({ messageId: "x-post", senderKind: "user", statement: { target: account.id, text: '{"text":"Private update"}' },
+      prepared: { accountId: account.id, accountGeneration: account.generation, text: "Private update" },
+      preview: { accountId: account.id, text: "Private update" } });
+    const stage = async (name, account = binding, extra = {}) => {
+      const input = { requestId: `${space}:${name}`, connectionId: `${space}:x`, channelId,
+        providerId: "x", actionId: "post", requestedBy: "owner", payload: payload(account), ...extra };
+      await requests.create(input);
+      return input;
+    };
+    const decide = (request) => requests.decide({ requestId: request.requestId, channelId, spaceId: space, actorUserId: "owner", allow: true });
+    const authorize = (request) => requests.authorize(request.requestId, request.connectionId, channelId);
+    const changed = error => error instanceof AppControlError && error.code === "action_request_scope_changed" && error.status === 409;
+
+    await write([binding, other]);
+    const list = await stage("account-list", binding, { actionId: "accounts", payload: {
+      messageId: "list-accounts", senderKind: "user", statement: { target: "*", text: "" }, prepared: {}, preview: {},
+    } });
+    assert.equal((await decide(list)).claimed, true, "listing accounts has no single selected account");
+    await authorize(list);
+    const pending = await stage("survives-pending");
+    const approved = await stage("survives-approved");
+    assert.equal((await decide(approved)).claimed, true);
+    const before = await read();
+    const rotated = { ...binding, accessToken: "private-rotated-access" };
+    await write([rotated, other], { asHub: true, expectedVersion: before.version, expectedGrant: before, actorUserId: "hub:oauth-refresh" });
+    await assert.rejects(authorize(list), changed, "list-wide approval retains the whole-envelope fence");
+    await authorize(approved);
+    await write([rotated, other, ...["303", "304", "305", "306"].map(id => ({ id, generation: crypto.randomUUID(), ownerUserId: "member" }))]);
+    assert.equal((await decide(pending)).claimed, true,
+      "a pending approval survives rotation and other accounts' addition, past the old four-account cap");
+    await authorize(pending);
+    await authorize(approved);
+
+    for (const prepared of [{}, { accountId: binding.id, accountGeneration: "not-a-generation" }]) {
+      await assert.rejects(stage(`invalid-${crypto.randomUUID()}`, binding,
+        { payload: { ...payload(binding), prepared } }), changed);
+    }
+    await assert.rejects(stage("wrong-owner", binding, { requestedBy: "member" }), changed);
+    await assert.rejects(stage("wrong-provider", binding, { connectionId: `${space}:webhook` }), changed);
+
+    for (const mutation of ["reconnect", "remove", "owner", "connection-recreate"]) {
+      const current = { ...binding, generation: crypto.randomUUID() };
+      await write([current, other]);
+      const queued = await stage(`queued-${mutation}`, current);
+      const executing = await stage(`executing-${mutation}`, current);
+      await decide(executing);
+      if (mutation === "connection-recreate") {
+        // Retain staged rows to exercise the generation fence, even when the new connection
+        // has the same opaque account/grant fields and the credential revision repeats.
+        await sql("DELETE FROM data.app_connector_credentials WHERE connection_id=$1", [`${space}:x`]);
+        await sql("DELETE FROM data.app_connector_connections WHERE connection_id=$1", [`${space}:x`]);
+        await configure("recreate-x-approvals");
+        await write([current, other]);
+      } else await write(mutation === "remove" ? [other] : [{ ...current,
+        ...(mutation === "reconnect" ? { generation: crypto.randomUUID() } : { ownerUserId: "member" }) }, other]);
+      await assert.rejects(decide(queued), changed, `${mutation} invalidates the pending grant`);
+      await assert.rejects(authorize(executing), changed, `${mutation} invalidates the executing grant`);
+    }
+
+    // The X exception must not relax another provider's whole-credential approval fence.
+    const generic = { connectionId: `${space}:webhook`, providerId: "webhook", payload: payload(binding) };
+    const genericPending = await stage("generic-pending", binding, generic);
+    const genericApproved = await stage("generic-approved", binding, generic);
+    await decide(genericApproved);
+    await credentials.put({ requestId: "generic-rotate", spaceId: space, providerId: "webhook", actorUserId: "owner",
+      fields: { apiToken: "private-generic-rotation" }, policy, at });
+    await assert.rejects(decide(genericPending), changed);
+    await assert.rejects(authorize(genericApproved), changed);
+  });
+});
+
+// Durable upload execution needs an explicit-allow claim and an encrypted terminal receipt.
+// Generic approval tests cannot prove policy-only starts, concurrent settlement, or replay after
+// a failed Channel append; these transitions are owned by the real PostgreSQL request row.
+integration("durable X uploads claim explicit allow once and retain one scoped encrypted outcome until delivery", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await addConnection(sql, space, "x", "X");
+    const channelId = `${space}:durable-upload`;
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      created_at,updated_at) VALUES ($2,$3,'upload','upload','open',$2||':rank',1,$1,$1)`, [at, channelId, space]);
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    const requests = new PostgresAppActionRequestRepository(database, material);
+    const policies = new PostgresAppActionPolicyRepository(database);
+    const account = { id: "101", generation: crypto.randomUUID(), ownerUserId: "owner" };
+    const writeGrant = (value) => credentials.put({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x",
+      actorUserId: "owner", fields: { accounts: JSON.stringify([value]) }, policy: { allowed: ["accounts"] }, at });
+    await writeGrant(account);
+    const payload = { messageId: "original-upload-command", senderKind: "agent", senderId: "original-agent-instance",
+      statement: { target: account.id, text: "source-message/private-attachment" },
+      prepared: { accountId: account.id, accountGeneration: account.generation, attachmentName: "private-video-name.mp4" },
+      preview: { accountId: account.id, attachmentName: "private-video-name.mp4" } };
+    const stage = async (name, extra = {}) => {
+      const input = { requestId: `${space}:${name}`, connectionId: `${space}:x`, channelId,
+        providerId: "x", actionId: "upload_video", requestedBy: "owner", payload, ...extra };
+      await requests.create(input);
+      return { requestId: input.requestId, spaceId: space, channelId };
+    };
+    const start = (reference, actorUserId = "owner") => requests.startAllowed({ ...reference, actorUserId });
+    const authorize = (reference) => requests.authorize(reference.requestId, `${space}:x`, channelId);
+    const policyMode = (mode) => policies.set({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x",
+      channelId, actionId: "upload_video", actorUserId: "owner", mode, at });
+    const reference = await stage("allow-once");
+    const forbidden = error => error instanceof AppControlError && error.status === 403;
+    await assert.rejects(start(reference), forbidden, "the default policy is not an explicit allow");
+    await assert.rejects(start(reference, "member"), error => error.status === 404, "another member cannot claim the owner's upload");
+    await policyMode("ask");
+    await assert.rejects(start(reference), forbidden);
+    await policyMode("allow");
+    const notUpload = await stage("not-an-upload", { actionId: "post" });
+    await assert.rejects(start(notUpload), error => error.status === 404);
+    const otherProvider = await stage("not-x", { providerId: "webhook", connectionId: `${space}:webhook` });
+    await assert.rejects(start(otherProvider), error => error.status === 404);
+    for (const [wrongAction, connectionId] of [[notUpload, `${space}:x`], [otherProvider, `${space}:webhook`]]) {
+      await sql("UPDATE data.app_connector_action_requests SET status='executing',decided_by=NULL WHERE request_id=$1", [wrongAction.requestId]);
+      await assert.rejects(requests.authorize(wrongAction.requestId, connectionId, channelId),
+        error => error.code === "action_request_scope_changed", "a missing approver cannot authorize any other action or provider");
+    }
+
+    const claimed = await Promise.all([start(reference), start(reference)]);
+    assert.equal(claimed.filter(result => result.claimed).length, 1, "one durable job consumes the staged request");
+    assert.deepEqual(claimed.find(result => result.claimed).payload, payload);
+    const job = await requests.executingUpload(reference);
+    assert.equal(job.request.connectionId, `${space}:x`);
+    assert.equal(job.request.requestedBy, "owner");
+    assert.equal(job.request.status, "executing");
+    assert.deepEqual(job.payload, payload);
+    const approver = (await sql("SELECT decided_by FROM data.app_connector_action_requests WHERE request_id=$1", [reference.requestId])).rows[0];
+    assert.equal(approver.decided_by, null, "explicit allow never fabricates a Human approval");
+    await authorize(reference);
+    await policyMode("ask");
+    await assert.rejects(authorize(reference), forbidden, "each provider write rechecks current explicit allow");
+    const approved = await stage("human-approved");
+    await requests.decide({ ...approved, actorUserId: "owner", allow: true });
+    await authorize(approved);
+    await requests.settle(approved.requestId, "completed");
+    await policyMode("allow");
+    await sql("UPDATE data.space_members SET role='viewer' WHERE space_id=$1 AND user_id='owner'", [space]);
+    await assert.rejects(authorize(reference), error => error instanceof AppControlError);
+    await sql("UPDATE data.space_members SET role='owner' WHERE space_id=$1 AND user_id='owner'", [space]);
+    await authorize(reference);
+
+    const wrongChannel = { ...reference, channelId: `${space}:other-channel` };
+    assert.equal(await requests.executingUpload(wrongChannel), null);
+    assert.equal(await requests.uploadOutcome(wrongChannel), null);
+    assert.deepEqual(await requests.settleUpload({ ...wrongChannel, status: "failed", receipt: "wrong scope" }), { stored: false });
+    await assert.rejects(requests.settleUpload({ ...reference, status: "completed", receipt: "r".repeat(64 * 1024) }),
+      error => error instanceof AppControlError && error.status === 400, "combined outcome metadata stays within 64 KiB");
+    assert.ok(await requests.executingUpload(reference), "a rejected receipt does not consume execution");
+    const outcomes = [{ status: "completed", receipt: "private-success-upload-receipt" },
+      { status: "failed", receipt: "private-failure-upload-receipt" }];
+    const settled = await Promise.all(outcomes.map(outcome => requests.settleUpload({ ...reference, ...outcome })));
+    assert.equal(settled.filter(result => result.stored).length, 1);
+    const winning = outcomes[settled.findIndex(result => result.stored)];
+    const outcome = await requests.uploadOutcome(reference);
+    assert.equal(outcome.status, winning.status);
+    assert.equal(outcome.request.status, winning.status);
+    assert.equal(outcome.receipt, winning.receipt);
+    assert.deepEqual(outcome.payload, { messageId: payload.messageId, senderKind: payload.senderKind, senderId: payload.senderId });
+    assert.equal(await requests.executingUpload(reference), null, "terminal ciphertext is never exposed as execution input");
+    const stored = (await sql("SELECT encrypted_value_json FROM data.app_connector_action_requests WHERE request_id=$1", [reference.requestId])).rows[0];
+    assert.doesNotMatch(JSON.stringify(stored), /private-success-upload|private-failure-upload|private-video-name|original-agent-instance/u);
+    assert.deepEqual(await requests.settleUpload({ ...reference, status: "blocked", receipt: "cannot replace the first outcome" }), { stored: false });
+    assert.deepEqual(await requests.uploadOutcome(reference), outcome, "an append retry reads the original durable receipt");
+    await requests.clearUploadOutcome(wrongChannel);
+    assert.deepEqual(await requests.uploadOutcome(reference), outcome);
+    await requests.clearUploadOutcome(reference);
+    await requests.clearUploadOutcome(reference);
+    assert.equal(await requests.uploadOutcome(reference), null);
+    assert.deepEqual(await requests.settleUpload({ ...reference, status: "completed", receipt: "cannot revive delivered receipt" }), { stored: false });
+
+    const expiry = await stage("receipt-expiry");
+    await start(expiry);
+    await requests.settleUpload({ ...expiry, status: "completed", receipt: "expired-private-outcome" });
+    await sql(`UPDATE data.app_connector_action_requests SET created_at=now()-interval '2 days',expires_at=now()-interval '1 day'
+      WHERE request_id=$1`, [expiry.requestId]);
+    assert.equal(await requests.uploadOutcome(expiry), null);
+    await stage("expiry-cleanup-trigger");
+    const expired = (await sql("SELECT status,encrypted_value_json FROM data.app_connector_action_requests WHERE request_id=$1", [expiry.requestId])).rows[0];
+    assert.deepEqual(expired, { status: "completed", encrypted_value_json: null });
+    const stale = await stage("reconnected-before-start");
+    await writeGrant({ ...account, generation: crypto.randomUUID() });
+    await assert.rejects(start(stale), error => error.code === "action_request_scope_changed");
   });
 });

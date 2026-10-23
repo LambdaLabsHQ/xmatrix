@@ -4,7 +4,7 @@ import type { DatabaseTransaction } from "./contracts.js";
 
 export type ChannelPrincipal = { kind: "user" | "agent"; id: string };
 
-type HumanRoles = "all" | "non_viewer" | "owner_admin";
+type HumanRoles = "all" | "non_viewer" | "contributor" | "owner_admin";
 type LifecycleLock = "none" | "share" | "no_key_update" | "update";
 
 interface ChannelCapabilityPolicy {
@@ -38,8 +38,10 @@ export const CHANNEL_CAPABILITY_POLICIES = Object.freeze({
   secret_new_work: userPolicy("non_viewer", "share"),
   secret_terminalize: userPolicy("non_viewer", "share"),
   app_history_read: policy("all", "none"),
-  app_new_work: policy("non_viewer", "share"),
-  app_terminalize: policy("non_viewer", "share"),
+  // Connected apps act with the Space's own credentials. Like its secrets, they
+  // are for members: a participant writes in their intake but cannot use them.
+  app_new_work: policy("contributor", "share"),
+  app_terminalize: policy("contributor", "share"),
   scheduler_history_read: policy("all", "none"),
   scheduler_new_work: policy("non_viewer", "share"),
   scheduler_terminalize: policy("non_viewer", "share"),
@@ -110,6 +112,7 @@ function humanRoleClause(policy: ChannelCapabilityPolicy, memberAlias: string, c
     return `(${memberAlias}.role NOT IN ('viewer','participant') OR (${memberAlias}.role='participant'
       AND ${channelAlias}.metadata_json->>'intakeOf'=${userIdSql}))`;
   }
+  if (policy.humanRoles === "contributor") return `${memberAlias}.role NOT IN ('viewer','participant')`;
   return `${memberAlias}.role IN ('owner','admin')`;
 }
 
@@ -118,8 +121,6 @@ export function channelCapabilityPredicate(input: {
   channelAlias: string;
   principalKindSql: string;
   principalIdSql: string;
-  /** Also admit a live Channel About session reading its own Channel's content. */
-  channelAboutSessionRead?: boolean;
 }): string {
   const capability = CHANNEL_CAPABILITY_POLICIES[input.capability];
   const c = input.channelAlias;
@@ -139,23 +140,21 @@ export function channelCapabilityPredicate(input: {
       WHERE channel_grant.space_id=${c}.space_id AND channel_grant.channel_id=${c}.channel_id
         AND channel_grant.subject_kind='agent' AND channel_grant.subject_id=${id})`;
   const openChannel = `${c}.mode<>'closed'`;
+  // An Agent acting with what only members use (the Space's connected apps)
+  // needs its Run's owner to be one now, as a Human caller would.
+  const ownerContributes = capability.humanRoles === "contributor" ? ` AND EXISTS (
+      SELECT 1 FROM data.runs channel_run JOIN data.space_members channel_owner
+        ON channel_owner.space_id=${c}.space_id AND channel_owner.user_id=channel_run.owner_user_id
+      WHERE channel_run.run_id=channel_instance.run_id
+        AND ${humanRoleClause(capability, "channel_owner", c, "channel_run.owner_user_id")})` : "";
   // An Agent is the Instance of a registered Run in this Space; it may always
   // use the Channel it was started in, open Channels, and Channels granted to it.
   const agent = capability.principals.includes("agent") ? `(${kind}='agent' AND EXISTS (
     SELECT 1 FROM data.instances channel_instance
     JOIN data.run_agent_registrations channel_registration ON channel_registration.run_id=channel_instance.run_id
     WHERE channel_instance.instance_id=${id} AND channel_registration.space_id=${c}.space_id
-      AND (${openChannel} OR channel_instance.channel_id=${c}.channel_id OR ${agentGrant})))` : "FALSE";
-  // A Channel About session has no Instance: its session id is its live Run's
-  // id. Where a reader opts in, it reads the content of the one Channel it summarizes.
-  const aboutSession = input.channelAboutSessionRead && input.capability === "message_content_read" ? `(${kind}='agent' AND EXISTS (
-    SELECT 1 FROM data.runs about_run
-    JOIN data.run_agent_registrations about_registration ON about_registration.run_id=about_run.run_id
-    WHERE about_run.run_id=${id} AND about_run.channel_id=${c}.channel_id
-      AND about_registration.space_id=${c}.space_id AND about_run.status IN ('starting','running')
-      AND about_run.metadata_json->>'routedAs'='management_channel_about'
-      AND about_run.metadata_json->>'runtimeSessionId'=${id}))` : "FALSE";
-  return aboutSession === "FALSE" ? `((${user}) OR (${agent}))` : `((${user}) OR (${agent}) OR (${aboutSession}))`;
+      AND (${openChannel} OR channel_instance.channel_id=${c}.channel_id OR ${agentGrant})${ownerContributes}))` : "FALSE";
+  return `(${c}.mode IN ('open','closed') AND ((${user}) OR (${agent})))`;
 }
 
 function lockClause(lock: LifecycleLock): string {
@@ -214,7 +213,6 @@ export function channelCapabilityCte(input: {
   capability: ChannelCapability;
   inputCte: string;
   cteName?: string;
-  channelAboutSessionRead?: boolean;
 }): string {
   const policy = CHANNEL_CAPABILITY_POLICIES[input.capability];
   const cteName = input.cteName ?? "authorized_channel";
@@ -223,8 +221,7 @@ export function channelCapabilityCte(input: {
     FROM data.channels c CROSS JOIN ${input.inputCte} input
     WHERE c.space_id=input.space_id AND c.channel_id=input.channel_id
       AND ${channelCapabilityPredicate({ capability: input.capability, channelAlias: "c",
-        principalKindSql: "input.principal_kind", principalIdSql: "input.principal_id",
-        ...(input.channelAboutSessionRead ? { channelAboutSessionRead: true } : {}) })}
+        principalKindSql: "input.principal_kind", principalIdSql: "input.principal_id" })}
     LIMIT 1${lockClause(policy.lock)}
   )`;
 }

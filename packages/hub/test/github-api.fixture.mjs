@@ -1,10 +1,13 @@
 import { createServer } from "node:http";
+import { GITHUB_LINKER } from "./support/github-app.mjs";
 
 /**
  * GitHub's REST API as the Hub uses it through a Space's installation: the
  * repository's installation, an installation token with the given
  * permissions, the installation's repositories, and whatever GET routes a test
- * answers. Check runs the Hub publishes are recorded in `checkRuns`.
+ * answers, including that the administrator recorded as linking the
+ * installation (`GITHUB_LINKER`) administers the repository. Check runs the Hub
+ * publishes are recorded in `checkRuns`.
  */
 export function fakeGitHubApi({ installationId, repository, permissions, routes = {} }) {
   const checkRuns = [];
@@ -17,6 +20,12 @@ export function fakeGitHubApi({ installationId, repository, permissions, routes 
       if (url === `/repos/${repository}/installation`) return reply(200, { id: installationId });
       if (url.includes(`/app/installations/${installationId}/access_tokens`)) {
         return reply(200, { token: "ghs_fixture", expires_at: "2099-01-01T00:00:00Z", permissions });
+      }
+      if (url === `/user/${GITHUB_LINKER.githubUserId}`) {
+        return reply(200, { id: GITHUB_LINKER.githubUserId, login: GITHUB_LINKER.login });
+      }
+      if (url === `/repos/${repository}/collaborators/${GITHUB_LINKER.login}/permission`) {
+        return reply(200, { permission: "admin", user: { id: GITHUB_LINKER.githubUserId, login: GITHUB_LINKER.login } });
       }
       if (url.startsWith("/installation/repositories")) {
         return reply(200, { total_count: 1, repositories: [{ id: 1, name, full_name: repository, private: false,

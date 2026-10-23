@@ -7,6 +7,8 @@ import { useMutation } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
 import { ConnectedAiApps } from "@/components/dashboard/connected-ai-apps";
+import { TwoFactorSettings } from "@/components/dashboard/two-factor-settings";
+import { PasskeySettings } from "@/components/dashboard/passkey-settings";
 import { GitHubAccountLink } from "@/components/dashboard/github-account-link";
 import { HumanProfileEditor, humanProfileRefusal } from "@/components/dashboard/human-profile-editor";
 import {
@@ -14,6 +16,7 @@ import {
   type CurrentHumanProfileSource,
 } from "@/components/dashboard/human-profile-summary";
 import { HumanAvatarPicker } from "@/components/dashboard/human-avatar-picker";
+import { rememberOwnFace } from "@/components/dashboard/face";
 import { HumanLocalTime } from "@/components/dashboard/human-local-time";
 import { useHumanTimeZoneSync } from "@/components/dashboard/use-human-time-zone-sync";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -35,7 +38,6 @@ function projectedProfile(
     // Not a fallback to `user.name`: that would label a colleague's profile
     // with the viewer's own identity.
     ...(member?.name ? { name: member.name } : {}),
-    ...(member?.avatarUrl ? { avatarUrl: member.avatarUrl } : {}),
   };
   const profile = humanProfileFromSpaceMember(source, member);
   // "Your profile" is the self-fallback inside humanProfileFromSpaceMember.
@@ -104,7 +106,9 @@ export function ProfileView({
   ) {
     setLocalError(null);
     try {
-      await profileMutation.mutateAsync(request);
+      const saved = await profileMutation.mutateAsync(request);
+      // Every face of theirs shows the picture the Hub now has, not only this screen's.
+      rememberOwnFace(saved.userId, saved.avatarUrl);
     } catch (error) {
       // A profile rule the Hub refused has its own sentence; anything else is described in general.
       const refusal = error instanceof XMatrixApiError ? humanProfileRefusal(error.code) : undefined;
@@ -218,12 +222,12 @@ export function HumanProfileView({
     <ToolPaperScroll>
       <header className="flex items-center gap-4 sm:gap-5">
         <HumanAvatarPicker
+          userId={profile.userId}
           displayName={profile.displayName}
-          avatarUrl={profile.avatarUrl}
           editable={self && Boolean(onUploadAvatar)}
           busy={saving}
           onSelect={(blob, mimeType) => onUploadAvatar?.(blob, mimeType)}
-          onRemove={profile.avatarUrl && onRemoveAvatar ? onRemoveAvatar : undefined}
+          onRemove={onRemoveAvatar}
           onError={(message) => onAvatarError?.(message)}
         />
         <div className="w-full min-w-0 flex-1">
@@ -289,6 +293,8 @@ export function HumanProfileView({
                   />
                 </li>
               ) : null}
+              <li className="py-3"><PasskeySettings /></li>
+              <li className="py-3"><TwoFactorSettings /></li>
               <li className="py-3"><GitHubAccountLink /></li>
               <li className="py-3"><ConnectedAiApps /></li>
             </ul>

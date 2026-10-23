@@ -22,7 +22,9 @@ pub async fn retained_handoff_source_at(
     {
         let index = find_exact_authority_index(&manifest, authority)?;
         let binding = &manifest.bindings[index];
-        require_retained_slot(&manifest, &binding.slot_id)?;
+        if binding.state != Some(SlotState::Retained) {
+            require_retained_slot(&manifest, &binding.slot_id)?;
+        }
         let slot_id = SlotId::parse(&authority.slot_id)?;
         let cwd = layout.slot_path(&slot_id)?;
         let base = registered_base_repo_for_worktree(&cwd).await?;

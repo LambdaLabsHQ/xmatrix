@@ -1393,14 +1393,14 @@ fn spawn_daemon_child_monitor(
         let mut interval = tokio::time::interval(Duration::from_secs(2));
         let mut progress = DaemonRunProgressReporter::default();
         let mut maintenance_at = Instant::now();
-        let mut idle_tracker = runtime_daemon_idle_sleep::IdleSleepTracker::default();
+        let mut failed_startups = runtime_daemon_idle_sleep::FailedStartupTracker::default();
         let mut pool_sweep_at = Instant::now() + Duration::from_secs(60);
         let pool_sweep_active = Arc::new(AtomicBool::new(false));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
             report_finished_daemon_children(&registry, &relay).await;
-            sleep_idle_daemon_children(&registry, &mut idle_tracker).await;
+            end_lingering_failed_startups(&registry, &mut failed_startups).await;
             if Instant::now() >= pool_sweep_at {
                 pool_sweep_at = Instant::now() + DAEMON_POOL_SWEEP_INTERVAL;
                 spawn_daemon_pool_sweep(registry.clone(), pool_sweep_active.clone());
@@ -1474,16 +1474,14 @@ fn daemon_run_idle_view(
     }
 }
 
-/// Put Runs that sat idle for the whole window to sleep, and end wrappers that
-/// failed at startup but never exited (docs/instance-sleep.md §2). The exit
-/// itself is reported by the ordinary finished-child path on a later tick.
-async fn sleep_idle_daemon_children(
+/// End wrappers that failed at startup but never exited (docs/instance-sleep.md
+/// §2). Idle Runs sleep on the Hub's word instead (sleep_daemon_child_on_hub_word).
+/// The exit itself is reported by the ordinary finished-child path on a later
+/// tick.
+async fn end_lingering_failed_startups(
     registry: &DaemonRunRegistry,
-    tracker: &mut runtime_daemon_idle_sleep::IdleSleepTracker,
+    tracker: &mut runtime_daemon_idle_sleep::FailedStartupTracker,
 ) {
-    let Some(window) = runtime_daemon_idle_sleep::idle_sleep_window() else {
-        return;
-    };
     let views = {
         let guard = registry.lock().await;
         guard
@@ -1491,7 +1489,7 @@ async fn sleep_idle_daemon_children(
             .map(|(key, managed)| daemon_run_idle_view(key, managed))
             .collect::<Vec<_>>()
     };
-    let decisions = tracker.observe(unix_millis_now(), window, &views);
+    let decisions = tracker.lingering(unix_millis_now(), &views);
     if decisions.is_empty() {
         return;
     }
@@ -1517,25 +1515,61 @@ async fn sleep_idle_daemon_children(
             ));
             continue;
         }
-        match decision.action {
-            runtime_daemon_idle_sleep::IdleAction::Sleep { idle_for, phase } => {
-                if end_idle_daemon_child(
-                    registry,
-                    &decision.key,
-                    decision.pid,
-                    Some((&phase, idle_for)),
-                )
-                .await
-                {
-                    tracker.note_ended(&decision.key, decision.pid);
-                }
-            }
-            runtime_daemon_idle_sleep::IdleAction::EndFailedStartup => {
-                if end_idle_daemon_child(registry, &decision.key, decision.pid, None).await {
-                    tracker.note_ended(&decision.key, decision.pid);
-                }
-            }
+        if end_idle_daemon_child(registry, &decision.key, decision.pid, None).await {
+            tracker.note_ended(&decision.key, decision.pid);
         }
+    }
+}
+
+/// Sleep the Run the Hub named, once this daemon's own facts agree it rests
+/// (`verify_hub_sleep`). The process is ended exactly like a self-decided
+/// sleep, so its exit report leaves the Instance `sleeping`. `Err` names why
+/// it was not: `not_running`, `not_idle` or `not_resumable`.
+pub(crate) async fn sleep_daemon_child_on_hub_word(
+    registry: &DaemonRunRegistry,
+    run_id: &str,
+    execution_key: &str,
+    instance_id: &str,
+    hub_idle_for: Duration,
+) -> Result<(), &'static str> {
+    let view = {
+        let guard = registry.lock().await;
+        guard
+            .iter()
+            .find(|(_, managed)| {
+                managed.run_id.as_deref() == Some(run_id)
+                    && managed.execution_key.as_deref() == Some(execution_key)
+                    && managed.instance_id.as_deref() == Some(instance_id)
+            })
+            .map(|(key, managed)| daemon_run_idle_view(key, managed))
+    };
+    let Some(view) = view else {
+        return Err("not_running");
+    };
+    let (phase, idle_for) =
+        match runtime_daemon_idle_sleep::verify_hub_sleep(&view, hub_idle_for, unix_millis_now()) {
+            runtime_daemon_idle_sleep::HubSleepVerdict::Sleep { phase, idle_for } => (phase, idle_for),
+            runtime_daemon_idle_sleep::HubSleepVerdict::Decline(reason) => return Err(reason),
+        };
+    let alive_at = view.marker.as_ref().map_or(0, |marker| marker.updated_at_millis);
+    let processes = tokio::task::spawn_blocking(runtime_daemon_idle_sleep::process_snapshot)
+        .await
+        .unwrap_or_default();
+    // Only the wrapper that wrote the marker may be signalled.
+    if !runtime_daemon_idle_sleep::is_marker_writer(view.pid, alive_at, &processes) {
+        return Err("not_running");
+    }
+    if end_idle_daemon_child(registry, &view.key, view.pid, Some((&phase, idle_for))).await {
+        append_daemon_registry_audit(&format!(
+            "hub_sleep key={} pid={} idle_for_ms={}",
+            view.key,
+            view.pid,
+            idle_for.as_millis()
+        ));
+        Ok(())
+    } else {
+        // The wrapper changed phase meanwhile: a message arrived.
+        Err("not_idle")
     }
 }
 
@@ -1729,6 +1763,7 @@ struct DaemonStopRequest {
     reason: Option<String>,
     worktree_disposition: Option<MachineWorktreeDisposition>,
     handoff_export: Option<MachineHandoffExport>,
+    handoff_context: Option<MachineHandoffContextRequest>,
     relay_lease: Option<MachineDaemonCommandLease>,
 }
 
@@ -1749,6 +1784,7 @@ impl DaemonStopRequest {
             preserve_instance_for_reborn: _,
             worktree_disposition,
             handoff_export,
+            handoff_context,
             relay_lease,
         } = command
         else {
@@ -1768,6 +1804,7 @@ impl DaemonStopRequest {
             reason,
             worktree_disposition,
             handoff_export,
+            handoff_context,
             relay_lease,
         })
     }
@@ -1822,6 +1859,13 @@ impl DaemonStopRequest {
         result: error::Result<DaemonStopOutcome>,
         handoff_export: Option<MachineHandoffExportResult>,
     ) -> MachineDaemonReport {
+        // The conversation is read once the process is gone, so it is whole.
+        let handoff_context = self.handoff_context.as_ref().filter(|_| result.is_ok()).map(|request| {
+            runtime_handoff_context::export_handoff_context(
+                self.resume_session_key.as_deref(),
+                request.max_chars,
+            )
+        });
         let (ok, stopped_pid, cleanup_reason, error) = match result {
             Ok((pid, reason)) => (true, pid, Some(reason.to_string()), None),
             Err(error) => (false, self.pid, None, Some(error.to_string())),
@@ -1842,6 +1886,7 @@ impl DaemonStopRequest {
             cleanup_reason,
             error,
             handoff_export,
+            handoff_context,
             relay_lease: self.relay_lease,
         }
     }
@@ -2512,6 +2557,9 @@ fn sample_machine_resources() -> Option<serde_json::Value> {
         .ok()?;
     let (system, previous) = &mut *guard;
     let mut value = sample_machine_resources_at(system, previous, Instant::now())?;
+    if let Some(network) = runtime_machine_network::snapshot() {
+        value["network"] = network;
+    }
     value["hostCapabilities"] = serde_json::json!(host_capabilities());
     if host_is_laptop() {
         value["formFactor"] = serde_json::json!("laptop");

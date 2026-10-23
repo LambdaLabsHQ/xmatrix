@@ -30,7 +30,7 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url("/fonts/inter-latin-wght-normal.woff2") format("woff2");
+  src: url("/fonts/inter-latin-wght-normal.f052ee44c3.woff2") format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
     U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
@@ -41,7 +41,7 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url("/fonts/inter-latin-ext-wght-normal.woff2") format("woff2");
+  src: url("/fonts/inter-latin-ext-wght-normal.48f540fb71.woff2") format("woff2");
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
     U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
     U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
@@ -56,7 +56,7 @@
   font-style: normal;
   font-weight: 200 800;
   font-display: swap;
-  src: url("/fonts/manrope-latin-wght-normal.woff2") format("woff2");
+  src: url("/fonts/manrope-latin-wght-normal.a30ddcd349.woff2") format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191,
     U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
@@ -67,7 +67,7 @@
   font-style: normal;
   font-weight: 200 800;
   font-display: swap;
-  src: url("/fonts/manrope-latin-ext-wght-normal.woff2") format("woff2");
+  src: url("/fonts/manrope-latin-ext-wght-normal.3911b66d9f.woff2") format("woff2");
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
     U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
     U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
@@ -939,11 +939,14 @@
   }
 
   /* Jump-target marker is a faint tint with a square-ended strip on the left
-     edge; no rounding, so it never reads as a card around the message. */
+     edge; no rounding, so it never reads as a card around the message.
+     A headed row opens with 12px but closes with 2px, so the tint closes with
+     the same 12px below its last line or card instead of touching it. */
   .xmatrix-app .message-jump-highlight {
     background: color-mix(in oklab, var(--primary) 10%, transparent);
     box-shadow: inset 3px 0 0 var(--primary);
     border-radius: 0;
+    padding-bottom: 0.625rem;
   }
 
   /* Image/video attachments stay cards rather than inheriting surrounding
@@ -1036,12 +1039,17 @@
   }
 
   .app-attachment-lightbox {
-    -webkit-backdrop-filter: blur(18px);
-    backdrop-filter: blur(18px);
     box-shadow: none;
     -webkit-mask-image: none !important;
     mask-image: none !important;
     clip-path: none !important;
+  }
+
+  /* The blur lives on its own layer so it fades with the dim: opening grows
+     out of the page, and a dismiss drag shows the page coming back. */
+  .app-attachment-lightbox .app-attachment-lightbox-backdrop {
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
   }
 
   .app-attachment-lightbox :is(.app-attachment-lightbox-dialog, .app-attachment-lightbox-zoom, .app-attachment-lightbox-image, .app-attachment-lightbox-close, .app-attachment-lightbox-download, .app-attachment-lightbox-copy) {
@@ -1050,6 +1058,10 @@
     box-shadow: none;
     -webkit-mask-image: none !important;
     mask-image: none !important;
+  }
+
+  /* The open image is clipped only while it morphs to and from its thumbnail. */
+  .app-attachment-lightbox :is(.app-attachment-lightbox-dialog, .app-attachment-lightbox-zoom, .app-attachment-lightbox-close, .app-attachment-lightbox-download, .app-attachment-lightbox-copy) {
     clip-path: none !important;
   }
 
@@ -1124,7 +1136,8 @@
     scrollbar-color: oklch(0.4 0 0 / 0.4) transparent;
   }
 
-  .light .xmatrix-app ::selection {
+  /* Avatars cannot be selected; skip their animated dots' highlight styles. */
+  .light .xmatrix-app :not(:where(.identity-avatar, .identity-avatar *))::selection {
     background: oklch(0.3 0 0 / 0.18);
   }
 
@@ -1740,6 +1753,17 @@
   border-width: 1px;
 }
 
+/* A conversation row is paper in every state, and its faces, its +N and its
+   count are glass chips on it. A backdrop filter has next to nothing to work
+   on there: flat paper, and under a pictured face nothing that shows. What it
+   drew was a hairline on a face's rim, where the face laps the one before it.
+   It also made each chip a compositor layer of its own, and with a full list
+   those were two thirds of every layer pass of the page. Glass on wood, the
+   rail's own face among it, keeps its filter. */
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane) .app-channel-row.app-channel-chat-row {
+  --app-liquid-backdrop-filter: none;
+}
+
 @keyframes flow {
   from { background-position: 0 0; }
   to { background-position: 24px 0; }
@@ -1761,8 +1785,8 @@
    the start, which is the entire reason they are the only wooden things on
    screen. A tool page is a board with glass cards on it too, so it belongs
    here as well. */
-.xmatrix-app *:not(.app-ambient):not(.app-rail):not(.app-sidebar):not(.app-details):not(.app-tool-surface),
-.xmatrix-app *:not(.app-ambient)::before,
+.xmatrix-app *:not(.app-ambient):not(.app-rail):not(.app-sidebar):not(.app-details):not(.app-tool-surface):not(:where(.app-status-pulse-sweep)),
+.xmatrix-app *:not(.app-ambient):not(:where(.app-composer-hint-sweep))::before,
 .xmatrix-app *:not(.app-ambient)::after {
   background-image: none !important;
 }
@@ -2098,7 +2122,7 @@
 }
 
 /* The message author's disc is paper like the labels beside it: the same flat
-   ink tint, with no edge, lens or shadow. Its status dot drops its glow. */
+   ink tint, with no edge, lens or shadow. */
 /* The old value of a tag that changed within one turn (a → b): its ink fades,
    the label's material stays, since a translucent label would turn grey. */
 .xmatrix-app .app-message-retag-from > * {
@@ -2109,10 +2133,6 @@
   background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
-.xmatrix-app .message-author-avatar .identity-avatar-status {
   box-shadow: none !important;
 }
 
@@ -2351,6 +2371,15 @@
   scroll-padding-inline: 0.75rem;
 }
 
+/* Off-strip islands have no composited paint layer. Their CSS timelines
+   must rest too, rather than waking the main thread for invisible work.
+   Transitions and overflowing hover controls keep their existing geometry. */
+.xmatrix-app .app-agent-work-item[data-work-visible="false"] *,
+.xmatrix-app .app-agent-work-item[data-work-visible="false"] *::before,
+.xmatrix-app .app-agent-work-item[data-work-visible="false"] *::after {
+  animation-play-state: paused !important;
+}
+
 @media (max-width: 767px) {
   .xmatrix-app .app-agent-work-dock {
     padding-top: 0.5rem !important;
@@ -2480,7 +2509,7 @@
 
 /* The control the panel dropped from is under its field row: the panel's
    magnifier and close button take its place, so it is not drawn twice. */
-body:has(.app-search-overlay) [data-search-anchor] {
+.xmatrix-app.app-search-open [data-search-anchor] {
   visibility: hidden;
 }
 
@@ -2978,21 +3007,28 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   box-shadow: none !important;
 }
 
-/* Sits on the disc's corner. The limit word is on the bottom rim, so the
-   two marks no longer cover each other. */
-.xmatrix-app .app-agent-work-avatar .identity-avatar-status {
+/* A disc wears one presence mark, beside messages and above the composer
+   alike, for a person or an Agent: a plain dot on the disc's corner, sized in
+   proportion to its disc, with no cutout or glow. A page-coloured cutout bit
+   into a photo but vanished into an Agent's white face, so the same mark read
+   differently. The limit word is on the bottom rim, so the two marks no longer
+   cover each other. */
+.xmatrix-app .message-author-avatar {
+  --app-presence-disc: var(--app-message-avatar-size);
+}
+
+.xmatrix-app .app-agent-work-avatar {
+  --app-presence-disc: var(--app-agent-work-disc);
+}
+
+.xmatrix-app :is(.message-author-avatar, .app-agent-work-avatar) .identity-avatar-status {
   top: 0 !important;
   right: 0 !important;
   z-index: 3 !important;
-  width: 0.875rem !important;
-  height: 0.875rem !important;
-  /* Solid dots only. A waiting/waking mark is just this ring, so a white
-     cutout here is the whole mark — the status-colour stroke is below,
-     after the hollow-ring rule. */
-  border: 2px solid oklch(1 0 0) !important;
-  box-shadow:
-    0 0 0 1px oklch(0 0 0 / 0.08),
-    0 0 8px 1px color-mix(in oklch, currentColor 46%, transparent) !important;
+  width: calc(var(--app-presence-disc) * 0.25) !important;
+  height: calc(var(--app-presence-disc) * 0.25) !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
 /* The limit word used to share the status mark's corner, so the dot covered
@@ -3095,27 +3131,42 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   white-space: nowrap;
 }
 
-/* While the work is live its words carry a highlight that sweeps left to
-   right, like Codex's thinking line: the ink is the band's dim side and the
-   band is the full ink. A stale line drops it for the steady attention ink.
-   Repeated classes outrank the app-wide `background-image: none` reset. */
-.xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-main > .truncate.truncate.truncate.truncate.truncate {
-  --app-shimmer-dim: color-mix(in oklch, currentColor 52%, transparent);
-  -webkit-text-fill-color: transparent;
-  background-image: linear-gradient(90deg,
-    var(--app-shimmer-dim) 0% 40%,
-    currentColor 50%,
-    var(--app-shimmer-dim) 60% 100%) !important;
-  background-size: 300% 100%;
-  background-repeat: no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: app-agent-work-intent-shimmer 2.2s linear infinite;
+/* The same thinking-line sweep, with static glyph textures. The feathered
+   window moves across the dim base; its full-width ink moves oppositely, so
+   the words stay put. Animating a text-clipped background repainted the
+   glass behind every live island on every frame. */
+.xmatrix-app .app-agent-work-intent-ink { position: relative; }
+
+.xmatrix-app .app-agent-work-intent-ink-base,
+.xmatrix-app .app-agent-work-intent-ink-shine {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@keyframes app-agent-work-intent-shimmer {
-  from { background-position: 100% 0; }
-  to { background-position: 0% 0; }
+.xmatrix-app .app-agent-work-intent-ink-shine::before { content: attr(data-ink); }
+.xmatrix-app .app-agent-work-intent-ink-window { display: none; }
+
+.xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-base { opacity: 0.52; }
+
+.xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-window {
+  position: absolute;
+  display: block;
+  top: 0;
+  bottom: 0;
+  left: -80%;
+  width: 60%;
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent, black 50%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 50%, transparent);
+  /* Frame zero while visibility is first observed; native effects retain the held frame. */
+  transform: translateX(0);
+}
+
+.xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-shine {
+  width: 166.666667%;
+  transform: translateX(80%);
 }
 
 .xmatrix-app .app-agent-work-intent-timer {
@@ -3129,23 +3180,25 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 }
 
 .xmatrix-app .app-agent-work-intent-ring {
+  display: block;
   width: 1.125rem;
   height: 1.125rem;
+  transform-origin: center;
+}
+
+.xmatrix-app .app-agent-work-intent-ring-face {
+  display: block;
+  width: 100%;
+  height: 100%;
   fill: none;
   stroke-width: 2.5;
-  transform-origin: center;
-  animation: app-agent-work-intent-ring-spin 1.6s linear infinite;
 }
 
-@keyframes app-agent-work-intent-ring-spin {
-  to { transform: rotate(360deg); }
-}
-
-.xmatrix-app .app-agent-work-intent-ring > circle:first-child {
+.xmatrix-app .app-agent-work-intent-ring-face > circle:first-child {
   stroke: color-mix(in oklch, var(--foreground) 10%, transparent);
 }
 
-.xmatrix-app .app-agent-work-intent-ring > circle:last-child {
+.xmatrix-app .app-agent-work-intent-ring-face > circle:last-child {
   stroke: oklch(0.769 0.188 70.08);
   stroke-linecap: round;
 }
@@ -3154,7 +3207,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   color: var(--m-ink-attention, var(--accent));
 }
 
-.xmatrix-app .app-agent-work-intent-stale .app-agent-work-intent-ring > circle:last-child {
+.xmatrix-app .app-agent-work-intent-stale .app-agent-work-intent-ring-face > circle:last-child {
   stroke: currentColor;
 }
 
@@ -3589,14 +3642,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[d
     transition: none !important;
   }
 
-  .xmatrix-app .app-agent-work-intent-ring {
-    animation: none;
-  }
-
-  .xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-main > .truncate.truncate.truncate.truncate.truncate {
-    -webkit-text-fill-color: currentColor;
-    animation: none;
-  }
+  .xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-base { opacity: 1; }
+  .xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-window { display: none; }
 }
 
 @media (max-width: 767px) {
@@ -3688,19 +3735,6 @@ html[data-app-theme] .xmatrix-app .app-composer-box .composer-textarea:focus-vis
   background: transparent !important;
   background-color: transparent !important;
   box-shadow: none !important;
-}
-
-/* The page name is a title, not a form field, so it does not take the recessed well. */
-html[data-app-theme] .xmatrix-app input.page-title,
-html[data-app-theme] .xmatrix-app input.page-title:hover,
-html[data-app-theme] .xmatrix-app input.page-title:focus,
-html[data-app-theme] .xmatrix-app input.page-title:focus-visible {
-  background: transparent !important;
-  background-color: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  outline: none !important;
 }
 
 /* Unify the two glass systems: cards/buttons get the same soft caustic overlay
@@ -4283,8 +4317,11 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     padding-bottom: 0;
   }
 
-  .xmatrix-app .app-page-article {
-    padding-top: 0;
+  /* Nothing scrolls under the band, where the window's search floats: a
+     paper beside a list scrolls below it, as a page scrolls below its
+     controls, and its first line starts level with the list's first row. */
+  .xmatrix-app .app-below-band {
+    margin-top: var(--app-band);
   }
 
   /* The details column's planks start below the band, level with the
@@ -4342,7 +4379,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 
   /* A docked conversation carries its own right-aligned search entry. */
-  .xmatrix-app:has(.app-page-conversation .app-panel-header) .app-global-bar {
+  .xmatrix-app.app-page-conversation-open .app-global-bar {
     display: none;
   }
 
@@ -4380,7 +4417,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     padding-right: var(--xmatrix-windows-caption-clearance);
   }
 
-  .xmatrix-app.xmatrix-desktop-windows .app-page-article {
+  .xmatrix-app.xmatrix-desktop-windows .app-page-band {
     padding-top: max(1.5rem, var(--xmatrix-windows-caption-height));
   }
 
@@ -5183,21 +5220,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.identity-avatar-s
   box-shadow: inset 0 0 0 var(--app-status-dot-ring, 1.5px) currentColor !important;
 }
 
-/* The work dock's white cutout (above) sits on this same disc. On a hollow
-   ring it replaced the status colour, so a waiting Agent read as a white
-   circle beside the Waiting chip. The stroke is the status colour. */
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-avatar-status.app-status-dot-ring {
-  background: var(--background) !important;
-  background-color: var(--background) !important;
-  border-color: currentColor !important;
-  box-shadow: none !important;
-}
-
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-avatar-status.app-status-dot-ring[class*="bg-amber-"] {
-  color: oklch(0.769 0.188 70.08) !important;
-  border-color: oklch(0.769 0.188 70.08) !important;
-}
-
 /* Usage fills are a semantic traffic-light scale, not material chrome. They
    must remain vivid after the generic material palette neutralizes utilities. */
 .xmatrix-app .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill > .app-usage-meter-fill {
@@ -5736,7 +5758,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     overflow: hidden;
   }
 
-  .xmatrix-app.xmatrix-app-shell .app-mobile-tab-button svg {
+  .xmatrix-app.xmatrix-app-shell .app-mobile-tab-button :is(svg, .app-status-pulse) {
     width: 1.125rem;
     height: 1.125rem;
   }
@@ -5866,37 +5888,23 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     padding-bottom: calc(var(--app-composer-height, 5rem) + var(--mobile-bottom-safe) + 1.625rem) !important;
   }
 
-  /* Mobile only: the floating composer unmounts while an inline thread draft
-     is open, so drop the large clearance pad. Desktop keeps both. */
-  .xmatrix-app.xmatrix-app-shell .app-message-surface:has(.app-thread-draft-composer) .app-message-timeline {
-    scroll-padding-bottom: calc(1.25rem + var(--mobile-bottom-safe)) !important;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-surface:has(.app-thread-draft-composer) .app-message-timeline > div {
-    padding-bottom: calc(1.25rem + var(--mobile-bottom-safe)) !important;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-surface:has(.app-thread-draft-composer) .app-message-timeline-scroll-end {
-    padding-bottom: calc(1.25rem + var(--mobile-bottom-safe)) !important;
-  }
-
   /* Channel detail: do not let the timeline scroll *under* the title bar.
      Padding inside a scroller only offsets the first paint; scrolling still
      moves rows into the fixed title zone. Offset the message surface so the
      scrollport's top edge sits below the title (same contract as tool views). */
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-main {
+  .xmatrix-app.xmatrix-app-shell.app-mobile-back-open .app-main {
     padding-top: var(--mobile-topbar-space) !important;
   }
 
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-message-surface {
+  .xmatrix-app.xmatrix-app-shell.app-mobile-back-open .app-message-surface {
     min-height: 0 !important;
   }
 
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-message-timeline {
+  .xmatrix-app.xmatrix-app-shell.app-mobile-back-open .app-message-timeline {
     scroll-padding-top: 0.5rem !important;
   }
 
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-message-timeline > div {
+  .xmatrix-app.xmatrix-app-shell.app-mobile-back-open .app-message-timeline > div {
     padding-top: 0.5rem !important;
   }
 
@@ -6920,6 +6928,15 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    and its pages clip rather than hide: a hidden overflow is still a scroll
    container, and focusing a control while the track slides scrolled it
    sideways, leaving the whole page 16px off the plank above it. */
+.xmatrix-app .app-mobile-dock-pager[inert] *,
+.xmatrix-app .app-mobile-dock-page[inert] *,
+.xmatrix-app .app-mobile-dock-pager[inert] *::before,
+.xmatrix-app .app-mobile-dock-page[inert] *::before,
+.xmatrix-app .app-mobile-dock-pager[inert] *::after,
+.xmatrix-app .app-mobile-dock-page[inert] *::after {
+  animation-play-state: paused !important;
+}
+
 .xmatrix-app .app-mobile-dock-pager {
   overflow: hidden;
   overflow: clip;
@@ -7026,6 +7043,16 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   font-weight: 900;
   line-height: 1;
   color: var(--primary-foreground);
+}
+
+/* A connector's mark is its own artwork: it sits on the card, not a tint. */
+.xmatrix-app .app-connector-command-chip .app-mention-chip-avatar-face {
+  background: var(--card);
+}
+
+/* The arguments are prose the command carries: highlighted with it, read at body weight. */
+.xmatrix-app .app-connector-command-arguments {
+  font-weight: 400;
 }
 
 .xmatrix-app .app-mention-chip[data-read-state="unread"] .app-mention-chip-avatar-face {
@@ -7188,6 +7215,50 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   animation: app-message-sending-in 160ms ease-out 700ms backwards;
 }
 @keyframes app-message-sending-in { from { opacity: 0; } }
+
+/* A message of the reader's own that did not go out. Its text steps back, since
+   it is not in the conversation, and the line under it leads with the filled
+   badge chat apps use for this: red "!" when the send failed, brass "?" when
+   nobody knows whether it was written. Its actions are links in the text's ink. */
+.xmatrix-app .app-message-unsent-body {
+  opacity: 0.5;
+}
+.xmatrix-app .app-message-unsent {
+  --app-unsent-ink: var(--m-ink-alert, var(--destructive));
+}
+.xmatrix-app .app-message-unsent[data-message-unsent="unconfirmed"] {
+  --app-unsent-ink: var(--m-ink-attention, var(--accent));
+}
+.xmatrix-app .app-message-unsent-ink {
+  color: var(--app-unsent-ink);
+}
+.xmatrix-app .app-message-unsent-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--app-unsent-ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+.xmatrix-app .app-message-unsent-action {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+}
+.xmatrix-app .app-message-unsent-action:hover {
+  text-decoration-color: currentColor;
+}
+.xmatrix-app .app-message-unsent-action:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
 .app-invocation-positioner { z-index: 80; }
 .app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; color: var(--foreground); font-size: 13px; line-height: 1.5; }
 .app-invocation-heading { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
@@ -7412,7 +7483,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-intent-launch:active:not(:disabled) { transform: scale(.97); }
 .app-intent-launch:disabled { cursor: default; opacity: .8; }
 .app-intent-launch svg { color: oklch(0.68 0.16 70); }
-.app-intent-launch[data-state="launching"] svg { animation: intent-zap 700ms ease-in-out infinite alternate; }
+.app-intent-launch[data-state="launching"] [data-slot="animated-icon"] { animation: intent-zap 700ms ease-in-out infinite alternate; }
 @keyframes intent-zap { to { transform: scale(1.25); filter: drop-shadow(0 0 4px oklch(0.72 0.16 70)); } }
 
 /* The draft's mention bands (composer-mention-bands.ts places them). They sit
@@ -7453,7 +7524,15 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    and @ wears the summon violet because typing it calls an Agent in. It starts
    a hair after the caret, so the caret never touches the chip. */
 .app-composer-hint { margin-left: 0.18em; color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
-.app-composer-hint[data-rotating="true"] { display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
+.app-composer-hint[data-rotating="true"] { position: relative; display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
+/* Crossfade a fixed blur into the sharp ink while the hint rises. Changing
+   blur's radius on every frame rebuilt the workspace's compositing overlaps;
+   these fixed textures move and fade entirely on the compositor instead. */
+.app-composer-hint-sharp { display: inline-block; animation: composer-hint-sharpen 420ms cubic-bezier(.2, .7, .2, 1) both; }
+.app-composer-hint-blur {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0; filter: blur(3px);
+  animation: composer-hint-soften 420ms cubic-bezier(.2, .7, .2, 1) both;
+}
 .app-composer-hint-trigger {
   --hint-ink: var(--primary);
   position: relative; isolation: isolate;
@@ -7468,9 +7547,16 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 }
 .app-composer-hint[data-summon="true"] .app-composer-hint-trigger { --hint-ink: oklch(0.62 0.16 285); }
 .app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before {
-  background:
-    linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%) 0 0 / 240% 100% no-repeat,
-    color-mix(in oklab, var(--hint-ink) 11%, transparent);
+  background: color-mix(in oklab, var(--hint-ink) 11%, transparent);
+}
+/* Keep the chip's fill and gradient static. Moving a separate clipped layer
+   preserves the glint without repainting a background-position every frame. */
+.app-composer-hint-sweep {
+  position: absolute; z-index: -1; inset: 0; overflow: hidden; border-radius: 0.3em;
+}
+.app-composer-hint-sweep::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: -168%; width: 240%;
+  background: linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%);
   animation: composer-hint-summon 2.4s cubic-bezier(.45, 0, .25, 1) 300ms infinite;
 }
 /* The composer's own caret (ComposerTextHighlight draws it in the mirror):
@@ -7488,11 +7574,13 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 @media (prefers-reduced-motion: reduce) {
   .app-composer-caret { animation: none; }
 }
-@keyframes composer-hint-in { from { opacity: 0; transform: translateY(0.45em); filter: blur(3px); } }
-@keyframes composer-hint-summon { from { background-position: 120% 0, 0 0; } to { background-position: -120% 0, 0 0; } }
+@keyframes composer-hint-in { from { opacity: 0; transform: translateY(0.45em); } }
+@keyframes composer-hint-sharpen { from { opacity: 0; } to { opacity: 1; } }
+@keyframes composer-hint-soften { from { opacity: 1; } to { opacity: 0; } }
+@keyframes composer-hint-summon { from { transform: translateX(0); } to { transform: translateX(140%); } }
 @media (prefers-reduced-motion: reduce) {
-  .app-composer-hint[data-rotating="true"],
-  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before { animation: none; }
+  .app-composer-hint[data-rotating="true"], .app-composer-hint-sharp { animation: none; }
+  .app-composer-hint-sweep, .app-composer-hint-blur { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -7500,7 +7588,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   .xmatrix-app .app-mention-intent-declined,
   .xmatrix-app .app-mention-intent-declined[data-launching="true"],
   .app-intent-confidence-bar > span,
-  .app-intent-launch[data-state="launching"] svg,
+  .app-intent-launch[data-state="launching"] [data-slot="animated-icon"],
   .xmatrix-app .app-summon-condition[data-jev-arriving="true"] { animation: none; }
 }
 
@@ -8136,7 +8224,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
    question, an approval) is a piece of the same paper: `.app-paper-card`. */
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *),
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) label.border:has(> input:not([type="file"]):not([type="checkbox"]):not([type="radio"])):not(.app-material-wood-panel *, .app-admin-view *),
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *) {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *) {
   background: transparent !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
@@ -8146,7 +8234,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
 }
 
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) label.border:has(> input:not([type="file"]):not([type="checkbox"]):not([type="radio"])):not(.app-material-wood-panel *, .app-admin-view *):focus-within,
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *):focus {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *):focus {
   box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.45), 0 0 0 4px oklch(0.35 0.07 60 / 0.08) !important;
   outline: none !important;
 }
@@ -8186,8 +8274,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   background: color-mix(in oklch, var(--app-panel-ink, var(--foreground)) 86%, var(--app-panel-paper, white)) !important;
 }
 
-:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *))::before,
-:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *))::after {
+:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *))::before,
+:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list, .app-paper-card) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *))::after {
   content: none !important;
 }
 
@@ -8218,6 +8306,18 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   padding: 14px 16px 16px;
   border-radius: 10px !important;
   background: var(--app-ask-tint);
+}
+
+/* A choice xMatrix offers in a message (the welcome's first tasks, bringing
+   work in) is a piece of the same tinted paper as an ask, a little deeper
+   under the pointer: no rule, no rim, no shadow. */
+.xmatrix-app .app-paper-tile {
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--foreground) 4%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+
+.xmatrix-app button.app-paper-tile:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--foreground) 7%, var(--app-panel-paper, oklch(0.976 0.005 85)));
 }
 
 .xmatrix-app .app-ask-card[data-ask-card="open"],
@@ -8261,6 +8361,32 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-dock .app-channel-
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines input:not([type="checkbox"]):not([type="radio"]) {
   background: transparent !important;
   box-shadow: none !important;
+}
+
+/* A menu or small form floating over the paper (a page's selection menu, `/`
+   insert, a link being typed, the table tools and heading menu; Discuss on a
+   passage selected in a message) is a card of whiter paper laid on the page,
+   not glass and not a tinted slip (user 2026-10-19: 不要边框; chose A among
+   four, after a tint and an ink bar read as ugly): no edge, a little brighter
+   than the page so it stands off the text it covers, and a soft warm shadow
+   that lifts it, as Notion's and Linear's menus do. */
+.app-material-paper-popover {
+  background: oklch(0.997 0.002 85);
+  color: var(--app-panel-ink, var(--foreground));
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px oklch(0.35 0.07 60 / 0.06),
+    0 8px 24px -6px oklch(0.35 0.07 60 / 0.18);
+}
+
+/* Its items are lines of the card: a little ink under the pointer, or while
+   chosen from the keyboard or pressed, and nothing at rest. */
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button {
+  background: transparent;
+}
+
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button:is(:hover:not(:disabled), :active, [aria-selected="true"], [aria-pressed="true"]) {
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
 }
 
 /* Notices on the paper: plain white with the tone's rail, not glass. */
@@ -8553,6 +8679,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
 
 .xmatrix-app .app-handoff-arrow {
   --invocation-color: var(--muted-foreground);
+  position: relative;
   display: inline-flex;
   flex: none;
   align-self: center;
@@ -8574,7 +8701,35 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   stroke-linejoin: round;
 }
 
-.xmatrix-app .app-handoff-comet { opacity: 0; stroke-width: 2.6; }
+.xmatrix-app .app-handoff-head {
+  position: absolute;
+  inset: 0;
+}
+
+.xmatrix-app .app-handoff-head svg { width: 100%; height: 100%; }
+
+/* The 38-unit track has 1.3-unit round caps. Its static clip holds a moving
+   HTML capsule: the old 10/40 normalized dash is 9.5 units plus those caps.
+   SVG stroke-dashoffset would repaint the message on every animation frame. */
+.xmatrix-app .app-handoff-comet-window {
+  position: absolute;
+  left: calc(2.4em * 0.7 / 44);
+  top: calc(2.4em * 4.7 / 44);
+  width: calc(2.4em * 40.6 / 44);
+  height: calc(2.4em * 2.6 / 44);
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.xmatrix-app .app-handoff-comet {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: calc(2.4em * 12.1 / 44);
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+}
 .xmatrix-app .app-handoff-arrow[data-tone="error"] .app-handoff-line { stroke-dasharray: 2 3; }
 
 /* In flight: a faint track, a bright comet running from one Agent to the
@@ -8583,48 +8738,70 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
 
 .xmatrix-app .app-handoff-arrow[data-flowing="true"] .app-handoff-comet {
   opacity: 1;
-  stroke-dasharray: 10 60;
   animation: app-handoff-comet 1.3s cubic-bezier(0.5, 0, 0.25, 1) infinite;
 }
 
 .xmatrix-app .app-handoff-arrow[data-flowing="true"] .app-handoff-head {
-  transform-box: fill-box;
-  transform-origin: center;
   animation: app-handoff-land 1.3s ease-out infinite;
 }
 
 @keyframes app-handoff-comet {
-  from { stroke-dashoffset: 10; }
-  to { stroke-dashoffset: -40; }
+  from { transform: translateX(calc(2.4em * -9.5 / 44)); }
+  to { transform: translateX(calc(2.4em * 38 / 44)); }
 }
 
 @keyframes app-handoff-land {
   0%, 60% { opacity: 0.45; transform: translateX(0); }
-  80% { opacity: 1; transform: translateX(1.5px); }
+  80% { opacity: 1; transform: translateX(3.409091%); }
   100% { opacity: 0.45; transform: translateX(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app .app-handoff-arrow .app-handoff-comet,
-  .xmatrix-app .app-handoff-arrow .app-handoff-head { animation: none; }
+  .xmatrix-app .app-handoff-arrow[data-flowing="true"] .app-handoff-comet,
+  .xmatrix-app .app-handoff-arrow[data-flowing="true"] .app-handoff-head { animation: none; }
 }
 
-/* Status pulse: while an Agent works, a break runs along the line left to
-   right. The path is drawn right to left and the dash period is its whole
-   length, so the climbing offset carries one gap across and wraps seamlessly.
-   At rest, and under reduced motion, the line is whole. */
-.xmatrix-app .app-status-pulse[data-live] path {
-  stroke-dasharray: 0.84 0.16;
-  animation: app-status-pulse-break 2s linear infinite;
+/* The ECG path is a static mask. Its moving, transparent break rides a
+   compositor transform inside that mask; animating SVG stroke-dashoffset
+   instead repainted the rail even when the whole workspace was idle. */
+.xmatrix-app .app-status-pulse {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
 }
 
-@keyframes app-status-pulse-break {
-  from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: 1; }
+.xmatrix-app .app-status-pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+}
+
+.xmatrix-app .app-status-pulse-sweep { display: none; }
+
+.xmatrix-app .app-status-pulse[data-live]::before { display: none; }
+
+.xmatrix-app .app-status-pulse[data-live] .app-status-pulse-sweep {
+  position: absolute;
+  display: block;
+  top: 0;
+  bottom: 0;
+  left: -140%;
+  width: 240%;
+  background: linear-gradient(to right,
+    currentColor 0% 46.666667%, transparent 46.666667% 53.333333%, currentColor 53.333333% 100%);
+  /* The whole trace is visible at frame zero before the first IO observation. */
+  transform: translateX(0);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app .app-status-pulse[data-live] path { stroke-dasharray: none; animation: none; }
+  .xmatrix-app .app-status-pulse[data-live]::before { display: block; }
+  .xmatrix-app .app-status-pulse[data-live] .app-status-pulse-sweep { display: none; animation: none; }
 }
 
 /* First-message launch choice: a quiet brass card under a new conversation's
@@ -8843,25 +9020,13 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   border-radius: inherit;
 }
 
-.xmatrix-app .app-rail-update-arrow {
-  animation: app-rail-update-cycle 4.2s 1s infinite;
-}
-
 @keyframes app-rail-update-in {
   from { opacity: 0; transform: scale(0.5); }
   to { opacity: 1; transform: scale(1); }
 }
 
-@keyframes app-rail-update-cycle {
-  0% { transform: translateY(0); opacity: 1; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.4); }
-  10% { transform: translateY(-26px); opacity: 0; }
-  10.01% { transform: translateY(26px); opacity: 0; animation-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1); }
-  26%, 100% { transform: translateY(0); opacity: 1; }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app.xmatrix-app.xmatrix-app .app-rail .app-rail-update,
-  .xmatrix-app .app-rail-update-arrow {
+  .xmatrix-app.xmatrix-app.xmatrix-app .app-rail .app-rail-update {
     animation: none;
   }
 }
@@ -8927,4 +9092,12 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 
 .overlay-scrollbar-thumb:is(:hover, [data-dragging])::before {
   background: oklch(0.3 0 0 / 0.58);
+}
+
+/* Explicitly registered animation hosts keep their geometry outside scrolling
+   clips; any positive viewport intersection resumes their existing animation. */
+[data-animation-visible="false"],
+[data-animation-visible="false"]::before,
+[data-animation-visible="false"]::after {
+  animation-play-state: paused !important;
 }

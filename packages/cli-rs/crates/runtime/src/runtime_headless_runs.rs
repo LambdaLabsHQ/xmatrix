@@ -200,9 +200,12 @@ pub(crate) async fn run_headless_external(run: ExternalRun<'_>) -> error::Result
                             let attachment_free = attachments
                                 .as_deref()
                                 .is_none_or(|items| items.is_empty());
-                            if attachment_free && slash_command_passthrough(&body, &agent).and_then(crate::harness_parameters::command).is_some() {
-                                let _ = relay_for_events.ack_channel_message(message_id, channel_id.clone(), sequence);
-                                let _ = relay_for_events.send_channel_message(channel_id, "This runtime does not advertise a parameter control interface".into()).await;
+                            if attachment_free && let Some(requested) = slash_command_passthrough(&body, &agent).and_then(crate::harness_parameters::command) {
+                                let _ = relay_for_events.ack_channel_message(message_id.clone(), channel_id.clone(), sequence);
+                                crate::harness_parameters::report_parameter_control(
+                                    &relay_for_events, &channel_id, &message_id, &requested, &[], None,
+                                    Err("This runtime does not advertise a parameter control interface".into()),
+                                ).await;
                                 continue;
                             }
                             let payload = match slash_command_passthrough(&body, &agent) {
@@ -717,5 +720,9 @@ impl ChannelControlledRuntime for ClaudeStreamSession {
 
     fn parameter_presence(&self) -> PresencePatch {
         claude_switch_presence(self)
+    }
+
+    fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter> {
+        self.presentation().parameters
     }
 }

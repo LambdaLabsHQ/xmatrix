@@ -129,6 +129,8 @@ export async function proxyXMatrixRequest(input: {
 
 type ForwardOptions = {
   body?: boolean;
+  /** Request headers the Hub route reads, carried from the browser's request. */
+  requestHeaders?: readonly string[];
   streamResponse?: boolean;
   responseHeaders?: readonly string[];
 };
@@ -142,9 +144,16 @@ export async function forwardXMatrixRequest(request: Request, input: {
   route: string;
   method: ProxyMethod;
 } & ForwardOptions): Promise<NextResponse> {
-  const { body = input.method === "POST" || input.method === "PUT" || input.method === "PATCH", ...proxy } = input;
+  const { body = input.method === "POST" || input.method === "PUT" || input.method === "PATCH", requestHeaders = [],
+    ...proxy } = input;
+  const headers: Record<string, string> = {};
+  for (const name of requestHeaders) {
+    const value = request.headers.get(name);
+    if (value) headers[name] = value;
+  }
   return proxyXMatrixRequest({
     ...proxy,
+    headers,
     authorization: request.headers.get("authorization") || undefined,
     ...(body ? { body: await request.text() } : {}),
   });
@@ -181,18 +190,18 @@ export function hubRouteHandlerFrom<Params extends object = Record<string, never
 /**
  * Handlers for a Space's optional catch-all route: `build` receives the
  * remaining segments, each encoded, as one subpath; `search` carries the query
- * along. A route exports the methods it serves.
+ * along, and `get` how its reads are forwarded. A route exports the methods it serves.
  */
 export function spaceSubpathHandlers(
   build: (spaceId: string, subpath: string) => string,
-  { search = false }: { search?: boolean } = {},
+  { search = false, get }: { search?: boolean; get?: ForwardOptions } = {},
 ) {
   const route = ({ spaceId, path = [] }: { spaceId: string; path?: string[] }, url: URL) => {
     const subpath = path.map((segment) => encodeURIComponent(segment)).join("/");
     return `${build(spaceId, subpath)}${search ? url.search : ""}`;
   };
   return {
-    GET: hubRouteHandlerFrom("GET", route),
+    GET: hubRouteHandlerFrom("GET", route, get),
     POST: hubRouteHandlerFrom("POST", route),
     PUT: hubRouteHandlerFrom("PUT", route),
     PATCH: hubRouteHandlerFrom("PATCH", route),

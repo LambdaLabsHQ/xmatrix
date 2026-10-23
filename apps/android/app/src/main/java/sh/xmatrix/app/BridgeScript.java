@@ -42,6 +42,7 @@ final class BridgeScript {
     "    pushDevice: () => invoke('pushDevice'),\n" +
     "    notify: (payload) => invoke('notify', payload),\n" +
     "    openExternal: (url) => invoke('openExternal', { url }),\n" +
+    "    authorizeInBrowser: (request) => invoke('authorizeInBrowser', request),\n" +
     "    getClipboardImages: () => Promise.resolve([]),\n" +
     "    checkCliInstalled: () => Promise.resolve({ installed: false }),\n" +
     "    openCliInstall: () => invoke('openExternal', { url: '" + AppConfiguration.CLI_INSTALL_URL + "' }),\n" +

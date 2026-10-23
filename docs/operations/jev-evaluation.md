@@ -37,6 +37,14 @@ evaluation entry point through Vercel AI Gateway. It accepts one shared `state`
 and named Boolean, Choice or Score `questions`. Routing is one possible caller;
 this package does not launch Agents, choose Machines or alter production routing.
 
+While a Human types a summon, the composer previews Jev's reading through
+`POST /api/channels/:id/summon-intent`. One preview reads up to four summons,
+and each may be retried once, so it can cost eight Jev calls. Each signed-in
+Human may request 60 previews a minute (`RATE_LIMIT_SUMMON_INTENT`); over that
+the Hub answers `429 rate_limited` before reading the draft or the Channel,
+the composer shows no reading, and sending still asks Jev once after the
+message is committed. `launch:force` and sending are not limited by it.
+
 A `summon_intent_reference`, `summon_intent_explanation` or
 `summon_intent_example` rejection means Jev read the mention as naming,
 explaining or quoting an Agent rather than asking one to start; its decision
@@ -54,14 +62,29 @@ with `node packages/hub/scripts/summon-intent-eval.mjs --live`.
 
 ## Worker endpoint and handoff
 
-This branch also adds `POST /api/ai/jev/evaluate` to the Hub. Send the same JSON
-with an ordinary xMatrix bearer token. The Hub verifies authentication; Agent
-callers additionally require a live Run and cannot use a restricted
-channel-about-session. Every authenticated Human or live Agent Run can evaluate;
-there is no separate account allowlist. Caller-supplied owner ids, keys, model
-names and endpoints are rejected. The provider key remains deployment-owned;
-unconfigured deployments return 503. Routing still rechecks current Channel
-permissions and the unchanged source publication before creating work.
+`POST /api/ai/jev/evaluate` accepts the same JSON with an ordinary xMatrix
+bearer token. Human callers supply `x-xmatrix-space-id`; the billing authority
+checks current membership and Pro entitlement in metered deployments. A header
+never grants access. Agent callers require a current live Run and use its birth
+Space and owner; a conflicting Space header is rejected. Valid Agent Runs may
+also evaluate within their Free Space. Unmetered deployments still verify
+Human Space membership, without imposing a Pro plan. There is no account-name
+allowlist. Caller-supplied owner ids, keys, model names and endpoints remain
+rejected. The provider key stays deployment-owned.
+
+Each admitted call spends both its owner's and its Space's allowance of 10
+evaluations a minute (`RATE_LIMIT_JEV_EVALUATE`). Multiple owners or Runs cannot
+multiply one Space's allowance. Both counters are checked before the body is
+read or a provider is called. Usage is attributed to the verified Space.
+The 11th answers `429` with `{ "code": "rate_limited", "retryable": true }`
+and `Retry-After: 60`, before the body is read or the provider is called. Both
+Jev allowances are Workers Rate Limiting bindings refused whatever
+`RATE_LIMIT_ENFORCED` says, because they bound the operator's provider spend;
+like every such binding they count per Cloudflare location, not exactly.
+There is no daily cap. The Hub's one exact counter (`auth-attempt-limit.ts`)
+keeps one-minute windows in the single sign-in broker object and prunes any
+counter idle for a minute, so a day's count cannot live there, and routing
+every evaluation through the sign-in broker would tie sign-in to Jev traffic.
 
 On 2026-09-19, the owner explicitly requested local Wrangler secret setup.
 `wrangler secret bulk --name xmatrix-hub` successfully set
@@ -78,6 +101,17 @@ access remains required, and a missing provider key still fails closed. Publish
 this change through the canonical immutable release train, then record live
 evaluation evidence separately from mocked provider tests. The successful live
 result below was a local CLI call, not a deployed Hub call.
+
+## Usage metering
+
+Every Jev call the Hub makes on its key is one datapoint in the
+`xmatrix_usage_cost` Analytics Engine dataset: the Space (the caller's owner
+for `/api/ai/jev/evaluate`), the feature (`summon_intent`, `launch_choice`,
+`input_launch`, `start_intent`, `supersession`, `page_attachment`, `evaluate`),
+the outcome and its allowlisted code, input and output tokens as the AI
+Gateway reports them, and latency. Nothing from the evaluation input or answer
+is written. `packages/hub/scripts/usage-cost-report.mjs` sums it per Space; see
+[usage cost metering](usage-cost-metering.md).
 
 ## Local command
 
@@ -146,3 +180,8 @@ The API key stays in the ignored local environment file, outside this record.
 
 References: [Vercel evaluation API](https://vercel.com/docs/ai-gateway/modalities/evaluation)
 and [Jev model page](https://vercel.com/ai-gateway/models/jev).
+
+The 2026-10-16 cost-protection decision adds current plan/Space admission and
+per-Space limits to standalone evaluation; the historical removal of an
+account-name allowlist does not waive these product budgets. It does not add
+plan checks to ordinary routing or startup reconciliation.

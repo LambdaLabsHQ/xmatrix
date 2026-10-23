@@ -1,3 +1,4 @@
+import { withRuntimeDeliveryIngress } from "./runtime-transport/runtime-delivery-diagnostics";
 import { utf8ByteLength } from "@xmatrix/protocol";
 import { DurableObject } from "cloudflare:workers";
 import { deliverRuntimeFanoutTargets, isRuntimeDeliveryUrl } from "./runtime-transport/runtime-route-directory-delivery";
@@ -54,7 +55,8 @@ export class RelayRuntimeChannelFanout extends DurableObject<Env> {
     }
     if (path === "/internal/runtime-channel-fanout/members") return this.members(now);
     if (path === "/internal/runtime-channel-fanout/deliver") {
-      return this.deliver(await readJsonRecord(request, MAX_DELIVERY_ENVELOPE_BYTES), now);
+      return withRuntimeDeliveryIngress("fanout", async () =>
+        this.deliver(await readJsonRecord(request, MAX_DELIVERY_ENVELOPE_BYTES), now));
     }
     return Response.json({ error: "Not found" }, { status: 404 });
   }

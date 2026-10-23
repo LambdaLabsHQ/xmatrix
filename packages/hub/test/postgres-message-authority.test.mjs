@@ -39,7 +39,7 @@ test("PostgreSQL history presents an authorized archived Channel through the Hub
           placement_shard_id: "shard-0", placement_placement_epoch: 1, placement_state: "active",
           placement_target_shard_id: null, placement_plan_class: "shared",
         }];
-        if (query.name === "message_history_page_v3") return [{
+        if (query.name === "message_history_page_v4") return [{
           history_authorized: true, acknowledged_sequence: 0, content_revision: 3,
           history_head_sequence: 30, message_id: null,
         }];
@@ -53,7 +53,7 @@ test("PostgreSQL history presents an authorized archived Channel through the Hub
   // A warm history request is two statements: the directory read that selects
   // the shard, then the fenced page read that authorizes the reader.
   assert.deepEqual(statements.map((statement) => statement.name),
-    ["channel_space_directory_resolve_placed_v1", "message_history_page_v3"]);
+    ["channel_space_directory_resolve_placed_v1", "message_history_page_v4"]);
   assert.equal(statements[0].context.placement, undefined);
   assert.deepEqual(statements[1].context.placement,
     { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 });
@@ -140,12 +140,15 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
           if (query.name === "message_append_commit_facts_v5") return [{
             search_rank: "pg:00000000000000000001", content_revision: 0, channel_id: commitChannelId,
           }];
-          if (query.name === "message_append_publish_unmetered_v1") return [{
+          if (query.name === "message_append_publish_unmetered_v3") return [{
             status: null, grace_until: null, seat_quantity: null, seat_count: null,
             prior_free_message_count: 0, free_message_count: 1,
             accepted: true, channel_id: commitChannelId, sequence_confirmed: true,
             result_json: JSON.parse(query.values[4]),
           }];
+          // Who the message reaches, read in the append's own transaction.
+          if (query.name === "message_live_routing_recipients_v4") return [{ user_id: "owner-1", recipient_count: 1 }];
+          if (query.name === "message_live_routing_attention_summary_v3") return [];
           if (query.name === "run_registration_authority_mode_v3" ||
               query.name === "run_registration_access_binding_v3") return [];
           throw new Error(`unexpected query ${query.name}`);
@@ -175,29 +178,17 @@ function openAppendRows(channelId) {
   };
 }
 
-for (const scenario of [
-  { name: "ordinary Agent" },
-  // The retired xMatrix management delegate: a Run started before it was retired posts nothing.
-  { name: "retired management delegate", routedAs: "management_assistant_mention", error: "agent_run_forbidden",
-    message: /management agent is retired/u },
-  { name: "Channel About cannot post", routedAs: "management_channel_about", error: "agent_run_forbidden",
-    message: /Channel About Runs cannot post/u },
-]) test(`PostgreSQL sender identity: ${scenario.name}`, async () => {
+/** The proven Run of `instance-1`, Codex:7 in channel-1, as the append reads it. */
+const provenRunRow = (extra = {}) => ({ owner_user_id: "owner-1", channel_id: "channel-1",
+  run_status: "running", instance_status: "busy", instance_channel_id: "channel-1",
+  channel_instance_id: "7", metadata_json: { executionKey: "execution-1" }, ...extra });
+
+test("PostgreSQL sender identity: ordinary Agent", async () => {
   const calls = [];
   const observations = [];
   const targetChannel = "channel-1";
   const database = agentAppendDatabase({ calls, sequenceChannelId: targetChannel, commitChannelId: "channel-1",
-    rows: (query) => {
-      if (query.name === "message_append_run_proof_v3") return [{
-        owner_user_id: "owner-1", channel_id: "channel-1",
-        run_status: "running", instance_status: "busy", instance_channel_id: "channel-1",
-        channel_instance_id: "7", metadata_json: { executionKey: "execution-1",
-          ...(scenario.routedAs ? { routedAs: scenario.routedAs, managementSpaceId: "space-1",
-            managementConfigGeneration: 2 } : {}),
-        },
-      }];
-      return agentChannelRows(query);
-    } });
+    rows: (query) => query.name === "message_append_run_proof_v3" ? [provenRunRow()] : agentChannelRows(query) });
   const append = postgresMessageAppend({
     RELAY_AUTHORITY_OBSERVABILITY_ENABLED: "true",
     POSTGRES_COORDINATION_OBSERVABILITY_SAMPLE_RATE: "1",
@@ -218,21 +209,11 @@ for (const scenario of [
     },
   }, {
     database, spaceId: "space-1",
-    ...(scenario.name === "ordinary Agent" ? { agentSendFingerprint: "2".repeat(64) } : {}),
+    agentSendFingerprint: "2".repeat(64),
     placement: { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 },
   });
-  if (scenario.error) {
-    await assert.rejects(append, (error) => error.code === scenario.error && scenario.message.test(error.message));
-    assert.equal(calls.some((query) => query.name === "message_append_commit_facts_v5"), false);
-    assert.equal(calls.some((query) => /space_management_configs/u.test(query.text ?? "")), false,
-      "no Space management configuration is consulted");
-    assert.equal(observations.length, 1);
-    assert.equal(observations[0].blobs[0], "message_append");
-    assert.equal(observations[0].blobs[1], "error");
-    return;
-  }
   const result = await append;
-  assert.equal(result.agentSendFingerprint, scenario.name === "ordinary Agent" ? "2".repeat(64) : undefined);
+  assert.equal(result.agentSendFingerprint, "2".repeat(64));
   assert.equal(observations.length, 1);
   assert.equal(observations[0].blobs[1], "ok");
   assert.equal(observations[0].doubles.length, 8);
@@ -261,19 +242,12 @@ test("a committed Agent message carries the Instance row's presentation", async 
      The row wins key by key, and the caller's overlay survives only where the
      row carries nothing -- an Instance whose first message outruns its first
      presentation write still stamps a header. */
-  const database = agentAppendDatabase({ sequenceChannelId: "channel-1", rows: (query) => {
-      if (query.name === "message_append_run_proof_v3") return [{
-        owner_user_id: "owner-1", channel_id: "channel-1",
-        run_status: "running", instance_status: "busy", instance_channel_id: "channel-1",
-        channel_instance_id: "7", metadata_json: { executionKey: "execution-1" },
-        presentation_json: {
-          model: "gpt-6-astra",
-          effort: "high",
-          statusChips: [{ id: "model", label: "Model", value: "gpt-6-astra" }],
-        },
-      }];
-      return agentChannelRows(query);
-    } });
+  const database = agentAppendDatabase({ sequenceChannelId: "channel-1", rows: (query) =>
+    query.name === "message_append_run_proof_v3" ? [provenRunRow({ presentation_json: {
+      model: "gpt-6-astra",
+      effort: "high",
+      statusChips: [{ id: "model", label: "Model", value: "gpt-6-astra" }],
+    } })] : agentChannelRows(query) });
   const result = await postgresMessageAppend({}, "channel-1", {
     commandId: "command-presentation-1", messageId: "message-presentation-1",
     channelId: "channel-1", body: "tagged", principal: { kind: "agent", id: "instance-1" },
@@ -531,13 +505,17 @@ test("a reply to a link is relayed into the link's Channel as work, once, under 
   assert.equal(crossChannelReplyOrigin({ channelId: "a", messageId: "m" }), undefined,
     "a relay without the owner whose authority it needs is not a relay");
   assert.deepEqual(crossChannelReplyOrigin({ channelId: "a", messageId: "m", ownerUserId: "o",
-    replier: { kind: "user", label: "Ada", agentId: "x", instanceId: "y" } }).replier,
+    replier: { kind: "user", label: "Ada", agentId: "x", instanceId: "y",
+      registration: { ownerUserId: "forged", machineId: "other", harness: "codex" } } }).replier,
     { kind: "user", label: "Ada" }, "only an Agent replier names an Instance");
+  const registration = { ownerUserId: "reply-owner", machineId: "server", harness: "claude" };
+  assert.deepEqual(crossChannelReplyOrigin({ channelId: "a", messageId: "m", ownerUserId: "o",
+    replier: { kind: "agent", label: "claude:2", registration } }).replier.registration, registration);
   const appended = [];
   await relayCrossChannelReply({
     env: {}, channelId: "channel-away", messageId: "reply-9", body: "yes, v84 is live",
     origin: { channelId: "channel-home", messageId: "link-1", ownerUserId: "owner-1",
-      replier: { kind: "agent", label: "claude:2", avatarUrl: "https://a/claude.png",
+      replier: { registration, kind: "agent", label: "claude:2", avatarUrl: "https://a/claude.png",
         agentId: "agent-7", instanceId: "channel-home:2" },
       requesterInstanceId: "channel-home:1" },
   }, {
@@ -556,7 +534,7 @@ test("a reply to a link is relayed into the link's Channel as work, once, under 
     "never a system fact, which an Agent would read as context instead of work");
   assert.deepEqual(command.residual.appMetadata.crossChannelReply,
     { sourceChannelId: "channel-away", sourceMessageId: "reply-9", linkMessageId: "link-1",
-      replierKind: "agent", replierAgentId: "agent-7", replierInstanceId: "channel-home:2",
+      replierKind: "agent", replierRegistration: registration, replierAgentId: "agent-7", replierInstanceId: "channel-home:2",
       requesterInstanceId: "channel-home:1" },
     "where it was written lives in metadata, resolved per reader; the replying Instance is skipped live");
   assert.equal(command.body, "yes, v84 is live", "the reply reads as itself, with no relay preamble");

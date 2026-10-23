@@ -6,6 +6,7 @@ require("./typescript-require.cjs").installTypeScriptRequire();
 const { selectComposerInvocation, updateComposerInvocationDraft, composerSendDraft, selectComposerReference } =
   require("./composer-invocation-bindings.ts");
 const { registrationMentionCandidates } = require("./registration-mention-candidates.ts");
+const { parseAgentInvocationSelections, staticFace } = require("@xmatrix/protocol");
 
 const {
   clearChannelComposerDraft,
@@ -103,6 +104,36 @@ test("overwriting a channel draft with empty content deletes the entry", () => {
 const key = { spaceId: "space", ownerUserId: "owner", machineId: "machine", harness: "codex" };
 const selection = { start: 0, end: 6, text: "@codex", target: { kind: "registration", key } };
 
+test("editing a picked Agent's context retires its target and the message still passes send validation", () => {
+  const initial = selectComposerInvocation(undefined, "@codex task", selection);
+  for (const body of ["x@codex task", "@codex:1 task", "> @codex task", "`@codex task`",
+    "[@codex task](https://example.com)", "```\n@codex task\n```", "~~@codex task~~"]) {
+    const edited = updateComposerInvocationDraft(initial, body);
+    const sent = composerSendDraft(edited, body);
+    assert.equal(sent.body, body);
+    assert.deepEqual(sent.selections, [], body);
+    const hash = "a".repeat(64);
+    assert.doesNotThrow(() => parseAgentInvocationSelections({ schemaVersion: 1, sourceRevision: 1,
+      sourceBodyHash: hash, selections: sent.selections }, {
+      spaceId: "space", body: sent.body, bodyHash: hash, revision: 1,
+    }));
+    // Removing the surrounding syntax must not resurrect an old machine choice.
+    assert.deepEqual(composerSendDraft(updateComposerInvocationDraft(edited, initial.body), initial.body).selections, []);
+  }
+  for (const body of ["(@codex task", "@codex! task", "😀 @codex task"]) {
+    const edited = updateComposerInvocationDraft(initial, body);
+    const sent = composerSendDraft(edited, body);
+    assert.equal(sent.selections.length, 1, body);
+    assert.deepEqual(sent.selections[0].target, selection.target);
+  }
+  // Drafts saved by an older client, and picks made within literal text, obey
+  // the same rule without waiting for another keystroke.
+  const body = "> @codex task";
+  const quoted = { ...selection, start: 2, end: 8 };
+  assert.deepEqual(composerSendDraft({ body, bindings: [quoted] }, body).selections, []);
+  assert.deepEqual(selectComposerInvocation(undefined, body, quoted).bindings, []);
+});
+
 test("selected identities survive channel switching, attachment changes and immutable reads", () => {
   const store = new Map();
   const invocationDraft = selectComposerInvocation(undefined, "@codex task", selection);
@@ -166,9 +197,9 @@ test("normal completion has one capability per harness and explicit locations re
   const selected = registrationMentionCandidates(existing, catalog, "codex/mac");
   assert.equal(selected.length, 1);
   assert.deepEqual(selected[0].invocationTarget, { kind: "registration", key: locations[1].key });
-  // A harness row and its locations carry the harness preset icon, not initials.
-  assert.equal(candidates[0].avatarUrl, "/agent-vendors/openai.svg");
-  assert.equal(selected[0].avatarUrl, "/agent-vendors/openai.svg");
+  // A harness row and its locations show the harness's face, not initials.
+  assert.equal(staticFace(candidates[0].face).imageUrl, "/agent-vendors/openai.svg");
+  assert.equal(staticFace(selected[0].face).imageUrl, "/agent-vendors/openai.svg");
   // An Agent its owner disabled is not offered, as a location or through its harness.
   const disabled = locations.map(location => ({ ...location, routingReady: false, routingBlocker: "owner_environment_disabled" }));
   assert.deepEqual(registrationMentionCandidates(existing, [{ harness: "codex", locations: disabled }], "codex/mac"), []);

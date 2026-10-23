@@ -56,6 +56,7 @@ export default defineConfig({
       // a benchmark into ten-way renderer startup measures host contention,
       // not channel-switch latency; functional cases remain fully parallel.
       name: "performance",
+      workers: 1,
       testMatch: "**/*-performance.spec.ts",
       dependencies: ["web", "mock-app"],
     },

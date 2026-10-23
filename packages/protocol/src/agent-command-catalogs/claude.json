@@ -3,7 +3,7 @@
   "sourceUrl": "https://code.claude.com/docs/en/commands",
   "sourceKind": "docs-table",
   "version": "2026-07-12",
-  "notes": "Live sessions may also advertise slash_commands via system/init; merge as additive overlay later.",
+  "notes": "Headless stream-json sessions answer interactive-only commands with \"isn't available in this environment\"; live system/init.slash_commands decides which passthrough entries are offered.",
   "commands": [
     {
       "token": "/model",
@@ -47,25 +47,6 @@
       "mode": "passthrough"
     },
     {
-      "token": "/help",
-      "label": "Help",
-      "description": "Show help and available commands.",
-      "mode": "passthrough"
-    },
-    {
-      "token": "/plan",
-      "label": "Plan mode",
-      "description": "Switch into plan mode before a large change.",
-      "mode": "passthrough",
-      "freeform": true
-    },
-    {
-      "token": "/resume",
-      "label": "Resume",
-      "description": "Return to an earlier conversation.",
-      "mode": "passthrough"
-    },
-    {
       "token": "/config",
       "label": "Settings",
       "description": "Open Claude Code settings.",
@@ -76,12 +57,6 @@
       "token": "/mcp",
       "label": "MCP",
       "description": "Manage MCP server configuration.",
-      "mode": "passthrough"
-    },
-    {
-      "token": "/permissions",
-      "label": "Permissions",
-      "description": "Set approval rules for tools.",
       "mode": "passthrough"
     },
     {

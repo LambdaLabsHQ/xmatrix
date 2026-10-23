@@ -126,6 +126,24 @@ test("Web publication requires the live Hub to admit the exact Web version", asy
   }), /expected compatibility HTTP 200/u);
 });
 
+test("a beta client's exact version is checked against the live Hub like a stable one", async () => {
+  const versions = [];
+  const fetchImpl = async (url, init) => {
+    if (new URL(url).pathname !== "/api/client-compatibility") return Response.json({ status: "ok", service: "xmatrix-hub" });
+    const headers = new Headers(init.headers);
+    versions.push(headers.get("x-xmatrix-client-version"));
+    const admitted = headers.get("x-xmatrix-client-component") !== null;
+    return Response.json(admitted ? { compatible: true, code: "compatible", retryable: false }
+      : { compatible: false, code: "client_upgrade_required", retryable: false }, { status: admitted ? 200 : 426 });
+  };
+  await waitForHubHealth({ url: "https://xmatrix-hub.example.test/", attempts: 1, cliVersion: "1.0.606-beta.3", fetchImpl });
+  assert.equal(versions[1], "1.0.606-beta.3");
+  for (const cliVersion of ["1.0.606-rc.1", "1.0.606-beta.0", "latest"]) {
+    await assert.rejects(waitForHubHealth({ url: "https://xmatrix-hub.example.test/", attempts: 1, cliVersion, fetchImpl }),
+      /must be a release version/u, cliVersion);
+  }
+});
+
 test("post-deploy smoke rejects non-HTTPS targets and exhausts its bound", async () => {
   await assert.rejects(
     waitForHubHealth({ url: "http://xmatrix-hub.example.test/" }),

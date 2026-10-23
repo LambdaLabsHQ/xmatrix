@@ -1,6 +1,9 @@
 import type { Env } from "../types";
+import { upstreamMeter, type UpstreamMeter } from "../usage-cost-metering";
 import type { AgentRegistrationIdentity } from "./agent-caller";
+import type { ConnectorSubscriptionSync } from "./provider";
 import { composioGet, deleteComposioAccount } from "./composio";
+import { parseAccountList, serializeAccountList, type AccountListField } from "./account-list";
 import { connectorCredentialRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
 import { oauthClient } from "./oauth";
@@ -20,7 +23,8 @@ export interface GmailMailbox { account: string; address: string; owner: string 
 /** Who runs an action: the Human, or an Agent (its registration) and the user whose Run it is. */
 export interface GmailCaller { userId: string; agent?: AgentRegistrationIdentity }
 
-export const MAX_MAILBOXES = 10;
+const MAILBOXES: AccountListField = { providerId: "gmail", field: "mailboxes",
+  invalid: { status: 502, message: "the stored Gmail mailboxes are unreadable; reconnect Gmail" } };
 const ACCOUNT_ID = /^[A-Za-z0-9_-]{4,128}$/u;
 const ADDRESS = /^[^\s@<>(),;:"\\[\]]{1,64}@[^\s@<>(),;:"\\[\]]{1,189}$/u;
 const OWNER = /^(?:user:[A-Za-z0-9_.:-]{1,128}|agent:[^/\s]{1,300}\/[^/\s]{1,300}\/[^/\s]{1,300})$/u;
@@ -29,23 +33,18 @@ const PROFILE = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 /** The stored list; a malformed value fails closed rather than being read in part. */
 export function parseMailboxes(value: string | undefined): GmailMailbox[] {
   if (!value) throw new ProviderRequestError(401, "Connect a Gmail mailbox first");
-  let parsed: unknown;
-  try { parsed = JSON.parse(value); } catch { parsed = undefined; }
-  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > MAX_MAILBOXES) {
-    throw new ProviderRequestError(502, "the stored Gmail mailboxes are unreadable; reconnect Gmail");
-  }
-  return parsed.map((entry) => {
-    const { account, address, owner } = (entry ?? {}) as Record<string, unknown>;
-    if (typeof account !== "string" || !ACCOUNT_ID.test(account) || typeof address !== "string" || !ADDRESS.test(address) ||
-        typeof owner !== "string" || !OWNER.test(owner)) {
-      throw new ProviderRequestError(502, "the stored Gmail mailboxes are unreadable; reconnect Gmail");
-    }
-    return { account, address: address.toLowerCase(), owner };
-  });
+  const mailboxes = parseAccountList(MAILBOXES, value, ({ account, address, owner }) =>
+    typeof account === "string" && ACCOUNT_ID.test(account) && typeof address === "string" && ADDRESS.test(address) &&
+      typeof owner === "string" && OWNER.test(owner) ? { account, address: address.toLowerCase(), owner } : undefined,
+  (mailbox) => mailbox.address);
+  if (!mailboxes.length) throw new ProviderRequestError(MAILBOXES.invalid.status, MAILBOXES.invalid.message);
+  return mailboxes;
 }
 
 export function serializeMailboxes(mailboxes: readonly GmailMailbox[]): string {
-  return JSON.stringify(mailboxes.map(({ account, address, owner }) => ({ account, address, owner })));
+  const value = serializeAccountList(MAILBOXES, mailboxes.map(({ account, address, owner }) => ({ account, address, owner })), "Gmail mailboxes");
+  if (!value) throw new ProviderRequestError(400, "a Gmail connection keeps at least one mailbox");
+  return value;
 }
 
 /** An Agent owner: `agent:` and its registration's owner, machine and harness, each URI-encoded. */
@@ -59,13 +58,28 @@ export function mayUseMailbox(mailbox: GmailMailbox, caller: GmailCaller): boole
   return caller.agent !== undefined && agentMailboxOwner(caller.agent) === mailbox.owner;
 }
 
+/**
+ * New-mail notifications reach a Channel the way any connector event does: the
+ * Channel subscribes `@gmail:subscribe:<mailbox>`. A mailbox is private to its
+ * member, so only that member (or their Agents' Runs) subscribes it; `*` means
+ * every mailbox the member owns. Delivery applies the same rule to each route.
+ */
+export const GMAIL_SUBSCRIPTIONS: ConnectorSubscriptionSync = {
+  async sync({ credentials, source, subscribed, actorUserId }) {
+    if (!subscribed) return undefined;
+    const owned = parseMailboxes(credentials.mailboxes).filter((mailbox) => mailbox.owner === `user:${actorUserId}`);
+    return owned.some((mailbox) => source === "*" || mailbox.address === source) ? undefined
+      : "only a mailbox's own member and their Agents subscribe its notifications";
+  },
+};
+
 /** One mailbox's credentials for a proxied call. */
 export function mailboxCredentials(credentials: Readonly<Record<string, string>>, mailbox: GmailMailbox): Record<string, string> {
   return { composioApiKey: credentials.composioApiKey ?? "", composioAccountId: mailbox.account };
 }
 
-async function mailboxAddress(apiKey: string, account: string): Promise<string> {
-  const profile = await composioGet({ composioApiKey: apiKey, composioAccountId: account }, PROFILE);
+async function mailboxAddress(apiKey: string, account: string, meter: UpstreamMeter): Promise<string> {
+  const profile = await composioGet({ composioApiKey: apiKey, composioAccountId: account }, PROFILE, {}, meter);
   const address = typeof profile.emailAddress === "string" ? profile.emailAddress.toLowerCase() : "";
   if (!ADDRESS.test(address)) throw new ProviderRequestError(502, "Google did not confirm the Gmail address");
   return address;
@@ -80,26 +94,31 @@ function apiKey(env: Env): string {
 /**
  * The stored list with the account one Connect just created added: a mailbox
  * already present is replaced (its old Composio account deleted) and keeps its
- * owner; a new one belongs to the connecting admin. Past the limit, the new
- * account is deleted and Connect fails.
+ * owner; a new one belongs to the connecting admin. When the list would no
+ * longer fit the connection, the new account is deleted and Connect fails.
  */
 export async function addConnectedMailbox(env: Env, input: { spaceId: string; actorUserId: string; account: string }):
   Promise<Record<string, string>> {
   const key = apiKey(env);
   if (!ACCOUNT_ID.test(input.account)) throw new ProviderRequestError(400, "Composio did not confirm the Gmail sign-in; restart Connect");
-  const address = await mailboxAddress(key, input.account);
+  const meter = upstreamMeter(env, { spaceId: input.spaceId, connector: "gmail", action: "connect" });
+  const address = await mailboxAddress(key, input.account, meter);
   const stored = await connectorCredentialRepository(env).resolveForAdmin({ requestId: crypto.randomUUID(),
     spaceId: input.spaceId, providerId: "gmail", actorUserId: input.actorUserId });
   const current = stored?.values.mailboxes ? parseMailboxes(stored.values.mailboxes) : [];
   const replaced = current.filter((mailbox) => mailbox.address === address);
   const kept = current.filter((mailbox) => mailbox.address !== address);
-  if (kept.length >= MAX_MAILBOXES) {
-    await deleteComposioAccount(key, input.account);
-    throw new ProviderRequestError(409, `a Space connects at most ${MAX_MAILBOXES} Gmail mailboxes; remove one first`);
-  }
-  for (const old of replaced) if (old.account !== input.account) await deleteComposioAccount(key, old.account);
   const owner = replaced[0]?.owner ?? `user:${input.actorUserId}`;
-  return { mailboxes: serializeMailboxes([...kept, { account: input.account, address, owner }]) };
+  let mailboxes: string;
+  try {
+    mailboxes = serializeMailboxes([...kept, { account: input.account, address, owner }]);
+  } catch (error) {
+    /* A list that no longer fits keeps nothing of this Connect, at Composio either. */
+    await deleteComposioAccount(key, input.account, meter);
+    throw error;
+  }
+  for (const old of replaced) if (old.account !== input.account) await deleteComposioAccount(key, old.account, meter);
+  return { mailboxes };
 }
 
 /** The mailboxes as a Space admin manages them: address and owner, never the Composio account. */
@@ -125,7 +144,10 @@ export async function updateMailbox(env: Env, input: { spaceId: string; actorUse
   if (!stored || !target) throw new ProviderRequestError(404, `${address || "that mailbox"} is not connected`);
   const next = input.owner === null ? current.filter((mailbox) => mailbox !== target)
     : current.map((mailbox) => mailbox === target ? { ...mailbox, owner: input.owner! } : mailbox);
-  if (input.owner === null) await deleteComposioAccount(apiKey(env), target.account);
+  if (input.owner === null) {
+    await deleteComposioAccount(apiKey(env), target.account,
+      upstreamMeter(env, { spaceId: input.spaceId, connector: "gmail", action: "mailbox_remove" }));
+  }
   await repository.put({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: "gmail",
     actorUserId: input.actorUserId, fields: { mailboxes: next.length ? serializeMailboxes(next) : null },
     expectedGrant: stored, policy: { allowed: ["mailboxes"] }, at: new Date().toISOString() });

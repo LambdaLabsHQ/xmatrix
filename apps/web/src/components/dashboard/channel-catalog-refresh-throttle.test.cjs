@@ -1,10 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { compileTsModules } = require("./compile-ts-modules.cjs");
+require("./typescript-require.cjs").installTypeScriptRequire();
 
-const refresh = compileTsModules(__dirname, ["channel-catalog-refresh"]);
-const { coalesceCatalogChanges, createCatalogRefreshThrottle } = refresh.exports;
-test.after(refresh.dispose);
+const { coalesceCatalogChanges, createCatalogRefreshThrottle } = require("./channel-catalog-refresh.ts");
 
 test("a burst of Channel changes keeps each Channel once and the highest revision", () => {
   assert.deepEqual(coalesceCatalogChanges([

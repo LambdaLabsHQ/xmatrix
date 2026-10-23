@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { connectorActionPolicy, type ConnectorActionPolicy } from "@xmatrix/protocol";
 
 import type { AuthorityDatabase } from "./contracts.js";
 import { AppControlError } from "./app-control.js";
@@ -7,11 +8,18 @@ import { appRequestText as text } from "./app-request-text.js";
 /*
  * Per-Channel connector action policy (docs/design/connector-platform.md §3.5).
  * A row overrides the manifest default for one action in one Channel: `allow`
- * lets Agents run a write action there, `deny` blocks the action for everyone.
+ * executes immediately, `ask` asks for approval once, `disallow` blocks it.
+ * The legacy deny column plus a matching ask_version represents ask; old
+ * writers invalidate it by advancing version, and old executors see deny.
  * Only Space owners and admins write it; executors read it at execution time.
  */
 
-export type AppActionPolicyMode = "allow" | "deny";
+export type AppActionPolicyMode = ConnectorActionPolicy;
+
+function policyMode(row: QueryResultRow): AppActionPolicyMode {
+  if (row.mode === "deny" && row.ask_version !== null && Number(row.ask_version) === Number(row.version)) return "ask";
+  return connectorActionPolicy(row.mode) ?? "disallow";
+}
 
 export class PostgresAppActionPolicyRepository {
   constructor(private readonly database: AuthorityDatabase) {
@@ -27,7 +35,7 @@ export class PostgresAppActionPolicyRepository {
     const channelId = text(input.channelId, "channelId");
     const actionId = text(input.actionId, "actionId", 100).toLowerCase();
     const actorUserId = text(input.actorUserId, "actorUserId");
-    if (input.mode !== null && input.mode !== "allow" && input.mode !== "deny") {
+    if (input.mode !== null && !connectorActionPolicy(input.mode)) {
       throw new AppControlError("invalid_app_request", 400, "mode is invalid");
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
@@ -51,12 +59,12 @@ export class PostgresAppActionPolicyRepository {
       }
       const at = new Date(input.at).toISOString();
       await tx.query({ name: "app_action_policy_upsert_v1", text: `INSERT INTO data.app_connector_action_policies
-        (connection_id,channel_id,action_id,space_id,mode,version,updated_by,created_at,updated_at)
-        VALUES ($1,$2,$3,$4,$5,1,$6,$7,$7)
+        (connection_id,channel_id,action_id,space_id,mode,version,updated_by,created_at,updated_at,ask_version)
+        VALUES ($1,$2,$3,$4,$5,1,$6,$7,$7,CASE WHEN $8 THEN 1 ELSE NULL END)
         ON CONFLICT (connection_id,channel_id,action_id) DO UPDATE SET mode=EXCLUDED.mode,
           version=data.app_connector_action_policies.version+1,updated_by=EXCLUDED.updated_by,
-          updated_at=EXCLUDED.updated_at`,
-      values: [connectionId, channelId, actionId, spaceId, input.mode, actorUserId, at], maxRows: 0 });
+          updated_at=EXCLUDED.updated_at,ask_version=CASE WHEN $8 THEN data.app_connector_action_policies.version+1 ELSE NULL END`,
+      values: [connectionId, channelId, actionId, spaceId, connectorActionPolicy(input.mode) === "allow" ? "allow" : "deny", actorUserId, at, input.mode === "ask"], maxRows: 0 });
       return { connectionId, channelId, actionId, mode: input.mode };
     });
   }
@@ -73,10 +81,10 @@ export class PostgresAppActionPolicyRepository {
       values: [spaceId, text(input.actorUserId, "actorUserId")], maxRows: 1 });
       if (!member[0]) throw new AppControlError("space_not_found", 404, "Space not found");
       const rows = await tx.query<QueryResultRow>({ name: "app_action_policy_list_v1", text: `SELECT
-        channel_id,action_id,mode,updated_at FROM data.app_connector_action_policies WHERE connection_id=$1
+        channel_id,action_id,mode,version,ask_version,updated_at FROM data.app_connector_action_policies WHERE connection_id=$1
         ORDER BY action_id,channel_id LIMIT 500`, values: [connectionId], maxRows: 500 });
       return rows.map((row) => ({ channelId: String(row.channel_id), actionId: String(row.action_id),
-        mode: row.mode === "deny" ? "deny" : "allow", updatedAt: new Date(row.updated_at as string).toISOString() }));
+        mode: policyMode(row), updatedAt: new Date(row.updated_at as string).toISOString() }));
     });
   }
 
@@ -85,12 +93,11 @@ export class PostgresAppActionPolicyRepository {
     Promise<AppActionPolicyMode | null> {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.action-policy.read" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_policy_read_v1", text: `SELECT mode
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_policy_read_v1", text: `SELECT mode,version,ask_version
         FROM data.app_connector_action_policies WHERE connection_id=$1 AND channel_id=$2 AND action_id=$3 LIMIT 1`,
       values: [text(input.connectionId, "connectionId"), text(input.channelId, "channelId"),
         text(input.actionId, "actionId", 100).toLowerCase()], maxRows: 1 });
-      const mode = rows[0]?.mode;
-      return mode === "allow" || mode === "deny" ? mode : null;
+      return rows[0] ? policyMode(rows[0]) : null;
     });
   }
 }

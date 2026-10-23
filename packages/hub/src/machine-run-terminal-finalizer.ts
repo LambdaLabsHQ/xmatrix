@@ -1,17 +1,16 @@
-import { requireNonblankText as text } from "./input-validation";
 import {
   PostgresMachineRunTerminalReportRepository,
+  PostgresPageRepository,
   type AuthorityDatabase,
   type MachineRunTerminalReport,
 } from "@xmatrix/db";
 
 import { machineDaemonCommandPrincipal } from "./connections/machine-daemon/auth";
-import { plainRecord as record } from "@xmatrix/protocol";
 import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
+import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH } from "./runtime-transport/relay-runtime-product-adapter";
 import type { Env } from "./types";
-import { dispatchProductChannelAbout } from "./product-agent-mention-authority-adapter";
 
 type TerminalReportRepository = Pick<PostgresMachineRunTerminalReportRepository,
   "pruneFinalized" | "claim" | "settle">;
@@ -22,9 +21,8 @@ export interface MachineRunTerminalPort {
   commitLifecycle(report: MachineRunTerminalReport): Promise<Record<string, unknown>>;
   /** Closes the Runtime socket of an Instance the lifecycle made terminal. */
   terminateInstance(instanceId: string, ownerUserId: string): Promise<void>;
-  dispatchChannelAbout(followUp: {
-    spaceId: string; channelId: string; requestId: string; successorOfRunId: string; actorUserId: string; triggerMessageId?: string;
-  }): Promise<unknown>;
+  /** Ends the page claims ended Instances held in the Run's conversation: a claim lives as long as its Run. */
+  endInstanceClaims(conversationId: string, instanceIds: string[]): Promise<void>;
 }
 
 
@@ -40,19 +38,7 @@ async function finalizeReport(report: MachineRunTerminalReport, port: MachineRun
   for (const instanceId of terminal as string[]) {
     await port.terminateInstance(instanceId, report.ownerUserId);
   }
-  const successors = Array.isArray(lifecycle.channelAboutFollowUps) ? lifecycle.channelAboutFollowUps : [];
-  if (successors.length > 50) throw new Error("Run lifecycle returned oversized Channel About follow-up work");
-  for (const item of successors) {
-    const followUp = record(item) ?? {};
-    await port.dispatchChannelAbout({
-      spaceId: text(followUp.spaceId, "channelAboutFollowUps[].spaceId"),
-      channelId: text(followUp.channelId, "channelAboutFollowUps[].channelId"),
-      requestId: text(followUp.requestId, "channelAboutFollowUps[].requestId"),
-      successorOfRunId: text(followUp.successorOfRunId, "channelAboutFollowUps[].successorOfRunId"),
-      actorUserId: text(followUp.actorUserId, "channelAboutFollowUps[].actorUserId"),
-      ...(followUp.triggerMessageId !== undefined ? { triggerMessageId: text(followUp.triggerMessageId, "channelAboutFollowUps[].triggerMessageId") } : {}),
-    });
-  }
+  if (terminal.length > 0 && report.channelId) await port.endInstanceClaims(report.channelId, terminal as string[]);
 }
 
 /**
@@ -109,8 +95,12 @@ export function machineRunTerminalPort(env: Env): MachineRunTerminalPort {
       const failed = responses.find((response) => !response.ok);
       if (failed) throw new Error(`instance terminal notification ${failed.status}`);
     },
-    async dispatchChannelAbout(followUp) {
-      return dispatchProductChannelAbout({ env, ...followUp });
+    async endInstanceClaims(conversationId, instanceIds) {
+      // Best effort: a claim it misses still runs out its lease, so it never holds the Run's finalization back.
+      await new PostgresPageRepository(createPostgresAuthorityDatabase(env, {
+        applicationName: "xmatrix-run-claims", statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
+      })).endInstanceClaims({ requestId: crypto.randomUUID(), conversationId, instanceIds })
+        .catch((error: unknown) => console.warn("ended Instances' page claims not ended", error));
     },
   };
 }

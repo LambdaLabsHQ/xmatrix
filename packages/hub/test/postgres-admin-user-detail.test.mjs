@@ -3,14 +3,7 @@ import test from "node:test";
 
 import { readPostgresAdminUserDetailFromFleet } from "../src/postgres-admin-user-detail.ts";
 import { listAdminAudit, recordAdminAudit } from "../src/admin-audit.ts";
-import { adminQueryDatabase } from "./support/admin-query-database.mjs";
-
-/* Columns that hold user content or private detail. No operator query may name them. */
-const CONTENT_COLUMNS = [
-  /\bbody\b/u, /\bmetadata_json\b/u, /\bconfiguration_json\b/u, /\bsecret_refs_json\b/u,
-  /\bencrypted_value_json\b/u, /\bcapabilities_json\b/u, /\berror\b/u, /\bhostname\b/u,
-  /\bip_address\b/u, /\buser_agent\b/u, /\btitle\b/u, /\btoken\b/u,
-];
+import { ADMIN_CONTENT_COLUMNS as CONTENT_COLUMNS, adminQueryDatabase } from "./support/admin-query-database.mjs";
 
 function assertMetadataOnly(query) {
   for (const column of CONTENT_COLUMNS) {
@@ -32,7 +25,7 @@ function shardResults(overrides = {}) {
     postgres_admin_user_spaces_v1: [],
     postgres_admin_user_agents_v1: [],
     postgres_admin_user_machines_v1: [],
-    postgres_admin_user_connectors_v1: [],
+    postgres_admin_user_connectors_v2: [],
     postgres_admin_user_runs_v1: [],
     postgres_admin_user_messages_v1: [{ total: 0, last_7d: 0, last_30d: 0, last_message_at: null }],
     postgres_admin_user_activity_v1: [],
@@ -72,7 +65,7 @@ test("admin user detail merges shards, reads Machines once, and fills a 30-day s
       plan: null, billing_status: null, seat_quantity: null,
       current_period_end: null, cancel_at_period_end: null, grace_until: null,
     }],
-    postgres_admin_user_connectors_v1: [{
+    postgres_admin_user_connectors_v2: [{
       space_id: "space-1", provider_id: "github", provider_name: "GitHub", status: "configured",
       created_at: "2026-09-02T00:00:00.000Z", last_checked_at: null,
     }],

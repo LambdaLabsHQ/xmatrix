@@ -5,11 +5,20 @@ import { GitPullRequest } from "lucide-react";
 
 import { actionClass } from "@/components/ui/action-tone";
 import { linkGitHubAccount, linkedGitHubAccount, unlinkGitHubAccount } from "@/lib/auth-client";
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 
 /**
- * The GitHub account that is this person's. Their pull requests pass the
- * `xmatrix/claim` check when they, or their Agents, hold the claim on the page
- * block the pull request links.
+ * GitHub's sign-in opens in the system browser from an app, and its answer
+ * only counts in the browser that asked; so an app links from the browser.
+ */
+function linkGitHub(): Promise<void> {
+  const app = getDesktopBridge();
+  return app ? app.openExternal(window.location.href) : linkGitHubAccount(window.location.href);
+}
+
+/**
+ * The GitHub account that is this person's. Their pull requests that link a
+ * page block count as theirs: a member's is pre-reviewed there.
  */
 export function GitHubAccountLink() {
   const queryClient = useQueryClient();
@@ -17,7 +26,7 @@ export function GitHubAccountLink() {
   const change = useMutation({
     mutationFn: () => account.data
       ? unlinkGitHubAccount(account.data.accountId)
-      : linkGitHubAccount(window.location.href),
+      : linkGitHub(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["auth", "linked-github-account"] }),
   });
   return (

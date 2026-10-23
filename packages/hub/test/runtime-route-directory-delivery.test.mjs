@@ -360,7 +360,37 @@ test("presence delivery exposes every original failure through the standard erro
     assert.match(error.cause.errors[0].message, /Invalid channel agent presence delivery/);
     assert.equal(error.cause.errors[1], transportFailure);
     assert.ok(error.cause.errors.every((failure) => failure.stack));
+    assert.match(error.cause.message, /source=owner target=legacy reason=unknown phase=response attempts=1/);
+    assert.match(error.cause.message, /source=owner target=owner reason=unknown phase=fetch attempts=1/);
     return true;
   });
   assert.deepEqual(fixture.runtimeCalls.map((call) => call.cell).sort(), ["cell-0", "user-bob"]);
+});
+
+test("presence fanout failures identify transport versus response without a legacy replay", async () => {
+  for (const phase of ["fetch", "response"]) {
+    const runtimeCalls = [];
+    const fanoutCalls = [];
+    const original = new Error("Subrequest depth limit exceeded.");
+    original.stack = undefined;
+    const env = {
+      XMATRIX_RUNTIME_CELL_MODE: "dual",
+      RELAY_RUNTIME: runtimeNamespace({ "cell-0": presenceOk }, runtimeCalls),
+      RELAY_RUNTIME_ROUTE_DIRECTORY: directoryNamespace([], [], { fanout: true }),
+      RELAY_RUNTIME_CHANNEL_FANOUT: jsonNamespace(fanoutCalls, () => {
+        if (phase === "fetch") throw original;
+        return Response.json({ error: "Fanout delivery failed" }, { status: 502 });
+      }),
+    };
+    await assert.rejects(publishRuntimeChannelAgentPresence({
+      env, channelId: SCOPE, body: "{}", exceptCell: "user-alice", reason: "connect",
+    }), error => {
+      assert.match(error.message, new RegExp(`route=fanout source=owner target=unknown reason=connect phase=${phase} attempts=1`));
+      if (phase === "fetch") assert.equal(error.cause.errors[0], original);
+      else assert.match(error.cause.errors[0].message, /fanout rejected delivery \(502\)/i);
+      return true;
+    });
+    assert.equal(fanoutCalls.length, 1);
+    assert.deepEqual(runtimeCalls, [], "unknown fanout delivery cannot fall back and redeliver");
+  }
 });

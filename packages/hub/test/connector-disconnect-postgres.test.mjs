@@ -5,6 +5,7 @@ import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { grantFieldsForgottenOnDisconnect, oauthClient } from "../src/connectors/oauth.ts";
 import { parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
+import * as metering from "../src/usage-cost-metering.ts";
 
 const load = await compileCommonJsSourceModule(new URL("../src/connectors/forget-grant.ts", import.meta.url));
 const at = "2026-10-09T00:00:00.000Z";
@@ -28,6 +29,7 @@ async function withGrant(run) {
     "./oauth": { grantFieldsForgottenOnDisconnect, oauthClient },
     "./composio": { deleteComposioAccount: async (key, id) => { effects.push([key, id]); await deleting(); } },
     "./gmail-mailboxes": { parseMailboxes },
+    "../usage-cost-metering": metering,
   };
   const { forgetConnectionGrant } = load(name => {
     assert.ok(dependencies[name], name);

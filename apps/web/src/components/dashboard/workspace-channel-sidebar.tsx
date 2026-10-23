@@ -1,5 +1,7 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { useRealtimeChannel } from "./realtime-channels";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { MobileInlineActions } from "./mobile-inline-actions";
 import { useAndroidBackDismiss } from "./use-android-back";
@@ -27,7 +29,6 @@ import { channelRowIndentPx, SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME } from "./
 import {
   ChannelPinState,
   type ChannelPinLookup,
-  areChannelNavItemPropsEqual,
   readStoredDesktopSidebarWidth,
   usePointerFirstSelect,
   useStableCallback,
@@ -35,7 +36,7 @@ import {
 import { channelEventViews } from "./workspace-shell-presence";
 
 const NO_EVENTS: readonly ObservabilityEvent[] = [];
-const NO_CHANNELS: readonly SerializedChannel[] = [];
+const NO_CHANNELS: readonly ChannelSnapshot[] = [];
 const NO_PINNED_CHANNEL_IDS: ReadonlySet<string> = new Set();
 
 /** Keeps the last painted rows for this Space across a refresh that has not
@@ -45,10 +46,10 @@ const NO_PINNED_CHANNEL_IDS: ReadonlySet<string> = new Set();
 function usePaintedChannelRows(
   spaceId: string | null,
   loaded: boolean,
-  live: readonly SerializedChannel[],
-  fallback: readonly SerializedChannel[],
+  live: readonly ChannelSnapshot[],
+  fallback: readonly ChannelSnapshot[],
 ) {
-  const heldRef = useRef<{ spaceId: string | null; rows: readonly SerializedChannel[] } | null>(null);
+  const heldRef = useRef<{ spaceId: string | null; rows: readonly ChannelSnapshot[] } | null>(null);
   const scopedFallback = useMemo(
     () => fallback.filter((channel) => !spaceId || channel.spaceId === spaceId),
     [fallback, spaceId],
@@ -71,11 +72,13 @@ const CONVERSATION_LIST_PRELOAD_PX = 600;
 import {
   channelHasUnreadMention,
   channelUnreadCount,
+  rowUnreadCount,
   channelUnreadMentionJumpId,
   rankCatalogChannels,
 } from "./workspace-shell-helpers-extra";
 
 import { ChannelRowPreview } from "./channel-row-preview";
+import { useChannelAsTimelineShows } from "./presented-channel-tail";
 import { MentionMark } from "./mention-mark";
 import { CONVERSATION_QUERY, INTAKE_QUERY, type SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
@@ -141,7 +144,7 @@ import { cn } from "@/lib/utils";
 
 import type {
   ObservabilityEvent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -173,12 +176,12 @@ export type ChannelSidebarProps = {
   onTogglePinned: (channelId: string) => void;
   /** The reader is done with what waits on them in this conversation. */
   onMarkDone: (channelId: string) => void;
-  onCopyChannelLink: (channel: SerializedChannel) => Promise<void>;
+  onCopyChannelLink: (channel: ChannelSnapshot) => Promise<void>;
   onSelectSpace: (spaceId: string) => void;
   onSelect: (channelId: string, messageId?: string) => void;
   catalogPaging: SpaceChannelCatalog;
   /** Durable catalog rows, painted until this Space's live answer arrives. */
-  fallbackChannels?: readonly SerializedChannel[];
+  fallbackChannels?: readonly ChannelSnapshot[];
   /** The list's +, first under the Space: a new conversation. */
   create?: CreateAction | null;
 };
@@ -210,7 +213,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   create = null,
 }: ChannelSidebarProps) {
   const [channelContextMenu, setChannelContextMenu] = useState<{
-    channel: SerializedChannel;
+    channel: ChannelSnapshot;
     x: number;
     y: number;
     state: "idle" | "copied" | "failed";
@@ -286,7 +289,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   }, [selectedChannelId, view]);
 
   const openChannelContextMenu = useCallback((
-    channel: SerializedChannel,
+    channel: ChannelSnapshot,
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>
   ) => {
     event.preventDefault();
@@ -322,13 +325,13 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   /* Rows are memoized: give them handlers that stay the same across renders
      and only their own Channel's events, so a busy Space's stream of events
      re-renders the rows it concerns instead of the whole list. */
-  const selectConversationRow = useStableCallback((channel: SerializedChannel) => {
+  const selectConversationRow = useStableCallback((channel: ChannelSnapshot) => {
     const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
     onSelect(channel.id, channelUnreadMentionJumpId(channel, events, mentionClearedAt, unreadCount));
   });
-  const selectIntakeRow = useStableCallback((channel: SerializedChannel) => onSelect(channel.id));
-  const togglePinnedRow = useStableCallback((channel: SerializedChannel) => onTogglePinned(channel.id));
-  const markDoneRow = useStableCallback((channel: SerializedChannel) => onMarkDone(channel.id));
+  const selectIntakeRow = useStableCallback((channel: ChannelSnapshot) => onSelect(channel.id));
+  const togglePinnedRow = useStableCallback((channel: ChannelSnapshot) => onTogglePinned(channel.id));
+  const markDoneRow = useStableCallback((channel: ChannelSnapshot) => onMarkDone(channel.id));
   const channelEventsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
   const channelEvents = useMemo(() => {
     const views = channelEventViews(
@@ -408,6 +411,8 @@ export const ChannelSidebar = memo(function ChannelSidebar({
                   events={channelEvents.get(channel.id) ?? NO_EVENTS}
                   active={view === "messages" && channel.id === selectedChannelId}
                   unreadCount={channelUnreadCount(channel, readCounts, readCountsBaselineReady)}
+                  readCount={readCounts[channel.id]}
+                  readCountsBaselineReady={readCountsBaselineReady}
                   hasUnreadMention={false}
                   isPinnedRoot={false}
                   onSelect={selectIntakeRow}
@@ -437,6 +442,8 @@ export const ChannelSidebar = memo(function ChannelSidebar({
                   events={channelEvents.get(channel.id) ?? NO_EVENTS}
                   active={view === "messages" && channel.id === selectedChannelId}
                   unreadCount={unreadCount}
+                  readCount={readCounts[channel.id]}
+                  readCountsBaselineReady={readCountsBaselineReady}
                   hasUnreadMention={hasUnreadMention}
                   isPinnedRoot={channelPinLookup.pinnedChannelIds.has(channel.id)}
                   onSelect={selectConversationRow}
@@ -500,33 +507,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
       )}
     </>
   );
-}, areChannelSidebarPropsEqual);
-
-export function areChannelSidebarPropsEqual(previous: ChannelSidebarProps, next: ChannelSidebarProps): boolean {
-  return (
-    previous.events === next.events &&
-    previous.spaces === next.spaces &&
-    previous.currentSpaceId === next.currentSpaceId &&
-    // The view setter closes over the held selection, so a stale one writes
-    // an outdated record.
-    previous.selectedChannelId === next.selectedChannelId &&
-    previous.loading === next.loading &&
-    previous.error === next.error &&
-    previous.view === next.view &&
-    previous.readCounts === next.readCounts &&
-    previous.mentionClearedAt === next.mentionClearedAt &&
-    previous.pinState === next.pinState &&
-    previous.readCountsBaselineReady === next.readCountsBaselineReady &&
-    previous.renamingSpaceId === next.renamingSpaceId &&
-    previous.spacesError === next.spacesError &&
-    previous.fallbackChannels === next.fallbackChannels &&
-    previous.onCopyChannelLink === next.onCopyChannelLink &&
-    // The + opens a draft through state setters, so only what it shows is compared.
-    previous.create?.label === next.create?.label &&
-    previous.create?.disabled === next.create?.disabled &&
-    previous.create?.active === next.create?.active
-  );
-}
+});
 
 function prefersReducedMotion() {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
@@ -719,7 +700,7 @@ export function SidebarSpaceHeader({
             disabled={renamingCurrentSpace || draftName.trim().length === 0}
             className="flex size-8 shrink-0 items-center justify-center rounded text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50"
           >
-            {renamingCurrentSpace ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            {renamingCurrentSpace ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
           </button>
         </form>
       ) : (
@@ -804,7 +785,7 @@ export { SpaceAvatar, spaceAvatarStyle, spaceDisambiguatorId } from "./workspace
 import { SpaceAvatar, spaceDisambiguatorId } from "./workspace-shell-chrome";
 
 /** The conversation holds a mention, reply or broadcast its reader has not dealt with. */
-export function channelWaitsOnReader(channel: SerializedChannel): boolean {
+export function channelWaitsOnReader(channel: ChannelSnapshot): boolean {
   return (channel.attention?.unreadAttentionCount ?? 0) > 0;
 }
 
@@ -812,7 +793,7 @@ export function channelWaitsOnReader(channel: SerializedChannel): boolean {
  * A conversation that waits on the reader previews the message that waits,
  * who is waiting and on what, rather than whatever was said last.
  */
-function rowPreviewChannel(channel: SerializedChannel): SerializedChannel {
+function rowPreviewChannel(channel: ChannelSnapshot): ChannelSnapshot {
   const waiting = channel.attention?.lastMessage;
   return channelWaitsOnReader(channel) && waiting && waiting.messageId === channel.attention?.lastMessageId
     ? { ...channel, lastMessage: waiting } : channel;
@@ -825,18 +806,18 @@ function rowPreviewChannel(channel: SerializedChannel): SerializedChannel {
  * conversation once. A section with no conversations is not shown.
  */
 export function channelListSections(
-  channels: readonly SerializedChannel[],
+  channels: readonly ChannelSnapshot[],
   pinnedChannelIds: ReadonlySet<string>,
 ) {
-  const needsYou: SerializedChannel[] = [];
-  const pinned: SerializedChannel[] = [];
-  const recent: SerializedChannel[] = [];
+  const needsYou: ChannelSnapshot[] = [];
+  const pinned: ChannelSnapshot[] = [];
+  const recent: ChannelSnapshot[] = [];
   for (const channel of channels) {
     if (channelWaitsOnReader(channel)) needsYou.push(channel);
     else (pinnedChannelIds.has(channel.id) ? pinned : recent).push(channel);
   }
   const sections: Array<{
-    label: string; count?: number; channels: SerializedChannel[];
+    label: string; count?: number; channels: ChannelSnapshot[];
     mark: ListSectionMark;
   }> = [
     { label: "Needs you", count: needsYou.length, channels: needsYou, mark: { icon: Bell, tone: "attention" } },
@@ -848,8 +829,8 @@ export function channelListSections(
 
 /** A conversation list as its sections: each one's heading, then its rows. */
 function ChannelSectionRows({ channels, row }: {
-  channels: readonly SerializedChannel[];
-  row: (channel: SerializedChannel) => ReactNode;
+  channels: readonly ChannelSnapshot[];
+  row: (channel: ChannelSnapshot) => ReactNode;
 }) {
   // The cold-start paint has no pins yet; they arrive with the signed-in shell.
   return channelListSections(channels, NO_PINNED_CHANNEL_IDS).map((section) => (
@@ -860,55 +841,65 @@ function ChannelSectionRows({ channels, row }: {
   ));
 }
 
-type ChannelSectionItem =
-  | { kind: "heading"; label: string; count?: number; mark: ListSectionMark }
-  | { kind: "row"; channel: SerializedChannel };
-
 /**
- * The same sections as ChannelSectionRows, as one virtualized list: headings
- * and rows are items, and only those near the viewport are mounted, scrolled
+ * The same sections as ChannelSectionRows, virtualized: each section's heading,
+ * then its rows, of which only those near the viewport are mounted, scrolled
  * by the list's own material sheet (`scrollRoot`).
+ *
+ * Each section is its own list of rows only. react-virtuoso remembers a
+ * size per position, not per item, so with headings in the same list a
+ * conversation entering or leaving "Needs you" left a heading's size at a
+ * row's place. Scrolling back up over it, Virtuoso corrected the difference
+ * mid-flick, which on iPhone blanks the list above a line cut through a row
+ * (user 2026-10-17). Rows are one height, so a section's positions all hold
+ * the same size whichever conversations fill them.
  */
 function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinnedChannelIds, row }: {
   scrollRoot: HTMLElement | null;
   /** Receives a function that brings a conversation's row into view. */
   scrollToChannelRef?: MutableRefObject<((channelId: string) => void) | null>;
-  channels: readonly SerializedChannel[];
+  channels: readonly ChannelSnapshot[];
   pinnedChannelIds: ReadonlySet<string>;
-  row: (channel: SerializedChannel) => ReactNode;
+  row: (channel: ChannelSnapshot) => ReactNode;
 }) {
-  const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, pinnedChannelIds).flatMap((section) => [
-    { kind: "heading" as const, label: section.label, count: section.count, mark: section.mark },
-    ...section.channels.map((channel) => ({ kind: "row" as const, channel })),
-  ]), [channels, pinnedChannelIds]);
-  const listRef = useRef<VirtuosoHandle | null>(null);
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
+  const sections = useMemo(() => channelListSections(channels, pinnedChannelIds), [channels, pinnedChannelIds]);
+  const listRefs = useRef(new Map<string, VirtuosoHandle>());
+  const sectionsRef = useRef(sections);
+  sectionsRef.current = sections;
   useEffect(() => {
     if (!scrollToChannelRef) return;
     scrollToChannelRef.current = (channelId) => {
-      const index = itemsRef.current.findIndex((item) => item.kind === "row" && item.channel.id === channelId);
-      if (index >= 0) listRef.current?.scrollIntoView({ index });
+      for (const section of sectionsRef.current) {
+        const index = section.channels.findIndex((channel) => channel.id === channelId);
+        if (index >= 0) {
+          listRefs.current.get(section.label)?.scrollIntoView({ index });
+          return;
+        }
+      }
     };
     return () => { scrollToChannelRef.current = null; };
   }, [scrollToChannelRef]);
-  if (!scrollRoot || items.length === 0) return null;
-  return (
-    <Virtuoso
-      ref={listRef}
-      customScrollParent={scrollRoot}
-      data={items}
-      computeItemKey={(_index, item) => (item.kind === "row" ? item.channel.id : `section:${item.label}`)}
-      increaseViewportBy={CONVERSATION_LIST_PRELOAD_PX}
-      itemContent={(_index, item) => (item.kind === "row"
-        ? row(item.channel)
-        : <ListSectionHeading label={item.label} count={item.count} mark={item.mark} />)}
-    />
-  );
+  if (!scrollRoot) return null;
+  return sections.map((section) => (
+    <Fragment key={section.label}>
+      <ListSectionHeading label={section.label} count={section.count} mark={section.mark} />
+      <Virtuoso
+        ref={(handle) => {
+          if (handle) listRefs.current.set(section.label, handle);
+          else listRefs.current.delete(section.label);
+        }}
+        customScrollParent={scrollRoot}
+        data={section.channels}
+        computeItemKey={(_index, channel) => channel.id}
+        increaseViewportBy={CONVERSATION_LIST_PRELOAD_PX}
+        itemContent={(_index, channel) => row(channel)}
+      />
+    </Fragment>
+  ));
 }
 
 /** When the row last moved: the time the list ranks it by, not only its last message's. */
-export function channelActivityAt(channel: SerializedChannel): string | undefined {
+export function channelActivityAt(channel: ChannelSnapshot): string | undefined {
   const sentAt = channel.lastMessage?.sentAt;
   if (!sentAt) return channel.updatedAt;
   return Date.parse(channel.updatedAt) > Date.parse(sentAt) ? channel.updatedAt : sentAt;
@@ -925,7 +916,7 @@ export function ColdStartChannelCatalog({
   desktopFrameClass,
   showMobileTabDock,
 }: {
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   /** `xmatrix-desktop-macos` / `xmatrix-desktop-windows` under Electron. */
   desktopFrameClass?: string;
   /** False under the iOS shell, whose tab bar is native. */
@@ -1028,7 +1019,7 @@ function ChannelRowSecondLine({
   badgeTitle,
   trailing,
 }: {
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   events: readonly ObservabilityEvent[];
   humanMembers: string[];
   avatarItems: ChannelAgentAvatarItem[];
@@ -1059,24 +1050,36 @@ function ChannelRowSecondLine({
 }
 
 export const MobileChannelChatRow = memo(function MobileChannelChatRow({
-  displayChannel,
+  displayChannel: catalogChannel,
   events,
   active,
-  badgeCount,
+  badgeCount: listedBadgeCount,
+  readCount,
+  readCountsBaselineReady,
   hasMention,
   onOpen,
   onOpenActions,
 }: {
-  displayChannel: SerializedChannel;
+  displayChannel: ChannelSnapshot;
   /** This Channel's events only (`channelEventViews`), so other Channels' events do not re-render the row. */
   events: readonly ObservabilityEvent[];
   active: boolean;
   badgeCount: number;
+  /** See `ChannelNavItemProps`: the row counts a message that has reached only it so far. */
+  readCount?: number;
+  readCountsBaselineReady?: boolean;
   hasMention: boolean;
   /* The row passes its own Channel, so one stable handler serves every row. */
-  onOpen: (channel: SerializedChannel) => void;
-  onOpenActions: (channel: SerializedChannel) => void;
+  onOpen: (channel: ChannelSnapshot) => void;
+  onOpenActions: (channel: ChannelSnapshot) => void;
 }) {
+  const displayChannel = useChannelAsTimelineShows(useRealtimeChannel(catalogChannel)!);
+  const badgeCount = displayChannel === catalogChannel || readCountsBaselineReady === undefined
+    ? listedBadgeCount
+    : Math.max(
+      rowUnreadCount(displayChannel, catalogChannel, listedBadgeCount, readCount, readCountsBaselineReady),
+      displayChannel.attention?.unreadAttentionCount || 0,
+    );
   const rowRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressPointerRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -1283,7 +1286,7 @@ export function MobileChannelInlineActions({
   onMarkDone,
   onCopyChannelLink,
 }: {
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   pinned: boolean;
   onClose: () => void;
   onTogglePinned: () => void;
@@ -1362,7 +1365,7 @@ export function MobileChannelChatList({
   currentSpaceId: string | null;
   catalogPaging: SpaceChannelCatalog;
   /** Durable catalog rows, painted until this Space's live answer arrives. */
-  fallbackChannels?: readonly SerializedChannel[];
+  fallbackChannels?: readonly ChannelSnapshot[];
   pinState: ChannelPinState;
   selectedChannelId: string | null;
   /** Tapped while the list was still the cold-start catalog; opens once the
@@ -1377,7 +1380,7 @@ export function MobileChannelChatList({
   onTogglePinned: (channelId: string) => void;
   /** The reader is done with what waits on them in this conversation. */
   onMarkDone: (channelId: string) => void;
-  onCopyChannelLink: (channel: SerializedChannel) => Promise<void>;
+  onCopyChannelLink: (channel: ChannelSnapshot) => Promise<void>;
   onSelect: (channelId: string, messageId?: string) => void;
 }) {
   const [actionChannelId, setActionChannelId] = useState<string | null>(null);
@@ -1398,11 +1401,11 @@ export function MobileChannelChatList({
     !paintedConversations.confirmed && conversations.length === 0 && page.loading,
   );
   const closeChannelActions = useCallback(() => setActionChannelId(null), []);
-  const openConversation = useStableCallback((channel: SerializedChannel) => {
+  const openConversation = useStableCallback((channel: ChannelSnapshot) => {
     const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
     onSelect(channel.id, channelUnreadMentionJumpId(channel, events, mentionClearedAt, unreadCount));
   });
-  const openConversationActions = useCallback((channel: SerializedChannel) => setActionChannelId(channel.id), []);
+  const openConversationActions = useCallback((channel: ChannelSnapshot) => setActionChannelId(channel.id), []);
   const channelEventsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
   const channelEvents = useMemo(() => {
     const views = channelEventViews(events, conversations.map((channel) => channel.id), channelEventsRef.current);
@@ -1456,6 +1459,8 @@ export function MobileChannelChatList({
                         || channel.id === actionChannelId
                         || channel.id === pendingChannelId}
                       badgeCount={Math.max(unreadCount, channel.attention?.unreadAttentionCount || 0)}
+                      readCount={readCounts[channel.id]}
+                      readCountsBaselineReady={readCountsBaselineReady}
                       hasMention={hasMention}
                       onOpen={openConversation}
                       onOpenActions={openConversationActions}
@@ -1529,10 +1534,12 @@ function ChannelCatalogPageSentinel({
 /* ChannelNavItemProps owned by message-model */
 
 export const ChannelNavItem = memo(function ChannelNavItem({
-  channel,
+  channel: catalogChannel,
   events,
   active,
-  unreadCount = 0,
+  unreadCount: listedUnreadCount = 0,
+  readCount,
+  readCountsBaselineReady,
   hasUnreadMention = false,
   isPinnedRoot,
   onSelect,
@@ -1540,6 +1547,8 @@ export const ChannelNavItem = memo(function ChannelNavItem({
   onMarkDone,
   onOpenContextMenu,
 }: ChannelNavItemProps) {
+  const channel = useChannelAsTimelineShows(useRealtimeChannel(catalogChannel)!);
+  const unreadCount = rowUnreadCount(channel, catalogChannel, listedUnreadCount, readCount, readCountsBaselineReady);
   const { onRowPointerDown, onRowClick } = usePointerFirstSelect(() => onSelect(channel));
   const focusedHumanMembers = channelFocusedHumanMembers(channel);
   const agentAvatarItems = channelOnlineAgentAvatarItems(channel);
@@ -1637,4 +1646,4 @@ export const ChannelNavItem = memo(function ChannelNavItem({
       />
     </LiquidGlassPill>
   );
-}, areChannelNavItemPropsEqual);
+});

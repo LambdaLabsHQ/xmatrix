@@ -12,7 +12,7 @@ for (const mobile of [false, true]) {
       const style = getComputedStyle(element);
       return [style.backgroundColor, style.backgroundImage, style.backgroundSize, style.backgroundPosition, style.backgroundBlendMode];
     });
-    expect(paint[1]).toContain('/textures/wood.webp');
+    expect(paint[1]).toMatch(/\/textures\/wood\.[0-9a-f]{10}\.webp/);
     const selectors = mobile ? ['.app-topbar .app-mobile-back-sign', '.app-detail-plank'] : ['.app-rail', '.app-detail-plank'];
     for (const selector of selectors) {
       for (const element of await page.locator(selector).all()) {
@@ -42,13 +42,13 @@ for (const view of ['profile', 'activity', 'more']) {
       .filter((element) => !element.closest('button, a, input, textarea, [data-slot="button"]'))
       .flatMap((element) => {
         const style = getComputedStyle(element);
-        return style.backgroundImage.includes('wood.webp') || style.backdropFilter !== 'none'
+        return style.backgroundImage.includes('/textures/wood.') || style.backdropFilter !== 'none'
           ? [element.className.toString()] : [];
       }));
     expect(surfaces).toEqual([]);
     // The bar is paper; its wood is the sign: the Space's on a dock root, the chevron and title's on a pushed screen.
     const wood = page.locator('.app-topbar.app-mobile-tab-root-bar :is(.app-mobile-space-trigger, .app-mobile-title), .app-topbar .app-mobile-back-sign');
-    expect(await wood.first().evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('wood.webp');
+    expect(await wood.first().evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('/textures/wood.');
   });
 }
 
@@ -63,7 +63,7 @@ test('mobile channel details puts its navigation and content planks on paper', a
       const style = getComputedStyle(element, pseudo);
       return style.content === 'none' && pseudo ? 'none' : style.backgroundImage;
     }))
-    .filter((image) => image.includes('wood.webp')));
+    .filter((image) => image.includes('/textures/wood.')));
   expect(woodBehind).toEqual([]);
-  expect(await sheet.locator('.app-mobile-channel-details-header').evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('wood.webp');
+  expect(await sheet.locator('.app-mobile-channel-details-header').evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('/textures/wood.');
 });

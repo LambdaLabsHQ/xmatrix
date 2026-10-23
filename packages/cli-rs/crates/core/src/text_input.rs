@@ -30,7 +30,7 @@ pub enum TextSource {
 
 /// Why a text looks damaged by an encoding conversion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LossyText {
+pub(crate) enum LossyText {
     /// U+FFFD: some decoder already replaced characters it could not read.
     ReplacementCharacter,
     /// Two or more `?` in a row while the shell's code page cannot carry
@@ -39,7 +39,7 @@ pub enum LossyText {
 }
 
 /// The process's Windows ANSI code page, or `None` off Windows.
-pub fn ansi_code_page() -> Option<u32> {
+pub(crate) fn ansi_code_page() -> Option<u32> {
     #[cfg(windows)]
     {
         // SAFETY: GetACP takes no arguments and only reads process state.
@@ -55,7 +55,7 @@ pub fn ansi_code_page() -> Option<u32> {
 ///
 /// Conservative by design: `??` is only suspicious when a non-UTF-8 Windows
 /// code page could have produced it, and never in text read from a file.
-pub fn detect_lossy_text(
+pub(crate) fn detect_lossy_text(
     text: &str,
     source: TextSource,
     code_page: Option<u32>,

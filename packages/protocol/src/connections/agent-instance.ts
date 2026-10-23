@@ -119,6 +119,8 @@ export interface AgentInstanceModelSwitchResultMessage {
   requestId: string;
   model?: string;
   error?: string;
+  /** The switch cancelled a turn that was running; Hub decides its continuation. */
+  interruptedTurn?: boolean;
 }
 
 export interface AgentInstanceEffortSwitchResultMessage {
@@ -126,6 +128,8 @@ export interface AgentInstanceEffortSwitchResultMessage {
   requestId: string;
   effort?: string;
   error?: string;
+  /** The switch cancelled a turn that was running; Hub decides its continuation. */
+  interruptedTurn?: boolean;
 }
 
 export interface AgentInstanceLifecycleMessage {
@@ -145,6 +149,8 @@ export interface AgentInstanceLifecycleMessage {
   snapshot?: AgentLifecycleSnapshot;
   /** RFC 3339 time a `usage_limited` provider account resets, when known. */
   resetsAt?: string;
+  /** Tasks still pending when `background_tasks_interrupted` was observed. */
+  pendingTasks?: number;
   ts?: string;
 }
 
@@ -159,6 +165,42 @@ export interface AgentInstanceTurnRetryMessage {
   safeToContinue?: boolean;
   errorMessage?: string;
   attemptToken?: string;
+}
+
+/**
+ * The Instance's harness withdrew a question it had asked on a card: the
+ * person answered in the Channel instead, or the turn it parked ended. A fact
+ * only; the Hub settles the card, ends its wait and says so in the Channel.
+ */
+export interface AgentInstanceQuestionClosedMessage {
+  type: "harness_question_closed";
+  requestId?: string;
+  channelId: string;
+  /** The requestId the card was posted with, which names its message. */
+  cardRequestId: string;
+}
+
+/**
+ * What a `/config` or `/fast` control did, reported as facts by the Instance
+ * that applied it; the Hub words the Channel notice.
+ */
+export interface AgentInstanceParameterControlResultMessage {
+  type: "agent_parameter_control_result";
+  requestId?: string;
+  channelId: string;
+  /** The control message this answers. */
+  sourceMessageId: string;
+  parameter?: string;
+  action: "query" | "select" | "toggle";
+  /** The parameter's value as the session holds it after the control. */
+  current?: string;
+  /** A retained selection the provider has not confirmed yet; never an observed value. */
+  pending?: string;
+  choices?: string[];
+  /** The provider's own note on the parameter (cooldown, disabled). */
+  notice?: string;
+  /** The original error when the control failed. */
+  error?: string;
 }
 
 export type AgentInstanceNetworkSampleMessage = ClientNetworkSample & {
@@ -220,6 +262,8 @@ export type AgentInstanceClientMessage =
   | AgentInstanceEffortSwitchResultMessage
   | AgentInstanceLifecycleMessage
   | AgentInstanceTurnRetryMessage
+  | AgentInstanceQuestionClosedMessage
+  | AgentInstanceParameterControlResultMessage
   | AgentInstanceNetworkSampleMessage
   | AgentInstanceEventPublishMessage
   | AgentInstanceTraceHistoryResultMessage;
@@ -253,10 +297,24 @@ type AgentLiveChannelDelivery = AgentChannelDelivery & {
   type: "channel_message_received";
   /** Fresh live delivery may cancel the provider's active turn. */
   interruptRequested?: boolean;
+  /**
+   * With `interruptRequested`: a runtime that can steer joins this delivery to
+   * the active turn instead of cancelling it. A runtime that cannot, or that
+   * predates the field, interrupts as before.
+   */
+  steerAllowed?: boolean;
 };
 
 type AgentReplayChannelDelivery = AgentChannelDelivery & {
   type: "channel_history_replay";
+  /**
+   * Hub's verdict on whether catch-up cancels the active turn, decided exactly
+   * as for live delivery. Always present on catch-up from a Hub that decides
+   * it; a runtime keeps its own older rule only when it is absent.
+   */
+  interruptRequested?: boolean;
+  /** As for live delivery: the interrupt may steer the active turn instead. */
+  steerAllowed?: boolean;
 };
 
 /** Channel-local deliveries and typed controls accepted by one running Instance. */
@@ -313,6 +371,10 @@ export type AgentInstanceServerMessage =
       attemptToken: string; input?: string; reason?: string }
   | { type: "agent_model_switch_requested"; requestId: string; model: string }
   | { type: "agent_effort_switch_requested"; requestId: string; effort: string }
+  /** The Hub's instruction that this Instance continue the turn its switches
+   * cancelled, sent to the Instance alone: it is not a Channel message. Sent
+   * only to a runtime that lists `switch_continuation_frame`. */
+  | { type: "agent_switch_continuation"; channelId: string; instanceId: string; requestIds: string[]; prompt: string }
   | { type: "channel_joined"; requestId?: string; channelId: string; agent: SerializedAgent }
   | { type: "channel_left"; requestId?: string; channelId: string; agent: SerializedAgent }
   | AgentLiveChannelDelivery
@@ -342,3 +404,31 @@ export type AgentInstanceServerMessage =
   | { type: "enhanced_presence"; agent: SerializedAgent }
   | { type: "rate_limited"; requestId?: string; retryAfterMs: number; message: string }
   | { type: "observable_event"; event: ObservabilityEvent };
+
+/** Hub-authored Channel message binding, stored under reserved xmatrixTurnRetry metadata.
+ * The instruction is exclusively the canonical message body, never a private input field. */
+/**
+ * The Hub's instruction that one Instance continue the turn a live switch
+ * cancelled, committed in the Channel for a runtime that predates the
+ * `agent_switch_continuation` frame. Only the named Instance, still waiting
+ * on one of the named switches, runs it.
+ */
+export interface ChannelSwitchContinuation {
+  version: 1;
+  instanceId: string;
+  /** The switch requests that cancelled the turn and landed. */
+  requestIds: string[];
+}
+
+export interface ChannelTurnRetry {
+  version: 1;
+  state: "issued";
+  runId: string;
+  instanceId: string;
+  ownerUserId: string;
+  operationId: string;
+  requestId: string;
+  attemptToken: string;
+  attempt: number;
+  expiresAt: number;
+}

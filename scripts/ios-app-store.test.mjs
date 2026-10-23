@@ -3,7 +3,7 @@ import { generateKeyPairSync, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { appleClient, appleToken, AppleApiError } from "./app-store-connect.mjs";
-import { findBuild, submitRelease, validateMetadata } from "./ios-app-store.mjs";
+import { findBuild, releaseToApple, submitRelease, validateMetadata } from "./ios-app-store.mjs";
 
 const metadata = JSON.parse(readFileSync(new URL("../apps/ios/app-store/metadata.json", import.meta.url), "utf8"));
 const args = { appId: "app", version: "1.0.200", buildNumber: "12345", metadata, waitFor: async () => {}, attempts: 2 };
@@ -73,6 +73,16 @@ test("submits exact build, preserves private review fields and unrelated localiz
   assert.ok(reviewWrite.data.attributes.notes.includes("1.0.200 (12345)"));
   assert.equal(writes.some((row) => row.method === "DELETE"), false);
   assert.equal(writes.some((row) => row.data?.attributes?.canceled), false);
+});
+
+test("stable What's New uses the authored public notes and preserves private review details", async () => {
+  const { api, writes } = fixture();
+  const notes = "Read what changed.\n\nFull release notes: https://xmatrix.sh/releases/1.0.200";
+  await releaseToApple(api, { ...args, release: "1.0.200", releaseNotes: notes, privateNotes: "SENSITIVE_TEST_SENTINEL" });
+  const localization = writes.find((row) => row.path.startsWith("/v1/appStoreVersionLocalizations/") && row.method === "PATCH");
+  assert.equal(localization.data.attributes.whatsNew, notes);
+  assert.equal(JSON.stringify(localization).includes("SENSITIVE"), false);
+  await assert.rejects(submitRelease(fixture().api, { ...args, releaseNotes: "x".repeat(4001) }), /4,000/u);
 });
 
 test("rerun verifies same submitted version's build and does no writes", async () => {
@@ -231,4 +241,31 @@ test("retry after creating a version but before creating review details recovers
   assert.equal((await submitRelease(api, args)).outcome, "submitted");
   assert.equal(writes.some((row) => row.path === "/v1/appStoreVersions" && row.method === "POST"), false);
   assert.ok(writes.find((row) => row.path === "/v1/appStoreReviewDetails"));
+});
+
+test("a beta ships only a build Apple processed as VALID, and never touches App Review", async () => {
+  const beta = { release: "1.0.200-beta.3", appId: "app", buildNumber: "12345", metadata, waitFor: async () => {}, attempts: 2 };
+  const valid = fixture();
+  assert.deepEqual(await releaseToApple(valid.api, beta), { outcome: "testflight-only", version: "1.0.200", buildNumber: "12345" });
+  assert.deepEqual(valid.writes, []);
+  for (const [build, failure] of [
+    [{ processingState: "INVALID" }, /expired or invalid/u],
+    [{ processingState: "FAILED" }, /expired or invalid/u],
+    [{ expired: true }, /expired or invalid/u],
+    [{ processingState: "PROCESSING" }, /processing timed out/u],
+  ]) {
+    const { api, writes } = fixture({ build });
+    await assert.rejects(releaseToApple(api, beta), failure, JSON.stringify(build));
+    assert.deepEqual(writes, [], JSON.stringify(build));
+  }
+  const missing = fixture({ builds: [] });
+  await assert.rejects(releaseToApple(missing.api, beta), /processing timed out/u);
+});
+
+test("a stable goes on from its VALID build to App Review under its X.Y.Z", async () => {
+  const { api, writes } = fixture();
+  const result = await releaseToApple(api, { release: "1.0.200", appId: "app", buildNumber: "12345", metadata,
+    waitFor: async () => {}, attempts: 2 });
+  assert.equal(result.outcome, "submitted");
+  assert.ok(writes.some((write) => write.path === "/v1/reviewSubmissions" && write.method === "POST"));
 });

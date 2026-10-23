@@ -1,5 +1,5 @@
 import { plainRecord } from "@xmatrix/protocol";
-import { githubCommitCheckVerdict, type GitHubCommitCheckVerdict } from "./app-connectors";
+import { githubCommitCheckVerdict, githubRepositoryDelegated, type GitHubCommitCheckVerdict } from "./app-connectors";
 import { resolveGitHubSubscriptionRoutes } from "./github-subscription-route-directory";
 import {
   githubIssueSourceRef,
@@ -12,7 +12,7 @@ import {
 import { wakeRestingInstances } from "./registration-launch-dispatch";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import type { Env } from "./types";
-import { appCommand } from "./apps";
+import { appCommand, findAppConnection } from "./apps";
 import {
   channelExposureReader,
   githubContentAllowedInChannel,
@@ -36,6 +36,21 @@ export interface ProductGitHubWebhookDependencies {
   checkVerdict: typeof githubCommitCheckVerdict;
   wake: typeof wakeRestingInstances;
   command: typeof appCommand;
+  delegated: typeof githubSpaceRepositoryDelegated;
+}
+
+/**
+ * Whether a Space takes this delivery: its GitHub connection links the
+ * installation, and the administrator who linked it administers the
+ * repository now. A repository added to the installation later, or one its
+ * linker no longer administers, reaches no Channel of that Space.
+ */
+export async function githubSpaceRepositoryDelegated(env: Env, input: { spaceId: string; actorUserId: string;
+  installationId: string; owner: string; repo: string; readScope?: "code-scanning" }): Promise<boolean> {
+  const connection = await findAppConnection(env, { spaceId: input.spaceId, providerId: "github",
+    actorUserId: input.actorUserId });
+  return connection?.status === "configured" &&
+    await githubRepositoryDelegated(env, connection, input.installationId, input.owner, input.repo, input.readScope);
 }
 
 /**
@@ -58,6 +73,7 @@ export async function dispatchProductGitHubWebhook(input: {
   const checkVerdict = dependencies.checkVerdict ?? githubCommitCheckVerdict;
   const wake = dependencies.wake ?? wakeRestingInstances;
   const command = dependencies.command ?? appCommand;
+  const delegatedTo = dependencies.delegated ?? githubSpaceRepositoryDelegated;
   const installationValue = record(input.payload.installation).id;
   const installationId = typeof installationValue === "string"
     ? installationValue.trim()
@@ -67,11 +83,21 @@ export async function dispatchProductGitHubWebhook(input: {
   if (!installationId || !repository || !feature) return { ok: true, delivered: 0 };
   /* A private repository's events reach only Channels people outside the
      Space cannot read; unstated privacy counts as private. */
-  const repositoryPublic = githubRepositoryIsPublic(input.payload.repository);
+  // Security alerts remain restricted content even for a public repository.
+  const repositoryPublic = input.event !== "code_scanning_alert" && githubRepositoryIsPublic(input.payload.repository);
   const repositoryName = `${repository.owner}/${repository.repo}`;
   const issues = new Map(githubWebhookIssueNumbers(input.event, input.payload)
     .map((number) => [githubIssueSourceRef(repositoryName, number), number]));
-  const routes = await resolveRoutes(input.env, installationId, [repository.sourceRef, ...issues.keys()], feature);
+  const resolved = await resolveRoutes(input.env, installationId, [repository.sourceRef, ...issues.keys()], feature);
+  const delegated = new Map<string, Promise<boolean>>();
+  for (const route of resolved) {
+    if (!delegated.has(route.spaceId)) delegated.set(route.spaceId, delegatedTo(input.env, { spaceId: route.spaceId,
+      actorUserId: route.authorityRootUserId, installationId, owner: repository.owner, repo: repository.repo,
+      ...(feature === "code-scanning" ? { readScope: "code-scanning" as const } : {}) })
+      .catch(() => false));
+  }
+  const routes = [];
+  for (const route of resolved) if (await delegated.get(route.spaceId)) routes.push(route);
   const repositoryBody = githubWebhookMessageBody(input.event, input.payload, repository);
   /* Each pull request must still have this head; share reads across its routes. */
   const settledSha = githubSettledCheckSuiteSha(input.event, input.payload);

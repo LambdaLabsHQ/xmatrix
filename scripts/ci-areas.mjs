@@ -1,6 +1,9 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+
+import { releaseChannel } from "./release-version-order.mjs";
 
 export const partitionNames = [
   "node-checks",
@@ -83,7 +86,6 @@ const releasePolicyPaths = [
   "scripts/web-release-handoff.mjs",
   ".github/workflows/cli-build.yml",
   ".github/workflows/client-publish.yml",
-  ".github/workflows/release-promote.yml",
   ".github/workflows/desktop-release.yml",
   ".github/workflows/android-deploy.yml",
   ".github/workflows/ios-testflight.yml"];
@@ -97,6 +99,7 @@ const hubDeployPolicyPaths = [
   "scripts/hub-postdeploy-smoke.test.mjs"];
 
 const rustToolchainPaths = [
+  "scripts/ci-cargo-fetch.mjs",
   ".github/actions/configure-windows-runner",
   ".github/actions/setup-rust-kache",
   ".github/actions/setup-windows-rust-cli",
@@ -155,7 +158,8 @@ export function affectedPartitions(changedFiles) {
     setupPnpmAction ||
     hubWorkflow ||
     hubDeployPolicy ||
-    touches(files, "packages/hub", "packages/db", "packages/protocol");
+    touches(files, "packages/hub", "packages/db", "packages/protocol",
+      "packages/cli-rs/crates/core/prompts");
   const desktop =
     rootShared ||
     setupPnpmAction ||
@@ -225,7 +229,38 @@ export function githubOutputs(changedFiles) {
   };
 }
 
+/**
+ * The partitions a release train gates on. The Hub reaches everyone with
+ * every beta, so its suite gates each train that ships it. A beta Web or
+ * client reaches only the people on the beta Web, its dev channel or
+ * TestFlight: its pull requests checked it and the release builds it, and its
+ * suites (the Web's browser shards and budget, Rust on Linux and Windows,
+ * Desktop, Android) gate the stable that ships it.
+ */
+export function releaseOutputs(scope, channel) {
+  const shipped = new Set(scope.split(",").map((component) => component.trim()));
+  const client = (component) => channel === "stable" && shipped.has(component);
+  return {
+    node: true,
+    web: client("web"),
+    hub: shipped.has("hub"),
+    desktop: client("desktop"),
+    android: client("android"),
+    cli: client("cli"),
+    cli_windows: client("cli"),
+    duplicates: true,
+  };
+}
+
 async function main() {
+  // A release train names what it ships; its stamped version says the channel.
+  const release = process.argv.indexOf("--release");
+  if (release !== -1) {
+    const { version } = JSON.parse(fs.readFileSync("version.json", "utf8"));
+    const outputs = releaseOutputs(process.argv[release + 1] ?? "", releaseChannel(version));
+    for (const [name, selected] of Object.entries(outputs)) console.log(`${name}=${selected}`);
+    return;
+  }
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
   const changedFiles = Buffer.concat(chunks).toString("utf8").split("\0");

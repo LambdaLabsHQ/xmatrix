@@ -1,6 +1,6 @@
 "use client";
 import type { DesktopUpdateStatus, DesktopDaemonStatus, DesktopCliInstallResult, DesktopSetupStatus, DesktopClipboardImage, DesktopCliSessionPayload, DesktopNotification, DesktopBadgeState, DesktopNotificationReply, DesktopAgentPresetInput, DesktopWorkspaceCandidateFields, DesktopAgentPresetDiscoveryShape } from "@xmatrix/protocol";
-export type { DesktopUpdateStatus, DesktopDaemonStatus, DesktopCliInstallResult, DesktopSetupStatus, DesktopClipboardImage, DesktopCliSessionPayload } from "@xmatrix/protocol";
+export type { DesktopUpdateStatus, DesktopDaemonStatus, DesktopDaemonFailure, DesktopCliInstallResult, DesktopSetupStatus, DesktopClipboardImage, DesktopCliSessionPayload } from "@xmatrix/protocol";
 
 type NativeBridgeClient = "desktop" | "ios" | "android" | string;
 type NativeBridgePlatform = NodeJS.Platform | "ios" | "android" | string;
@@ -103,7 +103,6 @@ export type DesktopBridge = {
     machineId?: string;
     updatedAt: string;
   }>;
-  switchEnvironment?: (environment: "production" | "test") => Promise<{ environment: "production" | "test" }>;
   openCliInstall: () => Promise<void>;
   /** Install the CLI from the App's bundled seed and register the daemon. */
   installCli?: () => Promise<DesktopCliInstallResult>;
@@ -119,6 +118,27 @@ export type DesktopBridge = {
   installAgentPreset?: (presetId: string) => Promise<{ ok: boolean; message: string }>;
   revealPath?: (workspacePath: string) => Promise<boolean>;
   checkRuntime?: (runtime: string) => Promise<DesktopRuntimeCheckResult>;
+  /**
+   * Sign a connector in to its service in a window of the shell's own and
+   * answer the session that window then holds (apps/desktop/src/sign-in-services.ts).
+   * `fresh` forgets the account the window was signed in to first. Absent on
+   * web and on shells older than it.
+   */
+  serviceSignIn?: (service: string, options?: { fresh?: boolean }) =>
+    Promise<{ status: "signed-in"; session: string } | { status: "cancelled" }>;
+  /**
+   * Open a Hub sign-in page in the system's sign-in sheet (iOS), a browser tab
+   * over the app (Android) or the default browser (desktop), and answer the
+   * URL the page finally returns to. The shell adds its own return address as
+   * `redirectParam`. Rejects with an AbortError when the person closes it.
+   * `ephemeral` keeps no browser sign-in around (iOS), to use another account.
+   * Absent on shells older than signing in in place.
+   */
+  authorizeInBrowser?: (request: { url: string; redirectParam: string; ephemeral?: boolean }) => Promise<string>;
+  /** Sign in with Apple, natively (iOS): the identity token for `nonce`, and the name Apple shares the first time. */
+  signInWithApple?: (request: { nonce: string }) => Promise<{
+    identityToken: string; givenName?: string; familyName?: string;
+  }>;
   checkForUpdates: () => Promise<DesktopUpdateStatus | void>;
   getUpdateStatus?: () => Promise<DesktopUpdateStatus>;
   installUpdate?: () => Promise<DesktopUpdateStatus>;

@@ -128,6 +128,46 @@ test("any frame counts as an answer", async (t) => {
   assert.equal(sockets[0].closedWith, null);
 });
 
+test("a packet is one delivery, proves liveness even for invalid JSON, and cannot cross a dial", async (t) => {
+  class PacketSocket extends FakeSocket {
+    listeners = new Set();
+    subscribePackets(listener) {
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    }
+    receivePacket(frames) {
+      for (const listener of this.listeners) listener(frames);
+    }
+    dispose(code) { this.close(code); }
+  }
+  const packets = [];
+  const physical = [];
+  const { connection } = harness(t, {
+    open: async () => {
+      const socket = new PacketSocket();
+      physical.push(socket);
+      return socket;
+    },
+    onMessage: () => assert.fail("packet transports must not redispatch every frame"),
+    onPacket: (socket, frames) => packets.push({ socket, frames }),
+  });
+  connection.start();
+  await flush();
+  physical[0].open();
+  t.mock.timers.tick(25_000);
+  physical[0].receivePacket([{ kind: "raw", data: "pong" }, { kind: "json", value: { type: "presence" } }]);
+  assert.equal(packets.length, 1);
+  assert.equal(packets[0].socket, physical[0]);
+  t.mock.timers.tick(10_000);
+  assert.equal(physical[0].closedWith, null);
+  connection.replace();
+  await flush();
+  physical[0].receivePacket([{ kind: "json", value: { type: "message", old: true } }]);
+  assert.equal(packets.length, 1);
+  assert.equal(physical[0].listeners.size, 0);
+  assert.equal(physical.length, 2);
+});
+
 test("a server that does not answer pings is never timed out", async (t) => {
   const { sockets } = await opened(t, {
     heartbeat: { intervalMs: 25_000, timeoutMs: 10_000, ping: (socket) => socket.send("ping"), supported: () => false },

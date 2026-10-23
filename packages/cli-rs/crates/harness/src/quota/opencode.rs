@@ -104,7 +104,7 @@ pub async fn read_opencode_zen_usage(force: bool) -> Option<LlmUsage> {
     usage
 }
 
-pub fn opencode_zen_usage_from_value(value: &Value) -> Option<LlmUsage> {
+pub(crate) fn opencode_zen_usage_from_value(value: &Value) -> Option<LlmUsage> {
     let payload = value
         .get("usage")
         .and_then(Value::as_object)

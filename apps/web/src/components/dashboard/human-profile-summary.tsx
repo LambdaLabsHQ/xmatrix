@@ -9,15 +9,15 @@ import {
 } from "@xmatrix/protocol";
 import { AtSign } from "lucide-react";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { HumanLocalTime } from "@/components/dashboard/human-local-time";
 import { cn } from "@/lib/utils";
 import { tagClass } from "./status-tag";
 
+/* No picture: a face is read by the person's id (face.tsx), never from a copy a session or a member row carries. */
 export type CurrentHumanProfileSource = {
   id: string;
   name?: string;
-  avatarUrl?: string;
 };
 
 export function currentHumanDisplayName(
@@ -39,9 +39,6 @@ export function humanProfileFromSpaceMember(
     userId: source.id,
     displayName: currentHumanDisplayName(source, member),
     ...(member?.handle ? { handle: member.handle } : {}),
-    ...(member?.avatarUrl || source.avatarUrl
-      ? { avatarUrl: member?.avatarUrl || source.avatarUrl }
-      : {}),
     ...(member?.bio ? { bio: member.bio } : {}),
     ...(member?.timeZone ? { timeZone: member.timeZone } : {}),
     ...(member?.handleIsTemporary !== undefined
@@ -69,11 +66,8 @@ export function HumanProfileSummary({
 
   return (
     <div className={cn("flex min-w-0 items-center gap-3", className)}>
-      <IdentityAvatar
-        kind="human"
-        label={profile.displayName}
-        imageUrl={profile.avatarUrl}
-        initials={profile.displayName.slice(0, 2)}
+      <Face
+        of={{ kind: "user", id: profile.userId, name: profile.displayName }}
         size={compact ? "md" : "lg"}
         showKindBadge={false}
       />

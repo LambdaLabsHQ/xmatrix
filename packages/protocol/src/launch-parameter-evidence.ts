@@ -1,4 +1,5 @@
 import { hasControlCharacter } from "./field-validation.js";
+import { machineNetworkObservation, type MachineNetworkObservation } from "./machine-network.js";
 /** One Jev answer: the exact input it read and the distribution it returned. */
 export interface LaunchDecisionStage { inputDigest: string; selected: string; probabilities: Record<string, number> }
 
@@ -13,9 +14,18 @@ export interface LaunchHarnessFit { score: number; probabilities: Record<string,
 export interface LaunchPlacementCandidate {
   harness: string; machineId: string; machineName?: string;
   fit: number; headroom?: number; quotaPace?: number; frontier: boolean; utility: number;
+  network?: MachineNetworkObservation;
+  networkQuality?: number;
+  /** The harness's measured median time to its first reply, and the fastest
+   * offered harness's median over it (0..1). Absent without enough launches. */
+  responseLatencyMs?: number;
+  responseQuality?: number;
   /** Whether the Space had described the harness when its fit was read; false
    * means it was judged without one. Absent from decisions made before it was recorded. */
   described?: boolean;
+  /** When it last failed to start within the breaker window: it was ranked
+   * after every environment that had not. */
+  startupFailedAt?: string;
 }
 
 /** Public decision evidence contains opaque workspace handles, never private directory catalogs. */
@@ -45,9 +55,12 @@ export interface LaunchParameterEvidence {
    * reported form, not a Jev option. Older records may still carry the choice.
    * `registration-parameters-v9` omits modelEffort and selections.model when
    * no models are declared, leaving the runtime's default model untouched;
-   * selections.effort is then the effort the author asked for on that model. */
+   * selections.effort is then the effort the author asked for on that model.
+   * From `registration-parameters-v11`, a choice with one option is `only`: that
+   * option is its answer, and Jev is not asked it; when every choice is, Jev
+   * is not called at all. */
   choices: Array<{ key: "modelEffort" | "workspace" | "placement";
-    selected: string; probabilities: Record<string, number> }>;
+    selected: string; probabilities: Record<string, number>; only?: true }>;
 }
 
 /** The model's probabilities as recorded, over handles matching `handle`.
@@ -92,24 +105,34 @@ function parseFit(value: unknown): LaunchParameterEvidence["fit"] | undefined | 
   return { inputDigest: value.inputDigest, scores };
 }
 
-function parsePlacement(value: unknown): LaunchParameterEvidence["placement"] | undefined | null {
+function parsePlacement(value: unknown, evaluatedAt: number): LaunchParameterEvidence["placement"] | undefined | null {
   if (value === undefined) return undefined;
   if (!plainRecord(value) || value.profile !== "balanced" || !Array.isArray(value.ranking) ||
     !value.ranking.length || value.ranking.length > 8) return null;
   const ranking: LaunchPlacementCandidate[] = [];
   for (const item of value.ranking) {
+    const network = plainRecord(item) ? machineNetworkObservation(item.network, evaluatedAt) : undefined;
     if (!plainRecord(item) || typeof item.harness !== "string" || !HARNESS.test(item.harness) ||
       typeof item.machineId !== "string" || !item.machineId || item.machineId.length > 128 || hasControlCharacter(item.machineId) ||
       item.machineName !== undefined && (typeof item.machineName !== "string" || !item.machineName ||
         item.machineName.length > 200 || hasControlCharacter(item.machineName)) ||
       !unit(item.fit, 0, 1) || item.headroom !== undefined && !unit(item.headroom, -1_000, 1) ||
       item.quotaPace !== undefined && !unit(item.quotaPace, 0, 1e12) || typeof item.frontier !== "boolean" || !unit(item.utility, -1_000, 2) ||
-      item.described !== undefined && typeof item.described !== "boolean") return null;
+      item.described !== undefined && typeof item.described !== "boolean" ||
+      item.startupFailedAt !== undefined && (typeof item.startupFailedAt !== "string" ||
+        item.startupFailedAt.length > 40 || !Number.isFinite(Date.parse(item.startupFailedAt))) ||
+      item.network !== undefined && (!network || !unit(item.networkQuality, 0, 1)) ||
+      (item.responseLatencyMs !== undefined || item.responseQuality !== undefined) &&
+        (!unit(item.responseLatencyMs, 0, 86_400_000) || !unit(item.responseQuality, 0, 1))) return null;
     ranking.push({ harness: item.harness, machineId: item.machineId,
       ...(item.machineName !== undefined ? { machineName: item.machineName as string } : {}),
       fit: item.fit, ...(item.headroom !== undefined ? { headroom: item.headroom as number } : {}),
       ...(item.quotaPace !== undefined ? { quotaPace: item.quotaPace as number } : {}), frontier: item.frontier, utility: item.utility,
-      ...(item.described !== undefined ? { described: item.described as boolean } : {}) });
+      ...(item.described !== undefined ? { described: item.described as boolean } : {}),
+      ...(item.startupFailedAt !== undefined ? { startupFailedAt: item.startupFailedAt as string } : {}),
+      ...(network ? { network, networkQuality: item.networkQuality as number } : {}),
+      ...(item.responseLatencyMs !== undefined ? { responseLatencyMs: item.responseLatencyMs as number,
+        responseQuality: item.responseQuality as number } : {}) });
   }
   return { profile: "balanced", ranking };
 }
@@ -125,8 +148,8 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
       !row.selections || typeof row.selections !== "object" || Array.isArray(row.selections) ||
       !Array.isArray(row.choices) || row.choices.length < 1 || row.choices.length > 3) return undefined;
   const selected = row.selections as Record<string, unknown>;
-  const skipsModel = ["registration-parameters-v9", "registration-parameters-v10"].includes(row.rubricVersion) &&
-    selected.model === undefined;
+  const skipsModel = ["registration-parameters-v9", "registration-parameters-v10", "registration-parameters-v11"]
+    .includes(row.rubricVersion) && selected.model === undefined;
   if ((!skipsModel && !text(selected.model, 160)) ||
       selected.effort !== undefined && !text(selected.effort, 80) ||
       !["repo", "local-path", "managed"].includes(String(selected.workspaceKind)) ||
@@ -134,18 +157,22 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
   const choices: LaunchParameterEvidence["choices"] = [];
   for (const raw of row.choices) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-    const { key, selected: choice, probabilities } = raw as Record<string, unknown>;
+    const { key, selected: choice, probabilities, only } = raw as Record<string, unknown>;
     if (!["modelEffort", "workspace", "placement"].includes(String(key)) || choices.some(item => item.key === key)) return undefined;
     const parsed = distribution(probabilities, key === "modelEffort" ? /^model_\d{1,3}$/u
       : key === "workspace" ? /^workspace_\d{1,3}$/u : /^placement_(?:any|stationary)$/u, choice);
     if (!parsed) return undefined;
-    choices.push({ key: key as LaunchParameterEvidence["choices"][number]["key"], selected: choice as string, probabilities: parsed });
+    // The only option is certain by itself, not by anyone's reading.
+    if (only !== undefined && (only !== true || row.rubricVersion !== "registration-parameters-v11" ||
+        Object.keys(parsed).length !== 1 || parsed[choice as string] !== 1)) return undefined;
+    choices.push({ key: key as LaunchParameterEvidence["choices"][number]["key"], selected: choice as string, probabilities: parsed,
+      ...(only ? { only: true as const } : {}) });
   }
   if (choices.some(item => item.key === "modelEffort") === skipsModel || !choices.some(item => item.key === "workspace")) return undefined;
   const harness = stage(row.harness, HARNESS);
   const environment = stage(row.environment, /^candidate_\d{1,3}$/u);
   if (harness === null || environment === null) return undefined;
-  const fit = parseFit(row.fit), placement = parsePlacement(row.placement);
+  const fit = parseFit(row.fit), placement = parsePlacement(row.placement, Date.parse(row.evaluatedAt as string));
   if (fit === null || placement === null) return undefined;
   let intent: LaunchParameterEvidence["intent"];
   if (row.intent !== undefined) {

@@ -2,15 +2,17 @@ import type { Metadata } from "next";
 import { Navbar } from "@/components/shared/navbar";
 import { Hero } from "@/components/landing/hero";
 import { QuickStart } from "@/components/landing/quick-start";
-import { HowItWorks } from "@/components/landing/how-it-works";
-import { FirstPage } from "@/components/landing/first-page";
+import { AgentStrip } from "@/components/landing/agent-strip";
+import { LivePage } from "@/components/landing/live-page";
+import { Why } from "@/components/landing/why";
+import { Faq } from "@/components/landing/faq";
 import { Connectors } from "@/components/landing/connectors";
 import { Pricing } from "@/components/landing/pricing";
 import { Footer } from "@/components/landing/footer";
 
 export const metadata: Metadata = {
   title: "xMatrix — Living pages maintained by your AI agents",
-  description: "Talk with Claude Code, Codex and your team. Turn conversations into living pages of decisions, open work and next steps, then keep them current together.",
+  description: "Talk with your team and coding agents like Claude Code, Codex, Cursor and Gemini. Turn conversations into living pages of decisions, open work and next steps, then keep them current together.",
   alternates: { canonical: "/" },
   openGraph: {
     title: "xMatrix — Living pages maintained by your AI agents",
@@ -26,11 +28,13 @@ export default function Home() {
     <div className="site-page">
       <Navbar />
       <Hero />
+      <AgentStrip />
+      <LivePage />
       <QuickStart />
-      <HowItWorks />
-      <FirstPage />
+      <Why />
       <Connectors />
       <Pricing />
+      <Faq />
       <Footer />
     </div>
   );

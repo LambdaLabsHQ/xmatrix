@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Lock, LockOpen, X } from "lucide-react";
-import type { ChannelAttachment, SerializedChannel, SerializedSpace, SerializedWorkspace } from "@xmatrix/protocol";
+import type { ChannelAttachment, ChannelSnapshot, SerializedSpace, SerializedWorkspace } from "@xmatrix/protocol";
 import type { MentionLocalContext } from "./mention-complete";
 import type { ComposerSendSnapshot } from "./workspace-shell-message-model";
 import { Composer, ComposerIcon } from "./workspace-composer-dialogs";
@@ -15,27 +15,32 @@ import { useAndroidBackDismiss } from "./use-android-back";
  * names and summarises the conversation from what it is about.
  */
 export function NewConversation({
-  space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace,
+  space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace, initialDraft = "",
+  error = null,
 }: {
+  /** What the composer opens holding, for the person to send (a welcome card's). */
+  initialDraft?: string;
+  /** Why the last conversation started here could not be made. */
+  error?: string | null;
   space: SerializedSpace | null;
   token: string | null;
   workspaces: SerializedWorkspace[];
   localContext: MentionLocalContext | null;
   /** False on a phone: a preventScroll focus opens the keyboard over the composer. */
   autoFocus: boolean;
-  onCreate: (body: string, mode: "open" | "closed") => Promise<SerializedChannel>;
-  onSend: (channel: SerializedChannel, snapshot: ComposerSendSnapshot) => Promise<void>;
+  onCreate: (body: string, mode: "open" | "closed") => Promise<ChannelSnapshot>;
+  onSend: (channel: ChannelSnapshot, snapshot: ComposerSendSnapshot) => Promise<void>;
   onCancel: () => void;
   onOpenAppsForSpace: (spaceId: string) => void;
 }) {
-  const draftRef = useRef("");
+  const draftRef = useRef(initialDraft);
   const [attachments, setAttachments] = useState<ChannelAttachment[]>([]);
   const [workspaceTarget, setWorkspaceTarget] = useState<string | null>(null);
   const [mode, setMode] = useState<"open" | "closed">("open");
   const [sending, setSending] = useState(false);
   // Created once, by the first send, so a retry after a failed send never
   // creates a second conversation.
-  const created = useRef<Promise<SerializedChannel> | null>(null);
+  const created = useRef<Promise<ChannelSnapshot> | null>(null);
   const [locked, setLocked] = useState(false);
   useAndroidBackDismiss(true, onCancel, sending);
 
@@ -71,7 +76,7 @@ export function NewConversation({
         workspaces={workspaces}
         localContext={localContext}
         isJoined
-        draft=""
+        draft={initialDraft}
         draftSeedRevision={0}
         selectedWorkspaceId={workspaceTarget}
         replyTarget={null}
@@ -79,7 +84,7 @@ export function NewConversation({
         mentionInsertRequest={null}
         autoFocusRequest={autoFocus ? 1 : 0}
         sending={sending}
-        error={null}
+        error={error}
         ariaLabel="What should happen"
         sendTitle="Start conversation"
         onDraftChange={(value) => { draftRef.current = value; }}

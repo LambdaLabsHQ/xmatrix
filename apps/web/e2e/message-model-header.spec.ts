@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { type Page } from "@playwright/test";
 import {
@@ -131,7 +132,7 @@ test("details rail shows live instance header labels instead of message snapshot
   await openGeneralChannel(page, {
     ...messageChannel(),
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "busy",
         label: "Codex",
@@ -283,7 +284,7 @@ test("agent usage alerts stop at the provider-reported reset time", async ({ pag
   const channel = {
     ...E2E_CHANNEL,
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "Codex",
@@ -300,7 +301,7 @@ test("agent usage alerts stop at the provider-reported reset time", async ({ pag
           },
         ],
       },
-      "agent:codex-current": {
+      "agent:codex-current": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
         label: "Current Codex",
@@ -375,7 +376,7 @@ test("agent message header does not derive historical context from live instance
     lastMessageSequence: 1,
     updatedAt: E2E_NOW,
     memberPresence: {
-      "agent:codex": {
+      "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "offline",
         label: "Codex",
@@ -442,7 +443,7 @@ test("hub system notices keep the xMatrix identity instead of the owning user's 
         channelId: "channel-general",
         sequence: 1,
         // The hub appends this notice under the machine owner's principal.
-        body: "Stopped @codex-legend on Devs-MacBook-Pro.local. The Workstation confirmed the process tree is terminated.",
+        body: "Stopped @codex-legend on Devs-MacBook-Pro.local. The Machine confirmed the process tree is terminated.",
         sentAt: E2E_NOW,
         from: {
           identityId: "user:owner-legend",
@@ -458,7 +459,7 @@ test("hub system notices keep the xMatrix identity instead of the owning user's 
   );
 
   const row = page.locator(".app-message-row", {
-    hasText: "The Workstation confirmed the process tree is terminated.",
+    hasText: "The Machine confirmed the process tree is terminated.",
   });
   await expect(row).toBeVisible();
   await expect(row.locator(".message-author-avatar img")).toHaveAttribute(
@@ -470,7 +471,7 @@ test("hub system notices keep the xMatrix identity instead of the owning user's 
 });
 
 
-for (const legacy of [true, false]) test(`cross-Channel Machine badge resolves ${legacy ? "an old exact Instance" : "a stopped sender snapshot"}`, async ({ page }) => {
+for (const relay of [false, true]) for (const legacy of [true, false]) test(`cross-Channel ${relay ? "relayed reply" : "link"} Machine badge resolves ${legacy ? "an old exact Instance" : "a stopped sender snapshot"}`, async ({ page }) => {
   const key = { spaceId: E2E_SPACE.id, ownerUserId: "agent-owner", machineId: "machine:server", harness: "codex" };
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...messageChannel(),
     members: ["agent:codex"], memberPresence: { "agent:codex": { kind: "agent", label: "Codex",
@@ -489,12 +490,21 @@ for (const legacy of [true, false]) test(`cross-Channel Machine badge resolves $
           { instanceId: "local:1", channelId: "channel-general", channelInstanceId: "1" },
         ] } }],
   });
-  await fulfillChannelHistory(page, [agentMessage({ messageId: `cross-machine-${legacy}`, sequence: 1,
+  const registration = { ownerUserId: key.ownerUserId, machineId: key.machineId, harness: key.harness };
+  const message = agentMessage({ messageId: `cross-machine-${legacy}`, sequence: 1,
     body: "The sender works in another Channel.", instanceId: "origin:1", channelInstanceId: "1", instanceLabel: "codex:1",
     from: { originChannelId: "origin", ...(legacy ? {} : { registration: {
       ownerUserId: key.ownerUserId, machineId: key.machineId, harness: key.harness,
     } }) },
-  })]);
+  });
+  if (relay) {
+    message.from = { kind: "user", identityId: "user:link-owner", userId: "link-owner", email: "", label: "codex:1" };
+    message.metadata = { xmatrixProvenance: "cross_channel_reply", crossChannelReply: {
+      sourceChannelId: "origin", sourceMessageId: "reply-1", replierKind: "agent",
+      replierInstanceId: "origin:1", ...(legacy ? {} : { replierRegistration: registration }),
+    } };
+  }
+  await fulfillChannelHistory(page, [message]);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
   const row = page.locator(".app-message-row", { hasText: "The sender works in another Channel." });
   await expect(row.locator(".app-agent-identity-labels")).toContainText("fixture-node");

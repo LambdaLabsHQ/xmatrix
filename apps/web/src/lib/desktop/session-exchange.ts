@@ -1,5 +1,5 @@
 import { WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
-import type { DesktopCliSessionPayload } from "./bridge";
+import type { DesktopBridge, DesktopCliSessionPayload } from "./bridge";
 import { errorFromResponse, xmatrixRawResponse, unexpectedResponse } from "../query/api-client";
 
 export async function requestCliSessionExchange(token: string) {
@@ -30,4 +30,19 @@ export async function exchangeDesktopCliSession(token: string): Promise<DesktopC
     hubUrl: cliSession.hubUrl,
     relayUrl: cliSession.relayUrl,
   };
+}
+
+/**
+ * Signing the desktop app in also signs this computer's CLI and daemon in with
+ * a session of their own. That part may fail (an old daemon, no CLI yet)
+ * without failing the app's own sign-in.
+ */
+export async function handDesktopSessionToCli(bridge: DesktopBridge | null, token: string): Promise<void> {
+  if (!bridge?.saveCliSession) return;
+  try {
+    await bridge.saveCliSession(await exchangeDesktopCliSession(token));
+    await bridge.startDaemon?.();
+  } catch (cliError) {
+    console.warn("Signed in, but this computer's CLI session could not be updated", cliError);
+  }
 }

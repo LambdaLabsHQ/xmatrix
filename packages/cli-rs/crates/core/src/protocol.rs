@@ -4,21 +4,21 @@ use std::collections::HashMap;
 // ── Constants ────────────────────────────────────────────────────────────────
 
 pub const DEFAULT_HUB_URL: &str = "https://xmatrix-hub.xmatrix.sh";
-pub const DEFAULT_WEB_URL: &str = "https://xmatrix.sh";
-pub const TEST_HUB_URL: &str = "https://xmatrix-hub.test.xmatrix.sh";
+pub(crate) const DEFAULT_WEB_URL: &str = "https://xmatrix.sh";
 pub struct HubRoutes;
 impl HubRoutes {
-    pub const LOGIN: &str = "/api/auth/cli/login";
-    pub const DEVICE_START: &str = "/api/auth/cli/device/start";
+    pub(crate) const LOGIN: &str = "/api/auth/cli/login";
+    pub(crate) const DEVICE_START: &str = "/api/auth/cli/device/start";
     pub const SETUP_INTENTS: &str = "/api/setup-intents";
-    pub const DEVICE_TOKEN: &str = "/api/auth/cli/device/token";
-    pub const REFRESH: &str = "/api/auth/refresh";
-    pub const EXCHANGE_SESSION: &str = "/api/auth/cli/exchange-session";
+    pub(crate) const DEVICE_TOKEN: &str = "/api/auth/cli/device/token";
+    pub(crate) const REFRESH: &str = "/api/auth/refresh";
+    pub(crate) const EXCHANGE_SESSION: &str = "/api/auth/cli/exchange-session";
+    pub(crate) const SIGN_OUT: &str = "/api/auth/cli/sign-out";
     pub const ME: &str = "/api/auth/me";
     pub const AGENT_INSTANCES: &str = "/api/agent-instances";
     pub const MACHINE_DAEMONS: &str = "/api/machine-daemons";
     pub const MACHINES: &str = "/api/machines";
-    pub const MACHINE_DAEMON_CREDENTIALS: &str = "/api/machine-daemon-credentials";
+    pub(crate) const MACHINE_DAEMON_CREDENTIALS: &str = "/api/machine-daemon-credentials";
     pub const MACHINE_DAEMON_MIGRATION_FENCE: &str = "/api/machine-daemon/migration-fence";
     pub const MACHINE_DAEMON_WORKSPACES: &str = "/api/machine-daemon/workspaces";
     pub const MACHINE_DAEMON_AGENT_RUN_TOKEN: &str = "/api/machine-daemon/agent-runs/token";
@@ -27,7 +27,7 @@ impl HubRoutes {
     #[allow(dead_code)]
     pub const SECRETS: &str = "/api/secrets";
     pub const RUN_SECRETS: &str = "/api/run-secrets";
-    pub const CONNECTORS_MCP: &str = "/api/connectors/mcp";
+    pub const CONNECTOR_USAGE: &str = "/api/connectors/usage";
     pub const SECRET_REQUESTS: &str = "/api/secret-requests";
     pub const DAEMON_CONTROL: &str = "/api/daemon/control";
     pub const DAEMON_COMMAND_LEASE_RENEW: &str = "/api/daemon/command-lease/renew";
@@ -41,7 +41,7 @@ impl HubRoutes {
     pub const CHANNELS: &str = "/api/channels";
     pub const MESSAGE_ATTACHMENT_PRODUCT_MEDIA: &str =
         "/api/relay-v2/message-attachments/product-media";
-    pub const OBSERVABLE_CLIENT_METRICS: &str = "/api/observable/client-metrics";
+    pub(crate) const OBSERVABLE_CLIENT_METRICS: &str = "/api/observable/client-metrics";
     pub const MIGRATIONS_SLACK: &str = "/api/migrations/slack";
     pub const SLACK_OAUTH_START: &str = "/api/migrations/slack/oauth/start";
     pub const SLACK_OAUTH_TOKEN: &str = "/api/migrations/slack/oauth/token";
@@ -200,7 +200,7 @@ pub struct SerializedAgent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
-pub struct AutomationMessage {
+pub(crate) struct AutomationMessage {
     pub body: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub app_mentions: Option<Vec<serde_json::Value>>,
@@ -208,7 +208,7 @@ pub struct AutomationMessage {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutomationCapabilities {
+pub(crate) struct AutomationCapabilities {
     pub update: bool,
     pub pause: bool,
     pub resume: bool,
@@ -218,7 +218,7 @@ pub struct AutomationCapabilities {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutomationExecutionStatus {
+pub(crate) struct AutomationExecutionStatus {
     pub status: String,
     pub attempts: u64,
     pub scheduled_for: String,
@@ -235,7 +235,7 @@ pub struct AutomationExecutionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
-pub struct SerializedAutomation {
+pub(crate) struct SerializedAutomation {
     pub id: String,
     pub owner_user_id: String,
     #[serde(default)]
@@ -532,6 +532,9 @@ pub struct AgentRuntimeWaiting {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub label: Option<String>,
+    /// For background tasks, how many are still running; clients word it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub count: Option<u32>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub details: Vec<String>,
     pub since_millis: u64,
@@ -733,6 +736,118 @@ impl CrossChannelReplySource {
     }
 }
 
+/// Hub-written Channel instruction. The message body is the only retry input;
+/// provider thread/turn identifiers remain private in the failure report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelTurnRetry {
+    pub version: u8,
+    pub state: String,
+    pub request_id: String,
+    pub operation_id: String,
+    pub attempt_token: String,
+    pub instance_id: String,
+    pub expires_at: u64,
+}
+
+/// The metadata of an unedited Hub-written Channel instruction, whose body is
+/// the input it carries.
+fn hub_instruction_metadata(message: &ChannelMessage) -> Option<&serde_json::Value> {
+    let metadata = message.metadata.as_ref()?;
+    (message.from.kind == "system"
+        && metadata["xmatrixProvenance"] == "system_fact"
+        && metadata["xmatrixSystemNotice"] == true
+        && message.sequence.is_some_and(|sequence| sequence > 0)
+        && !message.body.is_empty()
+        && message.body.len() <= 2_000
+        && message.edited_at.is_none()
+        && message.recalled_at.is_none()
+        && message.deleted_at.is_none())
+    .then_some(metadata)
+}
+
+fn instruction_instance_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 300
+        && !id
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
+}
+
+fn instruction_token(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 160
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+pub fn channel_turn_retry(message: &ChannelMessage) -> Option<ChannelTurnRetry> {
+    let metadata = hub_instruction_metadata(message)?;
+    let retry: ChannelTurnRetry =
+        serde_json::from_value(metadata["xmatrixTurnRetry"].clone()).ok()?;
+    (retry.version == 1
+        && retry.state == "issued"
+        && instruction_instance_id(&retry.instance_id)
+        && [&retry.request_id, &retry.operation_id, &retry.attempt_token]
+            .iter()
+            .all(|id| instruction_token(id)))
+    .then_some(retry)
+}
+
+/// Hub-written instruction that the Agent in this conversation co-write a page
+/// live (docs/design/pages-live-document.md §4.2): join the page's live session
+/// as its co-writer while `active`, and leave it once not. It names no
+/// Instance: the conversation is the co-writing, so its Agent answers it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelPageCoWrite {
+    pub version: u8,
+    pub space_id: String,
+    pub page_id: String,
+    pub active: bool,
+}
+
+pub fn channel_page_co_write(message: &ChannelMessage) -> Option<ChannelPageCoWrite> {
+    let metadata = hub_instruction_metadata(message)?;
+    let co_write: ChannelPageCoWrite =
+        serde_json::from_value(metadata["xmatrixPageCoWrite"].clone()).ok()?;
+    (co_write.version == 1
+        && instruction_token(&co_write.space_id)
+        && instruction_token(&co_write.page_id))
+    .then_some(co_write)
+}
+
+/// Hub-written instruction that one Instance continue the turn a live switch
+/// cancelled. The body is the continuation input; only the named Instance,
+/// still waiting on one of the named switches, runs it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelSwitchContinuation {
+    pub version: u8,
+    pub instance_id: String,
+    pub request_ids: Vec<String>,
+}
+
+pub fn channel_switch_continuation(message: &ChannelMessage) -> Option<ChannelSwitchContinuation> {
+    let metadata = hub_instruction_metadata(message)?;
+    let continuation: ChannelSwitchContinuation =
+        serde_json::from_value(metadata["xmatrixSwitchContinuation"].clone()).ok()?;
+    (continuation.version == 1
+        && switch_continuation_names_valid(&continuation.instance_id, &continuation.request_ids))
+    .then_some(continuation)
+}
+
+/// Whether a switch continuation names one Instance and 1 to 16 switches in
+/// the shape the Hub writes them, whether it came as Channel metadata or as an
+/// `agent_switch_continuation` frame.
+pub fn switch_continuation_names_valid(instance_id: &str, request_ids: &[String]) -> bool {
+    instruction_instance_id(instance_id)
+        && !request_ids.is_empty()
+        && request_ids.len() <= 16
+        && request_ids.iter().all(|id| instruction_token(id))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelMessage {
@@ -779,7 +894,7 @@ pub struct ChannelMessage {
 }
 
 /// Metadata provenance of an activity entry (docs/design/conversation-activity.md).
-pub const CHANNEL_ACTIVITY_PROVENANCE: &str = "activity";
+pub(crate) const CHANNEL_ACTIVITY_PROVENANCE: &str = "activity";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -823,7 +938,7 @@ pub enum ChannelActivity {
 }
 
 /// The activity an activity entry carries, from its metadata.
-pub fn channel_activity_of(metadata: Option<&serde_json::Value>) -> Option<ChannelActivity> {
+pub(crate) fn channel_activity_of(metadata: Option<&serde_json::Value>) -> Option<ChannelActivity> {
     let metadata = metadata?;
     if metadata.get("xmatrixProvenance")?.as_str()? != CHANNEL_ACTIVITY_PROVENANCE {
         return None;
@@ -860,7 +975,7 @@ pub fn folded_history_line(message: &ChannelMessage) -> Option<String> {
 }
 
 /// One plain line for an activity entry, the same glyphs the web shows.
-pub fn channel_activity_line(activity: &ChannelActivity) -> String {
+pub(crate) fn channel_activity_line(activity: &ChannelActivity) -> String {
     match activity {
         ChannelActivity::PullRequest {
             url,
@@ -1040,7 +1155,11 @@ pub struct ChannelSummarySource {
 #[serde(rename_all = "camelCase")]
 pub struct ChannelSummaryAuthor {
     pub kind: String,
-    pub run_id: String,
+    /// Only `run` authors carry one. Since the Hub writes summaries as a text
+    /// task (`kind: "task"`), the author has no Run; requiring this field made
+    /// every channel-list read fail once any listed channel had such a summary.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub run_id: Option<String>,
     pub agent_name: String,
 }
 
@@ -1153,7 +1272,7 @@ pub struct AgentLifecycleSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentInstanceRuntimeIdentity {
+pub(crate) struct AgentInstanceRuntimeIdentity {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub client_version: Option<String>,
@@ -1164,7 +1283,7 @@ pub struct AgentInstanceRuntimeIdentity {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentInstanceConnectMessage {
+pub(crate) struct AgentInstanceConnectMessage {
     #[serde(rename = "type")]
     pub message_type: &'static str,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1296,6 +1415,9 @@ pub enum AgentInstanceClientMessage {
         model: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
+        /// The switch cancelled a turn that was running; Hub decides its continuation.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        interrupted_turn: Option<bool>,
     },
     AgentEffortSwitchResult {
         request_id: String,
@@ -1303,6 +1425,9 @@ pub enum AgentInstanceClientMessage {
         effort: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
+        /// The switch cancelled a turn that was running; Hub decides its continuation.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        interrupted_turn: Option<bool>,
     },
     AgentTurnRetry {
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1319,6 +1444,40 @@ pub enum AgentInstanceClientMessage {
         error_message: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         attempt_token: Option<String>,
+    },
+    /// What a `/config` or `/fast` control did, as facts; Hub words the notice.
+    AgentParameterControlResult {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        request_id: Option<String>,
+        channel_id: String,
+        /// The control message this answers.
+        source_message_id: String,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        parameter: Option<String>,
+        /// `query`, `select` or `toggle`.
+        action: String,
+        /// The parameter's value as the session holds it after the control.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        current: Option<String>,
+        /// A retained selection the provider has not confirmed yet.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        pending: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        choices: Vec<String>,
+        /// The provider's own note on the parameter (cooldown, disabled).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        notice: Option<String>,
+        /// The original error when the control failed.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        error: Option<String>,
+    },
+    /// The harness withdrew a question it asked on a card; Hub settles the card.
+    HarnessQuestionClosed {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        request_id: Option<String>,
+        channel_id: String,
+        /// The request id the card was posted with, which names its message.
+        card_request_id: String,
     },
     AgentLifecycle {
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1342,6 +1501,9 @@ pub enum AgentInstanceClientMessage {
         /// RFC 3339 time a `usage_limited` provider account resets, when known.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         resets_at: Option<String>,
+        /// Tasks still pending when `background_tasks_interrupted` was observed.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        pending_tasks: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         ts: Option<String>,
     },
@@ -1536,6 +1698,16 @@ pub enum AgentInstanceServerMessage {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         reason: Option<String>,
     },
+    /// The Hub's instruction that one Instance continue the turn a live
+    /// switch cancelled, sent to that Instance alone: `prompt` is the input,
+    /// and only an Instance still waiting on one of `request_ids` runs it.
+    /// Sent only to a runtime advertising `switch_continuation_frame`.
+    AgentSwitchContinuation {
+        channel_id: String,
+        instance_id: String,
+        request_ids: Vec<String>,
+        prompt: String,
+    },
     AgentModelSwitchRequested {
         request_id: String,
         model: String,
@@ -1567,6 +1739,11 @@ pub enum AgentInstanceServerMessage {
         ack_required: Option<bool>,
         #[serde(default)]
         interrupt_requested: Option<bool>,
+        /// With `interrupt_requested`: a runtime that can steer joins this
+        /// delivery to its active turn instead of cancelling it. Absent from an
+        /// older Hub, whose interrupts stay interrupts.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        steer_allowed: Option<bool>,
         /// Work or orientation. Absent means work: a hub that predates the
         /// field must never have its deliveries silently dropped.
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1578,6 +1755,13 @@ pub enum AgentInstanceServerMessage {
         ack_required: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         delivery_intent: Option<String>,
+        /// Hub's verdict on whether this catch-up cancels the running turn,
+        /// decided exactly as for live delivery. Absent from an older Hub.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        interrupt_requested: Option<bool>,
+        /// As for live delivery: the interrupt may steer the active turn instead.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        steer_allowed: Option<bool>,
     },
     ChannelMessageUpdated {
         channel_id: String,
@@ -2401,6 +2585,7 @@ mod tests {
                 process: Some("online".into()),
             }),
             resets_at: None,
+            pending_tasks: None,
             ts: None,
         };
         let json = serde_json::to_value(&msg).unwrap();
@@ -2450,11 +2635,40 @@ mod tests {
             request_id: "req-1".into(),
             model: Some("gpt-5.5".into()),
             error: None,
+            interrupted_turn: None,
         };
         let json = serde_json::to_value(result).unwrap();
         assert_eq!(json["type"], "agent_model_switch_result");
         assert_eq!(json["requestId"], "req-1");
         assert_eq!(json["model"], "gpt-5.5");
+    }
+
+    #[test]
+    fn agent_switch_continuation_wire_format() {
+        let frame: AgentInstanceServerMessage = serde_json::from_str(
+            r#"{"type":"agent_switch_continuation","channelId":"ch-1","instanceId":"inst-1","requestIds":["req-1"],"prompt":"continue"}"#,
+        )
+        .unwrap();
+        let AgentInstanceServerMessage::AgentSwitchContinuation {
+            channel_id,
+            instance_id,
+            request_ids,
+            prompt,
+        } = frame
+        else {
+            panic!("expected agent_switch_continuation");
+        };
+        assert_eq!(channel_id, "ch-1");
+        assert_eq!(prompt, "continue");
+        assert!(switch_continuation_names_valid(&instance_id, &request_ids));
+        assert!(!switch_continuation_names_valid(&instance_id, &[]));
+        let too_many: Vec<String> = (0..17).map(|i| format!("r{i}")).collect();
+        assert!(!switch_continuation_names_valid(&instance_id, &too_many));
+        assert!(!switch_continuation_names_valid("", &request_ids));
+        assert!(!switch_continuation_names_valid(
+            &instance_id,
+            &["bad id".to_string()]
+        ));
     }
 
     #[test]
@@ -2473,6 +2687,7 @@ mod tests {
             request_id: "req-2".into(),
             effort: Some("high".into()),
             error: None,
+            interrupted_turn: None,
         };
         let json = serde_json::to_value(result).unwrap();
         assert_eq!(json["type"], "agent_effort_switch_result");

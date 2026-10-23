@@ -39,15 +39,13 @@ test("runtime symptoms use the same status and safe wording for every harness", 
   assert.equal(agentRuntimeNoticePhrase({severity:"unknown",sinceMillis:1}),"Agent notice");
 });
 
-test("work in hand is yellow: working breathes, waiting is a still ring", () => {
+test("work in hand is yellow: working is solid, waiting is a ring", () => {
   const working = identityStatusDotClass("busy");
   const waiting = identityStatusDotClass("waiting");
   assert.match(working, /\bbg-amber-500\b/);
-  assert.match(working, /motion-safe:animate-pulse/);
   assert.doesNotMatch(working, /app-status-dot-ring/);
   assert.match(waiting, /\bbg-amber-500\b/);
   assert.match(waiting, /\bapp-status-dot-ring\b/);
-  assert.doesNotMatch(waiting, /animate-pulse/);
 });
 
 test("online and idle are one free green, and no dot is blue any more", () => {
@@ -74,16 +72,6 @@ test("a live Instance whose runtime reports a wait displays as waiting", () => {
   assert.equal(display({ ...base, status: "offline", offlineReason: "machine_offline", runtimeState: { status: "running", waiting } }), "machine offline");
 });
 
-test("a waiting ring in the work dock is the status colour, not the white cutout", () => {
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const css = fs.readFileSync(path.join(__dirname, "../../app/globals.css"), "utf8");
-  const rule = css.match(/\.app-agent-work-avatar \.identity-avatar-status\.app-status-dot-ring\[class\*="bg-amber-"\]\s*\{[^}]+\}/);
-  assert.ok(rule, "work dock waiting ring rule");
-  assert.match(rule[0], /border-color:\s*oklch\(0\.769 0\.188 70\.08\)/);
-  assert.doesNotMatch(rule[0], /oklch\(1 0 0\)/);
-});
-
 test("the waiting phrase says what and how long, never a guess", () => {
   const since = Date.UTC(2026, 9, 4, 10, 0, 0);
   assert.equal(agentWaitingPhrase({ kind: "tool", label: "gh pr checks 1 --watch", sinceMillis: since }, since + 4 * 60_000 + 30_000), "waiting: gh pr checks 1 --watch · 4m");
@@ -98,6 +86,9 @@ test("the island names what is waited on as the runtime says it, with its kind's
   assert.deepEqual(subject({ kind: "tool", label: "Wait for CI on PR #3781" }), { word: "Wait for CI on PR #3781", icon: "SquareTerminal" });
   assert.deepEqual(subject({ kind: "tool" }), { word: "a tool call", icon: "SquareTerminal" });
   assert.deepEqual(subject({ kind: "background", label: "2 tasks" }), { word: "2 tasks", icon: "Layers" });
+  // A runtime reports the count; the client words it.
+  assert.deepEqual(subject({ kind: "background", count: 1 }), { word: "1 task", icon: "Layers" });
+  assert.deepEqual(subject({ kind: "background", count: 3 }), { word: "3 tasks", icon: "Layers" });
 });
 
 test("a failed wake rests visibly and says what resumes it", () => {

@@ -10,6 +10,11 @@ import {
 } from "../relay-authority-live-delivery-retry";
 import type { Env } from "../types";
 import {
+  runtimeDeliveryFailureDiagnostic,
+  type RuntimeDeliveryRoute,
+  type RuntimePresenceReason,
+} from "./runtime-delivery-diagnostics";
+import {
   RELAY_RUNTIME_SELECTED_CELL,
   relayRuntimeRoutingMode,
 } from "./runtime-cell-locator";
@@ -49,6 +54,7 @@ interface RuntimeDirectoryRoute {
 interface RuntimeRouteDeliveryFailure {
   cellName: RuntimeRouteDirectoryCell;
   error: unknown;
+  diagnostic?: string;
 }
 
 /**
@@ -58,10 +64,13 @@ interface RuntimeRouteDeliveryFailure {
  */
 export class RuntimeRouteDirectoryDeliveryError extends Error {
   constructor(readonly failures: readonly RuntimeRouteDeliveryFailure[]) {
-    super(`RelayRuntime committed delivery failed in ${failures.length} routed cell(s)`, {
+    super(`RelayRuntime committed delivery failed in ${failures.length} routed cell(s)` +
+      (failures[0]?.diagnostic ? ` [${failures[0].diagnostic}]` : ""), {
       // Error reporters follow standard causes, not our routing metadata. Keep
       // the original errors and stacks without adding cell identities to them.
-      cause: new AggregateError(failures.map((failure) => failure.error), "Runtime delivery failures"),
+      cause: new AggregateError(failures.map((failure) => failure.error),
+        "Runtime delivery failures" + failures.slice(0, 4)
+          .map((failure) => failure.diagnostic ? ` [${failure.diagnostic}]` : "").join("")),
     });
     this.name = "RuntimeRouteDirectoryDeliveryError";
   }
@@ -124,10 +133,11 @@ export async function publishRuntimeChannelAgentPresence(input: {
   channelId: string;
   body: string;
   exceptCell: string;
+  reason?: RuntimePresenceReason;
 }): Promise<void> {
   const request = () => runtimeRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_PATH, input.body);
   if (await scopeUsesChannelFanout(input.env, input.channelId)) {
-    await deliverThroughChannelFanout(input.env, input.channelId, request, input.exceptCell);
+    await deliverThroughChannelFanout(input.env, input.channelId, request, input.exceptCell, input.reason);
     if (input.exceptCell !== RELAY_RUNTIME_SELECTED_CELL &&
         relayRuntimeRoutingMode(input.env.XMATRIX_RUNTIME_CELL_MODE) === "dual") {
       await deliverToRuntimeCells({
@@ -135,6 +145,9 @@ export async function publishRuntimeChannelAgentPresence(input: {
         cells: [RELAY_RUNTIME_SELECTED_CELL],
         request,
         label: "Agent presence",
+        sourceCell: input.exceptCell,
+        reason: input.reason,
+        route: "legacy",
       });
     }
     return;
@@ -146,6 +159,9 @@ export async function publishRuntimeChannelAgentPresence(input: {
     cells,
     request,
     label: "Agent presence",
+    sourceCell: input.exceptCell,
+    reason: input.reason,
+    route: relayRuntimeRoutingMode(input.env.XMATRIX_RUNTIME_CELL_MODE) === "dual" ? "directory" : "legacy",
   });
 }
 
@@ -220,6 +236,7 @@ export function deliverRuntimeFanoutTargets(input: {
     cells: input.cells,
     request: () => runtimeRequest(input.url, input.body),
     label: input.label,
+    route: "fanout",
   });
 }
 
@@ -229,11 +246,22 @@ function deliverToRuntimeCells(input: {
   request: () => Request;
   label: string;
   self?: RuntimeLiveDeliverySelf;
+  sourceCell?: string;
+  reason?: RuntimePresenceReason;
+  route?: RuntimeDeliveryRoute;
 }): Promise<Array<{ cellName: RuntimeRouteDirectoryCell; response: Response }>> {
   return Promise.all(input.cells.map(async (cellName) => {
+    let attempts = 0;
+    let phase: "fetch" | "response" = "fetch";
+    let url = "https://relay-runtime/unknown";
     try {
       const response = await publishWithLiveDeliveryRetry(async () => {
-        const candidate = await fetchRuntimeCell(input.env, cellName, input.request(), input.self);
+        attempts += 1;
+        phase = "fetch";
+        const request = input.request();
+        url = request.url;
+        const candidate = await fetchRuntimeCell(input.env, cellName, request, input.self);
+        phase = "response";
         if (!candidate.ok) {
           const detail = await candidate.text().catch(() => "");
           throw new LiveDeliveryRejectedError(
@@ -245,11 +273,15 @@ function deliverToRuntimeCells(input: {
       });
       return { cellName, response };
     } catch (error) {
-      return { cellName, error };
+      return { cellName, error, diagnostic: runtimeDeliveryFailureDiagnostic({
+        url, route: input.route ?? "directory",
+        sourceCell: input.sourceCell ?? input.self?.cellName, targetCell: cellName,
+        reason: input.reason, phase, attempts,
+      }) };
     }
   })).then((results) => {
     const failures = results.flatMap((result): RuntimeRouteDeliveryFailure[] =>
-      "error" in result ? [{ cellName: result.cellName, error: result.error }] : [],
+      "error" in result ? [{ cellName: result.cellName, error: result.error, diagnostic: result.diagnostic }] : [],
     );
     if (failures.length > 0) throw new RuntimeRouteDirectoryDeliveryError(failures);
     return results.flatMap((result) =>
@@ -347,24 +379,33 @@ async function deliverThroughChannelFanout(
   scopeId: string,
   request: () => Request,
   exceptCell: string | undefined,
+  reason?: RuntimePresenceReason,
 ): Promise<void> {
   const namespace = env.RELAY_RUNTIME_CHANNEL_FANOUT;
   const fanout = namespace ? relayRuntimeChannelFanout(namespace, scopeId, env) : undefined;
   if (!fanout) throw new Error("Runtime channel fanout is not configured");
   const sample = request();
-  const response = await fanout.fetch(new Request(RUNTIME_FANOUT_DELIVER_PATH, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      url: sample.url,
-      body: await sample.text(),
-      ...(exceptCell && isRuntimeRouteDirectoryCell(exceptCell) ? { exceptCell } : {}),
-    }),
-  }));
-  if (!response.ok) {
+  let phase: "fetch" | "response" = "fetch";
+  try {
+    const response = await fanout.fetch(new Request(RUNTIME_FANOUT_DELIVER_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        url: sample.url,
+        body: await sample.text(),
+        ...(exceptCell && isRuntimeRouteDirectoryCell(exceptCell) ? { exceptCell } : {}),
+      }),
+    }));
+    phase = "response";
+    if (!response.ok) {
+      throw new Error(`Channel fanout rejected delivery (${response.status})`);
+    }
+  } catch (error) {
     throw new RuntimeRouteDirectoryDeliveryError([{
       cellName: RELAY_RUNTIME_SELECTED_CELL,
-      error: new Error(`Channel fanout rejected delivery (${response.status})`),
+      error,
+      diagnostic: runtimeDeliveryFailureDiagnostic({ url: sample.url, route: "fanout",
+        sourceCell: exceptCell, reason, phase, attempts: 1 }),
     }]);
   }
 }

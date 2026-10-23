@@ -5,6 +5,7 @@ import { machineDaemonCommand } from "./machines";
 import { relayRuntimeSingleCell } from "./relay-authority-locator";
 import { failureResponse, transientFailure } from "./error-contract";
 import { analyticsWorkerVersion } from "./analytics-sampling";
+import { HarnessReleaseWatchFailure, type HarnessReleaseWatchEvidence } from "./harness-release-watch-failure";
 import type { Env } from "./types";
 
 /** The Runtime cell route that runs one release pass beside PostgreSQL. */
@@ -22,7 +23,7 @@ type Latest = NonNullable<NonNullable<AgentPreset["management"]>["latest"]>;
 export function latestVersionUrl(latest: Latest): string | undefined {
   if (!PACKAGE.test(latest.package)) return undefined;
   return latest.kind === "npm"
-    ? `https://registry.npmjs.org/${latest.package.replace("/", "%2f")}/latest`
+    ? `https://registry.npmjs.org/${latest.package.replaceAll("/", "%2f")}/latest`
     : `https://pypi.org/pypi/${latest.package}/json`;
 }
 
@@ -125,23 +126,35 @@ export async function watchHarnessReleases(env: Env, dependencies: HarnessReleas
 export async function watchHarnessReleasesBesidePostgres(
   env: Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT" | "CF_VERSION_METADATA">,
 ): Promise<{ issued: number }> {
-  const response = await relayRuntimeSingleCell(env).fetch(new Request(
-    `https://relay-runtime${RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH}`, { method: "POST" }));
-  const body = await response.json<Record<string, unknown>>();
-  if (response.ok && typeof body.issued === "number") return { issued: body.issued };
-  // The cell already logged an outage; a defect it threw rejects the fetch instead.
-  if (body.retryable === true) return { issued: 0 };
-  // A deploy reaches this Worker before the cell restarts on it, and a cell
-  // still on an earlier release has no such route (XMATRIX-HUB-7M). Its 404
-  // names that release, so only a rollout in progress waits for the next pass;
-  // a missing route on this same release is still a defect.
-  if (response.status === 404 && typeof body.workerVersion === "string" &&
-      body.workerVersion !== analyticsWorkerVersion(env)) {
-    console.warn("Harness release watch reached a Runtime cell on another release", {
-      cellVersion: body.workerVersion, workerVersion: analyticsWorkerVersion(env) });
-    return { issued: 0 };
+  const started = Date.now();
+  let phase: HarnessReleaseWatchEvidence["phase"] = "runtime_fetch";
+  let responseStatus = 0;
+  try {
+    const response = await relayRuntimeSingleCell(env).fetch(new Request(
+      `https://relay-runtime${RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH}`, { method: "POST" }));
+    responseStatus = response.status;
+    phase = "response_body";
+    const body = await response.json<Record<string, unknown>>();
+    phase = "response_contract";
+    if (response.ok && typeof body.issued === "number") return { issued: body.issued };
+    // The cell already logged an outage; a defect it threw rejects the fetch instead.
+    if (body.retryable === true) return { issued: 0 };
+    // A deploy reaches this Worker before the cell restarts on it, and a cell
+    // still on an earlier release has no such route (XMATRIX-HUB-7M). Its 404
+    // names that release, so only a rollout in progress waits for the next pass;
+    // a missing route on this same release is still a defect.
+    if (response.status === 404 && typeof body.workerVersion === "string" &&
+        body.workerVersion !== analyticsWorkerVersion(env)) {
+      console.warn("Harness release watch reached a Runtime cell on another release", {
+        cellVersion: body.workerVersion, workerVersion: analyticsWorkerVersion(env) });
+      return { issued: 0 };
+    }
+    throw new Error(`Harness release watch answered ${response.status}: ${String(body.error ?? "no error")}`);
+  } catch (error) {
+    // Commands may already have committed. Never replay the whole pass just
+    // because the response was lost; the next scheduled pass re-reads targets.
+    throw new HarnessReleaseWatchFailure(error, phase, started, responseStatus);
   }
-  throw new Error(`Harness release watch answered ${response.status}: ${String(body.error ?? "no error")}`);
 }
 
 /** The Runtime cell's side: one pass, with an outage answered as retryable rather than thrown. */

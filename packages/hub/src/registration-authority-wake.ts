@@ -52,7 +52,7 @@ export async function wakeMachineChannels(env: PostgresAuthorityFleetEnv & {
   for (const { shardId, database } of shards) {
     const rows = await database.transaction({ requestId: `machine-reconnect-wake:${crypto.randomUUID()}`,
       operation: "registration.machine.waiting-channels" }, tx => tx.query<{ channel_id: string; work: string }>({
-      name: "machine_waiting_channels_v1",
+      name: "machine_waiting_channels_v3",
       text: `(SELECT DISTINCT channel_id, 'launch' AS work FROM data.agent_launches
           WHERE owner_user_id=$1 AND machine_id=$2 AND state IN ('prepared','queued') LIMIT ${AFFECTED_CHANNEL_LIMIT})
         UNION ALL (SELECT DISTINCT channel_id, 'registrationStop' AS work FROM data.registration_stop_intents

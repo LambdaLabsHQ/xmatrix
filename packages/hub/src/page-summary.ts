@@ -1,11 +1,9 @@
-import { PageControlError, PostgresMachineControlRepository, PostgresPageRepository } from "@xmatrix/db";
-import { MACHINE_TEXT_TASK_CAPABILITY, TEXT_TASK_HARNESSES, TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength,
-  type PageDocument } from "@xmatrix/protocol";
-import { registrationQuotaProbeTargetReader } from "./agent-routing-quota-refresh";
-import { machineDaemonCommand, machineDatabase } from "./machines";
-import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet } from "./postgres-authority-fleet";
-import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
+import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
+import { TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength, type PageDocument } from "@xmatrix/protocol";
+import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
+import { issueTextTask, textTaskMachines, type TextTaskMachine } from "./text-task-machines";
+import { retryablePostgresFailure } from "./postgres-error-classification";
 import type { Env } from "./types";
 
 /**
@@ -39,9 +37,12 @@ export function pageSummaryLine(text: string): string {
   return [...line].slice(0, PAGE_SUMMARY_MAX_CHARACTERS).join("");
 }
 
-/** The page's text as the Run reads it, cut at a character boundary when it is longer than a task carries. */
-export function pageSummaryInput(title: string, body: string): string {
-  let input = `# ${title}\n\n${body}`;
+/**
+ * The page's document as the Run reads it, its name opening it, cut at a character boundary when it
+ * is longer than a task carries.
+ */
+export function pageSummaryInput(body: string): string {
+  let input = body;
   while (utf8ByteLength(input) > TEXT_TASK_INPUT_MAX_BYTES) input = input.slice(0, Math.floor(input.length * 0.9));
   return input;
 }
@@ -56,6 +57,16 @@ export function summaryPages(env: Env): PostgresPageRepository {
 export type PageSummaryStart = { started: true; requestId: string; revision: number }
   | { started: false; reason: "current" | "tried" | "empty" | "no_machine" };
 
+/** Read preparation can be repeated; issuing must replay the same command, never a new task. */
+async function retrySummaryDatabase<T>(phase: "prepare" | "issue", work: () => Promise<T>): Promise<T> {
+  try { return await work(); }
+  catch (error) {
+    if (!retryablePostgresFailure(error)) throw error;
+    console.warn("Page summary database retry", { phase });
+    return work();
+  }
+}
+
 /**
  * Starts the summary of a page whose head has none yet, on the first of the
  * Space's enabled Agents whose Machine is online and can take a text task,
@@ -66,25 +77,28 @@ export type PageSummaryStart = { started: true; requestId: string; revision: num
  */
 export async function startPageSummary(env: Env, input: { spaceId: string; pageId: string; triedRevision?: number }):
   Promise<PageSummaryStart> {
+  const prepared = await retrySummaryDatabase("prepare", () => preparePageSummary(env, input));
+  if (!prepared.started) return prepared;
+  const { machine, requestId, revision, body } = prepared;
+  const task = { requestId, instruction: INSTRUCTION, input: pageSummaryInput(body) };
+  // issueTextTask derives both the command id and control id from requestId.
+  // A lost command receipt therefore replays its durable result, even if the
+  // first attempt committed and already woke the daemon.
+  await retrySummaryDatabase("issue", () => issueTextTask(env, machine, task));
+  return { started: true, requestId, revision };
+}
+
+async function preparePageSummary(env: Env, input: { spaceId: string; pageId: string; triedRevision?: number }):
+  Promise<Extract<PageSummaryStart, { started: false }> |
+    { started: true; machine: TextTaskMachine; requestId: string; revision: number; body: string }> {
   const pages = summaryPages(env);
-  const database = createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-page-summary-targets",
-    connectTimeoutMs: POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS, statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000,
-    lockTimeoutMs: 2_000 });
-  const directory = createPostgresAuthorityFleet(env, { applicationName: "xmatrix-page-summary-targets",
-    ...POSTGRES_AUTHORITY_TIMEOUTS }).directoryDatabase;
-  const targets = (await registrationQuotaProbeTargetReader(database, directory)(input.spaceId))
-    .filter((target) => TEXT_TASK_HARNESSES.includes(target.harness));
-  const machines = new PostgresMachineControlRepository(machineDatabase(env));
-  for (const target of targets) {
-    const route = { ownerUserId: target.ownerUserId, machineId: target.machineId, hostId: target.hostId };
-    const { daemon } = await machines.getDaemon({ requestId: crypto.randomUUID(), ...route });
-    if (!daemon || daemon.status !== "online" || !daemon.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) continue;
+  for await (const machine of textTaskMachines(env, input.spaceId, "page-summary")) {
     // A Machine is its owner's environment. Read through the ordinary page
     // authority as that owner before disclosing any text to its harness.
     let source: PageDocument;
     try {
       ({ page: source } = await pages.read({ requestId: crypto.randomUUID(), spaceId: input.spaceId,
-        pageId: input.pageId, principal: { kind: "user", id: route.ownerUserId } }));
+        pageId: input.pageId, principal: { kind: "user", id: machine.ownerUserId } }));
     } catch (error) {
       if (error instanceof PageControlError && error.status === 404) continue;
       throw error;
@@ -93,14 +107,7 @@ export async function startPageSummary(env: Env, input: { spaceId: string; pageI
     if (input.triedRevision === source.headRevision) return { started: false, reason: "tried" };
     if (!source.body.trim()) return { started: false, reason: "empty" };
     const requestId = `page-summary:${input.spaceId}:${input.pageId}:${source.headRevision}:${crypto.randomUUID()}`;
-    await machineDaemonCommand(env, {
-      ...route, ownerEmail: daemon.email, daemonId: daemon.id,
-      commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "text_task",
-      principal: { kind: "user", id: route.ownerUserId },
-      payload: { type: "machine_text_task", requestId, presetId: target.harness, instruction: INSTRUCTION,
-        input: pageSummaryInput(source.title, source.body) },
-    });
-    return { started: true, requestId, revision: source.headRevision };
+    return { started: true, machine, requestId, revision: source.headRevision, body: source.body };
   }
   return { started: false, reason: "no_machine" };
 }

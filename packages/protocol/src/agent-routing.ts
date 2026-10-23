@@ -1,4 +1,5 @@
 import { parseHarnessParameterValues } from "./harness-parameters.js";
+import { machineNetworkObservation } from "./machine-network.js";
 import { configurationFields } from "./configuration-fields.js";
 import { parseLaunchParameterEvidence, type LaunchParameterEvidence } from "./launch-parameter-evidence.js";
 import { canonicalRegistrationHarness } from "./agent-registration.js";
@@ -59,6 +60,7 @@ export function routingModelCatalogObservation(value: unknown, observedAt: unkno
 /** Machine measurements are decision facts, never concurrency limits. */
 export interface MachineResourceObservation {
   observedAt: string;
+  network?: import("./machine-network.js").MachineNetworkObservation;
   cpuLogicalCount?: number;
   cpuUsagePercent?: number;
   memoryTotalBytes?: number;
@@ -97,6 +99,8 @@ export function machineResourceObservation(value: unknown, now: number): Machine
   // Authority keeps only the observation of its live connection.
   if (!Number.isFinite(observed) || observed > now) return undefined;
   const result: MachineResourceObservation = { observedAt: new Date(observed).toISOString() };
+  const network = machineNetworkObservation(row.network, now);
+  if (network) result.network = network;
   for (const key of ["cpuLogicalCount", "memoryTotalBytes", "memoryAvailableBytes",
     "swapTotalBytes", "swapFreeBytes", "diskTotalBytes", "diskAvailableBytes"] as const) {
     const minimum = key === "memoryAvailableBytes" || key === "swapFreeBytes" || key === "diskAvailableBytes" ? 0 : 1;
@@ -181,7 +185,7 @@ const HARNESS_LABEL: Record<string, string> = {
   qoder: "Qoder", codebuddy: "CodeBuddy", omp: "Oh My Pi", auggie: "Auggie", cline: "Cline", kilo: "Kilo",
   droid: "Droid", devin: "Devin", commandcode: "Command Code", jcode: "jcode", prime: "Prime Agent",
   trae: "TraeCode", antigravity: "Antigravity", autohand: "Autohand", amp: "Amp", reasonix: "Reasonix",
-  dimcode: "DimCode",
+  dimcode: "DimCode", deepseek: "DeepSeek",
 };
 
 export function boundedRoutingLabel(value: unknown): string | undefined {

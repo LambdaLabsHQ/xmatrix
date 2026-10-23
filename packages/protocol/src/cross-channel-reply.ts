@@ -1,3 +1,4 @@
+import { parseAgentRegistrationKey, type AgentRegistrationKey } from "./agent-registration.js";
 import { plainRecord as record } from "./plain-record.js";
 
 /**
@@ -16,6 +17,8 @@ export interface CrossChannelReplyRelay {
   /** Present only for an Agent replier. */
   replierAgentId?: string;
   replierInstanceId?: string;
+  /** Send-time identity for presentation; never grants relay authority. */
+  replierRegistration?: AgentRegistrationKey;
   /** The Instance that wrote the link: the only one that takes the answer as
    *  work while it is live. Other Instances in its Channel get it as context. */
   requesterInstanceId?: string;
@@ -41,7 +44,12 @@ export function crossChannelReplyRelay(metadata: unknown): CrossChannelReplyRela
   if (!relay || !sourceChannelId) return undefined;
   const replierKind = relay.replierKind === "user" || relay.replierKind === "agent" ? relay.replierKind : undefined;
   const agent = (value: unknown) => (replierKind === "agent" ? text(value) : undefined);
+  let replierRegistration: AgentRegistrationKey | undefined;
+  if (replierKind === "agent" && relay.replierRegistration !== undefined) {
+    try { replierRegistration = parseAgentRegistrationKey(relay.replierRegistration); } catch { /* Invalid display identity stays unattributed. */ }
+  }
   const optional = {
+    replierRegistration,
     sourceMessageId: text(relay.sourceMessageId),
     linkMessageId: text(relay.linkMessageId),
     replierKind,

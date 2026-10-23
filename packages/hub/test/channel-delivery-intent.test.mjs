@@ -10,6 +10,7 @@ import { test } from "node:test";
  */
 import {
   agentChannelMessageDeliveryIntent,
+  agentChannelMessageMaySteer,
   agentChannelMessageRequestsInterrupt,
   channelMessage,
   channelMessageDeliveryIntent,
@@ -150,6 +151,22 @@ test("Agent peer replies queue unless they address this exact Instance", () => {
     agentChannelMessageRequestsInterrupt({ ...peer, body: "@Analyst:3 revise this" }, recipient),
     false,
   );
+});
+
+test("a Human message steers the active turn unless it @-addresses this Instance", () => {
+  const recipient = { agentName: "claude", agentId: "agent:owner:claude", channelInstanceId: "1" };
+  for (const body of ["不是", "看下竞品页", "`@claude` is the CLI", "@claude:2 take this", "看下 codex 的输出"]) {
+    const message = framed({ body });
+    assert.equal(agentChannelMessageRequestsInterrupt(message, recipient), true, body);
+    assert.equal(agentChannelMessageMaySteer(message, recipient), true, body);
+  }
+  for (const body of ["@claude stop and look", "看下 @claude", "@claude:1 now", "@agent:owner:claude:1 now", "@all heads up"]) {
+    assert.equal(agentChannelMessageMaySteer(framed({ body }), recipient), false, body);
+  }
+  const peer = framed({ body: "@claude:1 revise", from: { kind: "agent", identityId: "agent:critic", label: "critic" } });
+  assert.equal(agentChannelMessageRequestsInterrupt(peer, recipient), true);
+  assert.equal(agentChannelMessageMaySteer(peer, recipient), false, "an Agent's exact address is a deliberate interrupt");
+  assert.equal(agentChannelMessageMaySteer(framed({ body: "/kill all" }), recipient), false, "control is context");
 });
 
 test("provenance decides, not the id shape", () => {

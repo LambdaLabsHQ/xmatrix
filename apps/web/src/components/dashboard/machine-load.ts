@@ -1,8 +1,9 @@
 /**
  * Machine load presentation.
  *
- * The daemon reports numeric samples roughly every 30 seconds; the protocol
- * parser has already rejected stale, future and incoherent values, so this
+ * The daemon samples load roughly every ten seconds and reports changes or
+ * at least once a minute. The protocol parser rejects future/incoherent values,
+ * and the authenticated connection owns the current load; this
  * module only turns what remains into display rows. A missing measurement is
  * omitted rather than shown as zero.
  */

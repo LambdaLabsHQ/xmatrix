@@ -7,6 +7,31 @@ const candidates = ['first', 'last'].map(id => ({ key: { spaceId: 'space', owner
   description: id, models: ['small', 'large'], workspaceReferences: ['workspace-a', 'workspace-b'], workspaces: ['a', 'b'].map(letter => ({ reference: `workspace-${letter}`, machineId: id, canonicalCwd: `/projects/${letter}`, description: `Project ${letter}` })) }));
 // Two harnesses, so Jev scores each one's fit.
 const twoHarnesses = [candidates[0], { ...candidates[1], key: { ...candidates[1].key, harness: 'claude' } }];
+test('network placement favours HTTPS reliability/tail latency and never confuses ICMP with proxy traffic', async () => {
+  const now = Date.now();
+  const observedAt = new Date(now - 1000).toISOString();
+  const at = (candidate, latency, failures = 0, extra = {}) => ({ ...candidate, observations: {
+    evaluatedAt: observedAt, quota: { remainingPercent: 100, assumed: true },
+    machineResources: { observedAt, cpuUsagePercent: 10, network: {
+      observedAt, target: 'cloudflare-speed', protocol: 'https', attempts: 10, failures,
+      latencyP95Ms: latency, latencyMedianMs: latency, ...extra } } } });
+  const slow = at(candidates[0], 200), fast = at(candidates[1], 20);
+  assert.equal(jointRanking([slow, fast], () => 1 / 3, now)[0].candidate, fast);
+  const lossy = at(candidates[1], 20, 10);
+  assert.equal(jointRanking([lossy, slow], () => 1 / 3, now)[0].candidate, slow);
+  const directLoss = at(candidates[0], 20, 0, { packetLoss: {
+    protocol: 'icmp', target: '1.1.1.1', sent: 20, received: 1 } });
+  assert.equal(jointRanking([directLoss, fast], () => 1 / 3, now)[0].candidate, directLoss);
+  const stale = at(candidates[0], 1, 0, { observedAt: new Date(now - 3600_000).toISOString() });
+  const staleRanking = jointRanking([stale, fast], () => 1 / 3, now);
+  assert.equal(staleRanking[0].network, undefined);
+  assert.equal(staleRanking[0].candidate, stale, 'missing network facts preserve candidate order');
+  const result = await registrationLaunchChooser(answer)({ message: '@codex inspect', tags: {}, candidates: [slow, fast] });
+  assert.equal(result.key.machineId, fast.key.machineId);
+  assert.equal(result.parameterEvidence.placement.ranking[0].network.latencyP95Ms, 20);
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
+});
 /** Choices default to the last option; a fit score defaults to "capable". */
 function answer(input, options = {}) {
   return { answers: Object.fromEntries(Object.entries(input.questions).map(([key, question]) => {
@@ -18,7 +43,7 @@ function answer(input, options = {}) {
     return [key, { choice: selected, probabilities: Object.fromEntries(Object.keys(question.criteria).map(value => [value, value === selected ? 1 : 0])) }];
   })) };
 }
-test('one harness has no fit to score; the location, then the model of the chosen environment', async () => {
+test('one harness has no fit to score; the location and its one list of models are chosen in one call', async () => {
   const calls = [];
   const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
     message: '@codex inspect', tags: {}, candidates });
@@ -26,13 +51,25 @@ test('one harness has no fit to score; the location, then the model of the chose
   assert.equal(result.model, 'large');
   assert.equal(result.workspaceReference, 'workspace-b');
   assert.equal(Object.hasOwn(result, "oneshot"), false);
-  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace'], ['modelEffort']]);
-  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v10');
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
+  assert.deepEqual(result.parameterEvidence.choices.map(choice => choice.key), ['modelEffort', 'workspace']);
+  const { digestCanonicalCloneCborV1 } = await import('@xmatrix/protocol');
+  assert.equal(result.parameterEvidence.inputDigest, await digestCanonicalCloneCborV1(calls), "the evidence is what Jev read");
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v11');
   assert.equal(result.parameterEvidence.harness, undefined);
   assert.equal(result.parameterEvidence.fit, undefined);
   assert.deepEqual(result.parameterEvidence.placement.ranking.map(item => item.machineId), ['first', 'last']);
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
+});
+test('environments of one harness offering different models: the model is chosen after them, for the one that runs it', async () => {
+  const calls = [];
+  const offers = [candidates[0], { ...candidates[1], models: ['large', 'huge'] }];
+  const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@codex inspect', tags: {}, candidates: offers });
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace'], ['modelEffort']]);
+  assert.deepEqual(result.key, offers[0].key);
+  assert.equal(result.model, 'large', "among the models the chosen environment offers");
 });
 test('Jev scores each harness on its own question and never sees load, quota or machines', async () => {
   const calls = [];
@@ -231,10 +268,10 @@ test('omitted launch options stay in Jev choices and an explicit repo restricts 
   const calls = [];
   await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
     message: '@codex inspect', tags: {}, candidates: [candidate] });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
   const offered = Object.values(calls[0].questions.workspace.criteria).map(value => JSON.parse(value));
   assert.deepEqual(offered.map(workspace => workspace.repo), ['owner/project']);
-  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [["workspace"], ["modelEffort"]]);
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [["workspace", "modelEffort"]]);
   assert.ok(Object.keys(calls.at(-1).questions.modelEffort.criteria).length > 1);
 });
 
@@ -280,6 +317,14 @@ test('a named machine whose daemon is offline is not reported as a missing envir
   }), error => error.code === 'registration_machine_unavailable');
 });
 
+test('a machine whose harness is too old to talk to is refused naming it, without asking Jev', async () => {
+  const tooOld = { program: 'Cursor CLI', version: '2025.09.12-4852336', minimumVersion: '2026.01.01', machineName: 'Laptop' };
+  await assert.rejects(registrationLaunchChooser(async () => assert.fail('Jev must not be called'))({
+    message: '@auto machine:Laptop', tags: { machine: 'Laptop' }, candidates,
+    blocked: [{ machineId: 'laptop-id', machineName: 'Laptop', reason: 'harness_outdated', tooOld }],
+  }), error => error.code === 'registration_harness_outdated' && error.status === 409 && error.tooOld === tooOld);
+});
+
 test('explicit machine, model and effort failures retain their exact phase', async () => {
   const cases = [
     [{ machine: 'missing' }, 'registration_machine_unavailable'],
@@ -315,13 +360,15 @@ test('authorized channel context reaches both decisions while explicit current c
   const selected = await registrationLaunchChooser(async request => { calls.push(request); return answer(request); },
     async sequence => { assert.equal(sequence, 10); return context; })({
       message, sourceSequence: 10, tags: { pwd: '/projects/a', model: 'small' }, candidates: twoHarnesses });
-  assert.equal(calls.length, 2);
+  // The model the message names is the only one left, so only the harness's fit is asked.
+  assert.equal(calls.length, 1);
   for (const call of calls) {
     assert.equal(call.state.message, message);
     assert.deepEqual(call.state.channelContext, context);
   }
   assert.equal(selected.workspaceReference, 'workspace-a');
   assert.equal(selected.model, 'small');
+  assert.equal(selected.parameterEvidence.choices.find(choice => choice.key === 'modelEffort').only, true);
 });
 
 test('registration failures identify the actual phase without retaining provider or context text', async () => {
@@ -376,6 +423,47 @@ test('input that needs no repository may run in a private managed directory', as
     message: 'Organize this Space', tags: { pwd: '/projects/a' }, candidates: bare, managedWorkspace: true }));
 });
 
+test('a conversation co-writing a page is offered only the private managed directory, ready at once', async () => {
+  const calls = [];
+  const withRepo = { ...candidates[0], workspaceReferences: [...candidates[0].workspaceReferences, 'repo:owner/project'],
+    workspaces: [...candidates[0].workspaces, { reference: 'repo:owner/project', repo: 'owner/project', machineId: 'first', description: 'API server' }] };
+  const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@codex launch:force co-write this page', tags: { launch: 'force' }, candidates: [withRepo],
+    managedWorkspace: true, managedOnly: true });
+  assert.deepEqual(Object.values(calls[0].questions.workspace.criteria),
+    [JSON.stringify({ description: 'Private managed directory with no repository' })], "no repository, no registered directory");
+  assert.equal(result.workspaceReference, undefined);
+  assert.equal(result.parameterEvidence.selections.workspaceKind, 'managed');
+  // A named repository or directory still wins: the conversation asked for it.
+  calls.length = 0;
+  const named = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@codex repo:owner/project', tags: { repo: 'owner/project' }, candidates: [withRepo], managedOnly: true });
+  assert.equal(named.workspaceReference, 'repo:owner/project');
+});
+
+test('with nothing left to choose Jev is not called, and each choice is recorded as the only option it was', async () => {
+  let calls = 0;
+  const onlyOne = { ...candidates[0], models: [] };
+  const result = await registrationLaunchChooser(async input => { calls++; return answer(input); })({
+    message: '@codex launch:force co-write this page', tags: { launch: 'force' }, candidates: [onlyOne],
+    managedWorkspace: true, managedOnly: true });
+  assert.equal(calls, 0, "one harness, one directory, the runtime's own model: no question is left");
+  assert.equal(result.workspaceReference, undefined);
+  assert.equal(result.useRuntimeDefaultModel, true);
+  assert.deepEqual(result.parameterEvidence.choices,
+    [{ key: 'workspace', selected: 'workspace_0', probabilities: { workspace_0: 1 }, only: true }]);
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v11');
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
+  // A choice beside it is still Jev's to make, and the one-option question goes with it as before.
+  const asked = [];
+  const withModels = await registrationLaunchChooser(async input => { asked.push(input); return answer(input); })({
+    message: '@codex launch:force co-write this page', tags: { launch: 'force' }, candidates: [candidates[0]],
+    managedWorkspace: true, managedOnly: true });
+  assert.deepEqual(asked.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
+  assert.equal(withModels.parameterEvidence.choices.some(choice => choice.only), false);
+});
+
 const modelOptions = call => Object.values(call.questions.modelEffort.criteria).map(value => JSON.parse(value));
 
 test('an empty model list skips model selection, even beside an observed catalog', async () => {
@@ -417,10 +505,39 @@ test('a requested effort applies to the runtime default model without a model ch
   assert.equal(Object.hasOwn(chosen.parameterEvidence.selections, 'model'), false);
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
-  // The runtime's own report of its default model bounds the effort; without a report the runtime decides at launch.
+  // Effort requires positive evidence for the current default model.
   await assert.rejects(choose({ effort: 'medium' }), error => error.code === 'registration_effort_unavailable');
-  assert.equal((await choose({ effort: 'medium' }, { ...candidate, modelCatalog: undefined })).effort, 'medium');
+  await assert.rejects(choose({ effort: 'medium' }, { ...candidate, modelCatalog: undefined }),
+    error => error.code === 'registration_effort_unavailable');
   await assert.rejects(choose({ effort: 'high', model: 'gpt-5.4' }), error => error.code === 'registration_effort_unavailable');
+});
+
+test('effort routing excludes unproven controls before weighing fit or machine headroom', async () => {
+  const supported = { ...candidates[0], models: [], supportsRequestedEffort: true, supportsDefaultModelEffort: true,
+    parameterModel: 'reasoner', modelCatalog: [{ model: 'reasoner', description: '', efforts: [{ value: 'high', description: '' }] }] };
+  const unsupported = { ...supported, key: { ...supported.key, harness: 'cursor' },
+    observations: { machineResources: { cpuUsagePercent: 0 }, quota: { remainingPercent: 100, assumed: true } } };
+  for (const missing of [
+    { modelCatalog: [{ model: 'reasoner', description: '', efforts: [] }] },
+    { modelCatalog: undefined },
+    { parameterModel: undefined },
+    { parameterModel: 'other-model' },
+    { supportsDefaultModelEffort: false },
+  ]) {
+    const cursor = { ...unsupported, ...missing };
+    const chosen = await registrationLaunchChooser(async input => answer(input))({
+      message: '@auto effort:high', tags: { effort: 'high' }, candidates: [cursor, supported] });
+    assert.deepEqual(chosen.key, supported.key);
+    assert.equal(chosen.effort, 'high');
+    await assert.rejects(registrationLaunchChooser(async () => { throw new Error('must not evaluate'); })({
+      message: '@cursor effort:high', tags: { effort: 'high' }, candidates: [cursor] }),
+    error => error.code === 'registration_effort_unavailable');
+  }
+  // Declaring model names does not prove that the provider can set effort either.
+  await assert.rejects(registrationLaunchChooser(async () => { throw new Error('must not evaluate'); })({
+    message: '@auto model:reasoner effort:high', tags: { model: 'reasoner', effort: 'high' },
+    candidates: [{ ...unsupported, models: ['reasoner'], modelCatalog: undefined }] }),
+  error => error.code === 'registration_effort_unavailable');
 });
 
 test('default-only harnesses read intent, location and fit in one call, then weigh machine load', async () => {
@@ -522,14 +639,14 @@ test('Jev answers intent in the first call; a non-request starts nothing', async
   await assert.rejects(choose({ message: '@codex was started by my heading', tags: {}, candidates, summon }),
     error => error.code === 'summon_intent_explanation' && error.status === 409);
   assert.equal(calls.length, 1);
-  assert.deepEqual(Object.keys(calls[0].questions), ['intent', 'workspace']);
+  assert.deepEqual(Object.keys(calls[0].questions), ['intent', 'workspace', 'modelEffort']);
   assert.deepEqual(calls[0].state.summon, summon);
 });
 test('a request launches and keeps the intent evidence', async () => {
   const calls = [];
   const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, { intent: 'summon' }); })({
     message: '@codex inspect', tags: {}, candidates, summon });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1, "intent, location and model are read together");
   assert.equal(result.parameterEvidence.intent.source, 'jev');
   assert.equal(result.parameterEvidence.intent.probabilities.summon, 1);
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
@@ -569,7 +686,7 @@ test("dynamic parameters constrain eligible harnesses and the model which advert
   assert.equal(selected.key.harness, "kimi");
   assert.equal(selected.model, "large");
   assert.deepEqual(selected.parameters, { "future-speed": "turbo" });
-  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [["workspace"], ["modelEffort"]],
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [["workspace", "modelEffort"]],
     "one harness offers it: Jev scores no fit");
   await assert.rejects(chooser({ message: "@auto", tags, candidates: [{ ...catalog[0], parameters: [] }] }),
     error => error.code === "registration_parameter_unavailable");
@@ -626,7 +743,7 @@ test("a laptop is the machine's own form; Jev is not asked and headroom still pi
     message: '@codex migrate every service overnight', tags: {}, candidates: mixed });
   assert.equal(selected.key.machineId, 'last');
   assert.equal(Object.hasOwn(asked[0].questions, 'placement'), false);
-  assert.deepEqual(asked.map(call => Object.keys(call.questions)), [['workspace'], ['modelEffort']]);
+  assert.deepEqual(asked.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
   assert.equal(selected.parameterEvidence.choices.some(choice => choice.key === 'placement'), false);
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(selected.parameterEvidence), selected.parameterEvidence);
@@ -637,8 +754,83 @@ test('a Human-confirmed draft reading skips only intent and keeps the remaining 
   const calls = [];
   const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
     message: '@codex inspect', tags: {}, candidates, summon: { ...summon, readInDraft: true } });
-  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace'], ['modelEffort']]);
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
   assert.deepEqual(result.parameterEvidence.intent, { source: 'draft' });
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
+});
+
+test('an environment that failed to start in the last 30 minutes goes after every one that did not', async () => {
+  // 2026-10-17: `@auto` sent a new user's first task to a Grok that could not start, twice in a row.
+  const machine = (id, load, startupFailedAt) => ({ ...candidates[0], key: { ...candidates[0].key, machineId: id },
+    ...(startupFailedAt ? { startupFailedAt } : {}),
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true },
+      machineResources: { observedAt: 'now', cpuLogicalCount: 8, loadAverage: [load, 0, 0] } } });
+  const failed = machine('failed', 0, '2026-10-17T09:38:00.000Z'), busy = machine('busy', 6);
+  const ranked = jointRanking([failed, busy], () => 1);
+  assert.deepEqual(ranked.map(item => item.candidate.key.machineId), ['busy', 'failed']);
+  // Weighed only against its own kind: the failed one does not push the busy one off the frontier.
+  assert.deepEqual(ranked.map(item => item.frontier), [true, true]);
+  // A better fit that failed still goes last; with nothing else, it still runs the work.
+  assert.equal(jointRanking([failed, busy], candidate => candidate === failed ? 1 : 1 / 3)[0].candidate, busy);
+  assert.equal(jointRanking([failed], () => 1)[0].candidate, failed);
+  // The chooser records the breaker in its evidence.
+  const chosen = await registrationLaunchChooser(async input => answer(input))({ message: '@codex', tags: {},
+    candidates: [{ ...candidates[0], ...failed, key: candidates[0].key }, { ...candidates[1], observations: busy.observations }] });
+  assert.deepEqual(chosen.key, candidates[1].key);
+  assert.equal(chosen.parameterEvidence.placement.ranking[1].startupFailedAt, '2026-10-17T09:38:00.000Z');
+  assert.equal(chosen.parameterEvidence.placement.ranking[0].startupFailedAt, undefined);
+});
+
+test('equally fit, the harness that measurably replies sooner runs the work; a strong fit may still be slower', async () => {
+  // 2026-10-17 production medians, connected Run to first reply: Claude 22 s, Grok 60 s, OpenCode 160 s.
+  const harness = (name, responseLatencyMs) => ({ ...candidates[0],
+    key: { ...candidates[0].key, harness: name }, ...(responseLatencyMs ? { responseLatencyMs } : {}),
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true },
+      machineResources: { observedAt: 'now', cpuLogicalCount: 8, loadAverage: [0, 0, 0] } } });
+  const claude = harness('claude', 22_000), grok = harness('grok', 60_000), opencode = harness('opencode', 160_000);
+  const ranked = jointRanking([opencode, grok, claude], () => 1 / 3);
+  assert.deepEqual(ranked.map(item => item.candidate.key.harness), ['claude', 'grok', 'opencode']);
+  assert.deepEqual(ranked.map(item => Math.round(item.responseQuality * 100) / 100), [1, 0.37, 0.14]);
+  assert.deepEqual(ranked.map(item => item.frontier), [true, false, false]);
+  // A strong fit outweighs a slower reply until the wait costs more than the fit gains.
+  const strong = name => candidate => candidate.key.harness === name ? 2 / 3 : 1 / 3;
+  assert.equal(jointRanking([claude, grok], strong('grok'))[0].candidate, grok);
+  assert.equal(jointRanking([claude, opencode], strong('opencode'))[0].candidate, claude);
+  // Without enough launches a harness is not judged on speed, and the only
+  // measured one is its own fastest: neither is held back.
+  const unmeasured = harness('kimi');
+  assert.equal(jointRanking([unmeasured, grok], () => 1 / 3)[0].responseQuality, undefined);
+  assert.deepEqual(jointRanking([grok, unmeasured], () => 1 / 3).map(item => [item.candidate.key.harness, item.frontier]),
+    [['grok', true], ['kimi', true]]);
+  // The chooser records each one's measured latency, and the evidence parses.
+  const chosen = await registrationLaunchChooser(async input => answer(input))({ message: '@auto', tags: {},
+    candidates: [grok, claude] });
+  assert.equal(chosen.key.harness, 'claude');
+  assert.deepEqual(chosen.parameterEvidence.placement.ranking.map(item => [item.harness, item.responseLatencyMs, item.responseQuality]),
+    [['claude', 22_000, 1], ['grok', 60_000, 0.367]]);
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
+});
+
+test('level on the weakest side, the next-weakest decides: a slow network does not hand the work to the worse fit', () => {
+  // 2026-10-17 15:46: on one machine whose network quality was 0.05, every
+  // environment was level on it, and a 0.25 fit Cursor beat a 0.94 fit Grok
+  // on reply time alone.
+  const now = Date.now(), observedAt = new Date(now - 1000).toISOString();
+  const slowNetwork = (harness, responseLatencyMs) => ({ ...candidates[0], key: { ...candidates[0].key, harness },
+    responseLatencyMs, observations: { evaluatedAt: observedAt, outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true },
+      machineResources: { observedAt, cpuLogicalCount: 8, loadAverage: [0, 0, 0], network: { observedAt,
+        target: 'cloudflare-speed', protocol: 'https', attempts: 10, failures: 0, latencyP95Ms: 700, latencyMedianMs: 300 } } } });
+  const cursor = slowNetwork('cursor', 52_951), grok = slowNetwork('grok', 54_801), claude = slowNetwork('claude', 22_220);
+  const fits = { cursor: 0.25, grok: 0.94, claude: 0.01 };
+  const fast = { ...claude, key: { ...claude.key, machineId: 'fast' }, observations: { ...claude.observations,
+    machineResources: { ...claude.observations.machineResources, network: { ...claude.observations.machineResources.network,
+      latencyP95Ms: 35, latencyMedianMs: 20 } } } };
+  const ranked = jointRanking([cursor, grok, claude, fast], candidate => fits[candidate.key.harness], now);
+  assert.equal(ranked[0].candidate, grok);
+  assert.deepEqual(ranked.slice(1, 3).map(item => item.candidate.key.harness), ['cursor', 'claude']);
 });

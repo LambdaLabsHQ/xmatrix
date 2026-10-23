@@ -1,6 +1,6 @@
 # App Store subscriptions
 
-The official metered service offers one human seat per Space through StoreKit. Web/Stripe remains the team-seat purchase path. Community deployments do not expose these routes.
+The official metered service sells App Store Pro through StoreKit. A purchase from the app is one human seat; an App Store multiseat purchase gives its Space as many seats as Apple's signed transaction quantity. Web/Stripe remains the team-seat purchase path. As with Stripe, a Space with more billable humans than its seats is held at its seat limit rather than refused a provider update. Community deployments do not expose these routes.
 
 ## Ownership and entitlement
 
@@ -19,6 +19,18 @@ error path. Classification uses framework types/codes, never localized message
 text; older native builds still report their legacy untyped failures until updated.
 See [StoreKit errors](https://developer.apple.com/documentation/storekit/storekiterror)
 and [Apple's error handling guidance](https://developer.apple.com/documentation/storekit/handling-errors).
+
+## Organization seats
+
+An organization can buy App Store Pro seats through Apple Business Manager or Apple School Manager (Volume Purchasing) and assign them to its people. Each person's seat arrives as their own transaction with `inAppOwnershipType` `ASSIGNED` and no `appAccountToken`. Restore sends it to the Space's reconcile route like any other.
+
+- `control.apple_assigned_seats` binds each assigned transaction for good to the first xMatrix user who restores it.
+- The Hub asks Apple's Get Customer Groups for the seat's `ORGANIZATION` group. `control.apple_seat_groups` binds that group to the Space its first seat was restored from; the restorer must own that Space, and it must not already have a paid plan.
+- The group's Space holds one Apple subscription, `apple:<environment>:org:<groupId>`, whose seats are the group's active, unexpired assigned seats (1 to 99). A later member who restores is added to that Space as a member after its seats are updated.
+- Notifications for an assigned seat refresh it by transaction and recount the group; an older signature never replaces a newer one, and a seat no one has restored is not counted.
+- Get Customer Groups is sandbox-only at first. When Apple names no organization group, the seat counts toward a group of its own restorer (`user:<userId>`), so it still grants Pro in the Space it was restored from.
+
+Group membership decides where people meet; the signed transaction alone decides entitlement.
 
 ## Production configuration
 
@@ -40,6 +52,13 @@ After the gated Hub release, configure App Store Server Notifications V2 for pro
 Migration 0170 is expand-only; nullable provider columns default to Stripe and old rows continue to be interpreted as Stripe. Apply through the normal release migration gate. Deploy Hub/Web before the native StoreKit build through Production Release Intent. Older native clients show an update message instead of a web checkout inside iOS.
 
 An Apple outage fails closed for new grants. Existing access lasts through the verified expiry. Reconcile from the original owner's billing settings after recovery; do not manually move a transaction or rewrite provider ownership. Removing the configuration disables new Apple API operations but does not cancel a customer's subscription. Existing subscribers still need Apple's renewal controls.
+
+## Automated checks without a device
+
+Apple allows sandbox purchases only on a physical device; the Simulator can read products but not buy them, and Xcode's local StoreKit transactions are refused by the Hub by design. Each production Hub release therefore checks the App Store path without a device (`packages/hub/scripts/apple-notification-smoke.ts`), in its own job after the release receipts so a failure never withholds them:
+
+- Apple's Request a Test Notification sends a sandbox `TEST` notification to the URL configured in App Store Connect, and Get Test Notification Status reports what the Hub answered. Anything but `SUCCESS` fails the job, and so does a configuration fault Apple reports: a notification URL not set for the environment (404, errorCode 4040007) or a key Apple rejects (401/403). Apple being unreachable, a 5xx or a rate limit is a warning.
+- When the production environment variable `APPLE_SANDBOX_SMOKE_TRANSACTION_ID` names the original transaction of an existing sandbox subscription, it is verified again through the App Store Server API and the Hub's own checks, including its seat count. A device is needed only for the first sandbox purchase that provides it.
 
 ## Local runtime verification
 

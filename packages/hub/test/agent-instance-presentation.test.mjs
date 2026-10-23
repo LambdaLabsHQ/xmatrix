@@ -1,3 +1,4 @@
+import { channelPresenceInstances, decodeChannelSnapshot } from "@xmatrix/protocol";
 import assert from "node:assert/strict";
 
 import { test } from "node:test";
@@ -44,6 +45,13 @@ test("a runtime's wait passes through bounded, and a malformed one is dropped", 
     agentRuntimePresentation({ status: "idle", waiting: { kind: "background", sinceMillis: 5 } }),
     { status: "idle", waiting: { kind: "background", sinceMillis: 5 } },
   );
+  // A background wait carries its task count as a fact, bounded.
+  assert.deepEqual(
+    agentRuntimePresentation({ status: "idle", waiting: { kind: "background", count: 2, sinceMillis: 5 } }),
+    { status: "idle", waiting: { kind: "background", count: 2, sinceMillis: 5 } },
+  );
+  assert.equal(agentRuntimePresentation({ status: "idle", waiting: { kind: "background", count: -1, sinceMillis: 5 } })
+    .waiting.count, undefined);
   // The rest of what the harness says: at most four details, each bounded.
   assert.deepEqual(
     agentRuntimePresentation({ status: "idle", waiting: { kind: "background", sinceMillis: 5,
@@ -260,13 +268,17 @@ test("Agent presentation survives bounded hibernation with its required authorit
   assert.equal(restored.session.run.repository, "LambdaLabsHQ/xmatrix");
   assert.ok(new TextEncoder().encode(JSON.stringify(serialized)).byteLength <= 4_096);
 
-  const systemSession = runtimeSession();
-  systemSession.run.channelDeliveryEnabled = false;
-  const restoredSystem = parseAgentInstanceHibernationAttachment(
-    serializeAgentInstanceHibernationAttachment(systemSession),
-  );
-  assert.equal(restoredSystem.session.run.channelDeliveryEnabled, false);
-
+  // Sessions saved before Channel About Runs were retired named their kind: an Instance's is
+  // restored, an About session's is not.
+  const saved = () => serializeAgentInstanceHibernationAttachment(runtimeSession());
+  const instance = saved();
+  Object.assign(instance.session.principal, { runKind: "channel-instance", channelWriteAllowed: true });
+  instance.session.run.kind = "channel-instance";
+  assert.equal(parseAgentInstanceHibernationAttachment(instance).session.run.kind, undefined);
+  const about = saved();
+  Object.assign(about.session.principal, { runKind: "channel-about-session", channelWriteAllowed: false });
+  about.session.run.kind = "channel-about-session";
+  assert.equal(parseAgentInstanceHibernationAttachment(about), undefined);
 });
 
 test("Human channel presence and Agent peer cards receive the full live presentation", () => {
@@ -280,7 +292,7 @@ test("Human channel presence and Agent peer cards receive the full live presenta
         email: "codex@example.com",
         avatarUrl: "https://example.com/codex.png",
         registration: { ownerUserId: "user-1", machineId: "machine-1", harness: "codex" },
-        instances: [],
+        instances: [catalogInstance(runtimeSession())],
       },
     });
   const overlaid = overlayAgentPresenceOnChannel(channel, {
@@ -288,7 +300,7 @@ test("Human channel presence and Agent peer cards receive the full live presenta
     session,
     status: "busy",
   });
-  const presence = overlaid.memberPresence["agent-1"];
+  const presence = overlaid.memberPresence["instance-1"];
   const instance = presence.instances[0];
 
   assert.equal(presence.usage.totalTokens, 120);
@@ -340,7 +352,7 @@ test("initial focused-channel fanout includes each live Agent presentation", asy
     mode: "closed",
     visibleHumanMemberIds: ["user:user-1"],
     memberPresence: {
-      "agent-1": {
+      "agent-1": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" },
         kind: "agent",
         label: "Codex",
         usage: fullPresentation().usage,
@@ -382,7 +394,7 @@ test("initial focused-channel fanout includes each live Agent presentation", asy
 
   assert.equal(delivered.length, 1);
   assert.equal(delivered[0].userId, "user-1");
-  const instance = delivered[0].message.channel.memberPresence["agent-1"].instances[0];
+  const instance = delivered[0].message.channel.memberPresence["instance-1"].instances[0];
   assert.equal(instance.statusChips[1].value, "high");
   assert.equal(instance.usage.quotaUsages[0].label, "5h");
 });
@@ -427,7 +439,7 @@ test("shared Human presence fanout cannot publish one viewer's private Channel s
   assert.equal(channel.attention, attention, "the personalized Authority snapshot stays immutable");
 });
 
-test("the shared presence serializer drops only viewer-scoped fields", () => {
+test("the shared presence serializer drops viewer-scoped fields and what messages say", () => {
   const attention = {
     channelId: "channel-1",
     unreadAttentionCount: 1,
@@ -437,6 +449,9 @@ test("the shared presence serializer drops only viewer-scoped fields", () => {
     id: "channel-1",
     attention,
     readSequence: 4,
+    messageCount: 5,
+    historyHeadSequence: 5,
+    lastMessage: { messageId: "message-5", bodyPreview: "Not yet received", sentAt: "2026-08-21T06:00:00.000Z" },
     memberReadSequences: { "user:user-1": 4 },
     memberPresence: { "user:user-1": { kind: "user", status: "online" } },
   };
@@ -540,7 +555,7 @@ test("Grok Build monthly credit quota survives presence merge and Human agent ca
     spaceId: "space-1",
     name: "grok-usage",
     mode: "open",
-    memberPresence: { "grok-1": { kind: "agent", usage: heartbeat.usage, instances: [] } },
+    memberPresence: { "grok-1": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" }, kind: "agent", usage: heartbeat.usage, instances: [catalogInstance(session)] } },
     createdBy: "user-1",
     createdAt: "2026-07-31T00:00:00.000Z",
     updatedAt: "2026-07-31T00:00:00.000Z",
@@ -550,7 +565,7 @@ test("Grok Build monthly credit quota survives presence merge and Human agent ca
     session,
     status: "idle",
   });
-  const presence = overlaid.memberPresence["grok-1"];
+  const presence = overlaid.memberPresence["instance-1"];
   assert.equal(presence.usage.quotaUsages[0].label, "1mo");
   assert.equal(presence.instances[0].usage.quotaUsages[0].percent, (82434 / 150000) * 100);
 
@@ -632,23 +647,19 @@ test("unmarked session quota is removed from retained presentation and live seri
 test("channel agent presence keeps original birth connectedAt across reborn", () => {
   const birth = "2026-07-30T08:00:00.000Z";
   const channel = presentationChannel("agents-order", {
-      "agent-1": {
-        kind: "agent",
-        label: "Codex",
-        instances: [{
-          id: "instance-old",
+      "agent-1": codexMember([{
+          id: "instance-1",
           channelInstanceId: "1",
           channelId: "channel-1",
           label: "Codex:1",
           connectedAt: birth,
           lastSeenAt: birth,
           status: "offline",
-        }],
-      },
+        }]),
     });
 
   const reborn = runtimeSession({ activity: "Thinking" });
-  reborn.run.instanceId = "instance-new";
+  reborn.run.instanceId = "instance-1";
   reborn.run.channelInstanceId = "1";
   reborn.connectedAt = "2026-07-30T10:00:00.000Z";
   reborn.lastSeenAt = "2026-07-30T10:00:00.000Z";
@@ -658,9 +669,9 @@ test("channel agent presence keeps original birth connectedAt across reborn", ()
     session: reborn,
     status: "busy",
   });
-  const instances = overlaid.memberPresence["agent-1"].instances;
+  const instances = overlaid.memberPresence["instance-1"].instances;
   assert.equal(instances.length, 1);
-  assert.equal(instances[0].id, "instance-new");
+  assert.equal(instances[0].id, "instance-1");
   assert.equal(instances[0].channelInstanceId, "1");
   assert.equal(
     instances[0].connectedAt,
@@ -671,11 +682,10 @@ test("channel agent presence keeps original birth connectedAt across reborn", ()
 
 test("channel agent presence orders instances by birth connectedAt not lastSeen", () => {
   const channel = presentationChannel("agents-order", {
-      "agent-1": {
-        kind: "agent",
-        label: "Codex",
-        instances: [],
-      },
+      "agent-1": codexMember([
+          { ...catalogInstance(runtimeSession()), id: "instance-older", connectedAt: "2026-07-30T08:00:00.000Z" },
+          { ...catalogInstance(runtimeSession()), id: "instance-newer", channelInstanceId: "2", connectedAt: "2026-07-30T09:00:00.000Z" },
+        ]),
     });
 
   const older = runtimeSession({ activity: "older" });
@@ -708,7 +718,7 @@ test("channel agent presence orders instances by birth connectedAt not lastSeen"
     status: "busy",
   });
 
-  const ids = next.memberPresence["agent-1"].instances.map((instance) => instance.id);
+  const ids = channelPresenceInstances(decodeChannelSnapshot(next).presence).map(instance => instance.id);
   assert.deepEqual(ids, ["instance-older", "instance-newer"]);
 });
 
@@ -721,7 +731,7 @@ test("disconnect overlay drops the last live Instance so the Agent is no longer 
     name: "pg",
     mode: "open",
     memberPresence: {
-      "agent-1": {
+      "agent-1": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" },
         kind: "agent",
         label: "grok-daniel-windows",
         lastSeenAt: "2026-09-11T09:14:04.037Z",
@@ -744,7 +754,7 @@ test("disconnect overlay drops the last live Instance so the Agent is no longer 
     reason: "disconnect",
     session: current,
   });
-  assert.equal(overlaid.memberPresence["agent-1"], undefined);
+  assert.equal(overlaid.memberPresence["instance-1"], undefined);
 });
 
 test("live overlay does not resurrect Instances Authority already dropped", () => {
@@ -824,7 +834,7 @@ test("registration catalog and live presence retain one card per Instance throug
   } }, "space-1", ["channel-1"]);
   let channel = { id: "channel-1", memberPresence: catalog.get("channel-1") };
   const sessions = rows.map(row => ({
-    ownerUserId: "owner-1", agentId: row.instance_id, agentName: "Claude",
+    ownerUserId: "owner-1", agentId: "instance-3", agentName: "Claude",
     runId: `run-${row.channel_instance_id}`, instanceId: row.instance_id,
     channelId: "channel-1", channelInstanceId: String(row.channel_instance_id),
     machineId: "machine-1", hostId: "host-1", cwd: "/workspace", status: "idle",
@@ -976,3 +986,40 @@ test("a focus change refreshes only the Channels it left and opened; a connect r
   assert.deepEqual((await fanout("connect", null, null)).map(([channelId]) => channelId),
     ["channel-2", "watched-by-2", "watched-by-3"]);
 });
+
+function catalogInstance(session) {
+  return { id: session.run.instanceId, channelId: session.run.channelId,
+    channelInstanceId: session.run.channelInstanceId, connectedAt: session.connectedAt,
+    lastSeenAt: session.lastSeenAt, status: session.run.instanceStatus };
+}
+
+test("one conflicting live session cannot block another session's Channel presentation", t => {
+  t.mock.method(console, "error", () => {});
+  const first = runtimeSession({ activity: "Invalid report" });
+  first.run.channelInstanceId = "9";
+  const second = runtimeSession({ activity: "Valid report" });
+  second.run.instanceId = "instance-2";
+  second.run.channelInstanceId = "2";
+  const channel = presentationChannel("isolated", { first: {
+    kind: "agent", label: "Codex", registration: { ownerUserId: "user-1", machineId: "machine-1", harness: "codex" },
+    instances: [catalogInstance(runtimeSession()), catalogInstance(second)],
+  } });
+  const rejected = overlayAgentPresenceOnChannel(channel, { reason: "update", session: first });
+  const result = overlayAgentPresenceOnChannel(rejected, { reason: "update", session: second });
+  assert.equal(result.memberPresence["instance-1"].instances[0].channelInstanceId, "7");
+  assert.equal(result.memberPresence["instance-2"].activity, "Valid report");
+  assert.equal(console.error.mock.callCount(), 1);
+});
+
+test("an unbound live session never invents a card without registration", t => {
+  t.mock.method(console, "warn", () => {});
+  const result = overlayAgentPresenceOnChannel(presentationChannel("unbound", {}), {
+    reason: "connect", session: runtimeSession(),
+  });
+  assert.deepEqual(result.memberPresence, {});
+  assert.equal(console.warn.mock.callCount(), 1);
+});
+
+function codexMember(instances) {
+  return { kind: "agent", label: "Codex", registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" }, instances };
+}

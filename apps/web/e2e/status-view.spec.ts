@@ -23,6 +23,7 @@ const daemons = machines.map((machine, index) => ({
     cpuUsagePercent: 40, cpuLogicalCount: 8, memoryTotalBytes: 100, memoryAvailableBytes: 50,
     diskTotalBytes: 100, diskAvailableBytes: 80 } } : {}) },
 }));
+let nextChannelSlot = 0;
 const registration = (machineId: string, harness: string, working: number, idle = 0) => {
   // The first `idle` Instances wait for a message; the rest are in a turn.
   const machine = machines.find((candidate) => candidate.machineId === machineId)!;
@@ -33,7 +34,7 @@ const registration = (machineId: string, harness: string, working: number, idle 
     idle,
     live: { machine: { online: machine.online, lastSeenAt: recent(), platform: machine.platform },
       running: Array.from({ length: working + idle }, (_, index) => ({ instanceId: `${machineId}-${harness}-${index}`,
-        channelId: E2E_CHANNEL.id, channelInstanceId: String(index + 1), since: recent() })) },
+        channelId: E2E_CHANNEL.id, channelInstanceId: String(++nextChannelSlot), since: recent() })) },
   };
 };
 const registrations = [
@@ -46,7 +47,7 @@ const registrations = [
 // Who works is what the conversation shows: its busy Instances, as on the conversation list.
 const channel = {
   ...E2E_CHANNEL,
-  memberPresence: Object.fromEntries(registrations.map((item, index) => [`agent:${index}`, {
+  memberPresence: Object.fromEntries(registrations.map((item, index) => [`agent:${index}`, { registration: { ownerUserId: item.key.ownerUserId, machineId: item.key.machineId, harness: item.key.harness },
     kind: "agent", status: "online", label: `${item.key.harness}-${index}`,
     instances: item.live.running.map((instance, slot) => ({ id: instance.instanceId,
       channelInstanceId: instance.channelInstanceId, label: `${item.key.harness}-${index}:${slot + 1}`,

@@ -1,10 +1,13 @@
 "use client";
+import { presenceInstanceId } from "@xmatrix/protocol";
 
+import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
-import { discussionDraft, discussionTitle } from "./selection-discussion";
+import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
+import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
 import { pageApi } from "@/lib/pages/page-client";
-import { createConversation } from "./start-conversation";
+import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
 
 import { isMessageSendDeadlineError } from "@/lib/relay-v2/message-send-deadline";
 import { fetchChannelCatalogResolve } from "./channel-catalog-query";
@@ -41,7 +44,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 
 import {
@@ -50,7 +52,6 @@ import {
 } from "@/components/dashboard/mention-complete";
 import {
   clearChannelComposerDraft,
-  writeChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
 import { useAgentTraceHistorySync } from "@/components/dashboard/use-agent-trace-history-sync";
 import {
@@ -73,7 +74,7 @@ import { AGENT_PRESETS, WEB_PROXY_ROUTES, agentLaunchExecutable, canonicalRegist
 import type {
   ChannelMessage,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
   SpaceMemberPermissions,
   SerializedWorkspace,
@@ -112,6 +113,7 @@ import {
   buildLocalManagedAgents,
   buildMachineSummaries,
   buildTimeline,
+  agentBusyTraceStaleActivity,
   canInviteToSpace,
   clearBrowserHash,
   copyTextToClipboard,
@@ -162,7 +164,9 @@ import {
   useStableCallback,
   viewLabels,
 } from "./workspace-shell-modules";
-import { shareTimelineItems } from "./workspace-shell-message-model";
+import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
+import { channelEventViews } from "./workspace-shell-presence";
+import { sameValue, shareByKey } from "../../lib/same-value";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResponse } from "@/lib/query/api-client";
@@ -171,9 +175,11 @@ import type { WorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";
 import { questionnaireAnswerPayload, type QuestionnaireAnswer } from "./questionnaire-card";
+import { SCROLLING_MOVES_NO_ROWS, timelineScrollRest } from "./timeline-scroll-rest";
+
+const NO_TIMELINE_EVENTS: readonly ObservabilityEvent[] = [];
 
 export function useWorkspaceShellActions(s: WorkspaceShellState) {
-  const queryClient = useQueryClient();
   const fetch = useXMatrixQueryFetch(s.authenticatedUserId);
   const { profileUserId, setProfileUserId } = useHumanProfileViewState();
   const {
@@ -233,10 +239,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setSavingAgentConfig,
     setDeletingAgentId,
     setComposingConversation,
-    setChannelMoveOpen,
-    setChannelMoveTargetSpaceId,
-    setMovingChannelId,
-    setChannelMoveError,
     setWorkspaceSearchOpen,
     setRenamingSpaceId,
     setNewSpaceName,
@@ -327,6 +329,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void recallMessage(message);
   });
 
+  const handleTimelineUnsentAction = useStableCallback((message: TimelineItem, action: UnsentMessageAction) => {
+    resolveUnsentMessage(message, action);
+  });
+
   const handleTimelineReply = useStableCallback((message: TimelineItem) => {
     s.replyTargetRef.current = message;
     s.replyTargetHistoryRevisionRef.current = s.historyRevision;
@@ -369,13 +375,16 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   // The in-memory cache holds only this user's reads; it renders once the
   // selected Channel's rows are authorized. A copy per cache revision lets the
-  // memos below see writes to the cache ref.
+  // memos below see writes to the cache ref. The revision moves only for the
+  // histories the open conversation shows; a Channel that turns out to be one
+  // of them (a thread whose entity arrives after its first message) changes
+  // the catalog, and the copy is taken again then.
   const renderableHistoryCache = useMemo(() => {
-    if (!s.historyRenderAuthorized || !s.selectedChannelId || s.historyCacheRevision < 0) {
+    if (!s.historyRenderAuthorized || !s.selectedChannelId || s.historyCacheRevision < 0 || !s.channels) {
       return new Map<string, ChannelHistoryCacheEntry>();
     }
     return new Map(s.historyCacheRef.current);
-  }, [s.historyCacheRef, s.historyCacheRevision, s.historyRenderAuthorized, s.selectedChannelId]);
+  }, [s.channels, s.historyCacheRef, s.historyCacheRevision, s.historyRenderAuthorized, s.selectedChannelId]);
 
   const renderableOutgoingMessages = useMemo(() => {
     const authorizedById = new Map(s.renderableHistory.map((message) => [message.messageId, message]));
@@ -396,15 +405,31 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     });
   }, [s.outgoingMessages, s.renderableHistory]);
 
+  const timelineEventViewsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
+  const timelineEventViews = useMemo(() => {
+    const ids = s.selectedChannel ? [s.selectedChannel.id,
+      metadataString(s.selectedChannel.metadata, "threadRootChannelId")].filter(Boolean) : [];
+    const views = channelEventViews(s.agentStatusEvents, ids, timelineEventViewsRef.current);
+    timelineEventViewsRef.current = views;
+    return views;
+  }, [s.agentStatusEvents, s.selectedChannel]);
+  const timelineEvents = timelineEventViews.get(s.selectedChannel?.id ?? "") ?? NO_TIMELINE_EVENTS;
+  const parentTimelineEvents = timelineEventViews.get(
+    metadataString(s.selectedChannel?.metadata, "threadRootChannelId")) ?? NO_TIMELINE_EVENTS;
+
+  /* The timeline is rebuilt whenever a Channel or Agent presence changes, which
+     in a busy Space is many times a second. Items that say the same keep their
+     identity, so everything keyed on them (row memos, the launch query's
+     per-message key) recomputes only for messages that changed. */
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
-      const shared = shareTimelineItems(previousTimelineRef.current, appendOutgoingTimelineItems(
+      const shared = shareByKey(previousTimelineRef.current, appendOutgoingTimelineItems(
         buildTimeline(
           s.renderableHistory,
           s.selectedChannel,
           s.channels,
-          s.agentStatusEvents,
+          timelineEvents,
           s.user,
           s.channelReadCounts,
           renderableHistoryCache,
@@ -415,12 +440,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         renderableOutgoingMessages,
         s.selectedChannel?.id,
         s.user
-      ));
+      ), (item) => item.id);
       previousTimelineRef.current = shared;
       return shared;
     },
     [
-      s.agentStatusEvents,
+      timelineEvents,
       s.currentSpace?.members,
       s.channelReadCounts,
       s.channels,
@@ -432,6 +457,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     ]
   );
 
+  // The root is rebuilt with every Channel change; while it says the same it
+  // stays the message it was, as the timeline's own items do.
+  const threadRootRef = useRef<TimelineItem | undefined>(undefined);
   const selectedThreadRootContext = useMemo(() => {
     if (!s.selectedChannel || !isThreadChannel(s.selectedChannel)) return null;
     const parentChannelId = metadataString(s.selectedChannel.metadata, "threadRootChannelId");
@@ -455,7 +483,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       [rootMessage],
       parentChannel,
       s.channels,
-      s.agentStatusEvents,
+      parentTimelineEvents,
       s.user,
       s.channelReadCounts,
       renderableHistoryCache,
@@ -464,9 +492,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       s.currentSpace?.members,
     );
     const message = rootTimeline[0];
-    return message ? { message, channel: parentChannel } : null;
+    if (!message) return null;
+    const held = threadRootRef.current;
+    return { message: (threadRootRef.current = held && sameValue(held, message) ? held : message), channel: parentChannel };
   }, [
-    s.agentStatusEvents,
+    parentTimelineEvents,
     s.currentSpace?.members,
     s.channelReadCounts,
     s.channels,
@@ -720,13 +750,24 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }, [s.history, s.latestHistorySequenceRef]);
 
 
+  const liveTraceActivity = useStableCallback((target: AgentTraceTarget) => {
+    const channel = target.channelId ? s.realtimeChannels.get(target.channelId) : undefined;
+    const instance = target.instanceId ? channel?.presence?.instances.get(presenceInstanceId(target.instanceId)) : undefined;
+    if (instance) return agentBusyTraceStaleActivity({ agentId: target.id, channelId: target.channelId,
+      events: s.agentStatusEvents, instance, name: target.name }) ||
+      instance.activity || (instance.status === "busy" ? "Processing" : undefined);
+    return target.instanceId ? "Instance is no longer live" : undefined;
+  });
+
   const openAgentTrace = useCallback(
     (target: AgentTraceTarget) => {
       cancelAgentTraceHistoryBootstrap();
       setAgentTraceHistoryPanelState(null);
-      setAgentTraceTarget(resolveAgentTraceTargetOwner(target, s.agents));
+      setAgentTraceTarget(resolveAgentTraceTargetOwner({ ...target,
+        activity: target.activity ?? liveTraceActivity(target),
+      }, s.realtimeAgents.getSnapshot()));
     },
-    [s.agents, cancelAgentTraceHistoryBootstrap, setAgentTraceHistoryPanelState, setAgentTraceTarget]
+    [s.realtimeAgents, liveTraceActivity, cancelAgentTraceHistoryBootstrap, setAgentTraceHistoryPanelState, setAgentTraceTarget]
   );
 
   const closeAgentTrace = useCallback(() => {
@@ -979,6 +1020,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       cancelled = true;
     };
   }, [s.desktopBridge, s.desktopDaemonStatus, s.token, setDesktopContext, s.desktopCliSessionSyncTokenRef, setDesktopDaemonStatus, readLocalMachineName]);
+
+  const daemonFailure = s.desktopDaemonStatus?.state === "running" ? undefined : s.desktopDaemonStatus?.failure;
+  useEffect(() => {
+    if (daemonFailure && s.desktopContext) reportDesktopDaemonFailure(s.token, daemonFailure, s.desktopContext);
+  }, [daemonFailure, s.desktopContext, s.token]);
 
   useEffect(() => {
     if (!s.desktopBridge) return;
@@ -1347,7 +1393,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   });
 
   function navigateToChannel(channelId: string, messageId?: string, sequence?: number) {
-    const channelInState = s.channels.find((current) => current.id === channelId);
+    const channelInState = s.realtimeChannels.get(channelId);
     const channel = channelInState || s.channelsRef.current.find((current) => current.id === channelId);
     if (!channel) return;
     setComposingConversation(false);
@@ -1414,50 +1460,113 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   }
 
-  const copyChannelLink = useCallback(async (channel: SerializedChannel): Promise<void> => {
+  const copyChannelLink = useCallback(async (channel: ChannelSnapshot): Promise<void> => {
     await copyTextToClipboard(absoluteChannelUrl(channel, s.spacesRef.current));
   }, [s.spacesRef]);
 
+  /**
+   * Shows a new conversation at once and creates it meanwhile, as a Google Docs
+   * comment appears as it is clicked: its id is the one the Hub will give it.
+   * Its history, its focus and the messages sent to it wait for `created`; a
+   * create that fails takes it away again.
+   */
+  async function beginConversation(request: ConversationRequest):
+    Promise<{ channel: ChannelSnapshot; created: Promise<ChannelSnapshot> }> {
+    const token = s.token;
+    const userId = s.user?.id;
+    if (!token || !userId) throw new UserFacingProblem("Sign in again to start a conversation");
+    const requestKey = crypto.randomUUID();
+    const channel = await plannedConversation({ ...request, userId, requestKey });
+    const show = (next: (current: ChannelSnapshot[]) => ChannelSnapshot[]) => {
+      s.channelsRef.current = next(s.channelsRef.current);
+      setChannels(next);
+    };
+    const settled = () => {
+      s.channelCreationsRef.current.delete(channel.id);
+      s.setCreatingChannelIds((current) => {
+        const next = new Set(current);
+        next.delete(channel.id);
+        return next;
+      });
+    };
+    show((current) => replaceChannel(current, channel));
+    const created = createConversation({ ...request, token, requestKey }).then((committed) => {
+      show((current) => replaceChannel(current, committed));
+      settled();
+      return committed;
+    }, (error: unknown) => {
+      show((current) => current.filter((item) => item.id !== channel.id));
+      if (s.selectedChannelIdRef.current === channel.id) setSelectedChannelId(null);
+      settled();
+      throw error;
+    });
+    s.channelCreationsRef.current.set(channel.id, created);
+    s.setCreatingChannelIds((current) => new Set(current).add(channel.id));
+    return { channel, created };
+  }
+
   const { openPage, closePage, internalPageLink, startPageConversation, openPageConversation,
     closePageConversation } = pageShellActions({
-    token: s.token, user: s.user, view: s.view, selectedPageId: s.selectedPageId, selectedChannelId: s.selectedChannelId, currentSpaceId: s.currentSpaceId, spaces: s.spaces, setView,
-    setSelectedPageId: s.setSelectedPageId, setSelectedChannelId, setChannels, setBrowserPath,
+    token: s.token, user: s.user, view: s.view, beginConversation, selectedPageId: s.selectedPageId, selectedChannelId: s.selectedChannelId, currentSpaceId: s.currentSpaceId, spaces: s.spaces, setView,
+    setSelectedPageId: s.setSelectedPageId, setSelectedChannelId, setBrowserPath,
     focusComposer: () => setComposerAutoFocusRequest((current) => current + 1),
-    seedDraft: (conversationId, text) => writeChannelComposerDraft(s.channelComposerDraftsRef.current, conversationId,
-      { text, workspaceTarget: null, attachments: [] }),
+    seedComposer,
+    jumpToMessage: queueMessageJump,
+    deliver: (channel, body) => deliverOutgoingMessage(channel,
+      { body, attachments: [], appMentions: parseAppMentions(body, APP_CONNECTORS) }),
   });
+
+  function seedQuote(conversationId: string, quote: DiscussionQuote) {
+    s.setDiscussionQuotes((current) => new Map(current).set(conversationId, quote));
+  }
+
+  /** A new conversation's composer, ready before it opens with the passage it discusses. */
+  function seedComposer(conversationId: string, seed: { quote?: DiscussionQuote }) {
+    if (seed.quote) seedQuote(conversationId, seed.quote);
+  }
+
+  function dropDiscussionQuote(conversationId: string) {
+    s.setDiscussionQuotes((current) => {
+      if (!current.has(conversationId)) return current;
+      const next = new Map(current);
+      next.delete(conversationId);
+      return next;
+    });
+  }
 
   /**
    * A conversation started from a passage of a message (selection-discussion.ts).
-   * It opens holding the quote and a link back to the message, is as open as
+   * It opens holding the passage and a link back to the message, is as open as
    * the conversation it came from, and is linked to the same pages, so it
-   * inherits their context as that conversation does.
+   * inherits their context as that conversation does. Its first message names
+   * it by what was written; until then the passage does.
    */
   async function discussMessagePassage(message: TimelineItem, quote: string) {
     const sourceId = message.channelId ?? s.selectedChannelIdRef.current;
     const source = s.channelsRef.current.find((channel) => channel.id === sourceId);
     const token = s.token;
     if (!token || !s.user || !source || !message.messageId) return;
+    const failed = (err: unknown) => setHistoryError(userErrorMessage(err, "Couldn't start the conversation"));
     try {
-      const channel = await createConversation({ token: token, spaceId: source.spaceId,
+      const messageId = message.messageId;
+      const { channel, created } = await beginConversation({ spaceId: source.spaceId,
         memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote), mode: source.mode,
-        metadata: { fromChannelId: source.id, fromMessageId: message.messageId } });
-      const { links } = await pageApi.links(source.spaceId, token, { conversationId: source.id });
-      const places = new Map(links.filter((link) => !link.resolvedAt)
-        .map((link) => [`${link.pageId}\u0000${link.blockId}`, link] as const));
-      await Promise.all([...places.values()].map((link) => pageApi.link(source.spaceId, token, {
-        conversationId: channel.id, pageId: link.pageId, ...(link.blockId ? { blockId: link.blockId } : {}) })));
-      const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(message.messageId)}`;
-      writeChannelComposerDraft(s.channelComposerDraftsRef.current, channel.id, {
-        text: discussionDraft(quote, { label: `${message.author} in #${channelTitle(source)}`, href }),
-        workspaceTarget: null, attachments: [] });
-      setChannels((current) => replaceChannel(current, channel));
-      s.channelsRef.current = replaceChannel(s.channelsRef.current, channel);
+        metadata: { fromChannelId: source.id, fromMessageId: messageId, autoName: true } });
+      const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(messageId)}`;
+      seedQuote(channel.id, discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }, false));
       // Beside a page it opens beside the page, as a discussion of the page does.
       if (s.viewRef.current === "pages" && s.selectedPageId) openPageConversation(channel.id, { focus: true });
       else navigateToChannel(channel.id);
+      // It is linked to the pages the conversation it came from is about, once it exists.
+      void Promise.all([created, pageApi.links(source.spaceId, token, { conversationId: source.id })])
+        .then(([, { links }]) => {
+          const places = new Map(links.filter((link) => !link.resolvedAt)
+            .map((link) => [`${link.pageId}\u0000${link.blockId}`, link] as const));
+          return Promise.all([...places.values()].map((link) => pageApi.link(source.spaceId, token, {
+            conversationId: channel.id, pageId: link.pageId, ...(link.blockId ? { blockId: link.blockId } : {}) })));
+        }).catch(failed);
     } catch (err) {
-      setHistoryError(userErrorMessage(err, "Couldn't start the conversation"));
+      failed(err);
     }
   }
 
@@ -1694,17 +1803,23 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setView("messages");
   }
 
-  async function createNewConversation(body: string, mode: "open" | "closed") {
+  /**
+   * The conversation a first message starts. It opens with that message pending
+   * at once; if it could not be made, `failed` hears why.
+   */
+  async function createNewConversation(body: string, mode: "open" | "closed", failed?: (error: unknown) => void) {
     if (!s.token || !s.user || !s.currentSpaceId) throw new UserFacingProblem("Choose a Space first");
-    return createConversation({ token: s.token, spaceId: s.currentSpaceId,
+    const { channel, created } = await beginConversation({ spaceId: s.currentSpaceId,
       memberName: s.user.name || s.user.email || "Human", body, mode });
+    created.catch((error: unknown) => failed?.(error));
+    return channel;
   }
 
   /* The conversation opens as soon as it exists and its first message shows
      there as pending, as any send does; the shell's own send reads the
      selected conversation from React state, which has not settled in the tick
      after a create, so the message is delivered to the created channel. */
-  async function sendNewConversationMessage(channel: SerializedChannel, snapshot: ComposerSendSnapshot) {
+  async function sendNewConversationMessage(channel: ChannelSnapshot, snapshot: ComposerSendSnapshot) {
     if (!s.token) throw new UserFacingProblem("Sign in again to send");
     setChannels((current) => replaceChannel(current, channel));
     setComposingConversation(false);
@@ -1726,7 +1841,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
 
   async function updateChannelVisibility(
-    channel: SerializedChannel,
+    channel: ChannelSnapshot,
     mode: ChannelCreateMode
   ) {
     if (!s.token || s.updatingChannelVisibilityId || channel.mode === mode) return;
@@ -1751,7 +1866,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         cache: "no-store",
       });
       const payload = (await res.json().catch(() => ({}))) as {
-        channel?: SerializedChannel;
+        channel?: ChannelSnapshot;
         message?: unknown;
       };
       if (!res.ok) {
@@ -1774,42 +1889,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       });
     } finally {
       setUpdatingChannelVisibilityId(null);
-    }
-  }
-
-  function openChannelMove(channel: SerializedChannel) {
-    setChannelMoveTargetSpaceId(channel.spaceId || s.currentSpaceId || "");
-    setChannelMoveError(null);
-    setChannelMoveOpen(true);
-  }
-
-  async function moveChannel(channel: SerializedChannel) {
-    if (!s.token || s.movingChannelId) return;
-    const targetSpaceId = s.channelMoveTargetSpaceId.trim();
-    if (!targetSpaceId) {
-      setChannelMoveError("Select a target workspace");
-      return;
-    }
-
-    if (targetSpaceId === channel.spaceId) {
-      setChannelMoveOpen(false);
-      return;
-    }
-    setMovingChannelId(channel.id);
-    setChannelMoveError(null);
-    try {
-      const response = await fetch(WEB_PROXY_ROUTES.channel_transfer_proposals(channel.id), {
-        method: "POST", headers: { Authorization: `Bearer ${s.token}`, "content-type": "application/json" },
-        body: JSON.stringify({ spaceId: targetSpaceId }),
-        cache: "no-store",
-      });
-      await requireResponseOk(response);
-      await queryClient.invalidateQueries({ queryKey: ["channel-transfers"] });
-      setChannelMoveOpen(false);
-    } catch (err) {
-      setChannelMoveError(userErrorMessage(err, "Couldn't propose the move"));
-    } finally {
-      setMovingChannelId(null);
     }
   }
 
@@ -1908,7 +1987,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         userId: member.userId,
         email: member.email,
         name: member.name,
-        avatarUrl: member.avatarUrl,
         role,
       },
     });
@@ -2079,6 +2157,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         beforeSequence,
       });
       if (s.selectedChannelIdRef.current !== s.selectedChannel.id) return;
+      // On iPhone the page goes in once the reader's flick has stopped: the
+      // list keeps their place with a scroll, and one mid-flick blanks the screen.
+      const scrollRoot = s.timelineScrollRef.current;
+      if (SCROLLING_MOVES_NO_ROWS && scrollRoot) {
+        await timelineScrollRest(scrollRoot);
+        if (s.selectedChannelIdRef.current !== s.selectedChannel.id) return;
+      }
       mergeAndRememberChannelHistory(
         s.selectedChannel.id,
         olderPage.messages,
@@ -2099,7 +2184,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     agentLabel?: string
   ) {
     if (!s.token || s.stoppingAgentInstanceId || s.reborningAgentInstanceId || s.handingOffAgentInstanceId) return;
-    const liveAgent = s.agents.find((candidate) => candidate.id === agentId);
+    const liveAgent = s.realtimeAgents.get(agentId);
     const body = agentInstanceStopBody(liveAgent, instance, agentLabel);
     if (!body) {
       const message = "This instance has no channel address to stop.";
@@ -2137,7 +2222,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   /** The Agent name a lifecycle mention addresses, without a leading @. */
   function lifecycleMentionName(agentId: string, agentLabel: string): string {
-    const agent = s.agents.find((candidate) => candidate.id === agentId);
+    const agent = s.realtimeAgents.get(agentId);
     return (agent?.name || agentLabel).trim().replace(/^[@＠]/, "");
   }
 
@@ -2252,11 +2337,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setRenamingChannelId(channelId);
     setHistoryError(null);
     try {
-      const { channel } = await requestHub<{ channel?: SerializedChannel }>(
+      const { channel } = await requestHub<{ channel?: ChannelSnapshot }>(
         WEB_PROXY_ROUTES.channel(channelId),
         { method: "PATCH", body: { name: nextName } },
         (payload) => Boolean(payload.channel),
-      ) as { channel: SerializedChannel };
+      ) as { channel: ChannelSnapshot };
       setChannels((current) => replaceChannel(current, channel));
       if (s.selectedChannelIdRef.current === channel.id) {
         const nextPath = channelAppPath(channel, s.spaces);
@@ -2387,6 +2472,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (!body.trim() && attachments.length === 0) {
       return;
     }
+    const channel = s.selectedChannel;
+    const channelId = channel.id;
 
     const invocationSelections = fromComposer ? composerSnapshot?.invocationSelections : undefined;
     const summonIntents = fromComposer ? composerSnapshot?.summonIntents : undefined;
@@ -2400,9 +2487,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           ...replyPreviewSequence(replySnapshot.sequence),
         }
       : undefined;
-    const channel = s.selectedChannel;
-    const channelId = channel.id;
     if (fromComposer) {
+      // The composer wrote the discussion's passage into this message.
+      dropDiscussionQuote(channelId);
       clearChannelComposerDraft(s.channelComposerDraftsRef.current, channelId);
       s.draftWorkspaceTargetValueRef.current = null;
       s.draftAttachmentsRef.current = [];
@@ -2420,7 +2507,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   /** Shows the message as pending in its channel at once, then appends it. */
   async function deliverOutgoingMessage(
-    channel: SerializedChannel,
+    channel: ChannelSnapshot,
     { body, invocationSelections, summonIntents, attachments, replyToMessageId, replyTo, appMentions }:
       Pick<OutgoingMessage, "body" | "invocationSelections" | "summonIntents" | "attachments" | "replyToMessageId" | "replyTo" | "appMentions">,
   ) {
@@ -2452,10 +2539,18 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       attachments,
     });
     setOutgoingMessages((current) => [...current, outgoing]);
+    await attemptOutgoingSend(s.token, channel, outgoing);
+  }
 
+  /** One attempt at appending a pending row. Sending again runs it under the same clientMessageId. */
+  async function attemptOutgoingSend(token: string, channel: ChannelSnapshot, outgoing: OutgoingMessage) {
+    const { clientMessageId, body, invocationSelections, summonIntents, attachments, replyToMessageId, appMentions, sentAt } = outgoing;
+    const channelId = channel.id;
     try {
+      // A conversation still being created takes the message once it exists.
+      await s.channelCreationsRef.current.get(channelId);
       const payload = await appendChannelMessageWithAttachments({
-        token: s.token,
+        token,
         channel,
         clientMessageId,
         body,
@@ -2527,7 +2622,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       // POST may have committed. Only a determinate error is a failure, and an
       // unknown result is carried by the row rather than the channel banner.
       const unknownResult = isMessageSendDeadlineError(err);
-      const message = unknownResult ? "Result unconfirmed" : userErrorMessage(err, "Couldn't send the message") ?? undefined;
+      const message = unknownResult ? "Result unconfirmed" : userErrorMessage(err, MESSAGE_SEND_FAILED_FALLBACK) ?? undefined;
       setOutgoingMessages((current) =>
         current.map((item) =>
           item.clientMessageId === clientMessageId
@@ -2541,6 +2636,26 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         setHistoryError(message ?? null);
       }
     }
+  }
+
+  /** Send again, or drop, a row of the reader's own that did not go out. */
+  function resolveUnsentMessage(message: TimelineItem, action: UnsentMessageAction) {
+    const outgoing = s.outgoingMessagesRef.current.find((item) => item.clientMessageId === message.clientMessageId);
+    if (!outgoing || outgoing.status === "pending") return;
+    if (action === "discard") {
+      s.outboundPreviewByClientIdRef.current.delete(outgoing.clientMessageId);
+      setOutgoingMessages((current) => current.filter((item) => item.clientMessageId !== outgoing.clientMessageId));
+      setHistoryError(null);
+      return;
+    }
+    const channel = s.channelsRef.current.find((candidate) => candidate.id === outgoing.channelId);
+    if (!channel || !s.token) return;
+    const retried: OutgoingMessage = { ...outgoing, status: "pending", error: undefined };
+    setHistoryError(null);
+    setOutgoingMessages((current) =>
+      current.map((item) => item.clientMessageId === retried.clientMessageId ? retried : item)
+    );
+    void attemptOutgoingSend(s.token, channel, retried);
   }
 
   /** Whether the answer was posted; a card stays open when it was not. */
@@ -2560,7 +2675,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         cache: "no-store",
       });
       await requireResponseOk(res);
-      const payload = (await res.json()) as { message?: unknown; channel?: SerializedChannel };
+      const payload = (await res.json()) as { message?: unknown; channel?: ChannelSnapshot };
       if (isValidChannelMessage(payload.message)) {
         mergeAndRememberChannelHistory(message.channelId, [payload.message]);
         if (s.selectedChannelIdRef.current === message.channelId) {
@@ -2576,6 +2691,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       return true;
     } catch (err) {
       setHistoryError(userErrorMessage(err, "Couldn't send your answer"));
+      // A card the Hub already settled refuses the answer; reading it again
+      // shows the card as answered or withdrawn.
+      void refreshSelectedHistory();
       return false;
     }
   }
@@ -2587,7 +2705,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     // Catalog authority rather than the legacy single-Channel route, while
     // keeping the lookup inside the thread-open deadline.
     signal?: AbortSignal,
-  ): Promise<SerializedChannel | null> {
+  ): Promise<ChannelSnapshot | null> {
     if (!s.token) return null;
     const result = await fetchChannelCatalogResolve({
       token: s.token,
@@ -2600,9 +2718,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   /** The thread a message already has; conversations are no longer started from a message. */
   async function findMessageThreadChannel(
-    parentChannel: SerializedChannel | null,
+    parentChannel: ChannelSnapshot | null,
     message: TimelineItem
-  ): Promise<SerializedChannel | null> {
+  ): Promise<ChannelSnapshot | null> {
     if (!s.token || !parentChannel || !message.messageId) return null;
     const known = message.threadChannel ??
       threadChannelForMessage(s.channels, parentChannel.id, message.messageId);
@@ -2612,7 +2730,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     return resolved;
   }
 
-  async function openMessageThreadInChannel(parentChannel: SerializedChannel | null, message: TimelineItem) {
+  async function openMessageThreadInChannel(parentChannel: ChannelSnapshot | null, message: TimelineItem) {
     try {
       const threadChannel = await findMessageThreadChannel(parentChannel, message);
       if (!threadChannel) return;
@@ -2632,7 +2750,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    * that channel is still selected.
    */
   async function changeMessageInChannel(
-    channel: SerializedChannel | null,
+    channel: ChannelSnapshot | null,
     message: TimelineItem,
     change: (accessToken: string, channelId: string, messageId: string) => Promise<ChannelMessage>,
     onMergedMessages?: (messages: ChannelMessage[]) => void
@@ -2652,7 +2770,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function toggleMessageReactionInChannel(
-    channel: SerializedChannel | null,
+    channel: ChannelSnapshot | null,
     message: TimelineItem,
     emoji: string,
     onMergedMessages?: (messages: ChannelMessage[]) => void
@@ -2674,7 +2792,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function editMessageInChannel(
-    channel: SerializedChannel | null,
+    channel: ChannelSnapshot | null,
     message: TimelineItem,
     body: string,
     onMergedMessages?: (messages: ChannelMessage[]) => void
@@ -2692,7 +2810,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function recallMessageInChannel(
-    channel: SerializedChannel | null,
+    channel: ChannelSnapshot | null,
     message: TimelineItem,
     onMergedMessages?: (messages: ChannelMessage[]) => void
   ) {
@@ -2724,6 +2842,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     handleTimelineReact,
     handleTimelineEdit,
     handleTimelineRecall,
+    handleTimelineUnsentAction,
     handleTimelineReply,
     handleTimelineJumpToMessage,
     handleTimelineOpenThread,
@@ -2783,6 +2902,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     openPage,
     closePage,
     openPageConversation,
+    dropDiscussionQuote,
     closePageConversation,
     updateSpaceMemberPermissions,
     updateSpacePreferredLanguage,
@@ -2793,8 +2913,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     createNewConversation,
     sendNewConversationMessage,
     updateChannelVisibility,
-    openChannelMove,
-    moveChannel,
     createSpace,
     createSpaceInviteCode,
     inviteSpaceMembers,

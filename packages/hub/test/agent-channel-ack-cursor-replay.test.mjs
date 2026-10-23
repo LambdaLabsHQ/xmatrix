@@ -16,7 +16,7 @@ const CORPUS = Array.from({ length: TAIL }, (_, index) => ({
 }));
 
 /** Session identity is stable across instances; the session object is not. */
-function session(instanceId, channelDeliveryEnabled = true) {
+function session(instanceId) {
   return {
     principal: {
       ownerUserId: "user-1",
@@ -25,7 +25,7 @@ function session(instanceId, channelDeliveryEnabled = true) {
       executionKey: "exec-1",
       channelId: CHANNEL_ID,
     },
-    run: { instanceId, channelId: CHANNEL_ID, channelDeliveryEnabled },
+    run: { instanceId, channelId: CHANNEL_ID },
   };
 }
 
@@ -130,6 +130,24 @@ test("a newcomer's join window is context, and a catch-up backlog is work", asyn
   });
   assert.deepEqual(replayed(catchUp), [18, 19, 20]);
   assert.deepEqual(intents(catchUp), ["work", "work", "work"]);
+  // Hub, not the runtime, says whether catch-up cancels the running turn,
+  // exactly as for live delivery; a join window says nothing.
+  assert.deepEqual(catchUp.filter((frame) => frame.type === "channel_history_replay")
+    .map((frame) => frame.interruptRequested), [true, true, true]);
+  assert.ok(birth.filter((frame) => frame.type === "channel_history_replay")
+    .every((frame) => !("interruptRequested" in frame)));
+});
+
+test("catch-up steers like live delivery: an Agent's exact address interrupts, its other replies queue", async () => {
+  const agent = (sequence, body) => ({ ...CORPUS[sequence - 1], body,
+    from: { kind: "agent", label: "codex", identityId: "agent-peer", agentName: "codex", userId: "user-2" } });
+  const corpus = CORPUS.map((message) => message.sequence === 19 ? agent(19, "@builder:3 stop that")
+    : message.sequence === 20 ? agent(20, "done on my side") : message);
+  const runtime = { ...session("instance-steer"), principal: { ...session("instance-steer").principal, agentName: "builder" },
+    run: { ...session("instance-steer").run, channelInstanceId: "3" } };
+  const batch = await port(18, corpus).join(runtime, { type: "join_channel", channelId: CHANNEL_ID, historyLimit: 50 });
+  assert.deepEqual(batch.filter((frame) => frame.type === "channel_history_replay")
+    .map((frame) => [frame.message.sequence, frame.interruptRequested]), [[19, true], [20, false]]);
 });
 
 test("a reconnect that offers its own waterline is work, never orientation", async () => {
@@ -218,33 +236,6 @@ test("a headless join owed nothing is not served the channel's oldest messages a
   assert.deepEqual(batch.map((frame) => frame.type), ["channel_joined"]);
 });
 
-test("a system management run advances to tail without receiving channel history", async () => {
-  const history = port(0);
-  const runtime = session("instance-system", false);
-  const joined = await history.join(runtime, {
-    type: "join_channel",
-    channelId: CHANNEL_ID,
-    historyLimit: 0,
-  });
-  assert.deepEqual(joined.map((frame) => frame.type), ["channel_joined"]);
-  assert.deepEqual(replayed(joined), []);
-
-  const replay = await history.replay(runtime, {
-    type: "replay_channel_history",
-    channelId: CHANNEL_ID,
-    afterSequence: 0,
-    historyLimit: 50,
-  });
-  assert.deepEqual(replay, []);
-
-  const explicit = await history.history(runtime, {
-    type: "get_channel_history",
-    channelId: CHANNEL_ID,
-    limit: 50,
-  });
-  assert.deepEqual(explicit.messages, []);
-});
-
 test("catch-up skips a relayed reply this Instance wrote to its own cross-Channel link", async () => {
   // Production 2026-09-30: claude:6 answered its own link, restarted, and the
   // relay came back as catch-up work. It is written under the link owner, so
@@ -308,4 +299,18 @@ test("catch-up gives lifecycle control commands as context, like live delivery",
   });
   assert.deepEqual(replayed(batch), [16, 17, 18, 19, 20]);
   assert.deepEqual(intents(batch), ["context", "context", "context", "context", "work"]);
+});
+
+// Replay builds its own recipient from the resumed Run: a live-only fix loses
+// receipts on reconnect, while treating them as broadcast wakes a sibling.
+test("catch-up routes a Connector receipt to its retained caller after reconnect", async () => {
+  const receipt = { ...CORPUS.at(-1), from: { kind: "app", label: "Gmail", appId: "gmail" },
+    metadata: { xmatrixProvenance: "system_fact", xmatrixConnectorRequesterInstanceId: "caller" } };
+  for (const [instanceId, expected] of [["caller", "work"], ["peer", "context"]]) {
+    const batch = await port(19, [receipt]).join(session(instanceId), {
+      type: "join_channel", channelId: CHANNEL_ID, historyLimit: 0,
+    });
+    assert.deepEqual(intents(batch), [expected]);
+    assert.equal(batch.find(frame => frame.type === "channel_history_replay").interruptRequested, false);
+  }
 });

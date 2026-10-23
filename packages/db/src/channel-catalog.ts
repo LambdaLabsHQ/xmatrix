@@ -2,11 +2,13 @@ import { checkedStoredIso } from "./stored-values.js";
 import type { QueryResultRow } from "pg";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import { singleReadStatements } from "./single-read-statements.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import {
   channelVisibilityScope,
   CHANNEL_ACTIVITY_MESSAGE_KIND,
+  AGENT_INSTRUCTION_MESSAGE_KINDS,
   type ChannelCatalogPageFilter,
   type ChannelCatalogPageView, utf8ByteLength } from "@xmatrix/protocol";
 import { DatabaseContractError } from "./errors.js";
@@ -353,11 +355,11 @@ const HEAD_MESSAGE_FIELDS = `
   COALESCE((SELECT counter.content_revision FROM data.channel_content_counters counter
     WHERE counter.space_id=channel.space_id AND counter.channel_id=channel.channel_id),0)
     AS content_revision,
-  head.message_id AS head_message_id,head.sent_at AS head_sent_at,
-  head.author_kind AS head_author_kind,head.author_id AS head_author_id,
-  head.recalled_at AS head_recalled_at,head.preview_json AS head_preview_json,
-  head.payload_bundle_base64 AS head_payload_bundle_base64,
-  head.legacy_body AS head_legacy_body,`;
+  preview.message_id AS head_message_id,preview.sent_at AS head_sent_at,
+  preview.author_kind AS head_author_kind,preview.author_id AS head_author_id,
+  preview.recalled_at AS head_recalled_at,preview.preview_json AS head_preview_json,
+  preview.payload_bundle_base64 AS head_payload_bundle_base64,
+  preview.legacy_body AS head_legacy_body,`;
 
 /* The newest message that holds the principal's attention rides the row too,
    read by its sequence on the timeline index, only for a row that has one. */
@@ -374,6 +376,15 @@ const WAITING_MESSAGE_JOIN = `LEFT JOIN LATERAL (
     AND message.deleted_at IS NULL LIMIT 1
 ) waiting ON TRUE`;
 
+/* Messages nobody needs to read: activity entries (docs/design/conversation-activity.md
+   §3.2), instructions to one Agent Instance, and the switch receipt an older Hub
+   posted before a command's answer sat on the command itself. */
+const NOT_FOR_READING_KINDS = [CHANNEL_ACTIVITY_MESSAGE_KIND, ...AGENT_INSTRUCTION_MESSAGE_KINDS,
+  "xmatrix.system.control-switch"].map((kind) => `'${kind}'`).join(",");
+/* What a list row previews: the newest message a person reads, never an instruction. */
+const NOT_FOR_PREVIEW_KINDS = [...AGENT_INSTRUCTION_MESSAGE_KINDS, "xmatrix.system.control-switch"]
+  .map((kind) => `'${kind}'`).join(",");
+
 /**
  * How far the principal has read a conversation. Activity entries after the
  * cursor need no reading (docs/design/conversation-activity.md §3.2), so a
@@ -388,7 +399,7 @@ function effectiveReadSequenceSql(head: string): string {
       WHERE unread.space_id=channel.space_id AND unread.channel_id=channel.channel_id
         AND unread.deleted_at IS NULL
         AND unread.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)
-        AND unread.message_kind<>'${CHANNEL_ACTIVITY_MESSAGE_KIND}'
+        AND unread.message_kind NOT IN (${NOT_FOR_READING_KINDS})
     ),GREATEST(${head},COALESCE(cursor_row.acknowledged_sequence,0)))`;
 }
 
@@ -397,7 +408,7 @@ const UNREAD_MESSAGE_EXISTS_SQL = `EXISTS (SELECT 1 FROM data.messages message
       WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
         AND message.deleted_at IS NULL
         AND message.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)
-        AND message.message_kind<>'${CHANNEL_ACTIVITY_MESSAGE_KIND}')`;
+        AND message.message_kind NOT IN (${NOT_FOR_READING_KINDS}))`;
 
 function catalogIndexCtes(filter: ChannelCatalogPageFilter): string {
   const hasUnread = filter === "unread" ? UNREAD_MESSAGE_EXISTS_SQL : "FALSE";
@@ -490,10 +501,10 @@ export class PostgresChannelCatalogRepository {
   }
 
   /**
-   * One transaction on the Space's active placement. The fleet router reroutes
-   * it once if the shard's fence refuses a placement that went stale.
+   * Read statements on the Space's active placement. Each statement checks
+   * its fence; the router reroutes a read once if that placement went stale.
    */
-  private async withPlacedTransaction<T>(
+  private async withPlacedReads<T>(
     requestId: string,
     operation: string,
     spaceId: string,
@@ -503,10 +514,10 @@ export class PostgresChannelCatalogRepository {
     if (placement.state !== "active" || placement.targetShardId !== null) {
       throw new DatabaseContractError("Space placement is unavailable");
     }
-    return this.database.transaction({
+    return callback(singleReadStatements(this.database, {
       requestId, operation,
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
-    }, callback);
+    }));
   }
 
   async page(input: ChannelCatalogPageInput): Promise<Record<string, unknown>> {
@@ -517,7 +528,7 @@ export class PostgresChannelCatalogRepository {
     const query = (input.query ?? "").trim().toLocaleLowerCase().slice(0, 200);
     const limit = Math.min(Math.max(Number(input.limit ?? 50), 1), 50);
     if (!Number.isSafeInteger(limit)) throw new DatabaseContractError("limit is invalid");
-    return this.withPlacedTransaction(
+    return this.withPlacedReads(
       requestId, "channel-catalog.page", spaceId, async (transaction) => {
       const selected = viewSql(input.view, input.filter);
       const cursor = input.cursor;
@@ -534,7 +545,7 @@ export class PostgresChannelCatalogRepository {
           AND channel_id>(SELECT cursor_channel_id FROM catalog_input))
       )` : "";
       const envelopes = input.countsOnly ? [] : await transaction.query<CatalogPageEnvelope>({
-        name: `channel_catalog_page_${input.view}_${input.filter}_v13`,
+        name: `channel_catalog_page_${input.view}_${input.filter}_v14`,
         text: `WITH RECURSIVE catalog_input AS (
           SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
             $4::text AS search_query,
@@ -583,6 +594,12 @@ export class PostgresChannelCatalogRepository {
               AND message.deleted_at IS NULL
             ORDER BY message.timeline_sequence DESC LIMIT 1
           ) head ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT ${HEAD_MESSAGE_COLUMNS} FROM data.messages message
+            WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
+              AND message.deleted_at IS NULL AND message.message_kind NOT IN (${NOT_FOR_PREVIEW_KINDS})
+            ORDER BY message.timeline_sequence DESC LIMIT 1
+          ) preview ON TRUE
           LEFT JOIN data.delivery_cursors cursor_row
             ON cursor_row.space_id=channel.space_id AND cursor_row.channel_id=channel.channel_id
               AND cursor_row.subject_id=input.principal_kind||':'||input.principal_id
@@ -618,19 +635,24 @@ export class PostgresChannelCatalogRepository {
       }
       const statsRows = input.countsOnly || input.includeCounts !== false
         ? await transaction.query<StatsRow>({
-        name: "channel_catalog_counts_v9",
+        name: "channel_catalog_counts_v11",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind
-          ), ${PRINCIPAL_CONTEXT_CTE}, ${AUTHORIZED_CHANNELS_CTE}, facts AS (
+          ), ${PRINCIPAL_CONTEXT_CTE}, ${AUTHORIZED_CHANNELS_CTE}, attention_by_channel AS (
+            SELECT attention.channel_id,MAX(attention.timeline_sequence) AS last_sequence,
+              BOOL_OR(${declaredWaitStandsSql("attention")}) AS has_wait
+            FROM data.message_attention attention CROSS JOIN catalog_input input
+            WHERE attention.space_id=input.space_id
+              AND attention.subject_id=input.principal_kind||':'||input.principal_id
+            GROUP BY attention.channel_id
+          ), facts AS (
             SELECT channel.*,COALESCE(cursor_row.acknowledged_sequence,0) AS read_sequence,
               ${UNREAD_MESSAGE_EXISTS_SQL} AS has_unread,
-              EXISTS (SELECT 1 FROM data.message_attention attention
-                WHERE attention.space_id=channel.space_id
-                  AND attention.channel_id=channel.channel_id
-                  AND attention.subject_id=input.principal_kind||':'||input.principal_id
-                  AND (${declaredWaitStandsSql("attention")} OR attention.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)))
+              COALESCE(attention_flags.has_wait
+                OR attention_flags.last_sequence>COALESCE(cursor_row.acknowledged_sequence,0),FALSE)
                 AS has_attention
             FROM authorized_channels channel CROSS JOIN catalog_input input
+            LEFT JOIN attention_by_channel attention_flags ON attention_flags.channel_id=channel.channel_id
             LEFT JOIN data.delivery_cursors cursor_row
               ON cursor_row.space_id=channel.space_id AND cursor_row.channel_id=channel.channel_id
                 AND cursor_row.subject_id=input.principal_kind||':'||input.principal_id
@@ -692,10 +714,10 @@ export class PostgresChannelCatalogRepository {
         channelIds.length + (routeToken ? 1 : 0) > 200) {
       throw new DatabaseContractError("Catalog resolve must contain between 1 and 200 selectors");
     }
-    return this.withPlacedTransaction(
+    return this.withPlacedReads(
       requestId, "channel-catalog.resolve", spaceId, async (transaction) => {
       const envelopes = await transaction.query<CatalogResolveEnvelope>({
-        name: "channel_catalog_resolve_v15",
+        name: "channel_catalog_resolve_v16",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
               $4::text[] AS requested_channel_ids,$5::text[] AS route_range_lowers,
@@ -756,6 +778,12 @@ export class PostgresChannelCatalogRepository {
                 AND message.deleted_at IS NULL
               ORDER BY message.timeline_sequence DESC LIMIT 1
             ) head ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT ${HEAD_MESSAGE_COLUMNS} FROM data.messages message
+              WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
+                AND message.deleted_at IS NULL AND message.message_kind NOT IN (${NOT_FOR_PREVIEW_KINDS})
+              ORDER BY message.timeline_sequence DESC LIMIT 1
+            ) preview ON TRUE
             LEFT JOIN data.delivery_cursors cursor_row
               ON cursor_row.space_id=channel.space_id AND cursor_row.channel_id=channel.channel_id
                 AND cursor_row.subject_id=input.principal_kind||':'||input.principal_id

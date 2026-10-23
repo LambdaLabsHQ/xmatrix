@@ -1,4 +1,4 @@
-import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
+import { namedPageBody, PageControlError, PostgresPageRepository } from "@xmatrix/db";
 import type { Context, Hono } from "hono";
 import type { AuthUser } from "./auth";
 import { requireAuth } from "./index-shared";
@@ -92,10 +92,12 @@ function readCommands(body: Uint8Array): { commands: Array<{ from: string; to: s
   return { commands, pack: body.subarray(at) };
 }
 
-/** A new page's title: its frontmatter `title`, its first heading, or its file name. */
-function titleOf(frontmatter: string | null, body: string, path: string): string {
-  const heading = /^#\s+(.+)$/mu.exec(body)?.[1]?.trim();
-  return (frontmatterTitle(frontmatter) || heading || path.split("/").at(-1)!.replace(/\.md$/u, "")).slice(0, 200);
+/**
+ * A new page's name when its file does not open with one (a page is named by the heading
+ * its document opens with): its frontmatter `title`, or its file name.
+ */
+function titleOf(frontmatter: string | null, path: string): string {
+  return (frontmatterTitle(frontmatter) || path.split("/").at(-1)!.replace(/\.md$/u, "")).slice(0, 200);
 }
 
 class Refused extends Error {}
@@ -155,12 +157,13 @@ async function applyPush(env: Env, spaceId: string, authUser: AuthUser, current:
   const principal = runPrincipalOf(authUser);
   // Parents before children: a directory belongs to the page `<dir>.md` beside it,
   // created first; a directory with no such page (a pushed bundle's group) becomes one.
-  const created: Array<{ pageId: string; path: string; pushed: string; body: string; revision: number }> = [];
+  const created: Array<{ pageId: string; path: string; title: string; pushed: string; body: string;
+    revision: number }> = [];
   const create = async (path: string, parentPageId: string | null, title: string, pushed: string) => {
-    const body = unlinkPages(pushed, path, pageByFile);
+    const body = namedPageBody(unlinkPages(pushed, path, pageByFile), title);
     const { page } = await pages.create({ requestId: crypto.randomUUID(), spaceId, principal, parentPageId, title, body });
     pageByFile.set(path, page.pageId);
-    created.push({ pageId: page.pageId, path, pushed, body, revision: page.headRevision });
+    created.push({ pageId: page.pageId, path, title, pushed, body, revision: page.headRevision });
     return page.pageId;
   };
   const dirPage = async (dir: string): Promise<string | null> => {
@@ -176,11 +179,11 @@ async function applyPush(env: Env, spaceId: string, authUser: AuthUser, current:
   for (const creation of ordered) {
     if (pageByFile.has(creation.path)) throw new Refused(`${creation.path}: a page already has this file`);
     await create(creation.path, await dirPage(creation.path.slice(0, creation.path.lastIndexOf("/") + 1)),
-      titleOf(creation.frontmatter, creation.body, creation.path), creation.body);
+      titleOf(creation.frontmatter, creation.path), creation.body);
   }
   // Links to pages created later in the push resolve once every page exists.
   for (const page of created) {
-    const body = unlinkPages(page.pushed, page.path, pageByFile);
+    const body = namedPageBody(unlinkPages(page.pushed, page.path, pageByFile), page.title);
     if (body === page.body) continue;
     const response = await sessionCall(env, spaceId, page.pageId, "/internal/edit", {
       principal: sessionPrincipal(authUser), baseRevision: page.revision, body, conversationIds: [],

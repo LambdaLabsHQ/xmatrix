@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import { SCROLLING_MOVES_NO_ROWS } from "./timeline-scroll-rest";
+
 /* The message a reader is looking at while an older page is prepended above
    it, and where on screen its content sat before the prepend.
 
@@ -45,14 +47,16 @@ function captureReadingAnchor(root: HTMLElement): ReadingAnchor | null {
   return null;
 }
 
-/* Everything whose size places the timeline's rows. Border boxes, three levels
-   down: the virtualizer's scroller, its viewport, and the header, list, and
-   footer inside it. A list padding change (rows swapped for spacer) moves the
-   rows without changing any content box. */
+/* Everything whose size places the timeline's rows. Border boxes, three layout
+   levels down: the virtualizer's scroller, its viewport, and the header, list,
+   and footer inside its visual layer. That layer does not consume a level.
+   A list padding change (rows swapped for spacer) moves the rows without
+   changing any content box. */
 export function observeTimelineBoxes(root: Element, observer: ResizeObserver, depth = 3) {
   for (const child of root.children) {
     observer.observe(child, { box: "border-box" });
-    if (depth > 1) observeTimelineBoxes(child, observer, depth - 1);
+    const remaining = child.hasAttribute("data-timeline-rise-content") ? depth : depth - 1;
+    if (remaining > 0) observeTimelineBoxes(child, observer, remaining);
   }
 }
 
@@ -140,6 +144,13 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
        the first correction: until then the layout still carries the drift the
        prepend introduced. */
     const onScroll = () => {
+      // The anchor's own correction leaves the timeline where it was held.
+      // Where a scroll mid-flick blanks the screen, the anchor holds only
+      // until someone else scrolls (see timeline-scroll-rest).
+      if (SCROLLING_MOVES_NO_ROWS && root.scrollTop !== heldScrollTop) {
+        release();
+        return;
+      }
       if (!corrected) return;
       const top = anchorTop();
       if (top === null) {

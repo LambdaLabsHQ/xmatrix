@@ -1,17 +1,17 @@
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import type { AppConnectorEnv } from "./app-connectors";
 import { registrationRepositoryCatalog } from "./registration-repository-catalog";
 import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
-import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1, isAutoHandoffSuccessor } from "@xmatrix/protocol";
+import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags, DraftSummonIntent } from "@xmatrix/protocol";
+import type { AutoLaunchTags, DraftSummonIntent, HarnessSignedOut, HarnessTooOld, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
-  PostgresFirstMessageLaunchChoiceRepository,
-  type RegistrationAboutSession,
-  type ChannelAboutSessionStopTarget,
+  PostgresFirstMessageLaunchChoiceRepository, PostgresMessageRepository,
 } from "@xmatrix/db";
+import { postgresProductMessage } from "./postgres-message-authority";
 import { dispatchPreparedAgentLaunchWake } from "./product-agent-mention-authority-adapter";
 import { scheduleAgentRoutingQuotaRefresh } from "./agent-routing-quota-refresh";
 import { jevEvaluator, refreshChannelRoutingQuota, runtimePlacement } from "./runtime";
@@ -34,15 +34,18 @@ async function channelLaunchRepository(input: { database: AuthorityDatabase; dir
     input.env ? registrationRepositoryCatalog(input.env, input.database, placement.spaceId) : undefined) };
 }
 
+/** Jev for one launch decision, in the Space its Channel is placed in. */
+type LaunchEvaluator = (spaceId: string) => RoutingEvaluator;
+
 export async function executeRegistrationLaunchDispatch(input: {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluate?: RoutingEvaluator;
+  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor?: LaunchEvaluator;
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
   /** The author's "launch anyway" for one summon Jev read as a non-request. */
   forceMention?: string;
   draftIntents?: DraftSummonIntent[];
 }) {
   const { placement, repository } = await channelLaunchRepository(input);
-  const result = await repository.dispatchFromMessage(input, input.evaluate ? registrationLaunchChooser(input.evaluate, registrationLaunchContextReader({
+  const result = await repository.dispatchFromMessage(input, input.evaluatorFor ? registrationLaunchChooser(input.evaluatorFor(placement.spaceId), registrationLaunchContextReader({
     ...input, spaceId: placement.spaceId,
   })) : undefined);
   if (result.rejected.length) {
@@ -52,39 +55,41 @@ export async function executeRegistrationLaunchDispatch(input: {
         // Keep the typed domain code so diagnose names the actual cause; only
         // an untyped value collapses to the generic rejection.
         code: REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code) || /^[a-z][a-z0-9_]{2,79}$/u.test(item.code)
-          ? item.code : "registration_launch_rejected" })),
+          ? item.code : "registration_launch_rejected",
+        ...(item.tooOld ? { tooOld: item.tooOld } : {}), ...(item.signedOut ? { signedOut: item.signedOut } : {}) })),
     });
   }
+  // A recorded refusal answers its summon now; accepted launches answer as the coordinator publishes them.
+  if (result.rejected.length && input.env) await publishChannelInvocationsChanged(input.env as Env, input.channelId);
   return { ...result, shardId: placement.shardId, channelId: input.channelId };
 }
 
 interface RegistrationInputLaunch {
   runId: string; instanceId: string; launchId: string; agentName: string; hostId: string; reused: boolean;
-  /** Channel About sessions that finished their turn and still run; the caller stops them. */
-  retiredAboutSessions?: ChannelAboutSessionStopTarget[];
-  /** An About session already serves the Channel; nothing was launched. */
-  coalesced?: boolean;
 }
 
 /** What any-input launch callers state, whichever side of the relay they are on. */
 interface RegistrationInputRequest {
   /** Exclude the stable registration bound to this predecessor Instance. */
   excludeSourceInstanceId?: string;
+  /** Exclude an environment that just failed to start this work. */
+  excludeRegistration?: SpaceAgentRegistrationKey;
   commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
   runId?: string; instanceId?: string;
   initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
-  aboutSession?: RegistrationAboutSession;
   /** Capabilities the work needs; those a daemon can prove gate where it runs. */
   requiredCapabilities?: readonly string[];
+  /** A handoff predecessor's conversation, handed to the successor's spawn. */
+  handoffContext?: Record<string, unknown>;
 }
 
 /** Launch from any input. Jev chooses among every authorized registration in
  * the Channel's Space; no source message is required. */
 export async function executeRegistrationInputDispatch(input: RegistrationInputRequest & {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluate: RoutingEvaluator;
+  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor: LaunchEvaluator;
 }) {
   const { placement, repository } = await channelLaunchRepository(input);
-  const prepared = await repository.dispatchInput(input, registrationLaunchChooser(input.evaluate));
+  const prepared = await repository.dispatchInput(input, registrationLaunchChooser(input.evaluatorFor(placement.spaceId)));
   return { ...prepared, shardId: placement.shardId, channelId: input.channelId };
 }
 
@@ -120,19 +125,30 @@ export interface FirstMessageDecision { claimed: boolean; harness?: string }
  * decided harness is summoned by an ordinary `@<harness>` message.
  */
 export async function executeFirstMessageDecision(input: {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluate: RoutingEvaluator;
+  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor: LaunchEvaluator;
   commandId: string; actorUserId: string; channelId: string; messageId: string; body: string;
   /** The author is a Human, who may choose first. */
   window: boolean;
+  /** The decision's row exists: hand its unfinished summon to the Channel's coordinator. */
+  opened?: () => Promise<void>;
 }): Promise<FirstMessageDecision> {
   const { placement, repository } = await channelLaunchRepository(input);
-  const choose = registrationLaunchChooser(input.evaluate);
+  const choose = registrationLaunchChooser(input.evaluatorFor(placement.spaceId));
   const read = (onHarness?: (harness: string) => Promise<void>) => repository.readHarnessToStart({
     actorUserId: input.actorUserId, body: input.body, ...(onHarness ? { onHarness } : {}) }, choose);
   // Both authors persist the same decision before the system summon can be
   // authorized. The database gives Agent publications an immediate deadline.
-  return decideFirstMessageLaunch({ ...input, read, choices: new PostgresFirstMessageLaunchChoiceRepository(input.database, {
-    spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch }) });
+  const choices = new PostgresFirstMessageLaunchChoiceRepository(input.database, {
+    spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch });
+  // Each step of the decision is what the first message's chooser shows next.
+  const pushed = <T>(step: Promise<T>) => step.then(async (value) => {
+    if (input.env) await publishChannelInvocationsChanged(input.env as Env, input.channelId);
+    return value;
+  });
+  return decideFirstMessageLaunch({ ...input, read, choices: {
+    open: (request) => pushed(choices.open(request)), recommend: (request) => pushed(choices.recommend(request)),
+    claim: (request) => pushed(choices.claim(request)), fail: (request) => pushed(choices.fail(request)),
+  } });
 }
 
 type FirstMessageChoices = Pick<PostgresFirstMessageLaunchChoiceRepository, "open" | "recommend" | "claim" | "fail">;
@@ -145,11 +161,13 @@ type FirstMessageChoices = Pick<PostgresFirstMessageLaunchChoiceRepository, "ope
 export async function decideFirstMessageLaunch(input: {
   commandId: string; actorUserId: string; channelId: string; messageId: string; choices: FirstMessageChoices;
   read: (onHarness: (harness: string) => Promise<void>) => Promise<string>;
+  opened?: () => Promise<void>;
 }, wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now,
 ): Promise<FirstMessageDecision> {
   const request = (step: string) => `${input.commandId}:${step}`.slice(0, 200);
   const where = { channelId: input.channelId, messageId: input.messageId };
   const window = await input.choices.open({ requestId: request("open"), ...where, authorUserId: input.actorUserId });
+  await input.opened?.();
   if (window.chosenBy === "author") return { claimed: false };
   let reading: Promise<{ deadlineAt: string }> | undefined;
   const recommend = (harness?: string) => reading ??= input.choices.recommend({ requestId: request("recommend"), ...where,
@@ -187,7 +205,7 @@ export async function decideFirstMessageLaunch(input: {
 /** Prepares the wake of every resting Instance in a Channel; the Channel's
  * coordinator carries the prepared wakes from there. */
 export async function wakeRestingInstances(env: Env, input: {
-  commandId: string; channelId: string; sourceMessageId: string; prompt: string;
+  commandId: string; channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt: string;
 }) {
   const value = await executeRestingInstanceWake({ ...runtimePlacement(env), ...input });
   if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
@@ -209,29 +227,42 @@ export function prepareRegistrationReborn(env: Env, input: {
   return executeRegistrationRebornPrepare({ ...runtimePlacement(env), ...input });
 }
 
-/** A handoff of a source Instance to a named successor harness, or to the one
- * Jev picks for `auto`; an automatic handoff that went through is handed to
- * the Channel's coordinator before it is answered. */
-export async function prepareRegistrationHandoff(env: Env, input: {
-  commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
-  sourceInstanceId: string; sourceMention?: string; successorHarness: string; prompt: string;
-}): Promise<Record<string, unknown>> {
-  const placed = { ...runtimePlacement(env), ...input };
-  if (!isAutoHandoffSuccessor(input.successorHarness)) return executeRegistrationHandoffPrepare(placed);
-  const result = await executeRegistrationAutoHandoff(placed);
-  if (result.outcome === "handed_off") await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
-  return result;
-}
-
 /** Jev decides whether a new conversation's first message asks for an Agent;
  * a Human author may choose first within the window. */
 export function decideNewConversationLaunch(env: Env, input: {
   commandId: string; actorUserId: string; channelId: string; messageId: string; body: string; window: boolean;
 }) {
-  const evaluate = jevEvaluator(env, { actorUserId: input.actorUserId, channelId: input.channelId,
-    sourceMessageId: input.commandId, invocationId: input.commandId });
-  if (!evaluate) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
-  return executeFirstMessageDecision({ ...runtimePlacement(env), evaluate, ...input });
+  const evaluatorFor = jevEvaluator(env, { feature: "start_intent", actorUserId: input.actorUserId,
+    channelId: input.channelId, sourceMessageId: input.commandId, invocationId: input.commandId });
+  if (!evaluatorFor) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
+  // The request deciding this may end before its summon does (a background
+  // budget runs out); the coordinator then finishes it once it is due.
+  return executeFirstMessageDecision({ ...runtimePlacement(env), evaluatorFor, ...input,
+    opened: () => wakeAgentLaunchCoordinator(env, input.channelId, ["firstMessageSummon"]).catch(error =>
+      console.warn("First message summon handover failed", { channelId: input.channelId, messageId: input.messageId,
+        error: error instanceof Error ? error.message : String(error) })) });
+}
+
+/** xMatrix's summon of a decided first message finished dispatching. */
+export async function markFirstMessageSummoned(env: Env, input: { channelId: string; messageId: string }): Promise<void> {
+  const { database, directory } = runtimePlacement(env);
+  const commandId = `first-message-summoned:${input.messageId}`.slice(0, 200);
+  const { placement } = await channelLaunchRepository({ database, directory, commandId, channelId: input.channelId });
+  await new PostgresFirstMessageLaunchChoiceRepository(database, { spaceId: placement.spaceId, shardId: placement.shardId,
+    placementEpoch: placement.placementEpoch }).summoned({ requestId: commandId, ...input });
+}
+
+/** The body of a Channel's first message, read as its author. */
+export async function readFirstMessageBody(env: Env, input: { channelId: string; messageId: string; authorUserId: string }) {
+  const { database, directory } = runtimePlacement(env);
+  const commandId = `first-message-body:${input.messageId}`.slice(0, 200);
+  const { placement } = await channelLaunchRepository({ database, directory, commandId, channelId: input.channelId });
+  const page = await new PostgresMessageRepository(database).history({ requestId: commandId, spaceId: placement.spaceId,
+    principal: { kind: "user", id: input.authorUserId }, channelId: input.channelId, beforeSequence: 2, limit: 1 });
+  const message = page.messages.map(postgresProductMessage).find(item => Number(item.sequence) === 1);
+  if (message?.messageId !== input.messageId || typeof message.body !== "string") return undefined;
+  const from = message.from as { kind?: unknown } | undefined;
+  return { body: message.body, authorKind: from?.kind === "agent" ? "agent" as const : "user" as const };
 }
 
 /** Hub-side caller for any-input launches; wakes the daemon after the durable prepare. */
@@ -239,14 +270,11 @@ export async function dispatchRegistrationInput(input: RegistrationInputRequest 
   env: Env;
 }): Promise<RegistrationInputLaunch> {
   const { env, ...request } = input;
-  const evaluate = jevEvaluator(env, { actorUserId: request.actorUserId, channelId: request.channelId,
-    sourceMessageId: request.commandId, invocationId: request.commandId });
-  if (!evaluate) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
-  const result = await executeRegistrationInputDispatch({ ...runtimePlacement(env), evaluate, ...request }) as
+  const evaluatorFor = jevEvaluator(env, { feature: "input_launch", actorUserId: request.actorUserId,
+    channelId: request.channelId, sourceMessageId: request.commandId, invocationId: request.commandId });
+  if (!evaluatorFor) throw new RegistrationAccessError("registration_selection_unconfigured", 503);
+  const result = await executeRegistrationInputDispatch({ ...runtimePlacement(env), evaluatorFor, ...request }) as
     RegistrationInputLaunch & { shardId?: string };
-  const retired = result.retiredAboutSessions?.length ? { retiredAboutSessions: result.retiredAboutSessions } : {};
-  if (result.coalesced) return { runId: result.runId, instanceId: result.instanceId, launchId: "",
-    agentName: result.agentName, hostId: result.hostId, reused: true, coalesced: true, ...retired };
   // The launch is answered only once its Channel's coordinator owns it; the
   // caller's retry of the same command recovers the prepare and wakes again.
   await dispatchPreparedAgentLaunchWake({
@@ -255,7 +283,43 @@ export async function dispatchRegistrationInput(input: RegistrationInputRequest 
     ...(typeof result.shardId === "string" ? { shardId: result.shardId } : {}),
   });
   return { runId: result.runId, instanceId: result.instanceId, launchId: result.launchId,
-    agentName: result.agentName, hostId: result.hostId, reused: result.reused, ...retired };
+    agentName: result.agentName, hostId: result.hostId, reused: result.reused };
+}
+
+/**
+ * A Run that failed to start for an `@auto` summon, or for xMatrix's summon of
+ * a first message that named nobody, hands the same message to the next-ranked
+ * Agent, once: the retry is an any-input launch, which has no retry of its
+ * own. The failed environment is excluded; the author's other conditions
+ * still bind. One command per failed Run, so a replay recovers the same launch.
+ * Undefined when the Run has no such origin or nothing else can take the work.
+ */
+export async function dispatchStartupFallback(env: Env, input: { channelId: string; runId: string },
+  dispatch: typeof dispatchRegistrationInput = dispatchRegistrationInput): Promise<{ agentName: string } | undefined> {
+  const { database, directory } = runtimePlacement(env);
+  const commandId = `startup-fallback:${input.runId}`.slice(0, 200);
+  const { placement, repository } = await channelLaunchRepository({ database, directory, commandId, channelId: input.channelId });
+  const origin = await repository.startupFallbackOrigin({ commandId, channelId: input.channelId, runId: input.runId,
+    readBody: async (actorUserId, sourceSequence) => {
+      const page = await new PostgresMessageRepository(database).history({ requestId: commandId, spaceId: placement.spaceId,
+        principal: { kind: "user", id: actorUserId }, channelId: input.channelId, beforeSequence: sourceSequence + 1, limit: 1 });
+      const message = page.messages.map(postgresProductMessage).find(item => item.sequence === sourceSequence);
+      return typeof message?.body === "string" ? message.body : undefined;
+    } });
+  if (!origin) return undefined;
+  try {
+    const launched = await dispatch({ env, commandId, actorUserId: origin.actorUserId, channelId: input.channelId,
+      body: origin.body, tags: origin.tags, excludeRegistration: origin.failed,
+      // The retry answers the same message and is drawn on its summon, like the launch it replaces.
+      initialMessageId: origin.sourceMessageId, presentationMessageId: origin.sourceMessageId,
+      runMetadata: { sourceMention: origin.sourceMention } });
+    return { agentName: launched.agentName };
+  } catch (error) {
+    // Nothing else can take the work, or routing could not choose now: the
+    // failure notice stands on its own rather than a retry arriving late.
+    if (error instanceof RegistrationAccessError) return undefined;
+    throw error;
+  }
 }
 
 /** The reborn/handoff repository placed on the Channel's Space shard. */
@@ -287,29 +351,9 @@ export async function executeRegistrationRebornPrepare(input: {
  * message through its own reborn (docs/instance-sleep.md §3). */
 export async function executeRestingInstanceWake(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string;
-  channelId: string; sourceMessageId: string; prompt?: string;
+  channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt?: string;
 }) {
   return (await placedRebornRepository(input, "reborn")).wakeResting(input);
-}
-
-/** Handoff: a new Instance of `successorHarness`, registered on the source's
- * owner and machine, takes over the source's retained directory. */
-export async function executeRegistrationHandoffPrepare(input: {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
-  channelId: string; sourceMessageId: string; sourceInstanceId: string; sourceMention?: string; successorHarness: string;
-  prompt: string;
-}) {
-  return (await placedRebornRepository(input, "handoff")).prepareHandoff(input);
-}
-
-/** `handoff:@auto`: the first other harness on the source's machine with
- * headroom takes its retained directory, or the source's repository is named
- * so a successor can start on any machine. */
-export async function executeRegistrationAutoHandoff(input: {
-  env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
-  channelId: string; sourceMessageId: string; sourceInstanceId: string; sourceMention?: string; prompt: string;
-}) {
-  return (await placedRebornRepository(input, "handoff")).prepareAutoHandoff(input);
 }
 
 /** The source Instance's provider account is used up: its pool is held empty
@@ -328,8 +372,11 @@ interface MessageLaunch {
 
 interface MessageLaunchResult {
   selectionCount?: number; shardId?: string;
-  prepared?: Array<{ launchId: string }>; rejected?: Array<{ code: string }>;
+  prepared?: Array<{ launchId: string }>; rejected?: MessageLaunchRejection[];
 }
+
+/** A summon the dispatch refused, and the program it names: too old, or signed out. */
+export interface MessageLaunchRejection { code: string; sourceMention?: string; tooOld?: HarnessTooOld; signedOut?: HarnessSignedOut }
 
 type MessageLaunchDependencies = {
   launch?: (input: MessageLaunch) => Promise<MessageLaunchResult>;
@@ -340,8 +387,8 @@ type MessageLaunchDependencies = {
 function launchFromMessage(input: MessageLaunch): Promise<MessageLaunchResult> {
   const { env, messageId, ...launch } = input;
   return executeRegistrationLaunchDispatch({ ...runtimePlacement(env), ...launch, sourceMessageId: messageId,
-    evaluate: jevEvaluator(env, { actorUserId: input.actorUserId, channelId: input.channelId,
-      sourceMessageId: messageId, invocationId: input.commandId }) });
+    evaluatorFor: jevEvaluator(env, { feature: "launch_choice", actorUserId: input.actorUserId,
+      channelId: input.channelId, sourceMessageId: messageId, invocationId: input.commandId }) });
 }
 
 /** One registration dispatch from a stored message, then the daemon wake for
@@ -365,7 +412,7 @@ export async function dispatchRegistrationLaunchesAfterMessage(input: {
   draftIntents?: DraftSummonIntent[];
   scheduleBackground?: (task: Promise<unknown>) => void;
 }, dependencies: MessageLaunchDependencies = {},
-): Promise<{ selectionCount: number; prepared: Array<{ launchId: string }>; rejected?: Array<{ code: string }> }> {
+): Promise<{ selectionCount: number; prepared: Array<{ launchId: string }>; rejected?: MessageLaunchRejection[] }> {
   const result = await dispatchFromMessage({ ...input, commandId: `registration-launch:${input.messageId}` }, dependencies);
   if (result.selectionCount > 0) {
     // Jev chose from persisted quota facts; refresh them (including the

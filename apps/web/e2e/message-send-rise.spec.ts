@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { fixtureJson } from "./in-page-api-fixtures";
+import { fixtureJson, fixtureRule } from "./in-page-api-fixtures";
 import { paintedRowMoves, paintedRowOverlaps, paintedTimelineFrames, recordPaintedTimelineFrames } from "./painted-timeline-frames";
 import {
   E2E_CHANNEL,
@@ -23,6 +23,8 @@ test.use(E2E_DESKTOP_CONTEXT);
 
 type Page = Parameters<Parameters<typeof test>[2]>[0]["page"];
 type Rise = { sent: boolean; fromPx: number; fades: boolean };
+/** A way to rest the list was given to the compositor: where from, how long, and whether it only slows towards rest. */
+type ListRise = { fromPx: number; durationMs: number; oneWay: boolean; slowing: boolean };
 
 const HISTORY_LENGTH = 40;
 const SENT_BODY = "Rising message";
@@ -40,7 +42,9 @@ function channelAt(messages: number) {
 async function openChannelRecordingRises(page: Page) {
   await page.addInitScript(() => {
     const rises: Rise[] = [];
+    const listRises: ListRise[] = [];
     (window as unknown as { __timelineRises: Rise[] }).__timelineRises = rises;
+    (window as unknown as { __timelineListRises: ListRise[] }).__timelineListRises = listRises;
     const animate = Element.prototype.animate;
     Element.prototype.animate = function recordRise(this: Element, keyframes, options) {
       const kind = this.getAttribute("data-timeline-rise-row");
@@ -48,6 +52,17 @@ async function openChannelRecordingRises(page: Page) {
       const from = /translateY\(([\d.]+)px\)/u.exec(String(first?.transform ?? ""));
       if (kind !== null && from) {
         rises.push({ sent: kind === "sent", fromPx: Number(from[1]), fades: first?.opacity === 0 });
+      }
+      // The list's own way to rest: the offsets the compositor draws it at, in order.
+      if (this.hasAttribute("data-timeline-rise-content") && Array.isArray(keyframes)) {
+        const offsets = keyframes.map((frame) => Number(/^0 (-?[\d.]+)px$/u.exec(String(frame.translate ?? ""))?.[1]));
+        const steps = offsets.slice(1).map((offset, index) => Math.abs(offsets[index]!) - Math.abs(offset));
+        listRises.push({
+          fromPx: offsets[0]!,
+          durationMs: Number(typeof options === "number" ? options : options?.duration),
+          oneWay: offsets.every(Number.isFinite) && offsets.at(-1) === 0 && steps.every((step) => step >= 0),
+          slowing: steps[0]! > steps.at(-1)!,
+        });
       }
       return animate.call(this, keyframes, options);
     };
@@ -70,15 +85,45 @@ async function sendAndReadRises(page: Page): Promise<Rise[]> {
   return page.evaluate(() => (window as unknown as { __timelineRises: Rise[] }).__timelineRises);
 }
 
+/**
+ * Every way to rest the list has been given so far. The compositor draws it,
+ * so how many of its frames the page itself sees depends on how busy the page
+ * is; what the compositor was told to draw does not.
+ */
+async function listRises(page: Page): Promise<ListRise[]> {
+  return page.evaluate(() => (window as unknown as { __timelineListRises: ListRise[] }).__timelineListRises.slice());
+}
+
+/** Each of them goes one way; one that travels a row's room slows as it arrives and takes long enough to be seen. */
+function expectDrawnRises(rises: readonly ListRise[], atLeast: number) {
+  const travels = rises.filter((rise) => Math.abs(rise.fromPx) >= 8);
+  expect(travels.length, JSON.stringify(rises)).toBeGreaterThanOrEqual(atLeast);
+  expect(rises.filter((rise) => !rise.oneWay)).toEqual([]);
+  for (const rise of travels) {
+    expect(rise.slowing, JSON.stringify(rise)).toBe(true);
+    expect(rise.durationMs).toBeGreaterThan(100);
+  }
+}
+
+/** The list stands in its place: nothing holds it lower, and nothing is still bringing it there. */
+async function listAtRest(page: Page) {
+  await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-content]").evaluate((list) =>
+    (list as HTMLElement).style.translate === "" && list.getAnimations().length === 0)).toBe(true);
+}
+
+/** The frames painted so far, once no row is still coming in and the list stands in its place. */
+async function framesOnceAtRest(page: Page) {
+  await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-row]").evaluateAll((rows) =>
+    rows.filter((row) => row.getAnimations().length > 0).length)).toBe(0);
+  await listAtRest(page);
+  return paintedTimelineFrames(page);
+}
+
 /** The frames painted while `send` plays out, once the rows stand still again. */
 async function framesOfSend(page: Page, send: () => Promise<void>) {
   await recordPaintedTimelineFrames(page);
   await send();
-  await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-row]").evaluateAll((rows) =>
-    rows.filter((row) => row.getAnimations().length > 0).length)).toBe(0);
-  await expect.poll(() => page.locator(".app-message-timeline [data-viewport-type]").evaluate((list) =>
-    (list as HTMLElement).style.translate)).toBe("");
-  return paintedTimelineFrames(page);
+  return framesOnceAtRest(page);
 }
 
 /** How far, frame by frame, the newest message of the history moved. */
@@ -86,19 +131,56 @@ function movesOfRowAbove(frames: Awaited<ReturnType<typeof paintedTimelineFrames
   return paintedRowMoves(frames).filter((move) => move.row === `message:rise-${HISTORY_LENGTH}`).map((move) => move.by);
 }
 
+test("the new row comes in and the list comes to rest in the same frame", async ({ page }) => {
+  await openChannelRecordingRises(page);
+  // When each of the two animations ends, on the document's clock: the row's
+  // own way up, and the list's way to rest. Ending apart, each would wake the
+  // page ahead of its end and lay its layers out again once it is over.
+  // Read in the page on every frame from before the send: the two run together
+  // for only part of a third of a second, which a busy page's round trips miss.
+  await page.evaluate(() => {
+    const aparts: number[] = [];
+    (window as unknown as { __riseEndsApart: number[] }).__riseEndsApart = aparts;
+    const read = () => {
+      const list = document.querySelector(".app-message-timeline [data-timeline-rise-content]");
+      const row = Array.from(document.querySelectorAll(".app-message-timeline [data-timeline-rise-row='sent']")).at(-1);
+      const [rise] = list?.getAnimations() ?? [];
+      const [entrance] = row?.getAnimations() ?? [];
+      if (rise?.effect && entrance?.effect && rise.startTime !== null && entrance.startTime !== null) {
+        const end = (animation: Animation) => Number(animation.startTime) + Number(animation.effect!.getComputedTiming().endTime);
+        aparts.push(Math.abs(end(rise) - end(entrance)));
+      }
+      requestAnimationFrame(read);
+    };
+    requestAnimationFrame(read);
+  });
+  await sendAndReadRises(page);
+  await listAtRest(page);
+  const aparts = await page.evaluate(() => (window as unknown as { __riseEndsApart: number[] }).__riseEndsApart);
+  expect(aparts.length).toBeGreaterThan(0);
+  expect(aparts.at(-1)).toBeLessThan(1);
+});
+
 test("a sent message rises from the composer and lifts the rows above it", async ({ page }) => {
   await openChannelRecordingRises(page);
   let rises: Rise[] = [];
-  const moves = movesOfRowAbove(await framesOfSend(page, async () => {
+  const frames = await framesOfSend(page, async () => {
     rises = await sendAndReadRises(page);
-  }));
+  });
+  const moves = movesOfRowAbove(frames);
 
   expect(rises).toEqual([{ sent: true, fromPx: expect.any(Number), fades: true }]);
-  // The rows above travel the room the new row took, over several frames,
-  // upward only, and slower as they arrive.
-  expect(moves.length).toBeGreaterThan(3);
+  // The rows above travel the room the new row took: up from where they
+  // stood, slower as they arrive, and what was painted of it never went back.
+  expectDrawnRises(await listRises(page), 1);
+  expect((await listRises(page))[0]!.fromPx).toBeGreaterThan(0);
+  expect(moves.length).toBeGreaterThan(0);
   expect(moves.filter((by) => by > 0)).toEqual([]);
-  expect(Math.abs(moves[0]!)).toBeGreaterThan(Math.abs(moves[moves.length - 1]!));
+  // The rows move visually; the viewport the virtualizer measures retains
+  // its place in the layout, so a scroll cannot feed the rise back as an offset.
+  const viewportOffsets = frames.flatMap((frame) => frame.viewportOffsetTop === null ? [] : [frame.viewportOffsetTop]);
+  expect(viewportOffsets.length).toBeGreaterThan(1);
+  expect(Math.max(...viewportOffsets) - Math.min(...viewportOffsets)).toBeLessThan(1);
 });
 
 /* The list makes room for a new row by an estimate and corrects it a frame
@@ -115,7 +197,8 @@ test("messages sent one after another lift the rows without a bounce", async ({ 
       await draft.press("Enter");
       await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1 + index}"]`)).toBeInViewport();
     }));
-    expect(moves.length).toBeGreaterThan(3);
+    expectDrawnRises(await listRises(page), index + 1);
+    expect(moves.length).toBeGreaterThan(0);
     expect(moves.filter((by) => by > 0)).toEqual([]);
   }
 });
@@ -135,7 +218,8 @@ test("a message from someone else comes in the same way", async ({ page }) => {
     )), E2E_SPACE.id);
     await expect(page.locator(`[id="message:rise-${HISTORY_LENGTH + 1}"]`)).toBeInViewport();
   }));
-  expect(moves.length).toBeGreaterThan(3);
+  expectDrawnRises(await listRises(page), 1);
+  expect(moves.length).toBeGreaterThan(0);
   expect(moves.filter((by) => by > 0)).toEqual([]);
 });
 
@@ -145,21 +229,75 @@ test("a message from someone else comes in the same way", async ({ page }) => {
    each other (user 2026-10-13: "这个渲染怎么回事"). */
 test("messages that come in while the rows are rising are never drawn over each other", async ({ page }) => {
   await openChannelRecordingRises(page);
-  const draft = page.locator("textarea.composer-textarea").first();
-  await answerNextSend(page, HISTORY_LENGTH + 1, "One", 150);
-  await recordPaintedTimelineFrames(page);
-  await draft.fill("One");
-  await draft.press("Enter");
-  await expect(page.locator(".app-message-row").filter({ hasText: "One" }).last()).toBeVisible();
-  await answerNextSend(page, HISTORY_LENGTH + 2, "Two, which is a longer message than the one before it.", 150);
-  await draft.fill("Two, which is a longer message than the one before it.");
+  const draft = await sendOneAndDraftTwo(page);
   await draft.press("Enter");
   await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 2}"]`)).toBeInViewport();
-  await expect.poll(() => page.locator(".app-message-timeline [data-viewport-type]").evaluate((list) =>
-    (list as HTMLElement).style.translate)).toBe("");
-  const frames = await paintedTimelineFrames(page);
+  const frames = await framesOnceAtRest(page);
   expect(frames.length).toBeGreaterThan(10);
   expect(paintedRowOverlaps(frames)).toEqual([]);
+});
+
+/** Resolves once the compositor is drawing the list to rest, with what it has drawn so far (ms). */
+async function listOnItsWayToRest(page: Page): Promise<number> {
+  const handle = await page.waitForFunction(() => {
+    const list = document.querySelector(".app-message-timeline [data-timeline-rise-content]");
+    const [rise] = list?.getAnimations() ?? [];
+    return rise?.playState === "running" && Number(rise.currentTime) > 30 ? Number(rise.currentTime) : false;
+  }, undefined, { polling: "raf" });
+  return handle.jsonValue() as Promise<number>;
+}
+
+/* The way to rest is the compositor's: the page only knows how far it has come
+   from the animation's own clock. A message that arrives then has to go on
+   from where the list is drawn at that moment, not from where the first rise
+   began and not from its place in the layout. */
+test("a message that comes in while the list is on its way to rest goes on from where it is drawn", async ({ page }) => {
+  await openChannelRecordingRises(page);
+  const draft = await sendOneAndDraftTwo(page);
+  expect(await listOnItsWayToRest(page)).toBeGreaterThan(30);
+  await draft.press("Enter");
+  await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 2}"]`)).toBeInViewport();
+  const frames = await framesOnceAtRest(page);
+  const moves = movesOfRowAbove(frames);
+  // The rows go on rising, both messages' room in all. No frame throws the
+  // list to its place or back to where it stood: the only way down is the few
+  // pixels by which a late correction of the layout settles, as after any send.
+  const travelled = Math.abs(moves.reduce((sum, by) => sum + by, 0));
+  // Two ways to rest were given: the first, and the one that took over from where it had come.
+  expectDrawnRises(await listRises(page), 2);
+  expect(moves.filter((by) => by < 0).length).toBeGreaterThan(1);
+  expect(Math.max(...moves.map((by) => Math.abs(by)))).toBeLessThan(travelled * 0.6);
+  expect(Math.max(0, ...moves)).toBeLessThan(8);
+  expect(paintedRowOverlaps(frames)).toEqual([]);
+});
+
+/* The reader's own scrolling is theirs. While the list is on its way to rest
+   a wheel takes it at once: nothing is still drawn lower, nothing clips the
+   list, and nothing brings the reader back to the newest message afterwards. */
+test("the reader's wheel takes the list from a rise that is still playing", async ({ page }) => {
+  await openChannelRecordingRises(page);
+  const draft = page.locator("textarea.composer-textarea").first();
+  const timeline = page.locator(".app-message-timeline");
+  await answerNextSend(page, HISTORY_LENGTH + 1, "One", 150);
+  await draft.fill("One");
+  const box = (await timeline.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await draft.press("Enter");
+  await listOnItsWayToRest(page);
+  await page.mouse.wheel(0, -400);
+  const state = () => timeline.evaluate((scroller) => {
+    const list = scroller.querySelector<HTMLElement>("[data-timeline-rise-content]")!;
+    return {
+      held: list.style.translate !== "" || list.getAnimations().length > 0 || list.parentElement!.style.overflow !== "",
+      fromEnd: Math.round(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop),
+    };
+  });
+  await expect.poll(async () => (await state()).held).toBe(false);
+  await expect.poll(async () => (await state()).fromEnd).toBeGreaterThan(200);
+  const away = (await state()).fromEnd;
+  // Past the time a late correction of the layout is still waited for.
+  await page.waitForTimeout(1_800);
+  expect(await state()).toEqual({ held: false, fromEnd: away });
 });
 
 test("a sent message lands without motion when the reader asked for less of it", async ({ page }) => {
@@ -171,11 +309,34 @@ test("a sent message lands without motion when the reader asked for less of it",
 /* What the server answers a send with, after `delayMs`: long enough for a spec
    to look at the row while it is still on its way. */
 async function answerNextSend(page: Page, sequence: number, body: string, delayMs: number) {
-  await fixtureJson(page, `send-held-${sequence}`, "**/api/xmatrix/channels/channel-general/messages",
-    { message: {
-      messageId: `held-${sequence}`, channelId: E2E_CHANNEL.id, sequence, body,
+  await answerSends(page, sequence, [body], delayMs);
+}
+
+/** The answers to the next sends, in the order they are made, the first as message `sequence`. */
+async function answerSends(page: Page, sequence: number, bodies: readonly string[], delayMs: number) {
+  await fixtureRule(page, {
+    id: `send-held-${sequence}`,
+    pattern: "**/api/xmatrix/channels/channel-general/messages",
+    method: "POST",
+    responder: { kind: "sequence", delayMs, responses: bodies.map((body, index) => ({ json: { message: {
+      messageId: `held-${sequence + index}`, channelId: E2E_CHANNEL.id, sequence: sequence + index, body,
       sentAt: new Date().toISOString(), from: { ...E2E_USER_SENDER, identityId: "user:e2e-user" },
-    } }, { method: "POST", delayMs });
+    } } })) },
+  });
+}
+
+/** Sends "One" while recording painted frames, and drafts a longer second message to send after it. */
+async function sendOneAndDraftTwo(page: Page) {
+  const draft = page.locator("textarea.composer-textarea").first();
+  /* Both answers in one rule, in order: given as two, the later one takes over
+     the route, the first send comes back as the second message, and the
+     second send's row folds into it as the list rests. */
+  await answerSends(page, HISTORY_LENGTH + 1, ["One", "Two, which is a longer message than the one before it."], 150);
+  await recordPaintedTimelineFrames(page);
+  await draft.fill("One");
+  await draft.press("Enter");
+  await draft.fill("Two, which is a longer message than the one before it.");
+  return draft;
 }
 
 /** The newest row's height, whether it starts a sender's turn, and its avatar node. */

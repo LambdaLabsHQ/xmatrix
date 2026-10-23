@@ -171,7 +171,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .env("XMATRIX_SUPERVISOR_PARENT", "1")
             .env("XMATRIX_HUB_URL", &hub_url)
             .env("XMATRIX_SUPERVISOR_TRANSACTION_NONCE", &control_nonce)
-            .env_remove("XMATRIX_ENVIRONMENT")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -590,6 +589,47 @@ fn supervise_activation(
     }
 }
 
+/// The first `--version` line of a verified candidate, from a windowless run
+/// bounded to 30 seconds and stripped of the Supervisor's control handles.
+#[cfg(windows)]
+fn reported_version(candidate: &std::path::Path) -> Result<String, Box<dyn std::error::Error>> {
+    use std::io::Read as _;
+    use std::os::windows::process::CommandExt as _;
+    use std::process::Stdio;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut child = std::process::Command::new(candidate)
+        .arg("--version")
+        .env_remove("XMATRIX_SUPERVISOR_CONTROL_PROTOCOL")
+        .env_remove("XMATRIX_SUPERVISOR_CONTROL_READ_HANDLE")
+        .env_remove("XMATRIX_SUPERVISOR_CONTROL_WRITE_HANDLE")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("candidate --version did not finish within 30 seconds".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let mut output = String::new();
+    if let Some(stdout) = child.stdout.take() {
+        stdout.take(4096).read_to_string(&mut output)?;
+    }
+    if !status.success() {
+        return Err("candidate --version failed".into());
+    }
+    Ok(output)
+}
+
 #[cfg(windows)]
 fn supervise_stable_daemon(
     root: &std::path::Path,
@@ -633,6 +673,14 @@ fn supervise_stable_daemon(
         kernel.payload().committed.release_sequence,
         Some(&kernel.payload().committed.publisher_sha256),
         false,
+    )?;
+    // The envelope signs these bytes and their release sequence, which one
+    // core's betas share, but not the version the daemon reported for them. Run
+    // the verified bytes to prove that version before the kernel orders it
+    // against the committed release.
+    xmatrix_windows_continuity::verify_reported_version(
+        &reported_version(&candidate)?,
+        &artifact.version,
     )?;
     kernel.apply(KernelEvent::StageCandidate {
         transaction_id: transaction_id.clone(),

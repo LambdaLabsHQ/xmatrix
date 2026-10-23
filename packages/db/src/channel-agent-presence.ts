@@ -3,11 +3,10 @@ import {
   LIVE_AGENT_STATUS_SQL,
   localLlmUsage,
   type LlmUsage,
-  agentAvatarUrlFromMetadata,
+  agentFaceUrl,
   isLiveAgentStatus,
   type AgentInstanceRest,
   type AgentStatusChip,
-  normalizeAgentPresetRuntime,
   repoSummonReference,
   type ChannelMemberPresence,
   type SerializedAgentInstance,
@@ -79,7 +78,7 @@ const DURABLE_PRESENTATION_SQL = `i.presentation_json->>'model' AS instance_mode
         i.presentation_json->'statusChips' AS instance_status_chips`;
 
 function harnessAvatarUrl(harness: string): string | undefined {
-  return agentAvatarUrlFromMetadata({}, normalizeAgentPresetRuntime(harness) ?? harness);
+  return agentFaceUrl(harness);
 }
 
 /**
@@ -99,7 +98,7 @@ export async function loadChannelAgentPresence(
     throw new DatabaseContractError("Agent presence Channel selector limit exceeded");
   }
   const rows = await transaction.query<ChannelAgentPresenceRow>({
-    name: "channel_agent_presence_v9",
+    name: "channel_agent_presence_v10",
     text: `SELECT i.instance_id,i.channel_id,i.channel_instance_id,i.status,
         i.created_at,i.updated_at,i.presentation_json->'usage' AS instance_usage,${DURABLE_PRESENTATION_SQL},
         r.workspace_machine_id,
@@ -116,7 +115,6 @@ export async function loadChannelAgentPresence(
       WHERE i.channel_id=ANY($2::text[])
         AND i.status IN (${LIVE_AGENT_STATUS_SQL})
         AND r.status IN ('running','stopping')
-        AND COALESCE(r.metadata_json->>'routedAs','')<>'management_channel_about'
       ORDER BY i.channel_id,i.channel_instance_id,i.instance_id
       LIMIT 513`,
     values: [spaceId, selected],
@@ -193,7 +191,7 @@ export async function loadVisibleLiveAgentPresence(
   principal: { kind: "user" | "agent"; id: string },
 ): Promise<Map<string, Record<string, ChannelMemberPresence>>> {
   const channels = await transaction.query<{ channel_id: string }>({
-    name: "visible_live_agent_channels_v1",
+    name: "visible_live_agent_channels_v2",
     text: `SELECT c.channel_id FROM data.channels c
       WHERE c.space_id=$1
         AND ${channelCapabilityPredicate({
@@ -206,7 +204,6 @@ export async function loadVisibleLiveAgentPresence(
           WHERE i.channel_id=c.channel_id
             AND i.status IN (${LIVE_AGENT_STATUS_SQL})
             AND r.status IN ('running','stopping')
-            AND COALESCE(r.metadata_json->>'routedAs','')<>'management_channel_about'
         )
       ORDER BY c.channel_id
       LIMIT ${MAX_VISIBLE_LIVE_AGENT_CHANNELS}`,

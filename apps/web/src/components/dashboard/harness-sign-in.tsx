@@ -1,10 +1,11 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, ExternalLink, Loader2, LogIn } from "lucide-react";
 import {
-  MACHINE_HARNESS_LOGIN_CAPABILITY, agentPresetById, parseHarnessInventory,
+  MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY, agentPresetById, parseHarnessInventory,
   type AgentRegistrationSummary, type HarnessActionStatus, type HarnessLoginProgress,
 } from "@xmatrix/protocol";
 
@@ -13,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { noticeClass } from "@/components/ui/status-tone";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
-import { queueHarnessAction, readHarnessAction } from "./machine-harness-api";
+import type { OnboardingCopy } from "@/lib/onboarding-copy";
+import { queueHarnessAction, readHarnessAction, refreshHarnessInventory } from "./machine-harness-api";
 import { ToolDetailSection } from "./tool-split";
 import { fetchMachineDaemons } from "./workspace-admin-views";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
@@ -22,6 +24,7 @@ type Step = "start" | "finish" | "cancel";
 type Operation = { controlId: string; step: Step; startedAt: number };
 
 const SETTLED = (status?: HarnessActionStatus["status"]) => Boolean(status && !["queued", "running"].includes(status));
+const OBSERVATION_TIMEOUT = 20 * 60_000;
 const LOGIN_STATE_LABEL = { signed_in: "Signed in", signed_out: "Not signed in", unknown: "Could not check" } as const;
 
 /** What the owner sees of a harness's own sign-in on one Machine, and the
@@ -40,8 +43,13 @@ export function harnessSignInView(input: {
   const item = parseHarnessInventory(daemon?.metadata.harnesses)?.items.find((entry) => entry.id === registration.key.harness);
   return {
     visible: owner && Boolean(login),
+    canCancelStart: Array.isArray(capabilities) && capabilities.includes(MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY),
     flow: login?.flow,
     state: item?.login,
+    /** Its own words, when started like a launch, for why it cannot take work. */
+    detail: item?.login === "signed_out" ? item.loginDetail : undefined,
+    /** Signed out with no sign-in xMatrix can run: it is set up on its machine. */
+    setUpThere: owner && !login && item?.login === "signed_out",
     installed: item?.installed,
     daemon,
     blocker: !daemon ? "Connect this machine to sign in from here."
@@ -50,8 +58,22 @@ export function harnessSignInView(input: {
   };
 }
 
-export function HarnessSignInSection({ registration, token, userId }: {
+/** The person's own enabled agents whose harness their machine reports as
+ * signed out: nothing sent to one gets an answer until it is signed in. */
+export function signedOutRegistrations(registrations: readonly AgentRegistrationSummary[], userId: string | undefined,
+  daemons: Parameters<typeof harnessSignInView>[0]["daemons"]): AgentRegistrationSummary[] {
+  return registrations.filter((registration) => registration.state === "enabled" &&
+    harnessSignInView({ registration, userId, daemons }).state === "signed_out");
+}
+
+export function HarnessSignInSection({ registration, token, userId, bare = false, signInLabel = "Sign in", onSignedIn }: {
   registration: AgentRegistrationSummary; token: string; userId: string;
+  /** Called once a sign-in started here finishes signed in. */
+  onSignedIn?: () => void;
+  /** Only the sign-in itself, under a sentence the caller already wrote. */
+  bare?: boolean;
+  /** The button's word in the caller's language. */
+  signInLabel?: string;
 }) {
   const queryClient = useQueryClient();
   const daemonKey = useMemo(() => xmatrixQueryKeys.domain({ userId }, "machine-daemons", []), [userId]);
@@ -64,11 +86,21 @@ export function HarnessSignInSection({ registration, token, userId }: {
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [waitState, setWaitState] = useState<"normal" | "slow" | "expired">("normal");
+  useEffect(() => {
+    setWaitState("normal");
+    if (!operation) return;
+    const slow = setTimeout(() => setWaitState("slow"), Math.max(0, operation.startedAt + 60_000 - Date.now()));
+    const expired = setTimeout(() => setWaitState("expired"),
+      Math.max(0, operation.startedAt + OBSERVATION_TIMEOUT - Date.now()));
+    return () => { clearTimeout(slow); clearTimeout(expired); };
+  }, [operation]);
+
   const status = useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId }, "harness-actions", [operation?.controlId ?? null]),
     queryFn: ({ signal }) => readHarnessAction(token, operation!.controlId, signal),
-    enabled: Boolean(operation), retry: false,
-    refetchInterval: (query) => operation && Date.now() - operation.startedAt < 20 * 60_000 &&
+    enabled: Boolean(operation) && waitState !== "expired", retry: false,
+    refetchInterval: (query) => operation && Date.now() - operation.startedAt < OBSERVATION_TIMEOUT &&
       !SETTLED(query.state.data?.status) ? 2_000 : false,
     refetchIntervalInBackground: true,
   });
@@ -78,7 +110,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
       const daemon = view.daemon;
       if (!daemon?.machineId) throw new UserFacingProblem("This machine is offline.", true);
       const result = await queueHarnessAction(token, daemon.machineId, daemon.hostId, registration.key.harness,
-        `login_${input.step}`, undefined, input.code);
+        `login_${input.step}`, AbortSignal.timeout(30_000), input.code);
       return { ...input, controlId: result.controlId };
     },
     onSuccess: ({ step, controlId }) => {
@@ -114,6 +146,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
     if (operation.step === "cancel") return;
     if (settled.status === "succeeded" && login?.state === "signed_in") {
       setNotice({ text: "Signed in.", error: false });
+      onSignedIn?.();
     } else if (login?.state !== "cancelled") {
       setNotice({ text: settled.error ?? "The sign-in did not finish.", error: true });
     }
@@ -123,25 +156,37 @@ export function HarnessSignInSection({ registration, token, userId }: {
 
   if (!view.visible) return null;
   const busy = queue.isPending || Boolean(operation);
-  const starting = busy && !prompt;
+  const starting = busy && !prompt && !status.isError && waitState === "normal";
   const waitingForDevice = Boolean(prompt && prompt.flow === "device_code");
 
-  return (
-    <ToolDetailSection title="Sign-in">
+  const body = (
       <div className="space-y-3 text-sm" data-testid="harness-sign-in">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p>
+          {!bare && <p>
             {view.state ? LOGIN_STATE_LABEL[view.state] : "Not checked yet"}
             <span className="text-muted-foreground"> · the harness&apos;s own account on {registration.machineName}</span>
-          </p>
+          </p>}
           {!prompt && (
             <Button size="sm" variant="outline" disabled={busy || Boolean(view.blocker)}
               onClick={() => queue.mutate({ step: "start" })}>
-              {starting ? <Loader2 className="animate-spin" /> : <LogIn />}
-              {starting ? "Starting sign-in…" : view.state === "signed_in" ? "Sign in again" : "Sign in"}
+              {starting ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <LogIn />}
+              {starting ? "Starting sign-in…" : operation ? "Sign-in pending" : view.state === "signed_in" ? "Sign in again" : signInLabel}
             </Button>
           )}
         </div>
+        {operation && !prompt && view.canCancelStart && <Button size="sm" variant="ghost"
+          disabled={queue.isPending || operation.step === "cancel"}
+          onClick={() => queue.mutate({ step: "cancel" })}>Cancel sign-in</Button>}
+        {operation && !prompt && !view.canCancelStart && <p className="text-xs text-muted-foreground">
+          Update this machine&apos;s xMatrix daemon to cancel before its sign-in link arrives.
+        </p>}
+        {operation && waitState !== "normal" && !status.isError && <p role="status" className="text-xs text-muted-foreground">
+          {waitState === "expired"
+            ? "Stopped checking after 20 minutes. The sign-in may still be running on the machine. Resolve this sign-in before starting again."
+            : status.data?.status === "queued"
+              ? "The machine has not picked up this sign-in request yet."
+              : "The machine has not returned a sign-in result yet."}
+        </p>}
         {view.blocker && <p className="text-xs text-muted-foreground">{view.blocker}</p>}
         {prompt?.verificationUri && (
           <div className="space-y-2">
@@ -173,13 +218,13 @@ export function HarnessSignInSection({ registration, token, userId }: {
                 <Input value={code} onChange={(event) => setCode(event.target.value)} placeholder="Paste the code"
                   aria-label="Sign-in code" autoComplete="off" spellCheck={false} disabled={busy} />
                 <Button size="sm" type="submit" disabled={busy || !code.trim()}>
-                  {busy ? <Loader2 className="animate-spin" /> : null}Finish
+                  {busy ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}Finish
                 </Button>
               </form>
             )}
             <div className="flex items-center justify-between gap-2">
-              {waitingForDevice && <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2 className="size-3 animate-spin" />Waiting for you to finish in the browser…
+              {waitingForDevice && !status.isError && waitState !== "expired" && <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <AnimatedIcon icon={Loader2} className="size-3 animate-spin" />Waiting for you to finish in the browser…
               </p>}
               <Button size="sm" variant="ghost" className="ml-auto"
                 disabled={queue.isPending || operation?.step === "cancel"}
@@ -188,8 +233,86 @@ export function HarnessSignInSection({ registration, token, userId }: {
           </div>
         )}
         {notice && <p role="status" className={noticeClass(notice.error ? "alert" : "settled", "rounded-lg p-3")}>{notice.text}</p>}
-        {status.isError && <p className="text-xs text-destructive">Status could not be checked. The sign-in may still be running.</p>}
+        {status.isError && operation && <div className="space-y-2">
+          <p role="status" className="text-xs text-destructive">Status could not be checked. The sign-in may still be running on the machine.</p>
+          {waitState !== "expired" && <Button size="sm" variant="outline" disabled={status.isFetching}
+            onClick={() => { void status.refetch(); }}>Check status again</Button>}
+        </div>}
       </div>
-    </ToolDetailSection>
   );
+  return bare ? body : <ToolDetailSection title="Sign-in">{body}</ToolDetailSection>;
+}
+
+/** The owner's Machine daemons, shared with the sign-in's own reading. */
+function useOwnerDaemons(token: string, userId: string) {
+  return useQuery({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons", []),
+    queryFn: ({ signal }) => fetchMachineDaemons(token, signal), staleTime: 15_000 });
+}
+
+/** Starts the machine's check of its harnesses again and answers whether this
+ * one can take work now. */
+async function checkHarnessAgain(token: string, daemon: { machineId?: string; hostId?: string }, harness: string) {
+  if (!daemon.machineId) throw new UserFacingProblem("This machine is offline.", true);
+  const { controlId } = await refreshHarnessInventory(token, daemon.machineId, daemon.hostId, AbortSignal.timeout(30_000));
+  for (const started = Date.now(); Date.now() - started < 2 * 60_000;) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const status = await readHarnessAction(token, controlId);
+    if (!SETTLED(status.status)) continue;
+    const item = status.result?.inventory?.items.find((entry) => entry.id === harness);
+    return item?.login === "signed_in";
+  }
+  return false;
+}
+
+/** What an owner reads about an agent whose program cannot take work on its
+ * machine, and the one thing to do: sign it in from here, or, for a program
+ * set up only on its machine, its own words and a check after setting it up. */
+export function HarnessSignedOutBody({ registration, token, userId, copy, program, machine, onSignedIn }: {
+  registration: AgentRegistrationSummary; token: string; userId: string; copy: OnboardingCopy;
+  program: string; machine: string; onSignedIn?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const view = harnessSignInView({ registration, userId, daemons: useOwnerDaemons(token, userId).data });
+  const check = useMutation({
+    mutationFn: () => checkHarnessAgain(token, view.daemon ?? {}, registration.key.harness),
+    onSuccess: (ready) => {
+      void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons", []) });
+      if (ready) onSignedIn?.();
+    },
+  });
+  if (!view.setUpThere) {
+    return <>
+      <p>{copy.signedOut(program, machine)}</p>
+      <div className="mt-2"><HarnessSignInSection registration={registration} token={token} userId={userId} bare
+        signInLabel={copy.signIn} onSignedIn={onSignedIn} /></div>
+    </>;
+  }
+  const command = agentPresetById(registration.key.harness)?.runtime ?? registration.key.harness;
+  return <>
+    <p>{copy.cannotTakeWork(program, machine)}</p>
+    {view.detail && <p className="mt-1 text-muted-foreground">{copy.itSays} <q>{view.detail}</q></p>}
+    <p className="mt-1">{copy.setUpThere(command)}</p>
+    <div className="mt-2 flex items-center gap-2">
+      <Button size="sm" variant="outline" disabled={check.isPending || !view.daemon} onClick={() => check.mutate()}>
+        {check.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}{copy.checkAgain}
+      </Button>
+      {check.data === false && <p role="status" className="text-[13px] text-muted-foreground">{copy.stillCannot}</p>}
+      {check.isError && <p role="status" className="text-[13px] text-destructive">
+        {userErrorMessage(check.error, "Couldn't send that to the machine")}</p>}
+    </div>
+  </>;
+}
+
+/** The Agents page's place for a program set up only on its machine that
+ * cannot take work: nothing when it can, or when xMatrix can sign it in. */
+export function HarnessSetUpSection({ registration, token, userId, copy }: {
+  registration: AgentRegistrationSummary; token: string; userId: string; copy: OnboardingCopy;
+}) {
+  const daemons = useOwnerDaemons(token, userId);
+  if (!harnessSignInView({ registration, userId, daemons: daemons.data }).setUpThere) return null;
+  return <ToolDetailSection title="Set-up">
+    <div className="text-sm"><HarnessSignedOutBody registration={registration} token={token} userId={userId} copy={copy}
+      program={agentPresetById(registration.key.harness)?.displayName ?? registration.displayName}
+      machine={registration.machineName} /></div>
+  </ToolDetailSection>;
 }

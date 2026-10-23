@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { cn } from "@/lib/utils";
 
 import { StatusChipBadge, type StatusChip } from "./workspace-shell-recovered";
@@ -24,7 +25,7 @@ export function identityStatusChips({ name, owner, machine, machineBusy, machine
 
 /* Who, where, and in what. These answer which of two same-named Agents is
    speaking, so they stay whole and the tags after them give way first. */
-export function AgentIdentityLabels({ name, owner, machine, machineBusy, machineTarget, workspace, wrap }: {
+export const AgentIdentityLabels = memo(function AgentIdentityLabels({ name, owner, machine, machineBusy, machineTarget, workspace, wrap }: {
   name?: string; owner?: string; machine?: string; machineBusy?: StatusChip["busy"];
   machineTarget?: StatusChip["machine"]; workspace?: StatusChip;
   /** Set where the cluster owns its own lines; a one-line header keeps them together. */
@@ -38,4 +39,4 @@ export function AgentIdentityLabels({ name, owner, machine, machineBusy, machine
   )}>
     {chips.map((chip) => <StatusChipBadge key={chip.id} chip={chip} untruncated={!wrap} />)}
   </span>;
-}
+});

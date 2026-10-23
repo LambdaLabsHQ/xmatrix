@@ -12,29 +12,17 @@ import type { AdminUserDetail, AdminUserSummary } from "@xmatrix/protocol";
 import { ChevronLeft } from "lucide-react";
 
 import { AdminTable, type AdminColumn } from "./admin-table";
+import { AdminUserConnectors } from "./platform-admin-user-connectors";
 import { AdminPaperAction } from "./admin-paper";
-import { useAdminParam, useAdminUserDetail, usePlatformOverview } from "./platform-admin-data";
+import { openAdminSpace, useAdminParam, useAdminUserDetail, usePlatformOverview } from "./platform-admin-data";
 import {
   adminTime,
   adminUserLabel,
-  formatAdminAge,
   formatAdminCount,
 } from "./platform-admin-overview";
+import { AdminDetailHeader, TimeCell, adminTimeColumn, adminAge as age, adminUtc as utc } from "./platform-admin-cells";
 import { ToolDetailSection, ToolFact, ToolFacts } from "./tool-split";
 import { AdminDailyBars, AdminQueryView, AdminStatGrid } from "./workspace-platform-admin-view";
-
-function age(value: string | undefined, fallback = "—"): string {
-  return formatAdminAge(value, Date.now()) || fallback;
-}
-
-/** A time cell: one line, the exact UTC time on hover. */
-function TimeCell({ value, fallback }: { value: string | undefined; fallback?: string }) {
-  return <span className="whitespace-nowrap text-xs text-muted-foreground" title={value}>{age(value, fallback).replace(" UTC", "")}</span>;
-}
-
-function utc(value: string | undefined): string {
-  return value ? `${value.slice(0, 16).replace("T", " ")} UTC` : "—";
-}
 
 const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
   {
@@ -64,6 +52,10 @@ const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
     render: (user) => <TimeCell value={user.registeredAt} />,
   },
   {
+    key: "lastMessage", label: "Last message", numeric: true, value: (user) => adminTime(user.lastMessageAt),
+    render: (user) => <TimeCell value={user.lastMessageAt} fallback="Never" />,
+  },
+  {
     key: "lastAccess", label: "Last access", numeric: true, value: (user) => adminTime(user.lastSessionAt),
     render: (user) => <TimeCell value={user.lastSessionAt} fallback="Never" />,
   },
@@ -79,10 +71,6 @@ const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
   { key: "agents", mobile: "metric", label: "Agents", numeric: true, value: (user) => user.agentRegistrations, render: (user) => formatAdminCount(user.agentRegistrations) },
   { key: "machines", mobile: "metric", label: "Machines", numeric: true, value: (user) => user.machines, render: (user) => formatAdminCount(user.machines) },
   { key: "messages", mobile: "metric", label: "Messages", numeric: true, value: (user) => user.messages, render: (user) => formatAdminCount(user.messages) },
-  {
-    key: "lastMessage", label: "Last message", hidden: true, numeric: true, value: (user) => adminTime(user.lastMessageAt),
-    render: (user) => <TimeCell value={user.lastMessageAt} />,
-  },
 ];
 
 function userSearchText(user: AdminUserSummary): string {
@@ -110,7 +98,7 @@ function UsersList({ token, onOpen }: { token?: string; onOpen: (userId: string)
           rowKey={(user) => user.userId}
           search={userSearchText}
           searchPlaceholder="Name, email, handle, id"
-          defaultSort="lastAccess"
+          defaultSort="lastMessage"
           onRowClick={(user) => onOpen(user.userId)}
           empty="No user matches this search."
           note={overview.truncated.users
@@ -142,17 +130,9 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
   const spaceName = (spaceId: string) => spaceNames.get(spaceId) ?? spaceId;
   return (
     <>
-      <header>
-        <h2 className="text-2xl font-semibold leading-tight [overflow-wrap:anywhere]">{adminUserLabel(user)}</h2>
-        <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+      <AdminDetailHeader title={adminUserLabel(user)} truncated={detail.truncated}>
           {[user.email, user.handle ? `@${user.handle}` : undefined].filter(Boolean).join(" · ")}
-        </p>
-        {detail.truncated.length > 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Lists cut at their bound: {detail.truncated.join(", ")}.
-          </p>
-        )}
-      </header>
+      </AdminDetailHeader>
 
       <ToolDetailSection title="Account">
         <div className="app-admin-account">
@@ -162,6 +142,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             <ToolFact label="Sign-in">{user.providers?.join(", ") || "—"}</ToolFact>
             <ToolFact label="Email verified">{user.emailVerified ? "Yes" : "No"}</ToolFact>
             <ToolFact label="Profile">{user.profileCompleted ? "Completed" : "Not completed"}</ToolFact>
+            <ToolFact label="Last message"><TimeCell value={user.lastMessageAt} fallback="Never" /></ToolFact>
             <ToolFact label="Last access">{age(user.lastSessionAt, "Never")}</ToolFact>
           </ToolFacts>
         </div>
@@ -192,6 +173,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
 
       <ToolDetailSection title={`Spaces (${detail.spaces.length})`}>
         <AdminTable id="us" label="Spaces" rows={detail.spaces} rowKey={(space) => space.spaceId}
+          onRowClick={(space) => openAdminSpace(space.spaceId)}
           defaultSort="joined" empty="Not a member of any Space."
           columns={[
             { key: "name", label: "Space", value: (space) => space.name,
@@ -221,8 +203,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             { key: "harness", label: "Runtime", value: (agent) => agent.harness, render: (agent) => agent.harness },
             { key: "space", label: "Space", value: (agent) => spaceName(agent.spaceId),
               render: (agent) => <span className="block truncate">{spaceName(agent.spaceId)}</span> },
-            { key: "updated", label: "Updated", numeric: true, value: (agent) => adminTime(agent.updatedAt),
-              render: (agent) => <TimeCell value={agent.updatedAt} /> },
+            adminTimeColumn("updated", "Updated", (agent: { updatedAt: string }) => agent.updatedAt),
           ]} />
       </ToolDetailSection>
 
@@ -242,19 +223,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
       </ToolDetailSection>
 
       <ToolDetailSection title={`Connectors added (${detail.connectors.length})`}>
-        <AdminTable id="uc" label="Connectors" rows={detail.connectors}
-          rowKey={(connector) => `${connector.spaceId}:${connector.providerId}`}
-          defaultSort="created" empty="No connector added."
-          columns={[
-            { key: "provider", label: "Connector", value: (connector) => connector.providerName,
-              render: (connector) => <span className="font-bold">{connector.providerName}</span> },
-            { key: "space", label: "Space", value: (connector) => spaceName(connector.spaceId),
-              render: (connector) => <span className="block truncate">{spaceName(connector.spaceId)}</span> },
-            { key: "status", label: "Status", value: (connector) => connector.status,
-              render: (connector) => <span className="text-xs">{connector.status}</span> },
-            { key: "created", label: "Added", numeric: true, value: (connector) => adminTime(connector.createdAt),
-              render: (connector) => <TimeCell value={connector.createdAt} /> },
-          ]} />
+        <AdminUserConnectors connectors={detail.connectors} spaceName={spaceName} />
       </ToolDetailSection>
 
       <ToolDetailSection title={`Sessions (${detail.sessions.length})`}>

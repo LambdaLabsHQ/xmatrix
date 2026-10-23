@@ -1,10 +1,11 @@
 /**
  * Pure search / channel-tree model (no workspace UI view module imports).
  */
-import type { SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelSnapshot } from "@xmatrix/protocol";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { CHANNEL_READ_COUNTS_STORAGE_PREFIX } from "./workspace-shell-constants";
 import { metadataString } from "./workspace-shell-formatters";
+import type { SearchRank } from "./workspace-search-rank";
 
 export type WorkspaceSearchResult = {
   id: string;
@@ -19,23 +20,13 @@ export type WorkspaceSearchResult = {
   /** Space member to open. */
   userId?: string;
   spaceId?: string;
+  /** Where it sorts among everything found (`workspace-search-rank.ts`). */
+  rank: SearchRank;
 };
-
-/** Directory hits stay above messages, so a person is not pushed out by chat. */
-export function searchResultRank(kind: WorkspaceSearchResult["kind"]): number {
-  if (kind === "channel") return 0;
-  if (kind === "page") return 1;
-  if (kind === "member") return 2;
-  if (kind === "message") return 3;
-  if (kind === "agent") return 4;
-  if (kind === "space") return 5;
-  if (kind === "machine") return 6;
-  return 7;
-}
 
 export type ChannelTreeNode = {
   subtreeActivityAt?: string;
-  channel: SerializedChannel;
+  channel: ChannelSnapshot;
   children: ChannelTreeNode[];
 };
 
@@ -48,7 +39,7 @@ export function channelReadCountsStorageKey(userId: string): string {
 }
 
 export function channelMatchesSearch(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   normalizedQuery: string
 ): boolean {
   // Include last-message preview text: on mobile that is the second line of

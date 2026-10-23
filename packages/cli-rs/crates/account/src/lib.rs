@@ -10,7 +10,7 @@ use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
 use xmatrix_cli_core::{auth, config, daemon_auth, http};
 use xmatrix_cli_update::{
-    DEFAULT_CLI_RELEASE_API_URL, UpdateHintTarget, warn_if_cli_update_available,
+    UpdateHintTarget, default_cli_release_api_url, warn_if_cli_update_available,
 };
 
 pub async fn cmd_login(
@@ -223,16 +223,25 @@ pub async fn cmd_logout(hub_url: &str, all: bool, all_profiles: bool) -> error::
         let store = xmatrix_cli_core::profile::ProfileStore::discover();
         let registry = store.load_or_bootstrap()?;
         for state_root in store.state_roots(&registry)? {
+            for session in config::sessions_in_state_root(state_root.as_path()).await {
+                auth::end_hub_session(&session).await;
+            }
             config::clear_all_sessions_in_state_root(state_root.as_path()).await?;
         }
         println!("{} Logged out of all local profiles", "✓".green().bold());
     } else if all {
+        for session in config::sessions_in_state_root(&config::profile_state_dir()).await {
+            auth::end_hub_session(&session).await;
+        }
         config::clear_all_sessions().await?;
         println!(
             "{} Logged out of all sessions in this profile",
             "✓".green().bold()
         );
     } else {
+        if let Some(session) = config::load_session_for_hub(hub_url).await {
+            auth::end_hub_session(&session).await;
+        }
         config::clear_session_for_hub(hub_url).await?;
         println!("{} Logged out of {}", "✓".green().bold(), hub_url);
     }
@@ -321,7 +330,7 @@ pub async fn cmd_status(hub_url: &str) -> error::Result<()> {
     if let Some(status) = resp.get("status").and_then(|v| v.as_str()) {
         println!("  Status: {status}");
     }
-    warn_if_cli_update_available(DEFAULT_CLI_RELEASE_API_URL, UpdateHintTarget::Cli).await;
+    warn_if_cli_update_available(default_cli_release_api_url(), UpdateHintTarget::Cli).await;
 
     Ok(())
 }
@@ -330,8 +339,6 @@ fn environment_label(hub_url: &str) -> &'static str {
     let origin = config::normalized_hub_origin(hub_url);
     if origin == protocol::DEFAULT_HUB_URL {
         "production"
-    } else if origin == protocol::TEST_HUB_URL {
-        "test"
     } else {
         "custom"
     }

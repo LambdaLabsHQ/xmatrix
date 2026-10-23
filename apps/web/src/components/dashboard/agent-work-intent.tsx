@@ -6,6 +6,7 @@ import type { AgentRuntimeWaiting } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
 import { statusInkClass } from "@/components/ui/status-tone";
+import { useDecorationSpin, useDecorationAnimationGroup } from "@/components/ui/decoration-animation";
 import type { AgentWorkItem } from "./workspace-shell-message-model";
 
 /**
@@ -20,7 +21,7 @@ export const INTENT_STALE_MS = 5 * 60 * 1000;
 const TICK_MS = 30_000;
 
 /** When each Instance's current intent was first seen by this client. */
-export function useIntentSince(items: readonly AgentWorkItem[]): ReadonlyMap<string, number> {
+export function useIntentSince(items: readonly Pick<AgentWorkItem, "key" | "intent">[]): ReadonlyMap<string, number> {
   const seen = useRef(new Map<string, { intent: string; since: number }>());
   const [since, setSince] = useState<ReadonlyMap<string, number>>(() => new Map());
   useEffect(() => {
@@ -31,12 +32,12 @@ export function useIntentSince(items: readonly AgentWorkItem[]): ReadonlyMap<str
       const previous = seen.current.get(item.key);
       next.set(item.key, previous?.intent === item.intent ? previous : { intent: item.intent, since: now });
     }
+    const changed = seen.current.size !== next.size ||
+      [...next].some(([key, value]) => seen.current.get(key)?.since !== value.since);
     seen.current = next;
-    setSince((current) => {
-      const changed = current.size !== next.size ||
-        [...next].some(([key, value]) => current.get(key) !== value.since);
-      return changed ? new Map([...next].map(([key, value]) => [key, value.since])) : current;
-    });
+    // An external-store update can leave work on this fiber's alternate, so
+    // even a setter returning the same state may schedule another commit.
+    if (changed) setSince(new Map([...next].map(([key, value]) => [key, value.since])));
   }, [items]);
   return since;
 }
@@ -62,10 +63,12 @@ export function agentWaitingPhrase(waiting: AgentRuntimeWaiting, now: number): s
   return `waiting: ${agentWaitingSubject(waiting).word} · ${elapsedLabel(now - waiting.sinceMillis)}`;
 }
 
-/** What the plaque names after "Waiting": the runtime's label as it is, with its kind's icon. */
+/** What the plaque names after "Waiting": the runtime's label as it is, or its task count, with its kind's icon. */
 export function agentWaitingSubject(waiting: AgentRuntimeWaiting): { word: string; icon: LucideIcon } {
   const background = waiting.kind === "background";
-  return { word: waiting.label || (background ? "tasks" : "a tool call"), icon: background ? Layers : SquareTerminal };
+  const tasks = background && typeof waiting.count === "number"
+    ? `${waiting.count} ${waiting.count === 1 ? "task" : "tasks"}` : undefined;
+  return { word: tasks || waiting.label || (background ? "tasks" : "a tool call"), icon: background ? Layers : SquareTerminal };
 }
 
 function elapsedLabel(ms: number): string {
@@ -120,13 +123,13 @@ export function AgentWorkIntent({
             <span className="app-agent-work-intent-caption">Waiting</span>
             <span className="app-agent-work-intent-main">
               <subject.icon className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{subject.word}</span>
+              <IntentInk text={subject.word} animated={!stale} />
             </span>
           </>
         ) : (
           <>
             {busy && <span className="app-agent-work-intent-caption">Working on</span>}
-            <span className="app-agent-work-intent-main"><span className="truncate">{intent}</span></span>
+            <span className="app-agent-work-intent-main"><IntentInk text={intent} animated={!stale} /></span>
           </>
         )}
       </span>
@@ -138,6 +141,36 @@ export function AgentWorkIntent({
       )}
     </span>
   );
+}
+
+/** The ink stays in place while a feathered window carries the highlight.
+ * Its duplicate is a hidden paint layer, never a second accessible label. */
+function createIntentInkEffects(element: HTMLElement): readonly KeyframeEffect[] {
+  const window = element.querySelector<HTMLElement>(".app-agent-work-intent-ink-window");
+  const shine = element.querySelector<HTMLElement>(".app-agent-work-intent-ink-shine");
+  if (!window || !shine) return [];
+  const timing: KeyframeEffectOptions = { duration: 2200, iterations: Infinity, easing: "linear" };
+  return [
+    new KeyframeEffect(window, [{ transform: "translateX(0)" }, { transform: "translateX(333.333333%)" }], timing),
+    new KeyframeEffect(shine, [{ transform: "translateX(80%)" }, { transform: "translateX(-120%)" }], timing),
+  ];
+}
+
+function intentInkVisibility(element: HTMLElement) {
+  return {
+    element: element.closest<HTMLElement>(".app-agent-work-item") ?? element,
+    root: element.closest<HTMLElement>(".app-agent-work-scroller"),
+  };
+}
+
+function IntentInk({ text, animated }: { text: string | undefined; animated: boolean }) {
+  const animationRef = useDecorationAnimationGroup(createIntentInkEffects, animated, intentInkVisibility);
+  return <span ref={animationRef} className="app-agent-work-intent-ink truncate">
+    <span className="app-agent-work-intent-ink-base">{text}</span>
+    <span className="app-agent-work-intent-ink-window" aria-hidden="true">
+      <span className="app-agent-work-intent-ink-shine" data-ink={text} />
+    </span>
+  </span>;
 }
 
 /**
@@ -194,13 +227,16 @@ const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS;
 
 function TimerRing({ fraction }: { fraction: number }) {
   // Arc length is the elapsed share of the attention threshold. The ring
-  // itself turns (CSS); reduced motion leaves the arc parked at 12 o'clock.
+  // itself turns; reduced motion leaves the arc parked at 12 o'clock.
+  const animationRef = useDecorationSpin();
   return (
-    <svg className="app-agent-work-intent-ring" viewBox="0 0 18 18" aria-hidden="true">
-      <circle cx="9" cy="9" r={TIMER_RADIUS} />
-      <circle cx="9" cy="9" r={TIMER_RADIUS} transform="rotate(-90 9 9)"
-        strokeDasharray={`${fraction * TIMER_CIRCUMFERENCE} ${TIMER_CIRCUMFERENCE}`} />
-    </svg>
+    <span ref={animationRef} className="app-agent-work-intent-ring" aria-hidden="true">
+      <svg className="app-agent-work-intent-ring-face" viewBox="0 0 18 18">
+        <circle cx="9" cy="9" r={TIMER_RADIUS} />
+        <circle cx="9" cy="9" r={TIMER_RADIUS} transform="rotate(-90 9 9)"
+          strokeDasharray={`${fraction * TIMER_CIRCUMFERENCE} ${TIMER_CIRCUMFERENCE}`} />
+      </svg>
+    </span>
   );
 }
 

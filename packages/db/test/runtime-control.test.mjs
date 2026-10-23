@@ -177,7 +177,7 @@ test("instance_connect atomically promotes Instance, Run, and Launch", async () 
 
 test("the first Agent reply is recorded once against its exact Launch", async () => {
   const db = database((query) => placedChannel(query) ?? (
-    query.name === "channel_capability_runtime_terminalize_v3" ? [channel]
+    query.name === "channel_capability_runtime_check_v3" ? [channel]
         : query.name === "runtime_agent_launch_first_reply_v1" ? [{ launch_age_ms: "1250" }] : []));
   const value = await new PostgresRuntimeRepository(db).recordAgentLaunchFirstReply({
     requestId: "first-reply-1", channelId: "channel-1", runId: "run-1",
@@ -286,24 +286,27 @@ test("a pre-spawn failure still owes a notice when launch update already failed 
   const run = { status: "failed", version: 3, metadata_json: {
     machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" } };
   const context = { run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
-    agent_name: "Codex", status: "failed", startup_failed: true, metadata_json: run.metadata_json };
-  const db = lifecycleDatabase(run, { machine_lifecycle_notice_context_v5: [context],
+    agent_name: "Codex", harness: "codex", status: "failed", startup_failed: true, metadata_json: run.metadata_json };
+  const db = lifecycleDatabase(run, { machine_lifecycle_notice_context_v9: [context],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }] });
   const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("spawn-failed", "machine_spawn_result",
     { ...spawnedPayload, ok: false, error: "base_ref_unresolved" }));
   assert.deepEqual(value.changedRunIds, [], "an already failed Run requires no new status transition");
   assert.equal(value.startupFailureNoticeContext?.runId, "run-1");
+  assert.equal(value.startupFailureNoticeContext?.harness, "codex", "the notice carries its Agent's face");
   const replay = db.calls.find(q => q.name === "machine_lifecycle_replay_write_v1");
   assert.ok(JSON.stringify(replay.values).includes("startupFailureNoticeContext"), "notice delivery survives report replay");
+  assert.equal(Date.parse(replay.values[7]) - Date.parse(replay.values[6]), 30 * 24 * 60 * 60 * 1_000,
+    "a terminal lifecycle event keeps its month-long replay");
 });
 
-for (const [status, recoverableLaunchFailure, routedAs, executionCancellation] of [["stopped", false], ["completed", false],
-  ["starting", true], ["failed", false, "management_channel_about"], ["failed", false, undefined, { reason: "timeout" }]]) {
-  test(`late spawn failure does not announce ${executionCancellation ? "cancelled" : routedAs ?? status} as a new startup failure`, async () => {
-    const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1", routedAs, executionCancellation };
+for (const [status, recoverableLaunchFailure, executionCancellation] of [["stopped", false], ["completed", false],
+  ["starting", true], ["failed", false, { reason: "timeout" }]]) {
+  test(`late spawn failure does not announce ${executionCancellation ? "cancelled" : status} as a new startup failure`, async () => {
+    const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1", executionCancellation };
     const db = lifecycleDatabase({ status, version: 3, metadata_json: body }, {
-      machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
-        agent_name: "Codex", status, routed_as: routedAs, metadata_json: body }],
+      machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+        agent_name: "Codex", status, metadata_json: body }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
     });
     const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("spawn-failed", "machine_spawn_result",
@@ -317,7 +320,7 @@ for (const cancelled of [false, true]) {
     const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
       ...(cancelled ? { executionCancellation: { reason: "timeout", processCleanup: { status: "pending" } } } : {}) };
     const db = lifecycleDatabase({ status: "failed", version: 3, metadata_json: body }, {
-      machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
         agent_name: "Codex", status: "failed", startup_failed: true, metadata_json: body }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
     });
@@ -334,7 +337,7 @@ test("a confirmed channel stop leaves the receipt on the command instead of a Ch
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
     stopRequest: { sourceMessageId: "message-1", requestedAt: "2026-10-06T08:46:35.000Z" } };
   const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "stopping", metadata_json: body }],
     machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
@@ -348,7 +351,7 @@ test("a confirmed channel stop leaves the receipt on the command instead of a Ch
 test("a confirmed stop with no channel command still posts its notice", async () => {
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" };
   const db = lifecycleDatabase({ status: "running", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "running", metadata_json: body }],
     machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
@@ -359,11 +362,40 @@ test("a confirmed stop with no channel command still posts its notice", async ()
   assert.equal(value.stopResultNoticeContext.startupFailed, undefined);
 });
 
+test("a stop from a withdrawn registration carries why and who withdrew it", async () => {
+  const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" };
+  const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      agent_name: "claude", status: "stopping", metadata_json: body, stop_reason_code: "registration_disabled",
+      access_actor_name: "Daniel", owner_name: "Daniel", launcher_name: null }],
+    machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
+    machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
+  });
+  const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("registration-stop", "machine_stop_result",
+    { runId: "run-1", executionKey: "execution-1", requestId: "registration-stop:1", ok: true }));
+  assert.deepEqual(value.stopResultNoticeContext.stopCause,
+    { code: "registration_disabled", actorName: "Daniel", ownerName: "Daniel" });
+});
+
+test("a stop from a deleted Instance says the Instance was deleted", async () => {
+  const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
+    instanceDeletion: { schemaVersion: 1, state: "pending" } };
+  const db = lifecycleDatabase({ status: "running", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      agent_name: "claude", status: "running", metadata_json: body, owner_name: "Ada" }],
+    machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
+    machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
+  });
+  const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("delete-stop", "machine_stop_result",
+    { runId: "run-1", executionKey: "execution-1", requestId: "delete-1", ok: true }));
+  assert.deepEqual(value.stopResultNoticeContext.stopCause, { code: "instance_deleted", ownerName: "Ada" });
+});
+
 test("a failed channel stop still posts because acceptance is not termination", async () => {
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
     stopRequest: { sourceMessageId: "message-1" } };
   const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v5: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "stopping", metadata_json: body }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
   });
@@ -506,23 +538,7 @@ for (const ok of [true, false]) test(`an applied ${ok ? "successful" : "recovera
     { controlId: "control-1", ok, at: undefined });
 });
 
-test("a Channel About session's spawn is its start: its launch connects, so its Run ending is no failure", async () => {
-  const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1", spawnControlId: "control-1",
-    routedAs: "management_channel_about" };
-  for (const [instance, expected] of [[{}, "connected"], [{ instance_id: "instance-1", instance_status: "offline",
-    instance_version: 1, channel_instance_id: 1 }, "spawned"]]) {
-    const db = lifecycleDatabase({ status: "starting", version: 3, metadata_json: body, ...instance }, {
-      machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
-      machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
-    });
-    await new PostgresMachineLifecycleRepository(db).apply(machineReport(`spawn-${expected}`, "machine_spawn_result",
-      { requestId: "control-1", runId: "run-1", executionKey: "execution-1", ok: true, pid: 1 }));
-    const launch = db.calls.find(q => q.name === "machine_lifecycle_launch_update_v2");
-    assert.equal(launch.values[1], expected, instance.instance_id ? "an Instance's launch connects when it does" : "no Instance to wait for");
-  }
-});
-
-for (const rejectionCode of ['routing_no_eligible', 'routing_selection_failed', 'routing_parameter_selection_failed',
+for (const rejectionCode of ['registration_harness_signed_out', 'routing_no_eligible', 'routing_selection_failed', 'routing_parameter_selection_failed',
   'routing_parameter_constraints_invalid', 'routing_parameter_models_empty', 'routing_parameter_workspaces_empty',
   'routing_parameter_catalog_invalid', 'routing_parameter_catalog_unavailable', 'routing_parameter_invalid_answer',
   'routing_parameter_jev_aborted', 'routing_parameter_jev_invalid_input', 'routing_parameter_jev_customer_verification_required',
@@ -552,6 +568,10 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
     rejected: [{ sourceMention: '@auto machine:missing', code: rejectionCode,
       ...(rejectionCode === 'routing_parameter_invalid_answer' ? { answerFailure: {
         questionKey: 'workspace', issue: 'choice_not_offered', private: 'must-not-store' } } : {}),
+      ...(rejectionCode === 'registration_harness_outdated' ? { tooOld: { program: 'Cursor CLI', version: '2025.09.12-4852336',
+        minimumVersion: '2026.01.01', machineName: 'Laptop', update: 'cursor-agent update', private: 'must-not-store' } } : {}),
+      ...(rejectionCode === 'registration_harness_signed_out' ? { signedOut: { harness: 'codex', program: 'Codex',
+        machineId: 'machine-a', machineName: 'mac-mini', private: 'must-not-store' } } : {}),
       routingDecision: {
       source: 'deterministic', evaluatedAt: '2026-09-22T18:00:00Z', candidateCount: 1, secret: 'must-not-store',
       rows: [{ harness: 'codex', machineId: 'machine-a', activeRuns: 1,
@@ -562,6 +582,14 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
   assert.equal(view.rejections[0].code, rejectionCode);
   if (rejectionCode === 'routing_parameter_invalid_answer') assert.match(view.rejections[0].message,
     /"workspace" answer selected an option that was not offered/);
+  if (rejectionCode === 'registration_harness_outdated') assert.equal(view.rejections[0].message,
+    'Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later. ' +
+    'Run "cursor-agent update" there, then try again. No launch was allocated.');
+  if (rejectionCode === 'registration_harness_signed_out') {
+    assert.equal(view.rejections[0].message, "Codex on mac-mini is not signed in, so it can't take work. " +
+      'Sign it in from here, then the message goes to it. No launch was allocated.');
+    assert.deepEqual(view.rejections[0].signedOut, { harness: 'codex', program: 'Codex', machineId: 'machine-a', machineName: 'mac-mini' });
+  } else assert.equal(view.rejections[0].signedOut, undefined);
   assert.doesNotMatch(JSON.stringify(view.rejections), /must-not-store/);
   assert.equal(value.rejected[0].routingDecision.rows[0].quotaObservation.status, 'stale');
   assert.doesNotMatch(JSON.stringify(saved), /must-not-store/);
@@ -609,6 +637,9 @@ for (const snapshotComplete of [false, true]) {
     assert.equal(db.calls.some(q => q.name === "machine_lifecycle_snapshot_head_v2"), snapshotComplete);
     const progress = db.calls.filter(q => q.name === "machine_lifecycle_invocation_progress_v1");
     assert.deepEqual(progress.map(q => q.values[2]), ["run-1"]);
+    const replay = db.calls.find(q => q.name === "machine_lifecycle_replay_write_v1");
+    assert.equal(Date.parse(replay.values[7]) - Date.parse(replay.values[6]), 24 * 60 * 60 * 1_000,
+      "a snapshot's replay keeps a day");
   });
 }
 

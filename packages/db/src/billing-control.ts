@@ -1,5 +1,6 @@
 import { DetailedControlError } from "./control-error.js";
 import type { QueryResultRow } from "pg";
+import { spaceBilling, type CreditAllowance } from "@xmatrix/billing";
 import { commandDigest as hash } from "./command-digest.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -51,7 +52,7 @@ function replay(
     () => new BillingControlError("idempotency_conflict", 409, "command id was reused"));
 }
 
-async function commit(
+export async function commitBillingMutation(
   tx: DatabaseTransaction,
   input: { spaceId: string; commandId: string; kind: string; requestDigest: string;
     result: Record<string, unknown>; aggregateId: string; now: string },
@@ -110,7 +111,7 @@ function subscriptionEntitled(row: QueryResultRow | undefined, now: number): boo
 async function summary(
   tx: DatabaseTransaction, spaceId: string, actorUserId: string,
 ): Promise<Record<string, unknown>> {
-  const [members, subscriptions, usage, seats] = await Promise.all([
+  const [members, subscriptions, usage, seats, credits] = await Promise.all([
     tx.query<QueryResultRow & { role: string }>({
       name: "billing_summary_member_v1",
       text: "SELECT role FROM data.space_members WHERE space_id = $1 AND user_id = $2 LIMIT 1",
@@ -132,6 +133,12 @@ async function summary(
         WHERE space_id = $1 AND role IN ('owner','admin','member')`,
       values: [spaceId], maxRows: 1,
     }),
+    spaceBilling.credits ? tx.query<QueryResultRow>({
+      name: "billing_summary_credits_v1",
+      text: `SELECT period_start::text AS period_start,included_used,pack_used,grace_used,pack_balance
+        FROM data.space_credit_state WHERE space_id = $1 LIMIT 1`,
+      values: [spaceId], maxRows: 1,
+    }) : Promise.resolve([]),
   ]);
   const member = members[0];
   if (!member) throw new BillingControlError("forbidden", 403, "Space membership is required");
@@ -156,7 +163,29 @@ async function summary(
     seats: { used, limit },
     ...(used > limit ? { seatAdjustmentRequired: true } : {}),
     freeUsage: { acceptedMessages, limit: 500, remaining: Math.max(0, 500 - acceptedMessages) },
+    ...(entitled && spaceBilling.credits
+      ? { credits: creditSummary(spaceBilling.credits, Number(subscription!.seat_quantity), credits[0], now) } : {}),
     canManage: member.role === "owner",
+  };
+}
+
+/** This month's Agent credits (docs/design/agent-credits.md). A row from an
+ * earlier month has nothing used yet this month; its pack balance carries over. */
+function creditSummary(allowance: CreditAllowance, seatQuantity: number, row: QueryResultRow | undefined,
+  now: number): Record<string, unknown> {
+  const today = new Date(now);
+  const periodStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  const resetsOn = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
+  const current = row?.period_start === periodStart;
+  const used = (column: string) => current ? Number(row?.[column] ?? 0) : 0;
+  const included = seatQuantity * allowance.perSeat;
+  const grace = seatQuantity * allowance.gracePerSeat;
+  const packBalance = Number(row?.pack_balance ?? 0);
+  return {
+    periodStart, resetsOn, included, includedUsed: used("included_used"),
+    packBalance, packUsed: used("pack_used"), grace, graceUsed: used("grace_used"),
+    paused: used("included_used") >= included && packBalance === 0 && used("grace_used") >= grace,
+    packCredits: allowance.packCredits,
   };
 }
 
@@ -346,7 +375,7 @@ export class PostgresBillingRepository {
         result = { intent: { id: intentId, spaceId, interval: input.interval,
           seatQuantity: input.seatQuantity, expiresAt } };
       }
-      await commit(tx, { spaceId, commandId, kind: "billing-create-checkout-intent",
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-create-checkout-intent",
         requestDigest, result, aggregateId: intentId, now });
       return result;
     });
@@ -412,7 +441,7 @@ export class PostgresBillingRepository {
         });
         result = { recorded: true };
       }
-      await commit(tx, { spaceId, commandId, kind: "billing-record-checkout-session",
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-record-checkout-session",
         requestDigest, result, aggregateId: intentId, now });
       return result;
     });
@@ -451,7 +480,7 @@ export class PostgresBillingRepository {
         values: [intentId, now], maxRows: 0,
       });
       const result = active ? { abandoned: true } : { abandoned: false, replayed: true };
-      await commit(tx, { spaceId, commandId, kind: "billing-abandon-checkout-intent",
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-abandon-checkout-intent",
         requestDigest, result, aggregateId: intentId, now });
       return result;
     });
@@ -470,7 +499,7 @@ export class PostgresBillingRepository {
     const eventCreatedAt = text(input.eventCreatedAt, "eventCreatedAt", 64);
     const subscription = input.subscription;
     const provider = subscription.billingProvider ?? "stripe";
-    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && (subscription.quantity !== 1 || !subscription.currentPeriodEnd))) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
+    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && !subscription.currentPeriodEnd)) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
     const spaceId = text(subscription.spaceId, "subscription.spaceId");
     const ownerUserId = text(subscription.billingOwnerUserId, "subscription.billingOwnerUserId");
     const subscriptionId = text(subscription.id, "subscription.id");
@@ -522,7 +551,7 @@ export class PostgresBillingRepository {
           "Billing event id was replayed with different contents",
         );
         const result = { replayed: true, ...(await summary(tx, spaceId, ownerUserId)) };
-        await commit(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
+        await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
           requestDigest, result, aggregateId: providerEventId, now });
         return result;
       }
@@ -538,12 +567,6 @@ export class PostgresBillingRepository {
         text: "SELECT * FROM data.space_billing_subscriptions WHERE space_id = $1 FOR UPDATE",
         values: [spaceId], maxRows: 1,
       });
-      if (provider === "apple" && ["active", "trialing"].includes(subscription.status)) {
-        const seats = await tx.query<{ count: string | number }>({ name: "apple_subscription_seats_v1",
-          text: "SELECT COUNT(*) AS count FROM data.space_members WHERE space_id=$1 AND role IN ('owner','admin','member')",
-          values: [spaceId], maxRows: 1 });
-        if (Number(seats[0]?.count ?? 0) !== 1) throw new BillingControlError("apple_single_seat_required", 409, "App Store Pro requires exactly one human seat in this Space");
-      }
       const existing = existingRows[0];
       const incomingCanEntitle = ["active", "trialing", "past_due"].includes(subscription.status);
       if (existing && existing.provider_subscription_id !== subscriptionId &&
@@ -608,7 +631,7 @@ export class PostgresBillingRepository {
         });
         result = { applied: true, ...(await summary(tx, spaceId, ownerUserId)) };
       }
-      await commit(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
         requestDigest, result, aggregateId: providerEventId, now });
       return result;
     });

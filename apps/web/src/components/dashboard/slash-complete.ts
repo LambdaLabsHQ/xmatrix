@@ -1,4 +1,4 @@
-import type { SerializedAgent, SerializedChannel } from "@xmatrix/protocol";
+import type { SerializedAgent, ChannelSnapshot, FaceOf } from "@xmatrix/protocol";
 import {
   agentInstanceMentionLabel,
   channelAgentInstances,
@@ -59,7 +59,8 @@ export type SlashCommandTarget = {
   label: string;
   status: SerializedAgent["status"];
   local: boolean;
-  avatarUrl?: string;
+  /** The Instance's face (protocol faces.ts). */
+  face: FaceOf;
   email?: string;
 };
 
@@ -153,7 +154,7 @@ function slashExpressionEnd(draft: string, cursor: number): number {
  * runs it is the next stage's question.
  */
 export function channelSlashCommands(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   localContext?: MentionLocalContext | null
 ): SlashCommandCandidate[] {
   if (!channel) return [];
@@ -163,15 +164,16 @@ export function channelSlashCommands(
 
   for (const agent of channelAgents(channel)) {
     for (const instance of channelAgentInstances(channel, agent)) {
+      const label = instance.label?.trim() || `Instance ${instance.channelInstanceId || ""}`.trim();
       const target: SlashCommandTarget = {
         agentId: agent.id,
         instanceId: instance.id,
         // Channel slots are unique within a Channel, so `name:slot` is exact.
         mention: agentInstanceMentionLabel(agent.name, instance),
-        label: instance.label?.trim() || `Instance ${instance.channelInstanceId || ""}`.trim(),
+        label,
         status: instance.status,
         local: isLocalAgentCandidate(localMachineKeys, agent, instance),
-        avatarUrl: agent.avatarUrl,
+        face: { kind: "agent", name: label, harness: agent.type || null, id: instance.id },
         email: agent.email,
       };
       for (const option of instanceCommandOptions(agent, instance)) {
@@ -255,7 +257,7 @@ export function filterSlashCommandTargets(
 export function resolveSlashCompletion(
   draft: string,
   cursor: number,
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   localContext?: MentionLocalContext | null
 ): SlashCompletionResult {
   const active = findActiveSlashCommand(draft, cursor);

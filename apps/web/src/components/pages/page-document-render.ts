@@ -1,5 +1,6 @@
-import { markdownToPageDoc, pageSchema } from "@xmatrix/protocol/page-document";
+import { markdownToPageDoc, pageDocBlocks, pageSchema } from "@xmatrix/protocol/page-document";
 import { DOMSerializer, type Node as DocNode } from "prosemirror-model";
+import { pageMediaElement, type PageMediaUrl } from "./page-media";
 import { drawPageReferences, type PageReferenceTargets } from "./page-reference-chips";
 
 /**
@@ -16,14 +17,30 @@ const serializer = new DOMSerializer({
       ["input", { type: "checkbox", tabindex: "-1", ...(node.attrs.checked ? { checked: "" } : {}) }], ["div", 0]],
 }, DOMSerializer.marksFromSchema(pageSchema));
 
-export function renderPageDocument(markdown: string, target: HTMLElement, references?: PageReferenceTargets): void {
+/** Draws the markdown into `target`; returns each section's heading by the id the editor gives it. */
+export function renderPageDocument(markdown: string, target: HTMLElement, references?: PageReferenceTargets,
+  mediaUrl?: PageMediaUrl): Map<string, Element> {
   const doc = markdownToPageDoc(markdown);
   const fragment = serializer.serializeFragment(doc.content, { document: target.ownerDocument });
   target.replaceChildren(fragment);
+  // The document's top-level nodes are the target's children, in order.
+  const childAt = new Map<number, number>();
+  doc.forEach((_node, offset, index) => childAt.set(offset, index));
+  const headings = new Map<string, Element>();
+  for (const block of pageDocBlocks(doc)) {
+    const heading = target.children[childAt.get(block.pos) ?? -1];
+    if (heading) headings.set(block.id, heading);
+  }
   // An empty line holds a line's height in the editor, which gives it a trailing break.
   for (const block of target.querySelectorAll("p, h1, h2, h3, h4, h5, h6")) {
     if (!block.firstChild) block.append(Object.assign(target.ownerDocument.createElement("br"),
       { className: "ProseMirror-trailingBreak" }));
   }
+  // A file pasted into the page is drawn as the editor's image view draws it.
+  for (const image of target.querySelectorAll("img")) {
+    const media = pageMediaElement(image.getAttribute("src") ?? "", image.alt, mediaUrl ? { url: mediaUrl } : undefined);
+    if (media) image.replaceWith(media);
+  }
   if (references) drawPageReferences(target, references);
+  return headings;
 }

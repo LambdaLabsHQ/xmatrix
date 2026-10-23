@@ -1,14 +1,15 @@
 import {
-  DEFAULT_HUB_URL, PAGE_DOCUMENT_FRAGMENT, WEB_PROXY_ROUTES, normalizeHubUrl,
-  type AutomationTrigger, type PageAutomationAnchorChange, type PageAwareness, type PageClaim, type PageConversation, type PageDocument,
+  DEFAULT_HUB_URL, HUB_ROUTES, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
+  spaceVisibilityScope,
+  type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageClaim, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
-  type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeActivity, type PageTreeAgent,
+  type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
 
 export type {
-  PageAwareness, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
-  PageSummary, PageTreeActivity, PageTreeAgent,
+  PageAwareness, PageBlame, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
+  PageRevisionMoment, PageSummary, PageTreeActivity, PageTreeAgent,
 };
 import * as decoding from "lib0/decoding";
 import { encodePageSync, encodePageAwareness, readPageSyncReply } from "./page-sync-codec";
@@ -16,6 +17,8 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { xmatrixHubRead } from "@/lib/query/hub-read";
+import { commitBlobRef, prepareMessageAttachmentUpload } from "@/lib/relay-v2/message-attachment-upload-client";
 import { ReconnectingSocket } from "@/lib/connectivity/reconnecting-socket";
 
 /** How an open project is run (docs/design/open-project-governance.md). */
@@ -24,21 +27,32 @@ export interface SpaceGovernance {
   governancePageId: string | null;
 }
 
+/** A page's Hub route, or one of its own: where the Web's `WEB_PROXY_ROUTES.space_page` routes forward. */
+const hubPage = (spaceId: string, pageId: string, subpath = "") =>
+  HUB_ROUTES.space_pages(spaceId, `${encodeURIComponent(pageId)}${subpath ? `/${subpath}` : ""}`);
 
+// Reads go to the Hub straight when it answers this page (lib/query/hub-read.ts); writes go through the Web.
 export const pageApi = {
   tree: (spaceId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ pages: PageSummary[] }>({ url: WEB_PROXY_ROUTES.space_pages(spaceId), token, signal }),
+    xmatrixHubRead<{ pages: PageSummary[] }>({ hubPath: HUB_ROUTES.space_pages(spaceId),
+      webUrl: WEB_PROXY_ROUTES.space_pages(spaceId), token, signal }),
   /** The pages that changed last and what each change was, for the list's Recent changes. */
   recentChanges: (spaceId: string, token: string, limit: number, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ changes: PageRecentChange[] }>({
-      url: `${WEB_PROXY_ROUTES.space_pages(spaceId)}/recent-changes?limit=${limit}`, token, signal }),
+    xmatrixHubRead<{ changes: PageRecentChange[] }>({
+      hubPath: `${HUB_ROUTES.space_pages(spaceId, "recent-changes")}?limit=${limit}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_pages(spaceId)}/recent-changes?limit=${limit}`, token, signal }),
   read: (spaceId: string, pageId: string, token: string, revision?: number, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ page: PageDocument }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`, token, signal,
+    xmatrixHubRead<{ page: PageDocument }>({
+      hubPath: `${hubPage(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`, token, signal,
     }),
-  create: (spaceId: string, token: string, input: { title: string; parentPageId?: string | null;
-    accessMode?: "open" | "restricted" }) =>
-    xmatrixApiRequest<{ page: PageSummary }>({ url: WEB_PROXY_ROUTES.space_pages(spaceId), token,
+  /**
+   * Makes a page from a name and markdown, or from `document`, the Yjs state of a page someone has
+   * started writing (base64); `seeded` says its live session starts from that same document.
+   */
+  create: (spaceId: string, token: string, input: { parentPageId?: string | null;
+    accessMode?: "open" | "restricted" } & ({ title: string; body?: string } | { document: string })) =>
+    xmatrixApiRequest<{ page: PageSummary; seeded?: boolean }>({ url: WEB_PROXY_ROUTES.space_pages(spaceId), token,
       method: "POST", body: input }),
   update: (spaceId: string, pageId: string, token: string, input: { title?: string; parentPageId?: string | null;
     afterPageId?: string | null; accessMode?: "open" | "restricted"; agentSuggestOnly?: boolean }) =>
@@ -47,29 +61,48 @@ export const pageApi = {
   publish: (spaceId: string, pageId: string, token: string, published: boolean) =>
     xmatrixApiRequest<{ page: PageSummary }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/publication`,
       token, method: "PUT", body: { published } }),
-  /** How far this person has read the page: the newest revision they have had on screen. */
+  /**
+   * How far this person has read the page: the newest revision they have had on screen whole, and the page
+   * as they have seen it when they saw part of it past that (null when it is that revision's text).
+   */
   readState: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ revision: number | null }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
-      signal }),
-  markRead: (spaceId: string, pageId: string, token: string, revision: number) =>
+    xmatrixHubRead<{ revision: number | null; seen?: string | null }>({ hubPath: hubPage(spaceId, pageId, "read"),
+      webUrl: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token, signal }),
+  markRead: (spaceId: string, pageId: string, token: string, revision: number, seen: string | null) =>
     xmatrixApiRequest<{ revision: number }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
-      method: "PUT", body: { revision } }),
+      method: "PUT", body: { revision, seen } }),
   /** A GitHub file the page embeds, read through from GitHub by the Hub (pages-live-document.md §6.5). */
+  /** Where the page's reader reads an image or video pasted into it; the session cookie authorizes it. */
+  mediaUrl: (spaceId: string, pageId: string, file: string) =>
+    `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/media/${encodeURIComponent(file)}`,
+  /** Uploads a pasted file into the Space's private storage and keeps it as the page's media. */
+  uploadMedia: async (spaceId: string, pageId: string, token: string, file: File, onProgress: (percent: number) => void) => {
+    const visibilityScopeId = spaceVisibilityScope(spaceId);
+    const uploaded = await prepareMessageAttachmentUpload({ file, token, visibilityScopeId, mimeType: file.type, onProgress });
+    await commitBlobRef({ token, intentId: uploaded.intentId, refId: pageMediaRefId(pageId, uploaded.contentHash),
+      ownerKind: PAGE_MEDIA_OWNER_KIND, ownerId: pageId, visibilityScopeId });
+  },
   githubFile: (spaceId: string, pageId: string, token: string, href: string, signal?: AbortSignal) =>
     xmatrixApiRequest<PageGitHubFile>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/github-file?href=${encodeURIComponent(href)}`, token, signal }),
+  /**
+   * When and where each section last changed and what it owes. The page reads its claims, discussions and who
+   * is on it on their own, live, so this asks the Hub for the sections alone.
+   */
   awareness: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<PageAwareness>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness`, token, signal }),
-  claims: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ claims: PageClaim[]; competitiveBlocks: string[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims`, token, signal }),
-  claim: (spaceId: string, pageId: string, token: string, blockId: string) =>
-    xmatrixApiRequest<{ claim: PageClaim }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims`,
-      token, method: "POST", body: { blockId } }),
-  releaseClaim: (spaceId: string, pageId: string, token: string, claimId: string) =>
-    xmatrixApiRequest<{ released: boolean }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/claims/${encodeURIComponent(claimId)}`,
-      token, method: "DELETE" }),
+    xmatrixHubRead<PageAwareness>({ hubPath: `${hubPage(spaceId, pageId, "awareness")}?scope=sections`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness?scope=sections`, token, signal }),
+  /** Who wrote each piece of the page's newest revision (page-blame.ts). */
+  blame: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<PageBlame>({ hubPath: hubPage(spaceId, pageId, "blame"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/blame`, token, signal }),
+  /** The message `conversationId` was at when `revision` was written, to open it there; null when not readable. */
+  revisionMoment: (spaceId: string, pageId: string, token: string, revision: number, conversationId: string) => {
+    const query = `?conversation=${encodeURIComponent(conversationId)}`;
+    return xmatrixHubRead<{ moment: PageRevisionMoment | null }>({
+      hubPath: `${hubPage(spaceId, pageId, `revisions/${revision}/moment`)}${query}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/revisions/${revision}/moment${query}`, token });
+  },
   governance: (spaceId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<SpaceGovernance>({ url: WEB_PROXY_ROUTES.space_governance(spaceId), token, signal }),
   setGovernance: (spaceId: string, token: string, change: Partial<SpaceGovernance>) =>
@@ -87,31 +120,48 @@ export const pageApi = {
   promote: (spaceId: string, pageId: string, token: string, revision: number, baseRevision: number) =>
     xmatrixApiRequest<{ revision: PageRevision }>({ url: WEB_PROXY_ROUTES.space_page_promote(spaceId, pageId, revision),
       token, method: "POST", body: { baseRevision } }),
+  // Co-writing (docs/design/pages-live-document.md §4.2): the Agent in a conversation started from the
+  // page joins the page's live session and writes into it as its words come, until it is stopped.
+  startCoWriting: (spaceId: string, pageId: string, token: string, conversationId: string) =>
+    xmatrixApiRequest<{ startedAt: string }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing`,
+      token, method: "POST", body: { conversationId, live: true } }),
+  endCoWriting: (spaceId: string, pageId: string, token: string, conversationId: string) =>
+    xmatrixApiRequest<{ ended: boolean }>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing/${encodeURIComponent(conversationId)}`,
+      token, method: "DELETE" }),
+  /** Takes back what the Agent co-writing from the conversation last wrote, unless someone changed it since. */
+  undoCoWriting: (spaceId: string, pageId: string, token: string, conversationId: string) =>
+    xmatrixApiRequest<{ outcome: "undone" | "changed" | "nothing" }>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/co-writing/${encodeURIComponent(conversationId)}/undo`,
+      token, method: "POST", body: {} }),
+  suggestions: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<{ suggestions: PageRevision[] }>({ hubPath: hubPage(spaceId, pageId, "suggestions"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions`, token, signal }),
+  reviewSuggestions: (spaceId: string, pageId: string, token: string, through: number) =>
+    xmatrixApiRequest<{ reviewedThrough: number }>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/suggestions/review`, token, method: "POST",
+      body: { through } }),
   /** A page's links come with the conversations they name, as this reader sees them (§4.4). */
-  links: (spaceId: string, token: string, query: { pageId?: string; conversationId?: string }, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ links: PageLink[]; conversations?: PageConversation[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}?${new URLSearchParams(query as Record<string, string>)}`,
-      token, signal,
-    }),
+  links: (spaceId: string, token: string, query: { pageId?: string; conversationId?: string }, signal?: AbortSignal) => {
+    const search = new URLSearchParams(query as Record<string, string>);
+    return xmatrixHubRead<{ links: PageLink[]; conversations?: PageConversation[] }>({
+      hubPath: `${HUB_ROUTES.space_page_links(spaceId)}?${search}`,
+      webUrl: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}?${search}`, token, signal });
+  },
   agents: (spaceId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ pages: PageTreeActivity[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
+    xmatrixHubRead<{ pages: PageTreeActivity[] }>({ hubPath: HUB_ROUTES.space_page_links(spaceId, "agents"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
   // A page's Automations (docs/design/pages-live-document.md §6).
   automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ automations: SerializedAutomation[] }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
-  createAutomation: (spaceId: string, pageId: string, token: string, input: { name: string; instruction: string;
-    intervalMinutes: number; blockId: string; triggers?: AutomationTrigger[] }) =>
-    xmatrixApiRequest<{ automation: SerializedAutomation }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, method: "POST", body: input }),
+    xmatrixHubRead<{ automations: SerializedAutomation[] }>({ hubPath: hubPage(spaceId, pageId, "automations"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
   changeAutomation: (spaceId: string, pageId: string, token: string, automation: SerializedAutomation,
-    action: "pause" | "resume" | "run" | "reference" | "delete", blockId?: string) =>
+    action: "pause" | "resume" | "run" | "delete") =>
     xmatrixApiRequest<{ automation?: SerializedAutomation }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations/${encodeURIComponent(automation.id)}${
         action === "delete" ? `?expectedVersion=${automation.version}` : `/${action}`}`,
       token, method: action === "delete" ? "DELETE" : "POST",
-      ...(action === "delete" ? {} : { body: action === "reference" ? { blockId: blockId ?? "" }
-        : { expectedVersion: automation.version } }) }),
+      ...(action === "delete" ? {} : { body: { expectedVersion: automation.version } }) }),
   link: (spaceId: string, token: string, input: { conversationId: string; pageId: string; blockId?: string;
     anchor?: PageLinkAnchor }) =>
     xmatrixApiRequest<{ link: PageLink }>({ url: WEB_PROXY_ROUTES.space_page_links(spaceId), token,
@@ -141,11 +191,21 @@ export function pageChildren(pages: readonly PageSummary[]): Map<string | null, 
 
 
 export interface PagePresenceState {
-  user?: { name: string; color: string; kind?: "user" | "agent"; conversationId?: string | null };
-  activity?: "viewing" | "editing";
+  /** Who: a person by their account, so others draw their own face; an Agent by the conversation it works from. */
+  user?: { name: string; color: string; kind?: "user" | "agent"; id?: string; conversationId?: string | null };
+  /** A person views or edits; an Agent co-writing live watches, thinks, writes or waits for someone. */
+  activity?: "viewing" | "editing" | "watching" | "thinking" | "writing" | "waiting";
   block?: string;
+  /** An Agent co-writing live: its note to the people on the page, while it lasts. */
+  say?: string;
   /** Ten minutes in a hidden tab. */
   idle?: boolean;
+  /** An Agent co-writing live: its last change can still be taken back. */
+  undo?: boolean;
+  /** An Agent co-writing live: when it began what it is doing now (ms). */
+  since?: number;
+  /** An Agent co-writing live: its last answer went quiet and was given up. */
+  stalled?: boolean;
 }
 
 export type PageSessionNotice =
@@ -160,7 +220,12 @@ export type PageSessionNotice =
   /** The session's document has arrived; the editor shows the live page from here on. */
   | { type: "synced" }
   /** This person changed the document; it reaches the session over the socket, or on reconnect. */
-  | { type: "local-edit" };
+  | { type: "local-edit" }
+  /**
+   * The page this session's document started was made, on this person's first write. When `seeded`,
+   * the page's session holds this same document, and this one goes on as its live session.
+   */
+  | { type: "made"; pageId: string; seeded: boolean };
 
 /** The page session protocol this editor speaks: the page as a document. */
 const PAGE_SESSION_PROTOCOL = "xmatrix-page-v2.";
@@ -190,8 +255,21 @@ const PAGE_SESSION_PING = "ping";
 const PAGE_HEARTBEAT_INTERVAL_MS = 25_000;
 const PAGE_HEARTBEAT_TIMEOUT_MS = 10_000;
 
+/** A new page whose making failed is tried again on a write at least this much later. */
+const PAGE_MAKE_RETRY_MS = 2_000;
+/** A new page left while it is being made has this long to take what was written since. */
+const PAGE_LEAVE_FLUSH_MS = 15_000;
+
 export class PageLiveSession {
   readonly doc = new Y.Doc();
+  /** The page; null while it is a new page nobody has written on yet, which exists only here. */
+  pageId: string | null;
+  private making: Promise<string> | null = null;
+  private retryAt = 0;
+  private reached = false;
+  /** Left while being made: it closes once what was written since has reached the made page. */
+  private leaving = false;
+  private destroyed = false;
   /** The page's document (docs/design/pages-live-document.md §4.1), which the editor binds. */
   readonly fragment = this.doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
   readonly awareness = new awarenessProtocol.Awareness(this.doc);
@@ -203,15 +281,22 @@ export class PageLiveSession {
   private readonly connection: ReconnectingSocket;
   private readonly listeners = new Set<(notice: PageSessionNotice | { type: "status"; connected: boolean }) => void>();
 
-  constructor(private readonly input: { spaceId: string; pageId: string; token: string;
-    user: { name: string; color: string } }) {
+  constructor(private readonly input: { spaceId: string; pageId: string | null; token: string;
+    user: { id?: string; name: string; color: string };
+    /**
+     * For a new page: makes it from this document as it stands (its Yjs state), when this person
+     * first writes on it. Like copy-on-write, nothing is kept until then.
+     */
+    make?: (document: Uint8Array) => Promise<{ pageId: string; seeded: boolean }> }) {
     this.token = input.token;
+    this.pageId = input.pageId;
     this.awareness.setLocalStateField("user", { ...input.user, kind: "user" });
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === this) return;
       this.send(encodePageSync(encoder => syncProtocol.writeUpdate(encoder, update)));
       // This person's own edit, for the page's "Saving… / Saved" line.
       this.emit({ type: "local-edit" });
+      if (this.pageId === null && Date.now() >= this.retryAt) void this.make().catch(() => undefined);
     });
     this.awareness.on("update", ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
       origin: unknown) => {
@@ -222,6 +307,7 @@ export class PageLiveSession {
     this.connection = new ReconnectingSocket({
       open: () => this.open(),
       onOpen: (socket) => {
+        this.reached = true;
         socket.send(encodePageSync(encoder => syncProtocol.writeSyncStep1(encoder, this.doc)));
         socket.send(encodePageAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID])));
         this.emit({ type: "status", connected: true });
@@ -249,7 +335,38 @@ export class PageLiveSession {
       },
       backoff: { baseMs: 500, maxMs: 30_000 },
     });
-    this.connection.start();
+    if (this.pageId !== null) this.connection.start();
+  }
+
+  /**
+   * Edits are on their way, not stuck offline: the page is being made, or its session has not been
+   * reached yet since it was.
+   */
+  get underway(): boolean {
+    return !this.reached;
+  }
+
+  /**
+   * Makes the new page this document is the start of, once, and resolves to its id. After a failure
+   * a write tries again, at most every PAGE_MAKE_RETRY_MS.
+   */
+  make(): Promise<string> {
+    if (this.pageId !== null) return Promise.resolve(this.pageId);
+    if (!this.making) {
+      this.making = this.input.make!(Y.encodeStateAsUpdate(this.doc)).then(({ pageId, seeded }) => {
+        this.pageId = pageId;
+        if (this.destroyed) return pageId;
+        if (!this.leaving) this.emit({ type: "made", pageId, seeded });
+        if (seeded) this.connection.start();
+        else if (this.leaving) this.close();
+        return pageId;
+      }, (cause: unknown) => {
+        this.making = null;
+        this.retryAt = Date.now() + PAGE_MAKE_RETRY_MS;
+        throw cause;
+      });
+    }
+    return this.making;
   }
 
   /**
@@ -275,9 +392,11 @@ export class PageLiveSession {
   }
 
   private async open(): Promise<WebSocket> {
-    const session = await xmatrixApiRequest<{ protocol: string; socketPath: string; canEdit: boolean;
+    // From the Hub straight when it answers this page, as the socket itself is (lib/query/hub-read.ts).
+    const session = await xmatrixHubRead<{ protocol: string; socketPath: string; canEdit: boolean;
       heartbeat?: string }>({
-      url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.input.pageId), token: this.token,
+      hubPath: hubPage(this.input.spaceId, this.pageId!, "live"),
+      webUrl: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.pageId!), token: this.token,
       method: "POST", body: { document: PAGE_DOCUMENT_FRAGMENT },
       // A ticket request stuck on a dead connection must not stop every later attempt.
       signal: AbortSignal.timeout(PAGE_TICKET_TIMEOUT_MS),
@@ -308,6 +427,8 @@ export class PageLiveSession {
         this.emit({ type: "synced" });
       }
       if (reply) this.send(reply);
+      // Its answer to the session's first sync message carries what was written here since the page was made.
+      if (this.leaving && kind === syncProtocol.messageYjsSyncStep1) this.close();
     } else if (type === MESSAGE_AWARENESS) {
       awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
     } else if (type === MESSAGE_NOTICE) {
@@ -319,6 +440,20 @@ export class PageLiveSession {
   }
 
   destroy(): void {
+    // A new page left while it is being made still takes what was written after its first write.
+    const making = this.pageId === null ? this.making : null;
+    if (making && !this.leaving) {
+      this.leaving = true;
+      setTimeout(() => this.close(), PAGE_LEAVE_FLUSH_MS);
+      making.catch(() => this.close());
+      return;
+    }
+    this.close();
+  }
+
+  private close(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     // Tell the others this person left while the socket is still up.
     awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], "local");
     this.connection.stop();

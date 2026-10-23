@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { HARNESS_PROFILE_DESCRIPTION_LIMIT, WEB_PROXY_ROUTES, type AgentRegistrationSummary } from "@xmatrix/protocol";
@@ -73,7 +74,7 @@ export function HarnessProfileSection({ registration, token, onSaved }: {
               <button type="button" disabled={saving} onClick={() => { setDraft(null); setError(null); }}
                 className={actionClass({ variant: "secondary", size: "sm" })}>Cancel</button>
               <button type="submit" disabled={saving} className={actionClass({ variant: "primary", size: "sm" })}>
-                {saving ? <Loader2 className="size-4 animate-spin" /> : null}
+                {saving ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
                 Save
               </button>
             </>}

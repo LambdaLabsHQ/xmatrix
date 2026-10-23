@@ -6,7 +6,7 @@ import {
   type AppConnectorConnectionView,
 } from "./app-connectors";
 import type { Env } from "./types";
-import { appCommand, listAppConnections, listAppSourceRelations } from "./apps";
+import { appCommand, CONNECTED_APPS_NEED_MEMBER, listAppSourceRelations, usableAppConnections } from "./apps";
 import { getChannel } from "./spaces";
 import { channelActionRefusal } from "./connectors/connector-commands";
 import { publishCommandStatus } from "./connectors/command-support";
@@ -157,7 +157,11 @@ async function runGitHubConnectorStatement(
   const spaceId = typeof channel?.spaceId === "string" ? channel.spaceId : "";
   if (!spaceId) throw new Error("GitHub connector Channel has no Space identity");
 
-  const listed = await listAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
+  const listed = await usableAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
+  if (!listed) {
+    input.status(`GitHub ${action} blocked; ${CONNECTED_APPS_NEED_MEMBER}.`);
+    return;
+  }
   const connection = listed.map(connectionView).find((candidate) => candidate?.providerId === "github");
   if (!connection || connection.status !== "configured") {
     input.status("GitHub subscription blocked; connect GitHub to this Space first.");
@@ -254,10 +258,9 @@ async function runGitHubConnectorStatement(
   }
 
   const requestedFeatures = githubRepositoryFeaturesFromCommand(input.body);
-  const capabilities = new Set([
-    ...result.capabilities,
-    ...(connection.capabilities || []),
-  ]);
+  // Subscription features require the installation's effective permissions,
+  // never a capability retained on the connection before a permission change.
+  const capabilities = new Set(result.capabilities);
   const missing = action === "subscribe"
     ? githubRequiredCapabilities(requestedFeatures).filter((capability) => !capabilities.has(capability))
     : [];

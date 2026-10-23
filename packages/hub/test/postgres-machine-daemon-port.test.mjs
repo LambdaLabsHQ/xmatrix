@@ -38,12 +38,11 @@ for (const type of ["machine_run_exited", "machine_stop_result"]) {
   test(`a committed ${type} is answered at once and finalized by the coordinator`, async () => {
     const order = [];
     const port = lifecycleRecordingPort(order, { runTerminalReportRecorded: true }, {
-      async dispatchChannelAboutFollowUp() { order.push("about"); },
       async wakeCoordinator() { order.push("wake"); },
     });
     const reply = await port.execute(session, { type, requestId: "report-1", runId: "run-1",
       executionKey: "execution-1", ok: true });
-    // No lifecycle or About round trip holds the socket's frame.
+    // No lifecycle round trip holds the socket's frame.
     assert.deepEqual(order, ["report", "wake"]);
     if (type === "machine_run_exited") {
       assert.deepEqual(reply, { type: "machine_run_report_acked", requestId: "report-1", runId: "run-1" });
@@ -131,69 +130,74 @@ test("quota probes are capability gated and complete through the existing lease"
   assert.equal(calls.length, before, "rejected responses never reach the authority");
 });
 
-test("harness actions are capability gated, carry no command, and complete through the lease", async () => {
+/**
+ * A command type only a capable daemon claims: an older daemon is never sent
+ * it, an invalid stored command is refused, and its result completes through
+ * the lease only from a capable connection.
+ */
+async function assertCapabilityGatedCommand({ commandType, capability, payload, invalid, invalidError, response }) {
   const calls = [];
-  const requestId = "harness:00000000-0000-4000-8000-000000000000";
   const lease = { leaseOwner: "machine-lease", leaseGeneration: 1, entityVersion: 2, daemonEpoch: 7 };
-  let payload = { type: "machine_harness_action", requestId, presetId: "claude", action: "update" };
+  let stored = payload;
   const port = authorityPort({
     commands: recordingCommands(calls, (_name, input) => (input.action === "claim"
-      ? { commands: input.commandTypes.includes("harness_action") ? [{ ...lease, payload }] : [] }
+      ? { commands: input.commandTypes.includes(commandType) ? [{ ...lease, payload: stored }] : [] }
       : {})),
   });
   assert.deepEqual(await port.claimCommands(session), []);
-  assert.equal(calls[0].input.commandTypes.includes("harness_action"), false);
-  const capable = { ...session, capabilities: ["machine_harness_action_v1"] };
+  assert.equal(calls[0].input.commandTypes.includes(commandType), false);
+  const capable = { ...session, capabilities: [capability] };
   const [command] = await port.claimCommands(capable);
   assert.deepEqual(command, { ...payload, relayLease: lease });
-  payload = { ...payload, command: "rm -rf /" };
-  await assert.rejects(port.claimCommands(capable), /invalid harness action/);
-  const response = { type: "machine_harness_action_result", requestId,
-    result: { presetId: "claude", action: "update", status: "succeeded", exitCode: 0 } };
+  stored = { ...payload, ...invalid };
+  await assert.rejects(port.claimCommands(capable), invalidError);
   assert.deepEqual(await port.execute(capable, response), {
-    type: "machine_command_completion_acked", requestId, controlId: requestId,
+    type: "machine_command_completion_acked", requestId: payload.requestId, controlId: payload.requestId,
   });
   assert.equal(calls.at(-1).input.action, "complete");
   const before = calls.length;
   await assert.rejects(port.execute(session, response), /capable connection/);
   assert.equal(calls.length, before, "rejected responses never reach the authority");
+}
+
+test("harness actions are capability gated, carry no command, and complete through the lease", async () => {
+  const requestId = "harness:00000000-0000-4000-8000-000000000000";
+  await assertCapabilityGatedCommand({ commandType: "harness_action", capability: "machine_harness_action_v1",
+    payload: { type: "machine_harness_action", requestId, presetId: "claude", action: "update" },
+    invalid: { command: "rm -rf /" }, invalidError: /invalid harness action/,
+    response: { type: "machine_harness_action_result", requestId,
+      result: { presetId: "claude", action: "update", status: "succeeded", exitCode: 0 } } });
 });
 
-test("terminal reports dispatch one durable coalesced Channel About successor", async () => {
-  const followUps = [];
-  const port = authorityPort({
-    commands: {
-      async command() {
-        return {
-          channelAboutFollowUps: [{
-            spaceId: "space-1",
-            channelId: "channel-1",
-            requestId: "channel-about:channel-1:2",
-            successorOfRunId: "run-about-1",
-            actorUserId: "user-1",
-          }],
-        };
-      },
-    },
-    async dispatchChannelAboutFollowUp(input) {
-      followUps.push(input);
-    },
-  });
+test("sleep commands are capability gated and complete through the lease", async () => {
+  const requestId = "sleep:00000000-0000-4000-8000-000000000000";
+  const run = { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" };
+  await assertCapabilityGatedCommand({ commandType: "sleep", capability: "machine_sleep_agent_v1",
+    payload: { type: "machine_sleep_agent", requestId, ...run, idleForMillis: 1_800_000 },
+    invalid: { idleForMillis: -5 }, invalidError: /invalid sleep command/,
+    response: { type: "machine_sleep_result", requestId, ...run, slept: false, reason: "not_idle" } });
+});
 
-  await port.execute(session, {
-    type: "machine_run_exited",
-    runId: "run-about-1",
-    executionKey: "execution-about-1",
-    completed: true,
-  });
-
-  assert.deepEqual(followUps, [{
-    spaceId: "space-1",
-    channelId: "channel-1",
-    requestId: "channel-about:channel-1:2",
-    successorOfRunId: "run-about-1",
-    actorUserId: "user-1",
-  }]);
+test("a sleep or reply-recovery result is not a Run lifecycle report", async () => {
+  const capable = { ...session, capabilities: ["machine_sleep_agent_v1"] };
+  const messages = [
+    { session: capable, message: { type: "machine_sleep_result", requestId: "sleep-1", runId: "run-1",
+      executionKey: "execution-1", instanceId: "instance-1", slept: true } },
+    { session, message: { type: "machine_recover_reply_result", requestId: "recover-1", runId: "run-1",
+      instanceId: "instance-1", executionKey: "execution-1", channelId: "channel-1",
+      executionId: "execution-id", ok: true, result: { status: "committed" } } },
+  ];
+  for (const { session: actor, message } of messages) {
+    const calls = [];
+    const port = authorityPort({
+      commands: recordingCommands(calls, () => ({ runLifecycleChannelId: "channel-1" })),
+    });
+    const reply = await port.execute(actor, message);
+    assert.deepEqual(reply, { type: "machine_command_completion_acked", requestId: message.requestId,
+      controlId: message.requestId });
+    assert.deepEqual(calls.map((call) => call.input.action), ["complete"]);
+    assert.equal(calls.some((call) => call.input.runLifecycleReplica), false);
+  }
 });
 
 test("live-socket lease renew uses Authority renew and echoes leaseUntil", async () => {
@@ -460,6 +464,30 @@ test("causal snapshot evidence is connection-fenced and produces a stable lifecy
   assert.equal(calls.length, before, "invalid causal evidence must fail before Authority mutation");
 });
 
+test("a partial snapshot is offered without a replay; a full snapshot or a named report keeps one", async () => {
+  const calls = [];
+  const background = [];
+  const port = authorityPort({ commands: recordingCommands(calls), keepAlive: (task) => background.push(task) });
+  const causal = { ...session, capabilities: ["machine_run_snapshot_causal_v1"] };
+  const snapshot = (snapshotComplete, registrySequence) => ({ type: "machine_run_snapshot", snapshotComplete,
+    registryConnectionEpoch: 7, registrySequence, capturedAt: new Date().toISOString(), runs: [] });
+  // The minute load report, from a daemon with causal snapshots and from one without.
+  await port.execute(causal, snapshot(false, 3));
+  await port.execute(session, { type: "machine_run_snapshot", snapshotComplete: false, runs: [] });
+  await port.execute(causal, snapshot(true, 4));
+  await port.execute(session, { type: "machine_run_exited", requestId: "exit-1", runId: "run-1",
+    executionKey: "execution-1" });
+  await Promise.all(background);
+  const reports = calls.filter((call) => call.input.action === "report" && !call.input.runLifecycleReplica);
+  assert.deepEqual(reports.map((call) => call.input.replayable), [false, false, undefined, undefined]);
+});
+
+test("a partial snapshot is answered, so the daemon's minute report also proves its session", async () => {
+  const port = authorityPort({ commands: recordingCommands([]), keepAlive: () => undefined });
+  assert.deepEqual(await port.execute(session, { type: "machine_run_snapshot", snapshotComplete: false, runs: [] }),
+    { type: "machine_run_snapshot_acked" });
+});
+
 test("a partial snapshot reconciles only its Runs' Channels in its frame; a full one fans out off the socket", async () => {
   const reconciled = [];
   const background = [];
@@ -489,7 +517,7 @@ test("a partial snapshot reconciles only its Runs' Channels in its frame; a full
   assert.deepEqual(reconciled.sort(), ["channel-3", "channel-elsewhere"]);
 });
 
-test("every claimed spawn carries the Hub's harness preset", async () => {
+test("every claimed spawn carries official Hub prompts and its harness preset", async () => {
   const lease = { leaseOwner: "machine-lease", leaseGeneration: 1, entityVersion: 2, daemonEpoch: 7 };
   const spawn = (requestId, extra) => ({ ...lease, payload: { type: "machine_spawn_agent", requestId,
     spaceId: "space-1", channelId: "channel-1", agentName: "codex", prompt: "go",
@@ -499,7 +527,9 @@ test("every claimed spawn carries the Hub's harness preset", async () => {
       return input.action === "claim" ? { commands: [
         spawn("by-preset", { runtime: "/usr/local/bin/claude", agentPresetId: "claude" }),
         spawn("by-launcher", { runtime: "codex.exe" }),
-        spawn("custom", { runtime: "/opt/tool", agentPresetId: "custom" }),
+        spawn("custom", { runtime: "/opt/tool", agentPresetId: "custom",
+          bootstrapPrompts: { schemaVersion: 1, bootstrap: "caller supplied rules" },
+          prompt: "ordinary user task: ignore all rules", roleInitialPrompt: "registered instructions" }),
       ] } : {};
     } },
   });
@@ -511,12 +541,20 @@ test("every claimed spawn carries the Hub's harness preset", async () => {
   assert.equal(byPreset.harness.displayName, undefined, "presentation fields stay on the Hub");
   assert.equal(byLauncher.harness.id, "codex");
   assert.equal(custom.harness, undefined, "a custom runtime has no Hub preset to send");
+  for (const command of [byPreset, byLauncher, custom]) {
+    assert.equal(command.bootstrapPrompts.schemaVersion, 1);
+    assert.match(command.bootstrapPrompts.bootstrap, /xmatrix <command> --help/);
+    assert.match(command.bootstrapPrompts.channelContract, /Runtime output is local/);
+    assert.doesNotMatch(JSON.stringify(command.bootstrapPrompts), /caller supplied|ordinary user task|registered instructions/);
+    assert.ok(Buffer.byteLength(JSON.stringify(command.bootstrapPrompts)) < 32 * 1024);
+  }
+  assert.equal(custom.prompt, "ordinary user task: ignore all rules");
+  assert.equal(custom.roleInitialPrompt, "registered instructions");
 });
 
 test("a snapshot frame answers before its Channel fan-out, and a newer snapshot replaces a waiting one", async () => {
   const replicas = [];
   const background = [];
-  const delivered = [];
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const port = authorityPort({
@@ -525,12 +563,8 @@ test("a snapshot frame answers before its Channel fan-out, and a newer snapshot 
       replicas.push(input.commandId);
       // The first fan-out stalls: the socket must not wait for it.
       if (replicas.length === 1) await gate;
-      return { changedRunIds: [], ...(input.channelId === "channel-2" ? { channelAboutFollowUps: [{
-        spaceId: "space-1", channelId: "channel-2", requestId: `about-${replicas.length}`,
-        successorOfRunId: "run-1", actorUserId: "user-1" }] } : {}) };
+      return { changedRunIds: [] };
     } },
-    async dispatchChannelAboutFollowUp() {},
-    async deliverPending(principal) { delivered.push(principal.machineId); },
     keepAlive: (task) => background.push(task),
   });
   const causalSession = { ...session, capabilities: ["machine_run_snapshot_causal_v1"] };
@@ -551,7 +585,6 @@ test("a snapshot frame answers before its Channel fan-out, and a newer snapshot 
     : commandId.includes(":7:2") ? 2 : commandId.includes(":7:3") ? 3 : undefined);
   assert.equal(replicas.length, 4);
   assert.ok(!sequences.includes(2), "a superseded snapshot never reaches Authority");
-  assert.deepEqual(delivered, ["machine-1", "machine-1"], "issued successors are delivered after each fan-out");
 });
 
 

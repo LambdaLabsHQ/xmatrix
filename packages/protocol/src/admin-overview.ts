@@ -88,6 +88,7 @@ export interface AdminUserSummary {
   profileCompleted?: boolean;
   providers?: string[];
   firstSeenAt?: string;
+  /** Latest retained message from this user or their Agents; counts stay user-authored. */
   lastMessageAt?: string;
 }
 
@@ -247,8 +248,25 @@ export interface AdminUserMachine {
   updatedAt: string;
 }
 
+/** Retained connection activity across the Space, including every caller. */
+export interface AdminConnectorUsage {
+  requests: number;
+  requestsLast30d: number;
+  /** Execution records, not provider HTTP calls; includes blocked/planned work. */
+  byStatus: Record<"queued" | "completed" | "failed" | "blocked" | "planned", number>;
+  lastRequestAt?: string;
+  /** Retained standard webhook/event posts, counted once per destination Channel. */
+  eventDeliveries: number;
+  eventDeliveriesLast30d: number;
+  lastEventAt?: string;
+  subscribedChannels: number;
+  subscriptions: number;
+}
+
 export interface AdminUserConnector {
   spaceId: string;
+  /** Absent on an older Hub; clients must show unknown rather than zero. */
+  usage?: AdminConnectorUsage;
   providerId: string;
   providerName: string;
   status: string;
@@ -268,6 +286,7 @@ export interface AdminUserMessageSummary {
   total: number;
   last7d: number;
   last30d: number;
+  /** Latest retained message from the user or their Agents. */
   lastMessageAt?: string;
 }
 
@@ -299,6 +318,8 @@ export const ADMIN_AUDIT_MAX_ROWS = 500;
 export type AdminAuditAction =
   | "overview.read"
   | "user.read"
+  | "space.read"
+  | "operations.read"
   | "audit.read"
   | "handles.backfill"
   | "agent-senders.repair";

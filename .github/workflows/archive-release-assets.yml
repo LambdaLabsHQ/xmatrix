@@ -99,10 +99,15 @@ jobs:
             const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
               ...context.repo, run_id: run.id, filter: "latest", per_page: 100,
             });
-            const deployment = jobs.find(job => job.name === "deployment receipt");
-            if (!deployment?.steps?.some(step =>
-                step.name === `Record successful ${scope} component deployment` &&
-                step.conclusion === "success")) {
+            const receipts = jobs.filter(job => job.name.startsWith("deployment receipt ("));
+            // Immutable historical tags retain their step marker. A failed or
+            // ambiguous new scoped receipt cannot fall back to an old marker.
+            const legacy = !receipts.length && jobs.filter(job => job.name === "deployment receipt");
+            const verified = receipts.length === 1 && receipts[0].name === `deployment receipt (${scope})` &&
+              receipts[0].status === "completed" && receipts[0].conclusion === "success";
+            const historical = legacy && legacy.length === 1 && legacy[0].steps?.some(step =>
+              step.name === `Record successful ${scope} component deployment` && step.conclusion === "success");
+            if (!verified && !historical) {
               core.setFailed("Archive source lacks exact-scope deployment receipt");
               return;
             }
@@ -151,6 +156,10 @@ jobs:
           git fetch --force origin "refs/tags/$production_tag:refs/tags/$production_tag"
           test "$(git rev-parse "$production_tag^{commit}")" = "$SOURCE_SHA"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A beta's GitHub Releases are prereleases, so GitHub's "latest" stays the last stable.
+          prerelease=false
+          if [[ "$version" == *-beta.* ]]; then prerelease=true; fi
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Read back and verify the missing production deployment receipt
         if: steps.source.outputs.recover_receipt == 'true'
@@ -182,7 +191,7 @@ jobs:
             - Deployment receipt: R2 `xmatrix-release-receipts/production/xmatrix-v${{ steps.identity.outputs.version }}/deployment`
             - Authoritative run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.source_run_id }}`
           RELEASE_DRAFT: "false"
-          RELEASE_PRERELEASE: "false"
+          RELEASE_PRERELEASE: ${{ steps.identity.outputs.prerelease }}
           RELEASE_FORCE_TAG: "false"
           RELEASE_ALLOW_EMPTY_ASSETS: "true"
           RELEASE_KEEP_STALE_ASSETS: "true"
@@ -197,6 +206,7 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ steps.identity.outputs.version }}
+          RELEASE_PRERELEASE: ${{ steps.identity.outputs.prerelease }}
         run: |
           set -euo pipefail
 
@@ -242,7 +252,7 @@ jobs:
             RELEASE_TAG="$tag" \
             RELEASE_TITLE="$title" \
             RELEASE_NOTES="$notes" \
-            RELEASE_PRERELEASE=false \
+            RELEASE_PRERELEASE="$RELEASE_PRERELEASE" \
             RELEASE_DRAFT=true \
             RELEASE_PUBLISH_AFTER_UPLOAD=true \
             RELEASE_FORCE_TAG=false \

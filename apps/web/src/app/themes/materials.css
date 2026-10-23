@@ -239,36 +239,8 @@ html[data-app-theme] .xmatrix-app .app-message-surface-space-setup .app-space-se
   transform: none !important;
 }
 
-:is(.xmatrix-app, .site-canvas) .app-material-liquid-pill.app-material-liquid-pill,
-:is(.xmatrix-app, .site-canvas) .app-material-chip.app-material-chip {
+:is(.xmatrix-app, .site-canvas) .app-material-liquid-pill.app-material-liquid-pill {
   border-radius: 999px !important;
-}
-
-:is(.xmatrix-app, .site-canvas) .app-material-chip.app-material-chip {
-  display: inline-flex;
-  width: fit-content;
-  min-height: 1.25rem;
-  align-items: center;
-  justify-content: center;
-  white-space: nowrap;
-  border: 0;
-  background: var(--m-chip-bg);
-  color: oklch(0.06 0 0) !important;
-  box-shadow: var(--m-chip-edge);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
-.xmatrix-app .app-material-chip[data-tone="success"],
-.xmatrix-app .app-material-chip[data-tone="warning"],
-.xmatrix-app .app-material-chip[data-tone="muted"] {
-  color: oklch(0.06 0 0) !important;
-}
-
-.xmatrix-app .app-material-chip::before,
-.xmatrix-app .app-material-chip::after {
-  content: none !important;
-  display: none !important;
 }
 
 html[data-app-theme] .xmatrix-app .app-space-setup-card {

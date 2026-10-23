@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { executableSql } from "./sql-source.mjs";
+import { acquireMigrationLock, buildOnlineIndexes, onlineIndexStatements } from "./online-index-migration.mjs";
 
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
@@ -186,6 +187,7 @@ export async function loadMigrationManifest(directory = defaultMigrationsDirecto
       phase,
       checksumSha256: checksum(source),
       source,
+      onlineIndexes: await onlineIndexStatements(source, phase),
     }));
   }
   return Object.freeze(migrations);
@@ -296,18 +298,37 @@ function printablePlan(manifest, pending) {
   };
 }
 
-async function applyMigration(
+export async function applyMigration(client, migration, revision, runtimeRole) {
+  const startedAt = performance.now();
+  if (!migration.onlineIndexes) return applyMigrationTransaction(client, migration, revision, runtimeRole,
+    () => client.query(migration.source));
+  // Session and transaction advisory locks share the same key. The online
+  // build must retain serialization across PostgreSQL's internal commits.
+  await client.query("SET lock_timeout='5s'");
+  await acquireMigrationLock(client, "session");
+  try {
+    const { rows } = await client.query("SELECT checksum_sha256,phase FROM control.schema_migrations WHERE migration_id=$1", [migration.id]);
+    if (rows[0] && (rows[0].checksum_sha256 !== migration.checksumSha256 || rows[0].phase !== migration.phase)) {
+      throw new Error(`Concurrent migration checksum conflict: ${migration.id}`);
+    }
+    if (!rows.length) await buildOnlineIndexes(client, migration);
+    return await applyMigrationTransaction(client, migration, revision, runtimeRole, async () => {}, startedAt);
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtextextended('xmatrix-postgres-migrations', 0))");
+  }
+}
+
+async function applyMigrationTransaction(
   client,
   migration,
   revision,
   runtimeRole,
+  execute,
+  startedAt = performance.now(),
 ) {
-  const startedAt = performance.now();
   await client.query("BEGIN");
   try {
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtextextended('xmatrix-postgres-migrations', 0))",
-    );
+    await acquireMigrationLock(client);
     await client.query("SELECT set_config('xmatrix.runtime_role', $1, true)", [runtimeRole]);
     if (await ledgerExists(client)) {
       const existing = await client.query(
@@ -326,7 +347,7 @@ async function applyMigration(
     } else if (migration.id !== "0000_expand_migration_ledger") {
       throw new Error("Migration ledger is absent before a non-bootstrap migration");
     }
-    await client.query(migration.source);
+    await execute();
     await convergeRuntimeAccess(client, runtimeRole);
     const executionMs = Math.max(0, Math.round(performance.now() - startedAt));
     await client.query(
@@ -351,7 +372,7 @@ async function applyMigration(
 
 async function convergeRuntimeAccessTransaction(client, runtimeRole) {
   return withClientTransaction(client, async () => {
-    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('xmatrix-postgres-migrations', 0))");
+    await acquireMigrationLock(client);
     return convergeRuntimeAccess(client, runtimeRole);
   });
 }

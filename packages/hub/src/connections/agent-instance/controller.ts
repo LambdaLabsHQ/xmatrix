@@ -24,6 +24,8 @@ const AGENT_INSTANCE_MESSAGE_TYPES = new Set([
   "agent_effort_switch_result",
   "agent_lifecycle",
   "agent_turn_retry",
+  "harness_question_closed",
+  "agent_parameter_control_result",
   "event_publish",
   "trace_history_result",
 ]);
@@ -76,6 +78,8 @@ export interface AgentInstanceConnectionPort extends SocketEndpointPort {
   reportModelSwitch(ws: WebSocket, message: AgentInstanceMessage<"agent_model_switch_result">): void;
   reportEffortSwitch(ws: WebSocket, message: AgentInstanceMessage<"agent_effort_switch_result">): void;
   reportTurnRetry(ws: WebSocket, message: AgentInstanceMessage<"agent_turn_retry">): void;
+  reportQuestionClosed(ws: WebSocket, message: AgentInstanceMessage<"harness_question_closed">): void;
+  reportParameterControl(ws: WebSocket, message: AgentInstanceMessage<"agent_parameter_control_result">): void;
   reportLifecycle(ws: WebSocket, message: AgentInstanceMessage<"agent_lifecycle">): void;
   publishEvent(ws: WebSocket, message: AgentInstanceMessage<"event_publish">): void;
   traceHistoryResult(ws: WebSocket, message: AgentInstanceMessage<"trace_history_result">): void;
@@ -150,6 +154,12 @@ export class AgentInstanceConnectionController {
       ); return;
       case "agent_turn_retry": this.port.authorityMutation(
         ws, message, () => this.port.reportTurnRetry(ws, message),
+      ); return;
+      case "harness_question_closed": this.port.authorityMutation(
+        ws, message, () => this.port.reportQuestionClosed(ws, message),
+      ); return;
+      case "agent_parameter_control_result": this.port.authorityMutation(
+        ws, message, () => this.port.reportParameterControl(ws, message),
       ); return;
       case "agent_lifecycle": this.port.authorityMutation(
         ws,

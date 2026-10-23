@@ -95,70 +95,18 @@ jobs:
           test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$XMATRIX_DEPLOY_SHA"
           test -z "$(git status --porcelain)"
 
+      - name: Read the tagged release channel
+        id: release-channel
+        run: echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"
+
       - name: Reverify exact selected request before reusing its test result
-        uses: actions/github-script@v7
-        env:
-          DEPLOY_SHA: ${{ inputs.deploy_sha }}
-          REQUEST_RUN_ID: ${{ inputs.request_run_id }}
-          RELEASE_SCOPE: ${{ inputs.release_scope }}
+        uses: ./.github/actions/reverify-release-gate
         with:
-          # A runner-side "fetch failed" is retried rather than failing the job.
-          retries: 3
-          script: |
-            const scope = process.env.RELEASE_SCOPE;
-            if (!scope.split(",").includes("hub")) {
-              core.setFailed("Hub deployment requires selected Hub authorization");
-              return;
-            }
-            if (!/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
-              core.setFailed("Hub gate reuse requires an exact request run ID");
-              return;
-            }
-            const { data: productionRun } = await github.rest.actions.getWorkflowRun({
-              ...context.repo, run_id: context.runId,
-            });
-            if (productionRun.path !== ".github/workflows/production-release.yml" ||
-                productionRun.event !== "workflow_dispatch" ||
-                productionRun.head_sha !== process.env.DEPLOY_SHA) {
-              core.setFailed("Hub deployment must be called by the tagged Production Release run");
-              return;
-            }
-            const { data: requestRun } = await github.rest.actions.getWorkflowRun({
-              ...context.repo, run_id: Number(process.env.REQUEST_RUN_ID),
-            });
-            if (requestRun.path !== ".github/workflows/production-release-request.yml" ||
-                requestRun.event !== "workflow_dispatch" ||
-                requestRun.head_branch !== "main") {
-              core.setFailed("Hub gate reuse is not authorized for this exact tagged SHA");
-              return;
-            }
-            // The request tested either this exact main revision or its release
-            // commit (that revision plus the stamped release version).
-            try {
-              require("child_process").execFileSync("node",
-                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
-                { stdio: "inherit" });
-            } catch {
-              core.setFailed("Hub gate reuse is not authorized for this exact tagged SHA");
-              return;
-            }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              ...context.repo, run_id: requestRun.id, per_page: 100,
-            });
-            // The request's `gates` job passes only when every gate its scope
-            // selects passed, and the scope selects Hub.
-            for (const name of ["plan", "gates"]) {
-              if (!jobs.some(job => job.name === name && job.conclusion === "success")) {
-                core.setFailed(`Hub gate reuse is missing successful ${name}`);
-                return;
-              }
-            }
-            const dispatch = jobs.find(job => job.name === "authorize-and-dispatch");
-            if (!dispatch?.steps?.some(step =>
-                step.name === `Record successful ${scope} production authorization` &&
-                step.conclusion === "success")) {
-              core.setFailed("Hub gate reuse is missing the request authorization marker");
-            }
+          component: hub
+          deploy_sha: ${{ inputs.deploy_sha }}
+          request_run_id: ${{ inputs.request_run_id }}
+          release_scope: ${{ inputs.release_scope }}
+          release_channel: ${{ steps.release-channel.outputs.channel }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -212,6 +160,8 @@ jobs:
           STRIPE_PRO_ANNUAL_PRICE_ID: ${{ secrets.STRIPE_PRO_ANNUAL_PRICE_ID }}
           CONNECTOR_NOTION_CLIENT_ID: ${{ secrets.CONNECTOR_NOTION_CLIENT_ID }}
           CONNECTOR_NOTION_CLIENT_SECRET: ${{ secrets.CONNECTOR_NOTION_CLIENT_SECRET }}
+          CONNECTOR_X_CLIENT_ID: ${{ secrets.CONNECTOR_X_CLIENT_ID }}
+          CONNECTOR_X_CLIENT_SECRET: ${{ secrets.CONNECTOR_X_CLIENT_SECRET }}
           CONNECTOR_SLACK_CLIENT_ID: ${{ secrets.CONNECTOR_SLACK_CLIENT_ID }}
           CONNECTOR_SLACK_CLIENT_SECRET: ${{ secrets.CONNECTOR_SLACK_CLIENT_SECRET }}
           CONNECTOR_LINEAR_CLIENT_ID: ${{ secrets.CONNECTOR_LINEAR_CLIENT_ID }}
@@ -243,6 +193,12 @@ jobs:
           # Gmail signs in through Composio: its client id is the Composio auth config id.
           CONNECTOR_COMPOSIO_API_KEY: ${{ secrets.CONNECTOR_COMPOSIO_API_KEY }}
           CONNECTOR_GMAIL_CLIENT_ID: ${{ secrets.CONNECTOR_GMAIL_CLIENT_ID }}
+          GMAIL_WATCH_CLIENT_ID: ${{ secrets.GMAIL_WATCH_CLIENT_ID }}
+          GMAIL_WATCH_CLIENT_SECRET: ${{ secrets.GMAIL_WATCH_CLIENT_SECRET }}
+          GMAIL_WATCH_TOPIC: ${{ secrets.GMAIL_WATCH_TOPIC }}
+          GMAIL_WATCH_PUSH_EMAIL: ${{ secrets.GMAIL_WATCH_PUSH_EMAIL }}
+          GMAIL_WATCH_PUSH_AUDIENCE: ${{ secrets.GMAIL_WATCH_PUSH_AUDIENCE }}
+          GMAIL_WATCH_SUBSCRIPTION: ${{ secrets.GMAIL_WATCH_SUBSCRIPTION }}
           CONNECTOR_GOOGLE_PICKER_API_KEY: ${{ secrets.CONNECTOR_GOOGLE_PICKER_API_KEY }}
           CONNECTOR_GOOGLE_PICKER_APP_ID: ${{ secrets.CONNECTOR_GOOGLE_PICKER_APP_ID }}
           CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON: ${{ secrets.CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON }}
@@ -317,9 +273,16 @@ jobs:
               throw new Error("Invalid live production billing configuration");
             }
           }
+          const gmailWatchKeys = ["GMAIL_WATCH_CLIENT_ID","GMAIL_WATCH_CLIENT_SECRET","GMAIL_WATCH_TOPIC",
+            "GMAIL_WATCH_PUSH_EMAIL","GMAIL_WATCH_PUSH_AUDIENCE","GMAIL_WATCH_SUBSCRIPTION"];
+          if (gmailWatchKeys.some(key => process.env[key])) {
+            const file = require("node:path").join(process.env.GITHUB_WORKSPACE || process.cwd(), "packages/protocol/dist/gmail-watch-config.js");
+            require(file).parseGmailWatchConfig(process.env);
+            for (const key of gmailWatchKeys) payload[key] = process.env[key];
+          }
           // Each optional registered application rotates as a complete pair.
           // Unregistered providers preserve their existing Worker settings.
-          const providers = ["NOTION", "SLACK", "LINEAR", "SENTRY", "GITLAB", "JIRA", "NETLIFY", "VERCEL", "GOOGLE", "BITBUCKET", "PAGERDUTY", "CLOUDFLARE"];
+          const providers = ["NOTION", "X", "SLACK", "LINEAR", "SENTRY", "GITLAB", "JIRA", "NETLIFY", "VERCEL", "GOOGLE", "BITBUCKET", "PAGERDUTY", "CLOUDFLARE"];
           const validConnectorSecret = (key) => {
             const value = process.env[key];
             if (!value?.trim()) throw new Error(`Missing production connector secret ${key}`);
@@ -590,11 +553,14 @@ jobs:
         uses: ./.github/actions/setup-pnpm-node
 
       # Origins and the Web config come from the reviewed production profile.
+      # A beta builds for the beta Web, a stable for the stable one: the
+      # tagged version says which (deploy-config.mjs, web-beta).
       - name: Load the production deployment profile
         env: *production_profile_environment
         run: |
           set -euo pipefail
-          node scripts/deploy-config.mjs env production >> "$GITHUB_ENV"
+          web="$([ "$(node scripts/version.mjs channel)" = beta ] && echo web-beta || echo web)"
+          node scripts/deploy-config.mjs env production "$web" >> "$GITHUB_ENV"
 
       - &verify_web_checkout
         name: Verify exact clean tagged checkout
@@ -676,76 +642,30 @@ jobs:
       - *clear_server_proxy
       - *setup_web_release
 
-      # Origins and the Web config come from the reviewed production profile.
+      # Origins and the Web config come from the reviewed production profile;
+      # a beta deploys the beta Web, a stable the stable one.
       - name: Load the production deployment profile
         env: *production_profile_environment
         run: |
           set -euo pipefail
-          node scripts/deploy-config.mjs env production >> "$GITHUB_ENV"
-          node scripts/deploy-config.mjs render production web
+          web="$([ "$(node scripts/version.mjs channel)" = beta ] && echo web-beta || echo web)"
+          node scripts/deploy-config.mjs env production "$web" >> "$GITHUB_ENV"
+          node scripts/deploy-config.mjs render production "$web"
 
       - *verify_web_checkout
 
+      - name: Read the tagged release channel
+        id: release-channel
+        run: echo "channel=$(node scripts/version.mjs channel)" >> "$GITHUB_OUTPUT"
+
       - name: Reverify exact selected request before reusing the Web test result
-        uses: actions/github-script@v7
-        env:
-          DEPLOY_SHA: ${{ inputs.deploy_sha }}
-          REQUEST_RUN_ID: ${{ inputs.request_run_id }}
-          RELEASE_SCOPE: ${{ inputs.release_scope }}
+        uses: ./.github/actions/reverify-release-gate
         with:
-          # A runner-side "fetch failed" is retried rather than failing the job.
-          retries: 3
-          script: |
-            const scope = process.env.RELEASE_SCOPE;
-            if (!scope.split(",").includes("web") || !/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
-              core.setFailed("Web deployment requires an exact request selecting Web");
-              return;
-            }
-            const { data: productionRun } = await github.rest.actions.getWorkflowRun({
-              ...context.repo, run_id: context.runId,
-            });
-            if (productionRun.path !== ".github/workflows/production-release.yml" ||
-                productionRun.event !== "workflow_dispatch" ||
-                productionRun.head_sha !== process.env.DEPLOY_SHA) {
-              core.setFailed("Web deployment must be called by the tagged Production Release run");
-              return;
-            }
-            const { data: requestRun } = await github.rest.actions.getWorkflowRun({
-              ...context.repo, run_id: Number(process.env.REQUEST_RUN_ID),
-            });
-            if (requestRun.path !== ".github/workflows/production-release-request.yml" ||
-                requestRun.event !== "workflow_dispatch" ||
-                requestRun.head_branch !== "main") {
-              core.setFailed("Web gate reuse is not authorized for this exact tagged SHA");
-              return;
-            }
-            // The request tested either this exact main revision or its release
-            // commit (that revision plus the stamped release version).
-            try {
-              require("child_process").execFileSync("node",
-                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
-                { stdio: "inherit" });
-            } catch {
-              core.setFailed("Web gate reuse is not authorized for this exact tagged SHA");
-              return;
-            }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              ...context.repo, run_id: requestRun.id, per_page: 100,
-            });
-            // The request's `gates` job passes only when every gate its scope
-            // selects passed, and the scope selects Web.
-            for (const name of ["plan", "gates"]) {
-              if (!jobs.some(job => job.name === name && job.conclusion === "success")) {
-                core.setFailed(`Web gate reuse is missing successful ${name}`);
-                return;
-              }
-            }
-            const dispatch = jobs.find(job => job.name === "authorize-and-dispatch");
-            if (!dispatch?.steps?.some(step =>
-                step.name === `Record successful ${scope} production authorization` &&
-                step.conclusion === "success")) {
-              core.setFailed("Web gate reuse is missing the request authorization marker");
-            }
+          component: web
+          deploy_sha: ${{ inputs.deploy_sha }}
+          request_run_id: ${{ inputs.request_run_id }}
+          release_scope: ${{ inputs.release_scope }}
+          release_channel: ${{ steps.release-channel.outputs.channel }}
 
       # The build target built this exact commit in this run, alongside the Hub
       # deploy. Restore only a handoff whose checksums and commit match.

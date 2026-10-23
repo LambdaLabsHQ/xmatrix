@@ -1,0 +1,1 @@
+- Apps connected to this Space: {apps}. `xmatrix connector list` shows the command for each of their actions; act in one by sending its command with `xmatrix send`, and the result replies to your message in the channel.

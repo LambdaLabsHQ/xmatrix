@@ -54,6 +54,29 @@ access controls govern this metadata, including machine-local launcher paths.
 Consumers should validate it with `parseHarnessInventory` and display its
 capture time, rather than treating an offline machine's inventory as live.
 
+## Too old to talk to
+
+A preset may set `minimumVersion: { program, version }`: the oldest version
+that speaks the protocol xMatrix launches it with, taken from the vendor's own
+changelog, and the vendor's name for the program `version` reports on. That
+name is what a person is told is too old, so it names the program and not the
+product around it: Cursor's is the Cursor CLI, not the editor. An unknown
+version is not judged.
+
+Launch routing leaves out a harness its machine reports older than that, so
+`@auto` hands the work to another agent. When nothing else can take it, the
+refusal is one sentence filled from the registry and the machine's report
+(`harnessTooOld`, `harnessTooOldSentence`), plus the preset's update for that
+machine's platform:
+
+> Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs
+> 2026.01.01 or later. Run "cursor-agent update" there, then try again.
+
+The rejection stores those facts, not the text. The connect flow and the
+Agents list say the same sentence and offer the update in place. A new
+conversation's first message records only its failure code, so a refusal
+there reads the code's text without the program's name.
+
 ## Harness actions
 
 `HARNESS_ACTIONS` are `install`, `update`, `uninstall`, `auto_update_on`,
@@ -186,6 +209,18 @@ without a terminal, so its owner can sign the harness in from the Agents page
 instead of opening a shell on that Machine. The owner of a registration sees a
 Sign-in section with the harness's state on that Machine and a Sign in button.
 
+- **Waiting and recovery.** A request that has not returned a sign-in result
+  after one minute shows whether the machine has picked it up. Cancel is
+  available before the link arrives when the daemon advertises
+  `machine_harness_login_start_cancel_v1`, and while waiting for approval on
+  all supported daemons. Older daemons keep status recovery and show an update
+  hint instead of offering cancellation they cannot reliably perform.
+  The daemon registers a starting session before waiting for its prompt, so
+  cancellation reaches the process and late output cannot restore it.
+  Status-read failures offer a read-only retry; they never issue another sign-in.
+  After 20 minutes the UI stops observing and says the remote sign-in may still
+  be running; cancel it before starting again. Posting an action is bounded to
+  30 seconds, and each status read uses the shared workspace request deadline.
 - **Recipe.** `login.flow` is `device_code` (the harness prints a URL and, if it
   is not already in the URL, a one-time code; it finishes on its own once the
   owner approves) or `url_paste_code` (the sign-in page shows a code the
@@ -221,8 +256,9 @@ goose and openclaw sign in only inside an interactive terminal; pi, vibe, junie
 and qwen have no official headless sign-in (API keys or their TUI). auggie and
 commandcode accept only a localhost browser callback (commandcode also takes a
 pasted API key), dimcode prints no link even in a terminal, and codebuddy,
-droid, prime, trae, antigravity, autohand, amp and reasonix have no CLI sign-in
-(in-app, ACP `authenticate`, API keys or enterprise tokens).
+droid, prime, trae, antigravity, autohand, amp, reasonix and deepseek have no CLI sign-in
+(in-app, ACP `authenticate`, API keys or enterprise tokens; DeepSeek Harness
+reads `DEEPSEEK_API_KEY`).
 
 See [Machines and CLI management](harness-management-cli.md) for user commands and confirmation behavior.
 

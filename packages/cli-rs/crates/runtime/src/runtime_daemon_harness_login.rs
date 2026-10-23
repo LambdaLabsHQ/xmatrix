@@ -256,7 +256,6 @@ fn sign_in_failed(
 
 async fn start(preset: &AgentPreset, login: &HarnessLogin) -> HarnessActionResult {
     let failed = |text: &str| sign_in_failed(preset, HarnessAction::LoginStart, login, text);
-    let action = HarnessAction::LoginStart;
     if let Some(mut previous) = take_session(&preset.id) {
         previous.end();
     }
@@ -283,7 +282,7 @@ async fn start(preset: &AgentPreset, login: &HarnessLogin) -> HarnessActionResul
         Ok(input) => input,
         Err(error) => return failed(&error),
     };
-    let mut session = Session {
+    let session = Session {
         flow: login.flow,
         prompt: (String::new(), None),
         input: Some(input),
@@ -291,36 +290,71 @@ async fn start(preset: &AgentPreset, login: &HarnessLogin) -> HarnessActionResul
         exited: exited.clone(),
         stop: Some(stop),
     };
+    wait_for_prompt(preset, login, session).await
+}
+
+/// Register the process before waiting for output, so cancel also works while
+/// it is starting. A cancelled/replaced start cannot publish a later prompt.
+async fn wait_for_prompt(
+    preset: &AgentPreset,
+    login: &HarnessLogin,
+    mut session: Session,
+) -> HarnessActionResult {
+    let failed = |text: &str| sign_in_failed(preset, HarnessAction::LoginStart, login, text);
+    let output = session.output.clone();
+    let exited = session.exited.clone();
+    {
+        let Ok(mut sessions) = SESSIONS.lock() else {
+            session.end();
+            return failed("the sign-in session is unavailable");
+        };
+        sessions.insert(preset.id.clone(), session);
+    }
     let deadline = tokio::time::Instant::now() + START_TIMEOUT;
     loop {
         let text = plain_output(&snapshot(&output));
-        if let Some((url, code)) = prompt(login, &text) {
-            session.prompt = (url.clone(), code.clone());
-            if let Ok(mut sessions) = SESSIONS.lock() {
-                sessions.insert(preset.id.clone(), session);
+        {
+            let Ok(mut sessions) = SESSIONS.lock() else {
+                return failed("the sign-in session is unavailable");
+            };
+            let current = sessions
+                .get_mut(&preset.id)
+                .filter(|current| Arc::ptr_eq(&current.output, &output));
+            let Some(current) = current else {
+                return answer(
+                    &preset.id,
+                    HarnessAction::LoginStart,
+                    HarnessActionStatus::Succeeded,
+                    Some(progress(HarnessLoginState::Cancelled, login.flow)),
+                );
+            };
+            if let Some((url, code)) = prompt(login, &text) {
+                current.prompt = (url.clone(), code.clone());
+                return answer(
+                    &preset.id,
+                    HarnessAction::LoginStart,
+                    HarnessActionStatus::Succeeded,
+                    Some(HarnessLoginProgress {
+                        state: HarnessLoginState::AwaitingUser,
+                        flow: Some(login.flow.as_str().to_string()),
+                        verification_uri: Some(url),
+                        user_code: code,
+                    }),
+                );
             }
-            return answer(
-                &preset.id,
-                action,
-                HarnessActionStatus::Succeeded,
-                Some(HarnessLoginProgress {
-                    state: HarnessLoginState::AwaitingUser,
-                    flow: Some(login.flow.as_str().to_string()),
-                    verification_uri: Some(url),
-                    user_code: code,
-                }),
-            );
         }
-        if exited.borrow().is_some() {
-            // Already signed in, or the sign-in refused to run headless.
-            return failed(&text);
-        }
-        if tokio::time::Instant::now() >= deadline {
-            session.end();
-            return failed(&format!(
-                "{text}\n[no sign-in link after {} seconds]",
-                START_TIMEOUT.as_secs()
-            ));
+        if exited.borrow().is_some() || tokio::time::Instant::now() >= deadline {
+            if let Some(mut current) = take_same_session(&preset.id, &output) {
+                current.end();
+            }
+            return if exited.borrow().is_some() {
+                failed(&text)
+            } else {
+                failed(&format!(
+                    "{text}\n[no sign-in link after {} seconds]",
+                    START_TIMEOUT.as_secs()
+                ))
+            };
         }
         tokio::time::sleep(POLL).await;
     }
@@ -633,6 +667,44 @@ mod tests {
         agent_preset_by_id(id)
             .and_then(|preset| preset.management.as_ref()?.login.as_ref())
             .unwrap_or_else(|| panic!("{id} has a sign-in"))
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_the_prompt_stops_the_session_and_prevents_late_output() {
+        let mut preset = agent_preset_by_id("codex").unwrap().clone();
+        preset.id = "test-cancel-before-prompt".into();
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (_exit_tx, exited) = watch::channel(None);
+        let (stop, stopped) = oneshot::channel();
+        let session = Session {
+            flow: LoginFlow::DeviceCode,
+            prompt: (String::new(), None),
+            input: None,
+            output: output.clone(),
+            exited,
+            stop: Some(stop),
+        };
+        let mut waiting = Box::pin(wait_for_prompt(&preset, login("codex"), session));
+        tokio::select! {
+            outcome = &mut waiting => panic!("start settled before cancellation: {:?}", outcome.status),
+            _ = tokio::time::sleep(Duration::from_millis(1)) => {},
+        }
+        let mut pending = take_session(&preset.id).expect("the starting session can be cancelled");
+        pending.end();
+        assert!(
+            stopped.await.is_ok(),
+            "cancellation reaches the process supervisor"
+        );
+        keep(
+            &output,
+            b"https://auth.openai.com/codex/device\nI3YY-8QZ91\n",
+        );
+        let outcome = waiting.await;
+        assert_eq!(outcome.login.unwrap().state, HarnessLoginState::Cancelled);
+        assert!(
+            take_session(&preset.id).is_none(),
+            "late output cannot restore the cancelled session"
+        );
     }
 
     #[test]

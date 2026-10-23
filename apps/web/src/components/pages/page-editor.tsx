@@ -1,35 +1,65 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { pageDocBlockAt, pageDocBlocks, pageSchema, type PageDocBlock } from "@xmatrix/protocol/page-document";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import {
-  BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, PenLine, Pilcrow, Quote, Sparkles, Table, Users,
+  markdownToPageDoc, pageDocBlockAt, pageDocBlocks, pageDocToMarkdown, pageSchema, pageSeenDoc, type PageDocBlock,
+} from "@xmatrix/protocol/page-document";
+import {
+  BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
+  FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pilcrow, Quote, Table,
 } from "lucide-react";
-import { EditorState, type Command } from "prosemirror-state";
+import type { Node as DocNode, ResolvedPos } from "prosemirror-model";
+import { toggleMark } from "prosemirror-commands";
+import { EditorState, Selection, TextSelection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { yCursorPluginKey } from "y-prosemirror";
-import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
-import { isImeKeyDown } from "@/lib/ime-keydown";
+import { yCursorPluginKey, ySyncPluginKey } from "y-prosemirror";
+import {
+  channelReferenceToken, gitHubFileReferenceFrom, gitHubFileReferenceHref, pageBlocks, pageReferenceToken,
+  type PageAuthor, type PageSummary, type SerializedAutomation,
+} from "@xmatrix/protocol";
+import { Face } from "@/components/dashboard/face";
+import type { ChannelReference } from "@/components/dashboard/message-reference-catalog";
+import {
+  channelReferenceCandidates, pageReferenceCandidates, sectionReferenceCandidates, type ReferenceCandidate,
+} from "@/components/dashboard/reference-complete";
+import { PaperPopover } from "@/components/ui/material-surfaces";
+import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
+import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
+import { PageCommentBox } from "./page-comment-box";
+import type { MarginAgent } from "./page-margin-model";
+import { PageBlameLayer, PageByline, type PageBlameSource } from "./page-blame";
+import { SectionAgentsInPage } from "./page-section-agents";
+import type { PageSessionChanges } from "./page-session-changes";
 import {
-  addColumnAfter, addRowAfter, anchorOffsets, blockKind, deleteColumn, deleteRow, deleteTable, discussionsKey,
+  addColumnAfter, addRowAfter, anchorOffsets, blockKind, caretBlockAnchor, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
-  sectionsKey, selectionAnchor, setBlockKind, setLink, slashKey, type BlockKind, type CursorPresence, type Discussion,
-  type HeadingActions, type SectionNote, type SlashState,
+  sectionsKey, selectionAnchor, setBlockKind, setLink, type BlockKind, type CursorPresence, type Discussion,
+  type HeadingActions, type SectionNote,
 } from "./page-editor-setup";
+import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
+import type { WriteAgent } from "./page-write-with";
+import {
+  currentSuggestionTop, leaveSuggestion, pageSuggestions, showSuggestions, stepSuggestion, suggestionsKey,
+  takeSuggestion, type PageSuggestion, type SuggestionsReport,
+} from "./page-suggestions";
+
+/** The page's own controls over the suggestions laid over it. */
+export interface SuggestionControl { take(): void; leave(): void; step(by: -1 | 0 | 1): void }
+/**
+ * What of the page its reader has seen (pages-live-document.md §3.1): `see` takes in the blocks within
+ * `area` (screen coordinates) as they are now, and says what the reader has seen of the page, and whether
+ * that is all of it; `seeAll` takes in the whole page.
+ */
+export interface PageReading {
+  see(area: { top: number; bottom: number }): { body: string; whole: boolean } | null;
+  seeAll(): void;
+}
 
 export type { CursorPresence, Discussion, HeadingActions, SectionNote };
-
-/** Who last changed a section and when, as Google Docs' Show editors tells it for a selection. */
-export interface SectionEditors {
-  people: Array<{ name: string; color: string }>;
-  when: string;
-  conversation: { id: string; name: string } | null;
-}
 
 /**
  * The page, edited as a document (docs/design/pages-live-document.md §4):
@@ -38,23 +68,27 @@ export interface SectionEditors {
  * markdown for Agents, revisions and git.
  */
 
-/** What a section offers from the selection menu; the page view owns the actions. */
+/**
+ * What a selected passage offers; the page view owns the action. Only Discuss: what acts on the whole
+ * section (copying its link, who changed it) is the heading's, and asking an Agent is mentioning it in
+ * the discussion.
+ */
 export interface PageSectionActions {
   /** A conversation about the section; from a selection, anchored to that text. */
-  discuss?: (blockId: string, anchor?: { quote: string; from: unknown; to: unknown }) => void;
-  copyLink?: (blockId: string) => void;
-  claim?: (blockId: string) => void;
+  discuss?: (blockId: string, anchor?: PassageAnchor) => void;
   /**
-   * Ask about the passage, or ask an Agent to change it: a discussion anchored
-   * to it whose first message addresses xMatrix, which picks the Agent.
+   * A comment on a passage (§4.2): a discussion of the passage whose first message is the comment, which an
+   * Agent takes and answers there and in the page.
    */
-  ask?: (blockId: string, anchor: { quote: string; from: unknown; to: unknown },
-    request: { mode: "ask" | "change"; prompt: string }) => Promise<void>;
-  /** Who last changed the section the selection is in; null when it is not in recent history. */
-  editors?: (blockId: string) => SectionEditors | null;
-  /** Opens the page's History, where each change is shown in its author's colour. */
-  history?: () => void;
+  comment?: (blockId: string, anchor: PassageAnchor, text: string) => void;
+  /** The Agent at work on the page that takes a comment on the block, shown under the box. */
+  commentTaker?: (blockId: string) => MarginAgent | undefined;
 }
+
+type PassageAnchor = { quote: string; from: unknown; to: unknown };
+
+/** A comment being written on a passage, in the box under it. */
+interface CommentDraft { blockId: string; anchor: PassageAnchor; left: number; top: number; text: string }
 
 interface Toolbar {
   kind: BlockKind;
@@ -63,7 +97,7 @@ interface Toolbar {
   focused: boolean;
   /** The selection is in a table, which shows its row and column controls. */
   inTable: boolean;
-  slash: SlashState | null;
+  trigger: PageTrigger | null;
 }
 
 function readToolbar(view: EditorView): Toolbar {
@@ -74,7 +108,7 @@ function readToolbar(view: EditorView): Toolbar {
     empty: state.selection.empty,
     inTable: isInTable(state),
     focused: view.hasFocus(),
-    slash: slashKey.getState(state) ?? null,
+    trigger: triggersKey.getState(state) ?? null,
   };
 }
 
@@ -114,6 +148,88 @@ function embedGitHubFile(text: string): Command | null {
   };
 }
 
+/** What `[[`, `#` and `@` complete on a page, and what picking an Agent does. */
+export interface PageCompletion {
+  spaceId: string;
+  pages: readonly PageSummary[];
+  channels: readonly ChannelReference[];
+  agents: readonly WriteAgent[];
+  /** A page's title and markdown, for its sections after `[[page#`. */
+  readPage: (pageId: string) => Promise<{ pageId: string; title: string; body: string }>;
+  /** `@` picked an Agent: it comes to co-write the page from where it was mentioned, told nothing more. */
+  summonAgent: (harness: string, blockId: string) => void;
+}
+
+/** One row of the menu typing opened. */
+interface MenuItem { key: string; label: string; hint: string; icon: ReactNode; run: (view: EditorView) => void }
+
+type PageSections = { pageId: string; title: string; blocks: ReturnType<typeof pageBlocks> };
+
+function referenceItem(trigger: PageTrigger, candidate: ReferenceCandidate): MenuItem {
+  const token = candidate.kind === "channel" ? channelReferenceToken(candidate.channelId)
+    : pageReferenceToken(candidate.pageId, candidate.blockId);
+  return {
+    key: candidate.id, label: candidate.label, hint: candidate.detail,
+    icon: candidate.kind === "channel" ? <Hash /> : <FileText />,
+    run: (view) => { insertReference(trigger, token)(view.state, view.dispatch, view); },
+  };
+}
+
+function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefined,
+  sections: ReadonlyMap<string, PageSections>): MenuItem[] {
+  if (trigger.kind === "insert") {
+    return matchingItems(trigger.query).map((item) => ({ key: item.label, label: item.label, hint: item.hint, icon: item.icon,
+      run: (view) => {
+        view.dispatch(view.state.tr.delete(trigger.from, trigger.to).setMeta(triggersKey, "close"));
+        item.run(view.state, view.dispatch, view);
+      } }));
+  }
+  if (!completion) return [];
+  if (trigger.kind === "channel") {
+    return channelReferenceCandidates(completion.channels, trigger.query, completion.spaceId, null)
+      .map((candidate) => referenceItem(trigger, candidate));
+  }
+  if (trigger.kind === "page") {
+    if (trigger.section === null) {
+      return pageReferenceCandidates(completion.pages, trigger.query).map((candidate) => referenceItem(trigger, candidate));
+    }
+    const page = sectionPage(trigger, completion);
+    const read = page ? sections.get(page) : undefined;
+    return read ? sectionReferenceCandidates(read, read.blocks, trigger.section)
+      .map((candidate) => referenceItem(trigger, candidate)) : [];
+  }
+  const wanted = trigger.query.toLowerCase();
+  return completion.agents.filter((agent) => agent.harness.toLowerCase().includes(wanted))
+    .sort((a, b) => Number(!a.harness.toLowerCase().startsWith(wanted)) - Number(!b.harness.toLowerCase().startsWith(wanted)))
+    .map((agent) => ({
+      key: agent.harness, label: agent.harness, hint: "Agent",
+      icon: <Face of={{ kind: "agent", name: agent.harness, harness: agent.harness }} size="xs" shape="circle" glass={false}
+        className="pointer-events-none rounded-full" />,
+      // The mention stays in the page, and calls the Agent to co-write from there.
+      run: (view) => {
+        const blockId = pageDocBlockAt(view.state.doc, trigger.from);
+        insertReference(trigger, `@${agent.harness}`)(view.state, view.dispatch, view);
+        completion.summonAgent(agent.harness, blockId);
+      },
+    }));
+}
+
+/** The page `[[page#` names: the best match for what was typed before the `#`. */
+function sectionPage(trigger: PageTrigger & { kind: "page" }, completion: PageCompletion): string | null {
+  const best = pageReferenceCandidates(completion.pages, trigger.query)[0];
+  return best?.kind === "page" ? best.pageId : null;
+}
+
+const MENU_LABELS: Record<PageTrigger["kind"], string> = {
+  insert: "Insert", page: "Pages", channel: "Channels", agent: "Agents",
+};
+
+/** A menu starts again at its first row when what it lists changes. */
+function triggerKey(trigger: PageTrigger | null): string {
+  if (!trigger) return "";
+  return `${trigger.kind}:${trigger.from}:${trigger.query}:${trigger.kind === "page" ? trigger.section ?? "" : ""}`;
+}
+
 function matchingItems(query: string): InsertItem[] {
   const needle = query.toLowerCase();
   return needle ? INSERT_ITEMS.filter((item) => item.keywords.includes(needle) || item.label.toLowerCase().includes(needle))
@@ -128,25 +244,37 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
       // Keep the editor's selection: the button acts on it.
       onMouseDown={(event) => event.preventDefault()} onClick={onRun}
       className={`flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors
-        hover:bg-accent hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "bg-accent text-foreground" : ""}`}>
+        hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "text-foreground" : ""}`}>
       {children}
     </button>
   );
 }
 
-export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow,
+export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, readGitHubFile, references }: {
+  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readerShown = false, commentInMargin = false, onReaderChanges, onWrite, readFrom, reading,
+  suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
+  uploadMedia, onChanges, blame, writing }: {
   session: PageLiveSession;
+  /** Who wrote what, shown where the reader rests or selects and under the title; without it the page does not say. */
+  blame?: PageBlameSource;
+  /** Whether one of the page's authors is changing it now. */
+  writing?: (author: PageAuthor) => boolean;
+  /** What an empty page asks for instead of its title: someone co-writing it asks for its first line. */
+  placeholder?: string;
   canEdit: boolean;
   onBlockChange?: (blockId: string) => void;
   /** The page's sections, whenever they change. */
   onBlocks?: (blocks: PageDocBlock[]) => void;
   actions?: PageSectionActions;
+  /** The page has a margin beside it: the comment box stands there, level with its passage, as a comment card does. */
+  commentInMargin?: boolean;
   /** Who is on each section and when it last changed, drawn beside it. */
   sections?: Map<string, SectionNote>;
   /** A section to bring into view; a new `seq` follows again. */
   follow?: { blockId: string; seq: number } | null;
+  /** Each new value puts the writer's caret at the end of the text, to go on writing there. */
+  writeOn?: number;
   onOpenConversation?: (conversationId: string) => void;
   /** Open discussions anchored in the text. */
   discussions?: Discussion[];
@@ -168,16 +296,50 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   onReady?: () => void;
   /** The page as this reader last read it, as markdown, and the revision to diff it against: what changed since is shown as a diff. */
   readerBaseline?: { body: string; head: number } | null;
+  /** Whether that diff is marked over the text; otherwise the page shows as it is and the changes are only counted. */
+  readerShown?: boolean;
+  /** Suggestions waiting on the page, laid over it change by change until the reader takes or leaves each. */
+  suggestions?: readonly PageSuggestion[] | null;
+  /** How many changes are left, which is in front of the reader, and whose. */
+  onSuggestions?: (report: SuggestionsReport) => void;
+  /** Lets the page's own controls take, leave or step through the changes. */
+  suggestionControl?: MutableRefObject<SuggestionControl | null>;
   /** How many changes that diff shows. */
   onReaderChanges?: (count: number) => void;
+  /** The changes Ctrl+Z steps back through, everyone's since the page opened; null once the editor is gone. */
+  onChanges?: (changes: PageSessionChanges | null) => void;
+  /** This person changed the text themselves, not someone else's change arriving. */
+  onWrite?: () => void;
+  /**
+   * The page as its reader had seen it when it opened, as markdown; null when they had seen it as it opened.
+   * Undefined until that is known; what they see from then on is taken in through `reading`.
+   */
+  readFrom?: string | null;
+  reading?: MutableRefObject<PageReading | null>;
   /** Reads a GitHub file the page embeds, through the Hub. */
   readGitHubFile?: ReadGitHubFile;
   /** What `page:<id>` and `channel:<id>` in the text name and open. */
   references?: PageReferenceTargets;
+  /** What typing `[[`, `#` and `@` offers. */
+  completion?: PageCompletion;
+  /** Where the page reads an image or video pasted into it. */
+  mediaUrl?: PageMediaUrl;
+  /** Uploads an image or video pasted or dropped into the page. */
+  uploadMedia?: UploadPageMedia;
 }) {
   const frame = useRef<HTMLDivElement | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
+  const wrote = useRef(onWrite);
+  wrote.current = onWrite;
   const view = useRef<EditorView | null>(null);
+  // Publish immutable document changes to overlays; the view itself keeps the same identity.
+  const [drawn, setDrawn] = useState<{ view: EditorView; doc: DocNode } | null>(null);
+  const placeholderText = useRef(placeholder);
+  useEffect(() => {
+    placeholderText.current = placeholder;
+    // Decorations are read on a transaction: an empty one draws the new hint.
+    view.current?.dispatch(view.current.state.tr.setMeta("placeholder", placeholder));
+  }, [placeholder]);
   const editable = useRef(canEdit);
   editable.current = canEdit;
   const blockChange = useRef(onBlockChange);
@@ -196,6 +358,31 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   readFile.current = readGitHubFile;
   const referenceTargets = useRef(references);
   referenceTargets.current = references;
+  const media = useRef({ url: mediaUrl, upload: uploadMedia });
+  media.current = { url: mediaUrl, upload: uploadMedia };
+  // The files this writer pasted, shown from their own copy; let go with the editor.
+  const [localMedia] = useState(() => new Map<string, LocalMedia>());
+  useEffect(() => () => {
+    for (const local of localMedia.values()) URL.revokeObjectURL(local.url);
+    localMedia.clear();
+  }, [localMedia]);
+  const [mediaFailure, setMediaFailure] = useState<string | null>(null);
+  const passageActions = useRef(actions);
+  passageActions.current = actions;
+  const inMargin = useRef(commentInMargin);
+  inMargin.current = commentInMargin;
+  const [commentDraft, setCommentDraftState] = useState<CommentDraft | null>(null);
+  const draftRef = useRef<CommentDraft | null>(null);
+  /** A comment closed before it was sent, by its passage's text. */
+  const unsent = useRef<{ quote: string; text: string } | null>(null);
+  const setCommentDraft = useCallback((next: CommentDraft | null) => {
+    draftRef.current = next;
+    setCommentDraftState(next);
+  }, []);
+  // A selection made with the mouse opens the comment box under it once the clicks settle (a double click
+  // may be the first two of a triple); one made from the keyboard is being edited, and shows the menu.
+  const selectedWithMouse = useRef(false);
+  const commentTimer = useRef(0);
   const anchorsChange = useRef(onAnchorOffsets);
   anchorsChange.current = onAnchorOffsets;
   const presenceOf = useRef<CursorPresence>(cursorPresence ?? (() => "active"));
@@ -213,6 +400,9 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       if (!current || !frame.current || !anchorsChange.current) return;
       const offsets = anchorOffsets(current, session.fragment, frame.current, discussionList.current,
         session.awareness);
+      // The change in front of the reader, where the face of the Agent that suggested it stands.
+      const suggested = currentSuggestionTop(current);
+      if (suggested !== null) offsets.set("suggestion", suggested - frame.current.getBoundingClientRect().top);
       const key = JSON.stringify([...offsets].map(([anchor, top]) => [anchor, Math.round(top)]));
       if (key === lastOffsets.current) return;
       lastOffsets.current = key;
@@ -220,18 +410,19 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     });
   }, [session]);
   const [toolbar, setToolbar] = useState<Toolbar | null>(null);
-  const [slashIndex, setSlashIndex] = useState(0);
+  const shownToolbar = useRef<Toolbar | null>(null);
+  const showToolbar = useCallback((next: Toolbar) => {
+    shownToolbar.current = next;
+    setToolbar(next);
+  }, []);
+  const [menuIndex, setMenuIndex] = useState(0);
   const [linkDraft, setLinkDraft] = useState<string | null>(null);
   // A GitHub file link being pasted to embed, and why the last one was not a file.
   const [fileDraft, setFileDraft] = useState<string | null>(null);
   const [fileDraftError, setFileDraftError] = useState(false);
-  // The passage being asked about, kept while the question is typed (the editor loses its selection).
-  const [asking, setAsking] = useState<{ mode: "ask" | "change"; blockId: string; left: number; top: number;
-    anchor: { quote: string; from: unknown; to: unknown } } | null>(null);
-  const [askText, setAskText] = useState("");
-  const [askBusy, setAskBusy] = useState(false);
-  const [editorsShown, setEditorsShown] = useState<{ blockId: string; left: number; top: number } | null>(null);
-  const menu = useRef({ slash: null as SlashState | null, index: 0 });
+  const menu = useRef({ trigger: null as PageTrigger | null, items: [] as MenuItem[], index: 0 });
+  // The sections of pages `[[page#` named, as they are read.
+  const [sectionsRead, setSectionsRead] = useState<ReadonlyMap<string, PageSections>>(() => new Map());
 
   const run = useCallback((command: Command) => {
     const current = view.current;
@@ -240,35 +431,84 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     current.focus();
   }, []);
 
-  const applyInsert = useCallback((item: InsertItem) => {
+  const applyItem = useCallback((item: MenuItem) => {
     const current = view.current;
-    const slash = menu.current.slash;
     if (!current) return;
-    if (slash) current.dispatch(current.state.tr.delete(slash.from, slash.to).setMeta(slashKey, "close"));
-    item.run(current.state, current.dispatch, current);
+    item.run(current);
     current.focus();
   }, []);
 
+  /** Opens the comment box under the selection, or, with `caretBlock`, under the caret's paragraph. */
+  const openComment = useCallback((current: EditorView, caretBlock: boolean) => {
+    if (!passageActions.current?.comment || !frame.current) return false;
+    const { selection } = current.state;
+    if (selection.$from.parent.type.spec.code) return false;
+    const anchor = selectionAnchor(current.state, session.fragment)
+      ?? (caretBlock ? caretBlockAnchor(current.state, session.fragment) : null);
+    if (!anchor) return false;
+    const [from, to] = selection.empty ? [selection.$from.start(), selection.$from.end()] : [selection.from, selection.to];
+    const box = frame.current.getBoundingClientRect();
+    const start = current.coordsAtPos(from, 1);
+    const end = current.coordsAtPos(to, -1);
+    // In the margin, level with the passage's first line; else under its last line, from where it starts when it
+    // is one line, else from the text's edge.
+    const oneLine = Math.abs(start.top - end.top) < 4;
+    const left = Math.max(0, Math.min(oneLine ? start.left - box.left - 10 : 0, box.width - 448));
+    const top = inMargin.current ? start.top - box.top - 8 : end.bottom - box.top + 6;
+    const text = unsent.current?.quote === anchor.quote ? unsent.current.text : "";
+    setCommentDraft({ blockId: pageDocBlockAt(current.state.doc, from), anchor, left, top, text });
+    current.dispatch(current.state.tr.setMeta(discussionsKey, { draft: { from: anchor.from, to: anchor.to } }));
+    return true;
+  }, [session, setCommentDraft]);
+
+  /**
+   * Closes the box. Sent (`collapse`) or left for somewhere else (`away`), the passage is no longer selected, so
+   * what is typed next does not replace it; left, the focus stays where the reader went. A comment closed unsent
+   * is kept for the passage.
+   */
+  const closeComment = useCallback(({ collapse = false, away = false } = {}) => {
+    const draft = draftRef.current;
+    if (!draft) return;
+    unsent.current = !collapse && draft.text.trim() ? { quote: draft.anchor.quote, text: draft.text } : null;
+    setCommentDraft(null);
+    const current = view.current;
+    if (!current) return;
+    const tr = current.state.tr.setMeta(discussionsKey, { draft: null });
+    if (collapse || away) tr.setSelection(TextSelection.create(tr.doc, current.state.selection.to));
+    current.dispatch(tr);
+    if (!away) current.focus();
+  }, [setCommentDraft]);
+
+  const sessionChanges = useRef(onChanges);
+  sessionChanges.current = onChanges;
   useEffect(() => {
     if (!host.current) return;
     const handleKeyDown = (_view: EditorView, event: KeyboardEvent) => {
-      const slash = menu.current.slash;
-      if (!slash) return false;
-      const items = matchingItems(slash.query);
-      if (!items.length) return false;
+      selectedWithMouse.current = false;
+      // As in Google Docs: ⌘⌥M comments on the selection, or on the caret's paragraph.
+      if (event.code === "KeyM" && event.altKey && (event.metaKey || event.ctrlKey) && openComment(_view, true)) return true;
+      const trigger = menu.current.trigger;
+      // As in Cursor: Tab takes the suggested change in front of the reader, Escape leaves it.
+      if (!trigger && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
+        && suggestionsKey.getState(_view.state)?.hunks.length) {
+        if (event.key === "Tab") return takeSuggestion(_view);
+        if (event.key === "Escape") return leaveSuggestion(_view);
+      }
+      const items = menu.current.items;
+      if (!trigger || !items.length) return false;
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         const step = event.key === "ArrowDown" ? 1 : -1;
         const next = (menu.current.index + step + items.length) % items.length;
         menu.current.index = next;
-        setSlashIndex(next);
+        setMenuIndex(next);
         return true;
       }
       if (event.key === "Enter" || event.key === "Tab") {
-        applyInsert(items[Math.min(menu.current.index, items.length - 1)]!);
+        applyItem(items[Math.min(menu.current.index, items.length - 1)]!);
         return true;
       }
       if (event.key === "Escape") {
-        _view.dispatch(_view.state.tr.setMeta(slashKey, "close"));
+        _view.dispatch(_view.state.tr.setMeta(triggersKey, "close"));
         return true;
       }
       return false;
@@ -282,9 +522,10 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       blocksChange.current?.(blocks);
     };
     const editor = new EditorView(host.current, {
-      state: EditorState.create({ schema: pageSchema, plugins: editorPlugins({
-        fragment: session.fragment, awareness: session.awareness, handleKeyDown,
-        placeholder: "Write the current state of this area…",
+      state: EditorState.create({ schema: pageSchema, plugins: [...editorPlugins({
+        fragment: session.fragment, awareness: session.awareness, session, handleKeyDown,
+        onChanges: (changes) => sessionChanges.current?.(changes),
+        placeholder: () => placeholderText.current,
         onBlockChange: (blockId) => blockChange.current?.(blockId),
         openConversation: (conversationId) => openConversation.current?.(conversationId),
         focusConversation: (conversationId) => focusConversation.current?.(conversationId),
@@ -292,8 +533,12 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         cursorPresence: () => presenceOf.current,
         readGitHubFile: () => readFile.current,
         references: () => referenceTargets.current,
-      }) }),
-      nodeViews,
+        uploadMedia: () => media.current.upload,
+        localMedia,
+        onMediaFailure: setMediaFailure,
+      }), pageSuggestions(() => suggestionReport.current)] }),
+      nodeViews: nodeViews(() => media.current.url
+        ? { url: media.current.url, local: (file) => localMedia.get(file) } : undefined),
       editable: () => editable.current,
       attributes: { class: "page-document", spellcheck: "true", "data-editable": editable.current ? "true" : "false" },
       // Called as the view (possibly while it is still being constructed, when the document first syncs).
@@ -301,22 +546,44 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         // Collaboration can still deliver a transaction after the page unmounted the editor.
         if (this.isDestroyed) return;
         this.updateState(this.state.apply(tr));
-        if (tr.docChanged) readBlocks(this);
-        const next = readToolbar(this);
-        if (next.slash?.query !== menu.current.slash?.query || Boolean(next.slash) !== Boolean(menu.current.slash)) {
-          menu.current.index = 0;
-          setSlashIndex(0);
+        if (tr.docChanged) {
+          readBlocks(this);
+          setDrawn({ view: this, doc: this.state.doc });
         }
-        menu.current.slash = next.slash;
-        setToolbar(next);
+        // What the shared document brings (others' writes, its first sync) carries the sync's meta.
+        if (tr.docChanged && tr.getMeta(ySyncPluginKey) === undefined) wrote.current?.();
+        const next = readToolbar(this);
+        if (triggerKey(next.trigger) !== triggerKey(menu.current.trigger)) {
+          menu.current.index = 0;
+          setMenuIndex(0);
+        }
+        menu.current.trigger = next.trigger;
+        // Metadata-only transactions do not move the selection menu. Document and selection changes
+        // still render it, even when its controls match, to update its position.
+        if (tr.docChanged || tr.selectionSet || tr.storedMarksSet || !sameValue(shownToolbar.current, next)) showToolbar(next);
         measure();
       },
       handleDOMEvents: {
-        focus: (focused) => { setToolbar(readToolbar(focused)); return false; },
+        mousedown: (current) => {
+          selectedWithMouse.current = true;
+          window.clearTimeout(commentTimer.current);
+          // A drag often ends past the text's edge, outside the editor; wherever the button comes up, it was made here.
+          current.dom.ownerDocument.addEventListener("mouseup", () => {
+            window.clearTimeout(commentTimer.current);
+            commentTimer.current = window.setTimeout(() => {
+              if (!current.isDestroyed && selectedWithMouse.current && !current.state.selection.empty && current.hasFocus()) {
+                openComment(current, false);
+              }
+            }, 220);
+          }, { once: true, capture: true });
+          return false;
+        },
+        touchstart: () => { selectedWithMouse.current = false; return false; },
+        focus: (focused) => { showToolbar(readToolbar(focused)); return false; },
         blur: (blurred, event) => {
           // Leaving for the page's own menus keeps them open.
           if (frame.current?.contains(event.relatedTarget as Node | null)) return false;
-          setToolbar(readToolbar(blurred));
+          showToolbar(readToolbar(blurred));
           return false;
         },
         click: (_view, event) => {
@@ -329,7 +596,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       },
     });
     view.current = editor;
-    setToolbar(readToolbar(editor));
+    setDrawn({ view: editor, doc: editor.state.doc });
+    showToolbar(readToolbar(editor));
     readBlocks(editor);
     const resized = new ResizeObserver(() => measure());
     resized.observe(editor.dom);
@@ -342,8 +610,10 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       session.awareness.off("change", measure);
       cancelAnimationFrame(measureFrame.current);
       measureFrame.current = 0;
+      window.clearTimeout(commentTimer.current);
       editor.destroy();
       view.current = null;
+      setDrawn(null);
     };
     // The editor binds one session for its lifetime; the parent remounts it per page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -358,6 +628,12 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   useEffect(() => {
     if (view.current && follow) scrollToSection(view.current, follow.blockId);
   }, [follow]);
+  useEffect(() => {
+    const current = view.current;
+    if (!current || !writeOn) return;
+    current.dispatch(current.state.tr.setSelection(Selection.atEnd(current.state.doc)).scrollIntoView());
+    current.focus();
+  }, [writeOn]);
 
   const readerChanges = useRef(onReaderChanges);
   readerChanges.current = onReaderChanges;
@@ -367,11 +643,56 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     // After the synced document is in the editor, so the changes are measured against it.
     const frameId = requestAnimationFrame(() => {
       if (!view.current) return;
-      const count = showReaderChanges(view.current, session.fragment, readerBody);
+      const count = showReaderChanges(view.current, session.fragment, readerBody, readerShown);
       if (readerBody !== null) readerChanges.current?.(count);
     });
     return () => cancelAnimationFrame(frameId);
-  }, [readerBody, readerHead, session]);
+  }, [readerBody, readerHead, readerShown, session]);
+
+  const seenDoc = useRef<DocNode | null>(null);
+  useEffect(() => {
+    if (readFrom === undefined) return;
+    // After the synced document is in the editor, as the diff, so a page seen as it opened is that document.
+    const frameId = requestAnimationFrame(() => {
+      if (view.current) seenDoc.current = readFrom === null ? view.current.state.doc : markdownToPageDoc(readFrom);
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [readFrom, session]);
+  useEffect(() => {
+    if (!reading) return;
+    reading.current = {
+      see: (area) => {
+        const current = view.current;
+        if (!current || !seenDoc.current) return null;
+        const inView = (pos: number) => {
+          const block = current.nodeDOM(pos);
+          if (!(block instanceof HTMLElement)) return false;
+          const box = block.getBoundingClientRect();
+          return box.height > 0 && box.bottom > area.top && box.top < area.bottom;
+        };
+        seenDoc.current = pageSeenDoc(seenDoc.current, current.state.doc, inView);
+        const body = pageDocToMarkdown(seenDoc.current);
+        return { body, whole: body === pageDocToMarkdown(current.state.doc) };
+      },
+      seeAll: () => { if (view.current && seenDoc.current) seenDoc.current = view.current.state.doc; },
+    };
+    return () => { reading.current = null; };
+  }, [reading, session]);
+
+  const suggestionReport = useRef(onSuggestions);
+  suggestionReport.current = onSuggestions;
+  useEffect(() => {
+    if (view.current) showSuggestions(view.current, suggestions ?? []);
+  }, [suggestions, session]);
+  useEffect(() => {
+    if (!suggestionControl) return;
+    suggestionControl.current = {
+      take: () => { if (view.current) takeSuggestion(view.current); },
+      leave: () => { if (view.current) leaveSuggestion(view.current); },
+      step: (by) => { if (view.current) stepSuggestion(view.current, by); },
+    };
+    return () => { suggestionControl.current = null; };
+  }, [suggestionControl, session]);
 
   useEffect(() => {
     // An Agent's Run going to sleep or waking changes whose carets show, with no awareness change.
@@ -432,37 +753,84 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     const at = current.coordsAtPos(pos);
     return { left: at.left - box.left, top: at.top - box.top, bottom: at.bottom - box.top };
   };
+  const placeTable = ($pos: ResolvedPos) => {
+    if (!current || !frame.current) return null;
+    for (let depth = $pos.depth; depth > 0; depth--) {
+      if ($pos.node(depth).type.spec.tableRole !== "table") continue;
+      const table = current.nodeDOM($pos.before(depth));
+      if (!(table instanceof HTMLElement)) return null;
+      const box = frame.current.getBoundingClientRect();
+      const at = table.getBoundingClientRect();
+      return { left: at.left - box.left, top: at.top - box.top };
+    }
+    return null;
+  };
   const section = current ? pageDocBlockAt(current.state.doc, current.state.selection.from) : "";
-  const selectionActions = Boolean(actions?.discuss || actions?.ask || (actions?.claim && canEdit) || actions?.copyLink);
+  const selectionActions = Boolean(actions?.discuss || actions?.comment);
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
-    ? place(current.state.selection.from) : null;
+    && !commentDraft && !(actions?.comment && selectedWithMouse.current) ? place(current.state.selection.from) : null;
+  // A key meant for the passage, pressed while the box has nothing typed: it acts on the passage as before.
+  const passageKey = (event: { key: string; metaKey: boolean; ctrlKey: boolean }) => {
+    const editor = view.current;
+    if (!editor) return false;
+    const mod = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    const { from, to } = editor.state.selection;
+    const passage = editor.state.doc.textBetween(from, to, "\n\n");
+    if (mod && key === "c") { void navigator.clipboard?.writeText(passage); return true; }
+    if (event.key === "Backspace" || event.key === "Delete" || (mod && key === "x")) {
+      if (mod) void navigator.clipboard?.writeText(passage);
+      closeComment();
+      editor.dispatch(editor.state.tr.deleteSelection().scrollIntoView());
+      return true;
+    }
+    const mark = mod ? { b: pageSchema.marks.strong, i: pageSchema.marks.em, e: pageSchema.marks.code }[key] : undefined;
+    if (mark) {
+      closeComment();
+      toggleMark(mark)(editor.state, editor.dispatch, editor);
+      return true;
+    }
+    return false;
+  };
+  const tableAt = toolbar?.inTable && current ? placeTable(current.state.selection.$from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
   const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
-  const slash = canEdit && toolbar?.slash && toolbar.focused ? toolbar.slash : null;
-  const slashItems = slash ? matchingItems(slash.query) : [];
-  const slashAt = slash && slashItems.length ? place(slash.from) : null;
+  const trigger = canEdit && toolbar?.trigger && toolbar.focused ? toolbar.trigger : null;
+  const menuItems = trigger ? triggerItems(trigger, completion, sectionsRead) : [];
+  menu.current.items = menuItems;
+  const menuAt = trigger && menuItems.length ? place(trigger.from) : null;
+  const namedPage = trigger?.kind === "page" && trigger.section !== null && completion ? sectionPage(trigger, completion) : null;
+  const readPage = completion?.readPage;
+  useEffect(() => {
+    if (!namedPage || !readPage || sectionsRead.has(namedPage)) return;
+    let live = true;
+    void readPage(namedPage).then((read) => {
+      if (live) setSectionsRead((known) => new Map(known).set(read.pageId, { ...read, blocks: pageBlocks(read.body) }));
+    }, () => undefined);
+    return () => { live = false; };
+  }, [namedPage, readPage, sectionsRead]);
 
   return (
     <div ref={frame} className="relative" data-testid="page-editor">
-      {/* Surfaces take their material from the theme, which also sets their position;
-          the wrappers place them. */}
-      {canEdit && toolbar?.inTable && (
-        <div className="sticky top-0 z-10 mb-2 w-fit">
-        <div role="toolbar" aria-label="Table"
-          className="flex items-center gap-0.5 rounded-lg border border-border bg-popover px-1.5 py-1"
+      <SectionAgentsInPage />
+      {/* Surfaces are slips of the page's paper (PaperPopover); the wrappers place them. */}
+      {/* Over the page, above the table: taking room in the page would move the text under the pointer. */}
+      {canEdit && toolbar?.inTable && tableAt && (
+        <div className="absolute z-10 w-fit -translate-y-full" style={{ left: tableAt.left, top: tableAt.top - 6 }}>
+        <PaperPopover role="toolbar" aria-label="Table" className="flex items-center gap-0.5 px-1.5 py-1"
           data-testid="page-table-tools">
           <ToolButton label="Add a row below" onRun={() => run(addRowAfter)}><BetweenHorizontalEnd /></ToolButton>
           <ToolButton label="Add a column to the right" onRun={() => run(addColumnAfter)}><BetweenVerticalEnd /></ToolButton>
           <ToolButton label="Delete this row" onRun={() => run(deleteRow)}><Rows3 /></ToolButton>
           <ToolButton label="Delete this column" onRun={() => run(deleteColumn)}><Columns3 /></ToolButton>
           <ToolButton label="Delete the table" onRun={() => run(deleteTable)}><Trash2 /></ToolButton>
-        </div>
+        </PaperPopover>
         </div>
       )}
       {linkDraft !== null && (
         <div className={linkAtPos ? "absolute z-30" : "mb-2"}
           style={linkAtPos ? { left: Math.max(0, linkAtPos.left - 8), top: linkAtPos.top - 6, transform: "translateY(-100%)" } : undefined}>
-        <form className="flex items-center gap-2 rounded-lg border border-border bg-popover p-2"
+        <PaperPopover as="form" className="flex items-center gap-2 p-2"
           onSubmit={(event) => { event.preventDefault(); run(setLink(linkDraft)); setLinkDraft(null); }}>
           <Link2 className="size-4 shrink-0 text-muted-foreground" />
           <input autoFocus value={linkDraft} onChange={(event) => setLinkDraft(event.target.value)} placeholder="Paste a link"
@@ -473,13 +841,13 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
             <button type="button" className="text-sm text-muted-foreground"
               onClick={() => { run(setLink("")); setLinkDraft(null); }}>Remove</button>
           )}
-        </form>
+        </PaperPopover>
         </div>
       )}
       {fileDraft !== null && (
         <div className={fileAtPos ? "absolute z-30" : "mb-2"}
           style={fileAtPos ? { left: Math.max(0, fileAtPos.left - 8), top: fileAtPos.top - 6, transform: "translateY(-100%)" } : undefined}>
-        <form className="flex w-[min(32rem,80vw)] flex-col gap-1 rounded-lg border border-border bg-popover p-2"
+        <PaperPopover as="form" className="flex w-[min(32rem,80vw)] flex-col gap-1 p-2"
           data-testid="page-embed-github-file"
           onSubmit={(event) => {
             event.preventDefault();
@@ -499,155 +867,73 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           {fileDraftError && (
             <p className="text-xs text-muted-foreground">Paste a file link, like https://github.com/owner/repo/blob/main/README.md</p>
           )}
-        </form>
+        </PaperPopover>
+        </div>
+      )}
+      {mediaFailure !== null && (
+        <div role="alert" data-testid="page-media-failure"
+          className="sticky top-2 z-20 mb-2 flex items-center gap-3 rounded-lg bg-muted px-3 py-2 text-sm">
+          <span className="min-w-0 flex-1">{mediaFailure}</span>
+          <button type="button" className="text-muted-foreground hover:text-foreground hover:underline"
+            onClick={() => setMediaFailure(null)}>Dismiss</button>
         </div>
       )}
       <div ref={host} className="min-h-[50vh]" />
       {selectionMenu && (
         <div className="absolute z-20 -translate-y-full"
           style={{ left: Math.max(0, selectionMenu.left - 8), top: selectionMenu.top - 6 }}>
-        <div role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
-          className="flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 text-popover-foreground">
-          {actions?.discuss && (
+        <PaperPopover role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
+          className="flex items-center p-1">
+          {actions?.comment ? (
+            <button type="button" onMouseDown={(event) => event.preventDefault()}
+              onClick={() => { if (current) openComment(current, false); }}
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
+              <MessageSquare /> Comment
+            </button>
+          ) : actions?.discuss && (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
                 : undefined)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
-              <MessageSquarePlus /> Discuss
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
+              <MessageSquare /> Discuss
             </button>
           )}
-          {actions?.ask && (["ask", "change"] as const).filter((mode) => mode === "ask" || canEdit).map((mode) => (
-            <button key={mode} type="button" onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                const anchor = current ? selectionAnchor(current.state, session.fragment) : null;
-                if (!anchor || !selectionMenu) return;
-                setAskText("");
-                setAsking({ mode, blockId: section, anchor, left: selectionMenu.left, top: selectionMenu.top });
-              }}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
-              {mode === "ask" ? <><Sparkles /> Ask AI</> : <><PenLine /> Ask to change</>}
-            </button>
-          ))}
-          {actions?.claim && canEdit && (
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => actions.claim!(section)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
-              <Flag /> Claim
-            </button>
-          )}
-          {actions?.editors && (
-            <ToolButton label="Show editors" onRun={() => setEditorsShown({ blockId: section, left: selectionMenu.left,
-              top: selectionMenu.top })}><Users /></ToolButton>
-          )}
-          {actions?.copyLink && (
-            <ToolButton label="Copy a link to this section" onRun={() => actions.copyLink!(section)}><Link2 /></ToolButton>
-          )}
-        </div>
+        </PaperPopover>
         </div>
       )}
-      {editorsShown && actions?.editors && (
-        <EditorsPopover at={editorsShown} editors={actions.editors(editorsShown.blockId)}
-          onOpenConversation={(conversationId) => { setEditorsShown(null); openConversation.current?.(conversationId); }}
-          onHistory={actions.history ? () => { setEditorsShown(null); actions.history!(); } : undefined}
-          onClose={() => setEditorsShown(null)} />
-      )}
-      {asking && actions?.ask && (
-        <div className="absolute z-30 w-[min(28rem,100%)] -translate-y-full"
-          style={{ left: Math.max(0, asking.left - 8), top: asking.top - 6 }}>
-          <form className="space-y-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground"
-            data-testid="page-ask" onSubmit={(event) => {
-              event.preventDefault();
-              if (!askText.trim() || askBusy) return;
-              setAskBusy(true);
-              void actions.ask!(asking.blockId, asking.anchor, { mode: asking.mode, prompt: askText.trim() })
-                .then(() => setAsking(null), () => undefined).finally(() => setAskBusy(false));
-            }}>
-            <p className="line-clamp-2 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
-              {asking.anchor.quote}
-            </p>
-            <textarea autoFocus rows={2} value={askText} onChange={(event) => setAskText(event.target.value)}
-              aria-label={asking.mode === "ask" ? "Your question" : "What to change"}
-              placeholder={asking.mode === "ask" ? "Ask about this passage…" : "Say how it should change…"}
-              onKeyDown={(event) => {
-                if (isImeKeyDown(event.nativeEvent)) return;
-                if (event.key === "Escape") setAsking(null);
-                if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
-              }}
-              className="block w-full resize-none bg-transparent text-sm focus:outline-none" />
-            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{asking.mode === "ask" ? "An Agent answers in a discussion on this passage."
-                : "An Agent edits the page; you see its cursor."}</span>
-              <span className="flex gap-2">
-                <button type="button" onClick={() => setAsking(null)} className="hover:underline">Cancel</button>
-                <button type="submit" disabled={!askText.trim() || askBusy}
-                  className="font-semibold text-foreground disabled:opacity-40">{asking.mode === "ask" ? "Ask" : "Send"}</button>
-              </span>
-            </div>
-          </form>
+      {commentDraft && (
+        <div className={commentInMargin ? "absolute z-30 w-80" : "absolute z-30 w-[28rem] max-w-full"}
+          style={{ left: commentInMargin ? "calc(100% + 1.5rem)" : commentDraft.left, top: commentDraft.top }}>
+          <PageCommentBox text={commentDraft.text} taker={actions?.commentTaker?.(commentDraft.blockId)}
+            onText={(text) => setCommentDraft({ ...commentDraft, text })}
+            onClose={(away) => closeComment({ away })} onPassageKey={passageKey}
+            onSend={(text) => {
+              actions?.comment?.(commentDraft.blockId, commentDraft.anchor, text);
+              closeComment({ collapse: true });
+            }} />
         </div>
       )}
-      {slash && slashAt && (
-        <div className="absolute z-20 w-64" style={{ left: slashAt.left, top: slashAt.bottom + 4 }}>
-        <div role="listbox" aria-label="Insert" data-testid="page-insert-menu"
-          className="max-h-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground">
-          {slashItems.map((item, index) => (
-            <button key={item.label} type="button" role="option" aria-selected={index === slashIndex}
-              onMouseDown={(event) => event.preventDefault()} onClick={() => applyInsert(item)}
-              onMouseEnter={() => { menu.current.index = index; setSlashIndex(index); }}
+      {blame && <PageBlameLayer view={view} frame={frame} source={blame} inMargin={commentInMargin} />}
+      {blame && drawn && <PageByline view={drawn.view} doc={drawn.doc} frame={frame} source={blame}
+        writing={writing ?? (() => false)} />}
+      {trigger && menuAt && (
+        <div className="absolute z-20 w-64" style={{ left: menuAt.left, top: menuAt.bottom + 4 }}>
+        <PaperPopover role="listbox" aria-label={MENU_LABELS[trigger.kind]} data-testid={`page-${trigger.kind}-menu`}
+          className="max-h-80 overflow-y-auto p-1">
+          {menuItems.map((item, index) => (
+            <button key={item.key} type="button" role="option" aria-selected={index === menuIndex}
+              onMouseDown={(event) => event.preventDefault()} onClick={() => applyItem(item)}
+              onMouseEnter={() => { menu.current.index = index; setMenuIndex(index); }}
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm [&_svg]:size-4
-                [&_svg]:text-muted-foreground ${index === slashIndex ? "bg-accent" : ""}`}>
+                [&_svg]:shrink-0 [&_svg]:text-muted-foreground`}>
               {item.icon}
-              <span className="flex-1">{item.label}</span>
-              <span className="text-xs text-muted-foreground">{item.hint}</span>
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              <span className="max-w-[45%] truncate text-xs text-muted-foreground">{item.hint}</span>
             </button>
           ))}
-        </div>
+        </PaperPopover>
         </div>
       )}
-    </div>
-  );
-}
-
-/** Who changed the selected passage's section and when, with its conversation and History a click away. */
-function EditorsPopover({ at, editors, onOpenConversation, onHistory, onClose }: {
-  at: { left: number; top: number };
-  editors: SectionEditors | null;
-  onOpenConversation: (conversationId: string) => void;
-  onHistory?: () => void;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
-  return (
-    <div className="absolute z-30 w-72 -translate-y-full" style={{ left: Math.max(0, at.left - 8), top: at.top - 6 }}
-      onMouseDown={(event) => event.preventDefault()}>
-      <div role="dialog" aria-label="Editors" data-testid="page-editors"
-        className="space-y-1.5 rounded-lg border border-border bg-popover p-2.5 text-sm text-popover-foreground">
-        {editors ? (
-          <>
-            {editors.people.map((person) => (
-              <div key={person.name} className="flex items-center gap-2">
-                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: person.color }} />
-                <span className="truncate font-medium">{person.name}</span>
-              </div>
-            ))}
-            <div className="text-xs text-muted-foreground">
-              {editors.when}
-              {editors.conversation && (
-                <> · <button type="button" className="hover:text-foreground hover:underline"
-                  onClick={() => onOpenConversation(editors.conversation!.id)}>{editors.conversation.name}</button></>
-              )}
-            </div>
-          </>
-        ) : <div className="text-xs text-muted-foreground">No recent changes here.</div>}
-        <div className="flex justify-between gap-2 pt-1 text-xs">
-          {onHistory ? <button type="button" className="font-semibold hover:underline" onClick={onHistory}>
-            See version history</button> : <span />}
-          <button type="button" className="text-muted-foreground hover:underline" onClick={onClose}>Close</button>
-        </div>
-      </div>
     </div>
   );
 }

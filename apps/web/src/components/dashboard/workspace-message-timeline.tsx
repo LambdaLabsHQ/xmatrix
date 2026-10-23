@@ -1,6 +1,8 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { messageMachineIdentity, registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
-import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
+import { AttachmentLightbox, ImageGalleryLightbox, LIGHTBOX_BUTTON_CLASS, type GalleryImage } from "./attachment-lightbox";
 import { attachmentMediaType } from "./attachment-media-type";
 import { MediaPlayer } from "./media-player";
 import { AgentIdentityLabels } from "./agent-identity-labels";
@@ -9,33 +11,28 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource } from "@xmatrix/protocol";
+import { channelPresenceInstances, harnessSignedOutNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
-
-export {
-  replyPreviewsEqual,
-  timelineMessagesEqual,
-} from "./workspace-shell-message-model";
-
+import { sameValue, shareByKey } from "../../lib/same-value";
 
 import { MESSAGE_SURFACE_METRICS_EVENT, messageSurfaceOf } from "./message-surface-metrics";
 
 import {
-  activateMessageAttachmentMediaStore,
   commitMessageAttachmentMedia,
-  createMessageAttachmentMediaStore,
-  deactivateMessageAttachmentMediaStore,
-  releaseMessageAttachmentMediaStore,
+  holdMessageAttachmentMediaStore,
+  letGoMessageAttachmentMediaStore,
+  messageAttachmentMediaStoreFor,
 } from "./message-attachment-media-store";
 
 import {
-  agentInstanceBranchLabel,
   type AgentTraceTarget,
 } from "./workspace-shell-message-model";
 
-import { agentInstanceDisplayStatus } from "./workspace-shell-presence";
+import { RealtimeMessageAvatar } from "./realtime-message-avatar";
+import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
+import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
-import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { LiquidGlassPill, PaperPopover } from "@/components/ui/material-surfaces";
 import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
@@ -59,7 +56,7 @@ import {
 } from "./workspace-shell-formatters";
 
 import {
-  areMessageRowPropsEqual, type MessageRowChannel, type MessageRowComparableProps,
+  type MessageRowChannel, type MessageRowProps,
   attachmentDownloadHref,
   attachmentDownloadName,
   attachmentFetchHref,
@@ -96,12 +93,10 @@ import {
   goalStatusBadgeLabel,
   MachineRunFailureNotice,
   StatusChipBadge,
-  avatarInitials,
   buildAgentWorkItems,
   formatFileSize,
   formatTime,
   isMachineRunFailureNotice,
-  presenceStatusLabel,
   provenanceBadgeClass,
   provenanceLabel,
   provenanceTitle,
@@ -112,6 +107,7 @@ import {
   Fragment,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -140,6 +136,7 @@ import {
   type TimelineOpeningMeasure,
 } from "./timeline-opening-tail";
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
+import { TimelineVirtuosoScroller } from "./timeline-virtuoso-scroller";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, beginTimelineSendRise, isJustSentRow, playSentRowEntrance } from "./timeline-send-rise";
 import { FoldedActivityRow } from "./conversation-activity-row";
 import {
@@ -148,7 +145,6 @@ import {
   sinceDigestLine,
   type SinceDigest,
 } from "./conversation-activity-rows";
-import { useChannelSupersessions } from "./use-channel-supersessions";
 import { AgentWorkIntent, AgentWorkIntentCard, agentWaitingPhrase, useIntentSince, useNow } from "./agent-work-intent";
 import { AgentRuntimeNotice, agentRuntimeIssuePhrase, agentRuntimeNoticePhrase } from "./agent-runtime-notice";
 
@@ -156,14 +152,14 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 
 
-import { MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
+import { MessageUnsentNotice } from "./message-unsent-notice";
+import { foldedDiscussionBody, MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
 
 import {
   AlertTriangle,
   Check,
   ChevronDown,
   ChevronLeft,
-  ChevronRight,
   Copy,
   Download,
   FileText,
@@ -171,7 +167,6 @@ import {
   Loader2,
   Maximize2,
   MessageSquare,
-  MessageSquarePlus,
   Paperclip,
   Pencil,
   RefreshCw,
@@ -187,7 +182,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import {
   MESSAGE_AUTHOR_NAME_CLASS_NAME,
   MESSAGE_AVATAR_CLASS_NAME,
@@ -222,14 +217,16 @@ import { PageReferenceScopeProvider } from "@/components/dashboard/page-referenc
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAutoLaunchMentions } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation } from "@xmatrix/protocol";
 import { UnpublishedTurnState } from "./unpublished-turn-status";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
-import { launchChoiceOffered, launchChoicePollInterval, launchChoiceView } from "./first-message-launch-choice-state";
+import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { InvocationAccessError, invocationSourceMessages, loadInvocationPages } from "./mention-invocation-query";
-import { invocationPollInterval } from "./mention-invocation-state";
-import { buildMentionReadIndex, machineOfflineMentionSubjects, withInvocationMentionTargets } from "@/components/dashboard/mention-read-state";
+import { InvocationAccessError, invocationSourceMessages, isInvocationSource, loadInvocationPages } from "./mention-invocation-query";
+import {
+  buildMentionReadIndex, machineOfflineMentionSubjects, withInvocationMentionTargets,
+  type MentionReadIndex,
+} from "@/components/dashboard/mention-read-state";
 
 
 
@@ -286,6 +283,9 @@ import { useAndroidBackHandler } from "./use-android-back";
 
 import { cn } from "@/lib/utils";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
+import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
+import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
+import { queuedBehindTurns, type QueuedBehindTurn } from "@/components/dashboard/queued-behind-turn";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -300,7 +300,7 @@ import type {
   SerializedAgentLaunch,
   SerializedAgentContinuation,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -343,22 +343,46 @@ export type TimelineJumpHandle = {
 
 
 
-function useChannelAgentLaunches(channel: SerializedChannel | null, token: string | null,
+/* A message's text, hashed once per message: the question about the messages
+   shown is keyed by their texts, and asked again as each arrival changes them. */
+const bodyHashes = new WeakMap<TimelineItem, string>();
+
+function bodyHashOf(message: TimelineItem): string {
+  let hash = bodyHashes.get(message);
+  if (hash === undefined) {
+    hash = lowercaseHex(sha256(new TextEncoder().encode(message.body)));
+    bodyHashes.set(message, hash);
+  }
+  return hash;
+}
+
+function useChannelAgentLaunches(channel: ChannelSnapshot | null, token: string | null,
   timeline: readonly TimelineItem[], visibleMessageIds?: readonly string[], viewerIdentity?: string | null) {
   const launchSourceMessages = useMemo(() => invocationSourceMessages(timeline, visibleMessageIds),
     [timeline, visibleMessageIds]);
-  const sourceMessageIds = useMemo(() => launchSourceMessages
+  const shownMessageIds = useMemo(() => launchSourceMessages
     .map((message) => message.messageId || message.id), [launchSourceMessages]);
-  const sourceRevisionKey = useMemo(() => launchSourceMessages.map(message => [
-    lowercaseHex(sha256(new TextEncoder().encode(message.body))),
-    message.editedAt, message.recalledAt,
+  const shownRevisionKey = useMemo(() => launchSourceMessages.map(message => [
+    bodyHashOf(message), message.editedAt, message.recalledAt,
   ]), [launchSourceMessages]);
-  const newestSourceAt = launchSourceMessages.reduce((latest, message) =>
-    Math.max(latest, Date.parse(message.sentAt) || 0), 0);
+  /* The question stays the one last asked while it still covers every message
+     shown. Each arrival scrolls a message out of view; asking again for the
+     ones left would send the Hub the same question once per arrival. A message
+     it does not cover (a new one, an edited one) asks anew. */
+  const askedRef = useRef<{ channelId?: string; ids: string[]; revisions: unknown[][] } | null>(null);
+  const channelId = channel?.id;
+  const { ids: sourceMessageIds, revisions: sourceRevisionKey } = useMemo(() => {
+    const asked = askedRef.current;
+    if (asked && asked.channelId === channelId && shownMessageIds.length > 0) {
+      const askedRevision = new Map(asked.ids.map((id, index) => [id, JSON.stringify(asked.revisions[index])]));
+      if (shownMessageIds.every((id, index) => askedRevision.get(id) === JSON.stringify(shownRevisionKey[index]))) return asked;
+    }
+    return (askedRef.current = { channelId, ids: shownMessageIds, revisions: shownRevisionKey });
+  }, [channelId, shownMessageIds, shownRevisionKey]);
   return useQuery<AgentInvocationQueryPage>({
     queryKey: ["agent-launches", channel?.id, viewerIdentity, sourceMessageIds,
       sourceRevisionKey],
-    enabled: Boolean(token && viewerIdentity && channel?.id && sourceMessageIds.length),
+    enabled: Boolean(token && viewerIdentity && channel?.id && shownMessageIds.length),
     retry: false,
     placeholderData: (previous, previousQuery) => {
       if (!previous || !previousQuery || previousQuery.queryKey[1] !== channel?.id ||
@@ -386,29 +410,30 @@ function useChannelAgentLaunches(channel: SerializedChannel | null, token: strin
         return response.json();
       },
     }),
-    refetchInterval: (query) => {
-      const base = invocationPollInterval(query.state.data?.launches ?? [],
-        newestSourceAt, Date.now(), query.state.status === "error", query.state.data?.continuations ?? [],
-        query.state.data?.executions ?? [], query.state.data?.stops ?? []);
-      // A first message's launch choice lasts seconds: follow it closely.
-      const now = Date.now();
-      const choice = launchChoicePollInterval([
-        ...(query.state.data?.launchChoices ?? []).map(record => launchChoiceView(firstMessageDecisionWindow(record, []), {}, now)),
-        ...launchSourceMessages.filter(message => offersLaunchChoice(message, channel))
-          .map(message => launchChoiceView(undefined, { sentAt: message.sentAt }, now)),
-      ]);
-      return choice === undefined ? base : base === false ? choice : Math.min(base, choice);
-    },
+    // Nothing polls: the Hub pushes `channel_invocations_changed` when any of these records moves.
   });
 }
 
 /** The author's own first message of a new, unnamed conversation that
  * summons nobody: the Hub offers it a short launch choice. */
-function offersLaunchChoice(message: TimelineItem, channel: SerializedChannel | null): boolean {
+function offersLaunchChoice(message: TimelineItem, channel: ChannelSnapshot | null): boolean {
   return Boolean(message.own && message.senderKind === "user" && message.sequence === 1 &&
     channel?.metadata?.autoName === true && !message.recalledAt && !message.editedAt &&
     !hasOperationalAgentInvocation(message.body) && parseAutoLaunchMentions(message.body).length === 0 &&
     launchChoiceOffered(message.sentAt, Date.now()));
+}
+
+/* Whether the receipts have loaded matters to the one message that is a stop
+   command. Every other row is told the same thing always: the answer changes
+   each time the question does, and must not render them all. */
+const stopCommands = new WeakMap<TimelineItem, boolean>();
+function isStopCommand(message: TimelineItem): boolean {
+  let known = stopCommands.get(message);
+  if (known === undefined) {
+    known = parseAgentStopInvocation(normalizeMessageBodyForDisplay(message.body, message.senderKind)) !== undefined;
+    stopCommands.set(message, known);
+  }
+  return known;
 }
 
 interface TimelineVirtuosoContext {
@@ -419,6 +444,7 @@ interface TimelineVirtuosoContext {
 const TIMELINE_VIRTUOSO_COMPONENTS: VirtuosoComponents<TimelineItem, TimelineVirtuosoContext> = {
   Header: ({ context }) => context.header,
   Footer: ({ context }) => context.footer,
+  Scroller: TimelineVirtuosoScroller,
 };
 
 export const MessageTimeline = memo(function MessageTimeline({
@@ -447,6 +473,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onReact,
   onEdit,
   onRecall,
+  onUnsentAction,
   onReply,
   onOpenThread,
   onDiscussPassage,
@@ -461,8 +488,9 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId,
   threadRootMessage,
   threadRootChannel,
+  foldsDiscussionHead = false,
 }: {
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
   token: string | null;
   localContext?: MentionLocalContext | null;
@@ -494,9 +522,11 @@ export const MessageTimeline = memo(function MessageTimeline({
   onMessageExposed: (channelId: string, sequence: number) => void;
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
-  threadRootChannel?: SerializedChannel;
-} & Pick<MessageRowComparableProps,
-  "onReact" | "onEdit" | "onRecall" | "onReply" | "onOpenThread" | "onMentionSender" |
+  threadRootChannel?: ChannelSnapshot;
+  /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
+  foldsDiscussionHead?: boolean;
+} & Pick<MessageRowProps,
+  "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
@@ -601,36 +631,36 @@ export const MessageTimeline = memo(function MessageTimeline({
     if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channelId, refetchAgentLaunches, token]);
-  // One media store per channel view. A new one is built — and the previous
-  // one released — whenever the channel, the viewer, or the session changes. Ordinary message progress is excluded
-  // from the dependency list so it does not evict already-authorized media.
+  // A summon refused because its program was signed out is sent again, as its
+  // author's own launch, once that program is signed in from the notice.
+  const timelineRef = useRef(timeline);
+  timelineRef.current = timeline;
+  const resendSignedOutSummon = useCallback(async (sourceMessageId: string, sourceMention: string) => {
+    const source = timelineRef.current.find((item) => item.messageId === sourceMessageId);
+    if (!source?.own) return false;
+    await launchAnyway(sourceMessageId, source.body, sourceMention);
+    return true;
+  }, [launchAnyway]);
+  // The channel's media store, kept among the recent ones when the view moves
+  // on so reopening the channel shows its media at once. Ordinary message
+  // progress and token refresh are excluded from the dependency list so they
+  // do not replace already-loaded media.
+  const authenticated = token !== null;
   const mediaStore = useMemo(
-    () => createMessageAttachmentMediaStore({
+    () => messageAttachmentMediaStoreFor({
       channelId: channel?.id ?? null,
       viewerId: currentUserIdentityId,
-      authenticated: token !== null,
+      authenticated,
     }),
     [
       channel?.id,
       currentUserIdentityId,
-      token,
+      authenticated,
     ],
   );
   useLayoutEffect(() => {
-    // `released` is irreversible, but React development Strict Mode probes a
-    // layout effect with cleanup + setup while reusing this useMemo result.
-    // Re-activate that same store synchronously; a genuinely replaced store
-    // stays inactive through the microtask and is then released exactly once.
-    // This assumes cleanup and re-setup do not span a macrotask. If this tree
-    // later uses Activity/Offscreen-style pause and resume semantics, release
-    // must follow store identity instead of the transient `active` flag.
-    activateMessageAttachmentMediaStore(mediaStore);
-    return () => {
-      deactivateMessageAttachmentMediaStore(mediaStore);
-      queueMicrotask(() => {
-        if (!mediaStore.active) releaseMessageAttachmentMediaStore(mediaStore);
-      });
-    };
+    holdMessageAttachmentMediaStore(mediaStore);
+    return () => letGoMessageAttachmentMediaStore(mediaStore);
   }, [mediaStore]);
 
   // Stable, so it runs when a row mounts and not on every render: the row a
@@ -642,6 +672,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   const stableOnReact = useStableCallback(onReact);
   const stableOnEdit = useStableCallback(onEdit);
   const stableOnRecall = useStableCallback(onRecall);
+  const stableOnUnsentAction = useStableCallback(onUnsentAction);
   const stableOnReply = useStableCallback(onReply);
   const stableOnOpenThread = useStableCallback(onOpenThread);
   const stableOnMentionSender = useStableCallback(onMentionSender);
@@ -663,8 +694,11 @@ export const MessageTimeline = memo(function MessageTimeline({
   const hasTimelineContent = timeline.length > 0 || Boolean(threadRootMessage);
   // Talk stays whole; activity and superseded reports fold into one row per
   // run of the same Instance (docs/design/conversation-activity.md §4.1).
-  const supersessions = useChannelSupersessions(channel?.id, token, timeline);
-  const rows = useMemo(() => buildConversationRows(timeline, supersessions), [timeline, supersessions]);
+  // Rows that say what they said stay the objects they were, so only a row
+  // that changed draws again: folds and headed rows are rebuilt each time.
+  const heldRowsRef = useRef<TimelineItem[]>([]);
+  const rows = useMemo(() => (heldRowsRef.current = shareByKey(heldRowsRef.current,
+    buildConversationRows(timeline), (row) => row.id)), [timeline]);
   const [expandedFolds, setExpandedFolds] = useState<{ channelId?: string; ids: ReadonlySet<string> }>(
     () => ({ ids: new Set() }),
   );
@@ -920,12 +954,21 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   const handleTimelineItemsRendered = useStableCallback((items: ListItem<TimelineItem>[]) => {
     if (channel?.id) {
+      /* Only the rows that can carry invocation state are asked about, and
+         the scope stays the one held while it covers them: the rendered range
+         changes several times as each message arrives, and a new scope renders
+         the whole timeline again for a question that is the same. With none
+         of them in view the scope is empty, and nothing is asked. */
       const currentIds = new Set(timeline.map((message) => message.messageId || message.id));
-      const ids = items.flatMap(({ data }) => data && currentIds.has(data.messageId || data.id)
+      const ids = items.flatMap(({ data }) => data && currentIds.has(data.messageId || data.id) && isInvocationSource(data)
         ? [data.messageId || data.id] : []);
-      setVisibleInvocationScope((previous) => previous?.channelId === channel.id &&
-        previous.ids.length === ids.length && previous.ids.every((id, index) => id === ids[index])
-        ? previous : { channelId: channel.id, ids });
+      setVisibleInvocationScope((previous) => {
+        if (previous?.channelId === channel.id && (ids.length > 0 || previous.ids.length === 0)) {
+          const held = new Set(previous.ids);
+          if (ids.every((id) => held.has(id))) return previous;
+        }
+        return { channelId: channel.id, ids };
+      });
     }
     const exposedHighWaterByChannel = new Map<string, number>();
     for (const { data: message } of items) {
@@ -947,14 +990,41 @@ export const MessageTimeline = memo(function MessageTimeline({
   // One index per Channel membership change, shared by every mention chip in
   // the timeline: resolving `@name` per message would rebuild the same member
   // table for every row.
-  const mentionReadScope = useMemo<MentionReadChannelScope>(() => ({
-    index: withInvocationMentionTargets(buildMentionReadIndex(
+  // The Channel is a new object after every message and presence report. Its
+  // members are almost always who they were, so the index and the unreachable
+  // set are kept by what they say: only a change of theirs reaches the rows.
+  const launchedMentions = invocationQueryData?.launches;
+  const mentionIndexRef = useRef<MentionReadIndex | null>(null);
+  const mentionIndex = useMemo(() => {
+    const next = withInvocationMentionTargets(buildMentionReadIndex(
       channelMentionCandidates(channel, localContext, [], space)
-    ), invocationQueryData?.launches ?? []),
-    ...(channel?.memberReadSequences ? { memberReadSequences: channel.memberReadSequences } : {}),
+    ), launchedMentions ?? []);
+    const held = mentionIndexRef.current;
+    return (mentionIndexRef.current = held && sameValue(held, next) ? held : next);
+  }, [channel, localContext, space, launchedMentions]);
+  const machineOfflineRef = useRef<ReadonlySet<string> | null>(null);
+  const channelPresence = channel?.presence;
+  // Which of the person's messages wait on an Instance still on an earlier
+  // turn. Kept by value, so a presence report that changes none of them
+  // re-renders no row.
+  const queuedRef = useRef<Map<string, readonly QueuedBehindTurn[]> | null>(null);
+  const queuedByMessage = useMemo(() => {
+    const next = queuedBehindTurns(timeline, channelPresenceInstances(channelPresence));
+    const held = queuedRef.current;
+    return (queuedRef.current = held && sameValue(held, next) ? held : next);
+  }, [timeline, channelPresence]);
+  const machineOfflineSubjectIds = useMemo(() => {
+    const next = machineOfflineMentionSubjects({ presence: channelPresence });
+    const held = machineOfflineRef.current;
+    return (machineOfflineRef.current = held && sameValue(held, next) ? held : next);
+  }, [channelPresence]);
+  const memberReadSequences = channel?.memberReadSequences;
+  const mentionReadScope = useMemo<MentionReadChannelScope>(() => ({
+    index: mentionIndex,
+    ...(memberReadSequences ? { memberReadSequences } : {}),
     ...(currentUserIdentityId ? { currentUserIdentityId } : {}),
-    machineOfflineSubjectIds: machineOfflineMentionSubjects(channel),
-  }), [channel, currentUserIdentityId, localContext, space, invocationQueryData]);
+    machineOfflineSubjectIds,
+  }), [mentionIndex, memberReadSequences, currentUserIdentityId, machineOfflineSubjectIds]);
 
   const pageReferenceScope = useMemo(() => {
     const spaceId = space?.id ?? channel?.spaceId;
@@ -1017,6 +1087,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 onReact={stableOnReact}
                 onEdit={stableOnEdit}
                 onRecall={stableOnRecall}
+                onUnsentAction={stableOnUnsentAction}
                 onReply={stableOnReply}
                 onOpenThread={stableOnOpenThread}
                 onMentionSender={stableOnMentionSender}
@@ -1068,18 +1139,22 @@ export const MessageTimeline = memo(function MessageTimeline({
                   message={message}
                   agentLaunches={agentLaunchesByMessage.get(message.messageId || message.id) ?? NO_LAUNCHES}
                   agentStops={stopsByMessage.get(message.messageId || message.id) ?? NO_STOPS}
-                  stopReceiptsLoaded={agentLaunchQuery.data !== undefined || agentLaunchQuery.isError}
+                  stopReceiptsLoaded={isStopCommand(message)
+                    ? agentLaunchQuery.data !== undefined || agentLaunchQuery.isError : true}
                   invocationRejections={invocationRejectionsByMessage.get(message.messageId || message.id) ?? NO_REJECTIONS}
                   continuationInvocations={continuationsByMessage.get(message.messageId || message.id) ?? NO_CONTINUATIONS}
                   messageTargetEvidence={messageTargetEvidence.get(message.messageId || message.id)}
                   launchStatusUnavailable={agentLaunchQuery.isError}
                   onRetryAgentLaunch={retryAgentLaunch}
                   onLaunchAnyway={launchAnyway}
+                  onResendSignedOutSummon={resendSignedOutSummon}
+                  queuedBehind={queuedByMessage.get(message.messageId || message.id)}
                   launchWindow={launchWindowsByMessage.get(message.messageId || message.id)}
                   launchChoiceOffered={offersLaunchChoice(message, channel)}
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
+                  foldsDiscussionHead={foldsDiscussionHead}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
                   token={token}
@@ -1088,6 +1163,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onReact={stableOnReact}
                   onEdit={stableOnEdit}
                   onRecall={stableOnRecall}
+                  onUnsentAction={stableOnUnsentAction}
                   onReply={stableOnReply}
                   onOpenThread={stableOnOpenThread}
                   onMentionSender={stableOnMentionSender}
@@ -1153,8 +1229,8 @@ export const MessageTimeline = memo(function MessageTimeline({
 
       {!loading && !hasChannels && (
         <EmptyConversation
-          title="No channels"
-          body="Mention an agent to create an instance."
+          title="No conversations yet"
+          body="Start one with New conversation, then mention an agent in it."
         />
       )}
 
@@ -1173,6 +1249,7 @@ export const MessageTimeline = memo(function MessageTimeline({
               ? error
               : "No messages yet."
           }
+          nothingSaid={!error}
         />
       )}
 
@@ -1309,17 +1386,17 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
     <div className={cn("fixed z-50", !below && "-translate-y-full")}
       style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 128)),
         top: below ? passage.rect.bottom + 6 : passage.rect.top - 6 }}>
-      <div role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
-        className="flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 text-popover-foreground">
+      <PaperPopover role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
+        className="flex items-center p-1">
         <button type="button" onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             onDiscuss(passage.messageId, passage.quote);
             document.getSelection()?.removeAllRanges();
           }}
-          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-accent [&_svg]:size-4">
-          <MessageSquarePlus /> Discuss
+          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
+          <MessageSquare /> Discuss
         </button>
-      </div>
+      </PaperPopover>
     </div>,
     document.body,
   );
@@ -1354,7 +1431,7 @@ function MessageSendingMark({ label = false }: { label?: boolean }) {
   return (
     <span role="status" aria-label="Sending"
       className="app-message-sending inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-      <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+      <AnimatedIcon icon={Loader2} className="size-3 animate-spin" aria-hidden="true" />
       {label && "Sending"}
     </span>
   );
@@ -1418,9 +1495,14 @@ function SinceDivider({ digest }: { digest: SinceDigest }) {
   );
 }
 
-export function EmptyConversation({ title, body }: { title: string; body: string }) {
+export function EmptyConversation({ title, body, nothingSaid = false }: {
+  title: string; body: string;
+  /** Only that nothing has been said yet, which a comment thread shows by its empty composer instead. */
+  nothingSaid?: boolean;
+}) {
   return (
-    <div className="app-empty-conversation flex h-full flex-col items-center justify-center px-6 text-center">
+    <div className="app-empty-conversation flex h-full flex-col items-center justify-center px-6 text-center"
+      {...(nothingSaid ? { "data-nothing-said": "" } : {})}>
       <div className="app-empty-conversation-mark flex size-14 items-center justify-center rounded-xl bg-muted">
         <Hash className="size-7 text-muted-foreground" />
       </div>
@@ -1584,7 +1666,8 @@ function NamedMachineRunFailureNotice({ body, metadata, spaceId, token }: {
   const machineId = typeof metadata?.machineId === "string" ? metadata.machineId : undefined;
   const ownerUserId = typeof metadata?.machineOwnerUserId === "string" ? metadata.machineOwnerUserId : undefined;
   return <MachineRunFailureNotice body={body}
-    machineName={registrationMachineName(catalog.data?.registrations ?? [], machineId, ownerUserId)} />;
+    machineName={registrationMachineName(catalog.data?.registrations ?? [], machineId, ownerUserId)}
+    {...(typeof metadata?.harness === "string" && metadata.harness ? { harness: metadata.harness } : {})} />;
 }
 
 export const MessageRow = memo(function MessageRow({
@@ -1598,12 +1681,15 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable,
   onRetryAgentLaunch,
   onLaunchAnyway,
+  onResendSignedOutSummon,
+  queuedBehind,
   launchWindow,
   launchChoiceOffered = false,
   launchOptions = NO_LAUNCH_OPTIONS,
   onLaunchChoice,
   contextOnly = false,
   initiallyExpanded = false,
+  foldsDiscussionHead = false,
   currentUserIdentityId,
   channel,
   token,
@@ -1612,6 +1698,7 @@ export const MessageRow = memo(function MessageRow({
   onReact,
   onEdit,
   onRecall,
+  onUnsentAction,
   onReply,
   onOpenThread,
   onMentionSender,
@@ -1634,6 +1721,10 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable?: boolean;
   onRetryAgentLaunch: (launch: SerializedAgentLaunch) => Promise<void>;
   onLaunchAnyway?: (messageId: string, body: string, sourceMention: string) => Promise<void>;
+  /** Instances this message waits on, still on an earlier turn. */
+  queuedBehind?: readonly QueuedBehindTurn[];
+  /** Sends a signed-out notice's summon again once its program is signed in; false when the viewer cannot. */
+  onResendSignedOutSummon?: (sourceMessageId: string, sourceMention: string) => Promise<boolean>;
   /** A new conversation's first message: which Agent starts, chosen for a few seconds. */
   launchWindow?: InteractionDecisionWindow;
   /** The author's own fresh first message, offered before the Hub's record arrives. */
@@ -1645,9 +1736,11 @@ export const MessageRow = memo(function MessageRow({
   contextOnly?: boolean;
   /** Keep the opening context of a thread readable before folding later long messages. */
   initiallyExpanded?: boolean;
+  /** Its thread's head already shows a page discussion's passage. */
+  foldsDiscussionHead?: boolean;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
   onOpenHumanProfile: (userId: string) => void;
-} & MessageRowComparableProps) {
+} & MessageRowProps) {
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const [copied, setCopied] = useState(false);
@@ -1680,6 +1773,8 @@ export const MessageRow = memo(function MessageRow({
   const [rebornSenderArmed, setRebornSenderArmed] = useState(false);
   const [rebornToolbarPosition, setRebornToolbarPosition] = useState<CSSProperties>({ left: 0, top: 0 });
   const actionsRef = useRef<HTMLDivElement | null>(null);
+  // Images open out of their thumbnails here and return into them.
+  const attachmentGridRef = useRef<HTMLDivElement | null>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageAvatarRef = useRef<HTMLDivElement | null>(null);
   const rebornToolbarRef = useRef<HTMLDivElement | null>(null);
@@ -1692,7 +1787,10 @@ export const MessageRow = memo(function MessageRow({
   const humanSenderUserId = message.senderKind === "user" && message.senderId
     ? message.senderId.replace(/^user:/, "")
     : null;
-  const displayBody = normalizeMessageBodyForDisplay(message.body, message.senderKind);
+  // A page discussion's first message shows only what was written where its thread's head shows the
+  // passage; anywhere else the passage and its link back open the conversation.
+  const displayBody = normalizeMessageBodyForDisplay(
+    foldsDiscussionHead ? foldedDiscussionBody(message.body) : message.body, message.senderKind);
   const nonOperationalRanges = useMemo(() => /[@＠]/u.test(displayBody) ? nonOperationalMentionRanges(displayBody) : [], [displayBody]);
   const markdownComponents = useMemo(
     () => createMessageMarkdownComponents(onOpenInternalAppLink),
@@ -1700,11 +1798,20 @@ export const MessageRow = memo(function MessageRow({
   );
   // Mention chips compare the mentioned member's cursor against this one
   // message. Server-sent statuses stay authoritative where the Hub sent them.
+  // The Hub runs a connector command once, on send; an edit or a quote of it runs nothing.
+  const connectorInvocation = useMemo(() => contextOnly || message.editedAt ? undefined : parseConnectorInvocation(displayBody),
+    [contextOnly, message.editedAt, displayBody]);
+  // Model and effort statements answer on the statement, as a stop does.
+  const controlInvocations = useMemo(() => contextOnly || message.editedAt ? [] : parseAgentControlInvocations(displayBody),
+    [contextOnly, message.editedAt, displayBody]);
   const mentionReadMessageScope = useMemo<MentionReadMessageScope>(() => ({
     launches: contextOnly || message.editedAt ? [] : agentLaunches,
     // A thread root is a quote of the command. An edit no longer matches the fenced body.
     ...(contextOnly || message.editedAt ? {} : { stops: agentStops, stopReceiptsLoaded }),
     rejections: contextOnly ? [] : invocationRejections,
+    ...(connectorInvocation ? { connector: connectorInvocation } : {}),
+    ...(controlInvocations.length ? { controls: controlInvocations } : {}),
+    ...(!contextOnly && message.commandNotices ? { notices: message.commandNotices } : {}),
     continuations: contextOnly || message.editedAt ? [] : continuationInvocations,
     executions: contextOnly || message.editedAt ? [] : messageTargetEvidence?.executions,
     sourceBody: displayBody,
@@ -1716,8 +1823,10 @@ export const MessageRow = memo(function MessageRow({
     ...(!contextOnly && !message.editedAt ? { sentAt: message.sentAt } : {}),
     ...(message.sequence ? { sequence: message.sequence } : {}),
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
-  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
+  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, connectorInvocation, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   const questionnaire = questionnaireMetadata(message.metadata);
+  const onboardingStage = onboardingStageOf(message.metadata);
+  const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
@@ -1731,6 +1840,8 @@ export const MessageRow = memo(function MessageRow({
   const recalled = Boolean(message.recalledAt);
   const isOutboundPending = contextOnly || message.sendStatus === "pending" ||
     message.sendStatus === "unconfirmed" || message.sendStatus === "failed";
+  const unsentStatus = message.sendStatus === "unconfirmed" || message.sendStatus === "failed"
+    ? message.sendStatus : undefined;
   const canEditMessage = message.own && !recalled && !isOutboundPending && Boolean(message.messageId);
   const MessageHead: ElementType = message.continuation ? FloatingMessageActions : "div";
   const sourceApplication = messageExternalAppSource(message.metadata);
@@ -1789,7 +1900,7 @@ export const MessageRow = memo(function MessageRow({
           // Keep the body for clipboard copy: CSP blocks blob: object-URL requests.
           localMediaBlob: result.body,
         } as ChannelAttachment;
-        if (!commitMessageAttachmentMedia(mediaStore, identity, next, objectUrl)) {
+        if (!commitMessageAttachmentMedia(mediaStore, identity, next, objectUrl, result.body.size)) {
           throw new Error("Attachment view was closed");
         }
         mediaStore.failures.delete(identity);
@@ -1816,8 +1927,8 @@ export const MessageRow = memo(function MessageRow({
   useEffect(() => {
     attachmentMediaMountedRef.current = true;
     return () => {
-      // Only this row goes away. Its media belongs to the store, which the
-      // timeline releases when the channel or the viewer changes.
+      // Only this row goes away. Its media belongs to the store, which is
+      // released when it leaves the recent set or the viewer changes.
       attachmentMediaMountedRef.current = false;
     };
   }, []);
@@ -1868,20 +1979,15 @@ export const MessageRow = memo(function MessageRow({
     return () => document.removeEventListener("click", closeOnOutsideClick);
   }, [actionsOpen]);
 
-  const stableNavigateOpenImage = useStableCallback(navigateOpenImage);
   const stableCopyAttachment = useStableCallback(copyAttachment);
 
   useEffect(() => {
     if (!openAttachment) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      // The image viewer closes itself on Escape, animating back to the thumbnail.
+      if (event.key === "Escape" && openAttachment.kind !== "image") {
         setOpenAttachment(null);
-        return;
-      }
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        void stableNavigateOpenImage(event.key === "ArrowLeft" ? -1 : 1);
         return;
       }
       // Lightbox has no text selection target; bind Ctrl/Cmd+C to image copy.
@@ -1905,7 +2011,7 @@ export const MessageRow = memo(function MessageRow({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [openAttachment, stableNavigateOpenImage, stableCopyAttachment]);
+  }, [openAttachment, stableCopyAttachment]);
 
   useEffect(() => {
     if (!editing) return;
@@ -1953,11 +2059,90 @@ export const MessageRow = memo(function MessageRow({
     }
   }
 
-  async function navigateOpenImage(direction: -1 | 1) {
-    if (!openAttachment || openAttachment.kind !== "image" || imageAttachments.length < 2) return;
-    const currentIndex = imageAttachments.findIndex((attachment) => attachment.id === openAttachment.id);
-    const nextIndex = (Math.max(0, currentIndex) + direction + imageAttachments.length) % imageAttachments.length;
-    await openMessageAttachment(imageAttachments[nextIndex]);
+  /** The message's images as the viewer pages through them, each with its source once loaded. */
+  function galleryImages(open: ChannelAttachment): GalleryImage[] {
+    const images = imageAttachments.map((attachment) => {
+      const identity = relayV2AttachmentMediaIdentity(attachment);
+      const resolved = (identity ? mediaStore.resolved.get(identity) : undefined)
+        ?? (attachment.id === open.id ? open : attachment);
+      return { id: attachment.id, name: attachment.name, src: attachmentSource(resolved) };
+    });
+    return images.some((image) => image.id === open.id)
+      ? images
+      : [{ id: open.id, name: open.name, src: attachmentSource(open) }];
+  }
+
+  function attachmentThumbnail(id: string) {
+    return attachmentGridRef.current?.querySelector<HTMLElement>(`[data-lightbox-origin="${CSS.escape(id)}"]`) ?? null;
+  }
+
+  /** The open attachment's full-screen view: images in the zoomable gallery, video and Markdown in a plain frame. */
+  function attachmentLightbox(open: ChannelAttachment) {
+    const actions = (
+      <>
+        <a
+          href={attachmentDownloadHref(open)}
+          download={attachmentDownloadName(open)}
+          title={`Download ${open.name}`}
+          aria-label={`Download ${open.name}`}
+          className={cn("app-attachment-lightbox-download absolute left-1 top-1 size-10", LIGHTBOX_BUTTON_CLASS)}
+        >
+          <Download className="size-5" />
+        </a>
+        {open.kind === "image" && (
+          <button
+            type="button"
+            title={
+              attachmentCopyLabel(open.name, failedAttachmentCopyId === open.id, copiedAttachmentId === open.id)
+            }
+            aria-label={
+              attachmentCopyLabel(open.name, failedAttachmentCopyId === open.id, copiedAttachmentId === open.id)
+            }
+            onClick={() => void copyAttachment(open)}
+            className={cn(
+              "app-attachment-lightbox-copy absolute left-12 top-1 size-10",
+              LIGHTBOX_BUTTON_CLASS,
+              failedAttachmentCopyId === open.id && "bg-destructive/85 hover:bg-destructive"
+            )}
+          >
+            {copiedAttachmentId === open.id ? <Check className="size-5" /> : <Copy className="size-5" />}
+          </button>
+        )}
+      </>
+    );
+    if (open.kind === "image") {
+      return (
+        <ImageGalleryLightbox
+          images={galleryImages(open)}
+          activeId={open.id}
+          onActiveChange={(id) => {
+            const next = imageAttachments.find((attachment) => attachment.id === id);
+            if (next) void openMessageAttachment(next);
+          }}
+          onClose={() => setOpenAttachment(null)}
+          originFor={attachmentThumbnail}
+          actions={actions}
+        />
+      );
+    }
+    return (
+      <AttachmentLightbox label={open.name} onRequestClose={() => setOpenAttachment(null)} actions={actions}>
+        {open.kind === "video" ? (
+          <MediaPlayer
+            kind="video"
+            name={open.name}
+            src={attachmentSource(open)}
+            poster={open.thumbnailUrl}
+            className="max-h-[94dvh] max-w-[96vw] bg-black object-contain"
+            autoPlay
+          />
+        ) : open.kind === "markdown" ? (
+          <MarkdownAttachmentViewer attachment={open} />
+        ) : (
+          <MediaSkeleton label="Loading attachment" className="app-media-skeleton-stage" />
+        )}
+      </AttachmentLightbox>
+    );
   }
 
   async function downloadMessageAttachment(attachment: ChannelAttachment) {
@@ -2204,22 +2389,12 @@ export const MessageRow = memo(function MessageRow({
           }
         }}
       >
-        <IdentityAvatar
-          kind={
-            message.reservedSystemAgent
-              ? "system"
-              : message.senderKind === "agent"
-              ? "agent"
-              : message.senderKind === "app"
-                ? "app"
-                : message.senderKind === "system"
-                  ? "system"
-                  : "human"
-          }
-          label={message.author}
+        <RealtimeMessageAvatar
+          of={message.face}
+          channelId={message.channelId}
+          instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
+          senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
           status={message.senderStatus}
-          imageUrl={message.avatarUrl}
-          initials={avatarInitials(message.author)}
           size="md"
           showKindBadge={false}
           glass={false}
@@ -2235,8 +2410,8 @@ export const MessageRow = memo(function MessageRow({
                   channelId: channel?.id,
                   name: message.author,
                   status: message.senderStatus,
-                  activity: message.senderActivity,
                   goal: message.senderGoal,
+                  face: message.face,
                 })
               : humanSenderUserId
                 ? () => onOpenHumanProfile(humanSenderUserId)
@@ -2274,7 +2449,7 @@ export const MessageRow = memo(function MessageRow({
                 data-armed={rebornSenderArmed || undefined}
               >
                 {reborningSender ? (
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                  <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
                 ) : (
                   <RefreshCw className="size-3.5" aria-hidden="true" />
                 )}
@@ -2308,21 +2483,6 @@ export const MessageRow = memo(function MessageRow({
           )}
           <MessageTimestamp value={message.sentAt} className={MESSAGE_HEADER_TIMESTAMP_CLASS_NAME} />
           {message.sendStatus === "pending" && <MessageSendingMark label />}
-          {message.sendStatus === "unconfirmed" && (
-            // Neither a spinner nor an error: the send passed its deadline and
-            // the result is genuinely unknown. No spinner, because nothing is
-            // still in flight; no error, because it may well have been written.
-            // The label stays static — a bounded probe runs and then stops, so
-            // promising ongoing "checking" would outlive the work being done.
-            <span className={statusInkClass("attention", "inline-flex shrink-0 items-center gap-1 text-[11px] font-medium")}>
-              Result unconfirmed
-            </span>
-          )}
-          {message.sendStatus === "failed" && (
-            <span className="shrink-0 text-[11px] font-medium text-destructive">
-              {message.sendError || "Failed to send"}
-            </span>
-          )}
           <span className="contents">
           {message.senderKind === "agent" && !message.reservedSystemAgent &&
             (!message.retagged || message.retagged.keys.some((key) => key === "owner" || key === "machine")) && (
@@ -2336,7 +2496,8 @@ export const MessageRow = memo(function MessageRow({
               App
             </span>
           )}
-          {shouldShowProvenanceBadge(message.provenance) && (
+          {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice. */}
+          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && (
             <span
               className={provenanceBadgeClass(message.provenance, message.body)}
               title={provenanceTitle(message.provenance, message.body)}
@@ -2486,11 +2647,14 @@ export const MessageRow = memo(function MessageRow({
             </div>
           </form>
         ) : (
-          <div className="relative">
+          <div className={cn("relative", unsentStatus && "app-message-unsent-body")}>
             {message.replyTo && (
               <ReplyPreview reply={message.replyTo} onJump={onJumpToMessage} />
             )}
-            {crossSpaceRead ? (
+            {onboardingStage ? (
+              <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
+                userId={currentUserIdentityId.replace(/^user:/, "")} />
+            ) : crossSpaceRead ? (
               <CrossSpaceReadCard
                 request={crossSpaceRead}
                 token={token}
@@ -2518,6 +2682,12 @@ export const MessageRow = memo(function MessageRow({
               />
             ) : routingDecision ? (
               <RoutingDecisionBoard decision={routingDecision} />
+            ) : signedOutNotice ? (
+              <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} spaceId={channel?.spaceId ?? null} token={token}
+                userId={currentUserIdentityId.replace(/^user:/, "")}
+                onSignedIn={signedOutNotice.summon && onResendSignedOutSummon && (() => onResendSignedOutSummon(
+                  signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
+                notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
             ) : (
@@ -2528,6 +2698,9 @@ export const MessageRow = memo(function MessageRow({
                 </div>
               </MentionReadMessageScopeProvider>
             )}
+            {!recalled && queuedBehind?.map((entry) => <p key={entry.address} role="status"
+              className="mt-1.5 text-xs text-muted-foreground" data-testid="queued-behind-turn">
+              {entry.address} is still on an earlier message (since {formatTime(entry.since)}); this one is next.</p>)}
             {!recalled && message.senderKind === "user" && <UnpublishedTurnState
               executions={mentionReadMessageScope.executions || []} unavailable={launchStatusUnavailable} />}
             {!recalled && collapsible && !expanded && (
@@ -2563,7 +2736,7 @@ export const MessageRow = memo(function MessageRow({
           </button>
         )}
         {!recalled && message.attachments && message.attachments.length > 0 && (
-          <div className="mt-2 grid w-full max-w-[min(42rem,100%)] min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
+          <div ref={attachmentGridRef} className="mt-2 grid w-full max-w-[min(42rem,100%)] min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
             {message.attachments.map((attachment) => {
               const mediaIdentity = relayV2AttachmentMediaIdentity(attachment);
               const baseAttachment = mediaIdentity
@@ -2593,7 +2766,7 @@ export const MessageRow = memo(function MessageRow({
                   )}
                 >
                   {attachmentMediaType(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
-                    <div className="rounded-md border border-border bg-muted/45 p-3">
+                    <div className="app-paper-tile p-3">
                       <div className="mb-2 truncate text-sm font-medium">{displayAttachment.name}</div>
                       {source ? (
                         <MediaPlayer kind="audio" src={source} name={displayAttachment.name} />
@@ -2648,9 +2821,9 @@ export const MessageRow = memo(function MessageRow({
                       title={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
                       aria-label={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
                       onClick={() => void (displayAttachment.kind === "markdown" ? openMessageAttachment : downloadMessageAttachment)(displayAttachment)}
-                      className="flex w-full min-w-0 items-center gap-3 rounded-md border border-border bg-muted/45 px-3 py-3 text-left transition hover:bg-muted"
+                      className="app-paper-tile flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left transition-colors"
                     >
-                      <span className="flex size-10 shrink-0 items-center justify-center rounded bg-background text-muted-foreground">
+                      <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
                         {displayAttachment.kind === "markdown" ? <FileText className="size-5" /> : <Paperclip className="size-5" />}
                       </span>
                       <span className="min-w-0 flex-1">
@@ -2667,6 +2840,7 @@ export const MessageRow = memo(function MessageRow({
                       title={`Open ${displayAttachment.name}`}
                       aria-label={`Open ${displayAttachment.name}`}
                       onClick={() => void openMessageAttachment(displayAttachment)}
+                      data-lightbox-origin={displayAttachment.id}
                       className="message-image-attachment block max-w-[18rem] overflow-hidden rounded-[0.75rem] border border-border bg-transparent text-left"
                     >
                       {source ? (
@@ -2735,8 +2909,7 @@ export const MessageRow = memo(function MessageRow({
           <div className="app-thread-reply-preview mt-2 max-w-xl space-y-2 border-l-2 border-border pl-3">
             {message.threadReplies.map((reply) => (
               <div key={reply.id} className="flex w-full items-start gap-2 p-1 text-left text-xs">
-                <IdentityAvatar kind="human" label={reply.author} imageUrl={reply.avatarUrl}
-                  initials={avatarInitials(reply.author)} size="xs" shape="circle" showKindBadge={false} />
+                <Face of={reply.face} size="xs" shape="circle" showKindBadge={false} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-bold">{reply.author}</span>
                   <span className="line-clamp-2 whitespace-pre-wrap break-words text-muted-foreground">{reply.body}</span>
@@ -2757,12 +2930,9 @@ export const MessageRow = memo(function MessageRow({
             {message.threadReplyParticipants?.length ? (
               <span aria-hidden="true" className="app-thread-participant-stack flex shrink-0 -space-x-1.5">
                 {message.threadReplyParticipants.map((participant) => (
-                  <IdentityAvatar
+                  <Face
                     key={participant.id}
-                    kind="human"
-                    label={participant.author}
-                    imageUrl={participant.avatarUrl}
-                    initials={avatarInitials(participant.author)}
+                    of={participant.face}
                     size="xs"
                     shape="circle"
                     showKindBadge={false}
@@ -2775,6 +2945,13 @@ export const MessageRow = memo(function MessageRow({
             )}
             <span className="truncate">{threadChip.label}</span>
           </button>
+        )}
+        {unsentStatus && !contextOnly && (
+          // Neither a spinner nor a claim it failed when the result is unknown:
+          // nothing is in flight any more, and the write may have committed. The
+          // wording stays static, since the probe behind it is bounded and stops.
+          <MessageUnsentNotice status={unsentStatus} error={message.sendError}
+            onAction={(action) => onUnsentAction(message, action)} />
         )}
         {!recalled && !isOutboundPending && (
           <MessageReactions
@@ -2841,126 +3018,10 @@ export const MessageRow = memo(function MessageRow({
           </MobileInlineActions>
         )}
       </div>
-      {openAttachment &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            className="app-attachment-lightbox fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 text-white backdrop-blur-md sm:p-5"
-            role="presentation"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) setOpenAttachment(null);
-            }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={openAttachment.name}
-              className="app-attachment-lightbox-dialog relative flex h-full max-h-[94dvh] w-full max-w-[96vw] flex-col items-center justify-center"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) setOpenAttachment(null);
-              }}
-            >
-              <button
-                type="button"
-                title="Close attachment"
-                aria-label="Close attachment"
-                autoFocus
-                onClick={() => setOpenAttachment(null)}
-                className="app-attachment-lightbox-close absolute right-1 top-1 z-20 flex size-10 items-center justify-center bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-              >
-                <X className="size-5" />
-              </button>
-              <a
-                href={attachmentDownloadHref(openAttachment)}
-                download={attachmentDownloadName(openAttachment)}
-                title={`Download ${openAttachment.name}`}
-                aria-label={`Download ${openAttachment.name}`}
-                className="app-attachment-lightbox-download absolute left-1 top-1 z-20 flex size-10 items-center justify-center bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-              >
-                <Download className="size-5" />
-              </a>
-              {openAttachment.kind === "image" && (
-                <button
-                  type="button"
-                  title={
-                    attachmentCopyLabel(openAttachment.name, failedAttachmentCopyId === openAttachment.id, copiedAttachmentId === openAttachment.id)
-                  }
-                  aria-label={
-                    attachmentCopyLabel(openAttachment.name, failedAttachmentCopyId === openAttachment.id, copiedAttachmentId === openAttachment.id)
-                  }
-                  onClick={() => void copyAttachment(openAttachment)}
-                  className={cn(
-                    "app-attachment-lightbox-copy absolute left-12 top-1 z-20 flex size-10 items-center justify-center bg-black/55 text-white shadow-lg transition hover:bg-black/75",
-                    failedAttachmentCopyId === openAttachment.id && "bg-destructive/85 hover:bg-destructive"
-                  )}
-                >
-                  {copiedAttachmentId === openAttachment.id ? <Check className="size-5" /> : <Copy className="size-5" />}
-                </button>
-              )}
-              {openAttachment.kind === "image" && imageAttachments.length > 1 && (
-                <>
-                  <button
-                    type="button"
-                    title="Previous image"
-                    aria-label="Previous image"
-                    onClick={() => void navigateOpenImage(-1)}
-                    className="app-attachment-lightbox-previous absolute left-1 top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                  >
-                    <ChevronLeft className="size-6" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Next image"
-                    aria-label="Next image"
-                    onClick={() => void navigateOpenImage(1)}
-                    className="app-attachment-lightbox-next absolute right-1 top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                  >
-                    <ChevronRight className="size-6" />
-                  </button>
-                  <div className="absolute bottom-1 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-xs font-bold">
-                    {imageAttachments.findIndex((attachment) => attachment.id === openAttachment.id) + 1} / {imageAttachments.length}
-                  </div>
-                </>
-              )}
-              {openAttachment.kind === "video" ? (
-                <MediaPlayer
-                  kind="video"
-                  name={openAttachment.name}
-                  src={attachmentSource(openAttachment)}
-                  poster={openAttachment.thumbnailUrl}
-                  className="max-h-[94dvh] max-w-[96vw] bg-black object-contain"
-                  autoPlay
-                />
-              ) : openAttachment.kind === "markdown" ? (
-                <MarkdownAttachmentViewer attachment={openAttachment} />
-              ) : !attachmentSource(openAttachment) ? (
-                <MediaSkeleton label="Loading attachment" className="app-media-skeleton-stage" />
-              ) : (
-                <ZoomableAttachmentImage
-                  src={attachmentSource(openAttachment)}
-                  alt={openAttachment.name}
-                  resetKey={openAttachment.id}
-                  onRequestClose={() => setOpenAttachment(null)}
-                  onNavigate={(direction) => void navigateOpenImage(direction)}
-                />
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
+      {openAttachment && attachmentLightbox(openAttachment)}
     </div>
   );
-}, (previous, next) => previous.agentLaunches === next.agentLaunches &&
-    previous.agentStops === next.agentStops &&
-    previous.stopReceiptsLoaded === next.stopReceiptsLoaded &&
-    previous.invocationRejections === next.invocationRejections &&
-    previous.continuationInvocations === next.continuationInvocations &&
-    previous.messageTargetEvidence === next.messageTargetEvidence &&
-    previous.launchStatusUnavailable === next.launchStatusUnavailable &&
-  previous.onRetryAgentLaunch === next.onRetryAgentLaunch && previous.onLaunchAnyway === next.onLaunchAnyway &&
-  previous.launchWindow === next.launchWindow && previous.launchChoiceOffered === next.launchChoiceOffered &&
-  previous.launchOptions === next.launchOptions && previous.onLaunchChoice === next.onLaunchChoice &&
-  areMessageRowPropsEqual(previous, next));
+});
 
 const NO_LAUNCH_OPTIONS: readonly InteractionLaunchOption[] = [];
 
@@ -3123,7 +3184,7 @@ export function ReplyPreview({
       <span className="min-w-0">
         <span className="block truncate font-bold text-foreground">{reply.author}</span>
         <span className="line-clamp-2 [overflow-wrap:anywhere]">
-          {reply.body || "Attachment"}
+          {foldedDiscussionBody(reply.body) || "Attachment"}
         </span>
       </span>
     </a>
@@ -3290,14 +3351,13 @@ function QuickReactionPicker({
 
 
 export type { AgentWorkItem } from "./workspace-shell-message-model";
-import type { AgentWorkItem } from "./workspace-shell-message-model";
 import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 
 
 
-export function AgentWorkDetailsDock({
+export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   approvals,
-  channel,
+  channel: catalogChannel,
   token,
   timeline,
   events,
@@ -3310,7 +3370,7 @@ export function AgentWorkDetailsDock({
   onOpenAgentTrace,
 }: {
   approvals?: ReactNode;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   token: string | null;
   timeline: TimelineItem[];
   events: ObservabilityEvent[];
@@ -3335,22 +3395,78 @@ export function AgentWorkDetailsDock({
   ) => void;
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
 }) {
-  const launchQuery = useChannelAgentLaunches(channel, token, timeline);
+  const realtimeChannels = useContext(RealtimeChannelsContext);
+  const realtimeEvents = useContext(RealtimeEventsContext);
+  const launchQuery = useChannelAgentLaunches(catalogChannel, token, timeline);
   const launches = launchQuery.data?.launches ?? NO_LAUNCHES;
-  const workItems = useMemo(() => buildAgentWorkItems(channel, events, launches),
-    [channel, events, launches]);
+  const channelId = catalogChannel?.id ?? "";
+  const presentedViews = useRef<readonly AgentWorkView[]>([]);
+  const selectWork = useMemo(() => createAgentWorkSelection(channel => buildAgentWorkItems(channel, events, launches), presentedViews.current),
+    [events, launches]);
+  const workItems = useRealtimeChannelSelection(catalogChannel, selectWork);
+  // Share equal presentation across new query/event inputs. This cache never
+  // supplies an operation; readLatest always rebuilds from the current store.
+  useLayoutEffect(() => { presentedViews.current = workItems; }, [workItems]);
+  const readLatest = useCallback((key: string) => {
+    const channel = realtimeChannels ? realtimeChannels.get(channelId) : catalogChannel;
+    if (!channel) return undefined;
+    const liveEvents = realtimeEvents?.get(channelId)?.events;
+    return buildAgentWorkItems(channel, liveEvents ? [...liveEvents] : events, launches).find(item => item.key === key);
+  }, [realtimeChannels, realtimeEvents, channelId, catalogChannel, events, launches]);
+  const openTrace = useStableCallback((key: string) => {
+    const item = readLatest(key);
+    if (item) onOpenAgentTrace(item.target);
+  });
+  const stopInstance = useStableCallback((key: string) => {
+    const item = readLatest(key);
+    if (item && item.canStop !== false) onStopAgentInstance(item.agentId, item.instance, item.agentLabel);
+  });
+  const rebornInstance = useStableCallback((key: string) => {
+    const item = readLatest(key);
+    if (item && agentWorkCanReborn(item)) onRebornAgentInstance(item.agentId, item.instance, item.agentLabel);
+  });
+  const handoffInstance = useStableCallback((key: string, successor: string) => {
+    const item = readLatest(key);
+    if (item && agentWorkCanReborn(item)) onHandoffAgentInstance(item.agentId, item.instance, item.agentLabel, successor);
+  });
   const intentSince = useIntentSince(workItems);
   const now = useNow();
   // Handoff successors are the harnesses this Space registered — the same
   // catalog the composer completes `:handoff:@` from.
-  const registrationCatalog = useAgentRegistrationCatalog(channel?.spaceId ?? "", token ?? "",
-    Boolean(token && channel?.spaceId && workItems.some(agentWorkCanReborn)));
+  const registrationCatalog = useAgentRegistrationCatalog(catalogChannel?.spaceId ?? "", token ?? "",
+    Boolean(token && catalogChannel?.spaceId && workItems.some(item => item.canReborn)));
   const handoffSuccessors = useMemo(() => agentWorkHandoffSuccessors(
     registrationCatalog.data?.capabilities.map((capability) => capability.harness) ?? []),
   [registrationCatalog.data]);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLElement | null>(null);
+  // Activity replaces workItems frequently; only a roster change replaces
+  // the observer's targets. One observer owns the whole horizontal strip.
+  const animationRoster = JSON.stringify(workItems.map(item => item.key));
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || typeof IntersectionObserver === "undefined") return;
+    const items = Array.from(scroller.querySelectorAll<HTMLElement>(":scope > .app-agent-work-item"));
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const item = entry.target as HTMLElement;
+        const visible = entry.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
+        item.dataset.workVisible = String(visible);
+      }
+    }, { root: scroller, threshold: [0, Number.EPSILON] });
+    // Do not start an unpainted animation before the first observation. A
+    // positive-area intersection, including a partially visible island,
+    // resumes it. The second threshold distinguishes edge contact from ink.
+    for (const item of items) {
+      item.dataset.workVisible = "false";
+      observer.observe(item);
+    }
+    return () => {
+      observer.disconnect();
+      for (const item of items) delete item.dataset.workVisible;
+    };
+  }, [animationRoster]);
 
   /* The dock floats over the timeline and its scroller takes pointer events, so
      the timeline has to keep its tail clear of however much of it the dock
@@ -3427,26 +3543,26 @@ export function AgentWorkDetailsDock({
             item={item}
             intentSince={intentSince.get(item.key)}
             now={now}
-            stopping={stoppingAgentInstanceId === item.instance.id}
+            stopping={stoppingAgentInstanceId === item.instanceId}
             stopDisabled={controlsBusy}
-            reborning={reborningAgentInstanceId === item.instance.id}
+            reborning={reborningAgentInstanceId === item.instanceId}
             rebornDisabled={controlsBusy}
-            handingOff={handingOffAgentInstanceId === item.instance.id}
+            handingOff={handingOffAgentInstanceId === item.instanceId}
             handoffSuccessors={handoffSuccessors}
-            onStop={onStopAgentInstance}
-            onReborn={onRebornAgentInstance}
-            onHandoff={onHandoffAgentInstance}
-            onOpenAgentTrace={onOpenAgentTrace}
+            onStop={stopInstance}
+            onReborn={rebornInstance}
+            onHandoff={handoffInstance}
+            onOpenAgentTrace={openTrace}
           />
         ))}
       </div>}
     </div>
   );
-}
+});
 
 
 
-export function AgentWorkAvatar({
+export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   item,
   intentSince,
   now,
@@ -3461,7 +3577,7 @@ export function AgentWorkAvatar({
   onHandoff,
   onOpenAgentTrace,
 }: {
-  item: AgentWorkItem;
+  item: AgentWorkView;
   /** When this client first saw the current intent (agent-work-intent.tsx). */
   intentSince?: number;
   now?: number;
@@ -3472,10 +3588,10 @@ export function AgentWorkAvatar({
   handingOff?: boolean;
   /** Successor names offered by the Handoff picker, `auto` first. */
   handoffSuccessors?: readonly string[];
-  onStop: (agentId: string, instance: SerializedAgentInstance, agentLabel: string) => void;
-  onReborn: (agentId: string, instance: SerializedAgentInstance, agentLabel: string) => void;
-  onHandoff?: (agentId: string, instance: SerializedAgentInstance, agentLabel: string, successor: string) => void;
-  onOpenAgentTrace: (target: AgentTraceTarget) => void;
+  onStop: (key: string) => void;
+  onReborn: (key: string) => void;
+  onHandoff?: (key: string, successor: string) => void;
+  onOpenAgentTrace: (key: string) => void;
 }) {
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
@@ -3497,28 +3613,22 @@ export function AgentWorkAvatar({
   const [armedAction, setArmedAction] = useState<string | null>(null);
   const stopArmed = armedAction === "stop";
   const stopArmedByGestureRef = useRef(false);
-  const displayStatus = agentWorkDisplayStatus(item);
-  const waiting = displayStatus === "waiting" ? item.instance.runtimeState?.waiting : undefined;
-  const issue = item.instance.runtimeState?.issue;
-  const notice = item.instance.runtimeState?.notice;
+  const { displayStatus, waiting, issue, notice } = item;
   // Decided upstream by `agentInstanceUsageLimit` from the same inputs the
   // detail row uses. Deriving it here again is what let the two disagree.
   const usageLimit = item.usageLimit;
-  const canReborn = agentWorkCanReborn(item);
+  const canReborn = item.canReborn;
   // Handoff shares Reborn's address (`@<name>:<n>`); the picker only opens
   // when there is a successor to offer.
   const canHandoff = canReborn && Boolean(onHandoff) && handoffSuccessors.length > 0;
   const titleParts = [
     item.agentLabel,
     item.label,
-    agentInstanceBranchLabel(item.instance),
-    waiting ? agentWaitingPhrase(waiting, now ?? Date.now()) : presenceStatusLabel({
-      status: displayStatus,
-      activity: displayStatus === "busy" ? undefined : item.activity,
-    }),
+    item.branchLabel,
+    waiting ? agentWaitingPhrase(waiting, now ?? Date.now()) : item.statusLabel,
     usageLimit?.title,
     // Why its wake failed: the only place a wake, which answers no message, says so.
-    item.instance.rest === "wake_failed" && item.instance.restReason ? item.instance.restReason : undefined,
+    item.wakeFailureReason,
     issue ? agentRuntimeIssuePhrase(issue, now ?? Date.now()) : undefined,
     notice ? agentRuntimeNoticePhrase(notice) : undefined,
   ].filter(Boolean);
@@ -3676,7 +3786,7 @@ export function AgentWorkAvatar({
           event.preventDefault();
           return;
         }
-        onOpenAgentTrace(item.target);
+        onOpenAgentTrace(item.key);
       }}
       onContextMenu={(event) => {
         if (item.canStop === false) return;
@@ -3687,7 +3797,7 @@ export function AgentWorkAvatar({
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onOpenAgentTrace(item.target);
+          onOpenAgentTrace(item.key);
         } else if (item.canStop !== false && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
           event.preventDefault();
           requestStopFromGesture();
@@ -3726,12 +3836,9 @@ export function AgentWorkAvatar({
       }}
       className="app-agent-work-avatar relative flex shrink-0 items-center justify-center rounded-full outline-none"
     >
-      <IdentityAvatar
-        kind={item.avatarKind || "agent"}
-        label={item.agentLabel}
+      <Face
+        of={item.face}
         status={displayStatus}
-        imageUrl={item.avatarUrl}
-        initials={avatarInitials(item.agentLabel)}
         size="md"
         showKindBadge={false}
         glass={false}
@@ -3783,11 +3890,11 @@ export function AgentWorkAvatar({
           data-status={displayStatus}
           onClick={(event) => {
             // The disc handles its own click; the rest of the island opens the same trace.
-            if (!avatarButtonRef.current?.contains(event.target as Node)) onOpenAgentTrace(item.target);
+            if (!avatarButtonRef.current?.contains(event.target as Node)) onOpenAgentTrace(item.key);
           }}>
           {avatarButton}
           <AgentRuntimeNotice issue={issue} notice={notice} now={now ?? Date.now()}
-            onOpenTrace={() => onOpenAgentTrace(item.target)} />
+            onOpenTrace={() => onOpenAgentTrace(item.key)} />
           {(item.intent || waiting) && <AgentWorkIntent intent={item.intent} since={intentSince} now={now ?? Date.now()}
             busy={displayStatus === "busy"} waiting={waiting} />}
         </LiquidGlassPill>
@@ -3818,7 +3925,7 @@ export function AgentWorkAvatar({
         data-mode={handoffPickerOpen && canHandoff ? "handoff" : undefined}
         data-usage={usageLimit ? usageLimit.severity : undefined}
         role="toolbar"
-        aria-label={`Controls for ${item.instance.label}`}
+        aria-label={`Controls for ${item.instanceLabel}`}
         onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
@@ -3852,7 +3959,7 @@ export function AgentWorkAvatar({
             </div>
             {/* One row per successor, so five or fifty stay one column;
                 the list scrolls inside the toolbar past a few rows. */}
-            <div className="app-agent-work-picker-list" role="group" aria-label={`Hand off ${item.instance.label} to`}>
+            <div className="app-agent-work-picker-list" role="group" aria-label={`Hand off ${item.instanceLabel} to`}>
               {handoffSuccessors.map((successor) => {
                 const armed = armedAction === `handoff:${successor}`;
                 const target = successor === "auto" ? "the best available agent" : `a new @${successor}`;
@@ -3860,14 +3967,14 @@ export function AgentWorkAvatar({
                   <button
                     key={successor}
                     type="button"
-                    aria-label={`${armed ? "Confirm hand off" : "Hand off"} ${item.instance.label} to ${target}`}
+                    aria-label={`${armed ? "Confirm hand off" : "Hand off"} ${item.instanceLabel} to ${target}`}
                     disabled={rebornDisabled}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
                       pressArmed(`handoff:${successor}`, () => {
                         setHandoffPickerOpen(false);
-                        onHandoff?.(item.agentId, item.instance, item.agentLabel, successor);
+                        onHandoff?.(item.key, successor);
                       });
                     }}
                     className="app-agent-work-action"
@@ -3888,19 +3995,19 @@ export function AgentWorkAvatar({
         {canReborn ? (
           <button
             type="button"
-            aria-label={armedAction === "reborn" ? `Confirm reborn ${item.instance.label}` : `Reborn ${item.instance.label}`}
+            aria-label={armedAction === "reborn" ? `Confirm reborn ${item.instanceLabel}` : `Reborn ${item.instanceLabel}`}
             disabled={rebornDisabled}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              pressArmed("reborn", () => onReborn(item.agentId, item.instance, item.agentLabel));
+              pressArmed("reborn", () => onReborn(item.key));
             }}
             className="app-agent-work-action"
             data-action="reborn"
             data-armed={armedAction === "reborn" || undefined}
           >
             {reborning ? (
-              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <RefreshCw className="size-3.5" aria-hidden="true" />
             )}
@@ -3910,7 +4017,7 @@ export function AgentWorkAvatar({
         {canHandoff ? (
           <button
             type="button"
-            aria-label={`Hand off ${item.instance.label}`}
+            aria-label={`Hand off ${item.instanceLabel}`}
             disabled={rebornDisabled}
             onClick={(event) => {
               event.preventDefault();
@@ -3923,7 +4030,7 @@ export function AgentWorkAvatar({
             data-action="handoff"
           >
             {handingOff ? (
-              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <ArrowRightLeft className="size-3.5" aria-hidden="true" />
             )}
@@ -3932,19 +4039,19 @@ export function AgentWorkAvatar({
         ) : null}
         <button
           type="button"
-          aria-label={stopArmed ? `Confirm stop ${item.instance.label}` : `Stop ${item.instance.label}`}
+          aria-label={stopArmed ? `Confirm stop ${item.instanceLabel}` : `Stop ${item.instanceLabel}`}
           disabled={stopDisabled}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            pressArmed("stop", () => onStop(item.agentId, item.instance, item.agentLabel));
+            pressArmed("stop", () => onStop(item.key));
           }}
           className="app-agent-work-action"
           data-action="stop"
           data-armed={stopArmed || undefined}
         >
           {stopping ? (
-            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
           ) : (
             <Trash2 className="size-3.5" aria-hidden="true" />
           )}
@@ -3954,20 +4061,11 @@ export function AgentWorkAvatar({
       </div>
     );
   }
-}
+});
 
 
 
-export function agentWorkDisplayStatus(item: AgentWorkItem): string {
-  return agentInstanceDisplayStatus({
-    agentId: item.agentId,
-    events: item.latestEvent ? [item.latestEvent] : [],
-    instance: item.instance,
-    fallbackStatus: item.status,
-    name: item.agentLabel,
-    activity: item.activity,
-  });
-}
+export { agentWorkDisplayStatus, agentWorkCanReborn } from "./agent-work-view";
 
 
 
@@ -3978,12 +4076,6 @@ export function agentWorkHandoffSuccessors(harnesses: readonly string[]): string
   return names.length > 0 ? ["auto", ...new Set(names)] : [];
 }
 
-export function agentWorkCanReborn(item: AgentWorkItem): boolean {
-  if (item.canStop === false) return false;
-  if (item.avatarKind === "system") return false;
-  const channelInstanceId = item.instance.channelInstanceId?.trim();
-  return Boolean(channelInstanceId && /^[1-9]\d*$/.test(channelInstanceId));
-}
 
 
 

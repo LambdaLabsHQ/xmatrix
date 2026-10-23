@@ -1,9 +1,14 @@
+import type { HarnessSignedOut, HarnessTooOld } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
 import { ControlError } from "./control-error.js";
 
 export class RegistrationAccessError extends ControlError {
   override name = "RegistrationAccessError";
-  constructor(code: string, status: number) { super(code, status, code, status >= 500); }
+  /** `tooOld`: what a `registration_harness_outdated` refusal says is too old;
+   * `signedOut`: what a `registration_harness_signed_out` refusal says to sign in. */
+  constructor(code: string, status: number, readonly tooOld?: HarnessTooOld, readonly signedOut?: HarnessSignedOut) {
+    super(code, status, code, status >= 500);
+  }
 }
 
 /** The refusal for a launch route that found no online daemon. When the

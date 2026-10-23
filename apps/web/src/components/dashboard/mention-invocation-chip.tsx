@@ -1,18 +1,20 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+
+import { createContext, Fragment, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
-import { preparationFailureSummary, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { preparationFailureSummary, rejectionCause, WEB_PROXY_ROUTES, type FaceOf } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { declinedIntentCopy, type DeclinedIntent } from "./summon-intent";
 import { noteJevReading } from "./jev-filled-tags";
-import type { AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
-import { summonView, invocationChipStatus, invocationVendorIcon, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, type InvocationView, type InvocationStep } from "./mention-invocation-state";
-import { LoadingImage } from "@/components/dashboard/content-skeleton";
-import { avatarImageSrc } from "./identity-avatar";
+import type { AgentControlInvocation, AgentControlOutcomeRecord, AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
+import { summonView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
+import type { CommandNotice } from "./command-notices";
+import { MentionChipFace } from "./mention-chip-face";
 import { formatZonedDateTime } from "./time-display";
 import { JevDecisionFiles, JevDecisionSection, useJevDecisions } from "./summon-decision-records";
 import { MentionReplyRecovery } from "./mention-reply-recovery";
@@ -62,13 +64,14 @@ export function MentionContinuationChip({ record, unavailable }: { record: Seria
   const view = continuationView(record, unavailable);
   const label = record.sourceName + record.sourceMention.slice(record.sourceName.length + 1);
   const handoff = record.kind === "handoff";
+  const faces = continuationFaces(record);
   return <InvocationChip label={label} name={record.sourceName}
     variant={handoff ? "handoff" : undefined}
     labelContent={handoff ? <HandoffArrowLabel sourceName={record.sourceName} sourceOrdinal={record.sourceOrdinal}
-      successorName={record.targetName} successorAvatarUrl={record.targetAvatarUrl}
+      sourceFace={faces.source} successorName={record.targetName} successorFace={faces.successor}
       view={handoffView(record, { auto: false, fresh: false, unavailable })} /> : undefined}
     destinationName={record.kind === "handoff" ? record.targetName : undefined}
-    imageSrc={record.kind === "reborn" ? avatarImageSrc(record.targetAvatarUrl) : undefined}
+    face={faces.successor}
     sourceAddress={record.sourceMention} view={view}
     errorCode={record.activity?.errorCode || record.reborn?.errorCode} diagnosticId={record.activity?.diagnosticId}
     subtitle={`${record.kind === "reborn" ? "Restart" : `Handoff to @${record.targetName}`} · ${record.activity?.hostName || "Selected machine"}`}
@@ -79,15 +82,17 @@ export function MentionContinuationChip({ record, unavailable }: { record: Seria
     </>} />;
 }
 
-export function MentionInvocationChip({ label, labelContent, announcement, imageSrc, launch, shared, unavailable, onRetry, executions = [] }: {
+export function MentionInvocationChip({ label, labelContent, announcement, launch, shared, unavailable, onRetry, executions = [], notes }: {
   label: string;
   /** The address drawn with its own parts marked up; `label` still carries the plain text. */
   labelContent?: ReactNode;
   /** Parameters Jev filled, spoken with the address. The stored message is unchanged. */
   announcement?: string;
-  imageSrc?: string | null; launch: SerializedAgentLaunch; shared: boolean;
+  launch: SerializedAgentLaunch; shared: boolean;
   executions?: readonly SerializedAgentMessageExecution[];
   unavailable?: boolean; onRetry?: (launch: SerializedAgentLaunch) => Promise<void>;
+  /** What the Hub said about this summon's Runs, recorded on its message. */
+  notes?: readonly CommandNotice[];
 }) {
   const decision = parsePresentedRoutingDecision(launch.routingDecision);
   const summon = summonView(launch, executions, unavailable);
@@ -96,11 +101,8 @@ export function MentionInvocationChip({ label, labelContent, announcement, image
   const view = { ...summon, steps: summon.steps.map((step, index) => index === lead && selection ? { ...step, note: selection } : step) };
   const activity = launch.activity;
   const execution = executions.find(record => record.executionId === view.executionId && record.runId === launch.runId);
-  const icon = imageSrc ?? avatarImageSrc(invocationVendorIcon({
-    targetAvatarUrl: launch.targetAvatarUrl, sourceMention: launch.sourceMention || `@${label}`,
-    targetName: launch.targetName, routingDecision: launch.routingDecision,
-  }));
-  return <InvocationChip label={label} labelContent={labelContent} announcement={announcement} name={launch.targetName || label} imageSrc={icon}
+  const face = launchFace({ ...launch, sourceMention: launch.sourceMention || `@${label}` }, launch.targetName || label);
+  return <InvocationChip label={label} labelContent={labelContent} announcement={announcement} name={launch.targetName || label} face={face}
     view={view} sourceAddress={launch.sourceMention || `@${label}`}
     subtitle={launch.activity?.hostName || "Selected machine"}
     invocationId={launch.launchId} errorCode={activity?.errorCode || launch.errorCode}
@@ -109,6 +111,7 @@ export function MentionInvocationChip({ label, labelContent, announcement, image
     context={<>
       {shared && <p className="app-invocation-description">This mention shares the first invocation of this agent and lifecycle in this message.</p>}
       {execution && !unavailable && <MentionReplyRecovery key={execution.id} execution={execution} />}
+      {notes?.length ? <NoticeLines notices={notes} /> : null}
     </>}
     jev={{ channelId: launch.channelId, messageId: launch.sourceMessageId, sourceMention: launch.sourceMention || `@${label}`,
       ...(decision?.parameters ? { parameters: decision.parameters } : {}) }}
@@ -129,9 +132,8 @@ export function MentionInvocationRejectionChip({ rejection, unavailable, labelCo
     ? `auto:${rejection.sourceMessageId}:${ordinal}` : undefined;
   return <InvocationChip label={rejection.sourceMention.replace(/^[@＠]/u, "")} name={rejection.targetRef}
     labelContent={labelContent} announcement={announcement} sourceAddress={rejection.sourceMention}
-    imageSrc={avatarImageSrc(invocationVendorIcon({
-      sourceMention: rejection.sourceMention, targetName: rejection.targetRef, routingDecision: rejection.routingDecision,
-    }))}
+    face={addressedAgentFace({ name: rejection.targetRef, address: rejection.sourceMention,
+      routingDecision: rejection.routingDecision })}
     subtitle={rejection.code === "registration_daemon_offline" ? "This machine is offline"
       : rejection.code.startsWith("routing_") ? "Rejected before launch allocation" : "No new process was started"}
     invocationId={rejection.invocationId} errorCode={rejection.code}
@@ -140,8 +142,10 @@ export function MentionInvocationRejectionChip({ rejection, unavailable, labelCo
     context={<>
       {decision && <RoutingDecisionBoard decision={decision} compact />}
     </>}
-    view={{ ...invocationChipStatus("Failed",
-      unavailable ? `${rejection.message} Status could not be refreshed; this is the last confirmed outcome.` : rejection.message),
+    // The subtitle already says nothing was started, so the detail is the cause alone.
+    view={{ ...invocationChipStatus("Failed", unavailable
+      ? `${rejectionCause(rejection.message)} Status could not be refreshed; this is the last confirmed outcome.`
+      : rejectionCause(rejection.message)),
       terminal: true, steps: [] }} />;
 }
 
@@ -245,7 +249,7 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
     </div>}
     {onLaunchAnyway && <button type="button" className="app-intent-launch" data-state={launching}
       disabled={launching === "launching" || launching === "sent"} onClick={() => void launch()}>
-      <Zap aria-hidden="true" size={14} />
+      <AnimatedIcon icon={Zap} aria-hidden="true" size={14} />
       {launching === "launching" ? "Starting…" : launching === "sent" ? "Launch requested" : "Launch anyway"}
     </button>}
     {launching === "failed" && <p role="alert" className="app-invocation-action-error">The launch was not accepted. Refresh the message and try again.</p>}
@@ -253,33 +257,88 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
   </MentionProseCard>;
 }
 
+/** True until `until`, then re-renders once and stays false: a receipt still due. */
+function useBefore(until: number | undefined): boolean {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (until === undefined || now >= until) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, until - Date.now()) + 20);
+    return () => clearTimeout(timer);
+  }, [now, until]);
+  return until !== undefined && now < until;
+}
+
 /** A stop command. Its phase sits on the command the way a launch's phase sits
- * on the summon: requested, then confirmed by the Workstation. */
-export function MentionStopChip({ invocation, receipts, sentAt, pending, unavailable }: {
+ * on the summon: requested, then confirmed by the Machine. */
+export function MentionStopChip({ invocation, receipts, sentAt, pending, unavailable, notices }: {
   invocation: AgentStopInvocation; receipts: readonly SerializedAgentStop[];
   sentAt?: string; pending?: boolean; unavailable?: boolean;
+  /** What the Hub said about this stop beyond the receipts: queued, resting, nothing matched. */
+  notices?: readonly CommandNotice[];
 }) {
-  const [now, setNow] = useState(() => Date.now());
-  const pendingUntil = sentAt && receipts.length === 0 && !unavailable ? Date.parse(sentAt) + STOP_RECEIPT_PENDING_MS : undefined;
-  useEffect(() => {
-    if (pendingUntil === undefined || now >= pendingUntil) return;
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, pendingUntil - Date.now()) + 20);
-    return () => clearTimeout(timer);
-  }, [now, pendingUntil]);
+  const fresh = useBefore(sentAt && receipts.length === 0 && !unavailable ? Date.parse(sentAt) + STOP_RECEIPT_PENDING_MS : undefined);
   const view = stopView(receipts, {
-    fresh: Boolean(pending) || (pendingUntil !== undefined && now < pendingUntil), unavailable: Boolean(unavailable),
+    fresh: Boolean(pending) || fresh, unavailable: Boolean(unavailable),
+    notices,
   });
+  // A notice that settled the chip is already its detail; the rest add to it.
+  const extra = (notices ?? []).filter(notice => notice.body !== view.detail);
   const agentName = invocation.all ? "all" : invocation.target.replace(/:[1-9]\d*$/u, "");
   const ordinal = receipts.length === 1 ? receipts[0]?.instanceOrdinal : invocation.target.match(/:([1-9]\d*)$/u)?.[1];
   const machines = [...new Set(receipts.map(stop => stop.machineName).filter((name): name is string => Boolean(name)))];
   const named = receipts.find(stop => stop.targetName)?.targetName || agentName;
   return <InvocationChip label={invocation.text.replace(/^[@＠]/u, "")} labelContent={invocation.text}
     name={named} instanceOrdinal={ordinal}
-    imageSrc={avatarImageSrc(receipts.find(stop => stop.targetAvatarUrl)?.targetAvatarUrl
-      ?? invocationVendorIcon({ sourceMention: `@${agentName}`, targetName: named }))}
+    face={addressedAgentFace({ name: named, harness: receipts.find(stop => stop.targetHarness)?.targetHarness,
+      address: `@${agentName}` })}
     sourceAddress={invocation.text}
     subtitle={machines.length === 1 ? machines[0]! : machines.length > 1 ? `${machines.length} machines` : "Selected machine"}
-    view={view} />;
+    view={view} context={extra.length ? <NoticeLines notices={extra} /> : undefined} />;
+}
+
+/** Hub receipts as the popover reads them: the receipt's own words, once each. */
+function NoticeLines({ notices }: { notices: readonly CommandNotice[] }) {
+  return <>{notices.map(notice => <p key={notice.messageId} className="app-invocation-description">{notice.body}</p>)}</>;
+}
+
+/** A `/model` or `/effort` statement, highlighted whole like the `@` it starts
+ * with, its value marked where it sits, and the Instance's answer beside it:
+ * the switch receipt is drawn here instead of as a message of its own. */
+export function MentionControlChip({ invocation, outcome, notice, sentAt }: {
+  invocation: AgentControlInvocation; outcome?: AgentControlOutcomeRecord; notice?: CommandNotice; sentAt?: string;
+}) {
+  const fresh = useBefore(sentAt && !notice ? Date.parse(sentAt) + CONTROL_RECEIPT_PENDING_MS : undefined);
+  const view = controlView(invocation, outcome, notice, { fresh });
+  const agentName = invocation.target.replace(/:[1-9]\d*$/u, "");
+  const ordinal = invocation.target.match(/:([1-9]\d*)$/u)?.[1];
+  const value = invocation.value;
+  const valueAt = value && invocation.text.endsWith(value) ? invocation.text.length - value.length : -1;
+  const labelContent = valueAt > 0
+    ? <>{invocation.text.slice(0, valueAt)}<span className="app-summon-condition">{value}</span></>
+    : invocation.text;
+  const options = outcome?.status === "catalog" ? outcome.options : [];
+  return <InvocationChip label={invocation.text.replace(/^[@＠]/u, "")} labelContent={labelContent}
+    name={agentName} instanceOrdinal={ordinal}
+    face={addressedAgentFace({ name: agentName, address: `@${agentName}` })}
+    sourceAddress={invocation.text}
+    subtitle={invocation.kind === "model" ? "Model" : "Effort"}
+    view={view}
+    context={options.length ? <p className="app-invocation-description">
+      {options.map((option, index) => <Fragment key={option}>{index > 0 && " "}
+        <code data-current={option === (outcome as { current?: string }).current || undefined}>{option}</code></Fragment>)}
+    </p> : undefined} />;
+}
+
+/** A reborn or handoff the Hub refused before any Run existed. The refusal
+ * is drawn on the address that asked for it instead of as a message. */
+export function MentionRefusedLifecycleChip({ kind, text, agentName, ordinal, notices }: {
+  kind: "reborn" | "handoff"; text: string; agentName: string; ordinal: number; notices: readonly CommandNotice[];
+}) {
+  return <InvocationChip label={text.replace(/^[@＠]/u, "")} labelContent={text}
+    name={agentName} instanceOrdinal={String(ordinal)}
+    face={addressedAgentFace({ name: agentName, address: `@${agentName}` })}
+    sourceAddress={text} subtitle={kind === "reborn" ? "Reborn" : "Handoff"}
+    view={lifecycleRefusalView(notices, kind)} />;
 }
 
 const LAUNCH_HINT_TITLES: Record<string, string> = {
@@ -320,11 +379,13 @@ export function MentionSummonPending({ labelContent, reading, fillKey }: { label
   </span>;
 }
 
-function InvocationChip({ label, labelContent, announcement, name, instanceOrdinal, destinationName, imageSrc, sourceAddress, subtitle, invocationId, errorCode,
+function InvocationChip({ label, labelContent, announcement, name, instanceOrdinal, destinationName, face, sourceAddress, subtitle, invocationId, errorCode,
   diagnosticId, view, lead, context, details, onRetry, variant, jev }: {
   /** A handoff draws both Agents in its label, so it has no leading avatar. */
   variant?: "handoff";
-  label: string; labelContent?: ReactNode; announcement?: string; name: string; instanceOrdinal?: string; destinationName?: string; imageSrc?: string | null; sourceAddress: string; subtitle: string;
+  label: string; labelContent?: ReactNode; announcement?: string; name: string; instanceOrdinal?: string; destinationName?: string;
+  /** Whose face leads the chip (protocol faces.ts). */
+  face: FaceOf; sourceAddress: string; subtitle: string;
   invocationId?: string; errorCode?: string; diagnosticId?: string; view: InvocationView;
   lead?: ReactNode; context?: ReactNode;
   /** Evidence behind the answer, folded away with the address and diagnostic IDs. */
@@ -365,19 +426,7 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
       aria-label={`@${label}: ${statusText}. ${announcement ? `${announcement}. ` : ""}Show invocation details`}
       onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
       {variant !== "handoff" && <span className="app-mention-chip-avatar" aria-hidden="true">
-        <span className="app-mention-chip-avatar-face">
-          {imageSrc ? (
-            <LoadingImage
-              src={imageSrc}
-              alt=""
-              announce={false}
-              referrerPolicy="no-referrer"
-              draggable={false}
-              className="size-full object-cover"
-              fallback={<span className="app-mention-chip-initial">{name[0]?.toUpperCase() || "@"}</span>}
-            />
-          ) : <span className="app-mention-chip-initial">{name[0]?.toUpperCase() || "@"}</span>}
-        </span>
+        <span className="app-mention-chip-avatar-face"><MentionChipFace of={face} /></span>
       </span>}
       {/* The chip shows the whole `@` expression as written; the name and
           instance ordinal alone would omit the lifecycle and workspace the
@@ -385,7 +434,7 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
           already, so the `→ @target` summary lives only in the popover title. */}
       {variant === "handoff" ? labelContent : <span className="app-mention-chip-label">{labelContent ?? <>@{label}</>}</span>}
       {variant !== "handoff" && <span className="app-mention-invocation-status" contentEditable={false}>
-        <span aria-hidden="true">·</span><Icon aria-hidden="true" className={view.animate ? "app-invocation-spinner" : undefined} />
+        <span aria-hidden="true">·</span><AnimatedIcon icon={Icon} aria-hidden="true" className={view.animate ? "size-[.9em] app-invocation-spinner" : "size-[.9em]"} />
         {liveStage
           ? <span className="app-mention-invocation-step" data-state={liveStage.state}>{statusText}</span>
           : <span>{view.label}</span>}

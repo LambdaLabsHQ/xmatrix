@@ -12,7 +12,7 @@ test("the page card handshakes with its host, renders hostile text safely, and b
   const parent = { postMessage: (message) => outbound.push(message) };
   const window = { parent, addEventListener: (_type, callback) => { receive = callback; } };
   const resource = pageCardResource("https://xmatrix.test");
-  const script = resource.text.match(/<script>([\s\S]*)<\/script>/u)[1];
+  const script = resource.text.slice(resource.text.indexOf("<script>") + "<script>".length, resource.text.lastIndexOf("</script>"));
   runInNewContext(script, { window, document: { getElementById: (id) => nodes.get(id) }, URL });
   const deliver = (data, source = parent) => receive({ source, data: { jsonrpc: "2.0", ...data } });
   const page = { title: '<img src=x onerror="steal()">', body: "<script>steal()</script>" + "x".repeat(5000),

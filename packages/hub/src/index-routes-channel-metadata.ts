@@ -3,8 +3,10 @@ import type { Env } from "./types";
 import { channelMetadataHistory, configureChannel } from "./spaces";
 import { requireAuth, jsonErrors, productCommandId } from "./index-shared";
 import { agentRunDelegationDenied } from "./agent-run-channel-delegation";
+import { registerChannelDeletionRoutes } from "./index-routes-channel-deletion";
 
 export function registerChannelMetadataRoutes(app: Hono<{ Bindings: Env }>): void {
+  registerChannelDeletionRoutes(app);
   app.get("/api/channels/:channelId/metadata-history", (c) => jsonErrors(c, async () => {
     const user = await requireAuth(c.req.raw, c.env);
     const run = user.agentRun;
@@ -12,7 +14,6 @@ export function registerChannelMetadataRoutes(app: Hono<{ Bindings: Env }>): voi
       channelId: c.req.param("channelId"), principal: run ? { kind: "agent", id: run.agentId } : { kind: "user", id: user.id },
       ...(c.req.query("beforeRevision") !== undefined ? { beforeRevision: Number(c.req.query("beforeRevision")) } : {}),
       ...(c.req.query("revision") !== undefined ? { revision: Number(c.req.query("revision")) } : {}),
-      ...(c.req.query("inputId") ? { inputId: c.req.query("inputId") } : {}),
       ...(c.req.query("limit") !== undefined ? { limit: Number(c.req.query("limit")) } : {}),
     });
     return c.json(result, 200, { "cache-control": "private, no-store" });

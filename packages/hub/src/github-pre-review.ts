@@ -5,7 +5,8 @@ import {
 } from "./app-connectors";
 import { appOrigin } from "./deployment-origins";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { deterministicConversationId, launchConversationAgent, openConversation } from "./system-conversation";
+import { deterministicConversationId } from "./deterministic-id";
+import { launchConversationAgent, openConversation } from "./system-conversation";
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
 import { runtimeRepository } from "./runtime";
@@ -38,7 +39,7 @@ export function reviewedPullRequest(metadata: unknown): (PullRequestRef & { page
 
 export function preReviewPrompt(input: {
   pull: GitHubPullRequestForReview; url: string; blockLink: string; pageId: string; blockId: string;
-  holder: string;
+  author: string;
 }): string {
   const { pull } = input;
   const files = pull.files.map((file) =>
@@ -52,7 +53,7 @@ export function preReviewPrompt(input: {
     : "- (none)";
   return [
     `Pre-review pull request ${input.url} before a maintainer sees it.`,
-    `It does the work ${input.holder} claimed on ${input.blockLink} ` +
+    `It is ${input.author}'s work on ${input.blockLink} ` +
       `(\`xmatrix page read ${input.pageId}${input.blockId ? ` --block ${input.blockId}` : ""}\`).`,
     "",
     "Check four things and nothing else:",
@@ -103,7 +104,7 @@ export async function preReviewConversationMode(reader: ChannelExposureReader, i
 /** Opens the pull request's review conversation on its block and launches the pre-review there. */
 export async function startPreReview(env: Env, input: {
   spaceId: string; spaceOwnerUserId: string; connection: AppConnectorConnectionView; pull: PullRequestRef;
-  pageId: string; blockId: string; restricted: boolean; holder: string; blockLink: string;
+  pageId: string; blockId: string; restricted: boolean; author: string; blockLink: string;
 }): Promise<void> {
   const { spaceId, pull } = input;
   const principal = { kind: "user" as const, id: input.spaceOwnerUserId };
@@ -128,7 +129,7 @@ export async function startPreReview(env: Env, input: {
     channelId,
     commandId: `pre-review:${channelId}:${review.headSha}`.slice(0, 200),
     body: preReviewPrompt({ pull: review, url: pull.url, blockLink: input.blockLink, pageId: input.pageId,
-      blockId: input.blockId, holder: input.holder }),
+      blockId: input.blockId, author: input.author }),
     runMetadata: { routedAs: "pull_request_pre_review", pullRequestUrl: pull.url, headSha: review.headSha },
   });
 }

@@ -1,5 +1,10 @@
 # Release Updates
 
+Exact-tag PostgreSQL expand migrations support bounded concurrent index builds
+with durable, checksum-bound name reservations and the existing migration
+ledger. Interrupted builds recover only their own indexes; unknown names and
+changed definitions fail closed. See [online index migrations](operations/postgres-online-index-migrations.md).
+
 xMatrix has one global source version. The root `version.json` file is the canonical
 version source for a release train. An on-demand train publishes only its
 selected components; existing versions of other components remain live and the
@@ -19,6 +24,194 @@ syncs the package manifests, Rust crate metadata, and native release metadata)
 is what the request runs; use it on a branch only to make local builds report a
 specific version.
 
+## Beta and stable channels
+
+A release is a beta `X.Y.Z-beta.N` or a stable `X.Y.Z`, and the version alone
+decides its channel (`releaseChannel` in `scripts/release-version-order.mjs`).
+All releases form one ascending SemVer line:
+`X.Y.Z-beta.1 < … < X.Y.Z-beta.N < X.Y.Z < X.Y.(Z+1)-beta.1`.
+
+- **Beta.** Any Agent requests one after merging, as before:
+  `gh workflow run production-release-intent.yml --ref main -f release_components=<list>`.
+  The train freezes `main`, ships the union of the open betas it contains, and
+  versions the release as a beta of the patch after the last stable (or of a
+  higher `X.Y.Z` that `main`'s `version.json` or an earlier beta already names).
+  The Hub and the beta Web (`beta.xmatrix.sh`) deploy to production; CLI,
+  Desktop and Android publish to their dev channel; iOS goes to TestFlight
+  only. Its GitHub Release is a prerelease.
+- **Stable.** Only the stable release Agent requests one, naming a beta it
+  verified and the bump its changes call for:
+  `gh workflow run production-release-intent.yml --ref main -f channel=stable -f candidate=xmatrix-vX.Y.Z-beta.N -f bump=patch|minor|major -f release_components=web,cli,desktop,android,ios`.
+  The version is the last stable raised by `bump`; it must reach the
+  candidate's `X.Y.Z` and exceed every release. The intent and the train check
+  that the candidate is an immutable beta tag whose Production Release
+  succeeded and shipped every component asked for, and that its source contains
+  the last stable's source, so no stable moves back. The train then rebuilds
+  exactly that source at the stable version, deploys the stable Web
+  (`xmatrix.sh`) when it names `web`, and publishes the named clients to their
+  stable channel; iOS is also submitted to App Review. The Hub is not part of a
+  stable: it runs every beta, and keeps serving the stable Web until the next
+  stable ships a newer one. A stable train ships alone, and wakes the train
+  again for the betas it left open.
+- **Failure.** A beta whose gates or production run failed reopens for the next
+  train. A stable that failed before tagging closes: nothing changed. A stable
+  whose production run failed stays in flight under
+  `refs/release-inflight/<tag>/`, pending recovery by re-running that run's
+  failed jobs, until it succeeds or a later successful stable ships every
+  component it names. No train retries a stable on its own.
+- **Gates.** A train runs the CI gates for what it ships on its release
+  commit. The Hub suite gates each beta that ships the Hub; the Web suites and
+  client suites (Rust on Linux and Windows, Desktop, Android, the iOS
+  simulator) gate the stable that ships them. Every train runs CodeQL on its source for the
+  languages it ships before anything deploys
+  (`docs/operations/ci-lint-and-public-runners.md`).
+- **Evidence.** Each tag's annotation records the `scope`, `source` and
+  `channel` later trains read back. The request's authorization job is named
+  `authorize <scope> production <tag>`, and stable preflight accepts only the
+  release commit of a revision the request's `main` contains
+  (`release-commit.mjs verify-cut`).
+- **Clients.** Every build machine checks the artifact it built runs as exactly
+  the release version before uploading it: the CLI's `--version` on each
+  platform, the Desktop app's `app.asar` (`scripts/desktop-app-version.mjs`),
+  the Android APK through `aapt2`. A CLI or Desktop build picks its update feed
+  from its own version, so a beta follows dev and a stable follows stable. The
+  CLI installs only a newer release (`--force` reinstalls the same version), and
+  refuses a download that does not report the version its feed named; the
+  Windows Supervisor runs a verified candidate to prove its version and never
+  stages one that precedes the committed release. R2 refuses a beta on stable
+  and a stable on dev, and the Web download API refuses a stable pointer or
+  GitHub fallback that names a beta. iOS ships `X.Y.Z` with the Production
+  Release run ID as its build number.
+
+The synthetic Human reconnect smoke carries the exact source `version.json`
+version in its WebSocket URL and handshake. Its assertions compare those wire
+values with that manifest for both beta and stable builds, rather than requiring
+a stable-only version shape.
+
+## Release notes
+
+The stable release Agent also authors the release's user-facing changes since
+the previous stable, following [Authoring release notes](releases/README.md).
+Commit `docs/releases/<version>.md` through a PR before building and verifying
+the final beta candidate. The stable intent and train reject a candidate whose
+source lacks valid notes for the resulting stable version. This preserves the
+unchanged-beta-source contract: notes on newer main cannot be attached later.
+
+The production receipt publishes the authored stable notes, or GitHub's exact
+tag change list for a beta, before its deployment evidence on the GitHub Release.
+Users open `/releases/<version>` from Desktop updates, Machine versions or the
+CLI's update output, and download cards resolve their component and channel to
+the same exact-version page. iOS stable submissions populate App Store What's
+New from the authored notes, with a bounded preview and link to the full text.
+Manifests add an optional `releaseNotesUrl`; existing
+consumers can ignore it and the native IPC shape stays unchanged. After release,
+verify that the exact version's public page and update links work. Old releases
+without user-facing notes show an explicit unavailable message.
+
+Beta note generation bypasses cached release-list responses before choosing its
+explicit preceding published version. Reads retain the existing three-attempt,
+15-second-request bound; the note length and release-control-marker validators
+remain unchanged. In 1.5.1-beta.11, an outdated baseline expanded the generated
+notes beyond their bound after the Web deployment had succeeded. Re-running
+only that Production Release's failed receipt job published the correct small
+change list. Preserve immutable tags and use the same-run failed-job recovery;
+do not edit an already published body's notes to repair a failed receipt.
+
+Migration: existing immutable releases are untouched. New stable candidates
+must include notes in their source, so an older beta must be superseded by a
+newly verified one containing the document. Receipt failures retain the existing
+same-run recovery path; no version, tag, signing or update-feed authority changes.
+
+## Scope evidence without job step metadata
+
+Production request authorization is the completed successful job named
+`authorize <canonical scope> production`, which depends on the frozen plan and
+all selected gates. The dispatcher depends on this job. Production preflight
+and the independent Hub/Web reuse checks require exactly one such job, its
+completed/success conclusion, successful plan/gates, the authorizing workflow
+identity, and the same verified main/release SHA. A caller-supplied scope or a
+successful dispatcher alone cannot authorize a deployment. Step logs and an
+empty `steps` array supply no authorization evidence.
+
+Deployment receipt jobs similarly carry their scope in
+`deployment receipt (<canonical scope>)`. Archival requires the completed
+successful exact-scope job plus its existing exact run/SHA/attempt, selected
+component results and finalizer checks. Historical immutable tags retain their
+old receipt label and exact successful step marker; archival still accepts that
+historical proof only when no new scoped receipt exists. Missing step metadata
+never authorizes an old tag, and a failed/ambiguous new receipt cannot fall back.
+
+Migration evidence: v1.0.367's production request and its plan/gates/dispatcher
+succeeded, but the jobs and per-job APIs returned `steps: []`. Production
+preflight failed on the missing marker in three attempts; every build/deploy
+job was skipped and the live Web build stayed unchanged. The writer and all
+request-proof readers migrate together in a new reviewed main revision. The
+scope-specific job preserves the former marker's exact selection while using
+job conclusion evidence that remained available. Runtime workflow tests cover
+empty steps, missing/wrong/duplicate scope, failed/skipped/cancelled/incomplete
+jobs, selected-gate failures, different SHA and delayed evidence.
+
+Recovery: keep the failed immutable v1.0.367 tag unchanged. After the fix passes
+CI and merges, request a new Release Intent. The train reopens the failed train's
+intent and chooses a higher immutable version containing both the performance
+change and this fix. No provider mutation, manual tag move, direct deployment or
+credential expansion is needed. Existing production serialization and recovery
+conditions remain in force.
+
+### Delayed job conclusions
+
+Before production mutation, preflight reads the request's plan, aggregate gates
+and exact tag/scope authorization together. It retries missing or incomplete
+conclusions within a ten-minute window, at most 120 reads five seconds apart,
+with uncached requests and a ten-second request timeout. The full preflight
+job has a 20-minute timeout. A
+reported failure or duplicate authorization still stops immediately; exhausting
+the bound still refuses deployment. Successful authorization without reported
+gate success is insufficient.
+
+Migration evidence: 1.5.1-beta.2 and beta.3 passed their request gates but failed
+production preflight because GitHub's Jobs API had not reported those successes
+within the former one-minute window. No build or deployment ran. Completed job
+logs were available while the API still reported pending jobs for several
+minutes. This changes only the bounded evidence read, retaining the same exact
+source, workflow, tag, scope and successful-job requirements.
+
+Recovery: preserve failed tags and use a new beta from the CI-validated main
+revision containing this fix and its authored stable notes. Verify its successful
+production run and live Web before requesting stable. The normal same-run
+failed-job recovery remains available when GitHub accepts it; no direct deploy,
+manual tag move or substitute authorization is introduced.
+
+### Delayed candidate run discovery
+
+Train GitHub reads bypass caches and have a ten-second request timeout. An empty
+Production Release list is re-read at most 120 times, five seconds apart within
+a ten-minute evidence window. A reported active run remains active; the newest
+completed run must succeed, so an older success cannot hide a newer failure.
+If a checked stable intent's candidate evidence is still missing, active or
+unreadable, planning fails with that intent preserved. It cannot discard the
+stable decision or fall through to a beta on unavailable evidence. A definitive
+candidate rejection retains the existing refusal behavior.
+
+Migration evidence: the 1.5.1-beta.6 Production Release succeeded and its stable
+intent passed, but the following train received an empty candidate run list,
+deleted the checked intent and selected a beta instead. No stable tag was cut.
+Recovery: after the reviewed fix merges, re-run the affected planning job when
+the intent still exists. An intent the old planner already deleted must be
+requested again by the stable release Agent through Production Release Intent.
+No manual ref restoration, moved tag, new deployment path or weaker success
+requirement is introduced. Existing immutable releases are unchanged.
+
+Production preflight also re-reads an omitted current Production Release run
+before deciding which exact-SHA run is authoritative. Own-run discovery and
+request-job conclusions share one ten-minute window, with uncached reads and
+ten-second request timeouts. A known earlier same-SHA run still refuses a
+duplicate immediately; a missing current run or an exhausted window never
+authorizes deployment. The 1.5.1-beta.9 preflight exposed this second empty-list
+case before production mutation and recovered through the same run's failed-job
+retry once its record became visible. New immutable releases contain the
+bounded discovery; historical tags retain their existing same-run recovery.
+
 ## Shared release workflow definitions
 
 The immutable Production Release train calls `server-release.yml` with an explicit `hub`, `web-build`, or `web` target. The former `hub-deploy.yml`, `web-build.yml`, and `web-deploy.yml` had no other callers. Their original steps now live in separate target-selected jobs in the shared workflow. Hub and Web retain independent production concurrency groups, exact-request authorization, read-only GitHub permissions, the same production environments, and unchanged credential bindings. The build job explicitly keeps `contents: read` only. Web still builds beside Hub after PostgreSQL readiness; only Web deployment waits for Hub and the verified build handoff. Selected jobs keep the historical `hub / deploy`, `web-build / build`, and `web / deploy` evidence names; inactive jobs have distinct names. Unknown targets select no production job.
@@ -28,12 +221,84 @@ smoke requires the live health metadata to report that exact SHA and a nonempty
 provider version ID, alongside the existing health and compatibility checks.
 Missing or mismatched revision evidence fails the release gate.
 
-CLI, Desktop and Android build machines upload their verified files straight into the immutable R2 release `releases/<component>-v<version>/parts/<part>/<run>-<attempt>/`. `client-publish.yml` moves no artifact: it seals the release manifest that names the newest complete attempt of each part and points `channels/<component>/dev.json` at it. After the build is confirmed from the dev downloads (`/api/cli/releases/dev`, `/api/desktop/releases/dev/<asset>`, `/api/android/releases/dev/<asset>`), the `Release Promote` workflow points `channels/<component>/stable.json` at the same sealed release, so stable users get exactly the checked bytes. A channel never moves back to an older release. Hub and Web still deploy to production in the train; verify Hub and Web changes on the test environment first.
+CLI, Desktop and Android build machines upload their verified files straight into the immutable R2 release `releases/<component>-v<version>/parts/<part>/<run>-<attempt>/`. `client-publish.yml` moves no artifact: it seals the release manifest that names the newest complete attempt of each part and points the channel its version names at it: `channels/<component>/dev.json` for a beta, `stable.json` for a stable (see "Beta and stable channels"). A channel never moves back to an older release. Hub and Web deploy to production with every beta.
 
 Migration evidence: before consolidation, the effective YAML definitions were saved and compared with the selected shared jobs. Every original step, environment, runner selector, timeout, credential binding, and component lock matched; release-policy tests validate the new caller bindings and authorization order. Historical immutable tags continue to contain and use their previous workflow definitions. Android's new nested publication evidence is `android / release / release`; archival accepts that name or historical `android / release`, rejects multiple matching records, and still verifies exact train SHA, attempt, scope marker, PostgreSQL readiness, and finalizer outcome.
 
 Recovery remains the established Production Release Recovery workflow: it may cancel only the exact preflight-success/PostgreSQL-readiness-waiting shape before any build or deploy job materializes, then resume the same authorized replacement run. The parent graph and that proof are unchanged. A consolidation failure must be fixed through a new CI-validated main revision and Release Intent; do not modify immutable tags, publish unverified assets, or bypass train authorization. The existing CLI manifest/envelope `workflow: "cli-release.yml"` value remains the compatibility label expected by installed Rust update and Windows continuity consumers; relocating the reusable publisher does not rewrite that wire field. Signing helpers retain the original Developer ID leaf/team checks, pinned Apple intermediate, private keychain isolation, and cleanup; no signing identity or artifact format changed.
 
+
+## Unreleased: An Agent's claims end with its Run
+
+When an Agent's Instance ends, the page claims it held in its conversation end
+at once rather than running out their lease. A section it left unwritten owes
+an update immediately.
+
+## Unreleased: A claim locks nothing
+
+`xmatrix page claim` on a section that someone else is already on now succeeds,
+where it used to fail with `page_block_claimed`. The answer lists the others
+(`others`), and each conversation on the section gets a notice naming who else
+is there, so the Agents can talk, pick other work, or carry on side by side.
+An Automation occurrence claims its section beside whoever is on it, and the Run
+it starts is told who that is. Opening a block for competition is no longer
+needed.
+
+
+## Unreleased: Web per release channel
+
+Every beta deploys the beta Web (`xmatrix-web-beta`, `https://beta.xmatrix.sh`,
+no workers.dev or preview hosts, not indexed); only a stable deploys the stable
+Web (`xmatrix-web`, `https://xmatrix.sh`), rebuilt from the verified beta's
+source. `server-release.yml` picks the target from the tagged version
+(`node scripts/version.mjs channel`) and `deploy-config.mjs` renders it
+(`web` or `web-beta`). A stable train may name `web`; it still never names
+`hub`. Deployment receipts record the channel's Web, and the receipt reader
+accepts either Web for betas released before the split. Before a train deploys
+the Hub, preflight reads the live stable Web's build (`/api/web-build`) back to
+its release and refuses a Hub whose client policy would answer it with 426: a
+different protocol version or a higher minimum Web version
+(`scripts/stable-web-compatibility.mjs`).
+
+The native shells load and trust the Web of their own channel. A beta desktop,
+Android or iOS build opens `https://beta.xmatrix.sh/app` and a stable one
+`https://xmatrix.sh/app`. Each lets only that exact https origin navigate in
+place and call its bridge (the stable Web also under `www.xmatrix.sh`), never
+the other channel's Web or another host under `xmatrix.sh`. Desktop and Android
+read the channel from the app's own version. iOS cannot, because its App Store
+version drops `-beta.N`; `scripts/ios-testflight.sh` sets its Web
+(`XMATRIX_WEB_URL`, read back as `XMatrixWebURL`) from the release version when
+it archives. Android's packaged offline Web is served under the build's own Web
+origin. On every shell, the in-place sign-in opens only the Hub
+(`xmatrix-hub.xmatrix.sh`), no longer any `xmatrix.sh` host. Beta users sign in
+once more on the beta Web, because the session cookies the Web sets for native
+shells belong to `xmatrix.sh` alone.
+
+Migration evidence: the first beta train after this change creates the beta
+Worker and its custom domain on its Web deploy; `xmatrix.sh` keeps the last
+beta it served until the first stable that names `web` replaces it. The Hub
+already trusts the beta origin (APP_BETA_URL). Native builds released before
+the shells chose by channel keep loading `xmatrix.sh`. Clients that choose by
+channel ship only once `beta.xmatrix.sh` serves: their first beta follows the
+first beta Web deploy, or names `web` itself.
+
+Recovery: a failed beta Web deploy is re-run on the same Production Release
+run, like any job; it touches neither the Hub nor `xmatrix.sh`. Beta native
+builds load nothing while the beta Web is down, so that re-run restores them
+too. Undoing the split is a revert of this change and of the shells choosing
+by channel: betas then deploy `xmatrix.sh` again, later native betas load it,
+and the idle beta Worker can be deleted.
+
+## Unreleased: Pull requests that name a page block are not gated
+
+The GitHub App no longer publishes an `xmatrix/claim` check. A pull request that
+links a page block needs no claim. A repository that made the check required
+should drop it from its required checks, or its pull requests wait on a check
+that never arrives. A member's pull request (owner, admin or member) that names
+a block is pre-reviewed there, as claimed ones were. A participant's or an
+unlinked author's pull request is left to the maintainers. Merging a pull
+request leaves every section it names owing an update, whether or not anyone
+claimed it.
 
 ## Unreleased: Repository tokens are bound to the Run
 

@@ -1,11 +1,15 @@
+import { publishChannelInvocationsChanged } from "./channel-live-judgment";
+import { reconcileIdleSleeps } from "./instance-idle-sleep";
 import { reconcileAgentTurnRetries } from "./agent-turn-retry";
 import { reconcileReborn } from "./reborn-reconcile";
 import { finalizeMachineRunTerminalReports } from "./machine-run-terminal-finalizer";
 import { reconcileRegistrationRevocations } from "./registration-revocation-reconcile";
+import { reconcileFirstMessageSummons } from "./first-message-summon-reconcile";
 import { ControlError, reconcileRegistrationPreparationCancellations } from "@xmatrix/db";
 import { cleanAgentRuntimeMessageSource, sha256Hex, TERMINAL_RUN_STATUS_SQL } from "@xmatrix/protocol";
 import { withInitialMessageSource, PostgresChannelSpaceDirectory, PostgresEntitySpaceDirectory, type AuthorityDatabase,
-  type EntitySpaceRouteMutation, CHANNEL_AUTOMATION_WAKE_SQL } from "@xmatrix/db";
+  type EntitySpaceRouteMutation, CHANNEL_AUTOMATION_WAKE_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL,
+  FIRST_MESSAGE_SUMMON_PENDING_SQL } from "@xmatrix/db";
 import type { QueryResultRow } from "pg";
 
 import { createPostgresAuthorityFleet, type HubAuthorityEnv } from "./postgres-authority-fleet";
@@ -60,6 +64,8 @@ export interface LaunchRow extends QueryResultRow {
   directory_published: boolean;
   command_durable_at: string | Date | null;
   connected_at?: string | Date | null;
+  /** The Run's `machineReconnect`: its first spawn waits for a reconnecting daemon until then. */
+  machine_reconnect?: unknown;
 }
 
 export interface ClaimedAgentLaunch {
@@ -119,8 +125,7 @@ const CLAIMABLE_LAUNCH_SQL = `EXISTS (SELECT 1 FROM data.runs claim_run WHERE cl
  * A Launch the coordinator still has to act on. Once its spawn is recorded a
  * re-read can no longer change it: settlement keeps a spawned Launch spawned
  * whatever the command says. Its Instance connecting, its Run ending or a stop
- * moves it, and each of those writes the row or wakes the Channel. A Channel
- * About session has no Instance: its spawn result connects its Launch.
+ * moves it, and each of those writes the row or wakes the Channel.
  */
 const ACTIVE_LAUNCH_SQL = `(launch.state IN ('prepared','queued','admitted') OR
             (launch.state='spawned' AND (launch.spawned_at IS NULL OR launch.command_durable_at IS NULL)) OR
@@ -130,7 +135,7 @@ export async function claim(database: AuthorityDatabase, shardId: string, owner:
   target?: AgentLaunchWakeTarget): Promise<LaunchRow[]> {
   const claimedAt = new Date().toISOString();
   return database.transaction({ requestId: owner, operation: "launch.coordinator.claim" }, async (tx) =>
-    [...await tx.query<LaunchRow>({ name: "agent_launch_coordinator_claim_v7", text: `WITH eligible AS
+    [...await tx.query<LaunchRow>({ name: "agent_launch_coordinator_claim_v8", text: `WITH eligible AS
       MATERIALIZED (SELECT next_attempt_at FROM data.agent_launches launch
         WHERE ${ACTIVE_LAUNCH_SQL} AND next_attempt_at<=clock_timestamp()
           AND (lease_until IS NULL OR lease_until<clock_timestamp())
@@ -151,7 +156,8 @@ export async function claim(database: AuthorityDatabase, shardId: string, owner:
           wake_requested_at=COALESCE(wake_requested_at,$6::timestamptz),
           updated_at=GREATEST(updated_at,$6::timestamptz)
         FROM due WHERE launch.launch_id=due.launch_id RETURNING launch.*
-      ) SELECT claimed.*,run.version AS run_version,instance.version AS instance_version,
+      ) SELECT claimed.*,run.version AS run_version,run.metadata_json->'machineReconnect' AS machine_reconnect,
+          instance.version AS instance_version,
           head.commit_sequence AS route_version,head.updated_at AS route_updated_at,
           placement.placement_epoch,eligible_stats.eligible_count,
           eligible_stats.oldest_eligible_at,
@@ -167,7 +173,6 @@ export async function claim(database: AuthorityDatabase, shardId: string, owner:
               AND instance_route.placement_epoch=placement.placement_epoch
               AND instance_route.state='active')) AS directory_published
         FROM claimed JOIN data.runs run ON run.run_id=claimed.run_id
-        -- A Channel About session is a background Run with no Channel Instance.
         LEFT JOIN data.instances instance ON instance.instance_id=claimed.instance_id
         JOIN data.space_control_heads head ON head.space_id=claimed.space_id
         JOIN control.space_placement placement ON placement.space_id=claimed.space_id
@@ -318,6 +323,16 @@ function launchInitialSource(row: LaunchRow) {
   return candidate?.channelId === row.channel_id && candidate.messageId === row.trigger_id ? candidate : undefined;
 }
 
+/** Until when this Launch's spawn waits for a reconnecting daemon: only the
+ * first spawn prepared on it, never a retry the daemon asked for later. */
+export function reconnectWaitUntil(row: LaunchRow): string | undefined {
+  const reconnect = row.machine_reconnect;
+  if (!reconnect || typeof reconnect !== "object" || Array.isArray(reconnect)) return undefined;
+  const { controlId, waitUntil } = reconnect as Record<string, unknown>;
+  return controlId === row.control_id && typeof waitUntil === "string" && Number.isFinite(Date.parse(waitUntil))
+    ? waitUntil : undefined;
+}
+
 export function machineSpawnCommand(row: LaunchRow): Record<string, unknown> {
   const source = launchInitialSource(row);
   return { ...withInitialMessageSource(row.spawn_payload_json, source),
@@ -360,6 +375,11 @@ function commandSettlement(row: LaunchRow, command: Record<string, unknown> | un
     daemonOffline, errorStage: "command_issue", errorCode: "machine_command_missing",
     errorMessage: "Durable Machine command could not be reconciled", incrementAttempt: true };
   const commandDurableAt = typeof command.createdAt === "string" ? command.createdAt : undefined;
+  // Expired before any daemon claimed it, the spawn can no longer run: its
+  // machine did not come back in time.
+  if (command.expired === true) return { row, state: "failed", retryable: false, daemonOffline: false,
+    ...(commandDurableAt ? { commandDurableAt } : {}), errorStage: "command_issue",
+    errorCode: "machine_reconnect_expired", errorMessage: "The machine did not reconnect before the startup command expired" };
   const result = command.result && typeof command.result === "object" && !Array.isArray(command.result)
     ? command.result as Record<string, unknown> : null;
   if ((command.status === "completed" || command.status === "failed") && result) {
@@ -476,14 +496,16 @@ export async function channelsWithWork(database: AuthorityDatabase, shardId: str
   afterChannelId: string, limit: number): Promise<string[]> {
   return database.transaction({ requestId: `agent-launch:channels-with-work:${shardId}`,
     operation: "launch.coordinator.channels-with-work" }, async (tx) =>
-    (await tx.query<{ channel_id: string }>({ name: "agent_launch_channels_with_work_v4", text: `SELECT channel_id FROM (
+    (await tx.query<{ channel_id: string }>({ name: "agent_launch_channels_with_work_v6", text: `SELECT channel_id FROM (
         SELECT launch.channel_id FROM data.agent_launches launch
           WHERE ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$1")}
         UNION SELECT intent.channel_id FROM data.agent_reborn_intents intent
           WHERE intent.state IN ('waiting','prepared') OR (intent.state='failed' AND intent.failure_notified_at IS NULL)
         UNION SELECT retry.channel_id FROM data.runs retry WHERE retry.capacity_retry_at IS NOT NULL
+        UNION SELECT idle.channel_id FROM data.runs idle WHERE idle.idle_sleep_at IS NOT NULL
         UNION SELECT report.channel_id FROM data.machine_run_terminal_reports report
         UNION SELECT stop.channel_id FROM data.registration_stop_intents stop WHERE stop.state='pending'
+        UNION SELECT choice.channel_id FROM data.first_message_launch_choices choice WHERE ${FIRST_MESSAGE_SUMMON_PENDING_SQL}
         UNION SELECT prep.channel_id FROM data.registration_launch_intents prep
           WHERE prep.state='preparing' OR (prep.state='aborted' AND prep.cancellation_completed=FALSE)
         UNION SELECT run.channel_id FROM data.run_agent_registrations b JOIN data.runs run ON run.run_id=b.run_id AND run.owner_user_id=b.owner_user_id
@@ -503,7 +525,8 @@ export async function channelsWithWork(database: AuthorityDatabase, shardId: str
  * would spin the Channel's alarm.
  */
 /** The coordinated work one pass can do, each run by its own step. */
-export type CoordinatorStep = "registrationPreparation" | "registrationStop" | "runTerminal" | "reborn" | "launch" | "turnRetry";
+export type CoordinatorStep = "registrationPreparation" | "registrationStop" | "runTerminal" | "reborn" | "launch" | "turnRetry" |
+  "idleSleep" | "firstMessageSummon";
 
 
 function dueTime(value: string | Date | null | undefined): number | undefined {
@@ -518,8 +541,8 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
   return database.transaction({ requestId: `agent-launch:next-due:${channelId}`,
     operation: "launch.coordinator.next-due" }, async (tx) => {
     const rows = await tx.query<Record<"launch_due" | "reborn_due" | "report_due" | "preparation_due" | "stop_due"
-      | "automation_due" | "retry_due", string | Date | null>>({ name: options.automation
-        ? "agent_launch_channel_step_due_automation_v2" : "agent_launch_channel_step_due_v2",
+      | "automation_due" | "retry_due" | "idle_sleep_due" | "summon_due", string | Date | null>>({ name: options.automation
+        ? "agent_launch_channel_step_due_automation_v4" : "agent_launch_channel_step_due_v4",
       text: `SELECT LEAST(
         (SELECT MIN(${attemptAt("launch")}) FROM data.agent_launches launch
           WHERE launch.channel_id=$1 AND ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$2")}),
@@ -550,7 +573,10 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
             AND (EXISTS (SELECT 1 FROM data.instances i WHERE i.run_id=run.run_id AND i.channel_id=run.channel_id)
               OR EXISTS (SELECT 1 FROM data.agent_launches l WHERE l.run_id=run.run_id AND l.channel_id=run.channel_id))
             AND NOT EXISTS (SELECT 1 FROM data.registration_stop_intents s WHERE s.run_id=run.run_id))) AS stop_due,
-        (SELECT MIN(capacity_retry_at) FROM data.runs WHERE channel_id=$1 AND capacity_retry_at IS NOT NULL) AS retry_due
+        (SELECT MIN(capacity_retry_at) FROM data.runs WHERE channel_id=$1 AND capacity_retry_at IS NOT NULL) AS retry_due,
+        (SELECT MIN(idle_sleep_at) FROM data.runs WHERE channel_id=$1 AND idle_sleep_at IS NOT NULL) AS idle_sleep_due,
+        (SELECT MIN(${FIRST_MESSAGE_SUMMON_DUE_AT_SQL}) FROM data.first_message_launch_choices choice
+          WHERE choice.channel_id=$1 AND ${FIRST_MESSAGE_SUMMON_PENDING_SQL}) AS summon_due
         ${options.automation ? `,(${CHANNEL_AUTOMATION_WAKE_SQL}) AS automation_due` : ""}`,
       values: [channelId, shardId], maxRows: 1 });
     const row = rows[0];
@@ -561,7 +587,8 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
     };
     set("launch", row?.launch_due); set("reborn", row?.reborn_due); set("runTerminal", row?.report_due);
     set("registrationPreparation", row?.preparation_due); set("registrationStop", row?.stop_due);
-    set("automation", row?.automation_due); set("turnRetry", row?.retry_due);
+    set("automation", row?.automation_due); set("turnRetry", row?.retry_due); set("idleSleep", row?.idle_sleep_due);
+    set("firstMessageSummon", row?.summon_due);
     return due;
   });
 }
@@ -649,6 +676,10 @@ export class RelayPostgresAgentLaunchCoordinatorService {
       shard.database, fleet.directoryDatabase, shard.shardId, this.env, channelId, plan.includeParked));
     await step("runTerminal", "runTerminal", () => finalizeMachineRunTerminalReports(this.env as Env, fleet.directoryDatabase, channelId));
     await step("turnRetry", "turnRetry", () => reconcileAgentTurnRetries(this.env as Env, shard.database, channelId));
+    await step("idleSleep", "idleSleep", () => reconcileIdleSleeps(this.env as Env, shard.database, channelId));
+    // A first message decided (or due to be) whose summon its request never finished.
+    await step("firstMessageSummon", "firstMessageSummon", () => reconcileFirstMessageSummons(this.env as Env,
+      shard.database, channelId));
     await step("reborn", "reborn", () => reconcileReborn(shard.database, shard.shardId, this.env, fleet.directoryDatabase, channelId));
     await step("endedRun", "launch", () => reconcileEndedRunLaunches(shard.database, shard.shardId, channelId));
     await step("runless", "launch", () => reconcileRunlessLaunches(shard.database, shard.shardId, channelId));
@@ -657,6 +688,9 @@ export class RelayPostgresAgentLaunchCoordinatorService {
       this.waitUntil, new Date(), plan.automationDue));
     const claimed = runs("launch")
       ? await this.claimAndPublish({ channelId, shardId: shard.shardId, launchIds: [] }) : 0;
+    // A pass settles launches, reborns, stops and first-message choices: the
+    // Channel's chips read what it left.
+    await publishChannelInvocationsChanged(this.env as Env, channelId);
     const elapsedMs = performance.now() - startedAt;
     if (elapsedMs > 5_000) console.log("PostgreSQL Agent Launch Channel pass was slow", {
       channelId, elapsedMs: Math.round(elapsedMs), stepMs });
@@ -806,8 +840,11 @@ export class RelayPostgresAgentLaunchCoordinatorService {
           commandId: await batchId(rows), action: "issue_batch", ownerUserId: first.owner_user_id,
           ownerEmail: `${first.owner_user_id.replace(/[^a-zA-Z0-9._-]/gu, "_")}@unknown.invalid`,
           machineId: first.machine_id, hostId: first.hostname ?? "", payload: {}, metadata: {}, capabilities: [],
-          commands: rows.map((row) => ({ controlId: row.control_id, commandType: "spawn",
-            payload: machineSpawnCommand(row) })),
+          commands: rows.map((row) => {
+            const expiresAt = reconnectWaitUntil(row);
+            return { controlId: row.control_id, commandType: "spawn", payload: machineSpawnCommand(row),
+              ...(expiresAt ? { expiresAt } : {}) };
+          }),
           principal: { kind: "user", id: first.owner_user_id },
         });
       },

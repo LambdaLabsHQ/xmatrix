@@ -35,7 +35,6 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
     }
     // An Agent reads diagnostics as its owner, proving the Channel Instance it runs as.
     const agent = user.agentRun;
-    if (agent && agent.runKind !== "channel-instance") return c.json({ error: "Diagnostic principal is not allowed" }, 403);
     const reader = agent ? { actorUserId: agent.ownerUserId, agentProof: { agentId: agent.agentId, runId: agent.runId,
       instanceId: agent.instanceId ?? "", executionKey: agent.executionKey, channelId: agent.channelId, spaceId: agent.spaceId } }
       : { actorUserId: user.id };

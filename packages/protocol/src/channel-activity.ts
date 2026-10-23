@@ -12,6 +12,30 @@ export const CHANNEL_ACTIVITY_PROVENANCE = "activity";
 
 /** Annotation namespace of the Hub's judgment that a later message superseded this one. */
 export const SUPERSEDED_ANNOTATION_NAMESPACE = "xmatrix.superseded";
+/** The Hub's record that a questionnaire card was answered or withdrawn. */
+export const QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE = "xmatrix.questionnaire";
+
+/** The Hub's answer to a command a message wrote (`/model`, `/effort`, a stop, a reborn or handoff). */
+export const COMMAND_RESULT_ANNOTATION_NAMESPACE = "xmatrix.command-result";
+
+/**
+ * Message kinds the Hub commits for one Agent Instance to act on: continue a
+ * turn a switch cancelled, retry one capacity cut short, co-write a page. The
+ * Channel log is their durable inbox, so a resting or reconnecting Instance
+ * still reads them; no person reads them. They neither preview, count as
+ * unread, nor take a row.
+ */
+export const AGENT_INSTRUCTION_MESSAGE_KINDS = ["xmatrix.switch-continuation", "xmatrix.capacity-retry",
+  "xmatrix.system.page-co-write"] as const;
+
+/** Whether a message's metadata is an Agent instruction (AGENT_INSTRUCTION_MESSAGE_KINDS). */
+export function isAgentInstruction(metadata: Record<string, unknown> | undefined): boolean {
+  if (!metadata || metadata.xmatrixSystemNotice !== true) return false;
+  const retry = metadata.xmatrixTurnRetry;
+  return metadata.xmatrixSwitchContinuation !== undefined || metadata.xmatrixPageCoWrite !== undefined ||
+    (Boolean(retry) && typeof retry === "object" && (retry as { state?: unknown }).state === "issued" &&
+      (retry as { version?: unknown }).version === 1);
+}
 
 /** Author of annotations the Hub writes itself. Public writers cannot take it. */
 export const SYSTEM_ANNOTATION_AUTHOR = "system:xmatrix";
@@ -152,17 +176,115 @@ export function channelActivityOf(metadata: unknown): ChannelActivity | undefine
   }
 }
 
+/** The payloads of the Hub's own annotations in `namespace`; no other author counts. */
+function hubJudgments(annotations: unknown, namespace: string): Record<string, unknown>[] {
+  if (!Array.isArray(annotations)) return [];
+  return annotations.flatMap((entry) => {
+    const annotation = entry && typeof entry === "object" ? entry as Record<string, unknown> : undefined;
+    if (annotation?.namespace !== namespace || annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) return [];
+    return [annotation.payload && typeof annotation.payload === "object" ? annotation.payload as Record<string, unknown> : {}];
+  });
+}
+
 /** The id of the message that superseded this one, when the Hub judged so. */
 export function supersededByOf(annotations: unknown): string | undefined {
+  for (const payload of hubJudgments(annotations, SUPERSEDED_ANNOTATION_NAMESPACE)) {
+    if (typeof payload.supersededBy === "string" && payload.supersededBy) return payload.supersededBy;
+  }
+  return undefined;
+}
+
+/** One thing the Hub said about a command, in its own words. */
+export interface CommandResultNote {
+  /** The annotation that holds it: one note per fact, written once. */
+  id: string;
+  text: string;
+  at: string;
+  /** A stop that fenced no Run: this note is its whole answer. */
+  stopOutcome?: "stopped" | "not_stopped";
+  /** The Run the note is about, so the chip of the summon that started it shows it. */
+  runId?: string;
+}
+
+/**
+ * What a command came to, recorded on the message that wrote it rather than
+ * posted as another message: the answer belongs to the command, and a reader
+ * finds it there (docs/design/message-interaction-protocol.md).
+ */
+export interface CommandResult {
+  /** `/model` and `/effort`: one outcome per statement, in statement order. */
+  controls?: import("./agent-control-command.js").AgentControlOutcomeRecord[];
+  notes?: CommandResultNote[];
+}
+
+/** The merged result the Hub recorded for this message's command, if any. */
+export function commandResultOf(annotations: unknown): CommandResult | undefined {
   if (!Array.isArray(annotations)) return undefined;
+  let result: CommandResult = {};
   for (const entry of annotations) {
-    if (!entry || typeof entry !== "object") continue;
-    const annotation = entry as Record<string, unknown>;
-    if (annotation.namespace !== SUPERSEDED_ANNOTATION_NAMESPACE ||
+    const annotation = entry && typeof entry === "object" ? entry as Record<string, unknown> : undefined;
+    if (annotation?.namespace !== COMMAND_RESULT_ANNOTATION_NAMESPACE ||
         annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) continue;
-    const payload = annotation.payload;
-    const by = payload && typeof payload === "object" ? (payload as Record<string, unknown>).supersededBy : undefined;
-    if (typeof by === "string" && by) return by;
+    result = mergeCommandResult(result,
+      typeof annotation.id === "string" ? annotation.id : "", annotation.payload);
+  }
+  return result.controls || result.notes?.length ? result : undefined;
+}
+
+/**
+ * Join the facts two reads know about one command. Each note has its annotation's
+ * identity and recording time: partial or out-of-order snapshots cannot remove
+ * another Run's result or restore an older wording of the same fact. Controls
+ * are the command's single statement-ordered answer; a notes-only read retains it.
+ */
+export function mergeCommandResults(held: CommandResult | undefined, incoming: CommandResult): CommandResult {
+  const result = { ...held, ...incoming };
+  if (held?.notes || incoming.notes) {
+    const notes = new Map<string, CommandResultNote>();
+    for (const note of [...(held?.notes ?? []), ...(incoming.notes ?? [])]) {
+      const prior = notes.get(note.id);
+      if (!prior || note.at >= prior.at) notes.set(note.id, note);
+    }
+    result.notes = [...notes.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  }
+  return result;
+}
+
+/** `result` with one recorded command-result annotation applied, as a client
+ * applies the live event and the Hub applies its stored annotations. */
+export function mergeCommandResult(result: CommandResult | undefined, annotationId: string, payload: unknown): CommandResult {
+  const value = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+  const next: CommandResult = {};
+  if (Array.isArray(value.controls) && value.controls.every((item) =>
+    item && typeof item === "object" && typeof (item as { status?: unknown }).status === "string")) {
+    next.controls = value.controls as NonNullable<CommandResult["controls"]>;
+  }
+  const note = value.note && typeof value.note === "object" ? value.note as Record<string, unknown> : undefined;
+  if (annotationId && typeof note?.text === "string" && note.text && typeof note.at === "string") {
+    const stopOutcome: CommandResultNote["stopOutcome"] =
+      note.stopOutcome === "stopped" || note.stopOutcome === "not_stopped" ? note.stopOutcome : undefined;
+    next.notes = [{ id: annotationId, text: note.text, at: note.at, ...(stopOutcome ? { stopOutcome } : {}),
+      ...(typeof note.runId === "string" && note.runId && note.runId.length <= 200 ? { runId: note.runId } : {}) }];
+  }
+  return mergeCommandResults(result, next);
+}
+
+/** How a questionnaire card was settled, as the Hub recorded it. */
+export interface QuestionnaireState {
+  state: "answered" | "cancelled";
+  /** What the person picked or typed, per question id, when answered. */
+  answers?: Record<string, string[]>;
+}
+
+/** The card's settled state from the Hub's own annotation; absent while it is open. */
+export function questionnaireStateOf(annotations: unknown): QuestionnaireState | undefined {
+  for (const payload of hubJudgments(annotations, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE)) {
+    if (payload.state !== "answered" && payload.state !== "cancelled") continue;
+    const answers = payload.answers && typeof payload.answers === "object" && !Array.isArray(payload.answers)
+      ? Object.fromEntries(Object.entries(payload.answers as Record<string, unknown>).map(([id, values]) =>
+        [id, Array.isArray(values) ? values.filter((value): value is string => typeof value === "string") : []]))
+      : undefined;
+    return { state: payload.state, ...(answers ? { answers } : {}) };
   }
   return undefined;
 }

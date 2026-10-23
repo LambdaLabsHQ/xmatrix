@@ -1,12 +1,12 @@
 import {
-  WEB_PROXY_ROUTES,
-  type ChannelCatalogPage,
+  decodeChannelCatalogPage, decodeChannelCatalogResolve, WEB_PROXY_ROUTES,
+  type ChannelSnapshotCatalogPage, type ChannelCatalogPage, type ChannelCatalogResolveResult,
   type ChannelCatalogPageCounts,
   type ChannelCatalogPageFilter,
-  type ChannelCatalogPageRow,
+  type ChannelSnapshotCatalogPageRow,
   type ChannelCatalogPageView,
-  type ChannelCatalogResolveResult,
-  type SerializedChannel,
+  type ChannelSnapshotCatalogResolveResult,
+  type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { requireJson, xmatrixRawResponse } from "@/lib/query/api-client";
@@ -34,9 +34,9 @@ export function normalizeChannelCatalogQuery(input: {
 }
 
 function legacyRows(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   input: NormalizedChannelCatalogQuery,
-): ChannelCatalogPageRow[] {
+): ChannelSnapshotCatalogPageRow[] {
   const scoped = channels.filter((channel) => input.view !== "search" ||
     String(channel.name || "").toLocaleLowerCase().includes(input.query)).slice(0, 50);
   return scoped.map((channel) => ({
@@ -55,7 +55,7 @@ async function requestCatalogPage(input: {
   params: URLSearchParams;
   legacyQuery: NormalizedChannelCatalogQuery;
   signal?: AbortSignal;
-}): Promise<ChannelCatalogPage> {
+}): Promise<ChannelSnapshotCatalogPage> {
   // The shared transport turns a dropped connection into a retryable error, so
   // Query retries it instead of showing the browser's "Failed to fetch".
   const response = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_catalog_page}?${input.params}`, {
@@ -71,7 +71,7 @@ async function requestCatalogPage(input: {
       counts: { active: rows.length, unread: 0, mentions: 0 },
     };
   }
-  return requireJson<ChannelCatalogPage>(response, input.signal);
+  return decodeChannelCatalogPage(await requireJson<ChannelCatalogPage>(response, input.signal));
 }
 
 export async function fetchChannelCatalogPage(input: {
@@ -80,7 +80,7 @@ export async function fetchChannelCatalogPage(input: {
   query: NormalizedChannelCatalogQuery;
   cursor?: string | null;
   signal?: AbortSignal;
-}): Promise<ChannelCatalogPage> {
+}): Promise<ChannelSnapshotCatalogPage> {
   const params = new URLSearchParams({
     spaceId: input.spaceId, view: input.query.view, filter: input.query.filter,
     includeCounts: "false",
@@ -122,7 +122,7 @@ export async function fetchChannelCatalogResolve(input: {
   routeToken?: string;
   includeParticipants?: boolean;
   signal?: AbortSignal;
-}): Promise<ChannelCatalogResolveResult> {
+}): Promise<ChannelSnapshotCatalogResolveResult> {
   const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_catalog_resolve, {
     method: "POST",
     headers: { Authorization: `Bearer ${input.token}`, "content-type": "application/json" },
@@ -135,7 +135,7 @@ export async function fetchChannelCatalogResolve(input: {
     cache: "no-store",
   });
   if (response.status !== 404 && response.status !== 426) {
-    return requireJson<ChannelCatalogResolveResult>(response, input.signal);
+    return decodeChannelCatalogResolve(await requireJson<ChannelCatalogResolveResult>(response, input.signal));
   }
   const legacy = await fetchChannelCatalog(input.token, { spaceId: input.spaceId });
   const byId = new Map(legacy.channels.map((channel) => [channel.id, channel]));

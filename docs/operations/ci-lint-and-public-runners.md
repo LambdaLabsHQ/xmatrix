@@ -15,27 +15,77 @@ A deliberate exception is a `#[expect(lint, reason = "…")]` or an
 `eslint-disable-next-line` comment that says why. The existing Web ESLint rules
 remain available through its package's lint command.
 
+## CI tiers
+
+CI validates in two tiers, chosen in one place: the `changes` job of `ci.yml`
+(its `tier` output). Pull request CI is the fast tier, a pre-merge check whose
+jobs each finish in about two minutes including setup:
+
+- `node-static`: Oxlint, synchronized versions, dependency reachability,
+  unused imports, duplicate CSS rules and the source line limit;
+- `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
+  build, and the lint and typecheck that build would run (`next typegen`, then
+  `tsc`, beside `next lint`); in the full tier the checked build stays the
+  authoritative Web lint and typecheck;
+- `hub-check`: the Hub typecheck and its deploy bundle;
+- `rust-clippy`: Clippy on the complete Rust workspace and all targets.
+
+A release train runs the full tier for what it ships. Every train runs the
+protocol, billing, PostgreSQL package and script tests and the duplicate-code
+scan, and a train that ships the Hub runs the Hub suite. The Web suites (the
+checked build, browser shards and performance budget) and the client suites
+(the Rust tests on Linux and Windows, Desktop, Android and the iOS simulator
+gate) gate the stable train that ships them, not each beta: a beta Web or
+client reaches only the people on the beta Web, its dev channel or TestFlight,
+its pull requests checked it and the release builds it (`scripts/ci-areas.mjs`,
+`releaseOutputs`). Merging runs nothing more.
+Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so a release
+reuses only results the full tier earned and still blocks on every gate its
+scope and channel select.
+
 ## Hosted runners
 
 `ci.yml` defaults to GitHub-hosted `ubuntu-24.04` and `windows-2025`.
-The public repository has no self-hosted runners. Hosted Hub validation uses
-one static job and three test-file shards; Web uses one primary job and four
-functional browser shards. Together with Node, desktop, Android, both Rust
-jobs, the selector and aggregate, the full matrix has 16 jobs.
+The public repository has no self-hosted runners. In the full tier, hosted Hub
+validation uses one static job and three test-file shards; Web uses one primary
+job, four functional browser shards and a performance job. The primary job runs
+the unit tests and checked production build; the performance job starts
+alongside it on its own VM with one worker. Unsharded local runs still execute
+every performance case. The Node checks and the duplicate scan run as two jobs
+beside each other. Together with Desktop, Android, both Rust jobs, the selector
+and aggregate, the full matrix has 18 jobs. The primary job also saves its
+Next.js and Turbo build caches without waiting for browser sampling to finish.
+
+Each hosted job carries PNPM's lockfile supply-chain verification record
+(`lockfile-verified.jsonl`) in the Actions cache, keyed by the lockfile, the
+workspace policy files and the PNPM version. PNPM itself skips its per-entry
+registry check only for a lockfile with the same content hash verified under a
+policy at least as strict; any other lockfile or policy is checked in full.
 Reusable callers can set `linux_runner`, `offload_runner`, and `windows_runner`
 to a JSON runner label or array, for example `'"ubuntu-24.04"'`. These inputs
 select compute only; they do not change the tests or release authorization.
 Hosted jobs use the same content-addressed CI ledger as release gates; a
 missing or unreachable ledger runs the complete selected checks.
+The Node job queries that dependency-free ledger before bootstrapping PNPM or
+installing workspace dependencies. A hit finishes without installation; a miss
+or unavailable ledger installs dependencies and runs its tier's Node checks as
+usual.
+
+The reusable workflow's optional `ref` accepts only its triggering commit or
+that commit's verified release stamp. Each job first checks out the triggering
+revision and uses its dependency-free release verifier before switching to the
+target. A different source, extra code change, or malformed ref fails before
+target code or local actions can execute in the caller's cache scope. The
+Production Release Request caller already supplies this exact stamped child;
+public main and PR validation keep testing their triggering revision.
 
 Changes to `packages/db` select Node, Web/browser and Hub validation because
 both products consume the shared database package. Database unit tests alone
 do not validate the Hub's message coordination and authority fixtures.
 
-`public-ci.yml` runs the full shared matrix on a public snapshot's `main` push.
-Its manual dispatch also verifies that path in the private repository. A
-private `main` push skips this workflow's only job. Public PRs use `ci.yml` and
-its hosted defaults, including the aggregate `ci` result.
+`public-ci.yml` runs the full shared matrix on manual dispatch. Public PRs use
+`ci.yml`'s fast tier and its hosted defaults, including the aggregate `ci`
+result.
 
 The repository keeps CI, the content ledger, release workflows and their local
 composite actions together. External pull requests are closed in favour of
@@ -43,6 +93,26 @@ prompt requests. Hosted validation requires no production secrets: Hub tests
 bootstrap isolated PostgreSQL tools, Web uses the existing browser fixtures,
 and native tests use the pinned toolchains. Signing and production publication
 remain governed by Production Release Intent and its immutable release train.
+
+The shared Node setup bootstraps pinned PNPM with at most three npm install
+attempts for recognized connection, timeout, DNS and transient HTTP errors.
+Each registry request has a 60-second timeout; npm's nested retries are disabled
+and the outer retries wait two and four seconds. Authentication, package
+integrity, permissions, disk and other install failures stop immediately.
+PNPM enters the job's PATH only after installation and its version probe succeed.
+This recovery applies only to package-manager bootstrap, never validation or
+deployment failures.
+
+CodeQL scans before a release ships, not on pull requests or merges. Each
+release train runs CodeQL's security-extended queries on its frozen source for
+the languages its components are written in, plus the workflows that release
+them (`codeql` in `production-release-request.yml`; languages from
+`codeqlLanguages` in `scripts/release-train.mjs`). Swift builds on macOS with
+autobuild; the other languages use build mode `none`. Results upload as code
+scanning alerts on `main` under the same `/language:<name>` categories GitHub's
+default setup used, which must stay disabled: GitHub refuses a workflow's
+upload while default setup is on. The analysis has to finish before the train
+ships; its findings are alerts, not a gate verdict.
 
 CLI release builds run both macOS architectures in parallel on isolated hosted
 VMs. When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized
@@ -56,6 +126,13 @@ for migration validation and the documented PostgreSQL release path for
 applying migrations.
 
 ## Windows compile cache
+
+Windows CI and CLI release first fetch the locked dependencies for
+`x86_64-pc-windows-msvc`. Recognized transient curl and HTTP transfer failures
+receive at most three attempts, each bounded to two minutes, with five seconds
+between attempts. Lockfile, authorization, checksum and process failures stop
+immediately. Subsequent Cargo metadata, compilation and tests use the fetched
+registry offline; compiler, build-script and test failures are never retried.
 
 Native Windows CI archives kache's artifact store and SQLite index after
 trimming the store to 640 MiB, stopping its job-local writer, and waiting up to

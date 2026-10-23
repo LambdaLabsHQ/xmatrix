@@ -213,8 +213,7 @@ fn format_incoming_channel_message_delivered_at(
         .unwrap_or_default();
 
     format!(
-        "xMatrix channel {}{}{} from {} [{}]{}:{}{}\
-\n\n{}",
+        "xMatrix channel {}{}{} from {} [{}]{}:{}{}",
         channel_label,
         message_context,
         delivery_context,
@@ -229,7 +228,6 @@ fn format_incoming_channel_message_delivered_at(
             .unwrap_or_else(|| linked_sender_context(from)),
         reply_context,
         rendered_body.trim(),
-        bootstrap::channel_collaboration_policy(channel_label),
     )
 }
 
@@ -242,13 +240,6 @@ fn linked_sender_context(from: &protocol::MessageSender) -> String {
         .filter(|channel| !channel.is_empty())
         .map(|channel| format!(" via Channel {channel}"))
         .unwrap_or_default()
-}
-
-fn codex_channel_developer_instructions(channel_id: Option<&str>) -> Option<String> {
-    channel_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(bootstrap::channel_collaboration_policy)
 }
 
 /// xMatrix's own local slash commands, which must never be forwarded to the

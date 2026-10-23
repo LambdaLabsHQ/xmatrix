@@ -1,125 +1,9 @@
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::{OnceLock, RwLock};
-
 use reqwest::Url;
-use tokio::process::Command;
 
 use crate::config;
-use crate::error::{CliError, Result};
-use crate::protocol::TEST_HUB_URL;
 
-pub const ACCESS_TOKEN_HEADER: &str = "cf-access-token";
-const CLOUDFLARED_PATH_ENV: &str = "XMATRIX_CLOUDFLARED_PATH";
-pub const DAEMON_REQUEST_URL_ENV: &str = "XMATRIX_DAEMON_REQUEST_URL";
-pub const DAEMON_REQUEST_CAPABILITY_ENV: &str = "XMATRIX_DAEMON_REQUEST_CAPABILITY";
-
-#[derive(Clone)]
-struct AccessState {
-    hub_origin: String,
-    token: String,
-    executable: PathBuf,
-}
-
-fn state() -> &'static RwLock<Option<AccessState>> {
-    static STATE: OnceLock<RwLock<Option<AccessState>>> = OnceLock::new();
-    STATE.get_or_init(|| RwLock::new(None))
-}
-
-fn normalized_origin(value: &str) -> Option<String> {
-    let value = if let Some(rest) = value.strip_prefix("wss://") {
-        format!("https://{rest}")
-    } else if let Some(rest) = value.strip_prefix("ws://") {
-        format!("http://{rest}")
-    } else {
-        value.to_string()
-    };
-    let url = Url::parse(&value).ok()?;
-    let host = url.host_str()?;
-    let mut origin = format!("{}://{host}", url.scheme());
-    if let Some(port) = url.port() {
-        origin.push(':');
-        origin.push_str(&port.to_string());
-    }
-    Some(origin)
-}
-
-pub fn requires_access(value: &str) -> bool {
-    normalized_origin(value) == normalized_origin(TEST_HUB_URL)
-}
-
-pub fn cached_token_for_url(value: &str) -> Result<Option<String>> {
-    if !requires_access(value) {
-        return Ok(None);
-    }
-    let expected = normalized_origin(TEST_HUB_URL).expect("test Hub has a valid origin");
-    let guard = state()
-        .read()
-        .map_err(|_| CliError::Auth("Cloudflare Access token state is unavailable".into()))?;
-    let access = guard
-        .as_ref()
-        .filter(|access| access.hub_origin == expected);
-    access
-        .map(|access| access.token.clone())
-        .filter(|token| !token.trim().is_empty())
-        .map(Some)
-        .ok_or_else(|| {
-            CliError::Auth(
-                "Cloudflare Access login required for the xMatrix test environment. Run `xmatrix --environment test login`."
-                    .into(),
-            )
-        })
-}
-
-pub async fn prepare_for_hub(hub_url: &str, interactive: bool) -> Result<()> {
-    if !requires_access(hub_url) {
-        return Ok(());
-    }
-    if cached_token_for_url(hub_url).is_ok() {
-        return Ok(());
-    }
-    if daemon_request_broker().is_some() {
-        return Ok(());
-    }
-
-    let executable = find_cloudflared().await.ok_or_else(|| {
-        CliError::Auth(
-            "The xMatrix test environment requires Cloudflare Access, but `cloudflared` was not found. Install cloudflared and run `xmatrix --environment test login`."
-                .into(),
-        )
-    })?;
-
-    match read_access_token(&executable).await {
-        Ok(token) => {
-            config::save_cloudflared_path(&executable).await?;
-            cache_access(executable, token)
-        }
-        Err(_) if interactive => {
-            let status = Command::new(&executable)
-                .args(["access", "login", TEST_HUB_URL])
-                .stdin(Stdio::null())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .status()
-                .await
-                .map_err(|err| {
-                    CliError::Auth(format!("Failed to start Cloudflare Access login: {err}"))
-                })?;
-            if !status.success() {
-                return Err(CliError::Auth(
-                    "Cloudflare Access login was not completed".into(),
-                ));
-            }
-            let token = read_access_token(&executable).await?;
-            config::save_cloudflared_path(&executable).await?;
-            cache_access(executable, token)
-        }
-        Err(_) => Err(CliError::Auth(
-            "Cloudflare Access session is missing or expired. Run `xmatrix --environment test login`."
-                .into(),
-        )),
-    }
-}
+pub(crate) const DAEMON_REQUEST_URL_ENV: &str = "XMATRIX_DAEMON_REQUEST_URL";
+pub(crate) const DAEMON_REQUEST_CAPABILITY_ENV: &str = "XMATRIX_DAEMON_REQUEST_CAPABILITY";
 
 /// Largest broker locator this will read. The file holds one small record.
 const MAX_BROKER_STATE_BYTES: u64 = 4096;
@@ -187,7 +71,7 @@ fn broker_url_from_state(bytes: &[u8], active_profile: Option<&str>) -> Option<S
     loopback_broker_url(state.get("url")?.as_str()?)
 }
 
-pub fn daemon_request_broker() -> Option<(String, String)> {
+pub(crate) fn daemon_request_broker() -> Option<(String, String)> {
     // The capability is this Run's own secret and only ever arrives by
     // environment; the locator is public routing and must stay current.
     let capability = std::env::var(DAEMON_REQUEST_CAPABILITY_ENV).ok()?;
@@ -220,7 +104,7 @@ pub fn inside_agent_run() -> bool {
 /// from the run registry. When those disagree, prefer the exact registry key
 /// for this Run/execution so send can re-authorize without re-spawning.
 #[derive(Debug, PartialEq, Eq)]
-pub enum DaemonRequestCapabilityRediscovery {
+pub(crate) enum DaemonRequestCapabilityRediscovery {
     /// One persisted key differs from the spawn-time capability.
     Replacement { url: String, capability: String },
     /// Registry and sidecar disagree about the same Run — do not pick one.
@@ -231,7 +115,7 @@ pub enum DaemonRequestCapabilityRediscovery {
     None,
 }
 
-pub fn rediscovered_daemon_request_capability(
+pub(crate) fn rediscovered_daemon_request_capability(
     current_capability: &str,
 ) -> DaemonRequestCapabilityRediscovery {
     let Some(run_id) = std::env::var("XMATRIX_RUN_ID")
@@ -383,276 +267,10 @@ fn resolve_broker_url(recorded: Option<String>, seed: &str) -> Option<String> {
     recorded.or_else(|| loopback_broker_url(seed))
 }
 
-pub async fn refresh_for_url(value: &str) -> Result<()> {
-    if !requires_access(value) {
-        return Ok(());
-    }
-    let executable = state()
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|access| access.executable.clone()))
-        .or(config::saved_cloudflared_path().await)
-        .or_else(|| executable_on_path("cloudflared"))
-        .ok_or_else(|| CliError::Auth("`cloudflared` is required for test Access".into()))?;
-    let token = read_access_token(&executable).await?;
-    cache_access(executable, token)
-}
-
-fn cache_access(executable: PathBuf, token: String) -> Result<()> {
-    if token.trim().is_empty() {
-        return Err(CliError::Auth(
-            "Cloudflare Access returned an empty token".into(),
-        ));
-    }
-    let mut guard = state()
-        .write()
-        .map_err(|_| CliError::Auth("Cloudflare Access token state is unavailable".into()))?;
-    *guard = Some(AccessState {
-        hub_origin: normalized_origin(TEST_HUB_URL).expect("test Hub has a valid origin"),
-        token,
-        executable,
-    });
-    Ok(())
-}
-
-async fn read_access_token(executable: &Path) -> Result<String> {
-    let output = Command::new(executable)
-        .args(["access", "token", "-app", TEST_HUB_URL])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .await
-        .map_err(|err| CliError::Auth(format!("Failed to read Cloudflare Access token: {err}")))?;
-    if !output.status.success() {
-        return Err(CliError::Auth(
-            "Cloudflare Access session is missing or expired".into(),
-        ));
-    }
-    let token = String::from_utf8(output.stdout)
-        .map_err(|_| CliError::Auth("Cloudflare Access returned an invalid token".into()))?;
-    let token = token.trim().to_string();
-    if token.is_empty() {
-        return Err(CliError::Auth(
-            "Cloudflare Access returned an empty token".into(),
-        ));
-    }
-    Ok(token)
-}
-
-async fn find_cloudflared() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os(CLOUDFLARED_PATH_ENV)
-        .map(PathBuf::from)
-        .filter(|path| path.is_file())
-    {
-        return std::fs::canonicalize(path).ok();
-    }
-    if let Some(path) = config::saved_cloudflared_path()
-        .await
-        .filter(|path| path.is_file())
-    {
-        return std::fs::canonicalize(path).ok();
-    }
-    executable_on_path("cloudflared")
-}
-
-fn executable_on_path(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for directory in std::env::split_paths(&path) {
-        let candidate = directory.join(name);
-        if candidate.is_file() {
-            return std::fs::canonicalize(candidate).ok();
-        }
-        #[cfg(windows)]
-        {
-            let candidate = directory.join(format!("{name}.exe"));
-            if candidate.is_file() {
-                return std::fs::canonicalize(candidate).ok();
-            }
-        }
-    }
-    None
-}
-
-pub fn access_denial_message(status: u16) -> String {
-    match status {
-        401 => "Cloudflare Access session is missing or expired. Run `xmatrix --environment test login`.".into(),
-        403 => "Cloudflare Access denied this identity access to the xMatrix test environment.".into(),
-        _ => "Cloudflare Access login required for the xMatrix test environment. Run `xmatrix --environment test login`.".into(),
-    }
-}
-
-#[cfg(test)]
-#[expect(
-    clippy::await_holding_lock,
-    reason = "each #[tokio::test] runs on its own thread; the guard only serializes process-global env across test threads"
-)]
-mod tests {
-    use super::*;
-
-    #[cfg(unix)]
-    struct AccessTestEnvironment {
-        dir: PathBuf,
-        saved_variables: Vec<(&'static str, Option<std::ffi::OsString>)>,
-    }
-
-    #[cfg(unix)]
-    impl AccessTestEnvironment {
-        fn new(dir: PathBuf, executable: &Path) -> Self {
-            let saved_variables = [
-                CLOUDFLARED_PATH_ENV,
-                "XMATRIX_CONFIG_DIR",
-                DAEMON_REQUEST_URL_ENV,
-                DAEMON_REQUEST_CAPABILITY_ENV,
-            ]
-            .into_iter()
-            .map(|name| (name, std::env::var_os(name)))
-            .collect();
-
-            // These tests exercise cloudflared directly. A broker inherited from the
-            // invoking xMatrix process would intentionally bypass that path.
-            unsafe {
-                std::env::set_var(CLOUDFLARED_PATH_ENV, executable);
-                std::env::set_var("XMATRIX_CONFIG_DIR", dir.join("config"));
-                std::env::remove_var(DAEMON_REQUEST_URL_ENV);
-                std::env::remove_var(DAEMON_REQUEST_CAPABILITY_ENV);
-            }
-            *state().write().unwrap() = None;
-
-            Self {
-                dir,
-                saved_variables,
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    impl Drop for AccessTestEnvironment {
-        fn drop(&mut self) {
-            *state()
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
-            for (name, value) in self.saved_variables.drain(..) {
-                unsafe {
-                    match value {
-                        Some(value) => std::env::set_var(name, value),
-                        None => std::env::remove_var(name),
-                    }
-                }
-            }
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
-    }
-
-    #[test]
-    fn access_is_scoped_to_the_exact_test_origin() {
-        assert!(requires_access(TEST_HUB_URL));
-        assert!(requires_access("wss://xmatrix-hub.test.xmatrix.sh/ws"));
-        assert!(!requires_access("https://xmatrix-hub.xmatrix.sh"));
-        assert!(!requires_access("https://cdn.example.com/attachments/file"));
-        assert!(!requires_access(
-            "https://xmatrix-hub.test.xmatrix.sh.evil.example"
-        ));
-        assert!(!requires_access("https://test.xmatrix.sh"));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn fake_cloudflared_supplies_a_process_only_token() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let _guard = config::test_env_lock();
-        let dir =
-            std::env::temp_dir().join(format!("xmatrix-cloudflared-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let executable = dir.join("cloudflared");
-        std::fs::write(
-            &executable,
-            "#!/bin/sh\nif [ \"$1\" = access ] && [ \"$2\" = token ]; then printf fake-access-token; exit 0; fi\nexit 1\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let _environment = AccessTestEnvironment::new(dir, &executable);
-
-        prepare_for_hub(TEST_HUB_URL, false).await.unwrap();
-        assert_eq!(
-            cached_token_for_url(TEST_HUB_URL).unwrap().as_deref(),
-            Some("fake-access-token")
-        );
-        let websocket = crate::http::websocket_request(
-            "wss://xmatrix-hub.test.xmatrix.sh/ws",
-            crate::http::ClientComponent::Daemon,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            websocket.headers().get(ACCESS_TOKEN_HEADER).unwrap(),
-            "fake-access-token"
-        );
-        let persisted = std::fs::read_to_string(config::config_path()).unwrap();
-        assert!(persisted.contains(executable.to_string_lossy().as_ref()));
-        assert!(!persisted.contains("fake-access-token"));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn fake_cloudflared_runs_interactive_login_without_persisting_the_token() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let _guard = config::test_env_lock();
-        let dir = std::env::temp_dir().join(format!(
-            "xmatrix-cloudflared-login-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let executable = dir.join("cloudflared");
-        let marker = dir.join("logged-in");
-        std::fs::write(
-            &executable,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = access ] && [ \"$2\" = token ]; then [ -f \"{}\" ] && printf interactive-access-token && exit 0; exit 1; fi\nif [ \"$1\" = access ] && [ \"$2\" = login ]; then touch \"{}\"; exit 0; fi\nexit 1\n",
-                marker.display(),
-                marker.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let _environment = AccessTestEnvironment::new(dir, &executable);
-
-        prepare_for_hub(TEST_HUB_URL, true).await.unwrap();
-        let persisted = std::fs::read_to_string(config::config_path()).unwrap();
-        assert!(persisted.contains(executable.to_string_lossy().as_ref()));
-        assert!(!persisted.contains("interactive-access-token"));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn fake_cloudflared_rejection_is_actionable() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let _guard = config::test_env_lock();
-        let dir = std::env::temp_dir().join(format!(
-            "xmatrix-cloudflared-reject-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let executable = dir.join("cloudflared");
-        std::fs::write(&executable, "#!/bin/sh\nexit 1\n").unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let _environment = AccessTestEnvironment::new(dir, &executable);
-
-        let noninteractive = prepare_for_hub(TEST_HUB_URL, false).await.unwrap_err();
-        assert!(noninteractive.to_string().contains("missing or expired"));
-        let interactive = prepare_for_hub(TEST_HUB_URL, true).await.unwrap_err();
-        assert!(interactive.to_string().contains("was not completed"));
-    }
-}
-
-/// The daemon rebinds an ephemeral port on every start, so a locator baked into
-/// a Run's environment goes stale the moment the daemon restarts. Happy's CLI
-/// avoids this by reading the daemon's recorded port instead of pinning one.
 #[cfg(test)]
 mod broker_locator_tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn state(profile: Option<&str>, url: &str) -> Vec<u8> {
         let mut record = serde_json::Map::new();

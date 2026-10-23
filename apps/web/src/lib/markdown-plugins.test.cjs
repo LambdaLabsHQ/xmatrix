@@ -66,5 +66,5 @@ test("a dense run of adjacent links terminates without recursive traversal", () 
   const count = 300;
   const html = render(Array(count).fill(url).join("，"));
   assert.equal((html.match(/<a /g) || []).length, count);
-  assert.equal(html.replace(/<[^>]*>/g, ""), Array(count).fill(url).join("，"));
+  assert.equal(html.split(/<[^>]*>/).join(""), Array(count).fill(url).join("，"));
 });

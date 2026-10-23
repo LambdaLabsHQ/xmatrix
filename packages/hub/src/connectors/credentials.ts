@@ -1,4 +1,6 @@
-import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppActionPolicyRepository, PostgresAppCredentialRepository,
+import { trimEnd } from "@xmatrix/protocol";
+import { PostgresGmailRoutingRepository } from "@xmatrix/db";
+import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppActionPolicyRepository, PostgresAppActionRequestRepository, PostgresAppCredentialRepository,
   PostgresAppRepository, PostgresWeComSuiteRepository, PostgresTelegramRoomRepository, PostgresFeishuAppRepository, PostgresFeishuRoomRepository, PostgresSentryEventRepository, PostgresGoogleChatRoomRepository, PostgresTeamsRoomRepository, type AuthorityDatabase } from "@xmatrix/db";
 import { postgresDatabaseObservers } from "../postgres-observability";
 import type { Env } from "../types";
@@ -57,7 +59,7 @@ export function mintConnectorSecret(): string {
 export const INGRESS_KEY_FIELD = "ingressKey";
 
 export function connectorIngressUrl(origin: string, providerId: string, spaceId: string, ingressKey: string): string {
-  return `${origin.replace(/\/+$/u, "")}/api/connectors/${encodeURIComponent(providerId)}/events/` +
+  return `${trimEnd(origin, "/")}/api/connectors/${encodeURIComponent(providerId)}/events/` +
     `${encodeURIComponent(spaceId)}/${encodeURIComponent(ingressKey)}`;
 }
 
@@ -97,4 +99,12 @@ export function connectorDiscordLifecycleRepository(env: Env): PostgresDiscordLi
 
 export function connectorTeamsRoomRepository(env: Env): PostgresTeamsRoomRepository {
   return new PostgresTeamsRoomRepository(appPolicyDatabase(env));
+}
+
+export function connectorActionRequestRepository(env: Env): PostgresAppActionRequestRepository {
+  return new PostgresAppActionRequestRepository(appPolicyDatabase(env), env.XMATRIX_SECRET_CATALOG_KEY?.trim() ?? "");
+}
+
+export function gmailRoutingRepository(env: Env) {
+  return new PostgresGmailRoutingRepository(appPolicyDatabase(env), env.XMATRIX_SECRET_CATALOG_KEY?.trim() ?? "");
 }

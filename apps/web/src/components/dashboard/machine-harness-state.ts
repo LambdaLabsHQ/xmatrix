@@ -1,4 +1,4 @@
-import { AGENT_PRESETS, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, parseHarnessInventory, compareClientVersions, harnessActionAvailable, type HarnessCommand, type SerializedMachineDaemon } from "@xmatrix/protocol";
+import { AGENT_PRESETS, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, parseHarnessInventory, compareClientVersions, harnessActionAvailable, type SerializedMachineDaemon } from "@xmatrix/protocol";
 
 export function harnessUpdateAvailable(current?: string, latest?: string): boolean {
   return Boolean(current && latest && compareClientVersions(current, latest) === -1);
@@ -25,11 +25,6 @@ export function machineHarnessState(daemon: SerializedMachineDaemon | undefined,
   const installed = catalog.filter((row) => row.item?.installed);
   return { inventory, recipePlatform, canManage, responding, cursorUpdateReady, uninstallReady,
     rows: [...installed, ...catalog.filter((row) => !row.item?.installed)] };
-}
-
-/** Display argv as documentation; this text is never sent for execution. */
-export function harnessCommandLabel(recipe: HarnessCommand | null | undefined): string | undefined {
-  return recipe ? [recipe.command, ...recipe.args.map((arg) => /\s|["'`]/u.test(arg) ? JSON.stringify(arg) : arg)].join(" ") : undefined;
 }
 
 export function harnessAutoUpdateSupported(preset: typeof AGENT_PRESETS[number]): boolean {

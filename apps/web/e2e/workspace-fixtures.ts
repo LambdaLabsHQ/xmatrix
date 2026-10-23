@@ -1,8 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 
 import {
+  CREATED_CHANNEL_ID,
   fixtureChannelCatalog,
+  fixtureChannelCreate,
   fixtureJson,
+  fixtureFaces,
   fixtureRequestBodies,
   fixtureRequests,
   fixtureRule,
@@ -27,6 +30,8 @@ export {
 export const E2E_NOW = "2026-07-01T00:00:00.000Z";
 
 export type WorkspaceStubFixtures = {
+  /** People's and Agent Instances' pictures, keyed `user:<id>` / `agent:<instanceId>`, as the faces read answers them. */
+  faces?: Record<string, string>;
   spaces?: unknown[];
   channels?: unknown[];
   /** The Space's Agent registrations; each Agent a composer can start. */
@@ -117,6 +122,31 @@ export async function routeHumanSocket(
   return { connections: () => connections };
 }
 
+/**
+ * Routes the Human socket so a test can say what the Hub says when a
+ * Channel's launches, stops, continuations, executions or launch choices move:
+ * the chips re-read their records then, and only then. Nothing polls.
+ */
+export async function routeInvocationPush(page: Page, channelId = "channel-general") {
+  const sockets: Array<(message: unknown) => void> = [];
+  await routeHumanSocket(page, (frame, reply) => { if (frame.type === "human_connect") sockets.push(reply); });
+  return async () => {
+    await expect.poll(() => sockets.length).toBeGreaterThan(0);
+    for (const send of sockets) send({ type: "observable_event", event: { id: `invocations-${Date.now()}`,
+      type: "channel_invocations_changed", channelId, workspaceUserId: "system:xmatrix",
+      timestamp: new Date().toISOString(), metadata: {} } });
+  };
+}
+
+/** Enabled, routing-ready registrations of these harnesses on one machine, as the Space's catalog lists them. */
+export function harnessRegistrations(harnesses: readonly string[]) {
+  return harnesses.map((harness) => ({
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "owner", machineId: "machine", harness },
+    displayName: harness, ownerName: "Owner", machineName: "Workstation", version: 1, state: "enabled",
+    models: [], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
+  }));
+}
+
 export const E2E_CHANNEL = {
   id: "channel-general",
   spaceId: E2E_SPACE.id,
@@ -166,10 +196,10 @@ function openedChannel(fixtures: WorkspaceStubFixtures): { id: string; spaceId: 
 
 /** A new conversation's create and first-message endpoints, answering as this Channel;
     read back as "conversation-create" and "conversation-first-message". */
-export async function fixtureConversationCreate(page: Page, channel: { id: string }) {
-  await fixtureJson(page, "conversation-create", /\/api\/xmatrix\/channels$/u, { channel }, { method: "POST" });
+export async function fixtureConversationCreate(page: Page, channel: Record<string, unknown>) {
+  await fixtureChannelCreate(page, "conversation-create", channel);
   await fixtureJson(page, "conversation-first-message",
-    new RegExp(`/api/xmatrix/channels/${channel.id}/messages$`, "u"), { message: { messageId: "m-1" } }, { method: "POST" });
+    new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"), { message: { messageId: "m-1" } }, { method: "POST" });
 }
 
 /** Opens the app and starts a new conversation with the conversation list's +; returns the draft. */
@@ -261,6 +291,7 @@ export async function installWorkspaceStubs(
     spaces: fixtures.spaces ?? [],
   });
   await fixtureSpaceResources(page);
+  await fixtureFaces(page, fixtures.faces);
   const registrations = (fixtures.registrations ?? []).map((registration) => ({
     displayName: registration.key.harness, ownerName: "Owner", machineName: registration.key.machineId,
     version: 1, state: "enabled", models: [], routingReady: true, canManageOwnerGrant: false,
@@ -444,3 +475,6 @@ export async function openGeneralChannelWithPagedHistory(
     waitUntil: "domcontentloaded",
   });
 }
+
+/** Registration identity shared by Codex presence fixtures. */
+export const FIXTURE_AGENT_REGISTRATION = { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" };

@@ -7,7 +7,6 @@ import {
   createAuthorityDatabase,
   PostgresChannelCatalogRepository,
   PostgresSpaceControlRepository,
-  PostgresMessageRepository,
 } from "../dist/index.js";
 
 const connectionString = process.env.XMATRIX_TEST_POSTGRES_URL;
@@ -611,7 +610,7 @@ integration("startup resolve omits participants, full reads hydrate them, and AC
     assert.equal(Object.hasOwn(channel, "memberPresence"), false);
     assert.equal(Object.hasOwn(channel, "visibleHumanMemberIds"), false);
   }
-  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v9"), false);
+  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v10"), false);
   assert.equal(observations.some(event => event.queryName === "channel_catalog_open_space_members_v2"), false);
   const full = await catalog.resolve(input);
   assert.equal(catalogInstances(full.channels.find(channel => channel.id === "root-40")).length, 2);
@@ -694,10 +693,7 @@ integration("a registered Instance reads its Space's catalog as the Instance it 
 integration("xMatrix renames a conversation only while its name is automatic; a person's name stays", async () => {
   const { client, repository } = await seededSpaceControl();
   try {
-    await client.query(`UPDATE data.channels SET metadata_json = metadata_json || '{"autoName":true}'::jsonb
-      WHERE channel_id='child'`);
-    const current = async () => (await client.query(
-      "SELECT name, version, metadata_json FROM data.channels WHERE channel_id='child'")).rows[0];
+    const current = await autoNamedChild(client);
     const rename = async (name, automaticName) => repository.mutateChannel({
       requestId: `rename-${name}`, commandId: `rename-${name}`, kind: "channel_configure", channelId: "child",
       actorUserId: "owner", expectedVersion: Number((await current()).version), at: new Date().toISOString(),
@@ -717,52 +713,61 @@ integration("xMatrix renames a conversation only while its name is automatic; a 
   }
 });
 
-integration("a summary records the Run that wrote it, when, and the newest message it read in this Channel", async () => {
+integration("xMatrix writes a task's About for a member's Machine, never over a person's change or a further reading", async () => {
   const { client, repository } = await seededSpaceControl();
   try {
-    await client.query(`INSERT INTO data.messages
-      (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,
-       message_kind,content_hash,payload_kind,payload_ref,sent_at,updated_at,search_rank_sequence,
-       legacy_body,created_at)
-      VALUES ('space-catalog','root-01','elsewhere-1',9,1,'user','owner','message','hash',
-        'inline','inline',$1,$1,'elsewhere-rank','elsewhere',$1)`, [now]);
-    const current = async () => (await client.query(
-      "SELECT version, metadata_json FROM data.channels WHERE channel_id='child'")).rows[0];
+    const current = await autoNamedChild(client);
     let step = 0;
-    const configure = async (fields) => repository.mutateChannel({
-      requestId: `summary-${++step}`, commandId: `summary-${step}`, kind: "channel_configure", channelId: "child",
-      actorUserId: "owner", expectedVersion: Number((await current()).version), at: now, ...fields });
+    const write = async (fields, actorUserId = "user-1") => repository.mutateChannel({
+      requestId: `task-${++step}`, commandId: `task-${step}`, kind: "channel_configure", channelId: "child",
+      actorUserId, expectedVersion: Number((await current()).version), at: now, ...fields });
+    const task = (readRevision, throughSequence, summary, name) => ({ summary,
+      ...(name ? { name, automaticName: true } : {}),
+      summaryAuthor: { taskId: `channel-about:child:${readRevision}:${throughSequence}`, agentName: "codex",
+        readRevision, throughSequence } });
+    const conflict = (error) => error.code === "metadata_revision_conflict";
 
-    await prepareAboutInput(client, "child:about#1");
-    await configure({ summary: "Fixing summaries", summaryAuthor: {
-      runId: "child:about#1", agentName: "claude", throughMessageId: "message-1" } });
-    assert.deepEqual((await current()).metadata_json.summarySource, {
-      author: { kind: "run", runId: "child:about#1", agentName: "claude" }, generatedAt: now, throughSequence: 1,
-    });
-    const listed = await repository.getChannel({ requestId: "summary-read", spaceId: "space-catalog",
-      channelId: "child", principal: { kind: "user", id: "owner" } });
-    assert.equal(listed.channel.summarySource.throughSequence, 1);
+    // The member may not edit the conversation; the About from their Machine is xMatrix's to write.
+    await assert.rejects(write({ name: "By hand" }), (error) => error.code === "forbidden");
+    await write(task(0, 1, "Fixing login", "Login fixes"));
+    let row = await current();
+    assert.equal(row.name, "Login fixes");
+    assert.equal(row.metadata_json.autoName, true, "the name xMatrix chose stays automatic");
+    assert.deepEqual(row.metadata_json.summarySource, {
+      author: { kind: "task", agentName: "codex" }, generatedAt: now, throughSequence: 1 });
+    const [revision] = (await client.query(`SELECT source_json FROM data.channel_metadata_revisions
+      WHERE channel_id='child' ORDER BY revision DESC LIMIT 1`)).rows;
+    assert.deepEqual(revision.source_json, { kind: "about_task", actorUserId: "user-1", commandId: `task-${step}`,
+      taskId: "channel-about:child:0:1", agentName: "codex", readRevision: 0, throughSequence: 1 });
 
-    // Another Channel's message says nothing about how far this summary reads.
-    await prepareAboutInput(client, "child:about#2");
-    await assert.rejects(configure({ summary: "Fixing summaries again", summaryAuthor: {
-      runId: "child:about#2", agentName: "codex", throughMessageId: "elsewhere-1" } }),
-      error => error.code === "channel_about_input_mismatch");
-    assert.equal((await current()).metadata_json.summary, "Fixing summaries");
+    // Two readings of the same revision: one that read further replaces an older one, never the reverse.
+    await write(task(0, 5, "Fixing login and signup"));
+    assert.equal((await current()).metadata_json.summary, "Fixing login and signup");
+    await assert.rejects(write(task(0, 3, "Fixing login again")), conflict);
+    await assert.rejects(write(task(0, 5, "The same reading twice")), conflict);
+    assert.equal((await current()).metadata_json.summary, "Fixing login and signup");
 
-    // A summary written without an author, or cleared, keeps no earlier source.
-    await configure({ summary: "Unattributed" });
-    assert.equal((await current()).metadata_json.summarySource, undefined);
-    await prepareAboutInput(client, "child:about#3");
-    await configure({ summary: "Attributed", summaryAuthor: {
-      runId: "child:about#3", agentName: "claude", throughMessageId: "message-1" } });
-    await configure({ summary: null });
-    assert.equal((await current()).metadata_json.summarySource, undefined);
-    assert.equal((await current()).metadata_json.summary, undefined);
+    // A person's change after a reading stands.
+    await write({ name: "Login reliability" }, "admin");
+    await assert.rejects(write(task(2, 9, "Read before the rename")), conflict);
+    await write(task(3, 9, "Login reliability work"));
+    row = await current();
+    assert.equal(row.name, "Login reliability");
+    assert.equal(row.metadata_json.summary, "Login reliability work");
+    // Nobody outside the Space writes one.
+    await assert.rejects(write(task(4, 10, "From a stranger"), "stranger"), (error) => error.code === "forbidden");
   } finally {
     await client.end();
   }
 });
+
+/** The `child` conversation, still named automatically, and a reader of its row. */
+async function autoNamedChild(client) {
+  await client.query(`UPDATE data.channels SET metadata_json = metadata_json || '{"autoName":true}'::jsonb
+    WHERE channel_id='child'`);
+  return async () => (await client.query(
+    "SELECT name, version, metadata_json FROM data.channels WHERE channel_id='child'")).rows[0];
+}
 
 async function seededSpaceControl() {
   await seed();
@@ -786,31 +791,6 @@ function catalogInstances(channel) {
   const presence = channel.memberPresence;
   assert.deepEqual(Object.keys(presence), ["root-40:6", "root-40:7"]);
   return Object.values(presence).flatMap(member => member.instances);
-}
-
-async function prepareAboutInput(client, runId, channelId = "child", read = true) {
-  await client.query(`INSERT INTO data.runs
-    (run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
-    VALUES ($1,'owner',$2,'running',1,$3::jsonb,$4,$4)`, [runId,channelId,
-    JSON.stringify({ routedAs: "management_channel_about", runtimeSessionId: runId,
-      channelAboutTriggerRequestId: "bucket-1", ...(channelId === "child" ? { channelAboutTriggerMessageId: "message-1" } : {}) }),now]);
-  await client.query("SET session_replication_role=replica");
-  try {
-    const limits = JSON.stringify({ workspaces: [], models: [], capabilities: [], maxConcurrent: 4 });
-    await client.query(`INSERT INTO data.space_agent_registration_access
-      (space_id,owner_user_id,machine_id,harness,grant_state,grant_revision,grant_execution_revision,grant_limits,
-       policy_state,policy_revision,policy_execution_revision,policy_limits,updated_at)
-      VALUES ('space-catalog','owner','machine-1','claude','active',1,1,$1::jsonb,'enabled',1,1,$1::jsonb,$2)
-      ON CONFLICT DO NOTHING`, [limits,now]);
-    await client.query(`INSERT INTO data.run_agent_registrations
-      (run_id,space_id,owner_user_id,machine_id,harness,actor_user_id,allocation_id,authorization_digest,
-       grant_revision,grant_execution_revision,policy_revision,policy_execution_revision,requested_json)
-      VALUES ($1,'space-catalog','owner','machine-1','claude','owner',$2,repeat('a',64),1,1,1,1,$3::jsonb)`, [runId,`allocation-${runId}`,JSON.stringify({ workspaces: [], models: [], capabilities: [] })]);
-  } finally { await client.query("SET session_replication_role=origin"); }
-  if (!read) return;
-  const db = createAuthorityDatabase({ connectionString, shardId: "shard-0" });
-  return new PostgresMessageRepository(db).history({ requestId: `input-${runId}`,spaceId: "space-catalog",
-    channelId,principal: { kind: "agent",id: runId } });
 }
 
 integration("metadata revisions retain full content, reject stale writes, and restore by appending with replay", async () => {
@@ -860,56 +840,10 @@ integration("metadata revisions retain full content, reject stale writes, and re
   } finally { await client.end(); }
 });
 
-integration("About history records exact input references and refuses foreign, stale and ended Runs", async () => {
+integration("metadata history reads obey current Channel content permissions", async () => {
   const { client, repository } = await seededSpaceControl();
-  let command = 0;
-  const mutate = fields => repository.mutateChannel({ requestId: `about-version-${++command}`,commandId: `about-version-${command}`,
-    kind: "channel_configure",channelId: "child",actorUserId: "owner",at: now,...fields });
-  const about = (runId,throughMessageId = "message-1") => ({ summary: "About generated",summaryAuthor: { runId,agentName: "claude",throughMessageId } });
-  const history = () => repository.metadataHistory({ requestId: "history",spaceId: "space-catalog",channelId: "child",
-    principal: { kind: "user",id: "owner" } });
-  try {
-    const page = await prepareAboutInput(client,"child:about#1");
-    assert.equal(page.aboutInput.expectedRevision, 0);
-    const input = await repository.metadataHistory({ requestId: "input",spaceId: "space-catalog",channelId: "child",
-      principal: { kind: "user",id: "owner" },inputId: page.aboutInput.inputId });
-    assert.deepEqual(input.input.references_json.map(ref => ref.messageId), page.messages.map(message => message.messageId));
-    assert.equal(input.input.references_json[0].contentHash, "hash");
-    await client.query(`UPDATE data.messages SET recalled_at=$1 WHERE message_id='message-1'`, [now]);
-    const hiddenInput = await repository.metadataHistory({ requestId: "redacted-input",spaceId: "space-catalog",channelId: "child",
-      principal: { kind: "user",id: "owner" },inputId: page.aboutInput.inputId });
-    assert.equal(hiddenInput.input.references_json[0].contentUnavailable, true);
-    assert.equal(hiddenInput.input.references_json[0].payloadRef, undefined);
-    await client.query(`UPDATE data.messages SET recalled_at=NULL WHERE message_id='message-1'`);
-    await assert.rejects(client.query(`UPDATE data.channel_about_inputs SET run_id='forged' WHERE input_id=$1`, [page.aboutInput.inputId]),
-      error => error.code === "23514");
-    await mutate({ ...about("child:about#1"),expectedRevision: 0 });
-    const revision = (await history()).revisions[0];
-    assert.deepEqual(revision.source_json.inputIds, [page.aboutInput.inputId]);
-    assert.equal(revision.source_json.triggerMessageId, "message-1");
-    assert.equal(revision.source_json.triggerRequestId, "bucket-1");
-    await assert.rejects(mutate(about("child:about#1")), error => error.code === "metadata_revision_conflict");
-    await prepareAboutInput(client,"root-01:about#1","root-01");
-    await assert.rejects(mutate(about("root-01:about#1")), error => error.code === "channel_about_scope_invalid");
-    await prepareAboutInput(client,"child:about#2","child",false);
-    await assert.rejects(mutate(about("child:about#2")), error => error.code === "channel_about_input_required");
-    await prepareAboutInput(client,"child:about#3");
-    await client.query(`UPDATE data.runs SET status='completed' WHERE run_id='child:about#3'`);
-    await assert.rejects(mutate(about("child:about#3")), error => error.code === "channel_about_scope_invalid");
-    await prepareAboutInput(client,"child:about#4");
-    await assert.rejects(mutate({ ...about("child:about#4"), mode: "closed" }), error => error.code === "channel_about_scope_invalid");
-    await assert.rejects(mutate({ name: "Bypassed",actorRunId: "child:about#4" }), error => error.code === "channel_about_scope_invalid");
-    await assert.rejects(mutate(about("child:about#4","missing")), error => error.code === "channel_about_input_mismatch");
-    await client.query(`UPDATE data.space_agent_registration_access SET grant_state='revoked' WHERE space_id='space-catalog'`);
-    await assert.rejects(mutate(about("child:about#4")), error => error.code === "registration_revoked");
-    assert.equal((await history()).currentRevision, 1);
-  } finally { await client.end(); }
-});
-
-integration("metadata history and input reads obey current Channel content permissions", async () => {
-  const { client, repository } = await seededSpaceControl();
-  const history = (channelId, principal, more = {}) => repository.metadataHistory({ requestId: "history-access",
-    spaceId: "space-catalog",channelId,principal,...more });
+  const history = (channelId, principal) => repository.metadataHistory({ requestId: "history-access",
+    spaceId: "space-catalog",channelId,principal });
   try {
     for (const channelId of ["closed-hidden","closed-visible"]) {
       await repository.mutateChannel({ requestId: `metadata-${channelId}`,commandId: `metadata-${channelId}`,
@@ -920,10 +854,6 @@ integration("metadata history and input reads obey current Channel content permi
     await client.query(`DELETE FROM data.channel_access WHERE channel_id='closed-visible' AND subject_kind='user'`);
     await assert.rejects(history("closed-visible",{ kind: "user",id: "user-1" }), error => error.code === "channel_not_found");
     await assert.rejects(history("child",{ kind: "user",id: "outsider" }), error => error.code === "channel_not_found");
-    const page = await prepareAboutInput(client,"child:about#1");
-    assert.equal((await history("child",{ kind: "agent",id: "child:about#1" })).currentRevision, 0);
-    assert.equal((await history("closed-visible",{ kind: "user",id: "owner" },{ inputId: page.aboutInput.inputId })).input, null);
-    await assert.rejects(history("closed-hidden",{ kind: "agent",id: "child:about#1" }), error => error.code === "channel_not_found");
   } finally { await client.end(); }
 });
 
@@ -939,5 +869,38 @@ integration("two writers of the same metadata revision commit exactly one new co
       principal: { kind: "user",id: "owner" } });
     assert.equal(result.currentRevision, 1);
     assert.equal(result.revisions.length, 2);
+  } finally { await client.end(); }
+});
+
+// The aggregate counts Channels, keeps an acknowledged older wait, and cannot
+// pick up another principal's or an unreadable Channel's attention rows.
+integration("catalog counts keep older declared waits without multiplying or widening attention", async () => {
+  await seed();
+  const client = new Client({ connectionString });
+  await client.connect();
+  const repository = new PostgresChannelCatalogRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0" }));
+  const read = () => repository.page({ requestId: crypto.randomUUID(), spaceId: "space-catalog",
+    principal: { kind: "user", id: "user-1" }, view: "flat", filter: "all", countsOnly: true });
+  try {
+    await client.query(`INSERT INTO data.messages SELECT (jsonb_populate_record(NULL::data.messages,
+      to_jsonb(source)||jsonb_build_object('message_id',item.id,'search_rank_sequence',item.id,
+        'timeline_sequence',item.seq,'author_kind','agent','author_id','root-00:1'))).*
+      FROM data.messages source CROSS JOIN (VALUES ('older-wait',2),('newer-mention',3)) item(id,seq)
+      WHERE source.message_id='message-1'`);
+    await client.query(`UPDATE data.instances SET rest_state='sleeping' WHERE instance_id='root-00:1'`);
+    await client.query(`INSERT INTO data.message_attention
+      (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response) VALUES
+      ('space-catalog','user:user-1','child','older-wait','reply',2,$1,TRUE),
+      ('space-catalog','user:user-1','child','newer-mention','mention',3,$1,FALSE),
+      ('space-catalog','user:user-1','closed-hidden','hidden','mention',1,$1,FALSE),
+      ('space-catalog','user:someone-else','grandchild','other-principal','mention',1,$1,FALSE)`, [now]);
+    await client.query(`INSERT INTO data.delivery_cursors
+      (space_id,subject_id,channel_id,acknowledged_sequence,version,updated_at)
+      VALUES ('space-catalog','user:user-1','child',3,1,$1)`, [now]);
+    assert.deepEqual((await read()).counts, { active: 60, unread: 1, mentions: 1 });
+    await client.query(`UPDATE data.instances SET rest_state='stopped' WHERE instance_id='root-00:1'`);
+    assert.deepEqual((await read()).counts, { active: 60, unread: 0, mentions: 0 });
+    await client.query(`DELETE FROM data.delivery_cursors WHERE space_id='space-catalog' AND subject_id='user:user-1'`);
+    assert.deepEqual((await read()).counts, { active: 60, unread: 1, mentions: 1 });
   } finally { await client.end(); }
 });

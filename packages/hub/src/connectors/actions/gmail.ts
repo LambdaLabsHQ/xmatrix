@@ -1,4 +1,6 @@
+import { dropHtmlElements, stripHtmlTags } from "@xmatrix/protocol";
 import type { ConnectorAction } from "../provider";
+import type { UpstreamMeter } from "../../usage-cost-metering";
 import { record } from "../command-support";
 import { ProviderRequestError } from "../http";
 import { composioGet, composioPost } from "../composio";
@@ -11,8 +13,7 @@ import { mailboxCredentials, mayUseMailbox, parseMailboxes, type GmailMailbox } 
  * `https://mail.google.com/` grant, and each call is proxied as the stored
  * account. The Hub, not the grant, is the boundary: it calls only the
  * endpoints `GMAIL_CALLS` lists, and the only write, messages/send, belongs to
- * `send` and `reply`, which the manifest keeps off in every Channel until a
- * Space admin allows them there. A connection holds several mailboxes, and an
+ * `send` and `reply`, which ask for approval of each frozen email by default. A connection holds several mailboxes, and an
  * action uses only those its caller owns (`gmail-mailboxes.ts`); `read` and
  * `reply` find the message among them. `read` lists every link in the message so an
  * Agent can open one itself (a sign-up verification link, for example); the
@@ -30,7 +31,7 @@ const MAX_PARTS = 200;
 const MAX_ADDRESS = 254;
 const ADDRESS = /^[^\s@<>(),;:"\\[\]]+@[^\s@<>(),;:"\\[\]]+\.[^\s@<>(),;:"\\[\]]+$/u;
 
-/* Every Gmail endpoint the Hub calls; anything else the full grant would allow is refused before Composio sees it. */
+/* User-invoked Gmail endpoints. The notification worker separately permits only profile/history ID reads. */
 const GMAIL_CALLS: Record<"GET" | "POST", RegExp> = {
   GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32})$/u,
   POST: /^\/messages\/send$/u,
@@ -42,8 +43,8 @@ function gmailPath(method: "GET" | "POST", path: string): string {
 }
 
 function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
-  query: Record<string, string> = {}): Promise<Record<string, unknown>> {
-  return composioGet(credentials, gmailPath("GET", path), query);
+  query: Record<string, string> = {}, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
+  return composioGet(credentials, gmailPath("GET", path), query, meter);
 }
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
 
@@ -109,10 +110,8 @@ export function gmailBodies(payload: Record<string, unknown>): { plain?: string;
 
 /** Readable text of an HTML body: no styles, scripts or tags, block ends as line breaks. */
 export function htmlText(html: string): string {
-  return decodeEntities(html
-    .replace(/<(style|script|head)\b[\s\S]*?<\/\1\s*>/giu, "")
-    .replace(/<br\s*\/?>|<\/(p|div|tr|li|h[1-6]|table)\s*>/giu, "\n")
-    .replace(/<[^>]*>/gu, ""))
+  return decodeEntities(stripHtmlTags(dropHtmlElements(html, ["style", "script", "head"])
+    .replace(/<br\s*\/?>|<\/(p|div|tr|li|h[1-6]|table)\s*>/giu, "\n")))
     .replace(/[ \t ]+/gu, " ")
     .replace(/ *\n[\s]*\n\s*/gu, "\n\n")
     .trim();
@@ -166,8 +165,9 @@ function address(value: string): string | undefined {
   return bare.length <= MAX_ADDRESS && ADDRESS.test(bare) ? bare : undefined;
 }
 
-async function sendRaw(credentials: Readonly<Record<string, string>>, raw: string, threadId?: string): Promise<string> {
-  const sent = await composioPost(credentials, gmailPath("POST", "/messages/send"), { raw, ...(threadId ? { threadId } : {}) });
+async function sendRaw(credentials: Readonly<Record<string, string>>, raw: string, threadId: string | undefined,
+  meter: UpstreamMeter | undefined): Promise<string> {
+  const sent = await composioPost(credentials, gmailPath("POST", "/messages/send"), { raw, ...(threadId ? { threadId } : {}) }, meter);
   if (typeof sent.id !== "string") throw new ProviderRequestError(502, "Google did not confirm the sent message");
   return line(sent.id, 32);
 }
@@ -190,15 +190,47 @@ async function usableMailboxes({ credentials, caller }: Context, only?: string):
 }
 
 /** The mailbox among `mailboxes` that holds the message; Gmail answers 404 (or 400) for another mailbox's id. */
-async function findMessage(credentials: Readonly<Record<string, string>>, mailboxes: GmailMailbox[], id: string, format: "full" | "metadata") {
+async function findMessage({ credentials, usage }: Context, mailboxes: GmailMailbox[], id: string, format: "full" | "metadata") {
   for (const mailbox of mailboxes) {
     try {
-      return { mailbox, message: await gmailGet(mailboxCredentials(credentials, mailbox), `/messages/${id}`, { format }) };
+      return { mailbox, message: await gmailGet(mailboxCredentials(credentials, mailbox), `/messages/${id}`, { format }, usage) };
     } catch (error) {
       if (!(error instanceof ProviderRequestError) || (error.status !== 404 && error.status !== 400)) throw error;
     }
   }
   throw new ProviderRequestError(404, `none of your Gmail mailboxes has message ${id}`);
+}
+
+async function prepareSend(context: Context, input: Record<string, string>): Promise<Record<string, string>> {
+  const mailboxes = await usableMailboxes(context, input.from || undefined);
+  if (mailboxes.length > 1) throw new ProviderRequestError(400, "name the sending mailbox: from:<address> before the subject");
+  const mailbox = mailboxes[0]!;
+  return { ...input, from: mailbox.address, account: mailbox.account, owner: mailbox.owner,
+    raw: gmailRaw([["To", input.to!], ["Subject", input.subject!]], input.body!) };
+}
+
+async function prepareReply(context: Context, input: Record<string, string>): Promise<Record<string, string>> {
+  const { mailbox, message: original } = await findMessage(context, await usableMailboxes(context), input.id!, "metadata");
+  const payload = record(original.payload);
+  const to = address(header(payload, "reply-to")) ?? address(header(payload, "from"));
+  if (!to) throw new ProviderRequestError(422, "the message has no address to reply to");
+  const threadId = typeof original.threadId === "string" && MESSAGE_ID.test(original.threadId) ? original.threadId : "";
+  const originalSubject = header(payload, "subject");
+  const subject = /^re:/iu.test(originalSubject) ? originalSubject : `Re: ${originalSubject}`;
+  const messageId = line(header(payload, "message-id"), 998).trim();
+  const references = [line(header(payload, "references"), 998).trim(), messageId].filter(Boolean).join(" ");
+  return { ...input, to, subject, from: mailbox.address, account: mailbox.account, owner: mailbox.owner, threadId,
+    raw: gmailRaw([["To", to], ["Subject", subject],
+      ...(messageId ? [["In-Reply-To", messageId], ["References", references]] as [string, string][] : [])], input.body!) };
+}
+
+async function sendPrepared(context: Context, input: Record<string, string>): Promise<string> {
+  const mailbox = (await usableMailboxes(context, input.from))[0]!;
+  if (mailbox.account !== input.account || mailbox.owner !== input.owner) {
+    throw new ProviderRequestError(409, "the sending mailbox changed; ask again");
+  }
+  await context.authorizeWrite?.();
+  return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined, context.usage);
 }
 
 export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
@@ -208,7 +240,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const query = statement.text.trim();
       const mailbox = statement.target === "*" ? "" : address(statement.target);
       if (mailbox === undefined || (mailbox && mailbox !== statement.target)) {
-        return "use @gmail:search:* <Gmail search, e.g. from:noreply@example.com newer_than:1d>, or name one mailbox instead of *";
+        return "use @gmail:search:* <Gmail query> or @gmail:search:<connected mailbox address> <Gmail query>";
       }
       return query.length <= MAX_QUERY ? { query, mailbox } : `keep the search under ${MAX_QUERY} characters`;
     },
@@ -217,13 +249,13 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const lines = await Promise.all(mailboxes.map(async (mailbox) => {
         const credentials = mailboxCredentials(context.credentials, mailbox);
         const result = await gmailGet(credentials, "/messages",
-          { maxResults: String(SEARCH_LIMIT), ...(input.query ? { q: input.query } : {}) });
+          { maxResults: String(SEARCH_LIMIT), ...(input.query ? { q: input.query } : {}) }, context.usage);
         if (result.messages !== undefined && !Array.isArray(result.messages)) {
           throw new ProviderRequestError(502, "Google did not return a Gmail message list");
         }
         const ids = ((result.messages as unknown[] | undefined) ?? []).slice(0, SEARCH_LIMIT)
           .map(value => String(record(value).id)).filter(id => MESSAGE_ID.test(id));
-        const messages = await Promise.all(ids.map(id => gmailGet(credentials, `/messages/${id}`, { format: "metadata" })));
+        const messages = await Promise.all(ids.map(id => gmailGet(credentials, `/messages/${id}`, { format: "metadata" }, context.usage)));
         return messages.map(message => mailboxes.length > 1 ? `${mailbox.address}\t${messageLine(message)}` : messageLine(message));
       }));
       const columns = `${mailboxes.length > 1 ? "mailbox, " : ""}id, received UTC, from, subject, snippet`;
@@ -239,7 +271,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     },
     async execute(context, input) {
       const mailboxes = await usableMailboxes(context);
-      const { mailbox, message } = await findMessage(context.credentials, mailboxes, input.id, "full");
+      const { mailbox, message } = await findMessage(context, mailboxes, input.id, "full");
       const payload = record(message.payload);
       if (!payload.mimeType) throw new ProviderRequestError(502, "Google did not return a Gmail message");
       const bodies = gmailBodies(payload);
@@ -269,13 +301,11 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const { title, body } = titleAndBody(from ? text!.slice(from[0].length) : text ?? "");
       return title ? { to, from: from?.[1] ?? "", subject: title, body } : "write the subject after the recipient";
     },
+    prepare: prepareSend,
     async execute(context, input) {
-      const mailboxes = await usableMailboxes(context, input.from || undefined);
-      if (mailboxes.length > 1) throw new ProviderRequestError(400, "name the sending mailbox: from:<address> before the subject");
-      const mailbox = mailboxes[0]!;
-      const id = await sendRaw(mailboxCredentials(context.credentials, mailbox),
-        gmailRaw([["To", input.to], ["Subject", input.subject]], input.body));
-      return { summary: `Sent Gmail message ${id} from ${mailbox.address} to ${input.to}.` };
+      const frozen = input.raw ? input : await prepareSend(context, input);
+      const id = await sendPrepared(context, frozen);
+      return { summary: `Sent Gmail message ${id} from ${frozen.from} to ${frozen.to}.` };
     },
   },
   reply: {
@@ -285,27 +315,19 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const body = requireText(statement);
       return body ? { id: statement.target, body } : "write the reply after the message id";
     },
+    prepare: prepareReply,
     async execute(context, input) {
-      const { mailbox, message: original } = await findMessage(context.credentials, await usableMailboxes(context), input.id, "metadata");
-      const payload = record(original.payload);
-      const to = address(header(payload, "reply-to")) ?? address(header(payload, "from"));
-      if (!to) throw new ProviderRequestError(422, "the message has no address to reply to");
-      const threadId = typeof original.threadId === "string" && MESSAGE_ID.test(original.threadId) ? original.threadId : undefined;
-      const subject = header(payload, "subject");
-      const messageId = line(header(payload, "message-id"), 998).trim();
-      const references = [line(header(payload, "references"), 998).trim(), messageId].filter(Boolean).join(" ");
-      const id = await sendRaw(mailboxCredentials(context.credentials, mailbox), gmailRaw([["To", to],
-        ["Subject", /^re:/iu.test(subject) ? subject : `Re: ${subject}`],
-        ...(messageId ? [["In-Reply-To", messageId], ["References", references]] as [string, string][] : [])], input.body), threadId);
-      return { summary: `Replied to Gmail message ${input.id} from ${mailbox.address} as ${id}, to ${to}.` };
+      const frozen = input.raw ? input : await prepareReply(context, input);
+      const id = await sendPrepared(context, frozen);
+      return { summary: `Replied to Gmail message ${frozen.id} from ${frozen.from} as ${id}, to ${frozen.to}.` };
     },
   },
 };
 
 /** Confirm every mailbox's grant with a real read; profiles are not stored. */
-export async function verifyGmail(credentials: Readonly<Record<string, string>>): Promise<void> {
+export async function verifyGmail(credentials: Readonly<Record<string, string>>, meter?: UpstreamMeter): Promise<void> {
   for (const mailbox of parseMailboxes(credentials.mailboxes)) {
-    const profile = await gmailGet(mailboxCredentials(credentials, mailbox), "/profile");
+    const profile = await gmailGet(mailboxCredentials(credentials, mailbox), "/profile", {}, meter);
     if (typeof profile.emailAddress !== "string") throw new ProviderRequestError(502, `Google did not confirm Gmail access for ${mailbox.address}`);
   }
 }

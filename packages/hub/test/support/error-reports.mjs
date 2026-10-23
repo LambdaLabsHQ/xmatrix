@@ -10,3 +10,10 @@ export function captureErrorReports(t) {
   startErrorReporting({ dsn: "https://public@errors.example.test/1", release: "test", component: "hub" });
   return envelopes;
 }
+
+/** Decode the actual exception events delivered to the test's transport. */
+export function exceptionEvents(envelopes) {
+  return envelopes.flatMap(body => body.split("\n").map(line => {
+    try { return JSON.parse(line); } catch { return null; }
+  })).filter(value => value?.event_id && value.exception);
+}

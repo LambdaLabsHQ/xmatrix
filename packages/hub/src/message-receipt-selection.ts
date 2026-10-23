@@ -16,7 +16,7 @@ export function messageReceiptSelection(channelId: string, body: unknown, user: 
   // can write, and a send that timed out there must be recoverable there too.
   // The authority still requires this exact active Run, read access to the
   // Channel, and a receipt whose sender is this Instance.
-  if (run && (!run.instanceId || run.runKind !== "channel-instance")) {
+  if (run && !run.instanceId) {
     return { ok: false as const, status: 403 as const,
       error: "An Agent can read receipts only for its own Instance" };
   }

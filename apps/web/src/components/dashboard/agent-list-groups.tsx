@@ -1,13 +1,9 @@
 "use client";
 
-import {
-  agentPresetAvatarUrl,
-  normalizeAgentPresetRuntime,
-  type AgentCapabilitySummary,
-} from "@xmatrix/protocol";
+import type { AgentCapabilitySummary } from "@xmatrix/protocol";
 
 import { agentUsageGlance } from "./agent-quota-usage";
-import { IdentityAvatar } from "./identity-avatar";
+import { Face } from "./face";
 import { MachineGlyph } from "./machine-glyph";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { machineOs } from "./machine-os";
@@ -57,9 +53,7 @@ export function AgentListGroups({ groups, selectedId, shownId, currentUserId, li
       <ToolListGroup key={group.harness} title={group.harness} count={group.rows.length} identity limit={limit}
         onTitle={headingsOpen ? () => onSelect(headingId) : undefined}
         selected={headingId === selectedId} shownBeside={!selectedId && shownId === headingId}
-        icon={<IdentityAvatar kind="agent" label={group.harness}
-          imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(group.harness))}
-          initials={group.harness.slice(0, 2)} size="sm" className="shrink-0" />}>
+        icon={<Face of={{ kind: "agent", name: group.harness, harness: group.harness }} size="sm" className="shrink-0" />}>
         {group.rows.map((row) => (
           <ToolListRow key={row.id} testId="agent-row" state={row.activity.state}
             selected={row.id === selectedId}

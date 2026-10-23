@@ -41,7 +41,11 @@ pub async fn machine_name(hub_url: &str, token: &str, machine_id: &str) -> Resul
     response.name.map(|name| validate_name(&name)).transpose()
 }
 
-pub async fn require_machine_name(hub_url: &str, token: &str, machine_id: &str) -> Result<String> {
+pub(crate) async fn require_machine_name(
+    hub_url: &str,
+    token: &str,
+    machine_id: &str,
+) -> Result<String> {
     machine_name(hub_url, token, machine_id).await?.ok_or_else(|| CliError::Auth(
         "Name this Machine before starting its daemon. Run `xmatrix login --machine-name <name>` or name it in the desktop app.".into()))
 }

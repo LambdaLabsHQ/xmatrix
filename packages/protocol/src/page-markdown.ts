@@ -1,4 +1,6 @@
 import { diff3Merge, diffComm, diffIndices } from "node-diff3";
+import { trimEnd } from "./field-validation.js";
+import { stripHtmlTags } from "./html-text.js";
 
 /**
  * Markdown helpers shared by the page live session, the Web editor and the
@@ -17,14 +19,16 @@ export interface PageBlock {
 }
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/u;
-const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/u;
+const HEADING = /^\s{0,3}(#{1,6})\s(.*)$/u;
+
+/** A heading line's text: no surrounding blanks or closing `#` run. */
+function headingText(raw: string): string {
+  return trimEnd(raw.trim(), "#").trimEnd();
+}
 
 /** GitHub-style heading slug. */
 export function pageHeadingSlug(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/<[^>]*>/gu, "")
+  return stripHtmlTags(text.trim().toLowerCase())
     .replace(/[^\p{L}\p{N}\s_-]/gu, "")
     .replace(/\s/gu, "-")
     .slice(0, 180);
@@ -58,10 +62,11 @@ export function pageBlocks(markdown: string): PageBlock[] {
     const heading = prose ? HEADING.exec(line) : null;
     if (heading) {
       if (current) current.end = offset;
-      const base = pageHeadingSlug(heading[2]!) || "section";
+      const title = headingText(heading[2]!);
+      const base = pageHeadingSlug(title) || "section";
       const count = seen.get(base) ?? 0;
       seen.set(base, count + 1);
-      current = { id: count ? `${base}-${count}` : base, title: heading[2]!, depth: heading[1]!.length,
+      current = { id: count ? `${base}-${count}` : base, title, depth: heading[1]!.length,
         start: offset, end: lineEnd };
       blocks.push(current);
     } else if (!current && line.trim()) {
@@ -132,6 +137,62 @@ export function mergePageText(base: string, ours: string, theirs: string): PageM
   return conflicts ? { ok: false, conflicts } : { ok: true, text };
 }
 
+/** Words for merging: line breaks, runs of other space, a CJK character each, runs of letters and digits, or one other character. */
+const MERGE_WORD = /\n|[^\S\n]+|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[\p{L}\p{N}\p{M}_]+|\S/gu;
+
+function mergeWords(text: string): string[] {
+  return text.match(MERGE_WORD) ?? [];
+}
+
+function startsWithWords(words: readonly string[], prefix: readonly string[]): boolean {
+  return prefix.length <= words.length && prefix.every((word, index) => words[index] === word);
+}
+
+function endsWithWords(words: readonly string[], suffix: readonly string[]): boolean {
+  const offset = words.length - suffix.length;
+  return offset >= 0 && suffix.every((word, index) => words[offset + index] === word);
+}
+
+/**
+ * Three-way merge by line, and by word inside the lines both sides changed, so changes to
+ * different words of one paragraph, or to neighbouring lines, combine (`mergePageText` keeps whole
+ * lines apart). Where both changed the same words, `prefer` names the side that stays, and what the
+ * other side only added at an edge of those words stays beside it, as two people typing at one place
+ * both keep their words; without `prefer` such a merge fails.
+ */
+export function mergePageWords(base: string, ours: string, theirs: string, prefer: "ours" | "theirs"): { ok: true; text: string };
+export function mergePageWords(base: string, ours: string, theirs: string): PageMergeResult;
+export function mergePageWords(base: string, ours: string, theirs: string, prefer?: "ours" | "theirs"): PageMergeResult {
+  if (ours === theirs || theirs === base) return { ok: true, text: ours };
+  if (ours === base) return { ok: true, text: theirs };
+  let conflicts = 0;
+  let text = "";
+  for (const region of diff3Merge(lines(ours), lines(base), lines(theirs), { excludeFalseConflicts: true })) {
+    if (region.ok) {
+      text += region.ok.join("");
+      continue;
+    }
+    const { a, o, b } = region.conflict!;
+    for (const words of diff3Merge(mergeWords(a.join("")), mergeWords(o.join("")), mergeWords(b.join("")),
+      { excludeFalseConflicts: true })) {
+      if (words.ok) {
+        text += words.ok.join("");
+        continue;
+      }
+      if (!prefer) {
+        conflicts++;
+        continue;
+      }
+      const { a: mine, o: was, b: other } = words.conflict!;
+      const [kept, added] = prefer === "ours" ? [mine, other] : [other, mine];
+      if (startsWithWords(added, was)) text += [...kept, ...added.slice(was.length)].join("");
+      else if (endsWithWords(added, was)) text += [...added.slice(0, added.length - was.length), ...kept].join("");
+      else text += kept.join("");
+    }
+  }
+  return conflicts ? { ok: false, conflicts } : { ok: true, text };
+}
+
 /** A revision's change as lines kept, removed and added, for showing it as a diff. */
 export type PageLineDiff = Array<{ kind: "same" | "removed" | "added"; lines: string[] }>;
 
@@ -159,12 +220,10 @@ function plainPageLine(line: string): string {
   if (text.startsWith("|")) {
     text = text.replace(/^\||\|$/gu, "").split("|").map((cell) => cell.trim()).filter(Boolean).join(" · ");
   }
-  return text
+  return stripHtmlTags(text
     .replace(/^(?:>\s*)+/u, "")
     .replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/u, "")
-    .replace(/<!--.*?-->/gu, "")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1")
-    .replace(/<[^>]+>/gu, "")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1"))
     .replace(/\*\*|__|~~|`|\*/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
@@ -288,7 +347,7 @@ export function removeAutomationReference(markdown: string, automationId: string
       rest = `${rest.slice(0, Math.max(0, start))}${rest.slice(end + target.length)}`;
     }
     if (rest === line) lines.push(line);
-    else if (/[\p{L}\p{N}]/u.test(rest.replace(/^\s*\d+[.)]/u, ""))) lines.push(rest.replace(/[ \t]+$/u, ""));
+    else if (/[\p{L}\p{N}]/u.test(rest.replace(/^\s*\d+[.)]/u, ""))) lines.push(trimEnd(rest, " \t"));
   }
   return lines.join("\n").replace(/\n{3,}/gu, "\n\n");
 }
@@ -406,4 +465,69 @@ export function gitHubFileReferences(markdown: string): string[] {
     }
   }
   return [...references];
+}
+
+/**
+ * The link scheme of an image or video pasted into a page:
+ * `xmatrix:page-media/<sha-256>.<extension>`, written as a markdown image. The
+ * bytes are the Space's own private content; the page holds only the
+ * reference, which the Hub serves to whoever can read the page.
+ */
+export const PAGE_MEDIA_SCHEME = "xmatrix:page-media/";
+
+/** What a page shows inline, by the extension its reference carries. Never markup (no SVG). */
+export const PAGE_MEDIA_TYPES = {
+  png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif",
+  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+} as const;
+
+export type PageMediaExtension = keyof typeof PAGE_MEDIA_TYPES;
+
+export interface PageMedia {
+  /** `<sha-256>.<extension>`, what the reference ends with. */
+  file: string;
+  contentHash: string;
+  mimeType: (typeof PAGE_MEDIA_TYPES)[PageMediaExtension];
+  video: boolean;
+}
+
+const PAGE_MEDIA_FILE = /^([0-9a-f]{64})\.([a-z0-9]{2,5})$/u;
+const PAGE_MEDIA_REFERENCE = /xmatrix:page-media\/([0-9a-f]{64}\.[a-z0-9]{2,5})/gu;
+
+/** The media a `<sha-256>.<extension>` file name names; null when the type is not shown in pages. */
+export function pageMediaFile(file: string): PageMedia | null {
+  const match = PAGE_MEDIA_FILE.exec(file);
+  const extension = match?.[2];
+  if (!match || !extension || !Object.hasOwn(PAGE_MEDIA_TYPES, extension)) return null;
+  const mimeType = PAGE_MEDIA_TYPES[extension as PageMediaExtension];
+  return { file, contentHash: match[1]!, mimeType, video: mimeType.startsWith("video/") };
+}
+
+/** The media a page reference (`xmatrix:page-media/…`) names; null for any other source. */
+export function parsePageMedia(src: string): PageMedia | null {
+  return src.startsWith(PAGE_MEDIA_SCHEME) ? pageMediaFile(src.slice(PAGE_MEDIA_SCHEME.length)) : null;
+}
+
+/** The reference for content of a type pages show; null for any other type. */
+export function pageMediaReference(contentHash: string, mimeType: string): string | null {
+  const type = mimeType.split(";", 1)[0]!.trim().toLowerCase();
+  const extension = (Object.keys(PAGE_MEDIA_TYPES) as PageMediaExtension[])
+    .find((key) => PAGE_MEDIA_TYPES[key] === type);
+  return extension && /^[0-9a-f]{64}$/u.test(contentHash) ? `${PAGE_MEDIA_SCHEME}${contentHash}.${extension}` : null;
+}
+
+/** Each media file (`<sha-256>.<extension>`) the page's text references. */
+export function pageMediaReferences(markdown: string): string[] {
+  return [...new Set([...markdown.matchAll(PAGE_MEDIA_REFERENCE)].map((match) => match[1]!))]
+    .filter((file) => pageMediaFile(file) !== null);
+}
+
+/**
+ * The content reference that keeps a pasted file as the page's media: one per
+ * page and file, so pasting the same file again reuses it.
+ */
+export const PAGE_MEDIA_OWNER_KIND = "page_media";
+
+export function pageMediaRefId(pageId: string, contentHash: string): string {
+  return `page-media:${pageId}:${contentHash}`;
 }

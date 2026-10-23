@@ -1,6 +1,7 @@
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, type AppConnectorProviderManifest } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, trimEnd, type AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { base64UrlDecode, signGitHubAppState, verifyGitHubAppState } from "../index-shared";
 import type { Env } from "../types";
+import { metered, type UpstreamMeter } from "../usage-cost-metering";
 import { providerJson, ProviderRequestError } from "./http";
 import { vercelEventScopeId, vercelOAuthFields } from "./vercel-api";
 import { pkceChallenge, pkceGrantProof, validPkceClaims, oauthGrantState } from "./oauth-pkce";
@@ -9,7 +10,9 @@ import { discordCompanyApp, discordGrantContext, isDiscordInstallationGrant, val
 import type { AppOAuthInstallation } from "@xmatrix/db";
 import { isSentryInstallationGrant, refreshSentryInstallation } from "./sentry-installation";
 import { cloudflareGrantContext } from "./cloudflare-api";
+import { parseCloudflareLogins, serializeCloudflareLogins } from "./cloudflare-logins";
 import { composioConnectedAccount, composioConnectUrl, composioUserId } from "./composio";
+import { xOAuthFields } from "./x-oauth";
 
 /*
  * One-click OAuth for connectors (docs/design/connector-platform.md §3.2).
@@ -28,6 +31,7 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
   googleadsense: { scope: "https://www.googleapis.com/auth/adsense.readonly", name: "AdSense" },
   googleanalytics: { scope: "https://www.googleapis.com/auth/analytics.readonly", name: "Google Analytics" },
+  googleads: { scope: "https://www.googleapis.com/auth/adwords", name: "Google Ads" },
   googlebusinessprofile: { scope: "https://www.googleapis.com/auth/business.manage", name: "Business Profile" },
   gcp: { scope: "https://www.googleapis.com/auth/cloud-platform", name: "Google Cloud" },
 };
@@ -38,12 +42,12 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
  */
 export function grantFieldsForgottenOnDisconnect(providerId: string): Record<string, null> | undefined {
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
-  if (!GOOGLE_GRANTS[providerId] && manifest?.oauth?.flow !== "composio") return undefined;
+  if (!GOOGLE_GRANTS[providerId] && manifest?.oauth?.flow !== "composio" && providerId !== "x") return undefined;
   return Object.fromEntries((manifest?.credentials ?? []).filter((field) => field.managed).map((field) => [field.id, null]));
 }
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googlebusinessprofile: "google", gcp: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
@@ -107,21 +111,24 @@ export function oauthProviderIds(env: Env): string[] {
 }
 
 export function oauthRedirectUri(hubOrigin: string): string {
-  return `${hubOrigin.replace(/\/+$/u, "")}/api/connectors/oauth/callback`;
+  return `${trimEnd(hubOrigin, "/")}/api/connectors/oauth/callback`;
 }
 
 export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: string; userId: string;
-  redirectUri: string; now?: number; connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<string> {
+  redirectUri: string; now?: number; accountId?: string; meter?: UpstreamMeter;
+  connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<string> {
   const { oauth } = client.manifest;
   const claims = { providerId: client.manifest.id, spaceId: input.spaceId, userId: input.userId,
     nonce: crypto.randomUUID(), expiresAt: (input.now ?? Date.now()) + STATE_TTL_MS,
     ...(oauth.pkce || client.manifest.id === "discord" ? { clientId: client.clientId, redirectUri: input.redirectUri } : {}),
-    ...(client.manifest.id === "discord" ? { connectionSnapshot: input.connectionSnapshot, authorizationStartedAt: input.now ?? Date.now() } : {}) };
+    ...(["discord", "x"].includes(client.manifest.id) ? { connectionSnapshot: input.connectionSnapshot } : {}),
+    ...(client.manifest.id === "x" && input.accountId ? { accountId: input.accountId } : {}),
+    ...(client.manifest.id === "discord" ? { authorizationStartedAt: input.now ?? Date.now() } : {}) };
   const state = await signGitHubAppState(claims, client.clientSecret);
   if (oauth.flow === "composio") {
     const callback = new URL(input.redirectUri);
     callback.searchParams.set("state", state);
-    return composioConnectUrl(client, composioUserId(input.spaceId, claims.nonce), callback.toString());
+    return composioConnectUrl(client, composioUserId(input.spaceId, claims.nonce), callback.toString(), input.meter);
   }
   const url = new URL(oauth.authorizeUrl);
   if (oauth.flow === "vercel-integration") {
@@ -157,13 +164,15 @@ export async function verifyOAuthState(env: Env, state: string):
   if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" ||
       typeof claims.userId !== "string" || ((client.manifest.oauth.pkce || client.manifest.id === "discord") && !validPkceClaims(client, claims))) return undefined;
   const snapshot = claims.connectionSnapshot as { connectionVersion: number; credentialVersion: number; connectionGeneration: string } | undefined;
-  if (client.manifest.id === "discord" && (!snapshot || !Number.isSafeInteger(snapshot.connectionVersion) || snapshot.connectionVersion < 1 ||
+  if (["discord", "x"].includes(client.manifest.id) && (!snapshot || !Number.isSafeInteger(snapshot.connectionVersion) || snapshot.connectionVersion < 1 ||
       !Number.isSafeInteger(snapshot.credentialVersion) || snapshot.credentialVersion < 0 ||
       typeof snapshot.connectionGeneration !== "string" || !snapshot.connectionGeneration || snapshot.connectionGeneration.length > 1024)) return undefined;
-  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(client.manifest.id === "discord" ? { connectionSnapshot: snapshot } : {}) };
+  if (client.manifest.id === "x" && claims.accountId !== undefined &&
+      (typeof claims.accountId !== "string" || !/^[1-9][0-9]{0,19}$/u.test(claims.accountId))) return undefined;
+  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(["discord", "x"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}) };
 }
 
-async function tokenRequest(client: OAuthClient, grant: Record<string, string>): Promise<Record<string, unknown>> {
+async function tokenRequest(client: OAuthClient, grant: Record<string, string>, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
   const { oauth } = client.manifest;
   if (oauth.flow === "vercel-integration") {
     const { grant_type: _grantType, ...integrationGrant } = grant;
@@ -173,17 +182,19 @@ async function tokenRequest(client: OAuthClient, grant: Record<string, string>):
     ...(oauth.clientAuth === "basic" ? {} : { client_id: client.clientId, client_secret: client.clientSecret }) };
   const headers: Record<string, string> = oauth.clientAuth === "basic"
     ? { authorization: `Basic ${btoa(`${client.clientId}:${client.clientSecret}`)}` } : {};
-  const payload = await (oauth.tokenRequest === "json"
+  const exchange = () => oauth.tokenRequest === "json"
     ? providerJson(oauth.tokenUrl, { method: "POST", headers, json: body })
     : providerJson(oauth.tokenUrl, { method: "POST",
-      headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) })).catch(error => {
-      if (["pagerduty", "discord"].includes(client.manifest.id) && error instanceof ProviderRequestError) {
+      headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) });
+  // Only the company X app's token endpoint is an operator-paid upstream.
+  const payload = await (client.manifest.id === "x" ? metered(meter, "x", "oauth_token", exchange) : exchange()).catch(error => {
+      if (["pagerduty", "discord", "x"].includes(client.manifest.id) && error instanceof ProviderRequestError) {
         throw new ProviderRequestError(error.status, `${client.manifest.name} token exchange failed (${error.status})`);
       }
       throw error;
     });
   if (payload.ok === false || typeof payload.access_token !== "string" || !payload.access_token) {
-    throw new ProviderRequestError(400, `${client.manifest.name} did not issue a token${["pagerduty", "discord"].includes(client.manifest.id) ? "" : `: ${String(payload.error ?? "unknown")}`}`);
+    throw new ProviderRequestError(400, `${client.manifest.name} did not issue a token${["pagerduty", "discord", "x"].includes(client.manifest.id) ? "" : `: ${String(payload.error ?? "unknown")}`}`);
   }
   return payload;
 }
@@ -229,15 +240,19 @@ async function providerContext(client: OAuthClient, token: string): Promise<Reco
   return {};
 }
 
-/** Provider-authenticated workspace evidence stays separate from user-editable metadata. */
-export async function exchangeOAuthGrant(client: OAuthClient, code: string, redirectUri: string, state?: string):
-  Promise<{ fields: Record<string, string | null>; installation?: AppOAuthInstallation }> {
+/**
+ * Provider-authenticated workspace evidence stays separate from user-editable
+ * metadata. `meter` records the operator-paid calls (Composio, X) of this connect.
+ */
+export async function exchangeOAuthGrant(client: OAuthClient, code: string, redirectUri: string, state?: string,
+  meter?: UpstreamMeter): Promise<{ fields: Record<string, string | null>; installation?: AppOAuthInstallation }> {
   if (client.manifest.oauth.flow === "composio") {
     const claims = state && state.length <= 4_096 ? await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined) : undefined;
     if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" || typeof claims.nonce !== "string") {
       throw new ProviderRequestError(400, "Invalid or expired connect request; restart Connect");
     }
-    return { fields: { [client.manifest.oauth.tokenField]: await composioConnectedAccount(client, composioUserId(claims.spaceId, claims.nonce)) } };
+    return { fields: { [client.manifest.oauth.tokenField]: await composioConnectedAccount(client,
+      composioUserId(claims.spaceId, claims.nonce), meter) } };
   }
   let discordStartedAt: string | undefined;
   if (client.manifest.id === "discord") {
@@ -249,7 +264,12 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
   }
   const proof = client.manifest.oauth.pkce ? await pkceGrantProof(client, state, redirectUri) : undefined;
   const payload = await tokenRequest(client, { grant_type: "authorization_code", code, redirect_uri: redirectUri,
-    ...(proof ? { code_verifier: proof } : {}) });
+    ...(proof ? { code_verifier: proof } : {}) }, meter);
+  if (client.manifest.id === "x") {
+    const claims = await oauthGrantState(client, state, redirectUri);
+    return { fields: await xOAuthFields(client, payload, String(claims.userId),
+      typeof claims.accountId === "string" ? claims.accountId : undefined, meter) };
+  }
   if (GOOGLE_GRANTS[client.manifest.id]) validateGoogleGrant(client.manifest.id, payload, true);
   if (client.manifest.id === "bitbucket") validateBitbucketGrant(payload, true);
   const fields = oauthTokenFields(client, payload);
@@ -287,6 +307,33 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
 }
 
 /**
+ * A Cloudflare connection's logins with every grant about to expire renewed,
+ * or `undefined` when none needed it. Each login rotates on its own: one that
+ * Cloudflare refuses keeps its old grant, and the call that uses it reports the
+ * refusal, so one revoked login never stops the others.
+ */
+async function refreshCloudflareLogins(env: Env, stored: string, now: number): Promise<Record<string, string | null> | undefined> {
+  const logins = parseCloudflareLogins(stored);
+  const due = logins.filter((login) => login.expiresAt - now <= REFRESH_MARGIN_MS);
+  const client = oauthClient(env, "cloudflare");
+  if (!due.length || !client) return undefined;
+  let changed = false;
+  const next = [];
+  for (const login of logins) {
+    if (!due.includes(login)) { next.push(login); continue; }
+    const payload = await tokenRequest(client, { grant_type: "refresh_token", refresh_token: login.refreshToken })
+      .catch(() => undefined);
+    if (!payload) { next.push(login); continue; }
+    const seconds = Number(payload.expires_in);
+    next.push({ ...login, accessToken: String(payload.access_token),
+      refreshToken: typeof payload.refresh_token === "string" && payload.refresh_token ? payload.refresh_token : login.refreshToken,
+      expiresAt: Number.isFinite(seconds) && seconds > 0 ? now + seconds * 1_000 : now + 3_600_000 });
+    changed = true;
+  }
+  return changed ? { logins: serializeCloudflareLogins(next) } : undefined;
+}
+
+/**
  * Credentials whose OAuth token is about to expire, refreshed; `undefined`
  * when nothing needs refreshing. The caller stores the returned fields.
  */
@@ -295,6 +342,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
   if (providerId === "sentry" && isSentryInstallationGrant(values)) {
     return refreshSentryInstallation(env, values, now, options.unauthorized === true);
   }
+  if (providerId === "cloudflare" && values.logins) return refreshCloudflareLogins(env, values.logins, now);
   const expiresAt = Number(values.oauthExpiresAt);
   if (providerId === "discord" && isDiscordInstallationGrant(values)) {
     const configured = discordCompanyApp(env);
@@ -309,9 +357,10 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     }
   }
   const afterNotionUnauthorized = providerId === "notion" && options.unauthorized === true;
-  if (providerId === "gcp" && values.oauthToken &&
+  const completeGoogleGrant = providerId === "gcp" || providerId === "googleads";
+  if (completeGoogleGrant && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
-    throw new ProviderRequestError(401, "Google Cloud OAuth requires a complete expiring grant; reconnect");
+    throw new ProviderRequestError(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`);
   }
   if (providerId === "bitbucket" && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
@@ -321,7 +370,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
       (!Number.isFinite(expiresAt) || expiresAt - now > REFRESH_MARGIN_MS))) return undefined;
   const client = oauthClient(env, providerId);
   if (!client) {
-    if (providerId === "gcp") throw new ProviderRequestError(503, "Google Cloud OAuth application is unavailable for refresh; reconnect");
+    if (completeGoogleGrant) throw new ProviderRequestError(503, `${GOOGLE_GRANTS[providerId]!.name} OAuth application is unavailable for refresh; reconnect`);
     if (providerId === "bitbucket") throw new ProviderRequestError(503, "Bitbucket OAuth consumer is unavailable for refresh");
     if (providerId === "sentry") throw new ProviderRequestError(503, "Sentry user OAuth is unavailable for refresh; reconnect");
     return undefined;

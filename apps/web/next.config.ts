@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
+import CssSubjectBucketsPlugin from "./css-subject-buckets-webpack.mjs";
 import {
   configuredHubConnectSources,
   configuredHubOrigin,
@@ -28,14 +29,20 @@ const nextConfig: NextConfig = {
     ? { eslint: { ignoreDuringBuilds: true }, typescript: { ignoreBuildErrors: true } }
     : {}),
   transpilePackages: ["@xmatrix/protocol"],
+  // The Worker has no image optimizer binding: /_next/image answered every
+  // width with the original file and no cache lifetime, so each view
+  // downloaded it again. Images are shipped at the size they are drawn and
+  // served directly, under worker.mjs's cache rules.
+  images: { unoptimized: true },
   // A page rendered per request streams its title, description and canonical
   // into <body> for clients Next believes run scripts, Googlebot among them.
   // Search engines read those from <head>, so every client gets them there.
   htmlLimitedBots: /.*/u,
   // The user guide's Markdown is imported as text (src/lib/docs/guide.ts).
   turbopack: { rules: { "*.md": { loaders: ["./markdown-source-loader.cjs"], as: "*.js" } } },
-  webpack(config) {
+  webpack(config, { dev, isServer }) {
     config.module.rules.push({ test: /\.md$/u, use: [join(__dirname, "markdown-source-loader.cjs")] });
+    if (!dev && !isServer) config.plugins.push(new CssSubjectBucketsPlugin());
     return config;
   },
   // React Compiler memoizes components and hooks at build time, so a fresh
@@ -87,6 +94,10 @@ const nextConfig: NextConfig = {
             key: "Strict-Transport-Security",
             value: "max-age=31536000; includeSubDomains; preload",
           },
+          // Only the stable Web is indexed; the beta Web serves the same pages.
+          ...(process.env.NEXT_PUBLIC_XMATRIX_WEB_CHANNEL === "beta"
+            ? [{ key: "X-Robots-Tag", value: "noindex, nofollow" }]
+            : []),
         ],
       },
       ...["/connect/sentry", "/connect/wecom", "/connect/dingtalk"].map(source => ({ source, headers: [

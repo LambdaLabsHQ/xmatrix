@@ -1,14 +1,20 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
+  E2E_MOBILE_CONTEXT,
   E2E_SPACE,
   fixtureJson,
   fixtureRequestBodies,
+  fixtureRequests,
   fixtureRule,
+  installWorkspaceStubs,
   openGeneralChannelWithHistory,
   openWorkspaceWithStubs,
+  releaseFixture,
+  routeHumanSocket,
 } from "./workspace-fixtures";
 
 
@@ -67,6 +73,64 @@ test("hovered channel rows stay on the sidebar compositor surface", async ({ pag
   });
   expect(hoverChrome.backdrop, JSON.stringify(hoverChrome)).toBe("none");
   expect(hoverChrome.afterContent === "none" || hoverChrome.afterContent === "").toBeTruthy();
+});
+
+/** What in a conversation row still filters its backdrop, and the fill and edge its first face is drawn with. */
+function rowGlass(row: Locator) {
+  return row.evaluate((element) => {
+    const face = getComputedStyle(element.querySelector(".identity-avatar-face")!);
+    return {
+      filtering: [element, ...Array.from(element.querySelectorAll("*"))]
+        .filter((node) => getComputedStyle(node).backdropFilter !== "none")
+        .map((node) => node.className.toString().split(" ").slice(0, 3).join(".")),
+      fill: face.backgroundColor,
+      edge: face.boxShadow,
+    };
+  });
+}
+
+test("nothing in a conversation row filters the paper behind it, on a phone as on the desktop", async ({ page }, testInfo) => {
+  // Five working Agents and two unread messages: the row carries three faces, a +2, their status dots and a count.
+  const crowded = { ...E2E_CHANNEL, id: "channel-crowded", name: "crowded", messageCount: 5, historyHeadSequence: 5, readSequence: 3,
+    memberPresence: { "agent:codex": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "Codex", status: "busy", instances: [1, 2, 3, 4, 5].map((ordinal) => ({
+      id: `instance-codex-${ordinal}`, channelInstanceId: String(ordinal), label: `Codex:${ordinal}`, channelId: "channel-crowded",
+      status: "busy", connectedAt: E2E_CHANNEL.updatedAt, lastSeenAt: E2E_CHANNEL.updatedAt, activity: "Working",
+    })) } } };
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, crowded] });
+  for (const layout of ["phone", "desktop"] as const) {
+    await page.setViewportSize((layout === "phone" ? E2E_MOBILE_CONTEXT : E2E_DESKTOP_CONTEXT).viewport);
+    await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+    const rowOf = (id: string) => page.locator(`:is([data-channel-row-id="${id}"], [data-mobile-channel-row-id="${id}"]):visible`);
+    const row = rowOf(crowded.id);
+    await expect(row.locator(".identity-avatar-face")).toHaveCount(3);
+    await expect(row.locator(".app-channel-presence-overflow")).toHaveText("+2");
+    await expect(row.locator(".app-count-pill-value")).toHaveText("2");
+    // Glass chips on paper keep their fill and edge. A filter of what is
+    // behind them would cost each a compositor layer for next to nothing.
+    const atRest = await rowGlass(row);
+    expect(atRest.filtering).toEqual([]);
+    expect(atRest.fill).not.toBe("rgba(0, 0, 0, 0)");
+    expect(atRest.edge).not.toBe("none");
+    await testInfo.attach(`${layout}-crowded-row`, { body: await row.screenshot(), contentType: "image/png" });
+
+    // Under the pointer, under the keyboard and once opened, the row is paper still.
+    await row.hover();
+    expect((await rowGlass(row)).filtering).toEqual([]);
+    await row.focus();
+    expect((await rowGlass(row)).filtering).toEqual([]);
+    if (layout === "phone") continue;
+    await row.click();
+    await expect(row).toHaveClass(/app-channel-row-active/);
+    expect((await rowGlass(row)).filtering).toEqual([]);
+    // Left again, it is drawn as it was.
+    await rowOf(E2E_CHANNEL.id).click();
+    await expect(row).not.toHaveClass(/app-channel-row-active/);
+    await page.mouse.move(E2E_DESKTOP_CONTEXT.viewport.width - 40, E2E_DESKTOP_CONTEXT.viewport.height / 2);
+    await expect.poll(() => rowGlass(row)).toEqual(atRest);
+    // Glass on wood is another matter: the reader's own face on the rail still bends the grain behind it.
+    expect(await page.locator(".app-rail .app-rail-user-avatar .identity-avatar-face")
+      .evaluate((face) => getComputedStyle(face).backdropFilter)).toContain("blur(");
+  }
 });
 
 test("hovered and selected rows take the conversation's paper, a shade off the list", async ({ page }) => {
@@ -187,6 +251,51 @@ test("the list loads its next page into the same list", async ({ page }) => {
   await expect.poll(visibleChannelRowIds(page)).toEqual([E2E_CHANNEL.id, older.id]);
 });
 
+test("a message for a conversation the list has not paged in brings its row with the message, counted unread", async ({ page }) => {
+  // The reader has read all forty messages of both; neither is on the list's page.
+  const far = { ...E2E_CHANNEL, id: "channel-far", name: "far", updatedAt: "2026-06-01T00:00:00.000Z",
+    messageCount: 40, historyHeadSequence: 40, readSequence: 40 };
+  const shown = { ...far, id: "channel-shown", name: "shown" };
+  let send: ((frame: unknown) => void) | undefined;
+  await routeHumanSocket(page, (frame, reply) => { if (frame.type === "human_connect") send = reply; });
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, far, shown] });
+  await fixtureRule(page, {
+    id: "flat-open-only", pattern: /\/api\/xmatrix\/channels\/page\?.*view=flat/u,
+    responder: { kind: "static", json: { protocolVersion: 1, catalogRevision: 1, nextCursor: null,
+      rows: [{ channel: E2E_CHANNEL, ownActivityAt: E2E_CHANNEL.updatedAt }], counts: { active: 3, unread: 0, mentions: 0 } } },
+  });
+  send = undefined;
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect.poll(visibleChannelRowIds(page)).toEqual([E2E_CHANNEL.id]);
+  await expect.poll(() => Boolean(send)).toBe(true);
+  const message = (channelId: string, sequence: number, body: string) => ({ type: "channel_message_received", message: {
+    messageId: `${channelId}-${sequence}`, channelId, sequence, body, sentAt: new Date().toISOString(),
+    reactions: [], annotations: [], attachments: [],
+    from: { kind: "agent", label: "Codex", userId: "e2e-user", email: "codex@xmatrix.test", identityId: "agent:codex",
+      instanceId: "instance-codex-1", channelInstanceId: "1", instanceLabel: "Codex:1" },
+  } });
+
+  // Two messages arrive before the Hub has answered who the Channel is. Its
+  // answer is older than both: the row still ends on the second, two unread.
+  send!(message(far.id, 41, "first of two"));
+  send!(message(far.id, 42, "second of two"));
+  const farRow = page.locator(`[data-channel-row-id="${far.id}"]`);
+  await expect(farRow).toContainText("second of two");
+  await expect(farRow.locator(".app-count-pill-value")).toHaveText("2");
+  await expect.poll(visibleChannelRowIds(page)).toEqual([far.id, E2E_CHANNEL.id]);
+
+  // A shared presence frame shows the other Channel first, without the
+  // reader's read state. Its message still waits for their own read of it:
+  // one unread of forty-one, not forty-one, and not none.
+  send!({ type: "channel_updated",
+    channel: Object.fromEntries(Object.entries(shown).filter(([field]) => field !== "readSequence")) });
+  send!(message(shown.id, 41, "after the shared frame"));
+  const shownRow = page.locator(`[data-channel-row-id="${shown.id}"]`);
+  await expect(shownRow).toContainText("after the shared frame");
+  await expect(shownRow.locator(".app-count-pill-value")).toHaveText("1");
+  await expect.poll(visibleChannelRowIds(page)).toEqual([shown.id, far.id, E2E_CHANNEL.id]);
+});
+
 test("pinned conversations sit under their own Pinned heading", async ({ page }) => {
   const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan" };
   const other = { ...E2E_CHANNEL, id: "channel-other", name: "random" };
@@ -248,6 +357,55 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
   await expect(sidebar.getByText("Needs you", { exact: true })).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Done with #design" })).toHaveCount(0);
 });
+
+/* The account under an open shell can change without a navigation: a session
+   read on focus brings whoever the browser is signed in as now. A Done one
+   session asked and the Hub answers in another writes nothing in that one. */
+for (const accounts of [["e2e-user", "other-reader"], ["e2e-user", "other-reader", "e2e-user"]]) {
+  const change = accounts.length === 2 ? "another account signed in" : "another account came and went";
+  test(`a Done answered after ${change} leaves the list as that session reads it`, async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true;
+    });
+    const asked = { ...E2E_CHANNEL, id: "channel-asked", name: "review", messageCount: 9, historyHeadSequence: 9,
+      readSequence: 6, attention: { channelId: "channel-asked", unreadAttentionCount: 2, lastMessageSequence: 8,
+        primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: E2E_CHANNEL.updatedAt } };
+    await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [asked] });
+    await fixtureJson(page, "auth-token", "**/api/auth/token**", { token: "test-jwt" });
+    // Due for renewal, so every focus reads the session again.
+    const signIn = (step: number) => fixtureJson(page, `auth-session-${step}`, "**/api/auth/get-session**", {
+      user: { id: accounts[step], email: `${accounts[step]}@xmatrix.test`, name: accounts[step] },
+      session: { token: `session-${step}`, expiresAt: new Date(Date.now() + 60_000).toISOString() },
+    });
+    await signIn(0);
+    await page.goto(`/app/${asked.spaceId}/channels/${asked.name}--${asked.id}`, { waitUntil: "domcontentloaded" });
+    const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+    const waitsOnReader = sidebar.getByText("Needs you", { exact: true });
+    await expect(waitsOnReader).toBeVisible();
+
+    // The Hub holds its answer to the first session's Done.
+    await fixtureRule(page, { id: "asked-done", pattern: "**/api/xmatrix/channels/channel-asked/read",
+      responder: { kind: "deferred", json: { ok: true, readSequence: 9 } } });
+    const row = sidebar.locator(`[data-channel-row-id="${asked.id}"]`);
+    await row.hover();
+    await row.getByRole("button", { name: "Done with #review" }).click();
+    await expect.poll(async () => (await fixtureRequests(page, "asked-done")).length).toBe(1);
+    for (let step = 1; step < accounts.length; step += 1) {
+      const listReads = (await fixtureRequests(page, "channel-catalog")).length;
+      await signIn(step);
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      // The shell starts over for the session and reads its list again.
+      await expect.poll(async () => (await fixtureRequests(page, "channel-catalog")).length).toBeGreaterThan(listReads);
+      await expect(waitsOnReader).toBeVisible();
+    }
+
+    await releaseFixture(page, "asked-done");
+    // The answer has landed once the page has painted twice after it.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(waitsOnReader).toBeVisible();
+    await expect(row).toBeVisible();
+  });
+}
 
 test("unpinning the last conversation removes Pinned and saves an empty list", async ({ page }) => {
   const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan",

@@ -14,7 +14,7 @@ test("runtime picks are top-level addresses and their conditions continue at the
 /** Where the `@` word being completed starts, marked with `|` in the fixture. */
 function at(marked) {
   const start = marked.indexOf("|");
-  return { body: marked.replace("|", ""), start };
+  return { body: marked.slice(0, start) + marked.slice(start + 1), start };
 }
 
 test("a condition joins the summon it is typed onto", () => {

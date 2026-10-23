@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import { type Page } from "@playwright/test";
+import { workingAgentsSpace } from "./working-agents-fixtures";
 import {
   E2E_CHANNEL,
   E2E_NOW,
@@ -193,7 +194,8 @@ test("returning to the mobile channel list does not create a history loop", asyn
 });
 
 test("back from a conversation shows the channel list that was already painted", async ({ page }) => {
-  await openGeneralChannelList(page);
+  const space = workingAgentsSpace(1, "mobile-decoration");
+  await openGeneralChannelList(page, space.channels[0]);
   await expect(generalChannelRow(page)).toBeVisible();
   // Rebuilding the list on Back painted it empty for a frame while its rows measured.
   await generalChannelRow(page).evaluate((row) => {
@@ -204,6 +206,8 @@ test("back from a conversation shows the channel list that was already painted",
   const backToChannels = page.getByRole("button", { name: "Back to channels" });
   await expect(backToChannels).toBeVisible();
   await expect(page.locator(".app-mobile-channel-list-pane")).toBeHidden();
+  // The painted list remains mounted behind the conversation.
+  await expect(generalChannelRow(page)).toHaveCount(1);
   await backToChannels.tap();
 
   await expectChannelListVisible(page);

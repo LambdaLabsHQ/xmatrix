@@ -11,10 +11,14 @@ import { useCallback, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ADMIN_AUDIT_WEB_ROUTE,
+  ADMIN_OPERATIONS_WEB_ROUTE,
   ADMIN_OVERVIEW_DEFAULT_ACTIVITY_DAYS,
   ADMIN_OVERVIEW_WEB_ROUTE,
+  adminSpaceDetailWebRoute,
   adminUserDetailWebRoute,
   type AdminAuditEvent,
+  type AdminOperations,
+  type AdminSpaceDetail,
   type AdminPlatformOverview,
   type AdminUserDetail,
 } from "@xmatrix/protocol";
@@ -57,6 +61,30 @@ export function useAdminParam(name: string): [string, (value: string, options?: 
     window.dispatchEvent(new Event(PARAM_EVENT));
   }, [name, read]);
   return [value, set];
+}
+
+/**
+ * Go to another admin section and record, such as a member's user detail
+ * from a Space, as one step Back returns from. An empty value removes it.
+ */
+export function openAdminLocation(params: Record<string, string>) {
+  const url = parseAppLocation(window.location.href);
+  for (const [name, value] of Object.entries(params)) {
+    if (value) url.searchParams.set(name, value);
+    else url.searchParams.delete(name);
+  }
+  pushBrowserPath(`${url.pathname}${url.search}${url.hash}`);
+  window.dispatchEvent(new Event(PARAM_EVENT));
+  // The section list follows its own address event.
+  window.dispatchEvent(new Event("xmatrix:tool-item"));
+}
+
+export function openAdminUser(userId: string) {
+  openAdminLocation({ item: "users", user: userId, space: "" });
+}
+
+export function openAdminSpace(spaceId: string) {
+  openAdminLocation({ item: "spaces", space: spaceId, user: "" });
 }
 
 export function isForbidden(error: unknown): boolean {
@@ -106,5 +134,29 @@ export function useAdminAudit(token: string | undefined) {
       url: `${ADMIN_AUDIT_WEB_ROUTE}?limit=500`, token, signal,
     }).then((payload) => payload.events ?? []),
     enabled: Boolean(token && user?.id),
+  });
+}
+
+export function useAdminSpaceDetail(token: string | undefined, spaceId: string) {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "platform-space", [spaceId]),
+    queryFn: ({ signal }) => xmatrixApiRequest<{ detail?: AdminSpaceDetail }>({
+      url: adminSpaceDetailWebRoute(spaceId), token, signal,
+    }).then((payload) => payload.detail ?? null),
+    enabled: Boolean(token && user?.id && spaceId),
+    staleTime: 60_000,
+  });
+}
+
+export function useAdminOperations(token: string | undefined) {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "platform-operations", []),
+    queryFn: ({ signal }) => xmatrixApiRequest<{ operations?: AdminOperations }>({
+      url: ADMIN_OPERATIONS_WEB_ROUTE, token, signal,
+    }).then((payload) => payload.operations ?? null),
+    enabled: Boolean(token && user?.id),
+    staleTime: 60_000,
   });
 }

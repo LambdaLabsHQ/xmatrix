@@ -1,3 +1,4 @@
+import { mergeCommandResult, mergeCommandResults, type CommandResult } from "@xmatrix/protocol";
 import { dateTimeFormat, formatInstant, formatZonedDateTime } from "./time-display";
 
 type SequencedHistoryEntry = {
@@ -8,6 +9,7 @@ type ChannelHistoryLike = SequencedHistoryEntry & {
   messageId: string;
   channelId?: string;
   sentAt: string;
+  commandResult?: CommandResult;
 };
 
 export function formatMessageDateTime(
@@ -125,26 +127,34 @@ export function sortChannelHistory<T extends ChannelHistoryLike>(messages: T[]):
 }
 
 /**
- * A refresh that produced the identical window (same messages, edit and
- * recall markers, in the same order) must not re-render the timeline.
+ * The held message a live supersession judgment folds, carrying it; undefined
+ * when this window does not hold it or already shows the judgment. The event
+ * names only the two messages (docs/design/conversation-activity.md §3.3).
  */
-export function sameChannelHistoryWindow<
-  T extends ChannelHistoryLike & { editedAt?: string; recalledAt?: string },
->(
-  left: readonly T[],
-  right: readonly T[],
-): boolean {
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    const a = left[index]!;
-    const b = right[index]!;
-    if (
-      a.messageId !== b.messageId ||
-      a.editedAt !== b.editedAt ||
-      a.recalledAt !== b.recalledAt
-    ) return false;
+export function supersededHistoryMessage<
+  T extends ChannelHistoryLike & { recalledAt?: string; supersededBy?: string },
+>(messages: readonly T[], metadata: Record<string, unknown> | undefined): T | undefined {
+  const messageId = metadata?.messageId;
+  const supersededBy = metadata?.supersededBy;
+  if (typeof messageId !== "string" || typeof supersededBy !== "string" || !messageId || !supersededBy) {
+    return undefined;
   }
-  return true;
+  const held = messages.find((message) => message.messageId === messageId);
+  if (!held || held.recalledAt || held.supersededBy === supersededBy) return undefined;
+  return { ...held, supersededBy };
+}
+
+/** The held message with one command-result annotation the Hub just recorded
+ * applied, or undefined when it is not held or is recalled. */
+export function commandResultHistoryMessage<
+  T extends ChannelHistoryLike & { recalledAt?: string; commandResult?: CommandResult },
+>(messages: readonly T[], metadata: Record<string, unknown> | undefined): T | undefined {
+  const messageId = metadata?.messageId;
+  const annotationId = metadata?.annotationId;
+  if (typeof messageId !== "string" || typeof annotationId !== "string" || !messageId || !annotationId) return undefined;
+  const held = messages.find((message) => message.messageId === messageId);
+  if (!held || held.recalledAt) return undefined;
+  return { ...held, commandResult: mergeCommandResult(held.commandResult, annotationId, metadata?.payload) };
 }
 
 export function mergeChannelHistory<T extends ChannelHistoryLike>(
@@ -157,9 +167,28 @@ export function mergeChannelHistory<T extends ChannelHistoryLike>(
     byId.set(message.messageId, message);
   }
   for (const message of filterHistoryForChannel(channelId, incoming)) {
-    byId.set(message.messageId, message);
+    const held = byId.get(message.messageId);
+    byId.set(message.messageId, held ? withHeldJudgments(held, message) : message);
   }
   return sortChannelHistory(Array.from(byId.values()));
+}
+
+/* What the Hub judged about a message after it was committed, read from its
+   annotations. A frame built at commit time (the send's own answer, a live
+   echo) cannot carry one and knows nothing of it, so it never erases one the
+   reader already holds. A sent `/effort`'s answer is pushed before the send
+   returns, and that answer must survive the send's reply. */
+const HUB_JUDGMENTS = ["supersededBy", "questionnaireState", "commandResult"] as const;
+
+function withHeldJudgments<T extends ChannelHistoryLike>(held: T, incoming: T): T {
+  if ((incoming as { recalledAt?: string }).recalledAt) return incoming;
+  if (held.commandResult && incoming.commandResult) incoming = {
+    ...incoming, commandResult: mergeCommandResults(held.commandResult, incoming.commandResult),
+  };
+  const kept = HUB_JUDGMENTS.filter((key) => (held as Record<string, unknown>)[key] !== undefined &&
+    (incoming as Record<string, unknown>)[key] === undefined);
+  if (!kept.length) return incoming;
+  return { ...incoming, ...Object.fromEntries(kept.map((key) => [key, (held as Record<string, unknown>)[key]])) };
 }
 
 export function compactChannelHistoryWindow<T extends ChannelHistoryLike>(

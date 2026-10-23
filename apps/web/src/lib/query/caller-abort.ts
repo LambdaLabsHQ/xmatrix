@@ -5,10 +5,12 @@
  */
 export function untilCallerAborts<T>(shared: Promise<T>, signal?: AbortSignal | null): Promise<T> {
   if (!signal) return shared;
-  if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(signal.reason);
-    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    // Even a caller that already left owns this shared promise's rejection.
+    // Other callers still receive the query's result through their own waiters.
     shared.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
   });
 }

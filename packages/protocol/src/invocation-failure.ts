@@ -1,4 +1,6 @@
 import { machineTagSelects } from "./agent-auto-mention.js";
+import { hasControlCharacter } from "./field-validation.js";
+import { harnessTooOldSentence, type HarnessTooOld } from "./harness-management.js";
 
 const REGISTRATION_JEV_FAILURES = {
   invalid_answer: "returned an invalid answer",
@@ -87,13 +89,15 @@ export const REGISTRATION_PREPARATION_REJECTION_CODES = [
   "registration_machine_unavailable", "registration_machine_ambiguous", "registration_harness_unavailable", "registration_model_unavailable",
   "registration_effort_unavailable", "registration_parameter_unavailable", "registration_directory_unavailable",
   "registration_quota_exhausted", "registration_machine_not_auto_assigned",
-  "registration_workspace_or_daemon_unavailable", "registration_daemon_offline", "registration_workspace_not_configured",
+  "registration_workspace_or_daemon_unavailable", "registration_daemon_offline", "registration_harness_outdated",
+  "registration_harness_signed_out",
+  "registration_workspace_not_configured",
   "registration_workspace_constraint_mismatch", "registration_workspaces_limit", "registration_invocation_target_mismatch",
   "registration_source_changed", "registration_environment_changed", "registration_launch_changed",
   "registration_launch_aborted", "registration_launch_recovery_unavailable", "invalid_registration_launch",
   "invalid_registration_repository", "registration_repo_route_unavailable", "registration_managed_route_unavailable",
   "registration_environment_ineligible", "registration_environment_missing", "registration_not_granted",
-  "space_policy_exceeds_owner_grant", "registration_resource_not_admitted", "about_session_active", "about_session_limit",
+  "space_policy_exceeds_owner_grant", "registration_resource_not_admitted",
   ...SUMMON_INTENT_REJECTION_CODES,
   ...(["environment", "parameter"] as const).flatMap(phase =>
     Object.keys(REGISTRATION_JEV_FAILURES).map(reason => `registration_${phase}_${reason}`)),
@@ -147,6 +151,10 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_launch_rejected: "The registered summon could not satisfy its current configuration or authorization. No launch was allocated.",
   registration_workspace_or_daemon_unavailable: "The selected machine's daemon or registered workspace is unavailable for this launch. No launch was allocated.",
   registration_daemon_offline: "This machine is offline, so nothing was launched. It can be used again when it reconnects. No launch was allocated.",
+  // A refusal names the program and versions (harnessTooOldMessage); this is the code alone.
+  registration_harness_outdated: "The agent's program on that machine is too old for xMatrix. Update it there, then try again. No launch was allocated.",
+  // A refusal names the program and machine (harnessSignedOutMessage); this is the code alone.
+  registration_harness_signed_out: "The agent's program on that machine is not signed in. Sign it in there, then try again. No launch was allocated.",
   registration_workspace_not_configured: "The selected registration has no configured workspace for this launch. No launch was allocated.",
   registration_workspace_constraint_mismatch: "The selected workspace does not satisfy this invocation's repository or directory constraint. No launch was allocated.",
   registration_workspaces_limit: "Too many registered workspaces matched this invocation. No launch was allocated.",
@@ -165,8 +173,6 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_not_granted: "The registration owner has not granted this Space or Channel use of the selected environment. No launch was allocated.",
   space_policy_exceeds_owner_grant: "The Space policy asks for more than the registration owner granted. No launch was allocated.",
   registration_resource_not_admitted: "A requested workspace, model, secret or capability is not admitted for the selected registration. No launch was allocated.",
-  about_session_active: "An About session is already active for this Channel. No launch was allocated.",
-  about_session_limit: "The Channel has reached its About session limit. No launch was allocated.",
   routing_no_eligible: "No eligible environment matched this summon. No launch was allocated.",
   routing_selection_unconfigured: "Environment selection is not configured on this deployment. No launch was allocated.",
   routing_quota_refresh_failed: "Environment availability refresh failed. No launch was allocated.",
@@ -219,36 +225,133 @@ function parameterAnswerMessage(detail: DecisionAnswerFailure): string {
   return `xMatrix's ${subject} ${issue[detail.issue]}. No launch was allocated.`;
 }
 
+/** A harness its machine reports signed out of its own account: which
+ * program, on which machine, so its owner can sign it in from the refusal. */
+export interface HarnessSignedOut { harness: string; program: string; machineId: string; machineName?: string }
+
 /** A registration a launch could see, and why it was not offered. */
-export interface LaunchMachineBlock {
-  machineId: string;
-  machineName?: string;
-  reason: "daemon_offline";
-}
+export type LaunchMachineBlock = { machineId: string; machineName?: string } & (
+  | { reason: "daemon_offline" }
+  /** The machine reports this harness older than its preset's minimum version. */
+  | { reason: "harness_outdated"; tooOld: HarnessTooOld }
+  /** The machine reports this harness signed out: nothing sent to it is answered. */
+  | { reason: "harness_signed_out"; signedOut: HarnessSignedOut });
+
+/** Why a launch that found nothing to offer is refused, and for a harness
+ * too old to talk to or signed out, which program on which machine. */
+export interface LaunchRefusal { code: string; tooOld?: HarnessTooOld; signedOut?: HarnessSignedOut }
 
 /**
  * The filter that emptied the offered list names a missing registration.
  * A machine the author named whose daemon is known but not connected is
  * offline, which is a different fact.
  */
-export function launchRefusalCode(code: string, machineTag: string | undefined,
-  blocked: readonly LaunchMachineBlock[]): string {
-  if (!machineTag || (code !== "registration_machine_unavailable" && code !== "registration_not_found")) return code;
-  return blocked.some(block => block.reason === "daemon_offline" &&
+export function launchRefusal(code: string, machineTag: string | undefined,
+  blocked: readonly LaunchMachineBlock[]): LaunchRefusal {
+  if (code !== "registration_machine_unavailable" && code !== "registration_not_found") return { code };
+  // Nothing else could take it because what there was is too old to talk to.
+  const outdated = blocked.find(block => block.reason === "harness_outdated" &&
+    (!machineTag || machineTagSelects(machineTag, block.machineId, block.machineName)));
+  if (outdated?.reason === "harness_outdated") return { code: "registration_harness_outdated", tooOld: outdated.tooOld };
+  // Nothing else could take it because what there was is not signed in.
+  const signedOut = blocked.find(block => block.reason === "harness_signed_out" &&
+    (!machineTag || machineTagSelects(machineTag, block.machineId, block.machineName)));
+  if (signedOut?.reason === "harness_signed_out") return { code: "registration_harness_signed_out", signedOut: signedOut.signedOut };
+  if (!machineTag) return { code };
+  return { code: blocked.some(block => block.reason === "daemon_offline" &&
     machineTagSelects(machineTag, block.machineId, block.machineName))
-    ? "registration_daemon_offline" : code;
+    ? "registration_daemon_offline" : code };
 }
 
-export function preparationRejectionMessage(code: string, parameterFailure?: unknown): string | undefined {
-  const detail = code === "routing_parameter_invalid_answer"
-    ? parseDecisionAnswerFailure(parameterFailure) : undefined;
-  return detail ? parameterAnswerMessage(detail)
+/** A stored refusal detail's bounded text fields, or undefined when it is not a record. */
+function storedDetail(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const detail = value as Record<string, unknown>;
+  return { detail, field: (key: string, max: number) => {
+    const text = detail[key];
+    return typeof text === "string" && text.length > 0 && text.length <= max && !hasControlCharacter(text) ? text : undefined;
+  } };
+}
+
+/** A stored too-old refusal read back; anything else carries no detail. */
+export function parseHarnessTooOld(value: unknown): HarnessTooOld | undefined {
+  const stored = storedDetail(value);
+  if (!stored) return undefined;
+  const { detail, field } = stored;
+  const program = field("program", 80), version = field("version", 80), minimumVersion = field("minimumVersion", 40);
+  const machineName = field("machineName", 200), update = field("update", 300);
+  if (!program || !version || !minimumVersion || (detail.machineName !== undefined && !machineName) ||
+      (detail.update !== undefined && !update)) return undefined;
+  return { program, version, minimumVersion, ...(machineName ? { machineName } : {}), ...(update ? { update } : {}) };
+}
+
+/** A stored signed-out refusal read back; anything else carries no detail. */
+export function parseHarnessSignedOut(value: unknown): HarnessSignedOut | undefined {
+  const stored = storedDetail(value);
+  if (!stored) return undefined;
+  const { detail, field } = stored;
+  const harness = field("harness", 64), program = field("program", 80), machineId = field("machineId", 300);
+  const machineName = field("machineName", 200);
+  if (!harness || !/^[a-z][a-z0-9-]{0,63}$/u.test(harness) || !program || !machineId ||
+      (detail.machineName !== undefined && !machineName)) return undefined;
+  return { harness, program, machineId, ...(machineName ? { machineName } : {}) };
+}
+
+/** "Codex on mac-mini is not signed in, so it can't take work." */
+export function harnessSignedOutSentence(signedOut: HarnessSignedOut): string {
+  return `${signedOut.program}${signedOut.machineName ? ` on ${signedOut.machineName}` : ""} is not signed in, so it can't take work.`;
+}
+
+/** The kind of a Channel notice whose program is signed out: a summon refused
+ * for it, or a turn it refused. The Web draws it as the sign-in, then sends
+ * a refused summon again. */
+export const HARNESS_SIGNED_OUT_NOTICE_KIND = "xmatrix.harness-signed-out.v1";
+
+/** A signed-out notice's facts: what to sign in, and the summon to send again
+ * when it answers one (a turn failure answers none). */
+export function harnessSignedOutNoticeOf(metadata: Record<string, unknown> | undefined):
+  { signedOut: HarnessSignedOut; summon?: { sourceMention: string; sourceMessageId: string } } | null {
+  if (!metadata || metadata.kind !== HARNESS_SIGNED_OUT_NOTICE_KIND) return null;
+  const signedOut = parseHarnessSignedOut(metadata.signedOut);
+  if (!signedOut) return null;
+  const { sourceMention, sourceMessageId } = metadata;
+  const summon = typeof sourceMention === "string" && /^[@＠]/u.test(sourceMention) && sourceMention.length <= 4_500 &&
+    typeof sourceMessageId === "string" && sourceMessageId && sourceMessageId.length <= 300
+    ? { sourceMention, sourceMessageId } : undefined;
+  return { signedOut, ...(summon ? { summon } : {}) };
+}
+
+function harnessSignedOutMessage(signedOut: HarnessSignedOut): string {
+  return `${harnessSignedOutSentence(signedOut)} Sign it in from here, then the message goes to it. No launch was allocated.`;
+}
+
+/** What is too old, and the one thing to do about it. */
+function harnessTooOldMessage(tooOld: HarnessTooOld): string {
+  const where = tooOld.machineName ? "there" : "on that computer";
+  return `${harnessTooOldSentence(tooOld)} ${tooOld.update ? `Run "${tooOld.update}" ${where}` : `Update it ${where}`}, ` +
+    "then try again. No launch was allocated.";
+}
+
+/** `detail` is what the rejection stored for its code: an invalid answer's
+ * failure, what is too old, or what is signed out. */
+export function preparationRejectionMessage(code: string, detail?: unknown): string | undefined {
+  const answer = code === "routing_parameter_invalid_answer" ? parseDecisionAnswerFailure(detail) : undefined;
+  const tooOld = code === "registration_harness_outdated" ? parseHarnessTooOld(detail) : undefined;
+  const signedOut = code === "registration_harness_signed_out" ? parseHarnessSignedOut(detail) : undefined;
+  return answer ? parameterAnswerMessage(answer) : tooOld ? harnessTooOldMessage(tooOld)
+    : signedOut ? harnessSignedOutMessage(signedOut)
     : Object.hasOwn(PREPARATION_REJECTION_MESSAGES, code) ? PREPARATION_REJECTION_MESSAGES[code] : undefined;
 }
 
+/** A rejection's message for a card that already says nothing was started: only the cause. */
+export function rejectionCause(message: string): string {
+  return message.replace(/ No launch was allocated\.$/u, "");
+}
+
 /** The card already says that launch allocation failed, so show only the cause. */
-export function preparationFailureSummary(code: string, parameterFailure?: unknown): string | undefined {
-  return preparationRejectionMessage(code, parameterFailure)?.replace(/ No launch was allocated\.$/u, "");
+export function preparationFailureSummary(code: string, detail?: unknown): string | undefined {
+  const message = preparationRejectionMessage(code, detail);
+  return message === undefined ? undefined : rejectionCause(message);
 }
 
 /** Historical decision records predate typed preflight rejection codes. */

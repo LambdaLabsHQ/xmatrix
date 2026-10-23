@@ -269,6 +269,7 @@ fn inbound_drain_ignores_attachment_bearing_slash_messages() {
             client_message_id: None,
             ack_required,
             interrupt_requested,
+            steer_allowed: None,
             delivery_intent: None,
         },
     ))
@@ -311,7 +312,7 @@ fn codex_app_turn_input_preserves_channel_image_attachment() {
     assert_eq!(input[0]["type"], "text");
     let prompt_text = input[0]["text"].as_str().unwrap();
     assert!(prompt_text.contains("xMatrix channel chan-1 from Yiming Hu [user]"));
-    assert!(prompt_text.ends_with(&super::bootstrap::channel_collaboration_policy("chan-1")));
+    assert!(!prompt_text.contains("xMatrix channel contract:"));
     assert!(prompt_text.contains("Attachments:"));
     assert!(prompt_text.contains("- image screen.png (68 bytes, image/png)"));
     assert!(!prompt_text.contains("data:image/png;base64"));
@@ -363,7 +364,7 @@ fn claude_inbound_message_embeds_local_image_paths() {
     assert!(payload.contains("Attachments:"));
     assert!(payload.contains("- image screen.png at /tmp/xmatrix-attachment-fake.png"));
     assert!(payload.contains("read this file to view the image"));
-    assert!(payload.ends_with(&super::bootstrap::channel_collaboration_policy("chan-1")));
+    assert!(!payload.contains("xMatrix channel contract:"));
     assert!(!payload.contains("data:image/png;base64"));
 }
 
@@ -540,10 +541,8 @@ fn render_initial_message_attachment_lines_includes_paths() {
 fn shared_bootstrap_is_folded_once_into_the_first_runtime_input() {
     let mut bootstrap = Some("shared bootstrap".to_string());
 
-    let first = codex_turn_with_bootstrap(&mut bootstrap, "current assignment");
-    assert!(first.contains("shared bootstrap"));
-    assert!(first.contains("only live assignment"));
-    assert!(first.ends_with("current assignment"));
+    let first = codex_turn_with_bootstrap(&mut bootstrap, "current input");
+    assert_eq!(first, "shared bootstrap\n\ncurrent input");
     assert!(bootstrap.is_none());
     assert_eq!(
         codex_turn_with_bootstrap(&mut bootstrap, "next input"),
@@ -675,6 +674,7 @@ fn codex_app_error_message_prefers_human_readable_fields() {
     let direct = serde_json::json!({
         "message": "Network failed",
         "code": "network_error",
+        "data": {"httpStatusCode": 403, "requestId": "req-safe"},
     });
     let nested = serde_json::json!({
         "error": {
@@ -683,8 +683,9 @@ fn codex_app_error_message_prefers_human_readable_fields() {
         }
     });
 
-    assert_eq!(codex_app_error_message(&direct), "Network failed");
-    assert_eq!(codex_app_error_message(&nested), "Connection reset by peer");
+    assert_eq!(codex_app_error_message(&direct),
+        "Network failed | code=network_error | httpStatusCode=403 | requestId=req-safe");
+    assert_eq!(codex_app_error_message(&nested), "Connection reset by peer | type=api_error");
 }
 
 #[test]
@@ -710,7 +711,7 @@ fn zcode_app_helpers_accept_interrupt_session_events_and_errors() {
             "message": "Model unavailable",
             "code": "model_error",
         })),
-        "Model unavailable"
+        "Model unavailable | code=model_error"
     );
 }
 
@@ -832,9 +833,9 @@ fn codex_runtime_trace_payload_classifies_transient_reconnect_errors() {
     assert_eq!(payload["status"], "retrying");
     assert_eq!(
         payload["summary"],
-        "connection retrying: Reconnecting... 2/5"
+        "connection retrying: Reconnecting... 2/5 | request timed out"
     );
-    assert_eq!(payload["message"], "Reconnecting... 2/5");
+    assert_eq!(payload["message"], "Reconnecting... 2/5 | request timed out");
 }
 
 #[test]

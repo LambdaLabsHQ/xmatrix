@@ -1,5 +1,7 @@
+import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
 import type {
   DesktopAgentPresetDiscovery,
+  DesktopDaemonFailure,
   DesktopDaemonStatus,
 } from "@/lib/desktop/bridge";
 
@@ -119,4 +121,14 @@ export function spaceAgentSetupState(
     return { kind: "daemon-stopped", candidates };
   }
   return { kind: "ready-to-bind", candidates };
+}
+
+/* What a background-service failure means for the person (onboarding-copy.ts). */
+export function daemonFailureSentence(failure: DesktopDaemonFailure, copy: OnboardingCopy = ONBOARDING_COPY.en): string {
+  return copy.daemonFailure(failure.stage);
+}
+
+/* The failure to show: only while the daemon is not running. */
+export function shownDaemonFailure(status: DesktopDaemonStatus | null | undefined): DesktopDaemonFailure | null {
+  return status && status.state !== "running" && status.failure ? status.failure : null;
 }

@@ -18,8 +18,8 @@ const STATE = /^[A-Z][A-Z0-9_]{0,63}$/u;
 const VERSION_NOTES: Record<string, string> = {
   WAITING_FOR_REVIEW: "submitted; waiting for App Review",
   IN_REVIEW: "App Review started",
-  REJECTED: "App Review rejected it; read the reason in App Store Connect",
-  METADATA_REJECTED: "App Review rejected the listing; the build can stay",
+  REJECTED: "App Review rejected it; review_messages reads why",
+  METADATA_REJECTED: "App Review rejected the listing; the build can stay, and review_messages reads why",
   INVALID_BINARY: "Apple refused the build; upload a new one",
   DEVELOPER_REJECTED: "withdrawn from review",
   PENDING_DEVELOPER_RELEASE: "approved; waiting for you to release it",

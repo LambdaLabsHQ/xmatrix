@@ -46,6 +46,7 @@ fn channel_message_event(
         client_message_id: None,
         ack_required: Some(true),
         interrupt_requested: None,
+        steer_allowed: None,
         delivery_intent: None,
     })
 }
@@ -68,6 +69,7 @@ fn interrupting_channel_message_event(
         client_message_id: None,
         ack_required,
         interrupt_requested: Some(true),
+        steer_allowed: None,
         delivery_intent: None,
     })
 }
@@ -131,18 +133,24 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
             message: test_channel_message("m3", "chan-a", "replay"),
             ack_required: Some(true),
             delivery_intent: None,
+            interrupt_requested: None,
+            steer_allowed: None,
         });
     let foreign_replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
             message: test_channel_message("m5", "chan-b", "replay"),
             ack_required: Some(true),
             delivery_intent: None,
+            interrupt_requested: None,
+            steer_allowed: None,
         });
     let own_replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
             message: agent_channel_message("m6", "chan-a", "agent:self", "my own send"),
             ack_required: Some(true),
             delivery_intent: None,
+            interrupt_requested: None,
+            steer_allowed: None,
         });
 
     assert!(event_requests_active_turn_interrupt(
@@ -214,6 +222,44 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
 }
 
 #[test]
+fn hub_verdict_decides_whether_catch_up_interrupts() {
+    let replay = |message, interrupt_requested| {
+        AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
+            message,
+            ack_required: Some(true),
+            delivery_intent: None,
+            interrupt_requested: Some(interrupt_requested),
+            steer_allowed: None,
+        })
+    };
+    // A person's message the Hub judged not to steer (say, a stop it already
+    // carried out) queues, though the older host rule would have interrupted.
+    assert!(!event_requests_active_turn_interrupt(
+        &replay(test_channel_message("m1", "chan-a", "context"), false),
+        Some("chan-a"),
+        Some("agent:self")
+    ));
+    // An Agent's exact `@codex:1` steering interrupts in catch-up exactly as
+    // it does live, though the older host rule queued every Agent replay.
+    assert!(event_requests_active_turn_interrupt(
+        &replay(agent_channel_message("m2", "chan-a", "agent:peer", "@codex:1 stop"), true),
+        Some("chan-a"),
+        Some("agent:self")
+    ));
+    // Neither this instance's own message nor another channel's ever does.
+    assert!(!event_requests_active_turn_interrupt(
+        &replay(agent_channel_message("m3", "chan-a", "agent:self", "my own send"), true),
+        Some("chan-a"),
+        Some("agent:self")
+    ));
+    assert!(!event_requests_active_turn_interrupt(
+        &replay(test_channel_message("m4", "chan-b", "elsewhere"), true),
+        Some("chan-a"),
+        Some("agent:self")
+    ));
+}
+
+#[test]
 fn bound_runtime_rejects_foreign_channel_delivery() {
     assert!(runtime_accepts_channel_delivery(Some("chan-a"), "chan-a"));
     assert!(!runtime_accepts_channel_delivery(Some("chan-a"), "chan-b"));
@@ -276,6 +322,7 @@ fn claude_stream_extra_args_enables_bidirectional_stream_json() {
     );
     assert!(args.iter().any(|a| a == "--print"));
     assert!(args.iter().any(|a| a == "--verbose"));
+    assert!(args.iter().any(|a| a == "--include-partial-messages"));
     assert!(args.iter().any(|a| a == "--replay-user-messages"));
     assert!(args.windows(2).any(|pair| pair == ["--permission-prompt-tool", "stdio"]));
     assert!(!args.iter().any(|a| a == "--resume"));
@@ -1457,7 +1504,7 @@ fn codex_goal_resume_sets_active_status_without_replacing_objective() {
 }
 
 #[test]
-fn codex_goal_resume_reactivates_the_pause_gate() {
+fn codex_goal_resume_reports_an_active_goal() {
     let resumed = codex_goal_status_from_response(
         &GoalCommand::Resume,
         &serde_json::json!({
@@ -1470,7 +1517,6 @@ fn codex_goal_resume_reactivates_the_pause_gate() {
 
     assert_eq!(resumed.active, Some(true));
     assert_eq!(resumed.status.as_deref(), Some("active"));
-    assert!(!codex_goal_is_paused(Some(&resumed)));
 }
 
 #[test]
@@ -1729,43 +1775,6 @@ fn codex_goal_status_from_get_response_maps_paused_goal() {
 fn codex_goal_status_from_get_response_ignores_missing_goal() {
     assert!(codex_goal_status_from_get_response(&serde_json::json!({})).is_none());
     assert!(codex_goal_status_from_get_response(&serde_json::json!({"goal": null})).is_none());
-}
-
-#[test]
-fn codex_goal_is_paused_matches_status_only() {
-    let paused = protocol::AgentGoalStatus {
-        active: Some(false),
-        objective: Some("ship it".to_string()),
-        status: Some("paused".to_string()),
-        updated_at: None,
-        ..Default::default()
-    };
-    let active = protocol::AgentGoalStatus {
-        active: Some(true),
-        objective: Some("ship it".to_string()),
-        status: Some("active".to_string()),
-        updated_at: None,
-        ..Default::default()
-    };
-
-    assert!(codex_goal_is_paused(Some(&paused)));
-    assert!(!codex_goal_is_paused(Some(&active)));
-    assert!(!codex_goal_is_paused(None));
-}
-
-#[test]
-fn codex_paused_goal_notice_points_to_explicit_resume() {
-    let paused = protocol::AgentGoalStatus {
-        active: Some(false),
-        objective: Some("resume paused work".to_string()),
-        status: Some("paused".to_string()),
-        updated_at: None,
-        ..Default::default()
-    };
-
-    let notice = codex_paused_goal_notice(Some(&paused));
-    assert!(notice.contains("resume paused work"));
-    assert!(notice.contains("/goal resume"));
 }
 
 #[test]

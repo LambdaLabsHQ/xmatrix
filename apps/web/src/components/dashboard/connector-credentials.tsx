@@ -1,12 +1,14 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Loader2, RefreshCw } from "lucide-react";
+import { Check, Copy, KeyRound, Loader2, LogIn, RefreshCw } from "lucide-react";
 import { WEB_PROXY_ROUTES, type SerializedAppConnectorConnection } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -23,8 +25,13 @@ interface CredentialView {
 
 const INGRESS_KEY_FIELD = "ingressKey";
 
+/** Whether a provider posts its events to an ingress URL; Hub-produced events have none. */
+function takesIngress(connector: AppConnectorManifest): boolean {
+  return Boolean(connector.events && connector.events.ingress !== false);
+}
+
 export function connectorTakesCredentials(connector: AppConnectorManifest): boolean {
-  return Boolean(connector.events || connector.credentials?.some(field => !field.managed));
+  return Boolean(takesIngress(connector) || connector.credentials?.some(field => !field.managed));
 }
 
 /** Fields an admin types, as opposed to ones the Hub mints or OAuth fills in. */
@@ -34,7 +41,7 @@ export function connectorWritableCredentials(connector: AppConnectorManifest) {
 
 /** Whether the Hub mints values (an ingress URL or a secret) for this app. */
 export function connectorGeneratesCredentials(connector: AppConnectorManifest): boolean {
-  return Boolean(connector.events || connector.credentials?.some((field) => field.generated && !field.managed));
+  return Boolean(takesIngress(connector) || connector.credentials?.some((field) => field.generated && !field.managed));
 }
 
 function CopyValue({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
@@ -96,18 +103,29 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
       await afterSave();
     },
   });
+  // The desktop app signs in on the service's own page and saves the session it then holds.
+  const bridge = getDesktopBridge();
+  const signIn = useMutation({
+    mutationKey: [...key, "sign-in"],
+    mutationFn: async ({ field, service, fresh }: { field: string; service: string; fresh: boolean }) => {
+      const outcome = await bridge!.serviceSignIn!(service, { fresh });
+      if (outcome.status === "signed-in") await save.mutateAsync({ fields: { [field]: outcome.session } });
+    },
+  });
   const writable = connectorWritableCredentials(connector);
   const generated = (connector.credentials ?? []).filter((field) => field.generated && !field.managed);
   const stored = new Set(view.data?.credentialFields ?? connection?.credentialFields ?? []);
-  const missingIngress = connector.events && !view.data?.ingressUrl;
-  const pending = save.isPending || view.isFetching;
+  const ingress = takesIngress(connector);
+  const missingIngress = ingress && !view.data?.ingressUrl;
+  const pending = save.isPending || view.isFetching || signIn.isPending;
   const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
+    userErrorMessage(signIn.error, "Couldn't sign in to the service") ??
     userErrorMessage(view.error, "Couldn't load the credentials");
 
   return (
     <div className="space-y-4">
       {error ? <p className="text-sm font-medium text-destructive">{error}</p> : null}
-      {connector.events ? (
+      {ingress ? (
         view.data?.ingressUrl ? (
           <div className="space-y-2">
             <CopyValue label="Ingress URL" value={view.data.ingressUrl} secret />
@@ -134,30 +152,47 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
           if (Object.keys(fields).length > 0) save.mutate({ fields });
         }}>
           {writable.map((field) => (
-            <label key={field.id} className="block">
-              <span className="mb-1 flex items-center gap-2 text-xs font-bold text-muted-foreground">
-                {field.label}{field.required ? " *" : ""}
-                {stored.has(field.id) ? <span className="font-normal">· saved</span> : null}
-              </span>
-              <Input type="password" autoComplete="off" value={draft[field.id] ?? ""}
-                placeholder={stored.has(field.id) ? "Saved — enter a new value to replace it" : ""}
-                onChange={(event) => setDraft((current) => ({ ...current, [field.id]: event.target.value }))} />
-              <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
-            </label>
+            <div key={field.id}>
+              {/* Outside the label, which would otherwise pass its clicks to the first button. */}
+              {field.signIn && bridge?.serviceSignIn ? (
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Button size="sm" type="button" disabled={pending}
+                    onClick={() => signIn.mutate({ field: field.id, service: field.signIn!, fresh: false })}>
+                    {signIn.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <LogIn />} Sign in to {connector.name}
+                  </Button>
+                  {stored.has(field.id) ? (
+                    <Button size="sm" variant="ghost" type="button" disabled={pending}
+                      onClick={() => signIn.mutate({ field: field.id, service: field.signIn!, fresh: true })}>
+                      Use another account
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              <label className="block">
+                <span className="mb-1 flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                  {field.label}{field.required ? " *" : ""}
+                  {stored.has(field.id) ? <span className="font-normal">· saved</span> : null}
+                </span>
+                <Input type="password" autoComplete="off" value={draft[field.id] ?? ""}
+                  placeholder={stored.has(field.id) ? "Saved — enter a new value to replace it" : ""}
+                  onChange={(event) => setDraft((current) => ({ ...current, [field.id]: event.target.value }))} />
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
+              </label>
+            </div>
           ))}
           <Button size="sm" type="submit" disabled={pending || !Object.values(draft).some((value) => value.trim())}>
-            {save.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />} {connected ? "Save credentials" : "Save and connect"}
+            {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <KeyRound />} {connected ? "Save credentials" : "Save and connect"}
           </Button>
         </form>
       ) : null}
-      {connector.events || generated.length > 0 ? (
+      {ingress || generated.length > 0 ? (
         <Button size="sm" variant="outline" type="button" disabled={pending}
           onClick={() => {
             if (missingIngress) return save.mutate({});
             if (!window.confirm(`Rotate the ${connector.name} ingress URL and secrets? The provider stops delivering until you paste the new values.`)) return;
-            save.mutate({ regenerate: [...(connector.events ? [INGRESS_KEY_FIELD] : []), ...generated.map((field) => field.id)] });
+            save.mutate({ regenerate: [...(ingress ? [INGRESS_KEY_FIELD] : []), ...generated.map((field) => field.id)] });
           }}>
-          {save.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <RefreshCw />}
           {missingIngress ? "Generate ingress URL" : "Rotate URL and secrets"}
         </Button>
       ) : null}

@@ -14,6 +14,8 @@ import { commandDigest as digest } from "./command-digest.js";
 import { cancelRunExecution } from "./runtime-control.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import type { DatabaseRequestContext } from "./context.js";
+import { singleReadStatements } from "./single-read-statements.js";
 import {
   channelCapabilityPredicate,
   requireChannelCapability,
@@ -97,6 +99,15 @@ function retryBackoff(attempts: number): number {
   return Math.min(15 * 60_000, 5_000 * 2 ** Math.min(Math.max(0, attempts - 1), 8));
 }
 
+// The latest occurrence and its proved Runs share one projection across all
+// authorized catalogs. Message delivery status is independent of Run creation.
+const LATEST_OCCURRENCE_SQL = `SELECT x.*,(SELECT COALESCE(jsonb_agg(jsonb_build_object(
+  'runId',link.run_id,'instanceId',link.instance_id,'channelId',link.channel_id,'status',link.status)
+  ORDER BY link.selection_index,link.run_id),'[]'::jsonb) FROM data.automation_occurrence_runs link
+  WHERE link.occurrence_id=x.occurrence_id) AS run_links
+  FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
+  ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1`;
+
 // The Hub shares one occurrence lifecycle with the retiring Durable Object
 // authority, whose SQLite row still says task_id/task_version; this maps the
 // PostgreSQL columns onto that in-memory row shape.
@@ -106,8 +117,8 @@ function occurrence(row: QueryResultRow): Record<string, unknown> {
     scheduled_for: iso(row.scheduled_for), status: String(row.status),
     lease_owner: row.lease_owner ? String(row.lease_owner) : null,
     lease_until: row.lease_until ? iso(row.lease_until) : null, attempts: Number(row.attempts),
-    next_attempt_at: iso(row.next_attempt_at), run_id: String(row.run_id),
-    instance_id: String(row.instance_id), control_id: String(row.control_id),
+    next_attempt_at: iso(row.next_attempt_at), run_id: row.run_id ? String(row.run_id) : null,
+    instance_id: row.instance_id ? String(row.instance_id) : null, control_id: String(row.control_id),
     delivery_kind: String(row.delivery_kind), message_id: row.message_id ? String(row.message_id) : null,
     error_code: row.error_code ? String(row.error_code) : null,
     error_message: row.error_message ? String(row.error_message) : null,
@@ -239,6 +250,21 @@ function authorityRoot(row: QueryResultRow): string {
   return typeof root === "string" && root ? root : String(row.owner_user_id);
 }
 
+/**
+ * The (Space, user) pairs among these whose user is a member who may use the
+ * Space's connected apps now: owner, admin or member, not a viewer or an
+ * open-project participant (open-project-governance.md §2).
+ */
+async function appUsers(tx: DatabaseTransaction, pairs: Array<{ spaceId: string; userId: string }>): Promise<Set<string>> {
+  if (pairs.length === 0) return new Set();
+  const rows = await tx.query<QueryResultRow>({ name: "automation_app_users_v1", text: `SELECT m.space_id,m.user_id
+    FROM data.space_members m JOIN unnest($1::text[],$2::text[]) AS pair(space_id,user_id)
+      ON pair.space_id=m.space_id AND pair.user_id=m.user_id
+    WHERE m.role NOT IN ('viewer','participant')`,
+  values: [pairs.map((pair) => pair.spaceId), pairs.map((pair) => pair.userId)], maxRows: pairs.length });
+  return new Set(rows.map((row) => `${String(row.space_id)}\u0000${String(row.user_id)}`));
+}
+
 /** `reasonRequired` is always false: no Automation change needs a stated
  * reason. It stays on the wire for CLIs that still require the field. */
 function capabilities(row: QueryResultRow) {
@@ -287,13 +313,27 @@ async function withPageAccess(tx: DatabaseTransaction, userId: string,
     const access = pages.get(String(row.page_id));
     if (access) visible.push({ ...row, can_manage: access.canEdit });
   }
-  return visible;
+  return withEventReadAccess(tx, userId, visible);
+}
+
+/** A readable schedule does not grant use of the Space's connected apps or their event details. */
+async function withEventReadAccess(tx: DatabaseTransaction, userId: string,
+  rows: readonly QueryResultRow[]): Promise<QueryResultRow[]> {
+  const channels = [...new Set(rows.filter((row) => Array.isArray(row.trigger_events) && row.trigger_events.length)
+    .map((row) => String(row.channel_id)))];
+  if (channels.length === 0) return [...rows];
+  const allowed = await tx.query<QueryResultRow>({ name: "automation_event_read_access_v1", text: `SELECT c.channel_id
+    FROM data.channels c JOIN data.space_members m ON m.space_id=c.space_id AND m.user_id=$2
+    WHERE c.channel_id=ANY($1::text[]) AND m.role IN ('owner','admin','member')`,
+  values: [channels, userId], maxRows: channels.length });
+  const readable = new Set(allowed.map((row) => String(row.channel_id)));
+  return rows.map((row) => readable.has(String(row.channel_id)) ? row : { ...row, trigger_events: null });
 }
 
 /** The Human read predicate: a page's Automation passes here and is checked against its page afterwards. */
 function humanReadable(userSql: string): string {
-  return `(t.page_id IS NOT NULL OR ${channelCapabilityPredicate({ capability: "automation_history_read",
-    channelAlias: "c", principalKindSql: "'user'", principalIdSql: userSql })})`;
+  return `(c.mode IN ('open','closed') AND (t.page_id IS NOT NULL OR ${channelCapabilityPredicate({ capability: "automation_history_read",
+    channelAlias: "c", principalKindSql: "'user'", principalIdSql: userSql })}))`;
 }
 
 function automationFromRow(row: QueryResultRow): Record<string, unknown> {
@@ -316,6 +356,7 @@ function automationFromRow(row: QueryResultRow): Record<string, unknown> {
   const taskCapabilities = capabilities(row);
   const canManage = Object.values(taskCapabilities).some((value) => value === true);
   const latest = row.execution_status ? {
+    runs: Array.isArray(row.execution_runs) ? row.execution_runs : [],
     status: String(row.execution_status), attempts: Number(row.execution_attempts) || 0,
     scheduledFor: iso(row.execution_scheduled_for), nextAttemptAt: iso(row.execution_next_attempt_at),
     updatedAt: iso(row.execution_updated_at),
@@ -336,7 +377,7 @@ function automationFromRow(row: QueryResultRow): Record<string, unknown> {
     nextRunAt: iso(row.next_run_at),
     enabled: row.enabled === true, runCount,
     ...(row.last_run_at ? { lastRunAt: iso(row.last_run_at) } : {}),
-    ...(row.last_run_id ? { lastRunId: String(row.last_run_id) } : {}),
+    ...(!messageAutomation && row.last_run_id ? { lastRunId: String(row.last_run_id) } : {}),
     ...(row.last_run_status ? { lastRunStatus: String(row.last_run_status) } : {}),
     ...(row.last_run_finished_at ? { lastRunFinishedAt: iso(row.last_run_finished_at) } : {}),
     ...(row.execution_cancellation ? { executionCancellation: publicExecutionCancellation(row.execution_cancellation) } : {}),
@@ -409,7 +450,7 @@ async function automationChannel(tx: DatabaseTransaction, channelId: string,
 async function pageAutomationChannel(tx: DatabaseTransaction, channelId: string, pageId: string,
   userId: string) {
   const rows = await tx.query<QueryResultRow>({ name: "page_automation_channel_v1",
-    text: "SELECT channel_id,space_id,mode,metadata_json,version FROM data.channels WHERE channel_id=$1 LIMIT 1",
+    text: "SELECT channel_id,space_id,mode,metadata_json,version FROM data.channels WHERE channel_id=$1 AND mode IN ('open','closed') LIMIT 1 FOR SHARE",
     values: [channelId], maxRows: 1 });
   const channel = rows[0];
   if (!channel) throw new AutomationControlError("not_found", 404, "channel not found");
@@ -439,31 +480,31 @@ async function requireManager(tx: DatabaseTransaction, automation: QueryResultRo
  */
 export const CHANNEL_AUTOMATION_WAKE_SQL = `SELECT MIN(wake_at) AS wake_at FROM (
           SELECT t.next_run_at AS wake_at,c.space_id,t.channel_id
-            FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+            FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
             WHERE t.channel_id=$1 AND t.enabled=true
           UNION ALL
           SELECT o.next_attempt_at,c.space_id,t.channel_id
             FROM data.automation_occurrences o
             JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
+            JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
             WHERE t.channel_id=$1 AND o.status='pending'
           UNION ALL
           SELECT o.lease_until,c.space_id,t.channel_id
             FROM data.automation_occurrences o
             JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
+            JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
             WHERE t.channel_id=$1 AND o.status IN ('leased','prepared') AND o.lease_until IS NOT NULL
           UNION ALL
           SELECT o.execution_deadline_at,c.space_id,t.channel_id
             FROM data.automation_occurrences o JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
+            JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
             WHERE t.channel_id=$1 AND o.status='dispatched' AND o.finished_at IS NULL
           UNION ALL
           SELECT (r.metadata_json#>>'{executionCancellation,processCleanup,nextAttemptAt}')::timestamptz,
             c.space_id,t.channel_id FROM data.runs r
             JOIN data.automation_occurrences o ON o.run_id=r.run_id AND o.owner_user_id=r.owner_user_id
             JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
+            JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
             WHERE t.channel_id=$1 AND o.status='cancelled'
               AND r.metadata_json#>>'{executionCancellation,processCleanup,status}'='pending'
           UNION ALL
@@ -471,7 +512,7 @@ export const CHANNEL_AUTOMATION_WAKE_SQL = `SELECT MIN(wake_at) AS wake_at FROM 
             FROM data.automation_occurrences o
             LEFT JOIN data.runs r ON r.run_id=o.run_id AND r.owner_user_id=o.owner_user_id
             JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
+            JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
             WHERE t.channel_id=$1 AND o.status='dispatched' AND o.finished_at IS NULL
               AND (r.run_id IS NULL OR r.status NOT IN (${ACTIVE_RUN_STATUS_SQL}))
         ) automation_wakes WHERE wake_at IS NOT NULL`;
@@ -489,6 +530,23 @@ export class PostgresAutomationRepository {
     this.entityDirectory = new PostgresEntitySpaceDirectory(database);
     this.membershipDirectory = new PostgresUserSpaceMembershipDirectory(database);
     this.placements = new PostgresSpacePlacementDirectory(database);
+  }
+
+  /**
+   * Catalogs and their access checks are lock-free reads. Keep their checkout
+   * request-local, but give each SELECT its own implicit transaction so a lost
+   * response gets the client's one fresh-checkout retry, without BEGIN/COMMIT.
+   * As with READ COMMITTED, each query sees its own snapshot; every placed
+   * query still checks and holds the placement fence for that statement.
+   */
+  private async read<T>(context: DatabaseRequestContext,
+    callback: (reader: DatabaseTransaction) => Promise<T>): Promise<T> {
+    const session = this.database.openSession();
+    try {
+      return await callback(singleReadStatements(session, context));
+    } finally {
+      await session.close();
+    }
   }
 
   private async placement(requestId: string, operation: string, spaceId: string): Promise<SpacePlacement> {
@@ -815,7 +873,7 @@ export class PostgresAutomationRepository {
       "conflict", 409, "Automation list scope is inconsistent");
     const placement = routedSpaceId
       ? await this.placement(requestId, "automation.list.placement", routedSpaceId) : null;
-    return this.database.transaction(placement ? { requestId, operation: "automation.list",
+    return this.read(placement ? { requestId, operation: "automation.list",
       placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch } } : {
       requestId, operation: "automation.list-unscoped-legacy",
@@ -835,17 +893,16 @@ export class PostgresAutomationRepository {
           o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
           o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
           o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-          o.error_message AS execution_error_message
-          FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+          o.error_message AS execution_error_message,o.run_links AS execution_runs
+          FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
           LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-          LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-            ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+          LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
           WHERE t.channel_id=$2
             AND ${channelCapabilityPredicate({ capability: "automation_history_read", channelAlias: "c",
               principalKindSql: "'agent'", principalIdSql: "$1" })}
             AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$3 ORDER BY t.automation_id LIMIT $4`,
         values: [authority.principalId, authority.channelId, cursor, limit + 1], maxRows: limit + 1 });
-        const page = rows.slice(0, limit);
+        const page = await withEventReadAccess(tx, authority.ownerUserId, rows.slice(0, limit));
         return { tasks: page.map(automationFromRow), cursor: rows.length > limit
           ? String(page.at(-1)?.automation_id ?? "") : null,
           executionEnabled: true, agentManagementEnabled: true };
@@ -857,13 +914,12 @@ export class PostgresAutomationRepository {
         o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
         o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
         o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-        o.error_message AS execution_error_message
-        FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+        o.error_message AS execution_error_message,o.run_links AS execution_runs
+        FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
         JOIN data.space_members sm ON sm.space_id=c.space_id AND sm.user_id=$1
         LEFT JOIN data.channel_access ca ON ca.channel_id=c.channel_id AND ca.subject_kind='user' AND ca.subject_id=$1
         LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-        LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-          ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+        LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
         WHERE ${humanReadable("$1")}
           AND ($2::text IS NULL OR c.space_id=$2) AND ($3::text IS NULL OR c.channel_id=$3)
           AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$4 ORDER BY t.automation_id LIMIT $5`,
@@ -880,7 +936,7 @@ export class PostgresAutomationRepository {
     const requestId = text(input.requestId, "requestId", 200);
     const spaceId = text(input.spaceId, "spaceId", 300);
     const placement = await this.placement(requestId, "automation.page.placement", spaceId);
-    return this.database.transaction({ requestId, operation: "automation.page.list", placement: {
+    return this.read({ requestId, operation: "automation.page.list", placement: {
       spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch,
     } }, async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "automation_page_list_v1", text: `SELECT
@@ -889,11 +945,10 @@ export class PostgresAutomationRepository {
         o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
         o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
         o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-        o.error_message AS execution_error_message
-        FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+        o.error_message AS execution_error_message,o.run_links AS execution_runs
+        FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
         LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-        LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-          ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+        LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
         WHERE t.page_id=$1 AND c.space_id=$2 ORDER BY t.created_at,t.automation_id LIMIT 200`,
       values: [text(input.pageId, "pageId", 300), spaceId], maxRows: 200 });
       const visible = await withPageAccess(tx, text(input.userId, "userId", 300), rows);
@@ -917,7 +972,7 @@ export class PostgresAutomationRepository {
     }
     const pages = await Promise.all([...byShard.values()].map(async (group) => {
       const anchor = group[0]!;
-      return this.database.transaction({ requestId: input.requestId,
+      return this.read({ requestId: input.requestId,
         operation: "automation.list-shard", placement: {
           spaceId: anchor.spaceId, shardId: anchor.shardId,
           placementEpoch: anchor.placementEpoch,
@@ -928,14 +983,13 @@ export class PostgresAutomationRepository {
           o.status AS execution_status,o.attempts AS execution_attempts,
           o.scheduled_for AS execution_scheduled_for,o.next_attempt_at AS execution_next_attempt_at,
           o.updated_at AS execution_updated_at,o.finished_at AS execution_finished_at,
-          o.error_code AS execution_error_code,o.error_message AS execution_error_message
-          FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+          o.error_code AS execution_error_code,o.error_message AS execution_error_message,o.run_links AS execution_runs
+          FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
           JOIN data.space_members sm ON sm.space_id=c.space_id AND sm.user_id=$1
           LEFT JOIN data.channel_access ca ON ca.channel_id=c.channel_id
             AND ca.subject_kind='user' AND ca.subject_id=$1
           LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-          LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x
-            WHERE x.automation_id=t.automation_id ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+          LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
           WHERE c.space_id=ANY($2::text[]) AND ${humanReadable("$1")}
             AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$3 ORDER BY t.automation_id LIMIT $4`,
         values: [input.userId, group.map((route) => route.spaceId), input.cursor, input.limit + 1],
@@ -954,7 +1008,7 @@ export class PostgresAutomationRepository {
     const principal = object(input.principal, "principal");
     const automationId = text(input.automationId ?? input.taskId, "automationId", 300);
     const placement = await this.opaquePlacement(requestId, "automation", automationId);
-    return this.database.transaction({ requestId, operation: "automation.get",
+    return this.read({ requestId, operation: "automation.get",
       placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch } }, async (tx) => {
       if (principal.kind === "agent") {
@@ -968,17 +1022,17 @@ export class PostgresAutomationRepository {
           o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
           o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
           o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-          o.error_message AS execution_error_message
-          FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+          o.error_message AS execution_error_message,o.run_links AS execution_runs
+          FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
           LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-          LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-            ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+          LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
           WHERE t.automation_id=$2 AND t.channel_id=$3 AND ${agentBirthBindingSql("t.channel_id", "$1")}
             AND ${channelCapabilityPredicate({ capability: "automation_history_read", channelAlias: "c",
               principalKindSql: "'agent'", principalIdSql: "$1" })} AND ${MESSAGE_AUTOMATION_SQL} LIMIT 1`,
         values: [authority.principalId, automationId, authority.channelId], maxRows: 1 });
         if (!rows[0]) throw new AutomationControlError("automation_not_found", 404, "Automation not found");
-        return { task: automationFromRow(rows[0]) };
+        const visible = await withEventReadAccess(tx, authority.ownerUserId, rows);
+        return { task: automationFromRow(visible[0]!) };
       }
       const userId = humanPrincipal(input);
       const rows = await withPageAccess(tx, userId, await tx.query<QueryResultRow>({ name: "automation_get_v5", text: `SELECT
@@ -987,13 +1041,12 @@ export class PostgresAutomationRepository {
         o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
         o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
         o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
-        o.error_message AS execution_error_message
-        FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+        o.error_message AS execution_error_message,o.run_links AS execution_runs
+        FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
         JOIN data.space_members sm ON sm.space_id=c.space_id AND sm.user_id=$1
         LEFT JOIN data.channel_access ca ON ca.channel_id=c.channel_id AND ca.subject_kind='user' AND ca.subject_id=$1
         LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
-        LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
-          ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
+        LEFT JOIN LATERAL (${LATEST_OCCURRENCE_SQL}) o ON true
         WHERE t.automation_id=$2 AND ${humanReadable("$1")} AND ${MESSAGE_AUTOMATION_SQL} LIMIT 1`,
       values: [userId, automationId], maxRows: 1 }));
       if (!rows[0]) throw new AutomationControlError(
@@ -1037,7 +1090,7 @@ export class PostgresAutomationRepository {
       const due = await tx.query<QueryResultRow>({ name: "automation_due_lock_v2", text: `SELECT *
         FROM data.automations WHERE enabled=true AND next_run_at<=$1
           AND EXISTS (SELECT 1 FROM data.channels c
-            WHERE c.channel_id=automations.channel_id
+            WHERE c.channel_id=automations.channel_id AND c.mode IN ('open','closed')
               AND ($3::text IS NULL OR c.space_id=$3))
         ORDER BY next_run_at,automation_id LIMIT $2 FOR UPDATE SKIP LOCKED`,
       values: [now, OCCURRENCE_BATCH_SIZE, spaceId], maxRows: OCCURRENCE_BATCH_SIZE });
@@ -1119,12 +1172,12 @@ export class PostgresAutomationRepository {
           continue;
         }
         const occurrenceId = `scheduled-occurrence:${crypto.randomUUID()}`;
-        // The occurrence records its reserved natural key; the dispatch that
-        // later starts it must use exactly these ids.
+        // Message occurrences deliver invocations, not Runs. Registration launch
+        // owns every actual Run, joined by its exact canonical source message.
         const legacyIds = executionIds(occurrenceId);
-        const reserved = await reserveNaturalKey(tx, { creationKey: legacyIds.runId,
+        const reserved = deliveryKind === "message" ? null : await reserveNaturalKey(tx, { creationKey: legacyIds.runId,
           channelId: String(current.channel_id), scope: "instance", at: now });
-        const ids = { ...legacyIds, runId: reserved.runId, instanceId: reserved.instanceId! };
+        const ids = { ...legacyIds, runId: reserved?.runId ?? null, instanceId: reserved?.instanceId ?? null };
         const messageId = deliveryKind === "message"
           ? `scheduled-message:${occurrenceId.slice("scheduled-occurrence:".length)}`.slice(0, 200) : null;
         // The occurrence takes the events that made it due, to name them.
@@ -1154,7 +1207,7 @@ export class PostgresAutomationRepository {
       const rows = await tx.query<QueryResultRow>({ name: "scheduled_occurrence_claim_v3", text: `WITH candidate AS (
         SELECT o.occurrence_id FROM data.automation_occurrences o
         JOIN data.automations t ON t.automation_id=o.automation_id
-        JOIN data.channels c ON c.channel_id=t.channel_id
+        JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
         WHERE o.status='pending' AND o.next_attempt_at<=$1
           AND ($2::text IS NULL OR c.space_id=$2)
         ORDER BY o.next_attempt_at,o.scheduled_for,o.occurrence_id LIMIT 1 FOR UPDATE OF o SKIP LOCKED)
@@ -1214,7 +1267,7 @@ export class PostgresAutomationRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "automation.execution.get" }, async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "automation_execution_get_v2",
-        text: `SELECT t.* FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+        text: `SELECT t.* FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
           WHERE t.automation_id=$1 LIMIT 1`,
         values: [text(input.taskId, "taskId", 300)], maxRows: 1 });
       const row = rows[0];
@@ -1232,7 +1285,7 @@ export class PostgresAutomationRepository {
       const active = await tx.query<QueryResultRow>({ name: "scheduled_occurrence_dispatch_lock_v3",
         text: `SELECT o.status,o.lease_owner,o.error_message,o.finished_at
           FROM data.automation_occurrences o JOIN data.automations t ON t.automation_id=o.automation_id
-          JOIN data.channels c ON c.channel_id=t.channel_id
+          JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
           WHERE o.occurrence_id=$1 FOR UPDATE OF o`,
       values: [input.occurrenceId], maxRows: 1 });
       if (active[0]?.status !== "prepared" || active[0].lease_owner !== input.leaseOwner) {
@@ -1270,7 +1323,7 @@ export class PostgresAutomationRepository {
           AND ($5::text IS NULL OR delivery_kind=$5) AND ($6::text IS NULL OR message_id=$6)
           AND ($7::text IS NULL OR run_id=$7) AND ($8::text IS NULL OR instance_id=$8)
           AND EXISTS (SELECT 1 FROM data.automations t
-            JOIN data.channels c ON c.channel_id=t.channel_id
+            JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
             WHERE t.automation_id=automation_occurrences.automation_id)
         RETURNING occurrence_id`, values: [
         input.errorMessage ?? null, now, text(input.occurrenceId, "occurrenceId", 300),
@@ -1309,7 +1362,7 @@ export class PostgresAutomationRepository {
       const rows = await tx.query<QueryResultRow>({ name: "scheduled_occurrence_prepared_assert_v3",
         text: `SELECT 1 AS present FROM data.automation_occurrences o
           JOIN data.automations t ON t.automation_id=o.automation_id
-          JOIN data.channels c ON c.channel_id=t.channel_id WHERE o.occurrence_id=$1
+          JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed') WHERE o.occurrence_id=$1
           AND o.automation_id=$2 AND o.status='prepared' AND o.lease_owner=$3
           AND o.control_id=$4 AND o.run_id=$5 LIMIT 1`,
         values: [input.occurrenceId, input.taskId, input.leaseOwner, input.controlId, input.runId], maxRows: 1 });
@@ -1366,7 +1419,7 @@ export class PostgresAutomationRepository {
         text: `SELECT o.*,t.channel_id,r.metadata_json,r.status AS run_status FROM data.runs r
           JOIN data.automation_occurrences o ON o.run_id=r.run_id AND o.owner_user_id=r.owner_user_id
           JOIN data.automations t ON t.automation_id=o.automation_id AND t.owner_user_id=o.owner_user_id
-          JOIN data.channels c ON c.channel_id=t.channel_id
+          JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
           WHERE o.automation_id=$1 AND o.run_id=$2 AND o.owner_user_id=$3 AND c.space_id=$4
           FOR UPDATE OF r`, values: [automationId, runId, ownerUserId, placement.spaceId], maxRows: 1 });
       const row = rows[0];
@@ -1403,7 +1456,7 @@ export class PostgresAutomationRepository {
         o.*,t.channel_id FROM data.runs r JOIN data.automation_occurrences o
           ON o.run_id=r.run_id AND o.owner_user_id=r.owner_user_id
         JOIN data.automations t ON t.automation_id=o.automation_id AND t.owner_user_id=o.owner_user_id
-        JOIN data.channels c ON c.channel_id=t.channel_id
+        JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
         WHERE o.status='dispatched' AND o.finished_at IS NULL
           AND o.execution_deadline_at<=$1 AND r.status IN (${ACTIVE_RUN_STATUS_SQL})
           AND ($2::text IS NULL OR c.space_id=$2)
@@ -1425,7 +1478,7 @@ export class PostgresAutomationRepository {
           FROM data.runs r JOIN data.automation_occurrences o ON o.run_id=r.run_id
             AND o.owner_user_id=r.owner_user_id
           JOIN data.automations t ON t.automation_id=o.automation_id
-          JOIN data.channels c ON c.channel_id=t.channel_id
+          JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
           WHERE o.status='cancelled' AND r.status IN (${TERMINAL_RUN_STATUS_SQL})
             AND r.metadata_json#>>'{executionCancellation,processCleanup,status}'='pending'
             AND (r.metadata_json#>>'{executionCancellation,processCleanup,nextAttemptAt}')::timestamptz<=$1
@@ -1488,7 +1541,7 @@ export class PostgresAutomationRepository {
         FROM data.automation_occurrences o LEFT JOIN data.runs r
           ON r.run_id=o.run_id AND r.owner_user_id=o.owner_user_id
         JOIN data.automations t ON t.automation_id=o.automation_id
-        JOIN data.channels c ON c.channel_id=t.channel_id
+        JOIN data.channels c ON c.channel_id=t.channel_id AND c.mode IN ('open','closed')
         WHERE o.status='dispatched' AND o.finished_at IS NULL AND o.updated_at<=$1
           AND ($2::text IS NULL OR c.space_id=$2)
           AND (r.run_id IS NULL OR r.status NOT IN (${ACTIVE_RUN_STATUS_SQL}))
@@ -1568,18 +1621,22 @@ export class PostgresAutomationRepository {
    * §6.2). The caller decides which of them the event really fires.
    */
   async triggeredBy(input: { requestId: string; trigger: Record<string, unknown>; spaceId?: string;
-    pageId?: string }): Promise<Array<{ automationId: string; channelId: string; spaceId: string; pageId: string;
+    pageId?: string; appUse?: boolean }): Promise<Array<{ automationId: string; channelId: string; spaceId: string; pageId: string;
       authorityRootUserId: string; triggers: unknown[] }>> {
     const requestId = text(input.requestId, "requestId", 200);
     return this.database.transaction({ requestId, operation: "automation.triggered-by" }, async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "automation_triggered_by_v1", text: `SELECT
           a.automation_id,a.channel_id,a.page_id,a.owner_user_id,a.payload_json,c.space_id
-        FROM data.automations a JOIN data.channels c ON c.channel_id=a.channel_id
+        FROM data.automations a JOIN data.channels c ON c.channel_id=a.channel_id AND c.mode IN ('open','closed')
         WHERE a.page_id IS NOT NULL AND a.enabled=true AND (a.payload_json->'triggers') @> $1::jsonb
           AND ($2::text IS NULL OR c.space_id=$2) AND ($3::text IS NULL OR a.page_id=$3)
         ORDER BY a.automation_id LIMIT 200`,
       values: [JSON.stringify([input.trigger]), input.spaceId ?? null, input.pageId ?? null], maxRows: 200 });
-      return rows.map((row) => ({ automationId: String(row.automation_id), channelId: String(row.channel_id),
+      // An event from the Space's connected apps concerns only Automations whose authority may use them now.
+      const users = input.appUse ? await appUsers(tx, rows.map((row) => ({ spaceId: String(row.space_id),
+        userId: authorityRoot(row) }))) : undefined;
+      return rows.filter((row) => !users || users.has(`${String(row.space_id)}\u0000${authorityRoot(row)}`))
+        .map((row) => ({ automationId: String(row.automation_id), channelId: String(row.channel_id),
         spaceId: String(row.space_id), pageId: String(row.page_id), authorityRootUserId: authorityRoot(row),
         triggers: Array.isArray(json(row.payload_json).triggers) ? json(row.payload_json).triggers as unknown[] : [] }));
     });
@@ -1591,7 +1648,7 @@ export class PostgresAutomationRepository {
    * Returns the conversation to tell, or null when nothing changed.
    */
   async fireTrigger(input: { requestId: string; automationId: string; eventId: string;
-    event: Record<string, unknown>; at: string }, dingtalkEffect?: DingTalkEffectAuthority): Promise<string | null> {
+    event: Record<string, unknown>; at: string; appUse?: boolean }, dingtalkEffect?: DingTalkEffectAuthority): Promise<string | null> {
     const requestId = text(input.requestId, "requestId", 200);
     const at = timestamp(input.at, "at");
     const placement=dingtalkEffect ? await this.placement(requestId,"automation.dingtalk-effect.placement",dingtalkEffect.spaceId) : undefined;
@@ -1610,11 +1667,16 @@ export class PostgresAutomationRepository {
       const rows = await tx.query<QueryResultRow>({ name: "automation_trigger_lock_v1", text: `SELECT
           a.automation_id,a.channel_id,a.version,a.trigger_events,c.space_id,a.owner_user_id,a.payload_json,
           (extract(epoch from a.created_at)*1000000)::bigint::text AS birth
-        FROM data.automations a JOIN data.channels c ON c.channel_id=a.channel_id
+        FROM data.automations a JOIN data.channels c ON c.channel_id=a.channel_id AND c.mode IN ('open','closed')
         WHERE a.automation_id=$1 AND a.enabled=true AND a.page_id IS NOT NULL FOR UPDATE OF a`,
       values: [text(input.automationId, "automationId", 300)], maxRows: 1 });
       const row = rows[0];
       if (!row) { if (dingtalkEffect) dingtalkDenied(); return null; }
+      // Checked again under the Automation's lock: an authority who lost member
+      // rights keeps the Automation, but connected-app events no longer reach it.
+      if (input.appUse && !(await appUsers(tx, [{ spaceId: String(row.space_id), userId: authorityRoot(row) }])).size) {
+        return null;
+      }
       if (dingtalkEffect && source) {
         const destination=dingtalkEffect.destination;
         const triggers=json(row.payload_json).triggers;

@@ -71,14 +71,6 @@ export function githubFeatureCommand(
   return { source: githubSubscriptionSource(name), body: statements.join("\n") };
 }
 
-export function githubSubscribeCommand(
-  repository: string,
-  features: readonly GitHubRepositoryFeature[],
-): ChannelConnectorCommand | undefined {
-  if (features.length === 0) return undefined;
-  return githubFeatureCommand(repository, [], features);
-}
-
 /** Drop the repository from this channel outright, whatever it is subscribed to. */
 export function githubUnsubscribeCommand(
   repository: string,

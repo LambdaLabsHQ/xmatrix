@@ -1,30 +1,40 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { renderSVG } from "uqr";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowRight,
   Loader2,
-  Mail,
   ShieldCheck,
   AlertTriangle,
   ExternalLink,
 } from "lucide-react";
-import { BrandMark } from "@/components/shared/brand-mark";
+import {
+  AuthDivider,
+  AuthError,
+  AuthHeading,
+  AuthLinks,
+  AuthPrimaryButton,
+  AuthRequest,
+  AuthSecondaryButton,
+  AuthShell,
+} from "@/components/auth/auth-shell";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { useAuth } from "@/lib/auth-context";
 import {
   getDesktopBridge,
   type DesktopBridge,
 } from "@/lib/desktop/bridge";
-import { exchangeDesktopCliSession, requestCliSessionExchange } from "@/lib/desktop/session-exchange";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { requestCliSessionExchange } from "@/lib/desktop/session-exchange";
+import { AppSignInRefused, appleSignInNonce, signInAppWithProvider } from "@/lib/app-sign-in";
+import { NEW_ACCOUNT_FLAG } from "@/components/auth/new-account-step";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import { WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
+import { APP_SIGN_IN_FINISH_PATH, WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
 import {
-  authorizationLabel,
   deviceClientLabel as getDeviceClientLabel,
   deviceProductName,
   nativeAppLabel as getNativeAppLabel,
@@ -35,10 +45,14 @@ import {
 } from "@/lib/native-login-client";
 import { errorFromResponse, isTransientFailure, xmatrixRawResponse, XMatrixApiError, unexpectedResponse } from "@/lib/query/api-client";
 import { isAbort, userErrorMessage } from "@/lib/user-facing-error";
+import { authBaseUrl, isTransientAuthSessionError, type SocialSignInProvider } from "@/lib/auth-client";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;
+const RESEND_COOLDOWN_SECONDS = 30;
 const PENDING_DESKTOP_DEVICE_LOGIN_KEY = "xmatrix.pendingDesktopDeviceLogin";
+/* The app also asks at once when it is brought back, so a long wait between polls is never needed. */
+const DESKTOP_POLL_MAX_SECONDS = 10;
 
 type DesktopLoginState = {
   status: "idle" | "opening" | "waiting" | "complete" | "error";
@@ -66,6 +80,13 @@ type DeviceLoginPollResponse = {
   error?: string;
 };
 
+type DeviceRequestDescription = {
+  createdAt: string;
+  hostname?: string;
+  platform?: string;
+  requestedFrom?: string;
+};
+
 type PendingDesktopDeviceLogin = {
   deviceCode: string;
   verificationUrl: string;
@@ -73,6 +94,12 @@ type PendingDesktopDeviceLogin = {
   interval: number;
   pendingPollCount?: number;
 };
+
+const AppleIcon = (props: React.ComponentProps<"svg">) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+    <path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.18-1.73-1.35-.14-2.64.8-3.33.8-.69 0-1.74-.78-2.86-.76-1.47.02-2.83.86-3.59 2.17-1.53 2.66-.39 6.6 1.1 8.76.73 1.06 1.6 2.24 2.73 2.2 1.1-.04 1.51-.71 2.84-.71 1.32 0 1.7.71 2.86.69 1.18-.02 1.93-1.07 2.65-2.13.84-1.22 1.18-2.41 1.2-2.47-.03-.01-2.3-.88-2.32-3.5ZM14.2 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.65-1.05 1.69-.92 2.68.97.08 1.96-.49 2.56-1.23Z" />
+  </svg>
+);
 
 const GoogleIcon = (props: React.ComponentProps<"svg">) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" {...props}>
@@ -109,8 +136,12 @@ function LoginContent() {
   const {
     signInWithOtp,
     verifyOtp,
-    signInWithGoogle,
+    verifySecondFactor,
+    signInWithSocial,
+    signInWithApple,
+    signInWithPasskey,
     setSessionFromAuthResponse,
+    logout,
     user,
     session,
     loading: authLoading,
@@ -118,15 +149,39 @@ function LoginContent() {
 
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<"email" | "otp">("email");
+  /* A password or social sign-in that waits on the authenticator code arrives with `two_factor`. */
+  const [step, setStep] = useState<"email" | "otp" | "two_factor">(
+    () => searchParams.get("two_factor") ? "two_factor" : "email");
+  const [secondCode, setSecondCode] = useState("");
+  const [useBackupCode, setUseBackupCode] = useState(false);
+  const [trustDevice, setTrustDevice] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<SocialSignInProvider | "apple" | "passkey" | null>(null);
+  /* The last code check got no answer: the code is unspent and can be sent again. */
+  const [codeUnanswered, setCodeUnanswered] = useState(false);
+  const [resendAt, setResendAt] = useState(0);
+  const [clock, setClock] = useState(0);
+  const resendSeconds = Math.max(0, Math.ceil((resendAt - clock) / 1000));
+  const otpFormRef = useRef<HTMLFormElement>(null);
+  const secondFactorFormRef = useRef<HTMLFormElement>(null);
   const [cliComplete, setCliComplete] = useState(false);
   /* A device sign-in hands this account's session to whoever started it, so
      it is approved only by an explicit click after the person compares the
      code, never by opening a link while signed in. */
   const [deviceApprovalConfirmed, setDeviceApprovalConfirmed] = useState(false);
+  /* What the waiting device says about itself, read once to show beside its code. */
+  const [deviceRequest, setDeviceRequest] = useState<DeviceRequestDescription | "unknown" | null>(null);
+  const [deviceDeclined, setDeviceDeclined] = useState(false);
+  /* The older terminal sign-in hands a session to a local port; it too waits for an explicit click. */
+  const [legacyApprovalConfirmed, setLegacyApprovalConfirmed] = useState(false);
   const [desktopBridge, setDesktopBridge] = useState<DesktopBridge | null>(null);
+  const [webAuthnAvailable, setWebAuthnAvailable] = useState(false);
+  /* The desktop app shows a code for a signed-in phone to scan and approve. */
+  const [phoneSignIn, setPhoneSignIn] = useState(false);
+  /* How this browser last signed in, to put that way first in mind. */
+  const [lastUsed, setLastUsed] = useState<SignInMethod | null>(null);
   const [nativeClient, setNativeClient] = useState<NativeLoginClient>("desktop");
   const [desktopLogin, setDesktopLogin] = useState<DesktopLoginState>({ status: "idle" });
   const legacyCliSubmittedRef = useRef(false);
@@ -134,8 +189,10 @@ function LoginContent() {
   const desktopLoginStartedRef = useRef(false);
   const desktopLoginRunRef = useRef(0);
   const desktopPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const desktopPollNowRef = useRef<(() => void) | null>(null);
   const setSessionFromAuthResponseRef = useRef(setSessionFromAuthResponse);
   const otpVerificationStartedRef = useRef(false);
+  const appSignInAttemptRef = useRef(0);
 
   const cliCallback = searchParams.get("cli_callback");
   const cliState = searchParams.get("cli_state");
@@ -151,23 +208,41 @@ function LoginContent() {
   const legacyCliContext = parseCliLoginContext(cliCallback, cliState, cliHub);
   const cliCallbackContext = isCliCallbackContext(legacyCliContext) ? legacyCliContext : null;
   const cliError = legacyCliContext?.error ?? "";
-  const formError =
-    cliError ||
-    error ||
-    authError ||
-    (oauthError ? "Google sign-in did not complete. Try again, or use a login code." : "");
+  const formError = cliError || error || authError || (oauthError ? socialSignInFailure(oauthError) : "");
   const cliMode = Boolean(deviceCode || legacyCliContext);
   const awaitingDeviceConfirmation = Boolean(
     session?.access_token && deviceCode && userCode && !deviceApprovalConfirmed && !cliComplete,
   );
-  const cliModeActive = cliMode && !cliError;
+  const awaitingLegacyConfirmation = Boolean(
+    session?.access_token && cliCallbackContext && !legacyApprovalConfirmed && !cliComplete,
+  );
   const desktopMode = Boolean(desktopBridge) && !cliMode;
   const desktopModeActive = desktopMode && !user;
+  /* An app that can open the provider's page in place signs in right here, like the web; older ones use the browser. */
+  const inAppSignIn = desktopModeActive && Boolean(desktopBridge?.authorizeInBrowser);
+  const browserSignIn = desktopModeActive && !inAppSignIn;
+  /* Passkeys are made for the site's own domain in a browser; the app shells don't offer them to the page yet. */
+  const passkeysOffered = webAuthnAvailable && !desktopBridge;
+  /* The second factor of an app's provider sign-in is asked in its sign-in sheet; the Hub hands the app its code after. */
+  const continueAfterSecondFactor = appSignInContinuation(searchParams.get("continue"));
   const deviceClientLabel = getDeviceClientLabel(deviceClient);
   const nativeAppLabel = getNativeAppLabel(nativeClient);
-  const nativeReturnUrl = nativeLoginReturnUrl(deviceClient);
+  /* A request scanned on another device has no app here to bring back. */
+  const nativeReturnUrl = searchParams.get("scanned") ? null : nativeLoginReturnUrl(deviceClient);
 
   useEffect(() => {
+    if (!awaitingDeviceConfirmation || !deviceCode || !userCode || deviceRequest !== null) return;
+    let cancelled = false;
+    void describeDeviceRequest(deviceCode, userCode)
+      .then((description) => { if (!cancelled) setDeviceRequest(description); })
+      // Not reading the description only leaves the code to compare.
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [awaitingDeviceConfirmation, deviceCode, userCode, deviceRequest]);
+
+  useEffect(() => {
+    setLastUsed(readLastSignInMethod());
+    setWebAuthnAvailable("PublicKeyCredential" in window);
     const bridge = getDesktopBridge();
     setDesktopBridge(bridge);
     if (!bridge) return;
@@ -220,14 +295,11 @@ function LoginContent() {
       return;
     }
 
-    startDesktopDeviceLoginPolling(pending, desktopBridge);
+    startDesktopDeviceLoginPolling(pending);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resumes a pending login when its inputs change, not per render
   }, [authLoading, cliMode, desktopBridge, nextPath, user]);
 
-  function startDesktopDeviceLoginPolling(
-    pendingLogin: PendingDesktopDeviceLogin,
-    bridge: DesktopBridge
-  ) {
+  function startDesktopDeviceLoginPolling(pendingLogin: PendingDesktopDeviceLogin) {
     const runId = desktopLoginRunRef.current + 1;
     desktopLoginRunRef.current = runId;
     desktopLoginStartedRef.current = true;
@@ -276,12 +348,7 @@ function LoginContent() {
           }
 
           clearPendingDesktopDeviceLogin();
-          if (bridge.saveCliSession) {
-            const cliSession = await exchangeDesktopCliSession(payload.token);
-            await bridge.saveCliSession(cliSession);
-            await bridge.startDaemon?.();
-          }
-
+          // Taking the session up also hands this computer's CLI its own.
           await setSessionFromAuthResponseRef.current({
             token: payload.token,
             refreshToken: payload.refreshToken,
@@ -301,19 +368,20 @@ function LoginContent() {
           setDesktopLogin({
             status: "error",
             verificationUrl: pendingLogin.verificationUrl,
-            error: "Browser login expired. Start a fresh sign-in.",
+            error: payload.error && payload.error !== "Device login request expired"
+              ? payload.error : "Browser login expired. Start a fresh sign-in.",
           });
           return;
         }
 
         pendingPollCount += 1;
         const serverInterval = Math.max(5, payload.interval || pollInterval);
-        pollInterval = Math.min(30, serverInterval * Math.max(1, Math.ceil(pendingPollCount / 3)));
+        pollInterval = Math.min(DESKTOP_POLL_MAX_SECONDS, serverInterval * Math.max(1, Math.ceil(pendingPollCount / 3)));
         writePendingDesktopDeviceLogin({ ...pendingLogin, interval: pollInterval, pendingPollCount });
         desktopPollTimerRef.current = setTimeout(pollForApproval, pollInterval * 1000);
       } catch (nextError) {
         if (Date.now() < pendingLogin.expiresAt && isTransientDeviceLoginPollError(nextError)) {
-          pollInterval = Math.min(30, Math.max(5, pollInterval));
+          pollInterval = Math.min(DESKTOP_POLL_MAX_SECONDS, Math.max(5, pollInterval));
           setDesktopLogin({
             status: "waiting",
             verificationUrl: pendingLogin.verificationUrl,
@@ -332,13 +400,35 @@ function LoginContent() {
       }
     }
 
+    // Coming back to the app is when the browser has most likely finished: ask at once.
+    desktopPollNowRef.current = () => {
+      if (!loginRunIsCurrent()) return;
+      if (desktopPollTimerRef.current) clearTimeout(desktopPollTimerRef.current);
+      desktopPollTimerRef.current = null;
+      void pollForApproval();
+    };
     void pollForApproval();
   }
 
-  async function handleDesktopBrowserLogin() {
+  useEffect(() => {
+    if (!desktopBridge) return;
+    const pollNow = () => {
+      if (document.visibilityState === "visible" && desktopPollTimerRef.current) desktopPollNowRef.current?.();
+    };
+    window.addEventListener("focus", pollNow);
+    document.addEventListener("visibilitychange", pollNow);
+    return () => {
+      window.removeEventListener("focus", pollNow);
+      document.removeEventListener("visibilitychange", pollNow);
+    };
+  }, [desktopBridge]);
+
+  /** Starts a device sign-in: approved in the browser, or (`viaPhone`) by a signed-in phone scanning its code. */
+  async function handleDesktopBrowserLogin(viaPhone = false) {
     if (!desktopBridge || cliMode || authLoading || user || desktopLoginStartedRef.current) {
       return;
     }
+    setPhoneSignIn(viaPhone);
 
     const bridge = desktopBridge;
     clearPendingDesktopDeviceLogin();
@@ -359,6 +449,7 @@ function LoginContent() {
       const deviceLogin = (await startResponse.json()) as DeviceLoginStartResponse;
       const verificationUrl = new URL(deviceLogin.verificationUriComplete);
       verificationUrl.searchParams.set("client", nativeClient);
+      if (viaPhone) verificationUrl.searchParams.set("scanned", "1");
       const pendingLogin: PendingDesktopDeviceLogin = {
         deviceCode: deviceLogin.deviceCode,
         verificationUrl: verificationUrl.toString(),
@@ -372,8 +463,8 @@ function LoginContent() {
         status: "waiting",
         verificationUrl: pendingLogin.verificationUrl,
       });
-      await bridge.openExternal(pendingLogin.verificationUrl);
-      startDesktopDeviceLoginPolling(pendingLogin, bridge);
+      if (!viaPhone) await bridge.openExternal(pendingLogin.verificationUrl);
+      startDesktopDeviceLoginPolling(pendingLogin);
     } catch (nextError) {
       clearPendingDesktopDeviceLogin();
       desktopLoginStartedRef.current = false;
@@ -423,6 +514,7 @@ function LoginContent() {
       if (
         !session?.access_token ||
         !cliCallbackContext ||
+        !legacyApprovalConfirmed ||
         legacyCliSubmittedRef.current
       ) {
         return;
@@ -456,6 +548,7 @@ function LoginContent() {
         setCliComplete(true);
       } catch (nextError) {
         legacyCliSubmittedRef.current = false;
+        setLegacyApprovalConfirmed(false);
         setError(userErrorMessage(nextError, "Couldn't hand the session to your terminal") ?? "");
       } finally {
         setLoading(false);
@@ -477,6 +570,7 @@ function LoginContent() {
     }
   }, [
     cliCallbackContext,
+    legacyApprovalConfirmed,
     deviceApprovalConfirmed,
     deviceCode,
     userCode,
@@ -487,17 +581,148 @@ function LoginContent() {
     user,
   ]);
 
-  async function handleGoogleLogin() {
+  // Counts down the resend wait; stops once the wait is over.
+  useEffect(() => {
+    if (!resendAt) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (now >= resendAt) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendAt]);
+
+  // A full code (typed, pasted or filled from the mail app) signs in at once.
+  useEffect(() => {
+    if (step === "otp" && otp.length === LOGIN_CODE_LENGTH) {
+      otpFormRef.current?.requestSubmit();
+    }
+  }, [otp, step]);
+
+  useEffect(() => {
+    if (step === "two_factor" && !useBackupCode && secondCode.length === LOGIN_CODE_LENGTH) {
+      secondFactorFormRef.current?.requestSubmit();
+    }
+  }, [secondCode, step, useBackupCode]);
+
+  function startResendWait() {
+    const now = Date.now();
+    setClock(now);
+    setResendAt(now + RESEND_COOLDOWN_SECONDS * 1000);
+  }
+
+  function changeEmail() {
+    setStep("email");
+    setOtp("");
     setError("");
-    setLoading(true);
+    setNotice("");
+    setCodeUnanswered(false);
+  }
+
+  async function handleResendCode() {
+    if (loading || resendSeconds > 0) return;
+    setError("");
+    setNotice("");
+    setOtp("");
+    startResendWait();
     try {
-      await signInWithGoogle(
-        cliMode ? window.location.href : nextPath ? `${window.location.origin}${nextPath}` : undefined,
-      );
+      await signInWithOtp(email.trim());
+      setNotice("We sent a new code. Use the one in the newest email.");
     } catch (nextError) {
       setError(formatLoginError(nextError));
-      setLoading(false);
     }
+  }
+
+  async function handleSocialLogin(provider: SocialSignInProvider) {
+    setError("");
+    setSocialLoading(provider);
+    // The browser leaves for the provider here; a sign-in that comes back is how it was used.
+    rememberSignInMethod(provider);
+    try {
+      await signInWithSocial(provider, cliMode ? window.location.href : nextPath || undefined);
+    } catch (nextError) {
+      setError(formatLoginError(nextError));
+      setSocialLoading(null);
+    }
+  }
+
+  // A browser that can offer a saved passkey in the email field does so; choosing it signs in.
+  useEffect(() => {
+    if (!passkeysOffered || step !== "email" || user || cliMode) return;
+    let active = true;
+    void PublicKeyCredential.isConditionalMediationAvailable?.().then((available) => {
+      if (!active || !available) return;
+      signInWithPasskey(true)
+        .then(() => { if (active) router.replace(nextPath || "/app"); })
+        // Nothing chosen, or the prompt was set aside for another way in.
+        .catch(() => undefined);
+    });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- offered once per visit to the email step
+  }, [passkeysOffered, step, user, cliMode]);
+
+  async function handlePasskeySignIn() {
+    setError("");
+    setSocialLoading("passkey");
+    try {
+      await signInWithPasskey();
+      rememberSignInMethod("passkey");
+      if (!cliMode) router.replace(nextPath || "/app");
+    } catch (nextError) {
+      if (!isAbort(nextError)) setError(formatLoginError(nextError));
+      setSocialLoading(null);
+    }
+  }
+
+  /** Google or GitHub, opened in place by the app; the app redeems what comes back. */
+  async function handleAppProviderSignIn(provider: SocialSignInProvider) {
+    if (!desktopBridge) return;
+    const attempt = ++appSignInAttemptRef.current;
+    setError("");
+    setSocialLoading(provider);
+    try {
+      const signedIn = await signInAppWithProvider(desktopBridge, provider);
+      if (attempt !== appSignInAttemptRef.current) return;
+      await setSessionFromAuthResponse(signedIn.session);
+      rememberSignInMethod(provider);
+      router.replace(signedIn.newAccount && !nextPath ? `/app?${NEW_ACCOUNT_FLAG}=1` : nextPath || "/app");
+    } catch (nextError) {
+      if (attempt !== appSignInAttemptRef.current) return;
+      if (!isAbort(nextError)) {
+        setError(nextError instanceof AppSignInRefused ? socialSignInFailure(nextError.code) : formatLoginError(nextError));
+      }
+      setSocialLoading(null);
+    }
+  }
+
+  /* The browser tab may simply be closed; the app stops waiting for it here. */
+  function stopWaitingForBrowser() {
+    appSignInAttemptRef.current += 1;
+    setSocialLoading(null);
+  }
+
+  async function handleAppleSignIn() {
+    if (!desktopBridge?.signInWithApple) return;
+    setError("");
+    setSocialLoading("apple");
+    try {
+      const { nonce, hashed } = await appleSignInNonce();
+      const apple = await desktopBridge.signInWithApple({ nonce: hashed });
+      rememberSignInMethod("apple");
+      if (await signInWithApple({ ...apple, nonce }) === "two_factor") {
+        setStep("two_factor");
+        setSocialLoading(null);
+        return;
+      }
+      router.replace(nextPath || "/app");
+    } catch (nextError) {
+      if (!isAbort(nextError)) setError(formatLoginError(nextError));
+      setSocialLoading(null);
+    }
+  }
+
+  function signInWithProvider(provider: SocialSignInProvider) {
+    void (inAppSignIn ? handleAppProviderSignIn(provider) : handleSocialLogin(provider));
   }
 
   async function handleSendEmail(event: FormEvent) {
@@ -508,6 +733,7 @@ function LoginContent() {
     try {
       await signInWithOtp(email.trim());
       setStep("otp");
+      startResendWait();
     } catch (nextError) {
       setError(formatLoginError(nextError));
     } finally {
@@ -523,393 +749,561 @@ function LoginContent() {
 
     otpVerificationStartedRef.current = true;
     setError("");
+    setCodeUnanswered(false);
     setLoading(true);
 
     try {
-      await verifyOtp(email.trim(), otp.trim());
+      rememberSignInMethod("email");
+      if (await verifyOtp(email.trim(), otp.trim()) === "two_factor") {
+        setStep("two_factor");
+        return;
+      }
       if (!cliMode) {
         router.push(nextPath || "/app");
       }
     } catch (nextError) {
-      setError(formatLoginError(nextError));
+      const unanswered = isTransientAuthSessionError(nextError);
+      setCodeUnanswered(unanswered);
+      setError(unanswered ? "Couldn't reach xMatrix. Your code still works, so try again." : formatLoginError(nextError));
       otpVerificationStartedRef.current = false;
     } finally {
       setLoading(false);
     }
   }
 
+  async function handleVerifySecondFactor(event: FormEvent) {
+    event.preventDefault();
+    const code = secondCode.trim();
+    if (loading || !code) return;
+    setError("");
+    setLoading(true);
+    try {
+      await verifySecondFactor(code, { backup: useBackupCode, trustDevice });
+      if (continueAfterSecondFactor) {
+        window.location.assign(continueAfterSecondFactor);
+        return;
+      }
+      if (!cliMode) router.push(nextPath || "/app");
+    } catch (nextError) {
+      setSecondCode("");
+      setError(formatLoginError(nextError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeclineDevice() {
+    if (!deviceCode || !userCode) return;
+    setLoading(true);
+    setError("");
+    try {
+      await declineDeviceRequest(deviceCode, userCode);
+      setDeviceDeclined(true);
+    } catch (nextError) {
+      if (isDeviceLoginAlreadyCompletedError(nextError)) setDeviceRequest("unknown");
+      else setError(userErrorMessage(nextError, "Couldn't decline the sign-in") ?? "");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /* Signs this browser out and comes back to the same request, to answer it as someone else. */
+  async function switchAccount() {
+    setLoading(true);
+    const query = new URLSearchParams(searchParams);
+    for (const name of ["error", "error_description", "auth_error", "two_factor"]) query.delete(name);
+    await logout({ redirectTo: `/login?${query}` });
+    setLoading(false);
+  }
+
+  const productName = deviceProductName(deviceClient);
+  const signingInAs = user?.email ? <>Signing in as <strong>{user.email}</strong></> : null;
+
   return (
-    <div className="site-page site-login flex min-h-screen flex-col items-center justify-center px-4 py-12">
-      <div
-        className="pointer-events-none fixed inset-0"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, oklch(1 0 0 / 4%) 1px, transparent 0)",
-          backgroundSize: "40px 40px",
-        }}
-      />
-
-      <div className="relative z-10 w-full max-w-sm">
-        <BrandMark href="/" className="mb-10 justify-center" iconClassName="size-10" wordmarkClassName="text-xl" />
-
-        <div
-          className={cn(
-            "site-login-panel rounded-xl border bg-card p-6 shadow-lg shadow-black/5",
-            cliError
-              ? "border-destructive/40"
-              : cliModeActive
-                ? "border-primary/30 shadow-primary/5"
-                : "border-border"
-          )}
-        >
-          <div className="space-y-3">
-            {cliModeActive ? (
-              <Badge className="gap-1.5">
-                <ShieldCheck className="size-3.5" />
-                {authorizationLabel(deviceClient)}
-              </Badge>
-            ) : null}
-            {desktopModeActive ? (
-              <Badge className="gap-1.5">
-                <ExternalLink className="size-3.5" />
-                {nativeClient === "ios"
-                  ? "iOS Sign-in"
-                  : nativeClient === "android"
-                    ? "Android Sign-in"
-                    : "Browser Sign-in"}
-              </Badge>
-            ) : null}
-            {cliError ? (
-              <Badge variant="destructive" className="gap-1.5">
-                <AlertTriangle className="size-3.5" />
-                Invalid Callback
-              </Badge>
-            ) : null}
-
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">
-                {cliComplete
-                  ? deviceClient === "desktop"
-                    ? "Desktop login complete"
-                    : deviceClient === "ios"
-                      ? "iOS login complete"
-                      : deviceClient === "android"
-                        ? "Android login complete"
-                    : "CLI login complete"
-                  : cliError
-                    ? "This CLI sign-in link is not trusted"
-                    : cliMode
-                      ? deviceClient === "desktop"
-                        ? "Authorize xMatrix Desktop"
-                        : deviceClient === "ios"
-                          ? "Authorize xMatrix iOS"
-                          : deviceClient === "android"
-                            ? "Authorize xMatrix Android"
-                        : "Authorize xMatrix CLI"
-                      : desktopModeActive
-                        ? desktopLogin.status === "error"
-                          ? "Browser sign-in failed"
-                          : desktopLogin.status === "idle"
-                            ? "Sign in to xMatrix"
-                          : "Sign in in your browser"
-                      : step === "email"
-                        ? "Sign in to xMatrix"
-                        : "Check your email"}
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {cliComplete
-                  ? deviceClient === "desktop"
-                    ? "You can return to xMatrix. The desktop session is ready."
-                    : deviceClient === "ios"
-                      ? "You can return to xMatrix. The iOS session is ready."
-                      : deviceClient === "android"
-                        ? "You can return to xMatrix. The Android session is ready."
-                    : "You can return to your terminal. The CLI session is ready."
-                  : cliError
-                    ? "xMatrix only returns CLI sessions to loopback addresses on this device. Start a fresh login from your terminal."
-                    : cliMode
-                      ? deviceCode
-                        ? awaitingDeviceConfirmation
-                          ? `Approve only if your ${deviceClientLabel} shows this code. Approving signs it in as you.`
-                          : `Finish sign-in on xmatrix.sh to approve code ${userCode || "shown in your client"} for your ${deviceClientLabel}.`
-                        : `Finish sign-in to send your session back to the terminal on this device${cliCallbackContext?.hubHost ? ` for ${cliCallbackContext.hubHost}` : ""}.`
-                      : desktopModeActive
-                        ? desktopLogin.status === "error"
-                          ? desktopLogin.error || "Start a fresh browser sign-in."
-                          : desktopLogin.status === "idle"
-                            ? "Open your system browser when you're ready to sign in."
-                            : `Complete authentication in your system browser. The ${nativeAppLabel} will continue automatically when sign-in finishes.`
-                      : step === "email"
-                        ? "We'll send you a secure verification code."
-                        : `We sent a ${LOGIN_CODE_LENGTH}-digit verification code to ${email}.`}
-              </p>
-            </div>
+    <AuthShell legal={!cliComplete && !cliError}>
+      {cliComplete ? (
+        <>
+          <AuthHeading title="You're signed in">
+            {deviceClient === "desktop"
+              ? "You can return to xMatrix. The desktop session is ready."
+              : deviceClient === "ios"
+                ? "You can return to xMatrix. The iOS session is ready."
+                : deviceClient === "android"
+                  ? "You can return to xMatrix. The Android session is ready."
+                  : "You can return to your terminal. The CLI session is ready."}
+          </AuthHeading>
+          <div className="auth-stack">
+            {nativeReturnUrl ? (
+              <WoodPanel as="a" href={nativeReturnUrl} className="site-wood-pill auth-button">
+                Return to xMatrix
+              </WoodPanel>
+            ) : (
+              <AuthPrimaryButton onClick={() => window.close()}>
+                {deviceClient === "desktop" || deviceClient === "ios" || deviceClient === "android"
+                  ? "Return to xMatrix"
+                  : "Close this tab"}
+              </AuthPrimaryButton>
+            )}
+            <AuthSecondaryButton onClick={() => router.push("/app")}>Open xMatrix here</AuthSecondaryButton>
           </div>
-
-          {cliComplete ? (
-            <div className="mt-6 space-y-4">
-              {nativeReturnUrl ? (
-                <Button nativeButton={false} className="w-full" render={<a href={nativeReturnUrl} />}>
-                  Return to xMatrix
-                </Button>
-              ) : (
-                <Button type="button" className="w-full" onClick={() => window.close()}>
-                  {deviceClient === "desktop" || deviceClient === "ios" || deviceClient === "android"
-                    ? "Return to xMatrix"
-                    : "Return to terminal"}
-                </Button>
-              )}
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full text-xs text-muted-foreground"
-                onClick={() => router.push("/app")}
-              >
-                Open xMatrix
-              </Button>
-            </div>
-          ) : cliError ? (
-            <div className="mt-6 space-y-4">
-              <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">Run this again from your terminal:</p>
-                <p className="mt-2 rounded bg-background px-2 py-1 font-mono text-xs text-foreground">
-                  xmatrix login
-                </p>
-              </div>
-              <Button nativeButton={false} className="w-full" render={<Link href="/docs" />}>
-                Open Docs
-              </Button>
-              <Button nativeButton={false} variant="ghost" className="w-full" render={<Link href="/" />}>
-                Back to Home
-              </Button>
-            </div>
-          ) : awaitingDeviceConfirmation ? (
-            <div className="mt-6 space-y-4">
-              <div className="rounded-lg border border-border bg-muted/40 p-4 text-center">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Verification code
-                </p>
-                <p className="mt-2 font-mono text-2xl font-semibold tracking-[0.2em] text-foreground"
-                  data-testid="device-approval-code">
-                  {userCode}
-                </p>
-                {user?.email ? (
-                  <p className="mt-2 text-xs text-muted-foreground">Signing in as {user.email}</p>
-                ) : null}
-              </div>
-              <Button type="button" className="w-full" onClick={() => setDeviceApprovalConfirmed(true)}>
-                Approve
-              </Button>
-              <Button type="button" variant="ghost" className="w-full text-xs text-muted-foreground"
-                onClick={() => router.replace("/app")}>
-                This is not my code
-              </Button>
-            </div>
-          ) : desktopModeActive ? (
-            <div className="mt-6 space-y-4">
-              <div className="rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2 text-foreground">
-                  {desktopLogin.status === "idle" ? (
-                    <ExternalLink className="size-4 text-primary" />
-                  ) : desktopLogin.status === "error" ? (
-                    <AlertTriangle className="size-4 text-destructive" />
-                  ) : (
-                    <Loader2 className="size-4 animate-spin text-primary" />
-                  )}
-                  <span className="font-medium">
-                    {desktopLogin.status === "idle"
-                      ? "Browser sign-in is ready"
-                      : desktopLogin.status === "error"
-                      ? "Could not finish browser sign-in"
-                      : desktopLogin.status === "opening"
-                        ? "Opening your browser"
-                        : "Waiting for browser approval"}
-                  </span>
-                </div>
-                <p className="mt-2">
-                  {desktopLogin.status === "idle"
-                    ? "xMatrix will start sign-in only after you choose to continue."
-                    : `Keep this window open while you finish signing in. The ${nativeAppLabel} will update as soon as the browser session is approved.`}
-                </p>
-              </div>
-
-              {desktopLogin.error ? (
-                <p className="text-sm text-destructive">{desktopLogin.error}</p>
-              ) : null}
-
-              {desktopLogin.verificationUrl ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => desktopBridge?.openExternal(desktopLogin.verificationUrl!)}
-                >
-                  <ExternalLink className="mr-2 size-4" />
-                  Open browser again
-                </Button>
-              ) : null}
-
-              {desktopLogin.status === "idle" || desktopLogin.status === "error" ? (
-                <Button
-                  type="button"
-                  className="w-full"
-                  onClick={handleDesktopBrowserLogin}
-                  disabled={authLoading}
-                >
-                  <ExternalLink className="mr-2 size-4" />
-                  {desktopLogin.status === "error" ? "Start a fresh sign-in" : "Sign in with browser"}
-                </Button>
-              ) : null}
-            </div>
-          ) : step === "email" ? (
-            <form onSubmit={handleSendEmail} className="mt-6 space-y-4">
-              <Link href={`/login/password${searchParams.toString() ? `?${searchParams}` : ""}`} className="block text-center text-sm underline">Sign in with password</Link>
-              {cliMode ? (
-                <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-                  This browser session was opened by{" "}
-                  <code className="rounded bg-background px-1 py-0.5 text-xs">
-                    {deviceProductName(deviceClient)}
-                  </code>
-                  . After you sign in, xMatrix will authorize your {deviceClientLabel} session
-                  {deviceCode ? ` with verification code ${userCode || "shown in your client"}` : " on this device"}.
-                </div>
-              ) : null}
-
-              <div className="space-y-1.5">
-                <label htmlFor="login-email" className="text-sm font-medium">
-                  Email address
-                </label>
-                <Input
-                  id="login-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  required
-                  autoFocus
-                  value={email}
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                    setError("");
-                  }}
-                />
-              </div>
-
-              {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
-
-              <Button type="submit" className="w-full" disabled={loading || Boolean(cliError)}>
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                    Sending code…
-                  </>
-                ) : (
-                  <>
-                    <Mail className="mr-2 size-4" />
-                    Send login code
-                  </>
-                )}
-              </Button>
-
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase text-muted-foreground">
-                  <span className="bg-card px-2">Or continue with</span>
-                </div>
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={handleGoogleLogin}
-                disabled={loading || Boolean(cliError)}
-              >
-                <GoogleIcon className="mr-2 size-4" />
-                Sign in with Google
-              </Button>
+        </>
+      ) : cliError ? (
+        <>
+          <AuthHeading title="This sign-in link isn't trusted">
+            xMatrix only returns CLI sessions to loopback addresses on this device. Start a fresh
+            login from your terminal.
+          </AuthHeading>
+          <AuthRequest icon={<AlertTriangle className="size-4" />} title="Run this again in your terminal">
+            <code className="auth-command">xmatrix login</code>
+          </AuthRequest>
+          <AuthLinks>
+            <Link href="/docs">Open Docs</Link>
+            <Link href="/">Back to Home</Link>
+          </AuthLinks>
+        </>
+      ) : deviceDeclined ? (
+        <AuthHeading title="Sign-in declined">
+          Nothing was shared. The {deviceClientLabel} that asked can&apos;t use this request any more. You can
+          close this tab.
+        </AuthHeading>
+      ) : awaitingDeviceConfirmation && deviceRequest === "unknown" ? (
+        <>
+          <AuthHeading title="This sign-in request has ended">
+            It expired or was already answered. Start a fresh sign-in from your {deviceClientLabel}.
+          </AuthHeading>
+          <AuthLinks><Link href="/app">Open xMatrix here</Link></AuthLinks>
+        </>
+      ) : awaitingDeviceConfirmation ? (
+        <>
+          <AuthHeading title={`Approve ${productName}?`}>
+            Approve only if your {deviceClientLabel} shows this code and you started this sign-in yourself.
+            Approving signs it in as you.
+          </AuthHeading>
+          <AuthRequest
+            icon={<ShieldCheck className="size-4" />}
+            title={`${productName} is asking to sign in`}
+            code={userCode}
+          >
+            {deviceRequest && deviceRequest !== "unknown" ? <>{describeRequester(deviceRequest)}<br /></> : null}
+            {signingInAs}
+          </AuthRequest>
+          <ApprovalChoices error={formError} loading={loading} onApprove={() => setDeviceApprovalConfirmed(true)}
+            declineLabel="This is not my request" onDecline={() => void handleDeclineDevice()}
+            onSwitchAccount={() => void switchAccount()} />
+        </>
+      ) : awaitingLegacyConfirmation ? (
+        <>
+          <AuthHeading title="Approve xMatrix CLI?">
+            A terminal on this computer asked to sign in. Approve only if you just ran{" "}
+            <code className="auth-inline-code">xmatrix login</code>. Approving signs it in as you.
+          </AuthHeading>
+          <AuthRequest icon={<ShieldCheck className="size-4" />} title="xMatrix CLI is asking to sign in">
+            {signingInAs}
+          </AuthRequest>
+          <ApprovalChoices error={formError} loading={loading} onApprove={() => setLegacyApprovalConfirmed(true)}
+            declineLabel="Cancel" onDecline={() => router.replace("/app")}
+            onSwitchAccount={() => void switchAccount()} />
+        </>
+      ) : browserSignIn ? (
+        <>
+          <AuthHeading
+            title={
+              desktopLogin.status === "error"
+                ? "Browser sign-in didn't finish"
+                : desktopLogin.status === "idle"
+                  ? "Welcome to xMatrix"
+                  : "Continue in your browser"
+            }
+          >
+            {desktopLogin.status === "error"
+              ? "Start a fresh sign-in to try again."
+              : desktopLogin.status === "idle"
+                ? `Sign in or create your account in your browser. The ${nativeAppLabel} continues on its own when you're done.`
+                : `Keep this window open. The ${nativeAppLabel} continues as soon as the browser approves the sign-in.`}
+          </AuthHeading>
+          {desktopLogin.status === "opening" || desktopLogin.status === "waiting" ? (
+            <AuthRequest
+              icon={<Spinner />}
+              title={desktopLogin.status === "opening" ? "Opening your browser…" : "Waiting for your browser…"}
+            />
+          ) : null}
+          <AuthError>{desktopLogin.error}</AuthError>
+          <div className="auth-stack">
+            {desktopLogin.status === "idle" || desktopLogin.status === "error" ? (
+              <AuthPrimaryButton onClick={() => void handleDesktopBrowserLogin()} disabled={authLoading}>
+                <ExternalLink className="size-4" />
+                {desktopLogin.status === "error" ? "Start a fresh sign-in" : "Sign in with browser"}
+              </AuthPrimaryButton>
+            ) : null}
+            {desktopLogin.verificationUrl ? (
+              <AuthSecondaryButton onClick={() => desktopBridge?.openExternal(desktopLogin.verificationUrl!)}>
+                Open browser again
+              </AuthSecondaryButton>
+            ) : null}
+          </div>
+        </>
+      ) : inAppSignIn && phoneSignIn && desktopLogin.status !== "idle" ? (
+        <PhoneSignIn verificationUrl={desktopLogin.verificationUrl} error={desktopLogin.error}
+          onCancel={() => {
+            desktopLoginRunRef.current += 1;
+            desktopLoginStartedRef.current = false;
+            clearPendingDesktopDeviceLogin();
+            if (desktopPollTimerRef.current) clearTimeout(desktopPollTimerRef.current);
+            setDesktopLogin({ status: "idle" });
+            setPhoneSignIn(false);
+          }} />
+      ) : step === "email" ? (
+        <>
+          <AuthHeading title={cliMode ? `Sign in to approve ${productName}` : "Welcome to xMatrix"}>
+            {cliMode
+              ? `Your ${deviceClientLabel} is waiting. After you sign in, you'll confirm its code before anything is shared.`
+              : "Sign in or create your account. New accounts start free."}
+          </AuthHeading>
+          {cliMode && deviceCode ? (
+            <AuthRequest icon={<ShieldCheck className="size-4" />} title={`${productName} is asking to sign in`}>
+              Code <span className="auth-inline-code">{userCode || "shown in your client"}</span>
+            </AuthRequest>
+          ) : null}
+          <div className="auth-stack">
+            {inAppSignIn && desktopBridge?.signInWithApple ? (
+              <AuthSecondaryButton onClick={() => void handleAppleSignIn()} disabled={loading || socialLoading !== null}>
+                {socialLoading === "apple" ? <Spinner /> : <AppleIcon className="size-[18px]" />}
+                Continue with Apple
+                <LastUsed shown={lastUsed === "apple"} />
+              </AuthSecondaryButton>
+            ) : null}
+            <AuthSecondaryButton onClick={() => signInWithProvider("google")} disabled={loading || socialLoading !== null}>
+              {socialLoading === "google" ? <Spinner /> : <GoogleIcon className="size-[18px]" />}
+              Continue with Google
+              <LastUsed shown={lastUsed === "google"} />
+            </AuthSecondaryButton>
+            <AuthSecondaryButton onClick={() => signInWithProvider("github")} disabled={loading || socialLoading !== null}>
+              {socialLoading === "github" ? <Spinner /> : <Image src="/app-connectors/github.svg" alt="" width={18} height={18} />}
+              Continue with GitHub
+              <LastUsed shown={lastUsed === "github"} />
+            </AuthSecondaryButton>
+            {inAppSignIn && desktopBridge?.client === "desktop" && (socialLoading === "google" || socialLoading === "github") ? (
+              <p role="status" className="auth-hint">
+                Finish signing in in your browser.{" "}
+                <button type="button" className="auth-text-button" onClick={stopWaitingForBrowser}>Cancel</button>
+              </p>
+            ) : null}
+            <AuthDivider />
+            <form onSubmit={handleSendEmail} className="auth-stack">
+              <label htmlFor="login-email" className="auth-label">
+                Email address
+              </label>
+              <Input
+                id="login-email"
+                type="email"
+                autoComplete={passkeysOffered ? "email webauthn" : "email"}
+                placeholder="you@company.com"
+                required
+                autoFocus
+                value={email}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setError("");
+                }}
+                className="auth-input"
+              />
+              <AuthError>{formError}</AuthError>
+              <AuthPrimaryButton type="submit" disabled={loading || socialLoading !== null}>
+                {loading ? <Spinner /> : null}
+                {loading ? "Sending code…" : "Continue with email"}
+                <LastUsed shown={lastUsed === "email"} />
+              </AuthPrimaryButton>
             </form>
-          ) : (
-            <form onSubmit={handleVerifyOtp} className="mt-6 space-y-4">
-              {cliMode ? (
-                <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-                  Enter the verification code to finish browser sign-in, then xMatrix will authorize the waiting {deviceClientLabel} session.
-                </div>
-              ) : null}
-
-              <div className="space-y-1.5">
-                <label htmlFor="login-otp" className="text-sm font-medium">
-                  Verification Code
-                </label>
-                <p id="login-otp-hint" className="text-xs text-muted-foreground">
-                  Enter the {LOGIN_CODE_LENGTH}-digit code from your email.
-                </p>
-                <Input
-                  id="login-otp"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern={`[0-9]{${LOGIN_CODE_LENGTH}}`}
-                  required
-                  autoFocus
-                  value={otp}
-                  onChange={(event) =>
-                    setOtp(event.target.value.replace(/\D/g, "").slice(0, LOGIN_CODE_LENGTH))
-                  }
-                  minLength={LOGIN_CODE_LENGTH}
-                  maxLength={LOGIN_CODE_LENGTH}
-                  aria-describedby="login-otp-hint"
-                  className="text-center tracking-[0.35em]"
-                />
-              </div>
-
-              {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading || otp.length !== LOGIN_CODE_LENGTH || Boolean(cliError)}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                    Completing sign-in…
-                  </>
-                ) : (
-                  <>
-                    Sign in
-                    <ArrowRight className="ml-2 size-4" />
-                  </>
-                )}
-              </Button>
-
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full text-xs text-muted-foreground"
-                onClick={() => setStep("email")}
-                disabled={loading}
-              >
-                Back to email
-              </Button>
-            </form>
-          )}
-        </div>
-
-        <p className="mt-5 px-3 text-center text-xs leading-5 text-muted-foreground">
-          By continuing, you agree to the xMatrix{" "}
-          <Link className="font-medium text-foreground underline underline-offset-4" href="/terms">
-            Terms of Service
-          </Link>{" "}
-          and acknowledge the{" "}
-          <Link className="font-medium text-foreground underline underline-offset-4" href="/privacy">
-            Privacy Policy
-          </Link>
-          .
-        </p>
-      </div>
-    </div>
+          </div>
+          <AuthLinks>
+            {passkeysOffered ? (
+              <button type="button" className="auth-text-button" onClick={() => void handlePasskeySignIn()}
+                disabled={loading || socialLoading !== null}>
+                {socialLoading === "passkey" ? "Waiting for your passkey…" : "Sign in with a passkey"}
+                {lastUsed === "passkey" ? " · last used" : ""}
+              </button>
+            ) : null}
+            {inAppSignIn && desktopBridge?.client === "desktop" ? (
+              <button type="button" className="auth-text-button" onClick={() => void handleDesktopBrowserLogin(true)}
+                disabled={loading || socialLoading !== null}>
+                Sign in with your phone
+              </button>
+            ) : null}
+            <Link href={`/login/password${searchParams.toString() ? `?${searchParams}` : ""}`}>
+              Sign in with password
+            </Link>
+          </AuthLinks>
+        </>
+      ) : step === "two_factor" ? (
+        <>
+          <AuthHeading title="Two-step verification">
+            {useBackupCode
+              ? "Enter one of the backup codes you saved. Each works once."
+              : "Enter the 6-digit code from your authenticator app."}
+          </AuthHeading>
+          <form ref={secondFactorFormRef} onSubmit={handleVerifySecondFactor} className="auth-stack">
+            <label htmlFor="login-second-factor" className="auth-label">
+              {useBackupCode ? "Backup code" : "Authentication code"}
+            </label>
+            <Input
+              id="login-second-factor"
+              type="text"
+              inputMode={useBackupCode ? "text" : "numeric"}
+              autoComplete="one-time-code"
+              required
+              autoFocus
+              value={secondCode}
+              onChange={(event) => {
+                setSecondCode(useBackupCode
+                  ? event.target.value.trim().slice(0, 32)
+                  : event.target.value.replace(/\D/g, "").slice(0, LOGIN_CODE_LENGTH));
+                setError("");
+              }}
+              placeholder={useBackupCode ? "" : "0".repeat(LOGIN_CODE_LENGTH)}
+              className={useBackupCode ? "auth-input" : "auth-input auth-code-input"}
+            />
+            <label className="auth-check">
+              <input type="checkbox" checked={trustDevice} onChange={(event) => setTrustDevice(event.target.checked)} />
+              Don&apos;t ask again on this device for 30 days
+            </label>
+            <AuthError>{formError}</AuthError>
+            <AuthPrimaryButton type="submit" disabled={loading || !secondCode}>
+              {loading ? <Spinner /> : null}
+              {loading ? "Signing in…" : "Verify"}
+              {loading ? null : <ArrowRight className="size-4" />}
+            </AuthPrimaryButton>
+          </form>
+          <AuthLinks>
+            <button type="button" className="auth-text-button" disabled={loading} onClick={() => {
+              setUseBackupCode((current) => !current);
+              setSecondCode("");
+              setError("");
+            }}>
+              {useBackupCode ? "Use your authenticator app" : "Use a backup code"}
+            </button>
+            <button type="button" className="auth-text-button" disabled={loading} onClick={() => {
+              changeEmail();
+              setSecondCode("");
+              if (searchParams.get("two_factor")) {
+                const query = new URLSearchParams(searchParams);
+                query.delete("two_factor");
+                router.replace(`/login${query.toString() ? `?${query}` : ""}`);
+              }
+            }}>
+              Start over
+            </button>
+          </AuthLinks>
+        </>
+      ) : (
+        <>
+          <AuthHeading title="Check your email">
+            Enter the {LOGIN_CODE_LENGTH}-digit code we sent to <strong>{email}</strong>.{" "}
+            <button type="button" className="auth-text-button" onClick={changeEmail} disabled={loading}>
+              Change
+            </button>
+          </AuthHeading>
+          <form ref={otpFormRef} onSubmit={handleVerifyOtp} className="auth-stack">
+            <label htmlFor="login-otp" className="auth-label">
+              Login code
+            </label>
+            <Input
+              id="login-otp"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern={`[0-9]{${LOGIN_CODE_LENGTH}}`}
+              required
+              autoFocus
+              value={otp}
+              onChange={(event) => {
+                setOtp(event.target.value.replace(/\D/g, "").slice(0, LOGIN_CODE_LENGTH));
+                setError("");
+                setNotice("");
+                setCodeUnanswered(false);
+              }}
+              minLength={LOGIN_CODE_LENGTH}
+              maxLength={LOGIN_CODE_LENGTH}
+              aria-describedby="login-otp-hint"
+              placeholder={"0".repeat(LOGIN_CODE_LENGTH)}
+              className="auth-input auth-code-input"
+            />
+            <p id="login-otp-hint" className="auth-hint">
+              {cliMode
+                ? `After this, you'll confirm the ${deviceClientLabel} sign-in.`
+                : "The code works for 5 minutes. Not there? Check spam."}
+            </p>
+            <AuthError>{formError}</AuthError>
+            {notice ? <p role="status" className="auth-hint">{notice}</p> : null}
+            <AuthPrimaryButton type="submit" disabled={loading || otp.length !== LOGIN_CODE_LENGTH}>
+              {loading ? <Spinner /> : null}
+              {loading ? "Signing in…" : codeUnanswered ? "Try again" : "Sign in"}
+              {loading ? null : <ArrowRight className="size-4" />}
+            </AuthPrimaryButton>
+          </form>
+          <AuthLinks>
+            <button type="button" className="auth-text-button" onClick={handleResendCode}
+              disabled={loading || resendSeconds > 0}>
+              {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Resend code"}
+            </button>
+          </AuthLinks>
+        </>
+      )}
+    </AuthShell>
   );
+}
+
+async function describeDeviceRequest(deviceCode: string, userCode: string): Promise<DeviceRequestDescription | "unknown"> {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_describe, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ deviceCode, userCode }),
+  });
+  if (response.status === 409) return "unknown";
+  if (!response.ok) {
+    const failure = await errorFromResponse(response);
+    // Only the broker's own answer ends the request; a Hub still rolling out this route
+    // has no description to give, and the code alone is still there to compare.
+    if (failure instanceof XMatrixApiError && failure.code === "unknown_device_code") return "unknown";
+    throw failure;
+  }
+  return (await response.json()) as DeviceRequestDescription;
+}
+
+async function declineDeviceRequest(deviceCode: string, userCode: string): Promise<void> {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_decline, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ deviceCode, userCode }),
+  });
+  if (!response.ok) throw await errorFromResponse(response);
+}
+
+/** "Asked 2 minutes ago near Berlin, DE · daniel-laptop (darwin)" */
+function describeRequester(request: DeviceRequestDescription): string {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(request.createdAt)) / 60_000));
+  const when = minutes < 1 ? "Asked just now" : minutes === 1 ? "Asked 1 minute ago" : `Asked ${minutes} minutes ago`;
+  const where = request.requestedFrom ? ` near ${request.requestedFrom}` : "";
+  const machine = request.hostname
+    ? ` · ${request.hostname}${request.platform ? ` (${request.platform})` : ""}` : "";
+  return `${when}${where}${machine}`;
+}
+
+/**
+ * What a returning Google or GitHub sign-in that failed means for the person.
+ * The provider's or Better Auth's code arrives in `?error=`.
+ */
+function socialSignInFailure(code: string): string {
+  switch (code) {
+    case "access_denied":
+      return "Sign-in was cancelled. Choose a way to sign in when you're ready.";
+    case "email_not_found":
+      return "That account didn't share a verified email address. Add one there, or use a login code.";
+    case "account_not_linked":
+    case "unable_to_link_account":
+      return "This email already has an xMatrix account. Sign in with a login code, then link the account in Settings.";
+    case "state_not_found":
+    case "state_mismatch":
+    case "please_restart_the_process":
+    case "invalid_callback_request":
+      return "That sign-in took too long or was finished in another browser. Start it again.";
+    default:
+      return "Sign-in did not complete. Try again, or use a login code.";
+  }
+}
+
+type SignInMethod = "google" | "github" | "apple" | "email" | "passkey";
+const LAST_SIGN_IN_METHOD_KEY = "xmatrix.lastSignInMethod";
+
+function rememberSignInMethod(method: SignInMethod) {
+  try {
+    window.localStorage.setItem(LAST_SIGN_IN_METHOD_KEY, method);
+  } catch {
+    // Without storage the page simply shows no hint.
+  }
+}
+
+function readLastSignInMethod(): SignInMethod | null {
+  try {
+    const value = window.localStorage.getItem(LAST_SIGN_IN_METHOD_KEY);
+    return value === "google" || value === "github" || value === "apple" || value === "email" || value === "passkey"
+      ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function LastUsed({ shown }: { shown: boolean }) {
+  return shown ? <span className="auth-last-used">Last used</span> : null;
+}
+
+/** The desktop app's sign-in for a phone that is already signed in: scan, approve there, done here. */
+function PhoneSignIn({ verificationUrl, error, onCancel }: {
+  verificationUrl?: string;
+  error?: string;
+  onCancel: () => void;
+}) {
+  const code = useMemo(() => verificationUrl
+    ? renderSVG(verificationUrl, { border: 1, whiteColor: "#ffffff", blackColor: "#111827" }) : null, [verificationUrl]);
+  return (
+    <>
+      <AuthHeading title="Sign in with your phone">
+        Scan this with your phone&apos;s camera and approve on the phone, where you&apos;re signed in. This computer
+        continues on its own.
+      </AuthHeading>
+      {code ? (
+        <div className="mx-auto size-48 rounded-md bg-white p-2" role="img" aria-label="Sign-in code to scan with your phone"
+          dangerouslySetInnerHTML={{ __html: code }} />
+      ) : <AuthRequest icon={<Spinner />} title="Making a code…" />}
+      <AuthError>{error}</AuthError>
+      <AuthLinks>
+        <button type="button" className="auth-text-button" onClick={onCancel}>Use another way</button>
+      </AuthLinks>
+    </>
+  );
+}
+
+/** Approve, turn down, or answer as someone else: the choices for any device asking to sign in. */
+function ApprovalChoices({ error, loading, onApprove, declineLabel, onDecline, onSwitchAccount }: {
+  error: string;
+  loading: boolean;
+  onApprove: () => void;
+  declineLabel: string;
+  onDecline: () => void;
+  onSwitchAccount: () => void;
+}) {
+  return (
+    <>
+      <AuthError>{error}</AuthError>
+      <div className="auth-stack">
+        <AuthPrimaryButton onClick={onApprove} disabled={loading}>
+          {loading ? <Spinner /> : null}
+          Approve
+        </AuthPrimaryButton>
+        <AuthSecondaryButton onClick={onDecline} disabled={loading}>{declineLabel}</AuthSecondaryButton>
+      </div>
+      <AuthLinks>
+        <button type="button" className="auth-text-button" disabled={loading} onClick={onSwitchAccount}>
+          Use a different account
+        </button>
+      </AuthLinks>
+    </>
+  );
+}
+
+function Spinner() {
+  return <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />;
+}
+
+/** The Hub page that hands an app its sign-in code, if `value` is one; nothing else is followed. */
+function appSignInContinuation(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const hub = new URL(authBaseUrl());
+    return url.origin === hub.origin && url.pathname === APP_SIGN_IN_FINISH_PATH ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeNextPath(next: string | null): string {
@@ -927,6 +1321,30 @@ function formatLoginError(error: unknown): string {
 
   if (code === "over_email_send_rate_limit" || /email rate limit/i.test(message)) {
     return "Too many login emails were requested. Use Google sign-in or wait a minute before requesting another code.";
+  }
+
+  if (code === "INVALID_OTP") {
+    return "That code didn't match. Check the newest email, or resend a code.";
+  }
+
+  if (code === "OTP_EXPIRED") {
+    return "That code has expired. Resend a new one.";
+  }
+
+  if (code === "TOO_MANY_ATTEMPTS") {
+    return "Too many tries with this code. Resend a new one.";
+  }
+
+  if (code === "INVALID_CODE" || code === "INVALID_BACKUP_CODE") {
+    return "That code didn't match. Try the newest code from your app.";
+  }
+
+  if (code === "INVALID_TWO_FACTOR_COOKIE" || code === "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE") {
+    return "This sign-in timed out. Start over and sign in again.";
+  }
+
+  if (code === "ACCOUNT_TEMPORARILY_LOCKED") {
+    return "Too many wrong codes. Wait 15 minutes, then try again.";
   }
 
   if (code === "email_delivery_configuration_error") {
@@ -978,7 +1396,7 @@ async function approveDeviceLogin(
   deviceCode: string,
   userCode: string
 ): Promise<void> {
-  const response = await xmatrixRawResponse("/api/xmatrix/cli/device/approve", {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_approve, {
     method: "POST",
     headers: {
       "content-type": "application/json",

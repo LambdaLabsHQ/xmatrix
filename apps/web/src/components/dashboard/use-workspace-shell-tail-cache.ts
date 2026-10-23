@@ -1,3 +1,4 @@
+import type { SocketTransport } from "@/lib/connectivity/reconnecting-socket";
 // Product tail cache engine for the workspace shell (peeled by semantic
 // domain from use-workspace-shell-state.ts). Owns the durable bounded-tail
 // candidate store, the catalog-manifest admission gate, write-through
@@ -23,13 +24,13 @@ import {
   type ChannelHistoryCacheEntry,
   type HistoryRenderAuthority,
 } from "./workspace-shell-modules";
-import type { ChannelMessage, SerializedChannel } from "@xmatrix/protocol";
+import type { ChannelMessage, ChannelSnapshot } from "@xmatrix/protocol";
 
 export function useWorkspaceShellTailCache(deps: {
   user: { id: string } | null;
   mobileListFixture: unknown;
-  channels: SerializedChannel[];
-  channelsRef: React.MutableRefObject<SerializedChannel[]>;
+  channels: ChannelSnapshot[];
+  channelsRef: React.MutableRefObject<ChannelSnapshot[]>;
   historyCacheRef: React.MutableRefObject<Map<string, ChannelHistoryCacheEntry>>;
   historyRenderAuthoritiesRef: React.MutableRefObject<Map<string, HistoryRenderAuthority>>;
   historyRevisionRef: React.MutableRefObject<number>;
@@ -39,7 +40,7 @@ export function useWorkspaceShellTailCache(deps: {
   hasOlderMessagesRef: React.MutableRefObject<boolean>;
   latestHistorySequenceRef: React.MutableRefObject<number>;
   relayPushConnectedRef: React.MutableRefObject<boolean>;
-  relaySocketRef: React.MutableRefObject<WebSocket | null>;
+  relaySocketRef: React.MutableRefObject<SocketTransport | null>;
   setHistory: (messages: ChannelMessage[]) => void;
   setHasOlderMessages: (value: boolean) => void;
   setLoadingHistory: (value: boolean) => void;
@@ -97,7 +98,7 @@ export function useWorkspaceShellTailCache(deps: {
   const productTailCacheGapRef = useRef<Map<string, number>>(new Map());
   const productTailCachePersistTimersRef = useRef<Map<string, number>>(new Map());
   // Presentation-only cold-start catalog (disk rows shown before auth resolves).
-  const [cachedCatalogChannels, setCachedCatalogChannels] = useState<SerializedChannel[]>([]);
+  const [cachedCatalogChannels, setCachedCatalogChannels] = useState<ChannelSnapshot[]>([]);
 
   // Read the last same-device catalog in parallel with native-session auth.
   // Only the inert list is rendered from this path; no token or authority is
@@ -129,6 +130,18 @@ export function useWorkspaceShellTailCache(deps: {
       channelId,
       relaySocketLive() ? relaySocketGenerationRef.current : -1,
     );
+  }, [relaySocketLive]);
+
+  /* A read taken outside the open path: its window is contiguous only if
+     the socket was up when it started and has not dropped since. */
+  const beginHistoryTailRead = useCallback(() => {
+    const generation = relaySocketLive() ? relaySocketGenerationRef.current : -1;
+    return (channelId: string): void => {
+      historyTailBaseGenerationRef.current.set(
+        channelId,
+        generation === relaySocketGenerationRef.current ? generation : -1,
+      );
+    };
   }, [relaySocketLive]);
 
   const historyTailContiguous = useCallback((channelId: string): boolean => (
@@ -357,6 +370,7 @@ export function useWorkspaceShellTailCache(deps: {
     productTailCacheStoreRef,
     relaySocketLive,
     recordHistoryTailBase,
+    beginHistoryTailRead,
     historyTailContiguous,
     productTailCacheHydrationTick,
     scheduleProductTailCachePersist,

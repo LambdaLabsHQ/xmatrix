@@ -4,12 +4,14 @@ import test from "node:test";
 import {
   ConnectivityBreaker,
   createAuthorityDatabase,
+  databaseFailureEvidence,
   DatabaseCircuitOpenError,
   DatabaseCommitUnknownError,
   DatabaseContractError,
   DatabasePlacementStaleError,
   DatabaseRowLimitError,
   SpacePlacementHints,
+  PostgresAccountDeletionRepository,
 } from "../dist/index.js";
 
 function fakeFactory(options = {}) {
@@ -475,6 +477,21 @@ test("a timed-out single read is retried once on a fresh checkout", async () => 
   }
 });
 
+test("a single read retries a severed Hyperdrive egress on a fresh checkout", async () => {
+  const failure = Object.assign(new Error("Egress connection severed outside of Hyperdrive"), { code: "58000" });
+  const fake = retryPool(/single_read/u, [failure]);
+  const sessions = [];
+  const session = createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
+    sessionObserver: (summary) => sessions.push(summary),
+  }).openSession();
+  assert.deepEqual(await session.transaction(singleRead, readOne), [{ id: 1 }]);
+  await session.close();
+  assert.equal(fake.clients.length, 2);
+  assert.deepEqual(fake.clients.map((client) => client.releases), [[true], [false]]);
+  assert.equal(sessions[0].errorCode, "CONNECTION_TERMINATED");
+});
+
 test("a second single-read timeout surfaces without a third attempt", async () => {
   const second = new Error("Query read timeout");
   const fake = retryPool(/single_read/u, [new Error("Query read timeout"), second, new Error("third")]);
@@ -489,14 +506,12 @@ test("a second single-read timeout surfaces without a third attempt", async () =
 });
 
 test("answered single-read failures, explicit transactions and stale fences are never retried", async () => {
-  for (const failure of [Object.assign(new Error("canceling statement"), { code: "57014" }),
-    new Error("Connection terminated unexpectedly")]) {
-    const fake = retryPool(/single_read/u, [failure]);
-    await assert.rejects(createAuthorityDatabase({
-      connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
-    }).transaction(singleRead, readOne), (error) => error === failure);
-    assert.equal(fake.clients.length, 1);
-  }
+  const answered = Object.assign(new Error("canceling statement"), { code: "57014" });
+  const answeredRead = retryPool(/single_read/u, [answered]);
+  await assert.rejects(createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: answeredRead.factory,
+  }).transaction(singleRead, readOne), (error) => error === answered);
+  assert.equal(answeredRead.clients.length, 1);
 
   const timeout = new Error("Query read timeout");
   const explicit = retryPool(/^SELECT one$/u, [timeout]);
@@ -528,6 +543,8 @@ test("an open breaker refuses the retry and the original timeout surfaces", asyn
     connectivityBreaker: breaker, observer: (point) => observations.push(point),
   }).openSession();
   await assert.rejects(session.transaction(singleRead, readOne), (error) => error === failure);
+  assert.deepEqual(databaseFailureEvidence(failure).map(item => item.phase), ["sql", "pool_checkout"]);
+  assert.equal(databaseFailureEvidence(failure)[1].code, "DATABASE_CIRCUIT_OPEN");
   assert.equal(fake.clients.length, 1, "no second checkout");
   assert.deepEqual(fake.clients[0].releases, [true]);
   assert.equal(observations.at(-1).queryName, "database_phase_pool_checkout_v1");
@@ -770,3 +787,48 @@ async function assertPlacementRejected(fake) {
     call.input.text === "SELECT one"), false);
   assert.equal(fake.calls.some((call) => call.input === "ROLLBACK"), true);
 }
+
+// The repository's PostgreSQL lifecycle tests cover which deletion jobs are due.
+// These regressions protect admission when a transport loses a read or COMMIT;
+// the generic single-read tests cannot ensure this caller opts into that contract.
+test("account-deletion admission succeeds without a fallible read-only COMMIT", async () => {
+  const fake = fakeFactory({ failOn: /^COMMIT$/u, failureCode: "08006" });
+  const database = createAuthorityDatabase({ connectionString: "postgres://example.invalid/xmatrix",
+    shardId: "shard-0", clientFactory: fake.factory });
+  const repository = new PostgresAccountDeletionRepository(database, [database], ["shard-0"]);
+  assert.deepEqual(await repository.pending(), []);
+  const statements = fake.calls.filter(call => call.kind === "query").map(call =>
+    typeof call.input === "string" ? call.input : call.input.text);
+  assert.equal(statements.length, 1, "admission has one bounded database round trip");
+});
+
+test("account-deletion admission surfaces a second lost read and destroys both checkouts", async () => {
+  const second = new Error("Query read timeout");
+  const fake = retryPool(/account_deletion_requests/u, [new Error("Query read timeout"), second]);
+  const database = createAuthorityDatabase({ connectionString: "postgres://example.invalid/xmatrix",
+    shardId: "shard-0", poolFactory: fake.factory });
+  const repository = new PostgresAccountDeletionRepository(database, [database], ["shard-0"]);
+  await assert.rejects(repository.pending(), error => error === second);
+  assert.equal(fake.clients.length, 2, "one retry, with no third checkout");
+  assert.deepEqual(fake.clients.map(client => client.releases), [[true], [true]]);
+});
+
+// HUB-9P/9R: retries already exist, but the thrown error lost the first
+// attempt and whether this path was a single read. Check the real owner.
+test("exhausted single reads retain both failed attempts without SQL or parameters", async () => {
+  const first = new Error("Query read timeout");
+  const second = new Error("Query read timeout");
+  const fake = retryPool(/single_read/u, [first, second]);
+  const db = createAuthorityDatabase({ connectionString: "postgres://fixture", shardId: "shard-0", poolFactory: fake.factory });
+  await assert.rejects(db.transaction(singleRead, tx => tx.query({ name: "read_evidence_v1",
+    text: "SELECT $1 AS private_sql", values: ["private-parameter"], maxRows: 1 })), error => {
+    assert.equal(error, second);
+    const attempts = databaseFailureEvidence(error);
+    assert.equal(attempts.length, 2);
+    assert.ok(attempts.every(item => item.operation === "read" && item.statement === "single_read" &&
+      item.phase === "sql" && item.queryName === "read_evidence_v1" && item.code === "QUERY_READ_TIMEOUT" &&
+      Number.isSafeInteger(item.durationMs)));
+    assert.doesNotMatch(JSON.stringify(attempts), /private-|postgres:\/\//);
+    return true;
+  });
+});

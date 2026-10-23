@@ -1,5 +1,6 @@
 import { WEB_PROXY_ROUTES, type MessageSearchPage, type PageSearchHit } from "@xmatrix/protocol";
 import { requireJson, xmatrixRawResponse } from "@/lib/query/api-client";
+import { SearchRerankUnavailable, type SearchRerankCandidate, type SearchRerankReading } from "./workspace-search-rank";
 
 /**
  * Message search runs on the Hub: it scans the newest readable messages of the
@@ -39,4 +40,21 @@ export async function searchWorkspacePages(input: {
     cache: "no-store",
   });
   return requireJson<{ results: PageSearchHit[] }>(response);
+}
+
+/** Jev's reading of a search, from the Hub; Pro Spaces only (403 otherwise). */
+export async function rerankWorkspaceSearch(input: {
+  token: string;
+  spaceId: string;
+  query: string;
+  candidates: readonly SearchRerankCandidate[];
+  signal?: AbortSignal;
+}): Promise<SearchRerankReading> {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.search_rerank, {
+    method: "POST", cache: "no-store", signal: input.signal,
+    headers: { Authorization: `Bearer ${input.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ spaceId: input.spaceId, query: input.query, candidates: input.candidates }),
+  });
+  if (response.status === 403) throw new SearchRerankUnavailable();
+  return requireJson<SearchRerankReading>(response);
 }

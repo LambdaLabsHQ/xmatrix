@@ -4,21 +4,25 @@ import { verifyTelegramNativeConnection } from "./telegram-native";
 import { verifyWeComNativeConnection } from "./wecom-native";
 import { getAppConnectorProvider } from "../app-connectors";
 import type { Env } from "../types";
+import { upstreamMeter } from "../usage-cost-metering";
 import { connectionCredentials } from "./connection-credentials";
 import { ProviderRequestError } from "./http";
 import { connectorProvider } from "./registry";
 import { verifyDiscordNativeConnection } from "./discord-native";
 import { verifyFeishuNativeConnection } from "./feishu-native";
 import { verifyGoogleChatNativeConnection } from "./googlechat-native";
+import { verifyXConnection } from "./x-api";
 
 /* What a connection's credentials are and whether they work. A connection is
    Connected only after this passes: the fields its manifest requires are
    stored, and the provider accepted them on one real call. */
 
 /** Throws, with what to fix, unless the stored credentials are complete and the provider accepts them. */
-export async function verifyConnectorConnection(env: Env, spaceId: string, providerId: string): Promise<void> {
+export async function verifyConnectorConnection(env: Env, spaceId: string, providerId: string,
+  commandId: string): Promise<string | void> {
   const manifest = getAppConnectorProvider(providerId);
   if (!manifest) throw new Error("Unknown app");
+  if (providerId === "x") return verifyXConnection(env, spaceId, commandId);
   if (providerId === "teams" && await verifyTeamsNativeConnection(env, spaceId)) return;
   if (providerId === "dingtalk" && await verifyDingTalkNativeConnection(env, spaceId)) return;
   if (providerId === "wecom" && await verifyWeComNativeConnection(env, spaceId)) return;
@@ -33,7 +37,8 @@ export async function verifyConnectorConnection(env: Env, spaceId: string, provi
     throw new Error(`Save ${missing.map((field) => field.label).join(", ")} under Credentials`);
   }
   try {
-    await connectorProvider(providerId)?.verify?.(credentials);
+    await connectorProvider(providerId)?.verify?.(credentials,
+      upstreamMeter(env, { spaceId, connector: providerId, action: "verify" }));
   } catch (error) {
     if (error instanceof ProviderRequestError) throw new Error(`${manifest.name} refused the credentials: ${error.message}`);
     throw new Error(error instanceof DOMException && error.name === "TimeoutError"

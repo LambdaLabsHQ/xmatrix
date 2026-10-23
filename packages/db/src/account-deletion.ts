@@ -129,7 +129,7 @@ export class PostgresAccountDeletionRepository {
   }
 
   async pending(): Promise<string[]> {
-    return this.directory.transaction({ requestId: crypto.randomUUID(), operation: "account-deletion.pending" }, async (tx) =>
+    return this.directory.transaction({ requestId: crypto.randomUUID(), operation: "account-deletion.pending", statement: "single_read" }, async (tx) =>
       (await tx.query<{ user_id: string }>({ name: "account_deletion_pending_v1", text: `SELECT user_id
         FROM control.account_deletion_requests WHERE (state IN ('preparing','committed') OR (state='blocked' AND NOT fences_cleared) OR (state='completed' AND (historical_profile_cleanup_done IS NOT TRUE OR (avatar_sweep_after<=clock_timestamp() AND committed_at>clock_timestamp()-interval '1 day'))))
           AND (lease_until IS NULL OR lease_until<clock_timestamp()) ORDER BY updated_at LIMIT 2`, maxRows: 2 })).map(x => x.user_id));

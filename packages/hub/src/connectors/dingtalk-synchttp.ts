@@ -16,13 +16,20 @@ export function dingtalkStructuredJson(source: string): unknown {
     while (/[ \t\r\n]/u.test(source[at] ?? "") && at < source.length) at++;
   };
   function string(): string {
-    // oxlint-disable-next-line no-control-regex
-    const match = /"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/uy;
-    match.lastIndex = at;
-    const found = match.exec(source);
-    if (!found) throw rejected();
-    at = match.lastIndex;
-    const value = JSON.parse(found[0]) as string;
+    // One forward scan over a strict JSON string token: no control characters, only JSON escapes.
+    const start = at;
+    if (source[at] !== '"') throw rejected();
+    for (at += 1; source[at] !== '"'; at += 1) {
+      if (at >= source.length || source.charCodeAt(at) < 0x20) throw rejected();
+      if (source[at] !== "\\") continue;
+      at += 1;
+      if (source[at] === "u") {
+        if (!/^[0-9a-fA-F]{4}$/u.test(source.slice(at + 1, at + 5))) throw rejected();
+        at += 4;
+      } else if (!'"\\/bfnrt'.includes(source[at] ?? "") || at >= source.length) throw rejected();
+    }
+    at += 1;
+    const value = JSON.parse(source.slice(start, at)) as string;
     if (
       value.includes("\u0000") ||
       value.includes("\uFEFF") ||

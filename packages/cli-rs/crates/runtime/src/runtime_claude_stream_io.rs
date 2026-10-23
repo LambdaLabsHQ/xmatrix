@@ -27,6 +27,7 @@ use crate::runtime_claude_messages::claude_assistant_text;
 use crate::runtime_claude_messages::claude_frame_is_subagent;
 use crate::runtime_claude_messages::claude_init_details;
 use crate::runtime_claude_messages::claude_message_id;
+use crate::runtime_claude_messages::claude_partial_assistant_delta;
 use crate::runtime_claude_messages::claude_runtime_notice_payload;
 use crate::runtime_claude_messages::claude_tool_item_key;
 use crate::runtime_claude_messages::claude_tool_name;
@@ -52,7 +53,7 @@ use crate::runtime_harness_questions::{
 };
 use crate::runtime_trusted_role_prompt::claude_stream_extra_args;
 use crate::runtime_trusted_role_prompt::trusted_role_system_prompt_from_env;
-use crate::runtime_usage_limit::{claude_rate_limit_rejection, usage_limit_from_error};
+use crate::runtime_usage_limit::claude_rate_limit_rejection;
 use crate::runtime_waiting::{ToolWaits, background_wait, claude_tool_wait};
 use crate::{
     AgentPresentationFacts, CliError, PresencePatch, agent_instance_connection,
@@ -181,7 +182,7 @@ pub(crate) struct ClaudeStreamLaunch<'a> {
 
 /// The state a stream process's reader and watchdog share with its session.
 pub(crate) struct ClaudeStreamShared {
-    pub(crate) relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
+    pub relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     pub(crate) agent: protocol::SerializedAgent,
     pub(crate) active: Arc<AsyncMutex<Option<ActiveStreamTurn>>>,
     pub(crate) alive: Arc<AtomicBool>,
@@ -519,7 +520,7 @@ pub(crate) async fn claude_stream_reader(
                 let questions = claude_questions(&input);
                 match channel.filter(|_| !questions.is_empty()) {
                     Some(channel) => {
-                        publish_questionnaire(
+                        let card = publish_questionnaire(
                             &relay,
                             &channel,
                             questionnaire_message(
@@ -529,9 +530,11 @@ pub(crate) async fn claude_stream_reader(
                                 &questions,
                             ),
                         );
-                        model_state
-                            .questions
-                            .park(tool_use_id, ClaudeParkedQuestion { request_id, input });
+                        model_state.questions.park(
+                            tool_use_id,
+                            ClaudeParkedQuestion { request_id, input },
+                            card,
+                        );
                     }
                     None => {
                         let refusal = claude_permission_response(
@@ -786,6 +789,7 @@ pub(crate) async fn claude_stream_reader(
             && value.get("isReplay").and_then(Value::as_bool) == Some(true)
         {
             turn.input_replayed = true;
+            turn.inputs_replayed += 1;
         }
         if cli_originated_result {
             set_cli_turn_channel(&cli_turn_channel, None);
@@ -868,6 +872,18 @@ pub(crate) async fn claude_stream_reader(
                     turn.output_started = true;
                 }
             }
+            // A message steered in after Claude's last tool call waits behind
+            // this result and gets one of its own: the turn goes on until
+            // Claude has taken every input it was given.
+            Some("result")
+                if !turn.interrupt_requested
+                    && turn.input_replayed
+                    && turn.inputs_replayed < 1 + turn.inputs_steered =>
+            {
+                let (answer, _) = claude_result_answer(&value, &trace.visible_assistant_text);
+                turn.answer = Some(answer);
+                continue;
+            }
             Some("result") => {
                 // Settled before the submitter wakes: its `idle` report
                 // carries the wait, so background tasks outlive the turn.
@@ -916,7 +932,8 @@ pub(crate) async fn claude_stream_reader(
         *interrupted_channels.entry(channel.clone()).or_default() += 1;
     }
     for (channel, count) in interrupted_channels {
-        // Only bounded facts cross into the channel; descriptions can contain private tool input.
+        // Only the bounded fact crosses into the channel; Hub words the notice.
+        // Descriptions can contain private tool input and stay on this host.
         let _ = relay.send_message(protocol::AgentInstanceClientMessage::AgentLifecycle {
             request_id: Some(interruption_id.clone()),
             channel_id: Some(channel),
@@ -926,9 +943,10 @@ pub(crate) async fn claude_stream_reader(
             layer: "application".into(),
             status: "blocked".into(),
             reason: Some("background_tasks_interrupted".into()),
-            detail: Some(format!("The provider stream ended with {count} task(s) still pending. Their outcome is unknown; verify external operations before continuing.")),
+            detail: None,
             snapshot: None,
             resets_at: None,
+            pending_tasks: Some(u32::try_from(count).unwrap_or(u32::MAX)),
             ts: None,
         });
     }
@@ -1008,6 +1026,7 @@ pub(crate) async fn claude_stream_watchdog(
             .unwrap_or_else(|poison| poison.into_inner())
             .take();
         if let Some(channel_id) = channel_id {
+            let error = "Claude stopped responding while working on its own (after a background task finished). The session resumes on the next message.";
             send_llm_trace_with_source(
                 &relay,
                 &channel_id,
@@ -1017,12 +1036,13 @@ pub(crate) async fn claude_stream_watchdog(
                 None,
                 None,
                 serde_json::json!({
-                    "error": "Claude stopped responding while working on its own (after a background task finished). The session resumes on the next message.",
+                    "error": error,
                     "executionState": "unknown",
                     "origin": "task-notification",
                 }),
             )
             .await;
+            crate::report_turn_failure(&relay, Some(channel_id.as_str()), &agent, error, true);
             send_presence(&relay, Some("idle"), PresencePatch::default());
             alive.store(false, Ordering::SeqCst);
             break;
@@ -1095,7 +1115,7 @@ fn set_cli_turn_channel(cli_turn_channel: &Mutex<Option<String>>, channel_id: Op
 }
 
 /// The `turn_completed` / `turn_failed` trace for a turn the CLI started
-/// itself, and the usage limit it ran into.
+/// itself, and its failure.
 async fn publish_cli_turn_finished(
     relay: &Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     agent: &protocol::SerializedAgent,
@@ -1128,23 +1148,19 @@ async fn publish_cli_turn_finished(
         }),
     )
     .await;
-    // A background task's completion can start a turn on an account that is
-    // already used up. Nobody else reports that turn, so its usage limit
-    // reaches the Hub (and hands the Instance off) only from here.
+    // A background task's completion can start a turn by itself. Nobody else
+    // reports that turn, so its failure, with the provider's own error,
+    // reaches the Hub only from here; Hub reads a usage limit from it.
     if !failed {
-        crate::clear_pending_usage_limit();
+        crate::clear_pending_turn_failure();
     } else {
         let (answer, _) = claude_result_answer(result, &trace.visible_assistant_text);
-        if let Some(limit) = usage_limit_from_error(&answer) {
-            crate::report_turn_failure_with_usage_limit(
-                relay,
-                Some(channel_id),
-                agent,
-                &answer,
-                false,
-                Some(limit),
-            );
-        }
+        let error = if answer.trim().is_empty() {
+            "Claude failed a turn it started after a background task finished."
+        } else {
+            answer.as_str()
+        };
+        crate::report_turn_failure(relay, Some(channel_id), agent, error, false);
     }
 }
 
@@ -1222,15 +1238,22 @@ pub(crate) fn claude_result_answer(value: &Value, visible_assistant_text: &str) 
         let answer = result.unwrap_or_else(|| visible_assistant_text.trim());
         return (answer.to_string(), false);
     }
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(subtype) = value.get("subtype").and_then(Value::as_str) {
+    let mut parts = crate::runtime_failure_detail::error_metadata(value);
+    // An error result can still carry subtype "success" (an authentication
+    // failure does): it names nothing, so only another subtype is kept.
+    if let Some(subtype) = value
+        .get("subtype")
+        .and_then(Value::as_str)
+        .filter(|subtype| *subtype != "success")
+    {
         parts.push(subtype.to_string());
     }
     if let Some(errors) = value.get("errors").and_then(Value::as_array) {
-        parts.extend(errors.iter().map(|error| match error.as_str() {
-            Some(text) => text.to_string(),
-            None => error.to_string(),
-        }));
+        parts.extend(
+            errors
+                .iter()
+                .map(crate::runtime_failure_detail::provider_error_detail),
+        );
     }
     if let Some(result) = result {
         parts.push(result.to_string());
@@ -1243,11 +1266,22 @@ pub(crate) fn claude_result_answer(value: &Value, visible_assistant_text: &str) 
     (answer, true)
 }
 
+/// Partial text waits for this much, or this long, before it is reported.
+const CLAUDE_PARTIAL_FLUSH_BYTES: usize = 160;
+const CLAUDE_PARTIAL_FLUSH_MS: u64 = 400;
+/// As often as a page writes what comes (`CO_WRITER_WRITE_EVERY_MS` in the Hub's page-co-writer.ts).
+const CLAUDE_PAGE_WRITE_FLUSH_MS: u64 = 80;
+
 #[derive(Default)]
 pub(crate) struct ClaudeStreamTraceState {
     pub(crate) visible_assistant_text: String,
     pub(crate) current_message_text: String,
     pub(crate) last_message_id: Option<String>,
+    /// The message partial `stream_event`s are writing.
+    pub(crate) partial_message_id: Option<String>,
+    /// Partial text not reported yet, and when some last was.
+    partial_buffer: String,
+    partial_reported: Option<Instant>,
     seen_tool_uses: HashSet<String>,
     seen_tool_results: HashSet<String>,
     /// Bash commands that create pull requests, by tool use id, until their result.
@@ -1374,6 +1408,40 @@ pub(crate) async fn publish_claude_stream_trace(
         )
         .await;
         return;
+    }
+    // Partial text is reported in pieces, as Codex's is, rather than per token.
+    let partial = value.get("type").and_then(Value::as_str) == Some("stream_event");
+    if partial {
+        let delta = claude_partial_assistant_delta(state, value);
+        state.partial_buffer.push_str(&delta);
+    }
+    // A reply writing into a page goes out as it comes, for the page to show it so: a `⟦write⟧`
+    // from a conversation, or an answer to the page this Run co-writes live.
+    let flush_ms = if crate::runtime_page_stream_write::writing(channel_id)
+        || crate::runtime_page_co_write::answering(channel_id)
+    {
+        CLAUDE_PAGE_WRITE_FLUSH_MS
+    } else {
+        CLAUDE_PARTIAL_FLUSH_MS
+    };
+    let due = state.partial_buffer.len() >= CLAUDE_PARTIAL_FLUSH_BYTES
+        || state
+            .partial_reported
+            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(flush_ms));
+    if !state.partial_buffer.is_empty() && (!partial || due) {
+        let delta = std::mem::take(&mut state.partial_buffer);
+        state.partial_reported = Some(Instant::now());
+        send_llm_trace_with_source(
+            relay,
+            channel_id,
+            "assistant_delta",
+            "claude_code",
+            agent,
+            None,
+            None,
+            serde_json::json!({ "delta": delta, "messageId": state.partial_message_id }),
+        )
+        .await;
     }
     match value.get("type").and_then(Value::as_str) {
         Some("assistant") => {

@@ -1,6 +1,6 @@
 // The harness registry (`agent-presets.json`) owns every launcher alias; the
 // predicates in this file only ask it questions.
-pub(crate) use xmatrix_cli_agent::acp_backend_matches;
+pub use xmatrix_cli_agent::acp_backend_matches;
 use xmatrix_cli_agent::{
     agent_preset_by_id, agent_preset_for_launcher, agent_type_for_launcher, launcher_stem_matches,
 };
@@ -290,9 +290,8 @@ fn use_grok_app_backend(tool: &str) -> bool {
     {
         return true;
     }
-    // Default Grok launches to the ACP WebSocket serve backend (non-PTY). Users
-    // can force PTY by setting XMATRIX_GROK_APP=0/false and clearing the backend
-    // env, or force ACP stdio with XMATRIX_GROK_TRANSPORT=stdio.
+    // Default Grok launches to the ACP stdio backend (non-PTY). Users can force
+    // PTY by setting XMATRIX_GROK_APP=0/false and clearing the backend env.
     if !is_grok_tool(tool) {
         return false;
     }

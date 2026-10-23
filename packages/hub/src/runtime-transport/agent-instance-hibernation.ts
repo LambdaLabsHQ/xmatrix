@@ -85,6 +85,8 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
   const principal = session.principal;
   const run = session.run;
   const principalKeys = ["ownerUserId", "agentId", "agentName", "spaceId", "runId", "executionKey", "channelId", "machineId"] as const;
+  // Sessions saved before Channel About Runs were retired (2026-10-15) still name their kind; a
+  // retired About session is not restored.
   const optionalPrincipalKeys = ["hostId", "runKind", "channelWriteAllowed"] as const;
   const requiredRunKeys = ["runId", "agentId", "instanceId", "executionKey", "channelId", "machineId", "status", "instanceStatus"] as const;
   const optionalRunKeys = ["hostId", "kind", "channelDeliveryEnabled", "channelInstanceId", "cwd", "repository", "connectionVersion"] as const;
@@ -96,32 +98,21 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
       !hibernationHasOnlyKeys(run, [...requiredRunKeys, ...optionalRunKeys]) ||
       !requiredRunKeys.slice(0, 6).every((key) => hibernationBoundedString(run[key])) ||
       ![principal, run].every(item => item.hostId === undefined || item.hostId === "" || hibernationBoundedString(item.hostId, 160)) ||
-      !(run.channelDeliveryEnabled === undefined || typeof run.channelDeliveryEnabled === "boolean") ||
+      !(run.channelDeliveryEnabled === undefined || run.channelDeliveryEnabled === true) ||
       !(run.channelInstanceId === undefined || hibernationBoundedString(run.channelInstanceId)) ||
       !(run.cwd === undefined || hibernationBoundedString(run.cwd, 2_048)) ||
       !(run.repository === undefined || hibernationBoundedString(run.repository, 2_048)) ||
       !(run.connectionVersion === undefined ||
         Number.isSafeInteger(run.connectionVersion) && (run.connectionVersion as number) > 0) ||
-      !(run.kind === undefined || run.kind === "channel-instance" || run.kind === "channel-about-session") ||
-      !(principal.runKind === undefined || principal.runKind === "channel-instance" ||
-        principal.runKind === "channel-about-session") ||
-      !(principal.channelWriteAllowed === undefined || typeof principal.channelWriteAllowed === "boolean") ||
+      !(run.kind === undefined || run.kind === "channel-instance") ||
+      !(principal.runKind === undefined || principal.runKind === "channel-instance") ||
+      !(principal.channelWriteAllowed === undefined || principal.channelWriteAllowed === true) ||
       !["starting", "running"].includes(String(run.status)) ||
       !isLiveAgentStatus(run.instanceStatus) ||
       run.runId !== principal.runId || run.agentId !== principal.agentId ||
       run.executionKey !== principal.executionKey || run.channelId !== principal.channelId ||
       run.machineId !== principal.machineId) return undefined;
-  const runKind = run.kind === "channel-about-session"
-    ? "channel-about-session"
-    : "channel-instance";
-  const principalRunKind = principal.runKind === "channel-about-session"
-    ? "channel-about-session"
-    : "channel-instance";
-  const channelWriteAllowed = principal.channelWriteAllowed !== false;
-  if (runKind !== principalRunKind ||
-      (runKind === "channel-about-session" && channelWriteAllowed)) return undefined;
   const runOut: AgentInstanceRuntimeSession["run"] = {
-    kind: runKind,
     runId: String(run.runId),
     agentId: String(run.agentId),
     instanceId: String(run.instanceId),
@@ -132,9 +123,6 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
     status: run.status as "starting" | "running",
     instanceStatus: run.instanceStatus as LiveAgentStatus,
     ...(typeof run.connectionVersion === "number" ? { connectionVersion: run.connectionVersion } : {}),
-    ...(typeof run.channelDeliveryEnabled === "boolean"
-      ? { channelDeliveryEnabled: run.channelDeliveryEnabled }
-      : {}),
     ...(typeof run.channelInstanceId === "string" ? { channelInstanceId: run.channelInstanceId } : {}),
     ...(typeof run.cwd === "string" ? { cwd: run.cwd } : {}),
     ...(typeof run.repository === "string" ? { repository: run.repository } : {}),
@@ -151,8 +139,6 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
       principal: {
         ...Object.fromEntries(principalKeys.map((key) => [key, principal[key]])),
         hostId: typeof principal.hostId === "string" ? principal.hostId : "",
-        runKind: principalRunKind,
-        channelWriteAllowed,
       } as AgentInstanceRuntimeSession["principal"],
       run: runOut,
       connectedAt: session.connectedAt,

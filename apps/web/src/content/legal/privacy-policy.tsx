@@ -289,7 +289,11 @@ export function PrivacyPolicyContent() {
           it lists the connected account&apos;s GA4 properties and reads the reports a person or Agent
           asks for, including sessions, users, and landing pages. Google Business Profile access lists
           accounts and locations, reads performance and reviews, and publishes a review reply only when
-          someone in the Space asks for that reply.
+          someone in the Space asks for that reply. Google Ads access reads the selected advertising
+          account&apos;s settings, campaigns, budgets, ads, and performance reports. When requested and
+          permitted by the Channel&apos;s action policy or a specific approval, it validates, creates,
+          updates, pauses, or enables advertising resources in that account. Enabling a campaign can
+          incur Google Ads charges in the Customer&apos;s account.
         </p>
         <p>
           We use Google user data only to provide those user-facing features: we retrieve it when a
@@ -306,8 +310,12 @@ export function PrivacyPolicyContent() {
           >
             Google API Services User Data Policy
           </a>
-          , including the Limited Use requirements. We do not sell Google user data, use or transfer it
-          for advertising, use it to determine credit-worthiness or for lending, or use it to develop,
+          , including the Limited Use requirements. Google Ads account management uses that account&apos;s
+          advertising configuration and reports only for the features described above. We do not use
+          Google user data from Gmail, Drive, or other connected Google services to build advertising
+          audiences or target ads. We do not sell Google user data, use or transfer it for retargeting,
+          personalized or interest-based advertising, use it to determine credit-worthiness or for
+          lending, or use it to develop,
           improve, or train generalized AI or machine-learning models. Our staff do not read it except
           with your affirmative agreement for specific content, when necessary for security or to
           comply with law, or when the data is aggregated and anonymized for internal operations.
@@ -442,6 +450,12 @@ export function PrivacyPolicyContent() {
       </LegalSection>
 
       <LegalSection id="account-deletion" title="17. Account and Space deletion">
+        <p>
+          Space owners and admins can delete a Channel from its actions or details after confirming
+          its current name and the consequences for all members. Access ends immediately and
+          interrupted data cleanup resumes automatically. Linked Pages remain separate documents;
+          shared content-addressed bytes follow the existing retention policy.
+        </p>
         <p>
           You can start account deletion in Settings → Account or at the{' '}
           <Link href="/account/delete">account deletion page</Link>. A recent sign-in, your account

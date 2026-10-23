@@ -33,6 +33,31 @@ export function assertSemver(version) {
   parseSemver(version);
 }
 
+// A release is a stable `X.Y.Z` or a beta `X.Y.Z-beta.N` that precedes the
+// stable `X.Y.Z`. The version alone says which channel it belongs to: no
+// workflow input, GitHub prerelease flag or channel pointer decides that.
+const releaseVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.([1-9]\d*))?$/;
+
+/** "stable" for `X.Y.Z`, "beta" for `X.Y.Z-beta.N`; throws for any other version. */
+export function releaseChannel(version) {
+  const match = releaseVersionPattern.exec(version ?? "");
+  if (!match) {
+    throw new Error(
+      `Invalid release version '${version ?? ""}'. Expected X.Y.Z (stable) or X.Y.Z-beta.N (beta).`,
+    );
+  }
+  return match[4] === undefined ? "stable" : "beta";
+}
+
+/** The stable `X.Y.Z` a release version is, or precedes. */
+export function releaseCore(version) {
+  releaseChannel(version);
+  return version.split("-")[0];
+}
+
+/** A production release tag: `xmatrix-v` and a release version. */
+export const RELEASE_TAG_PATTERN = new RegExp(`^xmatrix-v${releaseVersionPattern.source.slice(1)}`, "u");
+
 export function compareSemver(left, right) {
   const parsedLeft = parseSemver(left);
   const parsedRight = parseSemver(right);

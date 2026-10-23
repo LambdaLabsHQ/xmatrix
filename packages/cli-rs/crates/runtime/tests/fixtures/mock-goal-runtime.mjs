@@ -1,4 +1,5 @@
 import readline from "node:readline";
+import { appendFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 
 const provider = process.argv[2];
@@ -44,14 +45,6 @@ function handleCodexSessionRequest(message) {
     return true;
   }
   if (message.method === "thread/start" || message.method === "thread/resume") {
-    if (Object.hasOwn(message.params ?? {}, "developerInstructions")) {
-      send({
-        jsonrpc: "2.0",
-        id: message.id,
-        error: { code: -32602, message: "xMatrix bootstrap must not use developerInstructions" },
-      });
-      return true;
-    }
     response(message, {
       thread: { id: "codex-fixture-thread", model: "gpt-fixture" },
     });
@@ -206,7 +199,7 @@ function handleCodexCapacity(message) {
   response(message, { turn: { id: turnId } });
   sendCodexTurnStarted(threadId, turnId);
   if (capacityStarts > 1 && provider !== "codex-capacity-exhausted") {
-    const preserved = ["threadId", "model", "effort", "developerInstructions"]
+    const preserved = ["threadId", "model", "effort"]
       .every((key) => message.params[key] === capacityInitialParams[key]);
     const continuation = message.params.input.length === 1 &&
       (provider === "codex-capacity-hub-recover"
@@ -263,6 +256,23 @@ function handleCodexInterruptWithoutCompletion(message) {
     default:
       if (message.id !== undefined) response(message, {});
   }
+}
+
+// `turn/steer` joins the running turn: the turn answers the steered input and
+// completes. In the rejecting mode Codex refuses it, as when its turn ended.
+// Everything else behaves as the interrupt fixture.
+function handleCodexSteer(message) {
+  if (message.method !== "turn/steer") return handleCodexInterruptWithoutCompletion(message);
+  const { threadId, expectedTurnId, input } = message.params;
+  if (provider === "codex-steer-rejected") {
+    send({ jsonrpc: "2.0", id: message.id, error: { code: -32600, message: "no active turn" } });
+    return;
+  }
+  response(message, { turnId: expectedTurnId });
+  const steered = input.map((item) => item.text ?? "").join("");
+  sendCodexTurnOutput(threadId, expectedTurnId, "steered-answer",
+    steered.includes("also check the docs") ? "answered the steer" : "steer text missing");
+  sendCodexTurnCompleted(threadId, expectedTurnId);
 }
 
 function handleCodexInterruptWithoutAck(message) {
@@ -620,15 +630,35 @@ function handleAcp(message) {
           mcpCapabilities: { http: true, sse: true },
           sessionCapabilities: { list: {}, resume: {} },
         },
-        authMethods: [{ id: "login", name: "Login", description: "fixture login" }],
+        authMethods: provider === "acp-cursor-login"
+          ? [{ id: "cursor_login", name: "Cursor Login", description: "fixture login" }]
+          : provider === "acp-missing-key"
+            ? [{ id: "openai", name: "Use OpenAI API key", description: "Requires setting the `OPENAI_API_KEY` environment variable" }]
+            : [{ id: "login", name: "Login", description: "fixture login" }],
         agentInfo: { name: "Kimi Code CLI", version: "0.30.0" },
       });
       break;
     case "authenticate":
+      // Current Cursor CLI advertises only cursor_login and rejects anything else.
+      if (provider === "acp-cursor-login" && message.params?.methodId !== "cursor_login") {
+        send({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: "Invalid params",
+          data: { message: `Unknown authentication method: ${message.params?.methodId}. Supported method: cursor_login` } } });
+        break;
+      }
+      // Qwen Code 0.26 without a configured provider refuses its only method.
+      if (provider === "acp-missing-key") {
+        send({ jsonrpc: "2.0", id: message.id, error: { code: -32603, message: "Internal error",
+          data: { details: "Missing API key for openai auth. Provide an API key via settings, or set OPENAI_API_KEY." } } });
+        break;
+      }
       acpState.authenticateSeen = true;
       response(message, {});
       break;
     case "session/new":
+      if ((provider === "acp-cursor-login" || provider === "acp-missing-key") && !acpState.authenticateSeen) {
+        send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "Authentication required" } });
+        break;
+      }
       response(message, {
         sessionId: "acp-fixture-session",
         configOptions: [
@@ -718,6 +748,8 @@ const handlers = {
 
   "codex-interrupt-no-completion": handleCodexInterruptWithoutCompletion,
   "codex-interrupt-no-ack": handleCodexInterruptWithoutAck,
+  "codex-steer": handleCodexSteer,
+  "codex-steer-rejected": handleCodexSteer,
   "codex-session-rate-limit-turn": handleCodexSessionRateLimitTurn,
   "codex-redirected-turn": handleCodexRedirectedTurn,
   "codex-goal-turn-order": handleCodexGoalTurnOrder,
@@ -725,6 +757,8 @@ const handlers = {
   zcode: handleZcode,
   grok: handleGrok,
   acp: handleAcp,
+  "acp-cursor-login": handleAcp,
+  "acp-missing-key": handleAcp,
   "acp-live-canary": handleAcp,
 };
 
@@ -735,5 +769,9 @@ if (!handlers[provider]) {
 
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (!line.trim()) return;
-  handlers[provider](JSON.parse(line));
+  const message = JSON.parse(line);
+  if (provider === "codex-turn-order" && process.argv[3]?.startsWith("--capture-requests=")) {
+    appendFileSync(process.argv[3].slice("--capture-requests=".length), `${JSON.stringify(message)}\n`);
+  }
+  handlers[provider](message);
 });

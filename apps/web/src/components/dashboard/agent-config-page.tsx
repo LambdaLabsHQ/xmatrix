@@ -4,7 +4,6 @@ import { useState } from "react";
 import { AlertTriangle, Check, ChevronDown, HardDrive } from "lucide-react";
 import {
   AGENT_PRESETS,
-  agentPresetAvatarUrl,
   type SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -17,7 +16,7 @@ import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { cn } from "@/lib/utils";
 
 import { DialogButton, DialogInset } from "./centered-dialog-shell";
-import { IdentityAvatar } from "./identity-avatar";
+import { Face } from "./face";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { AgentRoutingDeclarationEditor } from "./agent-routing-declaration-editor";
 import { SpaceRegistrationPanel } from "./space-registration-panel";
@@ -32,7 +31,7 @@ export type AgentConfigDialogState = {
 /* Presets the desktop shell can npm-install; mirrors its native-owned allowlist
    in apps/desktop/src/agent-preset-install.ts, which stays the authority. */
 const NATIVE_INSTALL_PRESETS = ["codex", "opencode", "pi", "copilot", "gemini", "qwen", "junie", "openclaw", "qoder",
-  "codebuddy", "auggie", "cline", "kilo", "droid", "commandcode", "autohand", "reasonix", "dimcode"];
+  "codebuddy", "auggie", "cline", "kilo", "droid", "commandcode", "autohand", "reasonix", "dimcode", "deepseek"];
 
 /* One line naming everything the disclosure holds, so a closed Details is
    still an answer to "what else is there?" rather than a dead end. */
@@ -99,7 +98,7 @@ export function AgentConfigPage({
       className="app-form-page app-message-surface app-message-surface-space-setup app-material-scroll-content relative flex min-w-0 flex-1 flex-col overflow-hidden"
       aria-labelledby="agent-config-title"
     >
-      <div className="app-space-setup-canvas min-h-0 flex-1 overflow-y-auto">
+      <div className="app-space-setup-canvas app-below-band min-h-0 flex-1 overflow-y-auto">
         <SetupCardShell>
           <SetupCardHeader
             title="New agent"
@@ -125,11 +124,8 @@ export function AgentConfigPage({
 
           <LiquidGlassCard className="app-form-page-card app-setup-hero mt-5 rounded-[22px] p-5">
             <div className="flex items-center gap-3">
-              <IdentityAvatar
-                kind="agent"
-                label={selectedPreset.displayName}
-                imageUrl={agentPresetAvatarUrl(selectedPreset.id)}
-                initials={selectedPreset.displayName.slice(0, 2)}
+              <Face
+                of={{ kind: "agent", name: selectedPreset.displayName, harness: selectedPreset.id }}
                 size="md"
                 className="app-space-agent-vendor-avatar shrink-0"
               />
@@ -209,11 +205,8 @@ export function AgentConfigPage({
                         onChange={() => applyPreset(preset.id)}
                         className="sr-only"
                       />
-                      <IdentityAvatar
-                        kind="agent"
-                        label={preset.displayName}
-                        imageUrl={agentPresetAvatarUrl(preset.id)}
-                        initials={preset.displayName.slice(0, 2)}
+                      <Face
+                        of={{ kind: "agent", name: preset.displayName, harness: preset.id }}
                         size="sm"
                         className="app-space-agent-vendor-avatar shrink-0"
                       />

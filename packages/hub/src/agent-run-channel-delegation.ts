@@ -23,9 +23,6 @@ export async function requireAgentRunChannelDelegation(
   run: AgentRunPrincipal,
   channelIds: Array<string | undefined>,
 ): Promise<{ kind: "user"; id: string }> {
-  if (run.runKind === "channel-about-session" || run.channelWriteAllowed === false) {
-    throw new AgentRunDelegationError("agent_run_forbidden", 403, "This Agent Run cannot act in Channels");
-  }
   const repository = new PostgresAgentChannelAccessRepository(createPostgresAuthorityDatabase(env, {
     applicationName: "xmatrix-agent-channel-delegation", statementTimeoutMs: 5_000,
     transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,

@@ -56,6 +56,7 @@ export const HUB_ENVIRONMENT = {
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL: product("binding", "Per-Channel Agent Launch coordinator."),
   GITHUB_SUBSCRIPTION_INDEX: product("binding",
     "Per-installation index of subscribed GitHub sources; a delivery nobody subscribed to reads no routes."),
+  RELAY_X_UPLOAD_EXECUTOR: product("binding", "Per-upload durable X video executor; stores only references and scheduling state."),
   RELAY_POSTGRES_BACKGROUND_ADMISSION: product("binding", "Per-shard permits for background passes."),
   RELAY_CHANNEL_CATALOG_AUTHORITY: test("binding", "Pre-PostgreSQL Channel catalog authority; bound only by test configs."),
   RELAY_SCHEDULER_AUTHORITY: test("binding", "Pre-PostgreSQL scheduler authority; bound only by test configs."),
@@ -110,10 +111,14 @@ export const HUB_ENVIRONMENT = {
   ATTACHMENT_BUCKET: product("binding", "R2 bucket for attachments and avatars."),
   DIAGNOSTICS_AE: { kind: "binding", scope: "feature", summary: "Analytics Engine dataset for client diagnostics. Unset: diagnostics are dropped." },
   RELAY_AUTHORITY_OBSERVABILITY_AE: { kind: "binding", scope: "feature", summary: "Analytics Engine dataset for authority and PostgreSQL timing. Unset: observation is off." },
+  XMATRIX_USAGE_COST_AE: { kind: "binding", scope: "feature", summary: "Analytics Engine dataset metering operator-paid Jev, Composio and X calls per Space. Unset: metering is off." },
   RATE_LIMIT_CREDENTIAL: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted." },
   RATE_LIMIT_ANONYMOUS: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted." },
   RATE_LIMIT_HUMAN_CONNECT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted." },
-  RATE_LIMIT_ENFORCED: product("var", "Refuses over-limit requests with 429 and Retry-After only when \"true\"; otherwise they are only logged."),
+  RATE_LIMIT_SUMMON_INTENT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of composer draft previews (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: previews are not counted." },
+  RATE_LIMIT_JEV_EVALUATE: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human and verified Space (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted." },
+  RATE_LIMIT_SEARCH_RERANK: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of `POST /api/search/rerank` (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: reorderings are not counted." },
+  RATE_LIMIT_ENFORCED: product("var", "Refuses over-limit request allowances (credential, anonymous, Human sign-in) with 429 and Retry-After only when \"true\"; otherwise they are only logged. Production pins true."),
   RELAY_AUTHORITY_OBSERVABILITY_ENABLED: product("var", "Writes authority observation only when \"true\"."),
   RELAY_AUTHORITY_OBSERVABILITY_SLOW_MS: tuning("Requests at or above this wall time are never sampled away."),
   POSTGRES_COORDINATION_OBSERVABILITY_SAMPLE_RATE: tuning("1-in-N sampling of message coordination summaries."),
@@ -124,6 +129,7 @@ export const HUB_ENVIRONMENT = {
 
   // Deployment identity and policy (deployment profile).
   APP_URL: { kind: "var", scope: "deployment", summary: "Web origin; rendered from the profile's `web.origin`. Unset: links, redirects and auth fail closed." },
+  APP_BETA_URL: { kind: "var", scope: "deployment", summary: "Beta Web origin every beta deploys; rendered from the profile's `web.beta.origin`. Trusted for sign-in and direct reads exactly like APP_URL; links still go to APP_URL. Unset: only APP_URL is trusted." },
   CONNECTOR_DINGTALK_COMPANY_CONFIG: { kind: "secret", scope: "feature", summary: "Verified company-console JSON: suite-ticket protocol, sync-http delivery, numeric suiteId, developerCorpId, appId and approved templateId/templateField. Requires complete native suite keys; unset keeps company routes and actions unavailable." },
   HUB_URL: { kind: "var", scope: "deployment", summary: "Hub origin and token issuer; rendered from the profile's `hub.origin`. Unset: authentication fails closed." },
   XMATRIX_RUNTIME_LOCATION_HINT: { kind: "var", scope: "deployment", summary: "Durable Object location hint (e.g. `apac`) for Runtime cells, which must sit next to PostgreSQL. Unset: cells are created near their first caller." },
@@ -133,7 +139,6 @@ export const HUB_ENVIRONMENT = {
   XMATRIX_INVITE_EMAIL_FROM: { kind: "var", scope: "deployment", summary: "Sender address for invites; defaults to XMATRIX_EMAIL_FROM." },
   PLATFORM_ADMIN_EMAILS: { kind: "var", scope: "deployment", summary: "Operator emails allowed to read the platform overview." },
   PLATFORM_ADMIN_SPACE_ID: { kind: "var", scope: "deployment", summary: "Space whose members are platform admins. Optional." },
-  TEST_ENVIRONMENT_ACCESS_SPACE_ID: operator("var", "Space whose members may switch to the hosted Test deployment; leave unset."),
 
   // Authentication.
   BETTER_AUTH_SECRET: { kind: "secret", scope: "required", summary: "Signs sessions and tokens. Unset: the Hub cannot authenticate anyone." },
@@ -142,6 +147,14 @@ export const HUB_ENVIRONMENT = {
   GOOGLE_CLIENT_ID: { kind: "secret", scope: "feature", summary: "Google OAuth client id. Unset with its secret: Google sign-in is hidden." },
   GOOGLE_CLIENT_SECRET: { kind: "secret", scope: "feature", summary: "Google OAuth client secret." },
   XMATRIX_SECRET_CATALOG_KEY: { kind: "secret", scope: "required", summary: "Encrypts Space secrets (at least 32 characters). Unset: Space secrets cannot be stored or read." },
+
+  // Dedicated native Gmail metadata notifications; configured together after review.
+  GMAIL_WATCH_CLIENT_ID: {kind:"secret",scope:"feature",summary:"Dedicated Google notification OAuth client; unset disables setup."},
+  GMAIL_WATCH_CLIENT_SECRET: {kind:"secret",scope:"feature",summary:"Dedicated notification OAuth secret, separate from Composio."},
+  GMAIL_WATCH_TOPIC: {kind:"secret",scope:"feature",summary:"Pub/Sub topic in the same Google project as the OAuth application."},
+  GMAIL_WATCH_SUBSCRIPTION: {kind:"secret",scope:"feature",summary:"Exact Pub/Sub push subscription accepted by notification ingress."},
+  GMAIL_WATCH_PUSH_EMAIL: {kind:"secret",scope:"feature",summary:"Expected verified Google service account in Pub/Sub push JWTs."},
+  GMAIL_WATCH_PUSH_AUDIENCE: {kind:"secret",scope:"feature",summary:"Exact JWT audience for the Gmail notification endpoint."},
 
   // Optional integrations.
   APPLE_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases." },

@@ -1,6 +1,26 @@
 # Connector Platform
 
-Status: proposed (2026-10-02). Owner: claude (Space channel "你怎么看 connector").
+Google Ads advertising configuration, selected-customer scoping, activation
+budget checks and stable native acceptance are specified in
+[Google Ads connector](../connectors/google-ads.md). Its separate `adwords`
+grant reuses the company Google client; API access is held by that Cloud project,
+not by a retired developer token. Both advertising write actions default to ask.
+
+Status: implemented platform. Each provider's registration, production release
+and native acceptance are tracked separately; availability in the registry does
+not imply a passed native acceptance test.
+
+X uses one company OAuth application with up to four separately owned user
+grants per Space. Stable account ID and authorization generation bind every
+approved publication; account refresh uses durable credential-store leases.
+Video commands persist frozen input and encrypted outcomes in PostgreSQL; a
+scoped Durable Object alarm stores scheduling references only and performs the
+transfer independently of the submitting HTTP/CLI connection. Started jobs
+never replay uncertain provider writes; result delivery uses a stable Channel
+append identity. See the [alarm lifecycle](https://developers.cloudflare.com/durable-objects/api/alarms/)
+and [invocation limits](https://developers.cloudflare.com/durable-objects/platform/limits/).
+The consent, Channel visibility, ownership and native acceptance contract is in
+[X connector](../connectors/x.md). Quote posting requires X Enterprise API access.
 
 ## 1. Goal
 
@@ -28,24 +48,27 @@ agent cannot do alone:
 Non-goals: a general iPaaS, user-authored provider code, or storing provider
 tokens anywhere except the connector credential store.
 
-## 2. Current state (main @ ab314090c)
+## 2. Current implementation
 
-The data model is already mostly neutral, but the code paths are GitHub-only.
+The shared platform registers providers through protocol manifests and Hub-side
+modules. GitHub retains its typed repository authority adapter; other providers
+use the connector registry. The later sections define provider-specific bounds.
 
-| Layer | Today | Problem |
+| Layer | Owner | Current contract |
 | --- | --- | --- |
-| Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | `AppConnectorProviderId = "github"`; actions carry no input schema |
-| Executor | `executeAppConnectorProviderAction` | one `if github` chain that parses free text per action |
-| Command path | `product-github-connector-authority-adapter.ts` | only `@github:` is recognised; only 5 of 12 declared actions are reachable (`comment`, `create_issue`, `close_issue`, `reopen_issue`, `review` are declared but never executed from a message) |
-| Write policy | `connectionMetadata.*WriteChannelId` | one metadata field per write action, which does not scale to a second provider |
-| Credentials | Worker secrets (`GITHUB_APP_*`) | no per-connection credential store, so an API-token provider has nowhere to live |
-| Inbound | `POST /api/apps/github/webhook` → `dispatchProductGitHubWebhook` | GitHub-specific route, feature mapping and route directory |
-| Relations | `data.app_source_relations` | `source_kind IN ('repository','issue')` CHECK |
-| Automations | `AutomationTrigger = merged \| ci-failed \| owed` | GitHub events are hard-coded in the protocol type |
+| Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and default policies are shared with clients |
+| Executor | `ConnectorProvider` and `platform-providers.ts` | Provider-owned parse/prepare/execute, authenticated Check and bounded outbound HTTP |
+| Commands | `connector-commands.ts`, `connectors/usage.ts` | A command runs only from a committed Channel message, whoever wrote it; Agents read what they can send with `xmatrix connector list` |
+| Policy and approval | Scoped connector repositories and approval routes | Channel allow/ask/disallow, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
+| Credentials | Encrypted connector credential repository | Per-Space provider grants; company app secrets remain Hub-held, and OAuth refresh failures do not become wider grants |
+| Inbound | Generic event ingress plus provider-specific native routes | Authenticated deliveries normalize to typed source/event identities and route through explicit subscriptions |
+| Automations | Provider event triggers | Normalized connector events can wake linked page Automations; a scheduled report is not a native provider webhook |
+| Google Ads | Separate `googleads` grant and selected advertiser | Bounded reads, atomic advertising configuration, validation-only calls and explicit, policy-controlled activation |
 
-The storage layer is reusable as is: `data.app_connector_connections` (one
-connection per Space per provider), `data.app_connector_executions`, the
-relation table, and the capability derivation from scopes.
+Connection records and execution receipts contain metadata and bounded outcome
+evidence, not raw credentials. Production changes follow the normal immutable
+release train. Provider registration, Check, actual writes, revocation and
+native event/serving evidence remain distinct acceptance requirements.
 
 ## 3. Architecture
 
@@ -56,10 +79,10 @@ relation table, and the capability derivation from scopes.
 inbound:  provider webhook ─► Ingress route ─► verify ─► normalize ─► ConnectorEvent
                                                    ├─► relation routing ─► Channel message (app author)
                                                    └─► Automation trigger {kind:"event"}
-outbound: @provider:action text ─┐
-          Agent tool call (MCP) ──┼─► ConnectorActionRequest ─► policy(channel×action) ─► allow ─► execute ─► execution record + receipt
-          Web UI button ─────────┘                                       ├─► approve ─► approval card ─► execute
-                                                                         └─► deny
+outbound: Channel message "@provider:action text" (a person, or an Agent's `xmatrix send`)
+            ─► parse ─► policy(channel×action) ─► allow ─► execute ─► execution record + receipt replying to the message
+                                                  ├─► ask ─► approval card ─► execute
+                                                  └─► disallow
 ```
 
 ### 3.1 Provider module contract
@@ -73,7 +96,7 @@ interface ConnectorProvider {
   completion?: ConnectorCompletionSource;
 }
 interface ConnectorAction<I = unknown> {
-  input: JsonSchema;                // bounded; this is also the MCP tool schema
+  input: JsonSchema;                // bounded
   effect: "read" | "write";         // sets the default policy
   parseCommand(text: string, ctx): I | ParseError;   // `@provider:action …` → input
   execute(ctx: ConnectorActionContext, input: I): Promise<ConnectorActionResult>;
@@ -108,14 +131,30 @@ and pasted authorization URLs fail before deployment. Registering or rotating an
 application requires the normal Production Release Intent and release train.
 Space connection tokens remain separate encrypted connection credentials.
 
-One-click connects start with a signed, expiring state bound to the provider,
-Space and admin. The provider's redirect to `/api/connectors/oauth/callback`
+One-click connects verify current owner/admin membership in the target Space
+before signing state or creating a Composio account. The signed, expiring state
+binds the provider, Space and initiating admin. The provider's redirect to `/api/connectors/oauth/callback`
 carries no xMatrix session, so the Hub only checks the state there and hands the
 grant to the app's `/connect/oauth` page. That page completes it with
 `POST /api/connectors/oauth/complete` as the signed-in user, and the Hub
-exchanges the code only when that user is the admin named in the state. A
+exchanges the code only when that user is the admin named in the state and
+still holds owner/admin authority in that active Space. The credential write
+checks that authority again after the provider request. A
 connect link sent to someone else therefore cannot store their provider account
 in the sender's Space.
+
+GitHub App authorization uses the same authenticated completion page and POST,
+after its separate `/api/auth/callback/github` redirect verifies `xmgh.` state.
+That anonymous callback exchanges no code and links no installation. Completion
+checks the initiating Human and current target-Space admin role before GitHub
+installation discovery. Discovery names only installations that person
+administers on GitHub: their own account's, or an organization's whose every
+covered repository they administer. Reaching an installation through one
+repository is membership, not authority to hand all of it to a Space.
+Installation-selection grants use purpose `github-grant:v4` and carry the
+GitHub user id `/user` returned; earlier grants require fresh consent. Linking
+records that user (`app_github_installation_links`), and every later use of a
+repository through the installation requires them to administer it then.
 
 Google Docs & Drive uses one `google` connection and the canonical platform pair
 `CONNECTOR_GOOGLE_CLIENT_ID` / `CONNECTOR_GOOGLE_CLIENT_SECRET`. The web-server
@@ -216,6 +255,13 @@ Search Console clicks. There are no inbound events and no writes. Enable the
 Google Analytics Admin and Data APIs on the company Google project and add the
 scope to its consent screen; it is a sensitive scope like `webmasters`.
 
+Google AdSense is a separate `googleadsense` connection on the same company
+Google client, holding only `https://www.googleapis.com/auth/adsense.readonly`.
+It reads accounts, sites, ad units, reports, payments, alerts and policy issues
+through the AdSense Management API v2 and has no writes or inbound events. The
+contract, including what the API cannot read, is in
+[the AdSense connector document](../connectors/google-adsense.md).
+
 Bing Webmaster Tools (`bingwebmaster`) saves the account's API key (Settings →
 API access); Bing accepts it only as the `apikey` query parameter of its JSON
 API, so the Hub never echoes a request URL into a summary or error. A site is
@@ -245,7 +291,9 @@ changes nothing: `create_version` (or renames the one version still open for
 editing, never downward), `set_metadata` (one language's listing text, checked
 against Apple's limits before any call), `set_build` (only the exact processed
 build, read back after binding), `submit`, `cancel_submission`, `release`
-(only from Pending Developer Release; Apple cannot undo it) and
+(only from Pending Developer Release; `phased` enables a 7-day rollout first,
+then `pause_phased_release`, `resume_phased_release` and
+`complete_phased_release`; Apple cannot undo the release) and
 `reply_review`. `submit` reuses an open draft submission with whatever else
 the team put in it, and refuses while another submission is with App Review or
 waits for an answer. App Review contact and sign-in details never pass through
@@ -268,8 +316,37 @@ against Apple's vocabulary and none is defaulted. `set_review_contact`
 refuses a sign-in password, which is entered in App Store Connect, and its
 receipt names the fields it set and never their values. Out of reach of the
 API and left to a person: creating the app record, the App Privacy answers,
-agreements, and reading or replying to App Review's messages; Apple's
-specification (4.5.1) has no resource for any of them.
+agreements, and replying to App Review; Apple's specification (4.5.1) has no
+resource for them.
+
+App Review's messages are read through the App Store Connect website's own
+`iris` endpoints, which take a signed-in web session instead of an API key.
+The connection keeps that session as one optional credential, `webSession`:
+the Cookie header of a signed-in appstoreconnect.apple.com page. Every request
+goes from the Hub, so no machine has to stay on, and only to Apple's website
+origin under `/iris/v1/` or `/olympus/v1/`, without following redirects, which
+mean Apple wants a new sign-in. Cookies Apple rotates during a call are saved
+back into the same credential once, as the Hub's own write through the action
+context's `saveCredentials`. The session never goes to the public API, and the
+API key's token never goes to the website. `review_messages` reads the newest
+thread's rejection reasons (section, description, code) and messages as plain
+text, fenced as untrusted; `web_session` says whose session it is.
+`create_app` sends the website's own app-record creation (the record, its app
+info and first version with their localizations, as fastlane's `produce`
+does) after the API key confirms the bundle ID is registered and has no app;
+`set_privacy` deletes the app's App Privacy answers, sends one per data type,
+purpose and protection, and publishes them, after checking the ids against
+the website's current lists; `privacy` reads them back. Writes carry the
+website's `x-csrf-itc` header, are sent once and never retried, and a
+`set_privacy` cut short says how far it got. A refusal comes back in Apple's
+words; a 401, a redirect or a bare 403 means the session lapsed. The Apple
+ID password never reaches xMatrix: the desktop app signs in on Apple's own page
+in a window with a profile of its own (`signIn` on the credential field,
+`apps/desktop/src/sign-in-services.ts`) and hands the page the cookies that
+window then holds for appstoreconnect.apple.com; the page saves them like any
+typed credential. Apple keeps the session from a day to a month, and signing in
+again is the only renewal. These endpoints are not a published contract and
+can change without notice.
 
 Files reach Apple in three steps, so the bytes never pass through the Hub and
 the machine that has the file needs no API key: a reservation
@@ -360,21 +437,21 @@ problems by severity), `queries:<host>` (top 50 popular queries by clicks).
 The write `recrawl:<host> <page url>` queues one page of that exact scheme,
 host and port, under the Channel's action policy.
 
-Gmail signs in through Composio rather than the company Google client.
+Gmail content access signs in through Composio rather than the company Google client.
 Composio's managed Google app is approved by Google only for its default
 Gmail scope, the full `https://mail.google.com/` grant; requesting the
 narrower `gmail.readonly` on it is what Google's app-blocked screen refuses
 ([Composio Gmail FAQ](https://docs.composio.dev/toolkits/gmail)). The auth
 config therefore requests `https://mail.google.com/` alone, without the
 default profile and contacts scopes, and the Hub is the boundary the grant
-is not: every Gmail call passes an endpoint list in `actions/gmail.ts`
+is not: every user-invoked Gmail action passes an endpoint list in `actions/gmail.ts`
 (GET profile, message list and one message; POST messages/send) and any
 other endpoint is refused before Composio is called. The only write, POST
 messages/send, belongs to `send` and `reply`, whose manifest
-`defaultPolicy: "deny"` keeps them off in every Channel until a Space admin
-allows them there (§3.5). A read-only grant would need the company's own
+`defaultPolicy: "ask"` stages an immutable email for a Space admin to approve
+once in that Channel (§3.5). A read-only grant would need the company's own
 Google app verified for `gmail.readonly` (OAuth verification and CASA).
-One Gmail connection holds up to ten mailboxes. Its only credential,
+One Gmail connection holds any number of mailboxes. Its only credential,
 `mailboxes`, lists each mailbox's Composio account, address and owner: a
 Space member (`user:<id>`) or an Agent registration
 (`agent:<owner>/<machine>/<harness>`, each part URI-encoded). A member's
@@ -385,7 +462,11 @@ owned by the connecting admin; connecting an address again replaces its
 Composio account (the old one is deleted) and keeps its owner. Space admins
 reassign or remove mailboxes in Apps → Gmail
 (`/api/spaces/:spaceId/app-connections/gmail/mailboxes`); removing one deletes
-its Composio account, and Disconnect deletes every one. Actions see only the
+its Composio account, and Disconnect deletes every one. Like X accounts and
+Cloudflare logins, the list is one encrypted field that moves under the
+connection's version check (`packages/hub/src/connectors/account-list.ts`):
+entries are not counted, the field is stored up to 256 KiB, and a Connect that
+would not fit is refused and its new Composio account deleted. Actions see only the
 caller's mailboxes: `search:*` searches each (labelled by mailbox when there
 are several) and `search:<address>` one; `read` and `reply` find the message
 among them; `send` takes `from:<address>` when the caller has more than one.
@@ -403,7 +484,32 @@ the project default. Reads: `search:* [Gmail search]` returns the ten newest
 matching messages (id, received time, sender, subject, snippet) and
 `read:<message id>` returns the headers, the text body (plain text, else HTML
 reduced to text, truncated at 8,000 characters) and every distinct http(s)
-link the message contains, fenced as untrusted content. Inline
+link the message contains, fenced as untrusted content.
+
+Gmail `search` and `read` answer like every other action: the receipt that
+replies to the command's message carries what they found, and the execution
+record keeps its bounded excerpt. Whoever can read the Channel reads the mail,
+so read mail in a Channel only the people who may see it are in. Search is
+`@gmail:search:* <Gmail query>`, or a connected mailbox address in place of `*`.
+
+This is not a secret-ingestion capability. Search snippets, headers and links
+can themselves contain login credentials, before a full-message read. There is
+no Gmail action that extracts a code into a Space secret without first publishing
+the read result. Do not use search/read for credentials that must stay out of
+messages; a closed Channel still stores messages and does not satisfy that rule.
+Piping a published receipt into `secret set` cannot undo the disclosure.
+
+The existing separate secret flow is a Run's `secret-add` request card, answered
+by a current Human Space admin, then `secret exec` injection into a process that
+does not expose the value. An Agent can also create a fresh secret from an
+already-authorized local value through `secret set --value-stdin`; this supplies
+no way to fetch mail privately and cannot overwrite an existing alias. An
+automated Gmail-to-secret transfer is not implemented. Adding one would require
+an explicit typed capability and secret-authority checks while keeping the
+command and value-free outcome visible; a hidden connector MCP is not a fallback.
+See the [operations guidance](../operations/app-connectors.md#qa-login-codes).
+
+Inline
 `multipart/mixed` body segments retain their order, choosing plain text or
 rendered HTML for each segment without duplicating alternative versions.
 Attachment parts and their descendants are excluded. Reads visit at most
@@ -415,7 +521,7 @@ the link itself. `send:<address> <subject>\n<body>` sends one plain-text
 message to one recipient, and `reply:<message id> <body>` answers the
 message's Reply-To (else From) in its thread with In-Reply-To and References
 set; header values are single-line and non-ASCII ones RFC 2047 encoded. There
-is no label, delete, draft or settings action and no inbound event. Composio is a subprocessor for connected mailboxes.
+is no label, delete, draft or settings action. Notifications are described below. Composio is a subprocessor for connected mailboxes.
 
 Disconnect reads the grant through the credential authority's live Space
 owner/admin check before any provider deletion. Member-visible connection
@@ -427,6 +533,72 @@ preserving a grant installed by a concurrent reconnect. Google disconnects
 use the same authorized read and version comparison. The Hub-only credential
 read remains for independently authorized executions and verified ingress.
 See [Gmail API](https://developers.google.com/workspace/gmail/api/reference/rest).
+
+#### Gmail notification signals
+
+The default notification setup uses the existing company Google client and
+registered connector callback, with a separate encrypted `gmail.labels` grant
+plus basic OpenID/email identity access. Google userinfo verifies the selected
+mailbox; existing Composio content tokens are not replaced. Minute cron checks
+four INBOX counts. Changes durably wake confirmation through that same owned
+Composio account's `/history` endpoint, restricted to inbox `messageAdded` IDs.
+The Composio `/profile` endpoint supplies the initial cursor and expired-cursor
+recovery. No message bodies are fetched. An independent incremental check is
+due every 15 minutes after the last completed scan, even if counts stay equal.
+Counter cancellation and provider delays are accepted best-effort limits;
+zero-loss delivery and maximum delay are not promised. A pass claims at most
+20 jobs and processes four concurrently. Cached access tokens remain encrypted
+and are refreshed near expiry; revocation and stop erase them with the grant.
+
+Optional native notifications use a separate Google OAuth client requesting
+only `gmail.metadata`. They do not replace the Composio content grant or its
+send/reply approval contract. Apps → Gmail lets a Human mailbox owner who is
+also a Space admin turn notifications on for each of their mailboxes, which
+authorizes notification access; it does not pick a destination. Like any
+connector event, a conversation receives a mailbox's notifications after it runs
+`@gmail:subscribe:<mailbox>` (or `*` for all of the member's mailboxes). Only the
+mailbox's member and their Agents may subscribe it, and delivery takes only
+subscriptions whose authority root is that member. Gmail events are produced by
+the Hub, so the manifest declares `events.ingress: false` and no ingress URL is
+minted. Agent-owned mailboxes are not supported by this first notification flow.
+No Gmail forwarding configuration is needed.
+
+Google watch publishes an email address and history ID to Pub/Sub; the Hub
+checks Google's RS256 signature, issuer, configured audience, verified service
+account and exact subscription before durably recording a wake. Only after an
+event does it query Gmail history for inbox `messageAdded` identities. It never
+queries the inbox on a timer. Daily watch renewal and retries of already accepted
+work use the same bounded scheduled drain.
+Renewal does not overwrite the consumed history cursor. Google does not provide
+a seconds-level delivery SLA; notification gaps may require a later event, and
+an expired history cursor establishes a fresh baseline and reports the gap.
+Old mail is not replayed as new work.
+
+The primary App authority stores the native refresh token and pending PKCE
+verifier in an encrypted notification envelope bound to the route identity.
+Configuration fingerprints, captured connection generation, credential version,
+mailbox ownership and current Space admin fence work; each append is checked
+against its subscribing member's conversation capability.
+Mailbox removal, reconnection or ownership changes retire that mailbox's
+notification rows and encrypted grants. Unchanged account/address/owner tuples
+survive another mailbox's addition or edit only when all shared credentials are
+also unchanged. The credential transaction advances retained rows to the new
+credential version and clears old worker leases, preserving cursors and pending
+IDs. A Channel move removes its subscriptions like any other source relation.
+A shared credential replacement, disconnect, account erasure
+or Space erasure retires all affected grants. Stop clears one local grant immediately;
+it does not revoke a Google grant another Space might still use. Abandoned
+OAuth attempts expire after ten minutes and bounded maintenance removes them.
+
+Durable Gmail-ID receipts coalesce duplicate signals and make conversation
+append idempotent. Notifications contain only a mail ID reference, never sender,
+subject, snippet or body. Reading one is an ordinary `@gmail:read:<id>` command.
+Page Automations use `gmail:message.received:<mailbox>`; only Automations whose
+authority root is the mailbox owner fire. Credentials must be supplied
+as an atomic optional group; partial configuration fails closed. Provisioning,
+Google verification and production activation are separate operator steps in
+[Gmail notifications](../operations/gmail-notifications.md).
+
 
 Google Sheets uses the same per-file Google connection and `drive.file` grant.
 `read_sheet:<spreadsheet id> <A1 range>` returns an explicit rectangle (up to
@@ -490,7 +662,8 @@ See [PagerDuty's official REST schema](https://github.com/PagerDuty/api-schema/b
 
 Sentry `read_issue:WEB-1A` (or a numeric group id) reads one issue and its latest
 event from the configured organization. Short ids require one lookup; numeric
-ids use two GETs. The excerpt includes title/status/culprit/platform, event UTC
+ids use two GETs. The excerpt includes title/status/culprit/platform, occurrence
+count and first/last-seen UTC times when valid, event UTC
 time, release version, component/environment, SDK and browser/runtime name/version,
 and whether the browser defect endpoint captured it. Its action is included only
 when it is one of protocol's closed `ClientDefectAction` set, the same set the web
@@ -500,7 +673,12 @@ and line/column only). Exception `type` and `value` are included when they are
 strings (including Sentry's annotated truncated-string form); a missing type or
 value does not fail the read, and frames still copy. Each exception also includes
 its mechanism type and handled/synthetic flags when present. Only these bounded
-diagnostic fields are copied; arbitrary tags, contexts and mechanism data remain
+diagnostic fields are copied. When mapped frames exist, up to eight terminal
+generated asset locations and line/column positions are retained separately so
+the deployed script can still be identified. URL credentials, query strings,
+fragments and inline script schemes are excluded from these generated locations.
+A missing or empty mapped stack falls back to raw file locations and positions
+with the same filtering. Arbitrary tags, contexts and mechanism data remain
 private. Incomplete exception values
 or frames are omitted. It is fenced as untrusted and capped at 12,000 characters;
 omissions are explicit. Request bodies/headers, local variables, source context,
@@ -711,6 +889,48 @@ It permits at most 50 authorized Spaces per installation; overflow fails before
 any delivery. Channel appends use the existing event/channel deduplication key;
 an append failure returns 503 for provider retry without duplicating successful appends.
 
+Proving membership of a workspace is not authority over everything the app
+sees there, so each provider narrows delivery to what one Space may read:
+
+- **Slack: one Space per workspace.** Slack issues one bot per workspace and
+  sends the messages of every channel it was invited into. A binding is
+  claimed under a per-workspace advisory lock and the claim
+  (`app_slack_workspace_claims`) names one Space: a Connect from any other
+  Space is refused (`workspace_connected_elsewhere`, shown as "already
+  connected to another xMatrix Space"). The bot stays in every channel it was
+  invited into until the app is uninstalled from the workspace, so the claim
+  outlives a disconnect in xMatrix, a failed check, a revoked token and the
+  Space's deletion; the claiming Space may connect again, which renews it.
+  Only a signature-verified `app_uninstalled` dated (Slack's `event_time`)
+  after the claim releases it; that event, or `tokens_revoked` naming bot
+  tokens, disconnects the bindings made before it (credentials kept). A
+  Connect after the event is not retired by a delayed or replayed delivery,
+  and a delivery without `event_time` retires nothing. The claim, not the
+  number of current bindings, decides use: only the claiming Space's binding
+  resolves the bot for actions and receives events, and an event is delivered
+  only when Slack's signed `event_time` is at or after the claim (routing, each
+  subscription route, the final append and Automations all check it), so
+  content from before an uninstall never reaches the next claimant. A binding
+  of an unclaimed workspace is no Space's. Existing bindings were backfilled:
+  a workspace one Space held is claimed by it; one that two Spaces' older
+  bindings share is contested (a claim naming no Space), so neither uses it,
+  receives its events or can claim it until Slack's uninstall releases it. The Slack app must subscribe
+  to both events.
+  The bot belongs to its binding, not to the stored credentials: regenerating a
+  Hub-minted field (the ingress key) keeps the binding, so a shared workspace
+  stays refused; any other manual edit unbinds the grant and drops its values
+  (the bot token among them), keeping only Hub-minted fields and what the admin
+  wrote.
+- **Linear: each Space's own grant.** OAuth grants act as the connecting
+  user. Before an event reaches a Space, the Hub reads its subject (issue,
+  comment, project, project update or cycle) by id with that Space's token;
+  only a Space whose user can read it receives it, so private teams stay
+  private. The answer holds only for the grant that read it: routes, the final
+  append and Automations are fenced to that credential version, so a Connect in
+  between withholds the delivery and Linear's retry asks the new grant. An
+  object that can no longer be read (deleted) is not delivered; a Linear outage
+  answers 503 so Linear retries.
+
 Existing OAuth installs reconnect to establish this evidence; no backfill guesses
 workspace ownership. Human credential edits invalidate the binding until another
 OAuth grant, while server refreshes preserve it and require the credential version
@@ -788,33 +1008,75 @@ GitHub triggers may use either spelling.
 
 ### 3.5 Outbound actions and policy
 
-- New `data.app_connector_action_policies (connection_id, channel_id, action_id, mode CHECK IN ('allow','approve','deny'), version)`.
-- Default when no row exists: every action, read or write, runs for a Human or
-  an Agent. Connectors do not stand in the way; a Space admin's Channel `deny`
-  row is the only xMatrix policy that blocks an action, and the provider's own
-  permissions still apply.
-- The one exception is an action whose manifest declares
-  `defaultPolicy: "deny"`: a write the provider's grant permits but xMatrix
-  holds back. It runs only in a Channel with an `allow` row. Only Gmail's
-  `send` and `reply` declare it, because Gmail's grant is the full mailbox.
+- Per-Channel action policy has three values: `allow` executes immediately,
+  `ask` stages each request for a Human Space admin, and `disallow` refuses it.
+  The legacy command/API spelling `deny` remains a restrictive `disallow` alias.
+  Only current Space owners/admins change a policy or decide a request; an Agent
+  Run cannot approve its own call.
+- No override uses the manifest default: Gmail `send`/`reply` and Google Ads
+  `mutate`/`set_campaign_status` default to `ask`, while other actions retain
+  `allow`. Existing explicit allow/deny rows keep
+  their meaning. GitHub's specialized dispatcher retains allow/disallow; it
+  rejects ask instead of suggesting that an unsupported approval will appear.
+- The existing policy row stays the sole authority. The additive `ask_version`
+  column identifies ask only when it equals that row's version and its legacy
+  mode is deny. Old executors therefore fail closed; old writers advance the
+  version and invalidate ask. This avoids rewriting rows or relaxing constraints.
+- `data.app_connector_action_requests` owns encrypted, immutable request input
+  and its 24-hour expiry, account generation and credential version. Channel
+  commands from people and Agents stage the same flow. The Pending approvals card fetches
+  previews through a current Human admin session and displays Gmail's actual
+  from/to/subject/body, including a reply's resolved recipient and headers.
+  None of that private payload enters the approval receipt or caller metadata.
+- A Human decision atomically changes pending to executing before provider I/O;
+  only the winning claim dispatches. Concurrent clicks, repeated decisions,
+  denial and terminal outcomes cannot send again. Account changes, expiry,
+  removed Channel access, current disallow, and lost admin/mailbox ownership
+  refuse execution. Approval covers the frozen request only, never the next call.
+  Gmail rechecks authorization immediately before messages/send. A crash or
+  uncertain write keeps its consumed state and must not be retried automatically.
+  Settling clears the encrypted payload; each new request also clears at most
+  50 expired payloads in its Space while retaining outcome evidence; removing the connection or moving or
+  purging its Channel/Space removes the associated requests.
+- Hub API: `GET /api/channels/:channelId/connector-action-requests` lists at most
+  50 unexpired pending previews for a current admin. `POST .../:requestId` accepts
+  only `{decision: "allow"|"disallow"}`; content is read from the frozen request,
+  never from the decision body. Both require current Channel access and return
+  private/no-store. Web proxies use the corresponding `/api/xmatrix` routes.
 - Migration: each `*WriteChannelId` metadata value becomes one
   `(connection, channel, action, allow)` row.
   - The migration is idempotent and bounded per connection.
   - The old fields are read as a fallback for one release, then dropped.
-- Agent entry point: `POST /api/connectors/mcp` (streamable HTTP MCP).
-  - Authenticated with the Agent Instance credential and scoped to the Run's
-    Channel.
-  - Tools list the Space's configured providers' executable actions. The
-    shared action catalog admits only manifest-declared actions with an own
-    executor whose read/write effect matches the declaration. MCP listing,
-    calls and generic Channel commands use that catalog; prototype properties
-    and undeclared executors are unknown actions. GitHub retains its specialized
-    command handler and is not exposed through this generic MCP catalog.
-  - Tool inputs are `target` and optional `text`, parsed by the same executor
-    as a Channel command. Channel access, connection credentials and live
-    action policy are checked at execution; a listed tool grants no authority.
-- Every request, whatever its entry point, writes one
-  `app_connector_executions` row and one Channel receipt.
+- Agents act the way people do: every connector command is a Channel message,
+  parsed after it commits, so nothing calls a provider out of the Channel's
+  sight. An Agent sends one with `xmatrix send`; its identity, Channel and
+  Space are those of any message it sends.
+  - The launch prompt names the Space's connected apps (`connectedApps` on the
+    spawn, names only). `xmatrix connector list` reads
+    `GET /api/connectors/usage` with the Run's credential: each configured
+    provider of the Run's Channel's Space and the commands its manifest
+    declares. The listing grants nothing; execution checks Channel access,
+    credentials and live policy again.
+  - The generic Channel command handler admits only manifest-declared actions
+    with an own executor whose read/write effect matches the declaration;
+    prototype properties and undeclared executors are unknown actions. GitHub
+    keeps its specialized command handler for the same `@github:` commands.
+  - The receipt replies to the command's message. Hub-only metadata records
+    the authenticated calling Instance, separately from the stable Agent id;
+    approvals and durable execution retain that exact caller. Live delivery
+    and catch-up queue work only for that Instance, without interrupting its
+    active turn. Other Instances and receipts without a retained Agent caller
+    receive context. Older receipts without that metadata remain context.
+  - Subscribed native events queue work for the Channel's existing Instances.
+    App receipt/event text is external data, never mention or lifecycle syntax.
+    After commit the existing bounded wake authority resumes sleeping or
+    interrupted recipients; a receipt restricts that query to its caller.
+    Stopped Instances stay stopped and no new Agent identity is allocated.
+- Staging ask writes one request and a Channel receipt. The approved dispatch
+  writes the normal `app_connector_executions` row and a separate terminal receipt.
+  Denial clears the encrypted input and its original command reference. Its
+  terminal system notice therefore names the request without a reply target;
+  repeated decisions reuse the same notice identity and never dispatch.
 
 ## 4. Providers
 
@@ -832,7 +1094,7 @@ or generates a webhook secret in the Apps view.
 | Jira Cloud | email + API token, webhook secret | issue created/updated/commented | create/transition/comment issue |
 | Notion | internal integration token | — (polling deferred) | read page, append block, create page |
 | Vercel | access token + webhook secret | deployment created/succeeded/error | redeploy |
-| Cloudflare | OAuth or API token; Hub-registered destination secret | notifications fired/resolved by alert type; subscriptions own the account's `xMatrix ·` policies | query logs, list deployments (read); rollback |
+| Cloudflare | Any number of OAuth logins in one encrypted `logins` credential (each Connect adds one), or an API token; Hub-registered destination secret | notifications fired/resolved by alert type, `<account id>/<alert type>` for accounts other than the default; subscriptions own each account's `xMatrix ·` policies | list accounts, query logs, list deployments, list D1 databases, read-only D1 query (read); rollback — each may name its account |
 | App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version, app record and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review; set app info, age rating, price, availability and review contact; upload builds and screenshots; signing certificates and profiles; TestFlight groups, beta review and tester feedback |
 | Discord | bot token | — | post message |
 | Feishu/Lark | custom app id/secret + verification token | message in linked chat | send message |
@@ -856,8 +1118,8 @@ or generates a webhook secret in the Apps view.
       credential store.
     - `@openconnector:search:<service>` (read) lists a service's actions.
     - `@openconnector:run:<service.action>[@alias] <json>` (write) runs one
-      action. It goes through the same channel policy, execution record,
-      receipt and agent MCP tool.
+      action. It goes through the same channel policy, execution record and
+      receipt.
     - The result preview is bounded, and mentions in it are shielded.
     - Check authenticates `/v1/health` and confirms `oomol-connect` health;
       provider connections and action availability need separate evidence.
@@ -883,7 +1145,7 @@ or generates a webhook secret in the Apps view.
 4. **Generic Webhook provider.** This proves the pipeline end to end.
 5. **Providers.** Then Sentry, Linear, PagerDuty, GitLab, Slack, Jira, Vercel,
    Cloudflare, Notion, Discord and Feishu, in that order.
-6. **Agent access.** The MCP endpoint and the CLI shim.
+6. **Agent access.** Connected app names in the launch prompt and `xmatrix connector list`.
 7. **Web Apps view.** A generic connect form driven by the manifest (token
    fields, webhook URL and secret display, per-Channel policy editor).
 

@@ -100,7 +100,7 @@ integration('DingTalk changed relation/features/Automation owner/enabled and for
 
 for(const kind of ['channel','automation']) integration(`DingTalk ${kind} late cancellation rolls back new writes and rejects actual replay early return`,async()=>effectFixture(async f=>{
   const controller=new AbortController(),cap=await f.cap(kind,controller.signal),input=kind==='channel'?await f.appendInput(cap):await f.fireInput(cap);
-  const pause=pauseQuery(f.database,kind==='channel'?'message_append_publish_unmetered_v1':'automation_replay_write_v1',()=>controller.abort());
+  const pause=pauseQuery(f.database,kind==='channel'?'message_append_publish_unmetered_v3':'automation_replay_write_v1',()=>controller.abort());
   const pending=kind==='channel'?new PostgresMessageRepository(pause.database).append(input,cap):new PostgresAutomationRepository(pause.database).fireTrigger(input,cap);
   const rejection=assert.rejects(pending,denied);
   await pause.waiting;pause.release();await rejection;

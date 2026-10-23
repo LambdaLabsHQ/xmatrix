@@ -1,7 +1,7 @@
-import { PAGE_DOCUMENT_FRAGMENT } from "@xmatrix/protocol";
-import { markdownToPageDoc, pageDocToMarkdown, pageSchema } from "@xmatrix/protocol/page-document";
-import { updateYFragment, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import * as Y from "yjs";
+import { editPageMarkdown, pageMarkdown } from "../src/lib/pages/page-markdown-edit";
+
+export { editPageMarkdown, pageMarkdown };
 
 /**
  * A page session's document for a stand-in session, written and read as
@@ -13,13 +13,9 @@ export function pageDocument(markdown: string): Y.Doc {
   return doc;
 }
 
-export function pageMarkdown(doc: Y.Doc): string {
-  return pageDocToMarkdown(yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT), pageSchema));
-}
-
-/** An edit made on the session side, such as an Agent's. */
-export function editPageMarkdown(doc: Y.Doc, change: (markdown: string) => string, origin: string): void {
-  const fragment = doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
-  const next = markdownToPageDoc(change(pageMarkdown(doc)));
-  doc.transact(() => updateYFragment(doc, fragment, next, { mapping: new Map(), isOMark: new Map() }), origin);
+/** The markdown of a document a new page was made from: `document` in its create request (base64 Yjs state). */
+export function startedMarkdown(document: unknown): string {
+  const doc = new Y.Doc();
+  Y.applyUpdate(doc, Buffer.from(String(document), "base64"));
+  return pageMarkdown(doc);
 }

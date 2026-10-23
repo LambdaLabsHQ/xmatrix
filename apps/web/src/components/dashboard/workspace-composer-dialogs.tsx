@@ -1,7 +1,10 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { useRealtimeChannel } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
-import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
+import { ImageGalleryLightbox } from "./attachment-lightbox";
 import { useAndroidBackHandler } from "./use-android-back";
 import { useComposerHint } from "./composer-hints";
 import { useDraftSummonIntents } from "./use-draft-summon-intents";
@@ -62,7 +65,7 @@ import {
   workspacesInSpace,
 } from "./space-scoped-tool-content";
 
-import type { TimelineItem } from "./workspace-shell-message-model";
+import type { ComposerChannelAttachment, TimelineItem } from "./workspace-shell-message-model";
 
 import {
   IMAGE_ATTACHMENT_TYPES,
@@ -101,14 +104,15 @@ import {
   planAttachmentIntake,
 } from "./composer-attachment-intake";
 import type { AttachmentIntakeEntry } from "./composer-attachment-intake";
+import { prepareVideoAttachmentFile } from "./video-attachment-compression";
 import { useAttachmentDropSink } from "./composer-attachment-drop-zone";
 import type { AttachmentDropCandidate } from "./composer-attachment-drop-zone";
 
 import {
   PendingAttachment,
   PendingAttachmentCard,
+  AttachmentOriginalOption,
   attachVideoMetadata,
-  avatarInitials,
   channelAttachmentKindForFile,
   channelOnlineAgentAvatarItems,
   cleanStatusChips,
@@ -134,6 +138,7 @@ import {
 import {
   useCallback,
   useEffect,
+  memo,
   useId,
   useLayoutEffect,
   useMemo,
@@ -158,13 +163,13 @@ import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
 import {
   ChevronLeft,
-  ChevronRight,
   FileText,
   Loader2,
   Paperclip,
   Pause,
   Pencil,
   Play,
+  Quote,
   RefreshCw,
   Reply,
   Trash2,
@@ -176,7 +181,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { Input } from "@/components/ui/input";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 
 import {
   type MentionInstanceTargetScope,
@@ -252,7 +257,7 @@ import type {
   ObservabilityEvent,
   SerializedAgentInstance,
   SerializedAppConnectorConnection,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedAutomation,
   AutomationUpdateRequest,
   SerializedSpace,
@@ -268,6 +273,7 @@ export type ComposerMentionInsertRequest =
 
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
+import { foldedDiscussionBody, quotedMessage, type DiscussionQuote } from "./selection-discussion";
 
 export type AgentTraceHistoryPanelState = {
   targetKey: string;
@@ -300,9 +306,9 @@ export {
   agentTraceEventPhase,
 } from "./workspace-shell-presence";
 
-export function Composer({
+export const Composer = memo(function Composer({
   compact = false,
-  channel,
+  channel: catalogChannel,
   attachmentsEnabled = true,
   draftIdentity,
   startsConversation = false,
@@ -317,6 +323,7 @@ export function Composer({
   invocationDraft,
   selectedWorkspaceId,
   replyTarget,
+  quote = null,
   attachments,
   mentionInsertRequest,
   autoFocusRequest,
@@ -325,6 +332,7 @@ export function Composer({
   onDraftChange,
   onWorkspaceSelect,
   onCancelReply,
+  onRemoveQuote,
   onAttachmentsChange,
   onOpenAppsForSpace,
   onSend,
@@ -336,7 +344,7 @@ export function Composer({
   afterSend,
 }: {
   compact?: boolean;
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   attachmentsEnabled?: boolean;
   /** Identifies the draft when `channel` is not its own, e.g. a conversation that does not exist yet. */
   draftIdentity?: string;
@@ -362,6 +370,11 @@ export function Composer({
   invocationDraft?: ComposerInvocationDraft;
   selectedWorkspaceId: string | null;
   replyTarget: TimelineItem | null;
+  /**
+   * The passage a discussion is about, which its first message carries
+   * (selection-discussion.ts); shown here unless its thread shows it.
+   */
+  quote?: DiscussionQuote | null;
   attachments: ChannelAttachment[];
   mentionInsertRequest: ComposerMentionInsertRequest | null;
   autoFocusRequest: number;
@@ -370,6 +383,7 @@ export function Composer({
   onDraftChange: (value: string, invocationDraft?: ComposerInvocationDraft) => void;
   onWorkspaceSelect: (workspaceTarget: string | null) => void;
   onCancelReply: () => void;
+  onRemoveQuote?: () => void;
   onAttachmentsChange: (
     value: ChannelAttachment[] | ((current: ChannelAttachment[]) => ChannelAttachment[])
   ) => void;
@@ -383,6 +397,7 @@ export function Composer({
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
 }) {
+  const channel = useRealtimeChannel(catalogChannel);
   const writable = isJoined && (Boolean(channel) || startsConversation);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -422,6 +437,8 @@ export function Composer({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [openComposerImageId, setOpenComposerImageId] = useState<string | null>(null);
+  // Draft images open out of their cards here and return into them.
+  const attachmentStripRef = useRef<HTMLDivElement | null>(null);
   // Object URLs behind pending image previews, revoked when their card goes.
   const pendingPreviewUrlsRef = useRef(new Map<string, string>());
   const [preparingSend, setPreparingSend] = useState(false);
@@ -443,7 +460,7 @@ export function Composer({
   const composerDropSinkId = useId();
   const readingAttachment =
     intakeBusy ||
-    pendingAttachments.some((attachment) => attachment.status === "reading" || attachment.status === "uploading");
+    pendingAttachments.some((attachment) => attachment.status !== "failed");
   const canSend =
     writable &&
     (localDraft.trim().length > 0 || attachments.length > 0) &&
@@ -459,45 +476,26 @@ export function Composer({
     completionApiRef.current?.dismissCompletion();
   }, []);
   const cursor = completionApiRef.current?.cursor ?? 0;
-  // An image can be opened as soon as it is in the composer, uploaded or not:
-  // a new conversation keeps its files local until the message is sent.
-  // Listed in the order the cards are drawn: pending first, then uploaded.
+  // Gallery navigation follows the visible cards, including in-place quality changes.
   const composerImages = useMemo(() => [
-    ...pendingAttachments.flatMap((attachment) => attachment.kind === "image" && attachment.previewUrl
-      ? [{ id: attachment.id, name: attachment.name, src: attachment.previewUrl }] : []),
-    ...attachments.flatMap((attachment) => attachment.kind === "image"
-      ? [{ id: attachment.id, name: attachment.name, src: attachment.url ?? attachment.dataUrl ?? "" }] : []),
-  ], [attachments, pendingAttachments]);
+    ...pendingAttachments.filter((attachment) => !attachment.replacesId),
+    ...attachments.map((attachment) => pendingAttachments.find((pending) => pending.replacesId === attachment.id) ?? attachment),
+  ].flatMap((attachment) => {
+    const src = "status" in attachment ? attachment.previewUrl : attachment.url ?? attachment.dataUrl;
+    return attachment.kind === "image" && src ? [{ id: attachment.id, name: attachment.name, src }] : [];
+  }), [attachments, pendingAttachments]);
   const openComposerImage = composerImages.find((image) => image.id === openComposerImageId) ?? null;
   useAndroidBackHandler(Boolean(openComposerImage), () => {
     setOpenComposerImageId(null);
     return true;
   });
 
-  const navigateComposerImage = useCallback((direction: -1 | 1) => {
-    if (!openComposerImageId) return;
-    if (composerImages.length < 2) return;
-    const currentIndex = composerImages.findIndex((image) => image.id === openComposerImageId);
-    const nextIndex = (Math.max(0, currentIndex) + direction + composerImages.length) % composerImages.length;
-    setOpenComposerImageId(composerImages[nextIndex].id);
-  }, [composerImages, openComposerImageId]);
-
   useEffect(() => {
-    if (!openComposerImageId) return;
-    if (!composerImages.some((image) => image.id === openComposerImageId)) {
+    // A removed draft image takes its preview with it.
+    if (openComposerImageId && !composerImages.some((image) => image.id === openComposerImageId)) {
       setOpenComposerImageId(null);
-      return;
     }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenComposerImageId(null);
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        navigateComposerImage(event.key === "ArrowLeft" ? -1 : 1);
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [composerImages, navigateComposerImage, openComposerImageId]);
+  }, [composerImages, openComposerImageId]);
 
   useLayoutEffect(() => {
     if (!writable || autoFocusRequest <= 0) return;
@@ -748,7 +746,7 @@ export function Composer({
       candidates,
       attachmentsEnabled,
       draftCount: attachments.length,
-      pendingCount: pendingAttachments.length + ledger.reservedCount(),
+      pendingCount: pendingAttachments.filter((attachment) => !attachment.replacesId).length + ledger.reservedCount(),
       maxAttachments: MAX_ATTACHMENTS,
       maxBytes: MAX_ATTACHMENT_BYTES,
       maxBytesLabel: formatFileSize(MAX_ATTACHMENT_BYTES),
@@ -772,6 +770,7 @@ export function Composer({
           status: entry.rejection ? "failed" : "reading",
           progress: 0,
           error: entry.rejection ?? undefined,
+          sourceFile: !entry.rejection && (entry.kind === "image" || entry.kind === "video") ? entry.file : undefined,
         })),
       ]);
     }
@@ -783,7 +782,9 @@ export function Composer({
   }
 
   async function uploadAttachmentEntries(
-    entries: AttachmentIntakeEntry<File>[]
+    entries: AttachmentIntakeEntry<File>[],
+    useOriginalMedia = false,
+    replaces?: ChannelAttachment,
   ): Promise<void> {
     const registry = uploadRegistryRef.current;
     // Claimed before the first await, so a card removed meanwhile is already
@@ -792,6 +793,11 @@ export function Composer({
     for (const entry of entries) registry.begin(entry.id);
 
     function failEntries(message: string) {
+      if (replaces) {
+        for (const entry of entries) clearPendingAttachment(entry.id);
+        setAttachmentError(message);
+        return;
+      }
       for (const entry of entries) {
         registry.settle(entry.id);
         updatePendingAttachment(entry.id, { status: "failed", error: message, progress: 0 });
@@ -812,7 +818,7 @@ export function Composer({
     // An open Channel's files are visible to its whole Space, so the scope exists before the Channel does.
     const scope = spaceVisibilityScope(spaceId);
     const uploads = entries.map((entry) =>
-      run(() => uploadAttachmentEntry(entry, scope, uploadToken, generation)).then(
+      run(() => uploadAttachmentEntry(entry, scope, uploadToken, generation, useOriginalMedia)).then(
         (attachment) => ({ ok: true as const, attachment }),
         (error: unknown) => ({ ok: false as const, error })
       )
@@ -826,10 +832,16 @@ export function Composer({
       // Checked here as well as inside the task: a card can be removed while an
       // upload that already finished waits its turn to commit.
       if (!registry.isLive(entry.id, generation)) {
+        if (result.ok && result.attachment?.url) URL.revokeObjectURL(result.attachment.url);
         clearPendingAttachment(entry.id);
         continue;
       }
       if (!result.ok) {
+        if (replaces) {
+          clearPendingAttachment(entry.id);
+          setAttachmentError(userErrorMessage(result.error, "Couldn't upload the file"));
+          continue;
+        }
         registry.settle(entry.id);
         updatePendingAttachment(entry.id, {
           status: "failed",
@@ -842,21 +854,27 @@ export function Composer({
         clearPendingAttachment(entry.id);
         continue;
       }
-      const uploaded = result.attachment;
+      const uploaded: ComposerChannelAttachment = {
+        ...result.attachment,
+        ...(entry.kind === "image" || entry.kind === "video"
+          ? { sourceMedia: { file: entry.file, original: useOriginalMedia } } : {}),
+      };
       clearPendingAttachment(entry.id);
-      appendDraftAttachment(uploaded);
-      if (uploaded.kind === "video") {
-        void attachVideoMetadata(entry.file, uploaded).then((withMetadata) => {
-          updateDraftAttachment(uploaded.id, withMetadata);
-        });
-      }
+      if (replaces) {
+        onAttachmentsChange((current) => current.map((attachment) => attachment.id === replaces.id ? uploaded : attachment));
+        if (replaces.url) URL.revokeObjectURL(replaces.url);
+      } else appendDraftAttachment(uploaded);
     }
   }
 
   // Jev reads each summon as the author types; the hint shows it and the send carries it.
-  const outgoingDraft = useMemo(() => composerSendDraft(invocationDraftRef.current, localDraft),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [localDraft, invocationDraftRef.current]);
+  // Picked channels and pages are shown by name and sent as their id tokens; a discussion's passage goes first.
+  const sendDraft = () => {
+    const typed = composerSendDraft(invocationDraftRef.current, localDraft);
+    return quote ? quotedMessage(quote, typed) : typed;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const outgoingDraft = useMemo(sendDraft, [localDraft, invocationDraftRef.current, quote]);
   const draftIntents = useDraftSummonIntents({ token, channelId: startsConversation ? undefined : channel?.id,
     body: outgoingDraft.body, selections: outgoingDraft.selections });
 
@@ -869,8 +887,7 @@ export function Composer({
     setAttachmentError(null);
     const sendScope = invocationScope;
     try {
-      // Picked channels and pages are shown by name and sent as their id tokens.
-      const { body, selections } = composerSendDraft(invocationDraftRef.current, localDraft);
+      const { body, selections } = sendDraft();
       const sourceBodyHash = selections.length ? await digestCanonicalCloneCborV1(body) : undefined;
       const invocationSelections = sourceBodyHash ? parseAgentInvocationSelections({ schemaVersion: 1,
         sourceRevision: 1, sourceBodyHash, selections }, {
@@ -882,7 +899,11 @@ export function Composer({
         body,
         ...(invocationSelections ? { invocationSelections } : {}),
         ...(summonIntents.length ? { summonIntents } : {}),
-        attachments,
+        attachments: attachments.map((attachment) => {
+          const uploaded = { ...attachment } as ComposerChannelAttachment;
+          delete uploaded.sourceMedia;
+          return uploaded;
+        }),
       });
     } catch (error) {
       setAttachmentError(userErrorMessage(error, "Couldn't prepare the message"));
@@ -897,7 +918,8 @@ export function Composer({
     entry: AttachmentIntakeEntry<File>,
     uploadScope: string,
     uploadToken: string,
-    generation: number
+    generation: number,
+    useOriginalMedia: boolean,
   ): Promise<ChannelAttachment | null> {
     const registry = uploadRegistryRef.current;
     // Queued behind the concurrency gate: nothing to abort, so the check is the
@@ -905,18 +927,22 @@ export function Composer({
     if (!registry.isLive(entry.id, generation)) return null;
 
     let uploadFile = entry.file;
-    if (entry.kind === "image") {
+    if (entry.kind === "image" && !useOriginalMedia) {
       const prepared = await prepareImageAttachmentFile(entry.file);
       if (!registry.isLive(entry.id, generation)) return null;
       if (!prepared) throw new UserFacingProblem("Image must be 1 MB or smaller.");
       uploadFile = prepared;
-      if (uploadFile.size !== entry.file.size || uploadFile.name !== entry.file.name) {
-        updatePendingAttachment(entry.id, {
-          name: uploadFile.name || entry.name,
-          size: uploadFile.size,
-        });
-      }
     }
+    if (entry.kind === "video" && !useOriginalMedia) {
+      const controller = new AbortController();
+      if (!registry.trackRequest(entry.id, controller)) return null;
+      uploadFile = await prepareVideoAttachmentFile(entry.file, {
+        signal: controller.signal,
+        onProgress: (progress) => updatePendingAttachment(entry.id, { status: "compressing", progress }),
+      });
+      if (!registry.isLive(entry.id, generation)) return null;
+    }
+    updatePendingAttachment(entry.id, { name: uploadFile.name || entry.name, size: uploadFile.size });
 
     updatePendingAttachment(entry.id, { status: "uploading", progress: 4 });
     const uploaded = await uploadChannelAttachment(
@@ -926,7 +952,15 @@ export function Composer({
       (progress) => updatePendingAttachment(entry.id, { progress }),
       (request) => registry.trackRequest(entry.id, request)
     );
-    return registry.isLive(entry.id, generation) ? uploaded : null;
+    if (uploaded.kind === "video") {
+      // Read the file we actually uploaded, so resized dimensions stay accurate.
+      const withMetadata = await attachVideoMetadata(uploadFile, uploaded);
+      if (registry.isLive(entry.id, generation)) return withMetadata;
+    } else if (registry.isLive(entry.id, generation)) {
+      return uploaded;
+    }
+    if (uploaded.url) URL.revokeObjectURL(uploaded.url);
+    return null;
   }
 
   function fileCandidates(files: FileList | File[]): AttachmentDropCandidate[] {
@@ -999,20 +1033,56 @@ export function Composer({
     }
   }
 
+  function changeAttachmentOriginal(attachment: ChannelAttachment, original: boolean) {
+    const source = (attachment as ComposerChannelAttachment).sourceMedia;
+    if (!source || pendingAttachments.some((pending) => pending.replacesId === attachment.id)) return;
+    const entry: AttachmentIntakeEntry<File> = {
+      id: crypto.randomUUID(), file: source.file, name: source.file.name,
+      kind: attachment.kind, size: source.file.size, rejection: null,
+    };
+    setAttachmentError(null);
+    const previewUrl = entry.kind === "image" ? pendingPreviewUrl(entry) : undefined;
+    setPendingAttachments((current) => [...current, {
+      id: entry.id, name: entry.name, kind: entry.kind, size: entry.size,
+      previewUrl,
+      status: "reading", progress: 0, replacesId: attachment.id, original,
+    }]);
+    void uploadAttachmentEntries([entry], original, attachment);
+  }
+
+  function renderPendingAttachment(attachment: PendingAttachment, key = attachment.id) {
+    return <PendingAttachmentCard key={key} attachment={attachment}
+      onOpen={() => setOpenComposerImageId(attachment.id)}
+      onOriginalChange={attachmentsEnabled && writable && !sending && !preparingSend && attachment.status === "failed" && attachment.sourceFile ? (original) => {
+        const file = attachment.sourceFile!;
+        removePendingAttachment(attachment.id);
+        setAttachmentError(null);
+        const entry = { id: crypto.randomUUID(), file, name: file.name, kind: attachment.kind, size: file.size, rejection: null };
+        const previewUrl = entry.kind === "image" ? pendingPreviewUrl(entry) : undefined;
+        setPendingAttachments((current) => [...current, { ...entry, sourceFile: file, previewUrl, original, status: "reading", progress: 0 }]);
+        void uploadAttachmentEntries([entry], original);
+      } : undefined}
+      onRemove={() => removePendingAttachment(attachment.id)} />;
+  }
+
+  function renderOriginalOption(attachment: ChannelAttachment) {
+    const source = (attachment as ComposerChannelAttachment).sourceMedia;
+    return source ? <AttachmentOriginalOption name={source.file.name} checked={source.original}
+      onChange={attachmentsEnabled && writable && !sending && !preparingSend
+        ? (original) => changeAttachmentOriginal(attachment, original) : undefined} /> : null;
+  }
+
   function removeAttachment(id: string) {
+    const attachment = attachments.find((item) => item.id === id);
+    if (attachment?.url) URL.revokeObjectURL(attachment.url);
+    for (const pending of pendingAttachments) {
+      if (pending.replacesId === id) removePendingAttachment(pending.id);
+    }
     onAttachmentsChange((current) => current.filter((attachment) => attachment.id !== id));
   }
 
   function appendDraftAttachment(attachment: ChannelAttachment) {
     onAttachmentsChange((current) => [...current, attachment]);
-  }
-
-  function updateDraftAttachment(id: string, attachment: ChannelAttachment) {
-    onAttachmentsChange((current) =>
-      current.map((currentAttachment) =>
-        currentAttachment.id === id ? { ...currentAttachment, ...attachment } : currentAttachment
-      )
-    );
   }
 
   function updatePendingAttachment(id: string, patch: Partial<PendingAttachment>) {
@@ -1063,7 +1133,7 @@ export function Composer({
     if (!(target instanceof Element)) return;
     if (
       target.closest(
-        "a, button, input, textarea, select, [role='button'], [contenteditable='true'], .composer-image-attachment"
+        "a, button, input, label, textarea, select, [role='button'], [contenteditable='true'], .composer-image-attachment"
       )
     ) {
       return;
@@ -1205,7 +1275,7 @@ export function Composer({
               attachments.length > 0
             ) {
               event.preventDefault();
-              onAttachmentsChange((current) => current.slice(0, -1));
+              removeAttachment(attachments[attachments.length - 1].id);
             }
           }}
           inputLeading={
@@ -1220,6 +1290,27 @@ export function Composer({
           }
           boxHeader={
             <>
+              {quote && !quote.anchored && (
+                <div data-testid="composer-quote"
+                  className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
+                  <Quote className="mt-0.5 size-3.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-foreground [overflow-wrap:anywhere]">{quote.text}</div>
+                    <div className="truncate">{quote.label}</div>
+                  </div>
+                  {onRemoveQuote && (
+                    <button
+                      type="button"
+                      title="Remove quote"
+                      aria-label="Remove quote"
+                      onClick={onRemoveQuote}
+                      className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
               {replyTarget && (
                 <div className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
                   <Reply className="mt-0.5 size-3.5 shrink-0" />
@@ -1228,7 +1319,7 @@ export function Composer({
                       Replying to {replyTarget.author}
                     </div>
                     <div className="line-clamp-2 [overflow-wrap:anywhere]">
-                      {replyTarget.body || "Attachment"}
+                      {foldedDiscussionBody(replyTarget.body) || "Attachment"}
                     </div>
                     {replyTarget.linkOrigin?.kind === "link" && (
                       <div className="mt-1 font-medium">
@@ -1250,22 +1341,17 @@ export function Composer({
                 </div>
               )}
               {(attachments.length > 0 || pendingAttachments.length > 0) && (
-                <div className="flex gap-2 overflow-x-auto px-3 py-3">
-                  {pendingAttachments.map((attachment) => (
-                    <PendingAttachmentCard
-                      key={attachment.id}
-                      attachment={attachment}
-                      onOpen={() => setOpenComposerImageId(attachment.id)}
-                      onRemove={() => removePendingAttachment(attachment.id)}
-                    />
-                  ))}
-                  {attachments.map((attachment) =>
-                    attachment.kind === "video" ? (
+                <div ref={attachmentStripRef} className="flex gap-2 overflow-x-auto px-3 py-3">
+                  {pendingAttachments.filter((attachment) => !attachment.replacesId).map((attachment) => renderPendingAttachment(attachment))}
+                  {attachments.map((attachment) => {
+                    const replacement = pendingAttachments.find((pending) => pending.replacesId === attachment.id);
+                    if (replacement) return renderPendingAttachment(replacement, attachment.id);
+                    return attachment.kind === "video" ? (
                       <div
                         key={attachment.id}
                         className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
                       >
-                        <div className="flex size-20 shrink-0 items-center justify-center bg-black text-white">
+                        <div className="relative flex size-20 shrink-0 items-center justify-center bg-black text-white">
                           {attachment.thumbnailUrl ? (
                             <LoadingImage
                               src={attachment.thumbnailUrl}
@@ -1275,6 +1361,7 @@ export function Composer({
                           ) : (
                             <Video className="size-7" />
                           )}
+                          {renderOriginalOption(attachment)}
                         </div>
                         <ReadyAttachmentDetails attachment={attachment} separator="·" onRemove={() => removeAttachment(attachment.id)} />
                       </div>
@@ -1297,6 +1384,7 @@ export function Composer({
                           type="button"
                           aria-label={`Open ${attachment.name}`}
                           className="block h-full w-full cursor-zoom-in rounded-md"
+                          data-lightbox-origin={attachment.id}
                           onClick={() => setOpenComposerImageId(attachment.id)}
                         >
                           <LoadingImage
@@ -1305,6 +1393,7 @@ export function Composer({
                             className="block h-full w-full rounded-md object-cover"
                           />
                         </button>
+                        {renderOriginalOption(attachment)}
                         <button
                           type="button"
                           title="Remove attachment"
@@ -1316,68 +1405,17 @@ export function Composer({
                         </button>
                       </div>
                     )
-                  )}
+                  })}
                 </div>
               )}
-              {openComposerImage && typeof document !== "undefined" && createPortal(
-                <div
-                  className="app-attachment-lightbox fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 text-white backdrop-blur-md sm:p-5"
-                  role="presentation"
-                  onMouseDown={(event) => {
-                    if (event.target === event.currentTarget) setOpenComposerImageId(null);
-                  }}
-                >
-                  <div
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={openComposerImage.name}
-                    className="app-attachment-lightbox-dialog relative flex h-full max-h-[94dvh] w-full max-w-[96vw] items-center justify-center"
-                  >
-                    <button
-                      type="button"
-                      title="Close attachment"
-                      aria-label="Close attachment"
-                      autoFocus
-                      onClick={() => setOpenComposerImageId(null)}
-                      className="app-attachment-lightbox-close absolute right-1 top-1 z-20 flex size-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                    >
-                      <X className="size-5" />
-                    </button>
-                    <ZoomableAttachmentImage
-                      src={openComposerImage.src}
-                      alt={openComposerImage.name}
-                      resetKey={openComposerImage.id}
-                      onRequestClose={() => setOpenComposerImageId(null)}
-                      onNavigate={navigateComposerImage}
-                    />
-                    {composerImages.length > 1 && (
-                      <>
-                        <button
-                          type="button"
-                          title="Previous image"
-                          aria-label="Previous image"
-                          onClick={() => navigateComposerImage(-1)}
-                          className="app-attachment-lightbox-previous absolute left-1 top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                        >
-                          <ChevronLeft className="size-6" />
-                        </button>
-                        <button
-                          type="button"
-                          title="Next image"
-                          aria-label="Next image"
-                          onClick={() => navigateComposerImage(1)}
-                          className="app-attachment-lightbox-next absolute right-1 top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition hover:bg-black/75"
-                        >
-                          <ChevronRight className="size-6" />
-                        </button>
-                        <div className="absolute bottom-1 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-xs font-bold">
-                          {composerImages.findIndex((attachment) => attachment.id === openComposerImage.id) + 1} / {composerImages.length}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>,
-                document.body
+              {openComposerImage && (
+                <ImageGalleryLightbox
+                  images={composerImages}
+                  activeId={openComposerImage.id}
+                  onActiveChange={setOpenComposerImageId}
+                  onClose={() => setOpenComposerImageId(null)}
+                  originFor={(id) => attachmentStripRef.current?.querySelector<HTMLElement>(`[data-lightbox-origin="${CSS.escape(id)}"]`) ?? null}
+                />
               )}
             </>
           }
@@ -1392,7 +1430,7 @@ export function Composer({
         />
     </div>
   );
-}
+});
 
 export function ComposerIcon({
   label,
@@ -1430,7 +1468,7 @@ function summarySourceLine(source: ChannelSummarySource, historyHeadSequence: nu
   return parts.join(" · ");
 }
 
-export function ChannelDetails({
+export const ChannelDetails = memo(function ChannelDetails({
   channel,
   space,
   workspaces,
@@ -1441,6 +1479,7 @@ export function ChannelDetails({
   onOpenAgentTrace,
   onRunChannelCommand,
   onManageApps,
+  onDeleteChannel,
   automations,
   automationExecutionEnabled,
   automationBusy,
@@ -1452,7 +1491,7 @@ export function ChannelDetails({
   mobileOverlayOpen = false,
   onCloseMobileOverlay,
 }: {
-  channel: SerializedChannel | null;
+  channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
   /** Registered working directories, the only record that knows a repository. */
   workspaces: SerializedWorkspace[];
@@ -1469,6 +1508,7 @@ export function ChannelDetails({
    */
   onRunChannelCommand?: (body: string) => void;
   onManageApps: () => void;
+  onDeleteChannel?: () => void;
   automations: SerializedAutomation[];
   automationExecutionEnabled: boolean | null;
   automationBusy: string | null;
@@ -1591,7 +1631,7 @@ export function ChannelDetails({
                 onClick={() => void requestAboutSummary()}
                 className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
               >
-                <RefreshCw className={aboutSummaryBusy ? "size-3.5 animate-spin" : "size-3.5"} />
+                <AnimatedIcon icon={RefreshCw} className={aboutSummaryBusy ? "size-3.5 animate-spin" : "size-3.5"} />
               </button>
             }
           >
@@ -1648,12 +1688,9 @@ export function ChannelDetails({
                               )}
                               className="app-detail-agent-avatar-button shrink-0 rounded-full"
                             >
-                              <IdentityAvatar
-                                kind="agent"
-                                label={label}
+                              <Face
+                                of={{ kind: "agent", name: label, harness: registration?.harness ?? null, id: instance.id }}
                                 status={instance.status}
-                                imageUrl={presence.avatarUrl}
-                                initials={avatarInitials(label)}
                                 size="sm"
                               />
                             </button>
@@ -1702,10 +1739,7 @@ export function ChannelDetails({
 
           <ChannelSubscriptionsBlock
             connections={connectorConnections}
-            userId={currentUserMemberId || "anonymous"}
-            spaceId={channelSpaceId}
             channelId={channelId}
-            token={token}
             connectorRevision={connectorRevision}
             onRunConnectorCommand={onRunChannelCommand}
             onManageApps={onManageApps}
@@ -1788,7 +1822,7 @@ export function ChannelDetails({
                             className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                           >
                             {automationBusy === `toggle:${automation.id}` ? (
-                              <Loader2 className="size-3.5 animate-spin" />
+                              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
                             ) : automation.enabled ? (
                               <Pause className="size-3.5" />
                             ) : (
@@ -1803,7 +1837,7 @@ export function ChannelDetails({
                             className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
                           >
                             {automationBusy === `delete:${automation.id}` ? (
-                              <Loader2 className="size-3.5 animate-spin" />
+                              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
                             ) : (
                               <Trash2 className="size-3.5" />
                             )}
@@ -1888,6 +1922,9 @@ export function ChannelDetails({
             </div>
           </DetailBlock>
           )}
+          {/* The desktop title carries delete; the phone has no title icons. */}
+          {onDeleteChannel && mobileOverlayOpen && <button type="button" onClick={onDeleteChannel}
+            className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}
         </div>
       </div>
   );
@@ -1940,7 +1977,7 @@ export function ChannelDetails({
       {detailsBody}
     </aside>
   );
-}
+});
 
 /**
  * Presentation metadata in the Details rail is deliberately read from the
@@ -1950,7 +1987,7 @@ export function ChannelDetails({
  * Every element here is the element the message header uses, so one metric
  * looks the same wherever it appears.
  */
-function LiveAgentPresentationChips({
+const LiveAgentPresentationChips = memo(function LiveAgentPresentationChips({
   instance,
   usageLimit,
   mention,
@@ -2009,7 +2046,7 @@ function LiveAgentPresentationChips({
       <TagRow tags={usageMeterTags} compact />
     </div>
   );
-}
+});
 
 export { AgentConfigPage } from "./agent-config-page";
 
@@ -2247,10 +2284,10 @@ export function ToolSurface({
   view: Exclude<AppView, "messages">;
   /** Whose profile the Profile view shows; null is the viewer's own. */
   profileUserId: string | null;
-  user: { id: string; email: string; name?: string; avatarUrl?: string };
+  user: { id: string; email: string; name?: string };
   /** Hub-reported operator capability; the admin route re-checks it. */
   platformAdmin?: boolean;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   machines: MachineSummary[];
   localWorkspaces: SerializedWorkspace[];
   localManagedAgents: LocalManagedAgent[];

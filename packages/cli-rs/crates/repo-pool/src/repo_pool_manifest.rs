@@ -42,6 +42,9 @@ thread_local! {
     static TEST_MANIFEST_SAVE_TICK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static TEST_FAIL_WORKTREE_UNLOCK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static TEST_FAIL_WORKTREE_REMOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    // What `git worktree remove --force` does when a writer races the delete:
+    // the admin directory goes, the work tree stays, and the command fails.
+    static TEST_UNREGISTER_THEN_FAIL_WORKTREE_REMOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // --- stable error codes (never raw git stderr with credentials) ---
@@ -506,6 +509,12 @@ struct BindingRecord {
     run_id: String,
     execution_key: String,
     slot_id: String,
+    /// Shared handoff checkouts track each session independently. Absent on
+    /// legacy exclusive bindings, whose lifecycle still lives on the slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    state: Option<SlotState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spawn_claim_token: Option<String>,
 }
 
 impl BindingRecord {
@@ -526,6 +535,8 @@ impl BindingRecord {
             run_id: request.run_id.clone(),
             execution_key: request.execution_key.clone(),
             slot_id: slot_id.as_str().to_string(),
+            state: None,
+            spawn_claim_token: None,
         }
     }
 }
@@ -916,11 +927,10 @@ fn validate_manifest(manifest: &RepoPoolManifest) -> Result<(), PoolError> {
             || !seen_instances.insert(binding.instance_id.clone())
             || !seen_runs.insert(binding.run_id.clone())
             || !seen_execs.insert(binding.execution_key.clone())
-            || !bound_slots.insert(slot_id.as_str().to_string())
         {
             return Err(PoolError::new(
                 PoolErrorCode::InvalidBinding,
-                "binding fields must be unique across session/instance/run/execution/slot",
+                "binding fields must be unique across session/instance/run/execution",
             ));
         }
         let slot = manifest.slots.get(slot_id.as_str()).ok_or_else(|| {
@@ -929,6 +939,11 @@ fn validate_manifest(manifest: &RepoPoolManifest) -> Result<(), PoolError> {
                 "binding references missing slot",
             )
         })?;
+        if !bound_slots.insert(slot_id.as_str().to_string()) && manifest.bindings.iter().any(
+            |peer| peer.slot_id == binding.slot_id && peer.state.is_none()) {
+            return Err(PoolError::new(PoolErrorCode::InvalidBinding, "shared slot needs per-session lifecycle"));
+        }
+        validate_shared_binding(binding)?;
         // Starting, Leased, Retained, Returning, Preparing, Quarantined may carry binding.
         // Available must not.
         if matches!(slot.state, SlotState::Available) {
@@ -941,6 +956,7 @@ fn validate_manifest(manifest: &RepoPoolManifest) -> Result<(), PoolError> {
 
     for (id, slot) in &manifest.slots {
         validate_updated_at(&slot.updated_at)?;
+        validate_shared_slot(manifest, slot)?;
         if let Some(receipt) = slot.last_returned_binding.as_ref() {
             validate_binding_field("lastReturned.sessionKey", &receipt.session_key)?;
             validate_binding_field("lastReturned.instanceId", &receipt.instance_id)?;
@@ -1458,6 +1474,9 @@ fn retain_bound_slot(
     request: &LeaseRequest,
 ) -> Result<(), PoolError> {
     let slot_id = find_exact_binding(&manifest, request)?.slot_id.clone();
+    if update_shared_binding(&mut manifest, request, SlotState::Retained, None)? {
+        return save_manifest_at(layout.pool_root(), &manifest);
+    }
     let slot = manifest
         .slots
         .get_mut(&slot_id)
@@ -1484,7 +1503,7 @@ pub async fn retained_binding_for_session_at(
 ) -> Result<RetainedLease, PoolError> {
     let retained = retained_authority_for_session_at(layout, session_key).await?;
     let slot_id = SlotId::parse(&retained.authority.slot_id)?;
-    if !layout.slot_path(&slot_id)?.join(".git").is_file() {
+    if !is_formal_linked_worktree(&layout.slot_path(&slot_id)?) {
         return Err(PoolError::new(
             PoolErrorCode::WorktreeMissing,
             "retained worktree missing",
@@ -1515,7 +1534,9 @@ async fn retained_authority_for_session_at(
             "retained session is not unique",
         ));
     }
-    require_retained_slot(&manifest, &binding.slot_id)?;
+    if binding.state != Some(SlotState::Retained) {
+        require_retained_slot(&manifest, &binding.slot_id)?;
+    }
     SlotId::parse(&binding.slot_id)?;
     Ok(RetainedLease {
         authority: binding.authority(),
@@ -1613,8 +1634,8 @@ pub async fn claim_starting_lease_at(
         .slots
         .get(&binding.slot_id)
         .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "binding slot missing"))?;
-    if slot.state != SlotState::Starting
-        || slot.spawn_claim_token.as_deref() != Some(spawn_claim_token)
+    if binding.state.unwrap_or(slot.state) != SlotState::Starting
+        || binding.spawn_claim_token.as_deref().or(slot.spawn_claim_token.as_deref()) != Some(spawn_claim_token)
     {
         return Err(PoolError::new(
             PoolErrorCode::InvalidBinding,
@@ -1642,6 +1663,9 @@ pub async fn claim_starting_lease_at(
     let identity = canonical_repo_identity(&manifest.canonical_repo_identity)?;
     verify_base_matches_identity(&base_repo, &identity).await?;
     verify_pool_worktree_ownership(layout, &base_repo, &expected_worktree, &slot_id).await?;
+    if update_shared_binding(&mut manifest, &LeaseRequest::from_authority(authority), SlotState::Leased, None)? {
+        return save_manifest_at(layout.pool_root(), &manifest);
+    }
     let slot = manifest
         .slots
         .get_mut(&binding.slot_id)
@@ -1713,18 +1737,16 @@ async fn transfer_retained_binding(
     replacement: &LeaseRequest,
     mode: RetainedTransferMode,
 ) -> Result<LeaseResult, PoolError> {
-    let (state_error, worktree_error, base_ref_error, session_key) = match mode {
+    let (state_error, worktree_error, base_ref_error) = match mode {
         RetainedTransferMode::Reborn => (
             "rebind only allowed from Retained",
             "reborn worktree missing",
             "reborn missing lastBaseRef",
-            expected.session_key.as_str(),
         ),
         RetainedTransferMode::Handoff => (
             "handoff transfer only allowed from Retained",
             "handoff worktree missing",
             "handoff missing lastBaseRef",
-            replacement.session_key.as_str(),
         ),
     };
     // Reject non-Retained writers before probing ownership or quarantining.
@@ -1739,7 +1761,7 @@ async fn transfer_retained_binding(
             .slots
             .get(slot_id.as_str())
             .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "slot missing"))?;
-        if slot.state != SlotState::Retained {
+        if manifest.bindings[idx].state.unwrap_or(slot.state) != SlotState::Retained {
             return Err(PoolError::new(PoolErrorCode::InvalidBinding, state_error));
         }
     }
@@ -1764,23 +1786,32 @@ async fn transfer_retained_binding(
     )?;
     let slot = manifest
         .slots
-        .get_mut(slot_id.as_str())
+        .get(slot_id.as_str())
         .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "slot missing"))?;
     let base_ref = slot
         .last_base_ref
         .clone()
         .ok_or_else(|| PoolError::new(PoolErrorCode::ManifestCorrupt, base_ref_error))?;
     let spawn_claim_token = fresh_spawn_claim_token();
-    slot.state = SlotState::Starting;
-    slot.spawn_claim_token = Some(spawn_claim_token.clone());
-    slot.updated_at = now_rfc3339();
-    manifest.bindings[idx] = BindingRecord {
-        session_key: session_key.to_string(),
-        instance_id: replacement.instance_id.clone(),
-        run_id: replacement.run_id.clone(),
-        execution_key: replacement.execution_key.clone(),
-        slot_id: slot_id.as_str().to_string(),
-    };
+    let shared = matches!(mode, RetainedTransferMode::Handoff) || manifest.bindings[idx].state.is_some();
+    if shared {
+        make_slot_shared(&mut manifest, slot_id.as_str())?;
+        let mut next = BindingRecord::for_lease(&slot_id, replacement);
+        next.state = Some(SlotState::Starting);
+        next.spawn_claim_token = Some(spawn_claim_token.clone());
+        if matches!(mode, RetainedTransferMode::Handoff) {
+            manifest.bindings.push(next);
+        } else {
+            manifest.bindings[idx] = next;
+        }
+        refresh_shared_slot(&mut manifest, slot_id.as_str())?;
+    } else {
+        manifest.bindings[idx] = BindingRecord::for_lease(&slot_id, replacement);
+        let slot = manifest.slots.get_mut(slot_id.as_str()).unwrap();
+        slot.state = SlotState::Starting;
+        slot.spawn_claim_token = Some(spawn_claim_token.clone());
+        slot.updated_at = now_rfc3339();
+    }
     save_manifest_at(layout.pool_root(), &manifest)?;
     Ok(LeaseResult {
         slot_id,
@@ -1990,7 +2021,7 @@ async fn lease_under_lock(
             // leftover: detach it from that foreign parent and continue. Trees
             // that still belong to this pool parent but fail ownership stay
             // quarantined (foreign lock, verify drift).
-            if !path.join(".git").is_file() {
+            if !is_formal_linked_worktree(&path) {
                 discard_broken_idle_slot(
                     layout,
                     base_repo,
@@ -2161,6 +2192,10 @@ fn bind_new_starting_slot(
     manifest
         .bindings
         .push(BindingRecord::for_lease(slot_id, request));
+    if manifest.bindings.iter().filter(|binding| binding.slot_id == slot_id.as_str()).count() > 1 {
+        make_slot_shared(manifest, slot_id.as_str())?;
+        refresh_shared_slot(manifest, slot_id.as_str())?;
+    }
     if let Err(error) = save_manifest_at(pool_root, manifest) {
         // Keep the locked orphan; a secondary failure must not replace the
         // primary error or cause the uncertain tree to be unlocked or removed.
@@ -2182,7 +2217,7 @@ fn broken_retained_slots(layout: &RepoPoolLayout, manifest: &RepoPoolManifest) -
             layout
                 .slot_path_for_id(id)
                 .ok()
-                .is_some_and(|path| path.exists() && !path.join(".git").is_file())
+                .is_some_and(|path| path.exists() && !is_formal_linked_worktree(&path))
         })
         .map(|(id, _)| id.clone())
         .collect()
@@ -2267,6 +2302,8 @@ async fn finish_return_after_fetch(
     if let Some(error) = return_rejected_before_fetch_apply(layout, request, expected)? {
         return Err(error);
     }
+    // No checkout mutation or successful fetch is needed while peers remain.
+    if release_shared_binding(layout, request, require_retained)? { return Ok(()); }
     match fetched {
         Ok(fetched) => {
             return_under_lock(
@@ -2390,7 +2427,7 @@ async fn return_under_lock(
             .slots
             .get(slot_id.as_str())
             .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "slot missing"))?;
-        if require_retained && slot.state != SlotState::Retained {
+        if require_retained && binding.state.unwrap_or(slot.state) != SlotState::Retained {
             return Err(PoolError::new(
                 PoolErrorCode::InvalidBinding,
                 "return without live registry requires retained stop evidence",
@@ -2729,7 +2766,7 @@ async fn discard_foreign_parent_idle_slot(
         GIT_MUTATION_TIMEOUT,
     )
     .await;
-    if path.join(".git").is_file() {
+    if is_formal_linked_worktree(path) {
         return Ok(false);
     }
     discard_broken_idle_slot(layout, base_repo, pool_root, manifest, slot_id, path).await?;
@@ -3095,10 +3132,11 @@ async fn perform_required_fetch_and_resolve(base_repo: &Path) -> Result<Resolved
             .or_insert(0) += 1;
     }
     let mut last_error = GitCommandError::from(GitRunError::Failed);
+    let mut refetch = false;
     for attempt in 1..=GIT_FETCH_ATTEMPTS {
         // Each attempt asks origin again: the branch itself may have changed
         // or vanished since the previous attempt.
-        match confirm_origin_default_once(base_repo).await {
+        match confirm_origin_default_once(base_repo, refetch).await {
             Ok(resolved) => return Ok(resolved),
             Err(ConfirmError::Git(error)) => last_error = error,
             Err(ConfirmError::Pool(error)) => return Err(error),
@@ -3107,6 +3145,9 @@ async fn perform_required_fetch_and_resolve(base_repo: &Path) -> Result<Resolved
         if matches!(last_error.kind, GitRunError::Auth | GitRunError::NotFound) {
             break;
         }
+        // Repeating negotiation assumes the same missing delta bases exist.
+        // Download a complete pack on the next attempt, within this budget.
+        refetch |= last_error.kind == GitRunError::MissingDeltaBase;
         if attempt < GIT_FETCH_ATTEMPTS {
             // A lock clears in moments; an unreachable remote needs longer.
             let step_ms = if matches!(last_error.kind, GitRunError::Network | GitRunError::Timeout) {
@@ -3148,7 +3189,7 @@ enum ConfirmError {
     Pool(PoolError),
 }
 
-async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, ConfirmError> {
+async fn confirm_origin_default_once(base_repo: &Path, refetch: bool) -> Result<ResolvedBase, ConfirmError> {
     let advertised = git(
         base_repo,
         &["ls-remote", "--symref", "origin", "HEAD"],
@@ -3163,11 +3204,11 @@ async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, C
             "could not resolve origin default branch: origin advertises none with a commit",
         ))
     })?;
-    materialize_advertised_default(base_repo, &branch, &advertised_oid, confirmed_at).await
+    materialize_advertised_default(base_repo, &branch, &advertised_oid, confirmed_at, refetch).await
 }
 
 async fn materialize_advertised_default(
-    base_repo: &Path, branch: &str, advertised_oid: &str, mut confirmed_at: String,
+    base_repo: &Path, branch: &str, advertised_oid: &str, mut confirmed_at: String, refetch: bool,
 ) -> Result<ResolvedBase, ConfirmError> {
     // Only fetch and resolve this one ref: every branch-specific step below
     // reads the branch origin named just now.
@@ -3182,14 +3223,21 @@ async fn materialize_advertised_default(
     .ok();
     let previous_default = git(base_repo,
         &["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], GIT_LOCAL_TIMEOUT).await.ok();
-    if held.as_deref() != Some(advertised_oid) {
+    if refetch || held.as_deref() != Some(advertised_oid) {
         // The remote-tracking ref is a cache of origin, including rewritten
         // history: force only this ref; local branches and leased worktrees
         // stay untouched.
         let refspec = format!("+refs/heads/{branch}:{tracking}");
+        let mut args = vec!["fetch", "--no-tags"];
+        if refetch {
+            // Append objects without pruning the shared store or changing any
+            // local branch, index, or leased worktree. Git 2.36+ supports this.
+            args.extend(["--refetch", "--no-auto-maintenance"]);
+        }
+        args.extend(["origin", &refspec]);
         git(
             base_repo,
-            &["fetch", "--no-tags", "origin", &refspec],
+            &args,
             GIT_FETCH_TIMEOUT,
         )
         .await
@@ -3614,6 +3662,32 @@ fn read_linked_worktree_admin_pointer(worktree: &Path) -> Result<PathBuf, PoolEr
     };
     reject_path_components(&path)?;
     Ok(path)
+}
+
+/// Git dropped this tree's registration while its repository is still there:
+/// the `.git` pointer names `<common-dir>/worktrees/<id>`, that admin directory
+/// is gone, and the common dir exists. `git worktree remove --force` leaves a
+/// tree in this state when the work-tree delete fails (a writer still in it)
+/// because it deletes the admin directory regardless. Such a tree is files, not
+/// a linked worktree. An unreadable pointer, or one whose repository is gone
+/// too, is no evidence of that and answers `false`.
+fn git_dropped_linked_worktree(worktree: &Path) -> bool {
+    let Ok(admin) = read_linked_worktree_admin_pointer(worktree) else {
+        return false;
+    };
+    let Some(worktrees) = admin.parent() else {
+        return false;
+    };
+    if worktrees.file_name().and_then(|name| name.to_str()) != Some("worktrees") {
+        return false;
+    }
+    !admin.exists() && worktrees.parent().is_some_and(Path::is_dir)
+}
+
+/// A slot tree git still knows as a linked worktree (or that is not provably
+/// anything else).
+fn is_formal_linked_worktree(worktree: &Path) -> bool {
+    worktree.join(".git").is_file() && !git_dropped_linked_worktree(worktree)
 }
 
 // --- path safety ---
@@ -4079,9 +4153,12 @@ async fn registered_base_repo_for_worktree(worktree: &Path) -> Result<PathBuf, P
 }
 
 /// Product-owned leftover at `poolRoot/slots/<slotId>` that is not a formal
-/// linked worktree (`.git` pointer missing or the directory is already gone).
-/// Layout containment and a non-symlink slot directory are required before
-/// any recursive delete. `git worktree prune` drops the stale registration.
+/// linked worktree (`.git` pointer missing, pointing at an admin directory git
+/// already dropped, or the directory is already gone). Layout containment and
+/// a non-symlink slot directory are required before any recursive delete.
+/// `git worktree prune` drops the stale registration. A process still writing
+/// into the tree can refill a directory between its unlink and rmdir, so the
+/// delete is retried briefly before it fails naming the slot path.
 async fn remove_leftover_idle_slot_directory(
     layout: &RepoPoolLayout,
     base_repo: &Path,
@@ -4107,24 +4184,43 @@ async fn remove_leftover_idle_slot_directory(
         ));
     }
     reject_reparse(worktree)?;
-    if worktree.join(".git").is_file() {
+    if is_formal_linked_worktree(worktree) {
         return Err(PoolError::new(
             PoolErrorCode::WorktreeCleanupFailed,
             "refusing leftover delete of a formal linked worktree",
         ));
     }
-    std::fs::remove_dir_all(worktree).map_err(|_| {
-        PoolError::new(
-            PoolErrorCode::WorktreeCleanupFailed,
-            "failed to remove leftover idle slot directory",
-        )
-    })
+    let mut last_error = None;
+    for attempt in 1..=LEFTOVER_REMOVE_ATTEMPTS {
+        match std::fs::remove_dir_all(worktree) {
+            Ok(()) => return Ok(()),
+            Err(_) if !worktree.exists() => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        if attempt < LEFTOVER_REMOVE_ATTEMPTS {
+            tokio::time::sleep(LEFTOVER_REMOVE_BACKOFF * attempt).await;
+        }
+    }
+    Err(PoolError::new(
+        PoolErrorCode::WorktreeCleanupFailed,
+        format!(
+            "failed to remove leftover slot directory {} after {LEFTOVER_REMOVE_ATTEMPTS} attempts ({})",
+            worktree.display(),
+            last_error.map_or_else(|| "unknown".to_string(), |error| error.kind().to_string()),
+        ),
+    ))
 }
+
+const LEFTOVER_REMOVE_ATTEMPTS: u32 = 5;
+const LEFTOVER_REMOVE_BACKOFF: Duration = Duration::from_millis(100);
 
 /// Safe cleanup for a tree created in this operation. Never `remove_dir_all`.
 /// Requires layout containment + common-dir + validated admin. Unlocks only our
 /// reason; foreign lock → fail-closed without unlock/remove.
 /// On remove failure after unlock: re-apply exact owned lock (fail-closed if relock fails).
+/// When the failed remove already dropped git's registration (it deletes the
+/// admin directory even when the work-tree delete stops), there is nothing left
+/// to relock: the tree is leftover files and the delete is finished here.
 async fn try_safe_remove_created_worktree(
     layout: &RepoPoolLayout,
     base_repo: &Path,
@@ -4136,7 +4232,7 @@ async fn try_safe_remove_created_worktree(
     }
     ensure_path_inside_layout(layout, worktree)?;
     if worktree.join(".git").is_file() {
-        let _admin = resolve_validated_worktree_admin(base_repo, worktree).await?;
+        let admin = resolve_validated_worktree_admin(base_repo, worktree).await?;
         let expected = pool_worktree_lock_reason(layout, slot_id);
         let mut unlocked_owned = false;
         if let Some(reason) = read_worktree_lock_reason(base_repo, worktree).await? {
@@ -4180,14 +4276,27 @@ async fn try_safe_remove_created_worktree(
             ));
         }
         let path_arg = worktree.display().to_string();
-        if git(
-            base_repo,
-            &["worktree", "remove", "--force", &path_arg],
-            GIT_MUTATION_TIMEOUT,
-        )
-        .await
-        .is_err()
-        {
+        #[cfg(test)]
+        let injected_unregister = TEST_UNREGISTER_THEN_FAIL_WORKTREE_REMOVE.with(|c| c.get());
+        #[cfg(not(test))]
+        let injected_unregister = false;
+        let removed = if injected_unregister {
+            std::fs::remove_dir_all(&admin)
+                .map_err(|_| PoolError::new(PoolErrorCode::Io, "injected unregister failed"))?;
+            false
+        } else {
+            git(
+                base_repo,
+                &["worktree", "remove", "--force", &path_arg],
+                GIT_MUTATION_TIMEOUT,
+            )
+            .await
+            .is_ok()
+        };
+        if !removed {
+            if git_dropped_linked_worktree(worktree) {
+                return remove_leftover_idle_slot_directory(layout, base_repo, worktree).await;
+            }
             if unlocked_owned {
                 // Remove failed after unlock: restore owned lock (fail-closed if cannot).
                 lock_pool_worktree(base_repo, worktree, layout, slot_id)
@@ -4325,6 +4434,7 @@ enum GitRunError {
     Auth,
     NotFound,
     Network,
+    MissingDeltaBase,
     PathTooLong,
     DiskFull,
     PermissionDenied,
@@ -4341,6 +4451,7 @@ impl GitRunError {
             Self::Auth => "authentication failed",
             Self::NotFound => "repository not found",
             Self::Network => "could not reach the remote",
+            Self::MissingDeltaBase => "missing delta base objects",
             Self::PathTooLong => "path too long",
             Self::DiskFull => "disk full",
             Self::PermissionDenied => "permission denied",
@@ -4400,6 +4511,11 @@ fn classify_git_failure(stderr: &str) -> GitRunError {
         || lower.contains("tls connection")
     {
         return GitRunError::Network;
+    }
+    if lower.contains("unresolved deltas left after unpacking")
+        || (lower.contains("pack has ") && lower.contains(" unresolved delta"))
+    {
+        return GitRunError::MissingDeltaBase;
     }
     if lower.contains("permission denied") || lower.contains("operation not permitted") {
         return GitRunError::PermissionDenied;

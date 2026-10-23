@@ -23,8 +23,7 @@ function workspacePathParts(path: string): string[] {
   const normalized = path
     .trim()
     .replace(/^\\\\\?\\/, "")
-    .replace(/\\/g, "/")
-    .replace(/\/+$/g, "");
+    .replace(/\\/g, "/");
   return normalized.split("/").filter(Boolean);
 }
 

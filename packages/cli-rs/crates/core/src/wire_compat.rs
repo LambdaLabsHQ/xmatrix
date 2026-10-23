@@ -36,7 +36,7 @@ pub struct WireRepair {
 }
 
 #[derive(Debug, Clone)]
-pub struct WireDecoded<T> {
+pub(crate) struct WireDecoded<T> {
     pub value: T,
     /// Empty when the payload matched this CLI exactly.
     pub repairs: Vec<WireRepair>,
@@ -89,7 +89,9 @@ fn rejected_our_fill(message: &str, serde_type: &str) -> bool {
 ///
 /// Returns the original error when the payload cannot be repaired, so a
 /// genuinely malformed response still fails instead of arriving as defaults.
-pub fn decode_tolerant<T: DeserializeOwned>(payload: &Value) -> Result<WireDecoded<T>, String> {
+pub(crate) fn decode_tolerant<T: DeserializeOwned>(
+    payload: &Value,
+) -> Result<WireDecoded<T>, String> {
     let mut current = payload.clone();
     let mut repairs: Vec<WireRepair> = Vec::new();
 

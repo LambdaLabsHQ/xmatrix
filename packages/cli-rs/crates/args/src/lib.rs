@@ -17,7 +17,7 @@ pub struct Cli {
         long,
         env = "XMATRIX_PROFILE",
         global = true,
-        conflicts_with_all = ["environment", "hub_url"]
+        conflicts_with = "hub_url"
     )]
     pub profile: Option<String>,
     /// Hub URL override for a custom deployment
@@ -25,36 +25,12 @@ pub struct Cli {
         long,
         env = "XMATRIX_HUB_URL",
         global = true,
-        conflicts_with_all = ["environment", "profile"]
+        conflicts_with = "profile"
     )]
     pub hub_url: Option<String>,
-    /// Select the built-in production or test environment
-    #[arg(
-        long,
-        env = "XMATRIX_ENVIRONMENT",
-        global = true,
-        value_enum,
-        conflicts_with_all = ["hub_url", "profile"]
-    )]
-    pub environment: Option<CliEnvironmentArg>,
     /// Auth token override
     #[arg(long, env = "XMATRIX_TOKEN")]
     pub token: Option<String>,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-pub enum CliEnvironmentArg {
-    Production,
-    Test,
-}
-
-impl CliEnvironmentArg {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Production => "production",
-            Self::Test => "test",
-        }
-    }
 }
 
 #[derive(Subcommand)]
@@ -106,19 +82,6 @@ pub enum SessionCommand {
         /// Include the access token (for a local client that owns the store)
         #[arg(long)]
         with_token: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum EnvironmentCommand {
-    /// List the built-in environments and the active selection
-    List,
-    /// Print the active environment
-    Current,
-    /// Change the environment used by commands and the local daemon
-    Use {
-        #[arg(value_enum)]
-        environment: CliEnvironmentArg,
     },
 }
 
@@ -225,11 +188,6 @@ pub enum Commands {
         #[command(subcommand)]
         command: BillingCommand,
     },
-    /// Inspect or change the active Hub environment
-    Env {
-        #[command(subcommand)]
-        command: EnvironmentCommand,
-    },
     /// Manage local connection profiles
     Profile {
         #[command(subcommand)]
@@ -269,16 +227,12 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Update this xMatrix CLI binary from the latest release
+    /// Update this xMatrix CLI binary from the latest release of its channel
     Update {
-        /// Release metadata URL
-        #[arg(
-            long,
-            env = "XMATRIX_RELEASE_API_URL",
-            default_value = "https://xmatrix.sh/api/cli/releases/latest"
-        )]
-        release_api_url: String,
-        /// Reinstall even when the latest version matches this binary
+        /// Release metadata URL (default: the dev feed for a beta, the stable feed otherwise)
+        #[arg(long, env = "XMATRIX_RELEASE_API_URL")]
+        release_api_url: Option<String>,
+        /// Reinstall when the latest release is this binary's own version
         #[arg(long)]
         force: bool,
     },
@@ -604,35 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn built_in_environment_and_custom_hub_are_mutually_exclusive() {
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "--environment",
-                "test",
-                "--hub-url",
-                "https://hub.example",
-                "status",
-            ])
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn environment_use_parses_the_named_target() {
-        let cli = Cli::try_parse_from(["xmatrix", "env", "use", "test"])
-            .expect("environment command should parse");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Env {
-                command: EnvironmentCommand::Use {
-                    environment: CliEnvironmentArg::Test,
-                },
-            })
-        ));
-    }
-
-    #[test]
     fn explicit_profile_is_global_and_conflicts_with_legacy_selectors() {
         let cli = Cli::try_parse_from(["xmatrix", "--profile", "isolated", "status"])
             .expect("profile selector should parse");
@@ -642,8 +567,8 @@ mod tests {
                 "xmatrix",
                 "--profile",
                 "isolated",
-                "--environment",
-                "test",
+                "--hub-url",
+                "https://hub.example",
                 "status",
             ])
             .is_err()
@@ -1311,9 +1236,6 @@ mod tests {
     #[test]
     fn metadata_history_and_restore_have_bounded_explicit_revision_arguments() {
         assert!(
-            Cli::try_parse_from(["xmatrix", "channel", "history", "c", "--authoritative"]).is_ok()
-        );
-        assert!(
             Cli::try_parse_from([
                 "xmatrix",
                 "channel",
@@ -1321,17 +1243,6 @@ mod tests {
                 "c",
                 "--revision",
                 "0"
-            ])
-            .is_ok()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "channel",
-                "metadata-history",
-                "c",
-                "--input",
-                "input-id"
             ])
             .is_ok()
         );
@@ -1370,55 +1281,6 @@ mod tests {
             ])
             .is_ok()
         );
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "channel",
-                "about",
-                "c",
-                "--summary",
-                "text",
-                "--expected-revision",
-                "2"
-            ])
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn channel_about_accepts_direct_text_or_one_json_stdin_input() {
-        let about = |extra: &[&str]| {
-            let mut argv = vec!["xmatrix", "channel", "about", "channel-1"];
-            argv.extend_from_slice(extra);
-            Cli::try_parse_from(argv)
-        };
-        let cli = about(&["--stdin", "--through", "m-9", "--expected-revision", "2"])
-            .expect("about should accept JSON stdin");
-        let Some(Commands::Channel {
-            command:
-                ChannelCommand::About {
-                    summary,
-                    name,
-                    stdin,
-                    through,
-                    expected_revision,
-                    ..
-                },
-        }) = cli.command
-        else {
-            panic!("expected channel about command");
-        };
-        assert!(stdin);
-        assert_eq!(summary, None);
-        assert_eq!(name, None);
-        assert_eq!(through.as_deref(), Some("m-9"));
-        assert_eq!(expected_revision, Some(2));
-        assert!(about(&["--summary", "中文摘要", "--name", "频道标题"]).is_ok());
-        assert!(about(&[]).is_err());
-        assert!(about(&["--stdin", "--summary", "text"]).is_err());
-        assert!(about(&["--stdin", "--name", "name"]).is_err());
-        assert!(about(&["--summary-file", "a.md"]).is_err());
-        assert!(about(&["--summary", "text", "--name-file", "n.txt"]).is_err());
     }
 }
 
@@ -1704,9 +1566,9 @@ pub enum SecretCommand {
 
 #[derive(Subcommand)]
 pub enum ConnectorCliCommand {
-    /// Serve this Space's connector actions as MCP tools over stdio, for the
-    /// harness an Agent Run drives (it is configured automatically)
-    Mcp,
+    /// The apps connected to this Run's Channel and each action's command;
+    /// act by sending one with `xmatrix send`
+    List,
 }
 
 #[derive(Subcommand)]
@@ -1913,38 +1775,13 @@ pub enum ChannelCommand {
         #[arg(required = true)]
         name: Vec<String>,
     },
-    /// Replace a channel's About summary (the channel's own About session only).
-    /// Submit text directly, or pipe a JSON object with summary and optional name
-    /// to --stdin. No intermediate files are read.
-    About {
-        /// Channel ID or xmatrix.sh channel URL
-        channel_id: String,
-        /// The new About summary
-        #[arg(long, required_unless_present = "stdin", conflicts_with = "stdin")]
-        summary: Option<String>,
-        /// Name a channel nobody has named yet
-        #[arg(long, conflicts_with = "stdin")]
-        name: Option<String>,
-        /// Read a UTF-8 JSON object containing summary and optional name from stdin
-        #[arg(long)]
-        stdin: bool,
-        /// The newest message the summary covers
-        #[arg(long)]
-        through: Option<String>,
-        /// Revision printed by the authoritative history read
-        #[arg(long)]
-        expected_revision: Option<u64>,
-    },
-    /// Read immutable title / About revisions and their recorded input
+    /// Read immutable title / About revisions
     MetadataHistory {
         channel_id: String,
         #[arg(long)]
         before_revision: Option<u64>,
-        #[arg(long, conflicts_with_all = ["before_revision", "input"])]
-        revision: Option<u64>,
-        /// Inspect one input id listed in a revision's source
         #[arg(long, conflicts_with = "before_revision")]
-        input: Option<String>,
+        revision: Option<u64>,
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
     },
@@ -1994,10 +1831,6 @@ pub enum ChannelCommand {
     History {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
-
-        /// Bypass the daemon cache and record About input at the Hub
-        #[arg(long)]
-        authoritative: bool,
     },
     /// Open a simple line-based channel chat with manual refresh
     Chat {
@@ -2365,7 +2198,7 @@ pub enum PageCommand {
         #[arg(long)]
         conversation: Option<String>,
     },
-    /// Claim a section you are working on, so others see it is taken; claiming again renews it
+    /// Say you are on a section, so other Agents see who is on what (it locks nothing); claiming again renews it
     Claim {
         /// Page ID
         page: String,
@@ -2867,6 +2700,7 @@ mod registration_argument_tests {
 
 /// Arguments shared by `send` and `channel send`.
 #[derive(clap::Args)]
+#[command(after_long_help = include_str!("../help/send.txt"))]
 pub struct SendArgs {
     /// Channel ID or xmatrix.sh channel URL
     pub channel_id: String,

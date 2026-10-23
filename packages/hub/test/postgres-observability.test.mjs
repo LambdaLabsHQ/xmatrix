@@ -85,6 +85,30 @@ test("client read deadlines remain distinguishable from server SQLSTATE timeouts
   assert.deepEqual(written.map((point) => point.blobs[5]), ["QUERY_READ_TIMEOUT", "57014"]);
 });
 
+// The existing timeout test cannot catch an open breaker being collapsed to DATABASE_ERROR,
+// or a refusal losing the failure that opened it. Exercise the persisted privacy boundary.
+test("breaker refusals retain their operation and bounded opening-failure diagnostics", () => {
+  const { env, written } = sink();
+  const point = { requestId: "private", operation: "app.sentry-event.claim",
+    queryName: "database_phase_pool_checkout_v1", shardId: "shard-0",
+    durationMs: 0, rowCount: 0, outcome: "error", slow: false, errorCode: "database_circuit_open",
+    connectivity: { state: "half_open", failureCode: "QUERY_READ_TIMEOUT",
+      failureOperation: "app.googlechat.cleanup", failureQuery: "database_phase_begin_v1",
+      failureCount: 5, failureAgeMs: 6_000, retryAfterMs: 1_000 } };
+  recordPostgresQueryObservation(env, point);
+  assert.equal(written[0].blobs[5], "DATABASE_CIRCUIT_OPEN");
+  assert.equal(written[0].blobs[10], "app.sentry-event.claim");
+  assert.deepEqual(written[0].blobs.slice(11), ["half_open", "QUERY_READ_TIMEOUT",
+    "app.googlechat.cleanup", "database_phase_begin_v1"]);
+  assert.deepEqual(written[0].doubles, [0, 0, 0, 1, 1_000, 6_000, 5]);
+  recordPostgresQueryObservation(env, { ...point, connectivity: {
+    state: "private", failureCode: "password=secret", failureOperation: "private@example.com",
+    failureQuery: "SELECT password", failureCount: -1, failureAgeMs: NaN, retryAfterMs: Infinity } });
+  assert.deepEqual(written[1].blobs.slice(11), ["other", "DATABASE_ERROR", "other", "other"]);
+  assert.deepEqual(written[1].doubles.slice(4), [0, 0, 0]);
+  assert.equal(JSON.stringify(written).includes("private"), false);
+});
+
 test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE", () => {
   const { env, written } = sink();
   const cases = [
@@ -93,13 +117,18 @@ test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE"
     ["message.history", "message_history_page_v1", "postgres.history", "history.sql"],
     ["message.append", "database_phase_commit_v1", "postgres.message", "phase.commit"],
     ["channel.direct-find", "channel_direct_find_v1", "postgres.direct", "direct.sql"],
+    ["account-deletion.pending", "database_phase_begin_v1", "postgres.account-deletion", "phase.begin"],
+    ["channel-purge.pending", "channel_purge_pending_v1", "postgres.channel-purge", "sql"],
+    ["account-deletion.claim", "account_deletion_claim_v1", "postgres.account-deletion", "sql"],
+    ["auth.account-revocation", "database_phase_pool_checkout_v1", "postgres.auth", "phase.pool_checkout"],
+    ["auth.account-revocation", "account_identity_revoked_v1", "postgres.auth", "sql"],
     ["runtime.summon_prepare_resolved_batch_v2", "runtime_summon_v2_profiles_exact_v2",
       "postgres.launch", "launch_resolve"],
     ["runtime.summon_prepare_resolved_batch_v2", "runtime_summon_v2_runs_v1",
       "postgres.launch", "launch_prepare"],
     ["launch.directory-publish-many", "entity_space_route_publish_many_v1",
       "postgres.launch", "directory_publish"],
-    ["machine-control.issue_batch", "machine_control_issue_batch_v1",
+    ["machine-control.issue_batch", "machine_control_issue_batch_v2",
       "postgres.machine", "command_issue"],
   ];
   for (const [operation, queryName] of cases) recordPostgresQueryObservation(env, {
@@ -109,6 +138,7 @@ test("hot-path operations retain bounded stage, transaction phase, and SQLSTATE"
   assert.deepEqual(written.map((point) => point.blobs.slice(1, 6)), cases.map((entry) => [
     entry[2], entry[3], "shard-0", "error", "40001",
   ]));
+  assert.deepEqual(written.map((point) => point.blobs[10]), cases.map((entry) => entry[0]));
 });
 
 test("operations outside the hot paths are grouped by their code-defined family", () => {
@@ -187,13 +217,25 @@ test("session points carry every segment of one checkout in fixed slots", () => 
 test("database observers accept any Worker env and stay silent without the binding", () => {
   const { env, written } = sink({ POSTGRES_QUERY_OBSERVABILITY_SAMPLE_RATE: "1" });
   const observers = postgresDatabaseObservers(env);
-  observers.observer({ requestId: "r", operation: "space.get", queryName: "space_get_v1",
+  observers.observer({ requestId: "r", operation: "account-deletion.pending", queryName: "account_deletion_pending_v1",
     shardId: "shard-0", durationMs: 1, rowCount: 1, outcome: "ok", slow: false });
-  observers.sessionObserver({ operation: "space.get", shardId: "shard-0", outcome: "ok",
+  observers.sessionObserver({ operation: "account-deletion.pending", shardId: "shard-0", outcome: "ok",
     wallMs: 3, queueMs: 0, checkoutMs: 0, firstStatementMs: 1, beginMs: 1,
     sqlMs: 1, sqlMaxMs: 1, commitMs: 1, rollbackMs: 0, roundTrips: 4, transactions: 1,
     queries: 1, rows: 1 });
   assert.deepEqual(written.map((point) => point.blobs[0]), ["query", "session"]);
+  assert.deepEqual(written.map((point) => [point.blobs[1], point.blobs[10]]), [
+    ["postgres.account-deletion", "account-deletion.pending"],
+    ["postgres.account-deletion", "account-deletion.pending"],
+  ]);
+  observers.sessionObserver({ operation: "auth.account-revocation", shardId: "shard-0", outcome: "error",
+    errorCode: "CONNECT_TIMEOUT", wallMs: 3_000, queueMs: 0, checkoutMs: 3_000, firstStatementMs: 0,
+    beginMs: 0, sqlMs: 0, sqlMaxMs: 0, commitMs: 0, rollbackMs: 0, roundTrips: 0,
+    transactions: 0, queries: 0, rows: 0 });
+  assert.deepEqual(written.at(-1).blobs, [
+    "session", "postgres.auth", "session", "shard-0", "error", "CONNECT_TIMEOUT", "version-1",
+    "cache_disabled", "none", "error", "auth.account-revocation",
+  ]);
   assert.doesNotThrow(() => postgresDatabaseObservers({}).observer({ requestId: "r",
     operation: "space.get", queryName: "space_get_v1", shardId: "shard-0", durationMs: 1,
     rowCount: 1, outcome: "error", slow: false }));

@@ -61,8 +61,6 @@ contextBridge.exposeInMainWorld("xmatrixDesktop", {
     ipcRenderer.invoke("desktop:save-cli-session", payload),
   refreshCliSession: (payload: DesktopCliSessionPayload) =>
     ipcRenderer.invoke("desktop:refresh-cli-session", payload),
-  switchEnvironment: (environment: "production" | "test") =>
-    ipcRenderer.invoke("desktop:switch-environment", environment),
   getLocalProfile: (): Promise<DesktopLocalProfileSelection> =>
     ipcRenderer.invoke("desktop:get-local-profile"),
   setLocalProfile: (selection: { mode: "follow-default" } | { mode: "explicit"; profileId: string }) =>
@@ -85,6 +83,10 @@ contextBridge.exposeInMainWorld("xmatrixDesktop", {
     ipcRenderer.invoke("desktop:discover-agent-presets", presets),
   revealPath: (workspacePath: string) => ipcRenderer.invoke("desktop:reveal-path", workspacePath),
   checkRuntime: (runtime: string) => ipcRenderer.invoke("desktop:check-runtime", runtime),
+  serviceSignIn: (service: string, options?: { fresh?: boolean }) =>
+    ipcRenderer.invoke("desktop:service-sign-in", service, options),
+  authorizeInBrowser: (request: { url: string; redirectParam: string }) =>
+    ipcRenderer.invoke("desktop:authorize-in-browser", request),
   checkForUpdates: () => ipcRenderer.invoke("desktop:check-for-updates"),
   getUpdateStatus: () => ipcRenderer.invoke("desktop:get-update-status"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),

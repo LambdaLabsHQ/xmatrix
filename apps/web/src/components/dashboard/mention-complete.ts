@@ -10,11 +10,12 @@ import type {
   MessageInteractionRegistry,
   SerializedAgent,
   SerializedAgentInstance,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedSpace,
+  FaceOf,
 } from "@xmatrix/protocol";
-import { harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
+import { channelPresenceInstances, presenceInstanceId, harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
 import {
   agentInteractionTarget,
   connectorInteractionTarget,
@@ -27,7 +28,6 @@ import {
   MENTION_COMMAND_COMPLETION_SCHEMA,
   MENTION_BROADCAST_NAMES,
   canonicalMentionToken,
-  agentAvatarUrlFromMetadata,
   HANDOFF_INSTANCE_MENTION_AT_CARET_RE,
   isHandoffSuccessorName,
 } from "@xmatrix/protocol";
@@ -60,7 +60,9 @@ export type MentionCandidate = {
   kind: "agent" | "user" | "app" | "service" | "launch";
   status: SerializedAgent["status"];
   email?: string;
-  avatarUrl?: string;
+  /** Whose face the row shows (protocol faces.ts): set on every row that is a person or an Agent, none on a
+   *  command, an App or a launch condition. */
+  face?: FaceOf;
   agentId?: string;
   /** Existing alternate Human address, retained for compatibility. */
   handle?: string;
@@ -179,9 +181,9 @@ const MENTION_QUERY_RE = /(?:^|\s)@(\S*)$/;
 const COMPOSABLE_AGENT_MENTION_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,123}$/;
 const AGENT_COMMAND_QUERY_RE = /^\S+\s+\/.*$/;
 
-function agentRegistryAvatarUrl(agent: SerializedAgent | undefined): string | undefined {
-  if (!agent) return undefined;
-  return agent.avatarUrl || agentAvatarUrlFromMetadata(agent.metadata, agent.type);
+/** An Agent's face: the harness its registration names (`type`), on the Instance it is. */
+function agentFace(agent: SerializedAgent, instanceId = agent.instanceId): FaceOf {
+  return { kind: "agent", name: agent.name, harness: agent.type || null, id: instanceId ?? null };
 }
 
 export function connectorCompletionErrorMessage(message: string): string {
@@ -225,30 +227,14 @@ export function connectorCompletionRecovery(message: string): ConnectorCompletio
  * identity: owner, machine and harness come from there, never from a separate
  * Agent record.
  */
-export function channelAgents(channel: SerializedChannel): SerializedAgent[] {
+export function channelAgents(channel: ChannelSnapshot): SerializedAgent[] {
   const agents: SerializedAgent[] = [];
-  for (const [memberId, presence] of Object.entries(channel.memberPresence || {})) {
-    if (presence.kind !== "agent") continue;
-    const name = presence.label?.trim();
-    const instances = presence.instances || [];
-    if (!name) continue;
-    const lead = [...instances].sort(
-      (left, right) => mentionStatusRank(left.status) - mentionStatusRank(right.status)
-    )[0];
-    agents.push({
-      id: memberId,
-      userId: presence.registration?.ownerUserId || "",
-      name,
-      type: presence.registration?.harness || "",
-      lifetime: "short",
-      email: presence.email || "",
-      metadata: presence.registration ? { machineId: presence.registration.machineId } : {},
-      connectedAt: lead?.connectedAt || "",
-      lastSeenAt: presence.lastSeenAt || lead?.lastSeenAt || "",
-      status: lead?.status || "offline",
-      ...(presence.avatarUrl ? { avatarUrl: presence.avatarUrl } : {}),
-      instances,
-    });
+  for (const instance of channelPresenceInstances(channel.presence)) {
+    agents.push({ id: instance.id, instanceId: instance.id, userId: instance.registration.ownerUserId,
+      name: instance.agentName, type: instance.registration.harness, lifetime: "short",
+      email: instance.email || "", metadata: { machineId: instance.registration.machineId },
+      connectedAt: instance.connectedAt, lastSeenAt: instance.lastSeenAt, status: instance.status,
+      instances: [instance] });
   }
   return agents;
 }
@@ -317,20 +303,41 @@ export type MentionInstanceTargetScope = "channel" | "none";
  * offered are the ones the grammar knows.
  */
 export function channelInteractionTargets(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
   instanceTargetScope: MentionInstanceTargetScope = "channel",
 ): { registry: MessageInteractionRegistry; candidates: MentionCandidate[] } {
   const entries = channel ? channelTargetEntries(channel, localContext, appConnectors, space, instanceTargetScope) : [];
-  const registry = interactionRegistry(entries.map(entry => entry.descriptor));
-  const accepted = new Set(registry.descriptors().map(descriptor => descriptor.targetId));
+  const { registry, accepted } = registryOf(entries.map(entry => entry.descriptor));
   return { registry, candidates: entries.filter(entry => accepted.has(entry.descriptor.targetId)).map(entry => entry.candidate) };
 }
 
+/* A registry checks every alias of every target against the grammar as it is
+   built. A conversation's targets are the same from one of its messages to
+   the next, while the Channel they are read from is a new object after each,
+   so the registries built last are kept by what they were built from. They
+   are never changed once built. */
+const REGISTRIES_KEPT = 16;
+const registries = new Map<string, { registry: MessageInteractionRegistry; accepted: ReadonlySet<string> }>();
+
+function registryOf(descriptors: readonly InteractionTargetDescriptor[]) {
+  const key = JSON.stringify(descriptors);
+  let built = registries.get(key);
+  if (built) {
+    registries.delete(key);
+  } else {
+    const registry = interactionRegistry(descriptors);
+    built = { registry, accepted: new Set(registry.descriptors().map(descriptor => descriptor.targetId)) };
+  }
+  registries.set(key, built);
+  if (registries.size > REGISTRIES_KEPT) registries.delete(registries.keys().next().value!);
+  return built;
+}
+
 export function channelMentionCandidates(
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
@@ -342,7 +349,7 @@ export function channelMentionCandidates(
 type TargetEntry = { descriptor: InteractionTargetDescriptor; candidate: MentionCandidate };
 
 function channelTargetEntries(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   localContext: MentionLocalContext | null | undefined,
   appConnectors: MentionAppConnector[],
   space: MentionSpace | null | undefined,
@@ -373,8 +380,7 @@ function channelTargetEntries(
   for (const memberId of visibleHumanChannelMemberIds(channel, space)) {
     const directoryMember = spaceMemberForChannelIdentity(space, memberId);
     if (!directoryMember) continue;
-    const memberPresence = channel.memberPresence?.[memberId];
-    const humanPresence = memberPresence?.kind === "user" ? memberPresence : undefined;
+    const humanPresence = channel.presence?.humans.get(memberId);
     const handle = directoryMember.handle?.trim();
     const name = directoryMember.name?.trim() || handle;
     if (!name) continue;
@@ -389,7 +395,7 @@ function channelTargetEntries(
       kind: "user",
       status: humanPresence?.status || "offline",
       email: directoryMember.email,
-      avatarUrl: directoryMember.avatarUrl,
+      face: { kind: "user", id: directoryMember.userId, name },
       ...(handle ? { handle } : {}),
       mention,
       completionSuffix: " ",
@@ -407,7 +413,7 @@ function channelTargetEntries(
       kind: "agent",
       status: AGENT_IDENTITY_NEUTRAL_STATUS,
       email: agent.email,
-      avatarUrl: agentRegistryAvatarUrl(agent),
+      face: agentFace(agent),
       mention,
       local: isLocalAgentCandidate(localMachineKeys, agent),
       description: agentTargetDescription,
@@ -450,7 +456,7 @@ function channelTargetEntries(
 export function resolveMentionCompletion(
   draft: string,
   cursor: number,
-  channel: SerializedChannel | null,
+  channel: ChannelSnapshot | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
@@ -605,7 +611,7 @@ function handoffSuccessorQuery(
 function resolveHandoffSuccessorCompletion(
   active: ActiveMention,
   sourceAgent: SerializedAgent,
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   successorHarnesses: readonly string[],
   channelInstanceId: string,
   successorQuery: string,
@@ -623,7 +629,7 @@ function resolveHandoffSuccessorCompletion(
     name: harness,
     kind: "agent",
     status: AGENT_IDENTITY_NEUTRAL_STATUS,
-    avatarUrl: agentAvatarUrlFromMetadata({}, harness),
+    face: { kind: "agent", name: harness, harness },
     mention: `${sourceMention}:handoff:@${harness}`,
     action: "handoff-instance",
     description: `Hand off @${sourceMention} to a new @${harness} instance`,
@@ -835,7 +841,7 @@ function resolveAgentCommandCompletion(
   active: ActiveMention,
   targetToken: string,
   commandTail: string,
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   agents: SerializedAgent[],
   localContext?: MentionLocalContext | null,
   instanceTargetScope: MentionInstanceTargetScope = "channel"
@@ -1080,7 +1086,7 @@ export function instanceEffortOptions(
 }
 
 function agentReferenceCandidates(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   agent: SerializedAgent,
   agents: SerializedAgent[],
   localContext?: MentionLocalContext | null,
@@ -1097,7 +1103,7 @@ function agentReferenceCandidates(
       kind: "agent" as const,
       status: instance.status,
       email: member.email,
-      avatarUrl: agentRegistryAvatarUrl(member),
+      face: agentFace(member, instance.id),
     };
     const mention = agentInstanceMentionLabel(instance.channelInstanceId ? member.name : reference, instance);
     candidates.push({
@@ -1162,16 +1168,17 @@ function findMentionAgent(
 }
 
 export function channelAgentInstances(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   agent: SerializedAgent,
   instanceTargetScope: MentionInstanceTargetScope = "channel"
 ): SerializedAgentInstance[] {
   if (instanceTargetScope === "none") return [];
-  return channel.memberPresence?.[agent.id]?.instances || [];
+  const instance = channel.presence?.instances.get(presenceInstanceId(agent.instanceId || agent.id));
+  return instance ? [instance] : [];
 }
 
 function findAgentInstanceTarget(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   agents: SerializedAgent[],
   targetToken: string,
   instanceTargetScope: MentionInstanceTargetScope = "channel"

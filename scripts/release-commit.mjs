@@ -10,7 +10,9 @@
 // commit: one parent, that SHA, and a tree that differs from it only in
 // versioned files, each byte-identical to `stampVersionText` of the parent's
 // file at the release version. The check re-derives the stamp rather than
-// comparing normalized hashes, so nothing besides the stamp can pass.
+// comparing normalized hashes, so nothing besides the stamp can pass. A stable
+// is cut from a verified beta's source rather than the request's own SHA, so
+// it is accepted as the release commit of a revision the request's SHA contains.
 import { execFileSync } from "node:child_process";
 
 import { gitOutput } from "./git-output.mjs";
@@ -18,7 +20,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { assertSemver } from "./release-version-order.mjs";
+import { assertSemver, releaseChannel } from "./release-version-order.mjs";
 import { stampVersionText, versionedPaths } from "./version.mjs";
 
 const FULL_SHA = /^[0-9a-f]{40}$/u;
@@ -114,13 +116,51 @@ export function verifyReleaseCommit(root, deploySha, sourceSha) {
   if (problem) throw new Error(problem);
 }
 
+/** Throws unless `deploySha` is the release commit of a revision `mainSha` contains. */
+export function verifyReleaseCut(root, deploySha, mainSha) {
+  for (const sha of [deploySha, mainSha]) {
+    if (!FULL_SHA.test(sha ?? "")) throw new Error("release and main must be full commit SHAs");
+    if (!hasCommit(root, sha)) git(root, ["fetch", "--no-tags", "origin", sha]);
+  }
+  const parents = git(root, ["rev-list", "--parents", "-n", "1", deploySha]).split(" ").slice(1);
+  if (parents.length !== 1) throw new Error(`${deploySha} is not a release commit: its parents are ${parents.join(",") || "none"}`);
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", parents[0], mainSha], { cwd: root, stdio: "ignore" });
+  } catch {
+    throw new Error(`${deploySha} was cut from ${parents[0]}, which ${mainSha} does not contain`);
+  }
+  verifyReleaseCommit(root, deploySha, parents[0]);
+}
+
+/**
+ * Throws unless `deploySha` is a release a train may cut while `mainSha` is
+ * main, by the version it carries: a beta (or a release from before channels
+ * existed) is `mainSha` or its release commit; a stable is the release commit
+ * of a verified beta's source, which `mainSha` contains.
+ */
+export function verifyRelease(root, deploySha, mainSha) {
+  if (!FULL_SHA.test(deploySha ?? "") || !FULL_SHA.test(mainSha ?? "")) {
+    throw new Error("release and main must be full commit SHAs");
+  }
+  if (!hasCommit(root, deploySha)) git(root, ["fetch", "--no-tags", "origin", deploySha]);
+  const version = JSON.parse(gitRaw(root, ["show", `${deploySha}:version.json`])).version;
+  if (deploySha !== mainSha && releaseChannel(version) === "stable") verifyReleaseCut(root, deploySha, mainSha);
+  else verifyReleaseCommit(root, deploySha, mainSha);
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, deploySha, sourceSha] = process.argv.slice(2);
-  if (command !== "verify" || !deploySha || !sourceSha) {
-    console.error("Usage: node scripts/release-commit.mjs verify <deploy-sha> <source-sha>");
+  if (!["verify", "verify-cut", "verify-release"].includes(command) || !deploySha || !sourceSha) {
+    console.error("Usage: node scripts/release-commit.mjs <verify <deploy-sha> <source-sha>|" +
+      "verify-cut <deploy-sha> <main-sha>|verify-release <deploy-sha> <main-sha>>");
     process.exit(2);
   }
   try {
+    if (command === "verify-cut" || command === "verify-release") {
+      (command === "verify-cut" ? verifyReleaseCut : verifyRelease)(process.cwd(), deploySha, sourceSha);
+      console.log(`${deploySha} is a release ${sourceSha} may ship.`);
+      process.exit(0);
+    }
     verifyReleaseCommit(process.cwd(), deploySha, sourceSha);
     console.log(deploySha === sourceSha
       ? `${deploySha} is the authorized source revision.`

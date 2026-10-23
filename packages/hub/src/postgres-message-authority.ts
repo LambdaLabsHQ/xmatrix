@@ -1,3 +1,4 @@
+import { reportPostgresConflict } from "./postgres-conflict-diagnostic";
 import {
   DatabaseCommitUnknownError,
   ContentControlError,
@@ -19,7 +20,8 @@ import {
 
 import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message-command";
 import { agentAvatarUrlFromMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
-  supersededByOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage } from "@xmatrix/protocol";
+  questionnaireStateOf, supersededByOf, commandResultOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
+  type QuestionnaireState } from "@xmatrix/protocol";
 import { REDACTED_CONTENT_HASH, productGatewayAttachmentKind } from "./product-message-command";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import {
@@ -37,7 +39,9 @@ import {
 import { productMessageSenderPresentation } from "./message-sender-presentation";
 import { compactMessageBodyPreview } from "./message-body-preview";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { postgresRetryAfterSeconds, retryablePostgresFailure } from "./postgres-error-classification";
+import {
+  postgresRetryAfterSeconds, postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONFLICT,
+} from "./postgres-error-classification";
 import {
   logSlowMessageCoordination,
   recordMessageCoordination,
@@ -45,6 +49,7 @@ import {
 } from "./postgres-coordination-observability";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import type { Env } from "./types";
+import { platformAdminSpaceId } from "./admin-platform-access";
 
 import { postgresPrincipalKind } from "./postgres-authority-http";
 
@@ -333,7 +338,7 @@ async function postgresMessageQueryContextFromDependencies(
 export function postgresMessageFailure(error: unknown): {
   status: number;
   body: { error: string; code: string; retryable: boolean };
-  /** A transient outage, answered as a retryable 503 with `Retry-After`, rather than a decided rejection. */
+  /** A transient outage or lost conflict, answered as a retryable 503 with `Retry-After`, rather than a decided rejection. */
   outage: boolean;
 } {
   // Every message operation first resolves its Channel through Space control,
@@ -344,6 +349,10 @@ export function postgresMessageFailure(error: unknown): {
       (error instanceof SpaceControlError && (error.status < 500 || error.retryable))) {
     return { status: error.status, body: { error: error.message, code: error.code, retryable: error.retryable },
       outage: error.retryable && error.status === 503 };
+  }
+  if (postgresTransactionConflict(error)) {
+    reportPostgresConflict(error);
+    return { status: 503, outage: true, body: { ...TRANSACTION_CONFLICT, retryable: true } };
   }
   console.error("PostgreSQL message authority failed", error);
   const outage = retryablePostgresFailure(error);
@@ -449,6 +458,23 @@ export async function postgresMessageAppend(
       runProof,
       ...(dependencies.placement ? { placement: dependencies.placement } : {}),
     });
+    // Read before you write: a sender that says how far it has read is not
+    // appended over anything newer it has not seen. Only a head past that
+    // point costs the second read.
+    const readThrough = command.readThroughSequence;
+    if (readThrough !== undefined && preparedContext.sequence > readThrough) {
+      const { unread, replay } = await messages.unreadSince({
+        requestId: `message-unread:${commandId}`.slice(0, 200),
+        spaceId, channelId, principal: actor, messageId,
+        afterSequence: readThrough, activityMessageKind: CHANNEL_ACTIVITY_MESSAGE_KIND,
+        ...(dependencies.placement ? { placement: dependencies.placement } : {}),
+      });
+      if (unread > 0 && !replay) {
+        throw new MessageAuthorityError("channel_read_stale", 409,
+          `channel_read_stale: ${unread >= 100 ? "100+" : unread} newer message(s) in this Channel ` +
+          `after sequence ${readThrough}, the last one this sender read, are unread. Nothing was sent.`);
+      }
+    }
     durations.prepareMs = performance.now() - phaseStartedAt;
     phaseStartedAt = performance.now();
     const canonicalSenderSnapshot = presentedAuthor
@@ -492,9 +518,12 @@ export async function postgresMessageAppend(
         ? { residual: command.residual! }
         : {}),
     });
+    // How far the sender had read is a precondition, not the message: a
+    // retry that has read further since is still the same append.
     const {
       sealedAttachments: _sealedAttachments,
       resolvedAttentionTargets: _resolvedAttentionTargets,
+      readThroughSequence: _readThroughSequence,
       ...digestCommand
     } = command;
     const requestDigest = await sha256Hex(canonicalJson(JSON.parse(JSON.stringify(
@@ -535,6 +564,8 @@ export async function postgresMessageAppend(
         : undefined,
       replyToMessageId: typeof command.residual?.replyToMessageId === "string"
         ? command.residual.replyToMessageId : undefined,
+      // The operator's own admin Space is not charged Agent credits.
+      creditsWaived: spaceId === platformAdminSpaceId(env),
       ...(dependencies.placement ? { placement: dependencies.placement } : {}),
     };
     let result: Record<string, unknown>;
@@ -557,6 +588,13 @@ export async function postgresMessageAppend(
       },dependencies.dingtalkEffect);
     }
     durations.appendMs = performance.now() - phaseStartedAt;
+    if (result.billingNotice && typeof result.billingNotice === "object") {
+      // Posted by the person this write answers to: the sender, or the Agent Run's owner.
+      const noticeUserId = actor.kind === "user" ? actor.id
+        : preparedContext.agentRunIdentity?.registration.ownerUserId;
+      result = { ...result, billingNotice: noticeUserId
+        ? { ...result.billingNotice as Record<string, unknown>, userId: noticeUserId } : undefined };
+    }
     durations.confirmMs = 0;
     durations.totalMs = performance.now() - startedAt;
     recordMessageCoordination({ env, outcome: "ok", durations });
@@ -606,18 +644,40 @@ export async function postgresMessageReceipt(
     runProof: input.runProof, expectedBodyHash: input.expectedBodyHash });
 }
 
+/** Whether this exact message identity was written, including a later tombstone. */
+export async function postgresMessageExists(
+  env: Env,
+  input: PostgresMessageQueryInput & { messageId: string },
+  dependencies: PostgresMessageDependencies = {},
+): Promise<boolean> {
+  const context = await postgresMessageQueryContextFromDependencies(env, input, "message-exists", dependencies);
+  return context.messages.exists({ requestId: context.requestId, spaceId: context.spaceId,
+    channelId: context.channelId, messageId: input.messageId, principal: context.actor });
+}
+
+type PostgresMessageHistoryInput = {
+  channelId: string;
+  before?: string;
+  beforeSequence?: number;
+  afterSequence?: number;
+  limit?: number;
+  principal: AuthorityPrincipal;
+};
+
 export async function postgresMessageHistory(
   env: Env,
-  input: {
-    channelId: string;
-    before?: string;
-    beforeSequence?: number;
-    afterSequence?: number;
-    limit?: number;
-    principal: AuthorityPrincipal;
-  },
+  input: PostgresMessageHistoryInput,
   dependencies: PostgresMessageDependencies = {},
 ): Promise<Record<string, unknown>> {
+  return (await postgresMessageHistoryInSpace(env, input, dependencies)).history;
+}
+
+/** A history page and the Space its Channel is placed in, which the read resolves anyway. */
+export async function postgresMessageHistoryInSpace(
+  env: Env,
+  input: PostgresMessageHistoryInput,
+  dependencies: PostgresMessageDependencies = {},
+): Promise<{ spaceId: string; history: Record<string, unknown> }> {
   // The Channel's route and its Space placement arrive in one directory read;
   // the page read still takes that placement's fence and checks the reader.
   const actor = principal(input.principal);
@@ -653,11 +713,8 @@ export async function postgresMessageHistory(
     selected.push(message);
     pageBytes += bytes;
   }
-  if (result.aboutInput && selected.length !== candidates.length) throw new MessageAuthorityError(
-    "about_history_page_budget", 413, "About history page exceeds byte budget; retry with a smaller limit");
   const messages = forward ? selected : selected.slice().reverse();
-  return {
-    ...(result.aboutInput ? { aboutInput: result.aboutInput } : {}),
+  return { spaceId, history: {
     channelId,
     messages,
     hasMore: result.hasMore || selected.length < candidates.length,
@@ -670,7 +727,7 @@ export async function postgresMessageHistory(
       admissibleForSteadyState: true,
       canCompleteWithoutLongLivedProjection: true,
     },
-  };
+  } };
 }
 
 function postgresProductThreadSummary(value: unknown): Record<string, unknown> | undefined {
@@ -736,6 +793,10 @@ export function postgresProductMessage(message: Record<string, unknown>): Record
       annotations: message.annotations,
       ...(!message.recalledAt && supersededByOf(message.annotations)
         ? { supersededBy: supersededByOf(message.annotations) } : {}),
+      ...(!message.recalledAt && questionnaireStateOf(message.annotations)
+        ? { questionnaireState: questionnaireStateOf(message.annotations) } : {}),
+      ...(!message.recalledAt && commandResultOf(message.annotations)
+        ? { commandResult: commandResultOf(message.annotations) } : {}),
       // A withdrawn message withdraws its files too: their bytes already answer 404.
       attachments: message.recalledAt || message.deletedAt ? [] : Array.isArray(message.attachments)
         ? message.attachments.map((attachment: Record<string, unknown>) => ({
@@ -937,6 +998,53 @@ export async function postgresMessageSystemAnnotation(
     annotationId: input.annotationId,
     payload: input.payload,
     requestDigest: await sha256Hex(JSON.stringify([input.namespace, input.messageId, input.payload])),
+  });
+}
+
+/**
+ * The card's settled state as its reader may see it, or undefined while it is
+ * open or when there is no such card to read.
+ */
+export async function postgresQuestionnaireState(
+  env: Env,
+  input: { channelId: string; messageId: string; principal: AuthorityPrincipal },
+  dependencies: PostgresMessageDependencies = {},
+): Promise<QuestionnaireState | undefined> {
+  const { actor, requestId, channelId, spaceId, messages } =
+    await postgresMessageQueryContextFromDependencies(env, input, "message-questionnaire-state", dependencies);
+  try {
+    const card = await messages.mutationCandidate({
+      requestId, spaceId, channelId, messageId: input.messageId, principal: actor, access: "participant",
+    });
+    return questionnaireStateOf(card.annotations);
+  } catch (error) {
+    if (error instanceof MessageAuthorityError && error.code === "message_not_found") return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Settle a questionnaire card once, as answered or withdrawn: the Hub's own
+ * annotation records it and the card stops waiting on its person.
+ */
+export async function postgresSettleQuestionnaire(
+  env: Env,
+  input: {
+    channelId: string;
+    messageId: string;
+    settlement: QuestionnaireState;
+    askedByInstanceId?: string;
+  },
+  dependencies: PostgresMessageDependencies = {},
+): Promise<{ state: QuestionnaireState; changed: boolean } | null> {
+  const { requestId, channelId, spaceId, messages } = await postgresMessageBackgroundContext(
+    env, input.channelId, "message-questionnaire-settle", dependencies);
+  return messages.settleQuestionnaire({
+    requestId, spaceId, channelId,
+    messageId: input.messageId,
+    settlement: input.settlement,
+    ...(input.askedByInstanceId ? { askedByInstanceId: input.askedByInstanceId } : {}),
+    requestDigest: await sha256Hex(JSON.stringify([input.messageId, input.settlement])),
   });
 }
 

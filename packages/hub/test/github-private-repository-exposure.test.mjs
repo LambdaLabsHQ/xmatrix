@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getAppConnectorProvider } from "../src/app-connectors.ts";
+import { getAppConnectorProvider, githubRepositoryDelegated } from "../src/app-connectors.ts";
 import { actionRefusal } from "../src/connectors/connector-commands.ts";
 import { channelMayCarryPrivateGitHubContent } from "../src/github-channel-exposure.ts";
 import { preReviewConversationMode } from "../src/github-pre-review.ts";
 import { githubRepositoryIsPublic } from "../src/github-subscription-domain.ts";
 import { dispatchProductGitHubWebhook } from "../src/product-github-webhook-authority-adapter.ts";
+import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
+import { GITHUB_LINKER, githubAppEnv, githubConnection, jsonResponse, stubGitHubFetch } from "./support/github-app.mjs";
 
 function reader({ mode = "open", spaceId = "space-1", openParticipation = true, channelError, spaceError } = {}) {
   return {
@@ -76,6 +78,7 @@ function webhookHarness(exposure) {
     dependencies: {
       exposure,
       resolveRoutes: async () => [route],
+      delegated: async () => true,
       append: async (_env, channelId, message) => {
         appended.push({ channelId, body: message.body });
         return { ok: true };
@@ -115,3 +118,51 @@ test("a repository's events still reach Channels that may carry them", () => ass
   ["private repository, closed Channel", { private: true }, reader({ mode: "closed" })],
   ["private repository, members-only Space", { private: true }, reader({ openParticipation: false })],
 ]));
+
+test("code scanning remains restricted content even when the repository is public", async () => {
+  for (const [exposure, expected] of [[reader(), 0], [reader({ mode: "closed" }), 1]]) {
+    const harness = webhookHarness(exposure);
+    const payload = { ...pushPayload({ private: false, visibility: "public" }), action: "created", alert: { number: 97 } };
+    const result = await dispatchProductGitHubWebhook({ env: {}, event: "code_scanning_alert", delivery: "alert-97",
+      payload }, { ...harness.dependencies, wake: async () => {} });
+    assert.equal(result.delivered, expected);
+    assert.equal(harness.appended.length, expected);
+  }
+});
+
+test("code scanning delivery requires its own installation's current read grant, including after revocation", async () => {
+  const env = await githubAppEnv();
+  const connection = githubConnection({ capabilities: ["github.code_scanning.read"],
+    metadata: { installationIds: ["42", "777"] },
+    githubLinks: ["42", "777"].map(installationId => ({ installationId, githubUserId: GITHUB_LINKER.githubUserId })) });
+  const load = await compileCommonJsSourceModule(new URL("../src/product-github-webhook-authority-adapter.ts", import.meta.url));
+  const { githubSpaceRepositoryDelegated } = load(name => {
+    if (name === "./apps") return { findAppConnection: async () => connection };
+    if (name === "./app-connectors") return { githubRepositoryDelegated };
+    return {};
+  });
+  const payload = { ...pushPayload({ private: false, visibility: "public" }), action: "created", alert: { number: 97 } };
+  const cases = [["code_scanning_alert", "read", 1], ["code_scanning_alert", undefined, 0],
+    ["code_scanning_alert", "write", 1], ["code_scanning_alert", "unknown", 0], ["push", undefined, 1]];
+  for (const [index, [event, permission, expected]] of cases.entries()) {
+    const github = stubGitHubFetch(call => {
+      const installation = call.url.match(/\/app\/installations\/(42|777)\/access_tokens$/u)?.[1];
+      if (!installation) return jsonResponse({}, 404);
+      // The other installation retains access while this alert's installation can lose it.
+      const granted = installation === "777" ? "read" : permission;
+      const requested = call.body?.permissions ?? {};
+      if (requested.security_events && !["read", "write", "unknown"].includes(granted)) return jsonResponse({}, 422);
+      return jsonResponse({ token: "ghs_event", ...(granted === "unknown" ? {} : { permissions: requested }) });
+    });
+    try {
+      const harness = webhookHarness(reader({ mode: "closed" }));
+      const wakes = [];
+      const result = await dispatchProductGitHubWebhook({ env, event,
+        delivery: `grant-${index}`, payload }, { ...harness.dependencies, delegated: githubSpaceRepositoryDelegated,
+        wake: async (_env, input) => { wakes.push(input); } });
+      assert.equal(result.delivered, expected, `${event}, permission=${permission}`);
+      assert.equal(harness.appended.length, expected);
+      assert.equal(wakes.length, expected);
+    } finally { github.restore(); }
+  }
+});

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   affectedPartitions,
   githubOutputs,
+  releaseOutputs,
 } from "./ci-areas.mjs";
 import { discoverScriptTests } from "./ci-script-tests.mjs";
 
@@ -60,6 +61,7 @@ test("Rust runner setup changes cannot bypass both platform test partitions", ()
     );
   }
   for (const file of [
+    "scripts/ci-cargo-fetch.mjs",
     ".github/scripts/kache-cache.ps1",
     ".github/scripts/reclaim-windows-rust-disk.ps1",
     ".github/scripts/rust-compile-jobs.sh",
@@ -191,4 +193,15 @@ test("installer changes require the CLI lane with native PowerShell coverage", (
   for (const file of ["apps/web/public/install.sh", "apps/web/public/install.ps1", "scripts/install-daemon-setup.windows.test.mjs"]) {
     assert.ok(affectedPartitions([file]).includes("rust-cli"), file);
   }
+});
+
+test("a beta train gates the Hub it ships; Web and client suites gate the stable", () => {
+  const everything = "hub,web,cli,desktop,android,ios";
+  assert.deepEqual(releaseOutputs(everything, "beta"), {
+    node: true, web: false, hub: true, desktop: false, android: false, cli: false, cli_windows: false, duplicates: true,
+  });
+  // After a beta skips them, the stable train is the only place these suites run.
+  assert.deepEqual(releaseOutputs("web,cli,desktop,android,ios", "stable"), {
+    node: true, web: true, hub: false, desktop: true, android: true, cli: true, cli_windows: true, duplicates: true,
+  });
 });

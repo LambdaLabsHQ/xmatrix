@@ -18,20 +18,49 @@ for how long) are words in the work dock, never more colours.
 - A Run between turns with background tasks still running showed as idle,
   so it looked finished while its work was still open.
 
+## Instance identity in presence
+
+The shared protocol model stores Human presence and devices separately from a
+read-only map of Agent Instances keyed by branded global Instance ID. Each
+Instance has one required registration; selectors derive the harness avatar,
+ordering and daemon filtering. Member aliases and aggregate `instances[]` are
+legacy wire shapes, decoded before Hub overlays or Web stores and encoded
+only at the boundary. No wire migration or coordinated CLI update is needed.
+
+The reducer is the sole map writer and lifecycle merger. Full authoritative
+snapshots replace residency; omitted presence preserves the prior projection,
+and an explicit empty snapshot clears it. Live reports only update known IDs.
+Messages only patch known Instances, never establish residency, and cannot
+wake an offline Instance. Deletes require the exact ID. Reborn retains that
+ID and registration while changing Run; handoff allocates a new Instance and
+slot. Partial slot or registration conflicts request authoritative reads per
+Channel/Instance, at most three per five minutes and only on incoming reports;
+short coalescing and bounded eviction let a read racing ahead of commit recover. Invalid
+Authority snapshots are diagnosed and isolated rather than repeatedly fetched.
+
+Legacy grouped rows split into individual Instances without copying aggregate
+Run activity, intent or clocks to siblings; only registration-level quota is
+shared. Canonical entries win over duplicate aliases, which are diagnosed.
+Hub overlays isolate conflicting sessions. A stale launch placeholder is
+suppressed by the same exact Instance ID. These projections grant no membership,
+execution or access authority; immutable message avatars remain historical.
+
 ## 2. Vocabulary
 
 | Display status | When | Dot |
 |---|---|---|
-| `busy` (working) | The turn is running and the runtime reports no wait | Yellow, solid, breathing (static under reduced motion) |
+| `busy` (working) | The turn is running and the runtime reports no wait | Yellow, solid, still |
 | `waiting` | The runtime reports `runtimeState.waiting` | Yellow ring, still |
 | `online` / `idle` (free) | Live, no work in hand | Green, solid |
 | `sleeping` / `interrupted` | Offline with a rest state | Moon / warning badge, face greyed (unchanged) |
-| `waking` | Rest state `waking` | Grey ring, pulsing |
+| `waking` | Rest state `waking` | Grey ring, still |
 | `machine offline` | The Instance's machine is unreachable | Red, solid |
 | `offline` | Gone | No dot |
 
-Yellow means work in hand: fill and motion say whether the Agent itself is
-working (solid, breathing) or waiting on something outside it (ring, still).
+Yellow means work in hand: fill says whether the Agent itself is working
+(solid) or waiting on something outside it (ring). Avatar status dots and
+waking faces stay still everywhere; live status changes still update their
+colour, fill, greyed face and rest badge.
 Blue is no longer a presence colour.
 
 Being stuck is told in words, not by recolouring the dot: the work dock's Now
@@ -52,6 +81,15 @@ drops its presence mark (other states, such as machine offline, keep their
 dot). A small timer ring at the
 trailing end keeps turning; its arc grows toward that threshold, with the
 elapsed time beside it.
+
+The work-island highlight and Status monitor use native Web Animations to
+avoid CSS iteration events. The window and its counter-moving ink share
+one 2.2-second clock. They pause together when the whole island leaves its
+work scroller, including while its pane is inactive, and resume their held
+phase when any positive area is visible again. Reduced motion cancels the
+effects and shows the steady words. Updating those words does not restart
+the clock. The Status monitor's moving break uses the same visibility and
+motion lifecycle; a responsive view that was hidden resumes its held phase.
 
 ## 3. The wait is declared by the runtime
 

@@ -28,7 +28,7 @@ impl HarnessPolicy {
         Self::read(&Self::path()).unwrap_or_default()
     }
 
-    pub(crate) fn read(path: &Path) -> Result<Self, String> {
+    pub fn read(path: &Path) -> Result<Self, String> {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -55,7 +55,7 @@ impl HarnessPolicy {
 
     /// Fails closed on a malformed file instead of overwriting the owner's
     /// other entries with a fresh document.
-    pub(crate) fn record(path: &Path, preset_id: &str, enabled: bool) -> Result<(), String> {
+    pub fn record(path: &Path, preset_id: &str, enabled: bool) -> Result<(), String> {
         let parent = path
             .parent()
             .ok_or_else(|| "policy has no parent directory".to_string())?;
@@ -110,8 +110,9 @@ fn observed_auto_update(
     }
     let state = |enabled| if enabled { "enabled" } else { "disabled" };
     let recorded = policy.auto_update(&preset.id);
-    if schedules_updates(management) && auto.controls.is_empty() {
-        // The daemon's schedule runs only while the recorded policy is on.
+    if schedules_updates(management) && (auto.controls.is_empty() || recorded.is_some()) {
+        // The daemon's schedule runs only while the recorded policy is on;
+        // once recorded, that policy also sets any switch the harness has.
         return state(recorded == Some(true));
     }
     let file_env: BTreeMap<String, String> = auto
@@ -550,9 +551,16 @@ mod tests {
         policy.0.insert("codex".into(), true);
         policy.0.insert("claude".into(), false);
         policy.0.insert("kiro".into(), false);
+        policy.0.insert("grok".into(), true);
+        let mut grok_off = empty.clone();
+        grok_off.0.insert("grok".into(), false);
         assert_eq!(observed("codex", &policy), "enabled");
         assert_eq!(observed("claude", &policy), "disabled");
         assert_eq!(observed("kiro", &policy), "disabled");
+        // A daemon-scheduled harness with its own switch follows the policy.
+        assert_eq!(observed("grok", &empty), "unknown");
+        assert_eq!(observed("grok", &policy), "enabled");
+        assert_eq!(observed("grok", &grok_off), "disabled");
         let AutoUpdateControl::Json(control) = &preset("gemini")
             .management
             .as_ref()

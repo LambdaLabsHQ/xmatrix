@@ -188,6 +188,14 @@ arbitrary message text. It is unavailable without PostgreSQL durable reborn auth
 
 The daemon inspects its owned Run status sidecars on a two-second monitor tick. It publishes a causal registry snapshot when phase/readiness changes, with a thirty-second refresh while Runs exist; heavyweight recovery/pruning retains its thirty-second cadence. Snapshot items optionally carry `statusPhase`, `wrapperReadyAtMillis`, and the optional `connectionRetry` attempt/schedule. A sidecar PID must match the tracked wrapper before its progress is included.
 
+Orphan terminal recovery also requires the retained registry sidecar, with a matching
+Profile, PID and status-file path. It reads the exact Run and execution identities
+from that record; sanitized file names cannot recover those identities. A failed
+report keeps the sidecar for retry. Acknowledgement or a terminal rejection removes
+it through the existing cleanup path, so retained status and log files cannot
+produce another exit on every reconnect. Legacy status files without a registry
+record remain diagnostic artifacts and are not replayed as guessed Runs.
+
 The Hub accepts progress only from the authenticated Machine, a fresh registry epoch/sequence, and the exact Run plus execution key. A closed allowlist projects phase/readiness without stdout, stderr, credentials, or local paths. This is display evidence, never authorization or Run terminal authority. Older daemons keep their existing behavior and the UI leaves unreported steps unconfirmed.
 
 Startup checkpoint history is bounded to 16 first observations from the current wrapper PID. It records only known phase keys and timestamps and survives phase rewrites; completed/failed fast Runs carry the same checkpoints in their terminal report. Client registration confirmation and channel join are positive wrapper-side observations, independent of the Hub's earlier connection claim. These fields never authorize an operation or override Run terminal state.
@@ -206,6 +214,13 @@ when the remote-tracking ref already holds the advertised tip. A local
 `origin/HEAD` never chooses the branch, so a renamed or deleted default branch
 cannot leave new leases on a stale ref; the local note is rewritten to the
 confirmed branch afterwards.
+
+If Git reports unresolved delta bases while fetching, the next attempt uses
+`git fetch --refetch --no-auto-maintenance` (Git 2.36 or later) to download
+the default branch's objects without trusting the incomplete local store.
+Recovery shares the existing three-attempt budget and 120-second command
+timeouts; it does not prune objects, delete the clone, or reset any checkout.
+Other fetch failures keep their existing retry and authorization behavior.
 
 Only leases that run at the same moment share one confirmation; a finished
 confirmation is never reused, so a lease started after a merge sees it. The base

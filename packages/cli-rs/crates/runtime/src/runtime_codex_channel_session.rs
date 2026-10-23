@@ -215,6 +215,7 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                 auto_join_channel_id.as_deref(),
                 false,
                 None,
+                None,
             )
             .await;
         let end = run
@@ -261,6 +262,7 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                     .as_deref()
                     .and_then(parse_codex_typed_channel_command);
                 let goal_command = passthrough.as_deref().and_then(parse_goal_command);
+                let native_turn = passthrough.as_deref().and_then(parse_codex_native_turn);
                 let mut payload = match &goal_command {
                     Some(command) => codex_goal_turn_payload(command).unwrap_or_default(),
                     None => passthrough
@@ -274,17 +276,6 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                         send_presence(&relay, Some("idle"), run.catalog_presence());
                     }
                     continue;
-                }
-                if goal_command.is_none() {
-                    run.refresh_goal().await;
-                    if codex_goal_is_paused(run.latest_goal.as_ref()) {
-                        let notice = codex_paused_goal_notice(run.latest_goal.as_ref());
-                        let _ = relay
-                            .send_channel_message(primary_channel_id.clone(), notice)
-                            .await;
-                        run.publish_idle();
-                        continue;
-                    }
                 }
                 let mut runtime_turn = runtime_state.begin_message_turn(
                     Some(&primary_channel_id),
@@ -339,7 +330,13 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                         continue;
                     }
                 }
-                let payload = codex_turn_with_bootstrap(&mut bootstrap, &payload);
+                // A native request carries no prompt, so the bootstrap waits
+                // for the next real turn.
+                let payload = if native_turn.is_some() {
+                    payload
+                } else {
+                    codex_turn_with_bootstrap(&mut bootstrap, &payload)
+                };
                 let turn_result = run
                     .submit_turn(
                         &mut events,
@@ -348,6 +345,7 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                         Some(&primary_channel_id),
                         true,
                         Some(&primary_message_id),
+                        native_turn.as_ref(),
                     )
                     .await;
                 run.settle_turn(
@@ -366,7 +364,7 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                 );
                 write_current_run_status("turn_running", false, None);
                 let turn_result = run
-                    .submit_turn(&mut events, &prompt, None, Some(&channel_id), true, None)
+                    .submit_turn(&mut events, &prompt, None, Some(&channel_id), true, None, None)
                     .await;
                 run.settle_turn(turn_result, Some(&channel_id), None, None)
                     .await?
@@ -548,15 +546,9 @@ impl CodexRun<'_> {
         channel_id: Option<&str>,
         interrupt_history_replay: bool,
         status_message_id: Option<&str>,
+        native: Option<&CodexNativeTurn>,
     ) -> InterruptibleCodexTurn {
-        // Codex treats the final assistant response as visible to its caller. In a
-        // channel-backed wrapper that output is intentionally local, so the
-        // explicit `xmatrix send` contract must be a developer instruction rather
-        // than ordinary turn text. Otherwise Codex can complete successfully while
-        // the human sees only a busy/idle transition and no reply.
-        let developer_instructions = codex_channel_developer_instructions(channel_id);
         let request = CodexTurnRequest {
-            developer_instructions: developer_instructions.as_deref(),
             model: self.latest_model.as_deref(),
             effort: self.latest_effort.as_deref(),
             models: &self.available_models,
@@ -566,6 +558,7 @@ impl CodexRun<'_> {
             interrupt_history_replay,
             runtime_state: Some(self.runtime_state),
             initial_goal: self.latest_goal.as_ref(),
+            native,
             ..CodexTurnRequest::new(text, self.agent)
         };
         let first = submit_codex_turn_interruptible(
@@ -809,5 +802,13 @@ impl ChannelControlledRuntime for CodexRun<'_> {
 
     fn parameter_presence(&self) -> PresencePatch {
         PresencePatch::presentation(self.catalog_presentation()).parameters(self.parameters())
+    }
+
+    fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter> {
+        self.parameters()
+    }
+
+    fn pending_parameter_selection(&self, id: &str) -> Option<String> {
+        self.app.pending_parameter_value(id, self.latest_model.as_deref())
     }
 }

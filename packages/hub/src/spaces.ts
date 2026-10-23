@@ -10,6 +10,7 @@ import {
 } from "@xmatrix/db";
 
 import { withChannelHeadPreview } from "./channel-head-preview";
+import { deterministicConversationId } from "./deterministic-id";
 import {
   createPostgresAuthorityDatabase,
   createPostgresAuthorityFleet,
@@ -20,6 +21,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { wakeRegistrationChannels } from "./registration-authority-wake";
 import { projectRegistrationQuota } from "./registration-quota-presentation";
 import { relayChannelCatalogPublishCommittedChanges } from "./relay-channel-catalog-notification-delivery";
+import type { RuntimeLiveDeliverySelf } from "./runtime-transport/runtime-route-directory-delivery";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import type { Env } from "./types";
 
@@ -32,8 +34,9 @@ export interface SpacesEnv extends PostgresAuthorityFleetEnv {
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
 }
 
-/** Test seams: a database, and the after-commit catalog notice and Channel wake. */
+/** Authority dependencies and the publishing Runtime's local delivery capability. */
 export interface SpacesDependencies {
+  runtimeSelf?: RuntimeLiveDeliverySelf;
   database?: AuthorityDatabase;
   directoryDatabase?: AuthorityDatabase;
   publishCatalogChanges?: (changes: readonly ChannelCatalogChangeAudience[]) => Promise<void>;
@@ -70,7 +73,7 @@ async function publishCatalogChanges(env: SpacesEnv, dependencies: SpacesDepende
     const changes = await repository.channelCatalogChangeAudiences({ requestId, spaceIds });
     if (dependencies.publishCatalogChanges) await dependencies.publishCatalogChanges(changes);
     else await relayChannelCatalogPublishCommittedChanges({ env: env as Pick<Env, "RELAY_RUNTIME" |
-      "RELAY_RUNTIME_ROUTE_DIRECTORY" | "XMATRIX_RUNTIME_CELL_MODE">, changes });
+      "RELAY_RUNTIME_ROUTE_DIRECTORY" | "XMATRIX_RUNTIME_CELL_MODE">, changes, self: dependencies.runtimeSelf });
   } catch (error) {
     console.error("PostgreSQL Channel catalog notification failed", error);
   }
@@ -97,11 +100,20 @@ async function projectQuota(env: SpacesEnv, dependencies: SpacesDependencies, re
 
 // Spaces
 
-export function createSpace(env: SpacesEnv, input: {
+/** The Space xMatrix makes for an account that has none (docs/architecture/first-space.md). */
+export function personalSpaceId(userId: string): Promise<string> {
+  return deterministicConversationId("personal-space", userId);
+}
+
+export async function createSpace(env: SpacesEnv, input: {
   commandId: string; spaceId: string; ownerUserId: string; name: string; metadata?: Record<string, unknown>;
 }) {
   const { repository, requestId } = spaces(env, {}, input.commandId);
-  return repository.createSpace({ requestId, ...input });
+  // The Spaces xMatrix made for the owner on its own, which a plan's Space
+  // allowance may leave out: the personal Space, and `private:<user id>`,
+  // which held a person's Channels before Spaces existed.
+  const personalSpaceIds = [await personalSpaceId(input.ownerUserId), `private:${input.ownerUserId}`];
+  return repository.createSpace({ requestId, ...input, personalSpaceIds });
 }
 
 interface DomainCommand { commandId: string; actorUserId: string; at: string; expectedVersion?: number }
@@ -178,6 +190,16 @@ export async function listSpaces(env: SpacesEnv, principal: Principal): Promise<
 
 // Channels
 
+export async function deleteChannel(env: SpacesEnv, input: {
+  commandId: string; spaceId: string; channelId: string; actorUserId: string;
+  name: string; at: string;
+}, dependencies: SpacesDependencies = {}) {
+  const { repository, requestId } = spaces(env, dependencies, input.commandId);
+  const result = await repository.deleteChannel({ ...input, requestId });
+  await publishCatalogChanges(env, dependencies, repository, requestId, [input.spaceId]);
+  return result;
+}
+
 export async function createChannel(env: SpacesEnv, input: {
   commandId: string; channelId: string; spaceId: string; name: string; mode: "open" | "closed";
   principal: Principal; metadata?: Record<string, unknown>; creatorAgentInstanceId?: string;
@@ -193,7 +215,7 @@ export async function createChannel(env: SpacesEnv, input: {
  * Space decide what the executions running in it (and in the threads a move
  * takes along) may do, so a change to either has those Channels recheck them;
  * a name, topic or summary decides nothing and wakes none (2026-10-09: every
- * summary an About session wrote rechecked each Channel of its Space). The
+ * About summary written rechecked each Channel of its Space). The
  * answer is the Channel as its actor now reads it.
  */
 export async function configureChannel(env: SpacesEnv,
@@ -260,6 +282,12 @@ function notifyTransferQueues(env: SpacesEnv, proposal: unknown): Promise<void> 
 export function listChannelTransfers(env: SpacesEnv, input: { spaceId: string; principal: Principal; channelId?: string }) {
   const { repository, requestId } = spaces(env);
   return repository.listTransferProposals({ requestId, ...input });
+}
+
+/** The Space a Channel is in now. */
+export async function channelSpaceId(env: SpacesEnv, channelId: string): Promise<string> {
+  const { repository, requestId } = spaces(env);
+  return repository.resolveChannelSpaceId({ requestId, channelId });
 }
 
 /**
@@ -411,7 +439,7 @@ export async function changeMembership(env: SpacesEnv, change: MembershipChange,
 
 /** Immutable metadata history is visible only to the Channel's current readers. */
 export async function channelMetadataHistory(env: SpacesEnv, input: {
-  channelId: string; principal: Principal; beforeRevision?: number; revision?: number; inputId?: string; limit?: number;
+  channelId: string; principal: Principal; beforeRevision?: number; revision?: number; limit?: number;
 }) {
   const { repository, requestId } = spaces(env);
   const spaceId = await repository.resolveChannelSpaceId({ requestId, channelId: input.channelId });

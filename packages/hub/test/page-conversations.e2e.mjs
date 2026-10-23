@@ -1,6 +1,6 @@
 import { assert, connectAgent, json, MOCK_TOKEN, randomUUID, test } from "./agent-mention-spawn.fixture.mjs";
 import {
-  channelSpaceId, createPgSpawnableScenario, launchScenarioRun, startPgHubWorker,
+  channelSpaceId, createPgSpawnableScenario, inTestTransaction, launchScenarioRun, startPgHubWorker, testUserId,
 } from "./agent-launch-postgres.fixture.mjs";
 
 // A page shows each linked conversation beside what it is about, and each
@@ -84,6 +84,22 @@ test("a page's links describe their conversations, and its sections name the Age
     assert.equal(discussions.open, 1);
     assert.equal(discussions.latest.from.label, "Page Reader");
     assert.match(discussions.latest.bodyPreview, /Cut the release notes\.$/u);
+
+    // A retained CLI JWT still names this person "Page Reader" after they
+    // complete onboarding. New message snapshots must use the saved Profile.
+    const ownerUserId = await testUserId(worker);
+    await inTestTransaction(tx => tx.query({ text: `INSERT INTO control.auth_users
+      (id,name,email,email_verified,created_at,updated_at)
+      VALUES ($1,'QA Renamed Reader','page-conversations@example.com',true,now(),now())`,
+      values: [ownerUserId] }));
+    const renamed = await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
+      method: "POST", headers: auth,
+      body: JSON.stringify({ body: "QA current profile check", clientMessageId: randomUUID() }),
+    });
+    assert.equal(renamed.status, 200, await renamed.clone().text());
+    const renamedMessage = (await renamed.json()).message;
+    assert.equal(renamedMessage.from.label, "QA Renamed Reader");
+    assert.equal((await links()).conversations[0].lastMessage.from.label, "QA Renamed Reader");
   } finally {
     liveAgent?.ws.close();
     daemon?.ws.close();

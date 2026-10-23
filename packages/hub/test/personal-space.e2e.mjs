@@ -1,14 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { prepareTestAgentRun } from "./e2e-utils.mjs";
-import { withOwnerWorker } from "./owner-worker.mjs";
+import { personalSpace, withOwnerWorker } from "./owner-worker.mjs";
+import { humanHandleShortCode, neutralHumanIdentity } from "@xmatrix/protocol";
 
 const spaceIds = async (call) => (await call("/api/spaces")).body.spaces.map((space) => space.id);
-async function personal(call) {
-  const { status, body } = await call("/api/personal-space", { method: "POST" });
-  assert.equal(status, 200, JSON.stringify(body));
-  return body.space;
-}
+const personal = personalSpace;
 
 test("a person with no Space gets one personal Space, once", () =>
   withOwnerWorker("Ada Lovelace", async ({ call }) => {
@@ -20,6 +17,14 @@ test("a person with no Space gets one personal Space, once", () =>
     assert.equal(await personal(call), null);
     assert.deepEqual(await spaceIds(call), [space.id]);
   }));
+
+test("a personal Space is not named after an email address or a generated placeholder name", async () => {
+  for (const name of ["owner@example.com", (userId) => neutralHumanIdentity(humanHandleShortCode(userId)).displayName]) {
+    await withOwnerWorker(name, async ({ call }) => {
+      assert.equal((await personal(call)).name, "My Space");
+    });
+  }
+});
 
 test("someone who already has a Space, as an invitee does, is given no personal one", () =>
   withOwnerWorker("Grace Hopper", async ({ call }) => {

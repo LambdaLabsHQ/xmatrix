@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { Loader2, PlusCircle } from "lucide-react";
 import type { SerializedSpace } from "@xmatrix/protocol";
@@ -51,17 +52,19 @@ export function TeamOtherSpace({
   );
 }
 
-/** Create a team Space, or restore one this viewer deleted. */
+/** Create a team Space, or restore one this viewer deleted. `error` says why the last attempt failed. */
 export function TeamNewSpace({
   token,
   userId,
   creatingSpace,
+  error,
   onCreateSpace,
   onRestoreSpace,
 }: {
   token?: string;
   userId: string;
   creatingSpace: boolean;
+  error: string | null;
   onCreateSpace: (name: string) => Promise<SerializedSpace | undefined>;
   onRestoreSpace: (spaceId: string) => Promise<void>;
 }) {
@@ -95,10 +98,11 @@ export function TeamNewSpace({
           disabled={creatingSpace || createName.trim().length === 0}
           className={actionClass({ variant: "primary" })}
         >
-          {creatingSpace ? <Loader2 className="size-4 animate-spin" /> : <PlusCircle className="size-4" />}
+          {creatingSpace ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <PlusCircle className="size-4" />}
           Create
         </button>
       </form>
+      {error && <p className="text-sm font-medium text-destructive">{error}</p>}
       <DeletedSpacesList token={token} userId={userId} onRestoreSpace={onRestoreSpace} />
     </div>
   );

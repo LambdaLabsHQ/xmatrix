@@ -1,4 +1,5 @@
 import { plainRecord as protocolRecord } from "@xmatrix/protocol";
+import { connectorMessageWakeTarget } from "../connector-message-delivery";
 /**
  * One committed channel message, framed once for every audience.
  *
@@ -15,11 +16,14 @@ import { plainRecord as protocolRecord } from "@xmatrix/protocol";
 import {
   CHANNEL_ACTIVITY_PROVENANCE,
   supersededByOf,
+  questionnaireStateOf,
+  commandResultOf,
   mentionAddressTokens,
   scanMentionAddresses,
   filterOperationalMentions,
   messagePublicationEvidence,
   parseAutoLaunchMentions,
+  MENTION_BROADCAST_NAMES,
   type ChannelMessage,
 } from "@xmatrix/protocol";
 import { parseProductAgentStopCommand } from "../product-agent-intervention";
@@ -34,7 +38,8 @@ import { parseProductAgentControlCommands } from "../product-agent-model-effort"
  * watching, and it is committed with `xmatrixProvenance: "system_fact"` to say
  * so. Handing one to an Instance as work made it act on the Hub's own
  * commentary, so provenance decides intent here, once, for every audience:
- * a system fact is context and never work. An activity entry is the same:
+ * a system fact is context. Agent-requested App receipts are the scoped
+ * exception resolved for the exact recipient below. An activity entry is the same:
  * a fact a runtime recorded about its own work (conversation-activity.md
  * §3.2), which must never queue a turn for a peer.
  *
@@ -74,8 +79,12 @@ export function channelMessageDeliveryIntent(
  */
 export function agentChannelMessageDeliveryIntent(
   message: ChannelMessage,
-  recipient: { agentName: string; agentId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
 ): "work" | "context" {
+  if (message.from.kind === "app") {
+    const target = connectorMessageWakeTarget(message);
+    return target && (!target.instanceId || target.instanceId === recipient.instanceId) ? "work" : "context";
+  }
   const baseIntent = channelMessageDeliveryIntent(message);
   if (baseIntent === "context") return baseIntent;
   // Stop is a control-plane fact committed into the Channel for auditability.
@@ -118,9 +127,10 @@ export function agentChannelMessageDeliveryIntent(
  */
 export function agentChannelMessageRequestsInterrupt(
   message: ChannelMessage,
-  recipient: { agentName: string; agentId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
 ): boolean {
   if (agentChannelMessageDeliveryIntent(message, recipient) === "context") return false;
+  if (message.from.kind === "app") return false;
   if (message.from.kind !== "agent") return true;
 
   const ordinal = recipient.channelInstanceId?.trim();
@@ -129,6 +139,43 @@ export function agentChannelMessageRequestsInterrupt(
   const tokens = mentionAddressTokens([...(recipient.nameIsAmbiguous ? [] : [`${agentName}:${ordinal}`]),
     ...(recipient.agentId ? [`${recipient.agentId}:${ordinal}`] : [])]);
   return filterOperationalMentions(message.body, scanMentionAddresses(message.body, tokens)).length > 0;
+}
+
+/**
+ * Whether an interrupting delivery may instead be steered into the turn the
+ * recipient is running.
+ *
+ * A Human's ordinary message steers: it joins the active turn at the next tool
+ * boundary, so work already in flight is kept. Only a Human message that
+ * @-addresses this Instance (its name, `name:N`, its Profile ID, or a broadcast
+ * name) cancels the turn outright. An Agent only ever interrupts by exact
+ * `@agent:N` address, which is deliberate, so its deliveries never steer. A
+ * runtime that cannot steer treats the delivery as the interrupt it carries.
+ */
+export function agentChannelMessageMaySteer(
+  message: ChannelMessage,
+  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+): boolean {
+  if (!agentChannelMessageRequestsInterrupt(message, recipient)) return false;
+  if (message.from.kind === "agent") return false;
+  return !humanMessageAddressesRecipient(message.body, recipient);
+}
+
+function humanMessageAddressesRecipient(
+  body: string,
+  recipient: { agentName: string; agentId?: string; channelInstanceId?: string },
+): boolean {
+  const ordinal = recipient.channelInstanceId?.trim();
+  const names = [recipient.agentName?.trim() ?? "", recipient.agentId?.trim() ?? ""].filter(Boolean);
+  const exact = ordinal ? names.map((name) => `${name}:${ordinal}`) : [];
+  const tokens = mentionAddressTokens([...exact, ...names, ...MENTION_BROADCAST_NAMES]);
+  const exactTokens = new Set(mentionAddressTokens(exact));
+  return filterOperationalMentions(body, scanMentionAddresses(body, tokens)).some((match) => {
+    if (exactTokens.has(match.token)) return true;
+    // `@claude:2` is matched by the bare name too; it addresses another
+    // Instance, which the longer exact token would otherwise have caught.
+    return !/^[:：]\d/u.test(body.slice(match.start + 1 + match.token.length));
+  });
 }
 
 export type ChannelMessageFrameInput = {
@@ -219,6 +266,8 @@ export function channelMessage(
   const thread = normalizedThreadSummary(input.thread);
   // Only the Hub's own judgment crosses; other annotations stay out of frames.
   const supersededBy = recalledAt ? undefined : boundedId(supersededByOf(input.annotations));
+  const questionnaireState = recalledAt ? undefined : questionnaireStateOf(input.annotations);
+  const commandResult = recalledAt ? undefined : commandResultOf(input.annotations);
   return {
     messageId,
     channelId,
@@ -264,5 +313,7 @@ export function channelMessage(
       ? { recalledBy: input.recalledBy as ChannelMessage["recalledBy"] }
       : {}),
     ...(supersededBy ? { supersededBy } : {}),
+    ...(questionnaireState ? { questionnaireState } : {}),
+    ...(commandResult ? { commandResult } : {}),
   };
 }

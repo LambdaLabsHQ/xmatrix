@@ -1,20 +1,16 @@
 //! Idle Instance sleep (docs/instance-sleep.md §2).
 //!
-//! An Instance is not its process: once a resumable Run has had nothing to do
-//! for the idle window, the daemon ends its process tree exactly like a
-//! retained stop and reports the exit as a sleep. The Hub keeps the Instance in
-//! its Channel and wakes it, through the ordinary reborn, on the next message.
+//! An Instance is not its process: the Hub decides when a resting Run sleeps,
+//! and this daemon ends its process tree exactly like a retained stop and
+//! reports the exit as a sleep. The Hub keeps the Instance in its Channel and
+//! wakes it, through the ordinary reborn, on the next message.
 //!
-//! This module holds the decision only: which Runs are idle, and whether a
-//! Run's provider still has work of its own running. The registry monitor owns
-//! the effects.
+//! This module holds the checks only: whether this daemon's own facts agree
+//! that a Run the Hub named rests, and which wrappers failed at startup and
+//! linger. The registry owns the effects.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
-
-/// Seconds a resumable Run must sit idle before it sleeps; `0` disables sleep.
-pub(crate) const INSTANCE_IDLE_SLEEP_SECS_ENV: &str = "XMATRIX_INSTANCE_IDLE_SLEEP_SECS";
-const DEFAULT_IDLE_SLEEP: Duration = Duration::from_secs(30 * 60);
 
 /// The status phase the daemon stamps on a Run it put to sleep. The exit
 /// report reads it back, so a daemon restart between the stop and the report
@@ -49,15 +45,6 @@ fn has_background_work(background_tasks: Option<u32>) -> bool {
     background_tasks.is_some_and(|count| count > 0)
 }
 
-pub(crate) fn idle_sleep_window() -> Option<Duration> {
-    let window = std::env::var(INSTANCE_IDLE_SLEEP_SECS_ENV)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(DEFAULT_IDLE_SLEEP);
-    (!window.is_zero()).then_some(window)
-}
-
 /// What the monitor knows about one managed Run on this tick.
 #[derive(Debug, Clone)]
 pub(crate) struct RunIdleView {
@@ -86,45 +73,36 @@ pub(crate) struct RunIdleMarker {
     pub background_tasks: Option<u32>,
 }
 
+/// A wrapper that failed at startup and has lingered past the grace.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum IdleAction {
-    /// The Run rests until the next message wakes it.
-    Sleep { idle_for: Duration, phase: String },
-    /// The wrapper already failed at startup and only lingers.
-    EndFailedStartup,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IdleDecision {
+pub(crate) struct LingeringStartup {
     pub key: String,
     pub pid: u32,
     /// The marker's `updated_at_millis`: the wrapper was alive then.
     pub alive_at_millis: u64,
-    pub action: IdleAction,
 }
 
-/// Remembers when each Run's phase last changed, so a turn shorter than the
-/// sampling interval that left no task-execution trace still counts as work.
+/// Remembers when each Run's phase last changed, so a failed startup is ended
+/// only once it has sat in that phase for the whole grace.
 #[derive(Debug, Default)]
-pub(crate) struct IdleSleepTracker {
-    phases: HashMap<String, (u32, String, u64, bool)>,
+pub(crate) struct FailedStartupTracker {
+    phases: HashMap<String, (u32, String, u64)>,
     /// Runs whose process this daemon already ended, or found gone. Their
     /// registry row outlives the process until the exit report is confirmed,
     /// and a dead pid must never be signalled again: it may belong to anyone.
     ended: HashSet<(String, u32)>,
 }
 
-impl IdleSleepTracker {
-    pub(crate) fn observe(
+impl FailedStartupTracker {
+    pub(crate) fn lingering(
         &mut self,
         now_millis: u64,
-        window: Duration,
         runs: &[RunIdleView],
-    ) -> Vec<IdleDecision> {
+    ) -> Vec<LingeringStartup> {
         let live: HashSet<&str> = runs.iter().map(|run| run.key.as_str()).collect();
         self.phases.retain(|key, _| live.contains(key.as_str()));
         self.ended.retain(|(key, _)| live.contains(key.as_str()));
-        let mut decisions = Vec::new();
+        let mut lingering = Vec::new();
         for run in runs {
             if self.ended.contains(&(run.key.clone(), run.pid)) {
                 continue;
@@ -135,75 +113,80 @@ impl IdleSleepTracker {
             let entry = self
                 .phases
                 .entry(run.key.clone())
-                .or_insert_with(|| (run.pid, marker.phase.clone(), now_millis, false));
+                .or_insert_with(|| (run.pid, marker.phase.clone(), now_millis));
             if entry.0 != run.pid || entry.1 != marker.phase {
-                *entry = (run.pid, marker.phase.clone(), now_millis, false);
+                *entry = (run.pid, marker.phase.clone(), now_millis);
             }
-            let phase_since = entry.2;
-            if run.stop_in_progress {
-                continue;
-            }
-            if marker.phase == "wrapper_startup_failed" && marker.completed {
-                if now_millis.saturating_sub(phase_since) >= FAILED_STARTUP_GRACE.as_millis() as u64
-                {
-                    decisions.push(IdleDecision {
-                        key: run.key.clone(),
-                        pid: run.pid,
-                        alive_at_millis: marker.updated_at_millis,
-                        action: IdleAction::EndFailedStartup,
-                    });
-                }
-                continue;
-            }
-            let busy = marker.execution_in_flight || has_background_work(marker.background_tasks);
-            if busy || entry.3 {
-                entry.2 = now_millis;
-            }
-            entry.3 = busy;
-            let phase_since = entry.2;
-            // Outstanding provider work resets the idle window even when the
-            // wrapper stays in turn_completed throughout a watch or CI wait.
-            if busy {
-                continue;
-            }
-            // `completed` is not consulted: a wrapper stamps `turn_completed`
-            // with `completed: true` after every ordinary turn, which is the
-            // very state a resting Run is in. Every harness with a resume key
-            // sleeps; only an explicit background-task count > 0 (watch /
-            // Monitor / CI wait) holds it awake.
-            if !run.resumable_session || !is_resting_phase(&marker.phase) {
-                continue;
-            }
-            let last_activity = [
-                Some(phase_since),
-                marker.last_execution_millis,
-                marker.wrapper_ready_at_millis,
-            ]
-            .into_iter()
-            .flatten()
-            .max()
-            .unwrap_or(phase_since);
-            let idle_for = Duration::from_millis(now_millis.saturating_sub(last_activity));
-            if idle_for >= window {
-                decisions.push(IdleDecision {
+            if !run.stop_in_progress
+                && marker.phase == "wrapper_startup_failed"
+                && marker.completed
+                && now_millis.saturating_sub(entry.2) >= FAILED_STARTUP_GRACE.as_millis() as u64
+            {
+                lingering.push(LingeringStartup {
                     key: run.key.clone(),
                     pid: run.pid,
                     alive_at_millis: marker.updated_at_millis,
-                    action: IdleAction::Sleep {
-                        idle_for,
-                        phase: marker.phase.clone(),
-                    },
                 });
             }
         }
-        decisions
+        lingering
     }
-}
 
-impl IdleSleepTracker {
     /// Never act on this Run's `pid` again.
     pub(crate) fn note_ended(&mut self, key: &str, pid: u32) {
         self.ended.insert((key.to_string(), pid));
+    }
+}
+
+/// Delivery and clock slack allowed when the Hub's idle duration is compared
+/// with this daemon's own.
+const HUB_SLEEP_SLACK: Duration = Duration::from_secs(60);
+
+/// What the daemon does with the Hub's decision that a Run sleeps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HubSleepVerdict {
+    Sleep {
+        phase: String,
+        idle_for: Duration,
+    },
+    /// `not_idle`, `not_running` or `not_resumable`, as the result reports it.
+    Decline(&'static str),
+}
+
+/// The daemon's own check before it sleeps a Run on the Hub's word. The Hub
+/// decides when; only this daemon sees the process, so the Run must still
+/// rest with no task execution or background task, and by this daemon's
+/// clock have been quiet about as long as the Hub saw it resting.
+pub(crate) fn verify_hub_sleep(
+    run: &RunIdleView,
+    hub_idle_for: Duration,
+    now_millis: u64,
+) -> HubSleepVerdict {
+    if !run.resumable_session {
+        return HubSleepVerdict::Decline("not_resumable");
+    }
+    let Some(marker) = run.marker.as_ref().filter(|_| !run.stop_in_progress) else {
+        return HubSleepVerdict::Decline("not_running");
+    };
+    if !is_resting_phase(&marker.phase)
+        || marker.execution_in_flight
+        || has_background_work(marker.background_tasks)
+    {
+        return HubSleepVerdict::Decline("not_idle");
+    }
+    let last_activity = marker
+        .last_execution_millis
+        .into_iter()
+        .chain(marker.wrapper_ready_at_millis)
+        .max()
+        .unwrap_or(0);
+    let idle_for = Duration::from_millis(now_millis.saturating_sub(last_activity));
+    if idle_for + HUB_SLEEP_SLACK < hub_idle_for {
+        return HubSleepVerdict::Decline("not_idle");
+    }
+    HubSleepVerdict::Sleep {
+        phase: marker.phase.clone(),
+        idle_for,
     }
 }
 
@@ -291,145 +274,26 @@ mod tests {
     }
 
     #[test]
-    fn a_resumable_run_sleeps_only_after_a_full_idle_window() {
-        let mut tracker = IdleSleepTracker::default();
-        let runs = [run("turn_completed")];
-        assert!(tracker.observe(0, WINDOW, &runs).is_empty());
-        assert!(tracker.observe(29 * MINUTE, WINDOW, &runs).is_empty());
-        let decisions = tracker.observe(30 * MINUTE, WINDOW, &runs);
-        assert_eq!(
-            decisions,
-            vec![IdleDecision {
-                key: "run:run-1".into(),
-                pid: 42,
-                alive_at_millis: 0,
-                action: IdleAction::Sleep {
-                    idle_for: WINDOW,
-                    phase: "turn_completed".into()
-                },
-            }]
-        );
-    }
-
-    #[test]
-    fn background_work_finishing_requires_a_new_idle_window() {
-        let mut tracker = IdleSleepTracker::default();
-        let mut runs = [run("turn_completed")];
-        tracker.observe(0, WINDOW, &runs);
-        runs[0].marker.as_mut().unwrap().background_tasks = Some(1);
-        assert!(tracker.observe(60 * MINUTE, WINDOW, &runs).is_empty());
-        runs[0].marker.as_mut().unwrap().background_tasks = Some(0);
-        assert!(tracker.observe(61 * MINUTE, WINDOW, &runs).is_empty());
-        assert!(tracker.observe(89 * MINUTE, WINDOW, &runs).is_empty());
-        assert_eq!(tracker.observe(91 * MINUTE, WINDOW, &runs).len(), 1);
-    }
-
-    #[test]
-    fn a_short_turn_between_samples_restarts_the_window() {
-        let mut tracker = IdleSleepTracker::default();
-        let mut runs = [run("turn_completed")];
-        tracker.observe(0, WINDOW, &runs);
-        // The phase never changed, but a task finished at minute 20.
-        runs[0].marker.as_mut().unwrap().last_execution_millis = Some(20 * MINUTE);
-        assert!(tracker.observe(40 * MINUTE, WINDOW, &runs).is_empty());
-        assert_eq!(tracker.observe(50 * MINUTE, WINDOW, &runs).len(), 1);
-        // A phase change is activity too.
-        let mut tracker = IdleSleepTracker::default();
-        let mut runs = [run("turn_completed")];
-        tracker.observe(0, WINDOW, &runs);
-        runs[0].marker.as_mut().unwrap().phase = "turn_running".into();
-        tracker.observe(10 * MINUTE, WINDOW, &runs);
-        runs[0].marker.as_mut().unwrap().phase = "turn_completed".into();
-        // Observed back at rest at minute 35: the window starts there.
-        assert!(tracker.observe(35 * MINUTE, WINDOW, &runs).is_empty());
-        assert!(tracker.observe(64 * MINUTE, WINDOW, &runs).is_empty());
-        assert_eq!(tracker.observe(65 * MINUTE, WINDOW, &runs).len(), 1);
-    }
-
-    #[test]
-    fn busy_unresumable_or_stopping_runs_never_sleep() {
-        let cases: Vec<Box<dyn Fn(&mut RunIdleView)>> = vec![
-            Box::new(|run| run.marker.as_mut().unwrap().phase = "turn_running".into()),
-            Box::new(|run| run.marker.as_mut().unwrap().execution_in_flight = true),
-            // The provider says a background task (a CI wait / Monitor) is still running.
-            Box::new(|run| run.marker.as_mut().unwrap().background_tasks = Some(1)),
-            Box::new(|run| run.resumable_session = false),
-            Box::new(|run| run.stop_in_progress = true),
-            Box::new(|run| run.marker = None),
-        ];
-        for mutate in cases {
-            let mut tracker = IdleSleepTracker::default();
-            let mut view = run("turn_completed");
-            mutate(&mut view);
-            tracker.observe(0, WINDOW, std::slice::from_ref(&view));
-            assert!(
-                tracker
-                    .observe(24 * 60 * MINUTE, WINDOW, &[view])
-                    .is_empty()
-            );
-        }
-    }
-
-    #[test]
-    fn unknown_or_zero_background_count_lets_every_harness_sleep() {
-        // Production markers leave backgroundTasks unset (Codex / Cursor / ACP /
-        // Grok, and Claude after its stream closes with none open). That is idle.
-        for phase in [
-            "turn_completed",
-            "turn_failed",
-            "acp_app_ready",
-            "grok_app_ready",
-            "codex_app_ready",
-        ] {
-            for background_tasks in [None, Some(0u32)] {
-                let mut tracker = IdleSleepTracker::default();
-                let mut view = run(phase);
-                let marker = view.marker.as_mut().unwrap();
-                marker.background_tasks = background_tasks;
-                marker.completed = phase == "turn_completed";
-                let runs = [view];
-                tracker.observe(0, WINDOW, &runs);
-                assert_eq!(
-                    tracker.observe(30 * MINUTE, WINDOW, &runs).len(),
-                    1,
-                    "phase={phase} bg={background_tasks:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_run_whose_last_turn_finished_normally_sleeps() {
-        // The marker a claude wrapper leaves after an ordinary turn (seen in
-        // production on 0.16.540): it must not look finished for good.
-        let mut tracker = IdleSleepTracker::default();
-        let mut view = run("turn_completed");
-        let marker = view.marker.as_mut().unwrap();
-        assert!(marker.completed);
-        marker.last_execution_millis = Some(0);
-        let runs = [view];
-        tracker.observe(0, WINDOW, &runs);
-        assert!(matches!(
-            tracker.observe(30 * MINUTE, WINDOW, &runs)[..],
-            [IdleDecision {
-                action: IdleAction::Sleep { .. },
-                ..
-            }]
-        ));
-    }
-
-    #[test]
-    fn a_lingering_failed_startup_is_ended_not_slept() {
-        let mut tracker = IdleSleepTracker::default();
+    fn only_a_failed_startup_that_lingered_is_ended() {
+        let mut tracker = FailedStartupTracker::default();
         let mut view = run("wrapper_startup_failed");
         view.marker.as_mut().unwrap().completed = true;
         view.resumable_session = false;
         let runs = [view];
-        assert!(tracker.observe(0, WINDOW, &runs).is_empty());
+        assert!(tracker.lingering(0, &runs).is_empty());
         assert_eq!(
-            tracker.observe(MINUTE, WINDOW, &runs)[0].action,
-            IdleAction::EndFailedStartup
+            tracker.lingering(MINUTE, &runs),
+            vec![LingeringStartup {
+                key: "run:run-1".into(),
+                pid: 42,
+                alive_at_millis: 0
+            }]
         );
+        // However long it rests, a working Run is the Hub's to sleep.
+        let resting = [run("turn_completed")];
+        let mut tracker = FailedStartupTracker::default();
+        tracker.lingering(0, &resting);
+        assert!(tracker.lingering(24 * 60 * MINUTE, &resting).is_empty());
     }
 
     #[test]
@@ -452,21 +316,19 @@ mod tests {
     #[test]
     fn an_ended_run_is_never_acted_on_again() {
         // A failed wrapper whose exit report never finalizes keeps its row.
-        let mut tracker = IdleSleepTracker::default();
+        let mut tracker = FailedStartupTracker::default();
         let mut failed = run("wrapper_startup_failed");
         failed.marker.as_mut().unwrap().completed = true;
         let runs = [failed];
-        tracker.observe(0, WINDOW, &runs);
-        let decisions = tracker.observe(MINUTE, WINDOW, &runs);
-        assert_eq!(decisions.len(), 1);
-        assert_eq!(decisions[0].action, IdleAction::EndFailedStartup);
+        tracker.lingering(0, &runs);
+        assert_eq!(tracker.lingering(MINUTE, &runs).len(), 1);
         tracker.note_ended("run:run-1", 42);
-        assert!(tracker.observe(2 * MINUTE, WINDOW, &runs).is_empty());
-        assert!(tracker.observe(60 * MINUTE, WINDOW, &runs).is_empty());
+        assert!(tracker.lingering(2 * MINUTE, &runs).is_empty());
+        assert!(tracker.lingering(60 * MINUTE, &runs).is_empty());
         // Once the row is gone and a new Run reuses the key, it is judged anew.
-        tracker.observe(61 * MINUTE, WINDOW, &[]);
-        tracker.observe(62 * MINUTE, WINDOW, &runs);
-        assert_eq!(tracker.observe(63 * MINUTE, WINDOW, &runs).len(), 1);
+        tracker.lingering(61 * MINUTE, &[]);
+        tracker.lingering(62 * MINUTE, &runs);
+        assert_eq!(tracker.lingering(63 * MINUTE, &runs).len(), 1);
     }
 
     #[test]
@@ -482,5 +344,82 @@ mod tests {
         // It is gone, or another process now holds its number.
         assert!(!is_marker_writer(10, alive_at, &[]));
         assert!(!is_marker_writer(10, alive_at, &[process(10, 2_100)]));
+    }
+
+    #[test]
+    fn a_hub_sleep_runs_only_when_this_daemon_also_sees_the_run_quiet() {
+        let quiet = |phase: &str, last_execution: u64| {
+            let mut view = run(phase);
+            view.marker.as_mut().unwrap().last_execution_millis = Some(last_execution);
+            view
+        };
+        // Quiet here as long as the Hub saw it: it sleeps, with the phase it rests in.
+        assert_eq!(
+            verify_hub_sleep(&quiet("turn_completed", 0), WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Sleep {
+                phase: "turn_completed".into(),
+                idle_for: WINDOW
+            }
+        );
+        // Every harness rests in its own phase, and an unknown or zero
+        // background count is no watch (Codex / Cursor / ACP / Grok never
+        // report one; Claude writes 0 when its stream closes with none open).
+        for phase in [
+            "turn_failed",
+            "acp_app_ready",
+            "grok_app_ready",
+            "codex_app_ready",
+        ] {
+            for background_tasks in [None, Some(0u32)] {
+                let mut view = quiet(phase, 0);
+                view.marker.as_mut().unwrap().background_tasks = background_tasks;
+                assert!(
+                    matches!(
+                        verify_hub_sleep(&view, WINDOW, 30 * MINUTE),
+                        HubSleepVerdict::Sleep { .. }
+                    ),
+                    "phase={phase} bg={background_tasks:?}"
+                );
+            }
+        }
+        // A minute of skew or delivery is tolerated; recent work is not.
+        assert!(matches!(
+            verify_hub_sleep(&quiet("turn_completed", MINUTE), WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Sleep { .. }
+        ));
+        assert_eq!(
+            verify_hub_sleep(&quiet("turn_completed", 20 * MINUTE), WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_idle")
+        );
+        // Work in hand, a running turn, or a background watch keep it awake.
+        assert_eq!(
+            verify_hub_sleep(&quiet("turn_running", 0), WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_idle")
+        );
+        let mut watching = quiet("turn_completed", 0);
+        watching.marker.as_mut().unwrap().background_tasks = Some(1);
+        assert_eq!(
+            verify_hub_sleep(&watching, WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_idle")
+        );
+        let mut executing = quiet("turn_completed", 0);
+        executing.marker.as_mut().unwrap().execution_in_flight = true;
+        assert_eq!(
+            verify_hub_sleep(&executing, WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_idle")
+        );
+        // A Run that cannot resume, or that is already stopping, is not slept.
+        let mut fresh = quiet("turn_completed", 0);
+        fresh.resumable_session = false;
+        assert_eq!(
+            verify_hub_sleep(&fresh, WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_resumable")
+        );
+        let mut stopping = quiet("turn_completed", 0);
+        stopping.stop_in_progress = true;
+        assert_eq!(
+            verify_hub_sleep(&stopping, WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_running")
+        );
     }
 }

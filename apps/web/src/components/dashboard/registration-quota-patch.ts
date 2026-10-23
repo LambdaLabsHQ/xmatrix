@@ -1,10 +1,11 @@
 import {
-  sameAgentRegistration,
+  reduceChannelPresence, sameAgentRegistration,
   withRegistrationQuota,
   type AgentRegistrationKey,
   type LlmUsage,
-  type SerializedChannel,
+  type ChannelSnapshot,
 } from "@xmatrix/protocol";
+import { sameValue } from "../../lib/same-value";
 
 /**
  * A registration's new quota reading (the `registration_quota` frame), applied
@@ -14,32 +15,27 @@ import {
  * were, so an unchanged reading renders nothing.
  */
 export function patchChannelsRegistrationQuota(
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[],
   registration: AgentRegistrationKey,
   quota: LlmUsage
-): SerializedChannel[] {
+): ChannelSnapshot[] {
   const project = (usage: LlmUsage | undefined) => {
     const next = withRegistrationQuota(usage, quota);
-    return JSON.stringify(next) === JSON.stringify(usage) ? usage : next;
+    return sameValue(next, usage) ? usage : next;
   };
   let changed = false;
   const next = channels.map((channel) => {
-    let memberPresence = channel.memberPresence;
-    for (const [member, presence] of Object.entries(channel.memberPresence ?? {})) {
-      if (presence.kind !== "agent" || !presence.registration ||
-          !sameAgentRegistration(presence.registration, registration)) continue;
-      const usage = project(presence.usage);
-      const instances = presence.instances?.map((instance) => {
-        const instanceUsage = project(instance.usage);
-        return instanceUsage === instance.usage ? instance : { ...instance, usage: instanceUsage };
-      });
-      const instancesChanged = instances?.some((instance, index) => instance !== presence.instances?.[index]) ?? false;
-      if (usage === presence.usage && !instancesChanged) continue;
-      memberPresence = { ...memberPresence, [member]: { ...presence, usage, ...(instances ? { instances } : {}) } };
+    let presence = channel.presence;
+    if (!presence) return channel;
+    for (const instance of presence.instances.values()) {
+      if (!instance.registration || !sameAgentRegistration(instance.registration, registration)) continue;
+      const usage = project(instance.usage);
+      if (!usage || usage === instance.usage) continue;
+      presence = reduceChannelPresence(presence, { type: "quota", instanceId: instance.id, usage });
     }
-    if (memberPresence === channel.memberPresence) return channel;
+    if (presence === channel.presence) return channel;
     changed = true;
-    return { ...channel, memberPresence };
+    return { ...channel, presence };
   });
   return changed ? next : channels;
 }

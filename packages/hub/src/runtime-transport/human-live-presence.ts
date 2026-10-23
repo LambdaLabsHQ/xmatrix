@@ -1,4 +1,4 @@
-import type { ChannelMemberPresence, SerializedChannel } from "@xmatrix/protocol";
+import { decodeChannelSnapshot, encodeChannelSnapshot, emptyChannelPresence, reduceChannelPresence, type HumanPresence, type SerializedChannel } from "@xmatrix/protocol";
 
 /**
  * Process-memory Human presence snapshot for RelayRuntime product sockets.
@@ -55,7 +55,7 @@ export function buildHumanMemberPresenceForChannel(
   visibleHumanMemberIds: readonly string[],
   sessions: readonly LiveHumanSessionSnapshot[],
   channelId: string,
-): Record<string, ChannelMemberPresence> {
+): ReadonlyMap<string, HumanPresence> {
   const sessionsByUserId = new Map<string, LiveHumanSessionSnapshot[]>();
   for (const session of sessions) {
     const userId = session.userId.startsWith("user:")
@@ -66,7 +66,7 @@ export function buildHumanMemberPresenceForChannel(
     sessionsByUserId.set(userId, list);
   }
 
-  const presence: Record<string, ChannelMemberPresence> = {};
+  const presence = new Map<string, HumanPresence>();
   for (const userId of visibleHumanUserIds(visibleHumanMemberIds)) {
     const memberId = `user:${userId}`;
     const userSessions = sessionsByUserId.get(userId) || [];
@@ -90,16 +90,15 @@ export function buildHumanMemberPresenceForChannel(
     // Runtime presence reports liveness only. Human identity and offline
     // membership come from the product directory, so omit offline rows.
     const label = latest?.name || latest?.email;
-    presence[memberId] = {
-      kind: "user",
+    presence.set(memberId, {
       status: "online",
       focused: userSessions.some((session) => session.focusedChannelId === channelId),
       ...(label ? { label } : {}),
       ...(latest?.email ? { email: latest.email } : {}),
       ...(latest?.avatarUrl ? { avatarUrl: latest.avatarUrl } : {}),
       ...(latest?.lastSeenAt ? { lastSeenAt: latest.lastSeenAt } : {}),
-      instances,
-    };
+      devices: instances,
+    });
   }
   return presence;
 }
@@ -133,13 +132,10 @@ export function overlayHumanPresenceOnChannel(
     sessions,
     channel.id,
   );
-  return {
-    ...channel,
-    memberPresence: {
-      ...channel.memberPresence,
-      ...humanPresence,
-    },
-  };
+  const snapshot = decodeChannelSnapshot(channel);
+  const presence = reduceChannelPresence(snapshot.presence ?? emptyChannelPresence(channel.id),
+    { type: "humans", humans: humanPresence });
+  return encodeChannelSnapshot({ ...snapshot, presence });
 }
 
 /**
@@ -148,6 +144,12 @@ export function overlayHumanPresenceOnChannel(
  * carries that reader's private projection. Never let those fields hitch a
  * ride on the shared update: clients merge-preserve their own copy when the
  * partial payload omits them.
+ *
+ * Nor does it say what was said: the last message, the count and the history
+ * head move only with the message frames themselves. Read here they could
+ * reach a client before the message did, and its list showed a message its
+ * conversation had not received yet (as Telegram does, a chat's last message
+ * is only ever the newest message the client holds).
  */
 export function channelForSharedPresenceFanout(
   channel: SerializedChannel,
@@ -155,6 +157,9 @@ export function channelForSharedPresenceFanout(
   const {
     attention: _viewerAttention,
     readSequence: _viewerReadSequence,
+    lastMessage: _lastMessage,
+    messageCount: _messageCount,
+    historyHeadSequence: _historyHeadSequence,
     ...shared
   } = channel;
   return shared;

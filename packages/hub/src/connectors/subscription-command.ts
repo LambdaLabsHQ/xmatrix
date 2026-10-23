@@ -29,7 +29,7 @@ export async function runSubscriptionStatement(
   if (!statement.ok) return `${label}: failed; ${statement.reason.replace(/_/gu, " ")}.`;
   const scope = await commandScope(manifest, input);
   if (typeof scope === "string") return `${label}: blocked; ${scope}.`;
-  return withExecution(manifest, input, scope, { id: statement.action, key: statementKey,
+  return await withExecution(manifest, input, scope, { id: statement.action, key: statementKey,
     label: statement.action === "subscribe" ? "Subscribe source" : "Unsubscribe source" }, async () => {
     const relations = await listAppSourceRelations(input.env, { channelId: input.channelId, principal: scope.principal });
     const current = relations.map(record).find((candidate) => candidate.connectionId === scope.connectionId &&
@@ -38,7 +38,7 @@ export async function runSubscriptionStatement(
     const next = nextSubscriptionFeatures(manifest, currentFeatures, statement);
     const sync = subscriptions && (async (subscribed: boolean) => subscriptions.sync({ env: input.env,
       spaceId: scope.spaceId, credentials: await connectionCredentials(input.env, scope.spaceId, manifest.id),
-      source: statement.source, subscribed }).catch((error: unknown) => {
+      source: statement.source, subscribed, actorUserId: input.actorUserId }).catch((error: unknown) => {
       if (error instanceof ProviderRequestError) return `${manifest.name} refused the change: ${error.message}`;
       throw error;
     }));

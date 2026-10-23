@@ -3,9 +3,13 @@
 //!
 //! The harness process starts fresh for every task, in an empty private
 //! directory, with no Run token and no channel: it can read what it was handed
-//! and answer, nothing else. The Hub decides what to do with the answer.
-use std::path::PathBuf;
+//! and answer, nothing else. It keeps nothing either: no saved session, and none
+//! of its user's memory, instructions, hooks or MCP servers reach it, so no task
+//! carries anything into another. The Hub decides what to do with the answer.
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -13,7 +17,7 @@ use tokio::process::Command;
 use xmatrix_cli_core::machine_daemon_connection::MachineTextTaskOutcome;
 
 use crate::runtime_daemon_harness_action::registry_preset;
-use crate::runtime_daemon_harness_inventory::resolve_launcher;
+use crate::runtime_daemon_harness_inventory::{harness_command, resolve_launcher};
 
 /// The whole task, harness start included, must finish inside this budget.
 const TASK_TIMEOUT: Duration = Duration::from_secs(120);
@@ -59,6 +63,101 @@ pub(crate) fn one_shot_args(preset_id: &str) -> Option<Vec<&'static str>> {
         ]),
         _ => None,
     }
+}
+
+/// The flags that keep a one-shot harness to its task: no saved session, and
+/// none of its user's memory, instructions, hooks or MCP servers. A harness is
+/// given those its installed version lists in its help, so an older one still
+/// answers, only without the ones it lacks.
+fn stateless_flags(preset_id: &str) -> &'static [&'static str] {
+    match preset_id {
+        "claude" => &[
+            "--no-session-persistence",
+            "--safe-mode",
+            "--strict-mcp-config",
+        ],
+        "codex" => &["--ephemeral", "--ignore-user-config"],
+        _ => &[],
+    }
+}
+
+/// Where a harness lists its one-shot mode's flags.
+fn help_args(preset_id: &str) -> &'static [&'static str] {
+    if preset_id == "codex" {
+        &["exec", "--help"]
+    } else {
+        &["--help"]
+    }
+}
+
+/// The flags of `flags` that `help` lists as flags of their own.
+fn listed_flags(flags: &[&'static str], help: &str) -> Vec<&'static str> {
+    flags
+        .iter()
+        .copied()
+        .filter(|flag| {
+            help.split(|c: char| c.is_whitespace() || matches!(c, ',' | '[' | ']' | '=' | '|'))
+                .any(|word| word == *flag)
+        })
+        .collect()
+}
+
+/// The one-shot argv with the stateless flags, which go before the prompt a
+/// harness reads from stdin (`-`).
+pub(crate) fn one_shot_argv<'a>(args: &[&'a str], stateless: &[&'a str]) -> Vec<&'a str> {
+    let mut argv = args.to_vec();
+    let at = if argv.last() == Some(&"-") {
+        argv.len() - 1
+    } else {
+        argv.len()
+    };
+    argv.splice(at..at, stateless.iter().copied());
+    argv
+}
+
+const HELP_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_HELP_BYTES: u64 = 256 * 1024;
+
+/// Which stateless flags each installed harness takes, read from its help once.
+static LISTED_FLAGS: LazyLock<Mutex<HashMap<PathBuf, Vec<&'static str>>>> =
+    LazyLock::new(Default::default);
+
+async fn supported_stateless_flags(program: &Path, preset_id: &str) -> Vec<&'static str> {
+    if let Some(flags) = LISTED_FLAGS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(program)
+    {
+        return flags.clone();
+    }
+    let Some(help) = help_text(program, help_args(preset_id)).await else {
+        return Vec::new();
+    };
+    let flags = listed_flags(stateless_flags(preset_id), &help);
+    LISTED_FLAGS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(program.to_path_buf(), flags.clone());
+    flags
+}
+
+async fn help_text(program: &Path, args: &[&str]) -> Option<String> {
+    let mut child = harness_command(program, args)
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let _tree = crate::process_tree::ProcessTreeGuard::bind_tokio_child(&child).ok()?;
+    let mut stdout = child.stdout.take()?.take(MAX_HELP_BYTES);
+    let read = async {
+        let mut out = Vec::new();
+        let (read, _) = tokio::join!(stdout.read_to_end(&mut out), child.wait());
+        read.ok()
+            .map(|_| String::from_utf8_lossy(&out).into_owned())
+    };
+    tokio::time::timeout(HELP_TIMEOUT, read)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// What the harness reads: the instruction, then the text, fenced so the text
@@ -122,7 +221,9 @@ pub(crate) async fn execute(
             Some("could not create a private directory"),
         );
     }
-    let result = run(&program, &args, &directory, &prompt(instruction, input)).await;
+    let stateless = supported_stateless_flags(&program, preset_id).await;
+    let argv = one_shot_argv(&args, &stateless);
+    let result = run(&program, &argv, &directory, &prompt(instruction, input)).await;
     let _ = tokio::fs::remove_dir_all(&directory).await;
     match result {
         Ok(text) => outcome(preset_id, "completed", Some(text), None),
@@ -208,6 +309,47 @@ mod tests {
         assert!(one_shot_args("claude").is_some_and(|args| args.contains(&"--print")));
         assert!(one_shot_args("codex").is_some_and(|args| args.first() == Some(&"exec")));
         assert!(one_shot_args("cursor").is_none());
+    }
+
+    #[test]
+    fn a_harness_keeps_nothing_it_can_be_told_not_to_keep() {
+        let claude_help = "  --no-session-persistence   Disable session persistence\n  --safe-mode   Start with all customizations disabled\n  --strict-mcp-config\n";
+        assert_eq!(
+            listed_flags(stateless_flags("claude"), claude_help),
+            vec![
+                "--no-session-persistence",
+                "--safe-mode",
+                "--strict-mcp-config"
+            ]
+        );
+        // An older harness gets only the flags it has; a flag named inside another's text is not one.
+        assert_eq!(
+            listed_flags(
+                stateless_flags("claude"),
+                "  --strict-mcp-config  Only use MCP servers from --mcp-config\n  --no-session-persistence-x\n"
+            ),
+            vec!["--strict-mcp-config"]
+        );
+        assert!(listed_flags(stateless_flags("cursor"), claude_help).is_empty());
+        let codex = one_shot_args("codex").unwrap();
+        assert_eq!(
+            one_shot_argv(&codex, &["--ephemeral", "--ignore-user-config"]),
+            vec![
+                "exec",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                "--ephemeral",
+                "--ignore-user-config",
+                "-"
+            ],
+            "flags go before the prompt read from stdin"
+        );
+        let claude = one_shot_args("claude").unwrap();
+        assert_eq!(
+            one_shot_argv(&claude, &["--safe-mode"]).last(),
+            Some(&"--safe-mode")
+        );
     }
 
     #[test]

@@ -18,6 +18,12 @@ export function defaultInstallPlatform(userAgent: string): InstallPlatform {
   return /windows/iu.test(userAgent) ? "windows" : "unix";
 }
 
+/** The platform a signed-in terminal reported (`windows-x86_64`, `macos-aarch64`), when it did. */
+export function terminalInstallPlatform(platform: string | undefined): InstallPlatform | undefined {
+  if (!platform) return undefined;
+  return platform.startsWith("windows") ? "windows" : "unix";
+}
+
 /** Harnesses the connected machine reported as installed. */
 export function installedHarnesses(status: SetupIntentStatus | undefined): Array<{ id: string; name: string }> {
   return (status?.machine?.harnesses ?? [])
@@ -59,8 +65,3 @@ export function connectStep(status: SetupIntentStatus, waitingForMs: number): Co
   return harnesses.length > 0 ? { kind: "found", machineName, harnesses } : { kind: "none-installed", machineName };
 }
 
-/** "Claude Code", "Claude Code and Codex", "Claude Code, Codex and Gemini". */
-export function listNames(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}

@@ -1,25 +1,23 @@
 "use client";
 
-import { useState, type ComponentType } from "react";
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
-  Download,
-  HardDrive,
   Loader2,
   Plus,
   RotateCcw,
   Settings,
+  type LucideIcon,
 } from "lucide-react";
 import {
   WEB_PROXY_ROUTES,
   AGENT_PRESETS,
-  agentPresetAvatarUrl,
-  normalizeAgentPresetRuntime,
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
   type AgentWorkingMode,
-  type SerializedChannel,
+  type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { harnessSpaceSwitch } from "./harness-space-switch";
@@ -31,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth-context";
+import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
@@ -41,8 +40,8 @@ import { AgentListGroups, agentHarnessItemId, agentListGroups } from "./agent-li
 import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
-import { HarnessSignInSection } from "./harness-sign-in";
-import { IdentityAvatar } from "./identity-avatar";
+import { HarnessSetUpSection, HarnessSignInSection } from "./harness-sign-in";
+import { Face } from "./face";
 import { MeterReadingList } from "./machine-load-panel";
 import {
   MY_AGENT_ACTION_LABEL,
@@ -51,7 +50,8 @@ import {
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
-import { ConnectMachine } from "./space-agent-setup-card";
+import { BringAgentsIn } from "./bring-agents-in";
+import { SetupCardShell } from "./space-setup-card-chrome";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
@@ -60,7 +60,7 @@ import {
 } from "./tool-split";
 import { ErrorNotice } from "@/components/ui/error-notice";
 
-const ACTION_ICON: Record<MyAgentAction, ComponentType<{ className?: string }>> = {
+const ACTION_ICON: Record<MyAgentAction, LucideIcon> = {
   configure: Settings,
   restore: RotateCcw,
 };
@@ -100,7 +100,7 @@ export function MyAgentsView({
   token: string | undefined;
   currentUserId: string;
   /** The Space's conversations the reader has, to name where an agent runs. */
-  channels: readonly SerializedChannel[];
+  channels: readonly ChannelSnapshot[];
   error: string | null;
   /** The desktop app reports this machine's harnesses itself; a browser cannot. */
   addsOnThisMachine: boolean;
@@ -117,6 +117,7 @@ export function MyAgentsView({
   const [item, select] = useToolItem();
 
   const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
+  const copy = useOnboardingCopy(spaceId, token, currentUserId);
   const newCandidates = fleet.candidates.filter((candidate) => !candidate.registration);
 
   function act(registration: AgentRegistrationSummary, action: MyAgentAction) {
@@ -188,8 +189,7 @@ export function MyAgentsView({
         onBack={() => select(null)}
         backLabel="Agents"
         context={<span className="flex items-center gap-1.5">
-          <IdentityAvatar kind="agent" label={harness}
-            imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(harness))} initials={harness.slice(0, 2)} size="xs" />
+          <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
           <span>{machineInLine ? `${harness} · ${registration.machineName}` : harness}</span>
         </span>}
         title={title}
@@ -206,7 +206,7 @@ export function MyAgentsView({
                 aria-label={`${MY_AGENT_ACTION_LABEL[action]}: ${registration.displayName}`}
                 aria-expanded={action === "configure" ? editingId === id : undefined}
                 title={ACTION_CONSEQUENCE[action]}>
-                <Icon className={cn(busy && action !== "configure" && "animate-spin")} />
+                <AnimatedIcon icon={Icon} className={cn(busy && action !== "configure" && "animate-spin")} />
                 {MY_AGENT_ACTION_LABEL[action]}
               </Button>
             );
@@ -287,6 +287,7 @@ export function MyAgentsView({
           </ToolDetailSection>
         )}
         {token && <HarnessSignInSection registration={registration} token={token} userId={currentUserId} />}
+        {token && <HarnessSetUpSection registration={registration} token={token} userId={currentUserId} copy={copy} />}
         <ToolDetailSection title="Where it runs">
           <ToolFacts>
             <ToolFact label="Runtime">{harness}</ToolFact>
@@ -306,22 +307,17 @@ export function MyAgentsView({
     /* A browser cannot find anything on a machine, so with nothing installed
        anywhere yet this shows where agents come from. */
     detail = (
-      <ToolDetailEmpty icon={<HardDrive />} title="Bring your agents into xMatrix">
-        <p>
-          Your agents run on your own computer, and xMatrix connects them with the people they work
-          with. Open the desktop app on that computer and it finds the agents already installed there.
-        </p>
-        <a href="/download" className={actionClass({ variant: "primary", size: "sm" })}>
-          <Download className="size-4" /> Download xMatrix
-        </a>
-        <ConnectMachine spaceId={spaceId} token={token} userId={currentUserId} centered />
-      </ToolDetailEmpty>
+      <div className="app-below-band min-h-0 flex-1 overflow-y-auto">
+        <SetupCardShell>
+          <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
+        </SetupCardShell>
+      </div>
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (
-      <ToolDetailEmpty icon={<Bot />} title={newCandidates.length ? "Enable an installed harness" : "Connect your agents"}>
-        <p>Turn on an installed harness in the list, or install one from Machines.</p>
-        <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> Manage machines</Button>
+      <ToolDetailEmpty icon={<Bot />} title={newCandidates.length ? copy.enableInstalledTitle : copy.connectAgentsTitle}>
+        <p>{copy.enableOrInstall}</p>
+        <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> {copy.manageMachines}</Button>
       </ToolDetailEmpty>
     );
   }
@@ -460,7 +456,7 @@ function RegistrationEditorForm({
           Cancel
         </button>
         <button type="submit" disabled={busy || !displayName.trim()} className={actionClass({ variant: "primary", size: "md" })}>
-          {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
           Save
         </button>
       </div>

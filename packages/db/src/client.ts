@@ -13,7 +13,7 @@ import type {
   DatabaseTransaction,
 } from "./contracts.js";
 import { databaseRequestContext, type DatabaseRequestContext } from "./context.js";
-import { SessionConnectivity, shardConnectivityBreaker, type ConnectivityBreaker } from "./connectivity-breaker.js";
+import { DatabaseCircuitOpenError, SessionConnectivity, shardConnectivityBreaker, type ConnectivityBreaker } from "./connectivity-breaker.js";
 import {
   DatabaseCommitUnknownError,
   DatabaseContractError,
@@ -24,6 +24,8 @@ import {
 import type { SpacePlacementHints } from "./placement.js";
 import { dingtalkPreparation, dingtalkDecision, dingtalkPreparedPlan, registerDingTalkPreparedPort, registerDingTalkPreparedTransaction,
   type DingTalkPreparedPlan, type DingTalkPreparedDecision } from "./dingtalk-prepared-port.js";
+
+import { recordDatabaseFailure, linkDatabaseFailures } from "./database-failure-evidence.js";
 
 const MAX_QUERY_NAME_BYTES = 160;
 const MAX_QUERY_BYTES = 64 * 1024;
@@ -188,25 +190,26 @@ function validatedQuery(query: DatabaseQuery): DatabaseQuery {
 }
 
 function errorCode(error: unknown): string {
+  // Hyperdrive can attach PostgreSQL's generic 58000 to a transport failure.
+  // Its exact driver message is more specific than that SQLSTATE.
+  if (error instanceof Error) {
+    const code = DRIVER_ERROR_CODES.get(error.message);
+    if (code) return code;
+  }
   if (error && typeof error === "object" && "code" in error &&
       typeof error.code === "string" && error.code.length <= 80) {
     return error.code;
   }
   if (error instanceof DatabaseContractError) return "DATABASE_CONTRACT_ERROR";
-  // node-postgres's client-side deadline has no SQLSTATE. Unlike a server
-  // statement timeout, it does not establish that the wire query has finished.
-  if (error instanceof Error) {
-    const code = DRIVER_ERROR_CODES.get(error.message);
-    if (code) return code;
-  }
   return "database_error";
 }
 
-/** node-postgres transport failures that carry no code, keyed by exact message. */
+/** Known node-postgres and Hyperdrive transport failures, keyed by exact message. */
 const DRIVER_ERROR_CODES = new Map([
   ["Query read timeout", "QUERY_READ_TIMEOUT"],
   ["Connection terminated", "CONNECTION_TERMINATED"],
   ["Connection terminated unexpectedly", "CONNECTION_TERMINATED"],
+  ["Egress connection severed outside of Hyperdrive", "CONNECTION_TERMINATED"],
   ["Client has encountered a connection error and is not queryable", "CONNECTION_UNUSABLE"],
   ["Client was closed and is not queryable", "CONNECTION_UNUSABLE"],
   ["Connection terminated due to connection timeout", "CONNECT_TIMEOUT"],
@@ -217,8 +220,18 @@ function commitResultMayBeUnknown(error: unknown): boolean {
   const code = errorCode(error).toUpperCase();
   return /^08[0-9A-Z]{3}$/u.test(code) || new Set([
     "ECONNRESET", "EHOSTUNREACH", "ENETDOWN", "ENETUNREACH", "EPIPE", "ETIMEDOUT",
-    "QUERY_READ_TIMEOUT", "CONNECTION_TERMINATED", "CONNECTION_UNUSABLE",
+    "QUERY_READ_TIMEOUT", "CONNECTION_TERMINATED", "CONNECTION_UNUSABLE", "CONNECT_TIMEOUT",
   ]).has(code);
+}
+
+/**
+ * The connection was lost before COMMIT or PREPARE was sent, so the
+ * transaction cannot have committed. A caller whose transaction has no effect
+ * outside the database may run it again on a fresh checkout.
+ */
+export function lostBeforeCommit(error: unknown): boolean {
+  return !(error instanceof DatabaseCommitUnknownError) && !(error instanceof DatabasePreparedUnknownError) &&
+    commitResultMayBeUnknown(error);
 }
 
 function observe(observer: DatabaseObserver | undefined, value: DatabaseObservation): void {
@@ -284,9 +297,9 @@ class SessionStats {
     this.totals.sqlMaxMs = Math.max(this.totals.sqlMaxMs, durationMs);
   }
 
-  fail(code: string): void {
+  fail(code: string, operation: string, queryName: string): void {
     this.errorCode ??= code;
-    this.connectivity.failed(code);
+    this.connectivity.failed(code, operation, queryName);
   }
 
   observation(shardId: string, endedAt: number): DatabaseSessionObservation {
@@ -321,7 +334,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
       this.stats.query(durationMs, result.rows.length);
       this.stats.connectivity.reached();
       if (result.rows.length > query.maxRows) {
-        this.stats.fail("database_row_limit_exceeded");
+        this.stats.fail("database_row_limit_exceeded", this.context.operation, query.name);
         observe(this.options.observer, this.observation(
           query.name,
           durationMs,
@@ -342,7 +355,10 @@ class PgDatabaseTransaction implements DatabaseTransaction {
       if (!(error instanceof DatabaseRowLimitError)) {
         const durationMs = performance.now() - startedAt;
         this.stats.query(durationMs, 0);
-        this.stats.fail(errorCode(error));
+        this.stats.fail(errorCode(error), this.context.operation, query.name);
+        recordDatabaseFailure(error, { operation: this.context.operation, shardId: this.options.shardId,
+          statement: this.context.statement ?? "transaction", phase: "sql", queryName: query.name,
+          code: errorCode(error), durationMs });
         observe(this.options.observer, this.observation(
           query.name,
           durationMs,
@@ -436,7 +452,7 @@ class PgSingleReadTransaction extends PgDatabaseTransaction {
     } catch (error) {
       // Only a lost response is retried; any answered failure, including a
       // refused placement fence, is final.
-      if (errorCode(error) !== "QUERY_READ_TIMEOUT") throw error;
+      if (!commitResultMayBeUnknown(error)) throw error;
       return this.retry(this.client, error, (client) => {
         this.client = client;
         return attempt();
@@ -463,8 +479,10 @@ class PgSingleReadTransaction extends PgDatabaseTransaction {
     const first = values.length + 1;
     const rows = await super.query<QueryResultRow>({
       ...query,
-      // One extra row: the fence-only row an empty read still returns.
-      maxRows: query.maxRows + 1,
+      // The outer join returns one fence-only row only when the read is
+      // empty, never an extra row beside nonempty results. Preserve the
+      // public upper bound (10,000) while allowing an empty maxRows=0 read.
+      maxRows: Math.max(1, query.maxRows),
       text: `SELECT fence.shard_id AS "${FENCE_SHARD}",fence.placement_epoch AS "${FENCE_EPOCH}",
           fence.state AS "${FENCE_STATE}",fence.target_shard_id AS "${FENCE_TARGET}",single_read.*
         FROM (${transactionSettingsSql(placeholderFrom(first))}) settings
@@ -620,7 +638,12 @@ function observePhase(
 ): void {
   const durationMs = performance.now() - startedAt;
   stats.phase(phase, durationMs);
-  if (error) stats.fail(errorCode(error));
+  if (error) {
+    stats.fail(errorCode(error), context.operation, `database_phase_${phase}_v1`);
+    recordDatabaseFailure(error, { operation: context.operation, shardId: options.shardId,
+      statement: context.statement ?? "transaction", phase, queryName: `database_phase_${phase}_v1`,
+      code: errorCode(error), durationMs });
+  }
   // A checkout through a reachable Hyperdrive can still stall on the origin,
   // so only a completed statement, never the checkout, closes the breaker.
   else if (phase !== "pool_checkout") stats.connectivity.reached();
@@ -634,6 +657,7 @@ function observePhase(
     outcome: error ? "error" : "ok",
     slow: durationMs >= options.slowQueryMs,
     ...(error ? { errorCode: errorCode(error) } : {}),
+    ...(error instanceof DatabaseCircuitOpenError && error.connectivity ? { connectivity: error.connectivity } : {}),
   });
 }
 
@@ -770,10 +794,10 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
   }
 
   /**
-   * The single retry of a timed-out single read. The stalled checkout still
+   * The single retry of a single read whose response was lost. The stalled checkout still
    * has the query in flight, so it is destroyed, never reused or queued
    * behind; the retry takes a new checkout through the shard breaker, and an
-   * open breaker or failed checkout surfaces the original timeout. The
+   * open breaker or failed checkout surfaces the original failure. The
    * session stays usable only if the retry succeeds.
    */
   private async retrySingleRead<T>(
@@ -787,14 +811,16 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
     let client: PgClientPort;
     try {
       client = await this.connection(context);
-    } catch {
+    } catch (error) {
       this.connectionUnusable = true;
+      linkDatabaseFailures(failure, failure, error);
       throw failure;
     }
     try {
       return await attempt(client);
     } catch (error) {
       this.connectionUnusable = true;
+      linkDatabaseFailures(error, failure);
       throw error;
     }
   }

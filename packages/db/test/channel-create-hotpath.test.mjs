@@ -11,9 +11,10 @@ const input = {
 };
 const allowed = { role: "member", space_id: "space-1", channel_exists: false };
 
-function fixture({ check = allowed, insert = true } = {}) {
+function fixture({ check = allowed, insert = true, headConflicts = 0 } = {}) {
   const calls = [];
   let receipt;
+  let conflicts = headConflicts;
   const database = {
     cacheMode: "disabled",
     async transaction(context, callback) {
@@ -31,7 +32,10 @@ function fixture({ check = allowed, insert = true } = {}) {
           case "channel_create_checks_v2": return check ? [check] : [];
           case "channel_create_v4": return insert
             ? [{ channel_id: input.channelId, search_rank_sequence: "pg:00000000000000000042" }] : [];
-          case "space_control_head_advance_v1": return [{ commit_sequence: 42 }];
+          case "space_control_head_advance_v1":
+            if (conflicts-- > 0) throw Object.assign(
+              new Error("could not serialize access due to concurrent update"), { code: "40001" });
+            return [{ commit_sequence: 42 }];
           default: return [];
         }
       } });
@@ -55,6 +59,12 @@ for (const [label, check, code] of [
 test("any member can create a channel", async () => {
   const f = fixture();
   assert.equal((await f.repository.createChannel(input)).id, input.channelId);
+});
+
+test("a create outlasts a burst of commits on its Space's control head", async () => {
+  const f = fixture({ headConflicts: 4 });
+  assert.equal((await f.repository.createChannel(input)).id, input.channelId);
+  assert.equal(f.calls.filter((query) => query.name === "space_control_head_advance_v1").length, 5);
 });
 
 test("participant intake remains authority-derived", async () => {

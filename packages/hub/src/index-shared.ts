@@ -9,17 +9,17 @@ import {
   AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE,
   HUB_ROUTES,
   isAutomationIntervalMinutes,
-  sha256Hex,
   hmacBytes,
   timingSafeEqual,
   type AgentRunPermission,
   spaceVisibilityScope,
+  trimEnd,
   utf8ByteLength,
 } from "@xmatrix/protocol";
 import type {
   ChannelAppMention,
 } from "@xmatrix/protocol";
-import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
+import { appOrigins, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 import { relayRuntimeSingleCell } from "./relay-authority-locator";
 import {
@@ -37,7 +37,7 @@ import {
   type AgentRunPrincipal,
   type AuthUser,
 } from "./auth";
-import { logAuthMetric } from "./auth-observability";
+export { betterAuthRouteGroup, logBetterAuthHandlerMetrics } from "./auth-observability";
 import {
   machineDaemonCommandPrincipal,
   verifyMachineDaemonCredential,
@@ -67,7 +67,6 @@ export { privateResponse } from "./private-response";
 
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 export const MAX_INVITE_EMAILS_PER_REQUEST = 100;
-export const LOGIN_RATE_LIMIT_PER_EMAIL = 5;
 export const LOGIN_RATE_LIMIT_PER_CLIENT = 20;
 export const CLIENT_METRIC_RATE_LIMIT = 60;
 export const CLIENT_METRIC_RATE_WINDOW_MS = 60_000;
@@ -151,59 +150,7 @@ export function hubOrigin(request: Request): string {
 }
 /** Connector URLs retain the request origin fallback for deployments without an explicit Hub URL. */
 export function connectorHubOrigin(env: Pick<Env, "HUB_URL">, request: Request): string {
-  return env.HUB_URL?.trim().replace(/\/+$/u, "") || new URL(request.url).origin;
-}
-export function betterAuthRouteGroup(path: string, status?: number): string {
-  if (path.endsWith("/token")) {
-    return status === 401 || status === 403 || status === 429
-      ? `auth_token_${status}`
-      : "auth_token";
-  }
-  if (path.includes("/sign-in/social")) return "google_sign_in";
-  if (path.includes("/callback/google")) return "google_callback";
-  if (path.includes("/email-otp/")) return "better_auth_email_otp";
-  if (path.includes("/sign-in/email-otp")) return "better_auth_email_otp";
-  if (path.endsWith("/sign-in/email")) return "better_auth_password";
-  if (path.includes("/request-password-reset") || path.includes("/reset-password")) return "better_auth_password_reset";
-  if (path.includes("/get-session")) return "better_auth_get_session";
-  if (path.includes("/jwks")) return "better_auth_jwks";
-  return "better_auth";
-}
-export async function logBetterAuthHandlerMetrics(path: string, response: Response) {
-  const routeGroup = betterAuthRouteGroup(path, response.status);
-  await logAuthMetric({
-    routeGroup,
-    status: response.status,
-    outcome: response.ok || response.status < 400 ? "ok" : "error",
-    authProvider: "better-auth",
-  });
-
-  if (path.includes("/callback/google") && response.status >= 200 && response.status < 400) {
-    await logAuthMetric({
-      routeGroup: "session_created",
-      status: response.status,
-      outcome: "google_callback",
-      authProvider: "better-auth",
-    });
-  }
-
-  if ((path.includes("/sign-in/email-otp") || path.endsWith("/sign-in/email")) && response.ok) {
-    await logAuthMetric({
-      routeGroup: "session_created",
-      status: response.status,
-      outcome: path.endsWith("/sign-in/email") ? "better_auth_password" : "better_auth_email_otp",
-      authProvider: "better-auth",
-    });
-  }
-
-  if (path.endsWith("/token") && response.ok) {
-    await logAuthMetric({
-      routeGroup: "session_reused",
-      status: response.status,
-      outcome: "auth_token",
-      authProvider: "better-auth",
-    });
-  }
+  return trimEnd(env.HUB_URL?.trim() ?? "", "/") || new URL(request.url).origin;
 }
 export function normalizeOrigin(value: string): string | null {
   try {
@@ -224,7 +171,7 @@ export function authCorsOrigin(request: Request, env: Env): string | null {
   }
 
   const allowedOrigins = new Set(
-    [appOrigin(env), hubAuthBaseUrl(env)]
+    [...appOrigins(env), hubAuthBaseUrl(env)]
       .map((value) => normalizeOrigin(value))
       .filter((value): value is string => Boolean(value))
   );
@@ -498,24 +445,6 @@ export function agentRunHttpRouteAllowed(
 ): boolean {
   if (agentBillingReadRoute(request, principal)) return true;
   const path = new URL(request.url).pathname;
-  if (principal.runKind === "channel-about-session") {
-    const history = /^\/api\/channels\/([^/]+)\/(?:history|metadata-history)$/.exec(path);
-    if (request.method === "GET" && history) {
-      try {
-        return decodeURIComponent(history[1]) === principal.channelId;
-      } catch {
-        return false;
-      }
-    }
-    if (request.method === "GET" && path === "/api/channels") return true;
-    const channel = /^\/api\/channels\/([^/]+)$/.exec(path);
-    if (request.method !== "PATCH" || !channel) return false;
-    try {
-      return decodeURIComponent(channel[1]) === principal.channelId;
-    } catch {
-      return false;
-    }
-  }
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/metadata-history$/.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/metadata-restore$/.test(path)) return true;
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/messages\/[^/]+\/decision-evidence$/.test(path)) return true;
@@ -525,19 +454,14 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && path === "/api/invocations/diagnostics") return true;
   // Saves a credential the Run already holds into its Space: the route proves
   // the live Run and refuses an alias the Space already has.
-  if (request.method === "POST" && path === HUB_ROUTES.secrets &&
-      principal.channelWriteAllowed !== false) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.secrets) return true;
   // Its Space's secrets the Run may read now: every `auto` one, and each
   // `ask` one a Space admin approved for it.
-  if (request.method === "POST" && path === HUB_ROUTES.run_secrets &&
-      principal.channelWriteAllowed !== false) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.run_secrets) return true;
   // Ask a Space admin, on a card in its Channel, for a secret it may not read yet.
-  if (request.method === "POST" && path === HUB_ROUTES.secret_requests &&
-      principal.channelWriteAllowed !== false) return true;
-  // Connector actions as MCP tools: each call runs in the Run's own Channel
-  // under that Channel's action policy (docs/design/connector-platform.md §3.5).
-  if (request.method === "POST" && path === HUB_ROUTES.connectors_mcp &&
-      principal.channelWriteAllowed !== false) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.secret_requests) return true;
+  // Its Channel's connected apps and their commands; acting is sending one.
+  if (request.method === "GET" && path === HUB_ROUTES.connector_usage) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   // Channel memory authorizes the exact Run in the repository: read where both
@@ -550,8 +474,11 @@ export function agentRunHttpRouteAllowed(
   // the owner's alone, so the decision route never admits a Run.
   // Pages authorize the exact Run in the repository, with its owner's page
   // access: Agents read, edit, arrange, restore and publish pages as the owner may.
-  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file)?)?$/u.test(path)) return true;
+  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file|\/media\/[^/]+)?)?$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages$/u.test(path)) return true;
+  // The page route authorizes the live Run and edit access before issuing a
+  // co-writer ticket; Runs cannot join as raw document-sync clients.
+  if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/live$/u.test(path)) return true;
   if (["PUT", "PATCH", "DELETE"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:revisions\/[^/]+\/promote|purge)$/u.test(path)) return true;
   if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:publication|competition|summary)$/u.test(path)) return true;
@@ -643,7 +570,7 @@ export function agentRunHttpRouteAllowed(
   ) return true;
   if (request.method !== "POST") return false;
   return (
-    (principal.channelWriteAllowed && /^\/api\/channels\/[^/]+\/messages$/.test(path)) ||
+    /^\/api\/channels\/[^/]+\/messages$/.test(path) ||
     path === RELAY_V2_MESSAGE_ATTACHMENT_PRODUCT_MEDIA_PATH
   );
 }
@@ -1194,17 +1121,6 @@ export function automationEvalInput(
 // readiness. Replica capability path above remains the verified primary path.
 // Relay V2 migration dual-path control plane is permanently retired.
 // All /api/admin/relay-v2/migration/* methods refuse; Room remains for PITR only.
-
-export async function deterministicChannelCreateId(userId: string, requestKey: string): Promise<string> {
-  const digest = await sha256Hex(`create-channel\0${userId}\0${requestKey.slice(0, 120)}`);
-  return [
-    digest.slice(0, 8),
-    digest.slice(8, 12),
-    digest.slice(12, 16),
-    digest.slice(16, 20),
-    digest.slice(20, 32),
-  ].join("-");
-}
 
 // memory-fabric v0 — generic channel annotations
 // The durable authority phase is the only transport switch. Once Authority is

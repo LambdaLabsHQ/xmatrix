@@ -1,3 +1,6 @@
+import { registerGmailNotificationRoutes } from "./index-routes-gmail-notifications";
+import { registerXAccountRoutes } from "./index-routes-x-accounts";
+import { registerConnectorApprovalRoutes } from "./index-routes-connector-approvals";
 import { handleDiscordLifecycleDelivery } from "./connectors/discord-events";
 import { registerTeamsRoutes } from "./index-routes-teams";
 import { handleTeamsAppDelivery } from "./connectors/teams-ingress";
@@ -5,7 +8,7 @@ import { handleDingTalkSuiteCallback } from "./connectors/dingtalk-suite";
 import { handleDingTalkSyncHTTP } from "./connectors/dingtalk-synchttp-ingress";
 import { registerDingTalkRoutes } from "./index-routes-dingtalk";
 import type { Hono } from "hono";
-import { HUB_ROUTES } from "@xmatrix/protocol";
+import { connectorActionPolicy, HUB_ROUTES } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "./app-connectors";
 import { connectorActionPolicyRepository, connectorIngressUrl, connectorCredentialRepository, INGRESS_KEY_FIELD,
   mintConnectorSecret } from "./connectors/credentials";
@@ -21,9 +24,10 @@ import { registerTelegramRoutes } from "./index-routes-telegram";
 import { registerWeComRoutes } from "./index-routes-wecom";
 import { registerFeishuRoutes } from "./index-routes-feishu";
 import { registerGoogleChatRoutes } from "./index-routes-googlechat";
-import { handleConnectorMcp } from "./connectors/mcp";
 import { isPolicyAction } from "./connectors/connector-commands";
+import { connectorActionCatalog } from "./connectors/action-catalog";
 import { connectorProvider } from "./connectors/registry";
+import { connectorUsage } from "./connectors/usage";
 import { connectorHubOrigin, readBoundedRequestBody, requestErrorStatus, requireAuth, requireHumanAuth, requireLiveAgentRun } from "./index-shared";
 import type { AuthUser } from "./auth";
 import type { Env } from "./types";
@@ -43,7 +47,7 @@ function credentialPolicy(providerId: string) {
   if (!manifest || manifest.status !== "available") return undefined;
   const declared = manifest.credentials ?? [];
   const generated = [...declared.filter((field) => field.generated && !field.managed).map((field) => field.id),
-    ...(manifest.events && !["googlechat", "wecom", "teams"].includes(providerId) ? [INGRESS_KEY_FIELD] : [])];
+    ...(manifest.events && manifest.events.ingress !== false && !["googlechat", "wecom", "teams"].includes(providerId) ? [INGRESS_KEY_FIELD] : [])];
   const writable = declared.filter((field) => !field.generated && !field.managed).map((field) => field.id);
   if (generated.length === 0 && writable.length === 0) return undefined;
   return { manifest, generated, writable, allowed: [...writable, ...generated] };
@@ -65,6 +69,9 @@ function errorResponse(error: unknown): Response {
 }
 
 export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
+  registerConnectorApprovalRoutes(app);
+  registerGmailNotificationRoutes(app);
+  registerXAccountRoutes(app);
   registerDingTalkRoutes(app);
   registerTeamsRoutes(app);
   registerGoogleChatRoutes(app);
@@ -103,19 +110,13 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
     }
   });
 
-  app.post(HUB_ROUTES.connectors_mcp, async (c) => {
+  app.get(HUB_ROUTES.connector_usage, async (c) => {
     try {
       const authenticated = await requireAuth(c.req.raw, c.env);
-      if (!authenticated.agentRun) return c.json({ error: "Connector tools are for Agent Runs" }, 403);
+      if (!authenticated.agentRun) return c.json({ error: "Connector usage is for Agent Runs" }, 403);
       const run = await requireLiveAgentRun(c.env, authenticated);
-      const bytes = await readBoundedRequestBody(c.req.raw, MAX_CREDENTIAL_REQUEST_BYTES);
-      if (!bytes) return c.json({ error: "Request is too large" }, 413);
-      let body: unknown;
-      try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch {
-        return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
-      }
-      return await handleConnectorMcp(c.env, { ownerUserId: run.ownerUserId, agentId: run.agentId, channelId: run.channelId,
-        runId: run.runId, spaceId: run.spaceId }, body);
+      const connectors = await connectorUsage(c.env, { ownerUserId: run.ownerUserId, channelId: run.channelId });
+      return c.json({ connectors }, 200, { "cache-control": "private, no-store" });
     } catch (error) {
       return errorResponse(error);
     }
@@ -150,12 +151,15 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
       if (!isPolicyAction(manifest, actionId)) {
         return c.json({ error: `${actionId || "action"} is not a ${manifest.name} write action` }, 400);
       }
-      if (body.mode !== "allow" && body.mode !== "deny" && body.mode !== null) {
-        return c.json({ error: "mode is allow, deny or null" }, 400);
+      if (body.mode !== null && !connectorActionPolicy(body.mode)) {
+        return c.json({ error: "mode is allow, ask, disallow or null" }, 400);
+      }
+      if (body.mode === "ask" && !connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions).get(actionId)?.executor) {
+        return c.json({ error: "This action does not support per-request approval" }, 400);
       }
       const result = await connectorActionPolicyRepository(c.env).set({ requestId: crypto.randomUUID(),
         spaceId: c.req.param("spaceId"), providerId: manifest.id, channelId: String(body.channelId ?? ""), actionId,
-        mode: body.mode, actorUserId: user.id, at: new Date().toISOString() });
+        mode: body.mode === null ? null : connectorActionPolicy(body.mode)!, actorUserId: user.id, at: new Date().toISOString() });
       return c.json(result);
     } catch (error) {
       return errorResponse(error);
@@ -197,7 +201,7 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
         if (Object.keys(fields).length === 0) return c.json({ error: "Nothing to write" }, 400);
         const result = await connectorCredentialRepository(c.env).put({ requestId: crypto.randomUUID(),
           spaceId: c.req.param("spaceId"), providerId: policy.manifest.id, actorUserId: user.id, fields,
-          policy: { allowed: policy.allowed }, at: new Date().toISOString() });
+          policy: { allowed: policy.allowed, generated: policy.generated }, at: new Date().toISOString() });
         return view(await readGenerated(), { credentialFields: result.credentialFields });
       }));
 }

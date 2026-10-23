@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  channelAboutRequestId,
+  channelAboutDue,
   dispatchProductMessageLaunches,
   productMessageControlFinishesBeforeResponse,
   summonFirstMessageHarness,
@@ -46,6 +46,24 @@ test("mixed summon results report only rejected allocations and bound unknown er
   await dispatchProductMessageLaunches(input, { registration: async () => ({ selectionCount: 1,
     prepared: [{ launchId: "successful" }], rejected: [] }) }, async value => success.push(value));
   assert.equal(success.length, 0);
+});
+
+test("a summon only a signed-out program could take names it and carries its sign-in on the notice", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "summon",
+    senderKind: "user", senderId: "human", actorUserId: "human", body: "@auto fix the build" };
+  const signedOut = { harness: "codex", program: "Codex", machineId: "machine:mac", machineName: "mac-mini" };
+  const tooOld = { program: "Cursor CLI", version: "2025.09.12", minimumVersion: "2026.01.01", machineName: "Laptop" };
+  const notices = [];
+  await dispatchProductMessageLaunches(input, { registration: async () => ({ selectionCount: 2, prepared: [], rejected: [
+    { code: "registration_harness_signed_out", sourceMention: "@auto", signedOut },
+    { code: "registration_harness_outdated", sourceMention: "@cursor", tooOld }] }) }, async value => notices.push(value));
+  assert.equal(notices.length, 2);
+  assert.equal(notices[0].body, "Agent launch failed: Codex on mac-mini is not signed in, so it can't take work. " +
+    "Sign it in from here, then the message goes to it. No launch was allocated. (registration_harness_signed_out)");
+  assert.deepEqual(notices[0].metadata, { kind: "xmatrix.harness-signed-out.v1", signedOut, sourceMention: "@auto" });
+  // What is too old is named in the Channel too, not only on the mention's card.
+  assert.match(notices[1].body, /^Agent launch failed: Cursor CLI on Laptop is 2025\.09\.12, too old/);
+  assert.equal(notices[1].metadata, undefined);
 });
 
 test("a mention Jev declined posts no Channel notice; its card says why", async () => {
@@ -138,15 +156,16 @@ test("an Agent's harness shout launches through its derived registration selecti
   assert.deepEqual(calls, ["owner"], "the Agent's owner is the launch actor");
 });
 
-test("Channel About runs after the first message and again on each fifth message", () => {
-  assert.equal(channelAboutRequestId("ch-1", 1), "channel-about:ch-1:0");
-  assert.equal(channelAboutRequestId("ch-1", 2), undefined);
-  assert.equal(channelAboutRequestId("ch-1", 4), undefined);
-  assert.equal(channelAboutRequestId("ch-1", 5), "channel-about:ch-1:1");
-  assert.equal(channelAboutRequestId("ch-1", 9), undefined);
-  assert.equal(channelAboutRequestId("ch-1", 10), "channel-about:ch-1:2");
-  assert.equal(channelAboutRequestId("ch-1", 100), "channel-about:ch-1:20");
-  assert.equal(channelAboutRequestId("ch-1", 101), undefined);
+test("Channel About runs after the first message while unnamed and again on each fifth message", () => {
+  assert.deepEqual(channelAboutDue(1), { unnamedOnly: true });
+  assert.equal(channelAboutDue(2), undefined);
+  assert.equal(channelAboutDue(4), undefined);
+  assert.deepEqual(channelAboutDue(5), { unnamedOnly: false });
+  assert.equal(channelAboutDue(9), undefined);
+  assert.deepEqual(channelAboutDue(10), { unnamedOnly: false });
+  assert.deepEqual(channelAboutDue(100), { unnamedOnly: false });
+  assert.equal(channelAboutDue(101), undefined);
+  assert.equal(channelAboutDue(undefined), undefined);
 });
 
 test("an unconfirmed launch names its diagnostic reference and stable code, never the exception text", async () => {
@@ -215,6 +234,14 @@ test("a mention-less first message asks whether a new conversation starts an Age
   assert.equal(productMessageControlFinishesBeforeResponse("fix the flaky login test"), false);
 });
 
+// Durable admission must complete before acknowledging a command; the transfer
+// is owned by the upload executor rather than the HTTP request.
+test("X video admission is acknowledged before response while reads remain asynchronous", () => {
+  assert.equal(productMessageControlFinishesBeforeResponse("@x:upload_video:101 message/attachment"), true);
+  assert.equal(productMessageControlFinishesBeforeResponse("@x:timeline:101"), false);
+  assert.equal(productMessageControlFinishesBeforeResponse("`@x:upload_video:101 message/attachment`"), false);
+});
+
 
 test("explicit controls and a nested handoff successor cannot allocate a second first-message Run", async () => {
   for (const body of ["@codex /model test-model", "@helper:1 /effort high", "/stop all", "@codex:3:handoff:@auto", "@codex:3:reborn"]) {
@@ -231,9 +258,11 @@ test("explicit controls and a nested handoff successor cannot allocate a second 
 test("a harness decided for a first message is summoned by an ordinary @ reply through the same pipeline", async () => {
   const appended = [];
   const committed = [];
+  const summoned = [];
   const dependencies = {
     append: async (_env, channelId, command) => { appended.push({ channelId, command }); return new Response("{}"); },
     postCommit: async input => { committed.push(input); },
+    summoned: async (_env, where) => { summoned.push({ ...where, afterDispatch: committed.length }); },
   };
   const input = { env: {}, channelId: "channel", messageId: "first", actorUserId: "author", harness: "codex" };
   await summonFirstMessageHarness(input, dependencies);
@@ -245,12 +274,17 @@ test("a harness decided for a first message is summoned by an ordinary @ reply t
   assert.deepEqual(command.principal, { kind: "user", id: "author" }, "authorized as the first message's author");
   assert.deepEqual(committed.map(value => [value.messageId, value.body, value.senderKind, value.senderId, value.actorUserId]),
     [["xmatrix-summon:first", "@codex launch:force", "system", "xmatrix", "author"]]);
+  // Marked only once its dispatch returned; until then its coordinator retries it.
+  assert.deepEqual(summoned, [{ channelId: "channel", messageId: "first", afterDispatch: 1 }]);
   // A retry reuses the same message, so it appends and launches nothing new.
   await summonFirstMessageHarness(input, dependencies);
   assert.equal(appended[1].command.messageId, command.messageId);
   await assert.rejects(summonFirstMessageHarness(input, { ...dependencies,
     append: async () => new Response("{}", { status: 503 }) }), /append failed \(503\)/u);
   assert.equal(committed.length, 2, "nothing is interpreted when the append failed");
+  await assert.rejects(summonFirstMessageHarness(input, { ...dependencies,
+    postCommit: async () => { throw new AgentLaunchHandoverUnavailable(503); } }), AgentLaunchHandoverUnavailable);
+  assert.equal(summoned.length, 2, "a summon whose dispatch failed is not marked, so it stays due");
 });
 
 test("a message's side interpretation runs in the background, never holding its response", async () => {

@@ -84,8 +84,6 @@ export const MESSAGE_JUMP_SETTLE_FRAMES = 12;
 
 export const EVENT_LIMIT = 200;
 
-export const XMATRIX_SYSTEM_AVATAR_URL = "/brand/xmatrix-management-icon.png";
-
 export const TRACE_EVENT_LIMIT = 500;
 
 /**

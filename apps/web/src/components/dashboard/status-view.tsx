@@ -3,12 +3,10 @@
 import { ChevronRight } from "lucide-react";
 import { useMemo } from "react";
 import {
-  agentPresetAvatarUrl,
-  normalizeAgentPresetRuntime,
   type AgentRegistrationSummary,
   type ObservabilityEvent,
   type SerializedAutomation,
-  type SerializedChannel,
+  type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
@@ -20,7 +18,7 @@ import { AgentListGroups, agentListGroups } from "./agent-list-groups";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
 import { ListSkeleton } from "./content-skeleton";
-import { IdentityAvatar } from "./identity-avatar";
+import { Face } from "./face";
 import { MachineGlyph } from "./machine-glyph";
 import { MachineLoadGlance } from "./machine-load-panel";
 import { MachineListRow, machinePlatform, machineStateLine, machinesWithHostsFirst } from "./machine-list-row";
@@ -76,7 +74,7 @@ export function StatusView({
   token: string | undefined;
   currentUserId: string;
   machines: MachineSummary[];
-  channels: readonly SerializedChannel[];
+  channels: readonly ChannelSnapshot[];
   events: ObservabilityEvent[];
   automations: SerializedAutomation[];
   executionEnabled: boolean | null;
@@ -176,9 +174,8 @@ export function StatusView({
                   <button type="button" onClick={onOpenAgents} data-testid="status-runtime"
                     title={runtimeLine(runtime)} aria-label={`${runtime.harness}: ${runtime.working} working, ${runtimeLine(runtime)}`}
                     className={cn("flex items-center gap-2", runtime.working === 0 && "opacity-50")}>
-                    <IdentityAvatar kind="agent" label={runtime.harness}
-                      imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(runtime.harness))}
-                      initials={runtime.harness.slice(0, 2)} size="sm" showKindBadge={false} className="shrink-0" />
+                    <Face of={{ kind: "agent", name: runtime.harness, harness: runtime.harness }} size="sm"
+                      showKindBadge={false} className="shrink-0" />
                     <span className="text-xl font-black tabular-nums">{runtime.working}</span>
                   </button>
                 </li>
@@ -302,9 +299,7 @@ function RuntimeStack({ counts }: { counts: RuntimeCount[] }) {
       aria-label={counts.map((count) => `${count.harness} ${count.working}`).join(", ")} role="img">
       {shown.map((count) => (
         <span key={count.harness} className="flex items-center gap-1" aria-hidden="true">
-          <IdentityAvatar kind="agent" label={count.harness}
-            imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(count.harness))}
-            initials={count.harness.slice(0, 2)} size="xs" showKindBadge={false} />
+          <Face of={{ kind: "agent", name: count.harness, harness: count.harness }} size="xs" showKindBadge={false} />
           <span className="text-sm font-semibold tabular-nums">{count.working}</span>
         </span>
       ))}

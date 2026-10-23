@@ -1,3 +1,4 @@
+import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, installWorkspaceStubs } from "./workspace-fixtures";
 
@@ -173,7 +174,7 @@ test("the details rail tags where an Agent works: repository when there is one, 
   await installWorkspaceStubs(page, {
     spaces: [{ ...E2E_SPACE, members: [...E2E_SPACE.members, { userId: "owner-0", name: "Legend Wang",
       email: "owner-0@example.test", role: "member", joinedAt: E2E_NOW }] }],
-    channels: [{ ...E2E_CHANNEL, memberPresence: { [profile.id]: { kind: "agent", status: "busy",
+    channels: [{ ...E2E_CHANNEL, memberPresence: { [profile.id]: { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", status: "busy",
       label: "claude", instances: [{ ...instance("1", repoCwd), repository: "LambdaLabsHQ/xmatrix" },
         instance("2", plainCwd)] } } }],
     // Managed repository checkouts have no registered Workspace row.

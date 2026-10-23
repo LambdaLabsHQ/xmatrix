@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import Markdown, { defaultUrlTransform } from "react-markdown";
-import { gitHubFileUrl, parseGitHubFileReference } from "@xmatrix/protocol";
+import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
+import { gitHubFileUrl, pageMediaFile, parseGitHubFileReference, parsePageMedia, withRoute } from "@xmatrix/protocol";
+import { getXMatrixHubUrl } from "@/lib/xmatrix";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 import { loadPublicPage as load } from "@/lib/pages/public-page";
 import { PublicPageLive } from "./public-page-live";
@@ -19,11 +20,29 @@ function summary(body: string): string {
   return (paragraph ?? "").replace(/[*_`>[\]]/gu, "").slice(0, 200);
 }
 
-/** A file the page embeds links to GitHub here: a public reader is never shown a repository's contents. */
-function publicPageUrl(url: string): string {
-  const reference = parseGitHubFileReference(url);
-  return reference ? gitHubFileUrl(reference) : defaultUrlTransform(url);
+/**
+ * A file the page embeds links to GitHub here: a public reader is never shown a repository's contents.
+ * An image or video pasted into the page is read from the Hub as the public page's own.
+ */
+function publicPageUrl(spaceId: string, pageId: string) {
+  return (url: string): string => {
+    const media = parsePageMedia(url);
+    if (media) {
+      return withRoute(getXMatrixHubUrl(), `/api/public/spaces/${encodeURIComponent(spaceId)}/pages/${
+        encodeURIComponent(pageId)}/media/${media.file}`);
+    }
+    const reference = parseGitHubFileReference(url);
+    return reference ? gitHubFileUrl(reference) : defaultUrlTransform(url);
+  };
 }
+
+/** A pasted video plays where the page shows it. */
+const publicPageComponents: Components = {
+  img: ({ src, alt, title }) => typeof src === "string" && pageMediaFile(src.slice(src.lastIndexOf("/") + 1))?.video
+    ? <video src={src} title={alt} controls preload="metadata" playsInline className="max-w-full rounded-md" />
+    // eslint-disable-next-line @next/next/no-img-element -- markdown images are arbitrary, not next/image assets.
+    : <img src={src} alt={alt ?? ""} title={title} />,
+};
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { spaceId, pageId } = await params;
@@ -43,7 +62,8 @@ export default async function PublicPageView({ params }: Params) {
     <main className="mx-auto min-h-screen max-w-3xl px-6 py-10" data-testid="public-page">
       <p className="mb-6 text-sm text-muted-foreground">{page.spaceName}</p>
       <article className="prose max-w-none">
-        <Markdown remarkPlugins={markdownRemarkPlugins} urlTransform={publicPageUrl}>{page.body}</Markdown>
+        <Markdown remarkPlugins={markdownRemarkPlugins} urlTransform={publicPageUrl(spaceId, pageId)}
+          components={publicPageComponents}>{page.body}</Markdown>
       </article>
       {page.children.length > 0 && (
         <nav className="mt-10 border-t pt-4" aria-label="Pages below">

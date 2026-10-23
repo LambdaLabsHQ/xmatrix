@@ -8,11 +8,13 @@ description: How xMatrix release versions work now. Use when a user asks to bump
 ## Overview
 
 **Releasing does not need a version bump on `main`.** A Production Release
-Intent names only the components. The release train chooses the next patch above
-every published release (or `main`'s own version when that is higher), stamps
-it onto the frozen `main` SHA as one release commit (`scripts/release-commit.mjs`),
-and tests, tags and ships that commit. `main`'s `version.json` may therefore lag the newest
-`xmatrix-v*` tag; that is expected. To release, start one intent naming the
+Intent names only the components. A beta train versions its release as a beta of
+the patch after the last stable (`X.Y.Z-beta.N`, or a higher `X.Y.Z` that `main`
+already carries), stamps it onto the frozen `main` SHA as one release commit
+(`scripts/release-commit.mjs`), and tests, tags and ships that commit. A stable
+`X.Y.Z` is the stable release Agent's: it releases a verified beta with a
+patch, minor or major bump. `main`'s `version.json` may therefore lag the newest
+`xmatrix-v*` tag; that is expected. To release a change, start one beta intent naming the
 components: `gh workflow run production-release-intent.yml --ref main -f release_components=hub,web,cli`.
 
 Use the workflow below only when a branch genuinely needs its own manifests to
@@ -65,4 +67,4 @@ Do not bump only `Cargo.toml`, a package manifest, an app project file, or a Git
 
 ## Release Behavior
 
-The release workflows read the version from the checked-out release commit, which the release train stamped with the version it chose (the next patch above every published release, or a higher version already on `main`). To release a minor or major bump, merge that version to `main` with this workflow; the next train uses it. If installed clients still report an old version after a release, check which `xmatrix-v*` tag the release used and whether that component was in the train's scope (the union of its intents' `release_components`).
+The release workflows read the version from the checked-out release commit, which the release train stamped with the version it chose (a beta of the next patch, or of a higher version already on `main`; a stable is the last stable raised by the bump its intent names). To plan a minor or major line for the betas ahead, merge that version to `main` with this workflow; the next beta train uses it. If installed clients still report an old version after a release, check which `xmatrix-v*` tag the release used and whether that component was in the train's scope (the union of its intents' `release_components`).

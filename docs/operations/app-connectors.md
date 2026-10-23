@@ -4,6 +4,20 @@ App connectors route app context into xMatrix channels through typed provider ma
 
 ## Current Providers
 
+- X connects company and personal accounts through independent OAuth 2.0
+  authorizations to one company application. Apps lists the connected handles;
+  each grant is usable only by its connecting member and their Agents.
+  Publishing selects an account explicitly and defaults to per-request
+  approval; read results are visible to the calling Channel. Company app setup,
+  bounded refresh recovery and separate native acceptance of both accounts are
+  documented in [X connector](../connectors/x.md). Quote posting requires an
+  Enterprise API plan; self-serve access is insufficient.
+
+- Google Ads provides selected-account performance queries, dry-run validation,
+  atomic advertising configuration and policy-controlled campaign activation/
+  pausing. Cloud-project API access, separate OAuth, integer budgets and actual
+  stable acceptance are documented in [Google Ads connector](../connectors/google-ads.md).
+
 - Google Cloud provides operations context, direct project gross-cost reports, billing-export cost/credit analysis, public SKU descriptions, daily or credential/method API request counts, secret-free key metadata and historical audit-principal summaries
   and Monitoring incident routing. A supported API can be enabled through a
   separate policy-controlled action; OAuth does not override Google IAM.
@@ -55,30 +69,58 @@ provider's webhook at the ingress URL. Then subscribe a channel with
 ### Cloudflare
 
 Cloudflare connects with OAuth (`CONNECTOR_CLOUDFLARE_CLIENT_ID` /
-`CONNECTOR_CLOUDFLARE_CLIENT_SECRET`, a Cloudflare OAuth client with the
-scopes in the manifest) or with an account API token that has Notifications
-Edit, Workers Observability Write and Workers Scripts Edit. When the login
-reaches more than one account, it still connects; set Account ID on the
-connection before subscribing or running actions.
+`CONNECTOR_CLOUDFLARE_CLIENT_SECRET`, a Cloudflare OAuth client whose allowed
+scopes include every scope in the manifest, `d1.read` among them) or with an
+account API token that has Notifications Edit, Workers Observability Write,
+Workers Scripts Edit and D1 Read.
+
+One connection holds any number of Cloudflare logins, bounded only by the
+256 KiB the platform stores for its `logins` credential. Every Connect adds a login
+with its own rotating grant; a login that reaches exactly the accounts of an
+existing one replaces it. To add another Cloudflare user, that user signs out
+of Cloudflare first or finishes the sign-in in a private window. Apps →
+Cloudflare → Cloudflare logins lists each login's accounts and who connected
+it, and removes one. Removing a login forgets its grant in xMatrix; the
+Cloudflare user revokes the application under My Profile → Access Management.
+A connection made before logins existed keeps its single grant until the next
+Connect, which turns it into the first login.
+
+Default account ID is the account a command or a bare alert type uses when it
+names none. The first login sets it when that login reaches one account;
+adding a login never changes it. Every command may name another account by
+its id (`<account id>/<worker>`); `@cloudflare:list_accounts:*` lists the
+accounts the logins reach. Which login serves an account is read from
+Cloudflare on every call, and a refused login does not hide the accounts the
+others reach.
 
 Nothing is configured in the Cloudflare dashboard. The Space's subscriptions
 are the authority for which notifications reach xMatrix:
 
-- `@cloudflare:subscribe:<alert type>` checks the type against the account's
-  available alerts, creates one webhook destination named `xMatrix · <Space id>`
-  for the connection's ingress URL (once), and creates a notification policy
-  named `xMatrix · <alert type> · <Space id>` that sends to it. Names carry
+- `@cloudflare:subscribe:<alert type>` (default account) or
+  `@cloudflare:subscribe:<account id>/<alert type>` (any other account) checks
+  the type against that account's available alerts, creates one webhook
+  destination named `xMatrix · <Space id>` for the connection's ingress URL
+  (once per account), and creates a notification policy named
+  `xMatrix · <alert type> · <Space id>` that sends to it. Names carry
   the Space, so Spaces sharing an account never touch each other's policies. A type that needs filters is
-  refused with Cloudflare's reason.
-- When no Channel in the Space subscribes to the type any more, the Hub
+  refused with Cloudflare's reason. Naming the default account explicitly is
+  refused, because its alerts arrive under the bare alert type.
+- When no Channel in the Space subscribes to the source any more, the Hub
   deletes that Space's policy. Policies with other names are never touched.
-- `*` routes every notification the account already sends to the
+- `*` routes every notification the accounts already send to the
   destination and configures nothing; the destination's test message reaches
   only `*`.
 
 Each delivery is `fired` or `resolved` (`alert_event`), deduplicated by
 `alert_correlation_id` and edge, so an Automation can use
-`--on cloudflare:fired:workers_observability_real_time_issue`.
+`--on cloudflare:fired:workers_observability_real_time_issue`. An alert from
+an account other than the default arrives as `<account id>/<alert type>`.
+
+D1 reads run one `SELECT` (or `WITH`, `VALUES`, `EXPLAIN`) per command and
+show at most 50 rows in the Channel. The `d1.read` grant is what keeps them
+read-only; the Hub also refuses a second statement or any statement that
+changes data before calling Cloudflare. Grants from before D1 was offered are
+told to reconnect.
 
 ### App Store Connect
 
@@ -109,8 +151,20 @@ Apple's event id, so an Automation can use
 `--on appstoreconnect:version:com.example.app`.
 
 Apple gives no API for creating the app record, answering App Privacy,
-accepting agreements, or reading and replying to App Review's messages; those
-stay in App Store Connect, as does the App Review sign-in password. `read_app`
+accepting agreements, or replying to App Review. The first two, and reading
+App Review's messages, go through the App Store Connect website with the
+optional Web session credential (`create_app`, `set_privacy` and `privacy`,
+`review_messages`); accepting agreements and replying to App Review stay in
+App Store Connect, as does the App Review sign-in password. The Web session is
+saved like this. In the xMatrix desktop app, Sign in
+to App Store Connect under Credentials opens Apple's own sign-in page in a
+window of its own; once signed in, the app saves the session and closes the
+window. Elsewhere, sign in at appstoreconnect.apple.com, copy the Cookie header
+of any request in the browser's developer tools, and save it. Apple keeps it
+from a day to a month, less when it is used from another region than it was
+signed in from; `web_session` checks it, and `review_messages` says when it has
+lapsed. Renewing from the desktop app is usually one click, since its window
+stays signed in longer than the copy the Hub holds. `read_app`
 shows what a new app still lacks. A first version's App Review contact is set
 with `set_review_contact`; later versions inherit it through `create_version`.
 
@@ -144,19 +198,21 @@ section, and none is ever shown again.
 | Bitbucket Cloud | `read_pull_request:<workspace/repo!5>` (read), `comment:<workspace/repo!5> <text>` |
 | Jira | `read_issue:<ENG-9>` (read), `comment:<ENG-9>`, `transition:<ENG-9> <status>` |
 | Vercel | `redeploy:<deployment id>` |
-| Cloudflare | `query_logs:<worker> [minutes] [error\|warn\|log]` (read), `list_deployments:<worker>` (read), `rollback:<worker> [version id] [reason]` |
-| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `read_app:<bundle id>` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]`. Signing: `signing:<bundle id>`, `read_certificate:<id>`, `read_profile:<id>` (reads), `register_bundle_id:<bundle id> <name> [platform=…]`, `enable_capability:<bundle id> <CAPABILITY>`, `create_certificate:<type> <signing request>`, `create_profile:<bundle id> <certificate id> [store=…]`. TestFlight: `testflight:<bundle id>`, `feedback:<bundle id> [crashes]`, `crash_log:<feedback id>` (reads), `add_to_group:<bundle id> <version> <build number> <group>`, `submit_beta_review:<bundle id> <version> <build number>`, `set_test_notes:<bundle id> <version> <build number> <locale> <notes>` |
+| Cloudflare | `list_accounts:*`, `query_logs:[<account id>/]<worker> [minutes] [error\|warn\|log]`, `list_deployments:[<account id>/]<worker>`, `list_databases:<account id>\|*`, `query_database:[<account id>/]<database> <SELECT …>` (reads), `rollback:[<account id>/]<worker> [version id] [reason]` |
+| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `read_app:<bundle id>`, `review_messages:<bundle id>`, `web_session:*` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `release:<bundle id> <version> [phased]`, `pause_phased_release:<bundle id> <version>`, `resume_phased_release:<bundle id> <version>`, `complete_phased_release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]`. Signing: `signing:<bundle id>`, `read_certificate:<id>`, `read_profile:<id>` (reads), `register_bundle_id:<bundle id> <name> [platform=…]`, `enable_capability:<bundle id> <CAPABILITY>`, `create_certificate:<type> <signing request>`, `create_profile:<bundle id> <certificate id> [store=…]`. TestFlight: `testflight:<bundle id>`, `feedback:<bundle id> [crashes]`, `crash_log:<feedback id>` (reads), `add_to_group:<bundle id> <version> <build number> <group>`, `submit_beta_review:<bundle id> <version> <build number>`, `set_test_notes:<bundle id> <version> <build number> <locale> <notes>` |
 | Feishu | `send:<chat id>` |
 | Telegram | `send:<chat id>` |
 | Discord | `post:<channel id>` (mentions never ping) |
 | Notion | `append:<page id>`, `create_page:<parent page id>` |
 | Google Search Console | Property `list_sites/get_site/add_site/delete_site`; sitemap `list_sitemaps/get_sitemap/submit_sitemap/delete_sitemap`; `query` (concise options or bounded API JSON); `inspect_url`; ownership `get_verification_token/verify_site/list_verifications/get_verification/update_verification_owners/delete_verification`. See the onboarding procedure below. |
 | Google Analytics | `list_properties:*`, `report:<property id> [by=…] [days=…] [limit=…] [channel=…]` (reads) |
+| Google AdSense | `list_accounts:*`, `list_sites:<pub-…>`, `list_adunits:<pub-…>`, `report:<pub-…> [by=…] [days=…] [limit=…] [domain=…] [include_today]`, `list_payments:<pub-…>`, `list_alerts:<pub-…>`, `list_policy_issues:<pub-…>` (reads). See the [AdSense contract](../connectors/google-adsense.md). |
+| Google Ads | `list_accounts:*`, `read_account:<customer ID>`, `query:<customer ID> <SELECT GAQL>`, `validate_mutations:<customer ID> {json}` (reads), `mutate:<customer ID> {json}`, `set_campaign_status:<customer ID>/<campaign ID> {json}` (writes, ask by default). See the [Google Ads contract](../connectors/google-ads.md). |
 | Bing Webmaster Tools | `list_sites:*`, `traffic:<site>`, `queries:<site>`, `pages:<site>`, `crawl_stats:<site>` (reads), `submit_urls:<site> <url …>`, `submit_sitemap:<site> <sitemap url>`, `indexnow:<site> <url …>` |
 | Google Business Profile | `list_accounts:*`, `list_locations:<account>`, `performance:<location> [days=…]`, `reviews:<location>` (reads), `reply_review:<review> <text>` |
 | PageSpeed Insights | `audit:<page url> [strategy=mobile\|desktop]`, `field:<page url or origin> [form=phone\|desktop\|all] [scope=page\|origin]` (reads; Google API key) |
 | Yandex Webmaster | `list_hosts:*`, `summary:<host id>`, `queries:<host id>` (reads), `recrawl:<host id> <page url>` |
-| Gmail (via Composio) | `search:*\|<mailbox> [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub); `send:<address> [from:<mailbox>] <subject>\n<body>`, `reply:<message id> <body>` (off until a Space admin allows them in the channel). Each Connect adds a mailbox; each mailbox is used only by its owner, a member or an Agent, set in Apps → Gmail |
+| Gmail (via Composio) | `search:*\|<mailbox> [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub); `send:<address> [from:<mailbox>] <subject>\n<body>`, `reply:<message id> <body>` (ask for a Space admin’s approval each time by default). Each Connect adds a mailbox; mailboxes are not counted (the `mailboxes` field is stored up to 256 KiB). Each mailbox is used only by its owner, a member or an Agent, set in Apps → Gmail |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 
 xmatrix.sh publishes its own IndexNow key at `https://xmatrix.sh/71d38a28828cfa8a824127e9320a4668.txt` (`apps/web/public`), so the company's `bingwebmaster` connection can push xmatrix.sh URLs with that key. The key is public by design; a new key needs a new file.
@@ -238,29 +294,107 @@ of Gmail, Slack or any other third-party provider.
 Policy is stored in `data.app_connector_action_policies` and read at execution
 time:
 
-- **`deny`.** A Space admin's `@<provider>:policy:<action> deny` blocks the
-  action for everyone in that channel.
-- **`allow`.** A Space admin's `@<provider>:policy:<action> allow` turns on an
-  action that is off by default.
-- **Default.** Every other action, read or write, runs, whether a Human or an
-  Agent sent it. The provider's own permissions still apply. Gmail's `send`
-  and `reply` are the exception: they are off in every channel until allowed,
-  because the Gmail grant covers the whole mailbox.
+- **`allow`.** Execute immediately within the provider's existing permissions.
+- **`ask`.** Create a 24-hour, encrypted, immutable request. A current Human
+  Space admin approves or denies it in the Channel's Pending approvals. Each
+  approval covers one request only; duplicate clicks cannot dispatch twice.
+- **`disallow`.** Block the action. Legacy `deny` remains the same restrictive alias.
+- **Default.** Gmail send/reply and Google Ads mutate/set_campaign_status use
+  ask; other actions retain allow. Existing
+  explicit overrides keep their meaning. GitHub's specialized dispatcher does
+  not support ask and rejects it.
 
-Every attempt writes an execution record and a receipt in the channel.
+Ask stages before the normal execution record. Approved dispatch rechecks
+Channel access, policy, account generation, credentials and mailbox ownership.
+It freezes the actual Gmail reply recipient before approval and never fetches
+new headers to redirect the approved email. Expired or changed requests must
+be recreated. Consumed or uncertain writes are not automatically retried.
+The approval payload is cleared after settlement; ordinary receipts carry the
+request reference rather than the email body. See connector-platform.md §3.5
+for persistence, additive rollout and API contracts.
+
 Persisted completion summaries are limited to 1,000 UTF-8 bytes, and failure or
 blocked reasons to 500 UTF-8 bytes. The Hub truncates these excerpts at complete
-Unicode code points; the action's full bounded context remains in the tool
-result and Channel receipt. Multibyte issue titles and stack metadata therefore
+Unicode code points; the action's full bounded context remains in the Channel
+receipt. Multibyte issue titles and stack metadata therefore
 do not prevent an otherwise successful read from finalizing.
 
-**Agents.**
-- An Agent can post the command itself with `xmatrix send`.
-- An Agent's harness also gets the actions as MCP tools automatically.
-  - Claude Code gets them through `--mcp-config`, Codex through `-c mcp_servers.xmatrix_connectors.*`, and ACP harnesses through the session's `mcpServers`.
-  - Each one runs `xmatrix connector mcp`, a stdio proxy to `POST /api/connectors/mcp` that uses the Run's current credential.
-  - The tools are named `<provider>__<action>`. `tools/list` offers only the providers the Space has connected. Each call runs as the Agent in its Run's channel under the same policy.
-  - Set `XMATRIX_CONNECTOR_MCP=0` on a Run to leave them out.
+`@sentry:list_issues:<project slug or *> <Sentry search>` lists up to 25 of the
+most frequent issues seen in the last 14 days that match one line of Sentry
+search, such as everything first seen in a release
+(`firstRelease:xmatrix-v1.2.3`, the tag every Hub and Web event carries) or
+since an hour ago (`firstSeen:-24h`). Each line keeps Sentry's own issue fields
+(short id, title, level, status, event and user counts, first and last seen),
+never event payloads, users or request data.
+
+Sentry issue reads include the latest event's terminal twenty exception frames
+and up to eight earlier `src/` callers outside `node_modules`, in stack order.
+This keeps application entry points visible when dependency frames fill the
+tail. When source maps replaced the generated locations, up to eight terminal
+generated asset paths and positions are included separately, without URL
+credentials, queries, fragments or inline script schemes. Issue occurrence
+count and first/last-seen UTC times support recurrence checks; these are issue
+totals, not release-specific counts. Only frame names, paths and positions are returned; local variables,
+source context, requests and breadcrumbs remain excluded. The full receipt
+still has the shared 12,000-character context limit. When the Worker reporter
+could only retain a capture stack for a stackless platform Error, its fixed
+mechanism label is shown as `stack=capture boundary (origin unavailable)`;
+arbitrary mechanism data remains excluded. See [runtime delivery errors](runtime-delivery-errors.md).
+
+Scheduled Harness release watch failures retain the original rejection and
+distinguish the Runtime fetch, response body and response contract phases.
+`read_issue` exposes only their bounded duration, HTTP status (or unavailable)
+and the platform's retryable/overloaded flags. A lost response never replays
+the entire pass: notices may already have committed, so the next scheduled
+pass reads current targets again. The target lookup is a `single_read`, whose
+lost SQL response can be retried once on a fresh checkout independently of
+notice issuance. Request, registry, daemon and response content stay private.
+
+Gmail search/read answer in the Channel receipt that replies to the command,
+like every other action, so everyone who can read the Channel reads the mail.
+Read mail in a Channel only the people who may see it are in. Search is
+`@gmail:search:* <Gmail query>` or `@gmail:search:<connected mailbox> <Gmail query>`.
+
+Gmail calls go through Composio on the shared project key, which the operator
+pays for. Each Composio call (proxied Gmail reads and sends, Connect links,
+account lookups and deletions) is metered to its Space and Hub action, without
+mail, addresses or account ids; see [usage cost metering](usage-cost-metering.md).
+
+### QA login codes
+
+Do not search for or read login codes with Gmail actions when the QA contract
+requires credentials to stay out of messages and logs. Search already returns
+subjects/snippets, and read returns the body/links. Both enter the Channel
+receipt and a bounded execution-history excerpt. A closed Channel or saving
+the result as a secret afterwards does not avoid this persistence.
+
+There is currently no connector action for a Gmail-to-Space-secret transfer
+without publishing mail content. Do not restore connector MCP, call the provider
+through a hidden side path, or substitute a runtime Gmail plugin. Mark fresh
+email delivery and automatic login unverified when this is the required path;
+historical pre-channel-only coverage does not verify the current behavior.
+
+The supported manual secret path, when explicitly authorized, is:
+
+1. Request a fresh alias with `xmatrix request secret-add <fresh-alias> --env QA_LOGIN_CODE --reason "QA login"`.
+2. A Space admin enters the authorized value on that card, never in chat. The
+   Human-only fulfill route saves it and grants the requesting live Run access.
+3. Use `xmatrix secret exec --secret <fresh-alias>=QA_LOGIN_CODE -- <login-command>`.
+   The child consumes the environment variable without printing it, putting it
+   in arguments, or capturing it in traces, screenshots, HTML or request logs.
+
+This verifies manual secret handling only, not connector delivery or automatic
+mail-code retrieval. Do not create a real code request merely to validate docs.
+An Agent's `secret set --value-stdin` accepts an already-held, authorized local
+value; it is not an email reader. It cannot overwrite an existing alias or
+choose broader secret access. Existing-secret replacement/deletion remains a
+Space admin action; use a fresh alias for a new one-time-code attempt.
+
+### Agent commands
+- An Agent acts only by posting the command with `xmatrix send`, so every call is a
+  message the Channel sees, parsed like anyone's, and its receipt replies to it.
+- The launch prompt names the Space's connected apps. `xmatrix connector list`
+  prints each one's commands for the Run's Channel.
 
 **Automations.** `--on <connector>:<event|*>[:<source>]` fires a page
 Automation on a connector event in the same Space, for example
@@ -332,6 +466,13 @@ Register each provider's OAuth app with the redirect URI
   workspace bindings and application signing secrets; Vercel uses the Integration
   binding and Client Secret described above. Other inbound setups use their
   per-connection ingress URL and the provider's signing secret.
+- A Slack workspace connects to one Space; Connect from another Space is
+  refused, even after a disconnect or the Space's deletion, because the bot
+  stays in the channels it joined. To move a workspace, a Slack workspace admin
+  removes the xMatrix app from it, which retires it everywhere. The Slack app's Event Subscriptions
+  must include the `app_uninstalled` and `tokens_revoked` events for that.
+  Linear events reach a Space only when its connecting user can read the issue,
+  comment or project they are about.
 - A pasted token keeps working alongside OAuth. Actions prefer the OAuth token
   when one is stored.
 
@@ -453,9 +594,9 @@ deployment profile (`deploy/profiles/production.json` → `hub.vars`) and ships
 with each release. Connect answers 503 and names every `GITHUB_APP_*` value a
 deployment left unset; it does not look any of them up at runtime.
 
-The page claim check (`xmatrix/claim`, see
+Pull requests that name page blocks (pre-review and owed updates, see
 [`pages-and-conversations.md`](../design/pages-and-conversations.md) §5.6)
-needs these GitHub App settings:
+need these GitHub App settings:
 - the **Checks: write** and **Pull requests: read** repository permissions
   (pre-review reads the change and posts `xmatrix/pre-review`);
 - the **Email addresses: read** account permission;
@@ -470,8 +611,8 @@ Also configure `GITHUB_APP_SLUG` as the public GitHub App slug for the install U
 
 In the xMatrix Apps view, configure GitHub for each space that should use it:
 
-- Click `Connect` on the GitHub connector. It authorizes on GitHub with the App's own OAuth client and its registered callback (a state prefixed `xmgh.` is the connector's; any other belongs to account linking), lists the installations of the App that person reaches, and returns them as a signed grant valid for 30 minutes for that Space and person. Every GitHub connect outcome returns through the Web's `/connect/github` page, which keeps the outcome and grant for the tab and then opens the Space's Apps view, so the app's address canonicalization never drops them. The user token is used only in that callback and never stored, and nothing depends on the profile's GitHub link. A freshly installed or updated installation returns through `/api/apps/github/setup`, which sends the installer through the same authorization and links it only when they reach it.
-- The GitHub callback returns directly to the Space `Apps` view. If organization-owner approval is required, the view reports the installation as pending instead of silently returning without a connection.
+- Click `Connect` on the GitHub connector. It authorizes on GitHub with the App's own OAuth client and its registered callback (a state prefixed `xmgh.` is the connector's; any other belongs to account linking), lists the installations of the App that person administers (their own account's, or an organization's whose every covered repository they administer; reaching one repository is not enough), and returns them as a signed grant valid for 30 minutes for that Space and person. Every GitHub connect outcome returns through the Web's `/connect/github` page, which keeps the outcome and grant for the tab and then opens the Space's Apps view, so the app's address canonicalization never drops them. The anonymous callback only hands state/code to `/connect/oauth`; the signed-in initiating Human completes it through `POST /api/connectors/oauth/complete` after a current Space-admin check. The user token is used only in that authenticated completion and never stored, and nothing depends on the profile's GitHub link. Installation-selection grants issued before the administration check must be refreshed with Connect (`github-grant:v4`). A freshly installed or updated installation returns through `/api/apps/github/setup`, which sends the installer through the same authorization and links it only when they administer it. Linking records the GitHub user who handed the installation over; a repository is used through it (tokens, actions, events, Automation triggers, claim checks) only while that user administers the repository. An installation linked before this record existed shows as paused in `GitHub accounts` until an administrator of it runs `Find my GitHub accounts` in the Space.
+- After authenticated completion, the GitHub outcome returns through `/connect/github` to the Space `Apps` view. If organization-owner approval is required, the view reports the installation as pending instead of silently returning without a connection.
 - `Disconnect` disables the Space connection and forgets its linked installations; xMatrix routing configuration and scopes are kept. `Connect` then authorizes on GitHub again, and the installation it returns replaces the old ones. Only a connection in error recovers by a check of its retained installations.
 - After connecting, click `Configure` to select the default agent that should be added to issue work channels.
 - The first successful `@github:subscribe` in a channel creates that channel's GitHub binding. `@github:unsubscribe` removes selected source features and removes the binding when the final subscription is gone. Channel details displays this derived subscription state and opens Composer `@` completion; Space-wide connection management remains in `Apps`.
@@ -507,8 +648,8 @@ to the Space's GitHub App installation. Repository names are loaded only for the
 selected owner and only when the connector is enabled for the current channel.
 
 Repository subscriptions support `issues`, `pulls`, `comments`, `reviews`,
-`commits`, `checks`, `status`, and `releases`. The `all` shorthand expands to
-all eight features for both
+`commits`, `checks`, `status`, `releases`, and `code-scanning`. The `all` shorthand expands to
+all features for both
 `subscribe` and `unsubscribe`; use the individual names when only some event
 types are wanted.
 `comments` follows the selected source kinds: with `issues` it includes Issue
@@ -519,6 +660,24 @@ backward-compatible `issues comments` default. Repository subscriptions do not
 backfill existing items or commits; they deliver future matching webhook events.
 The `commits` feature summarizes each GitHub `push` delivery with its branch or
 tag, pusher, commit range, compare URL, and up to 8 commit SHA/message entries.
+
+`@github:subscribe:OWNER/REPO code-scanning` delivers signed GitHub
+`code_scanning_alert` webhooks (created, reopened, appeared in another branch,
+fixed, or closed by a user). The GitHub App must have **Code scanning alerts:
+read** (`security_events`) and subscribe to **Code scanning alert**; existing
+installations must accept the permission upgrade on GitHub. The subscription
+requires the installation's effective permission, not a retained connection
+capability. Each delivery rechecks that exact installation with a token narrowed
+to the repository and `security_events:read`; revoked or unconfirmed access
+blocks the message and Agent wake, even if another linked installation has access.
+Alert messages contain only the alert reference and lifecycle action;
+the Agent fetches details through its current repository grant. Security alerts
+reach only Channels allowed to carry private content, including for public
+repositories. Delivery uses the existing idempotent append and wakes resting
+Instances; stopped Instances remain stopped. A Channel can therefore handle
+alerts as events without a cadence or polling Automation. Its linked Page holds
+the standing handling instructions and outstanding alert-to-PR work. Existing
+alerts need a one-time initial audit because subscriptions do not backfill.
 
 The product model follows a Slack-style feature subscription approach: users
 choose which channel features such as commits, issues, pulls, comments, reviews, checks,
@@ -832,3 +991,45 @@ it with a personal account, purchase a plan or widen an IP allowlist implicitly.
 ## Teams company bot
 
 Native Teams personal/groupChat support uses a company SingleTenant bot and Human Space admin confirmation. The canonical registration, authorization, receipt, revocation and acceptance contract is in [Teams company bot](../connectors/teams-native.md). Teams Workflows webhook connections remain outbound-only. Legacy Office 365 Connectors stopped working in May 2026; preserve their existing records but do not create new legacy registrations or describe them as native acceptance. Native corporate registration and acceptance must be recorded separately from release validation.
+
+
+## Native Gmail notification access
+
+An optional separate metadata grant enables Gmail watch → authenticated Pub/Sub
+push → new inbox message IDs. Apps → Gmail provides one-time Google consent and
+an automatically renewed watcher; no forwarding setup or periodic inbox query is
+required. It currently supports Human-owned mailboxes whose owner is a Space
+admin. Existing Composio content access and per-message send approval remain the
+same. Provisioning and acceptance are in [Native Gmail notifications](gmail-notifications.md).
+
+## X company application and durable video jobs
+
+Configure the complete `CONNECTOR_X_CLIENT_ID` / `CONNECTOR_X_CLIENT_SECRET`
+pair in the production release environment and deliver it through Production
+Release Intent. Follow [X setup and native acceptance](../connectors/x.md) for
+company/personal account consent, account ownership, API budget and the
+Enterprise-only quote parameter.
+
+`RELAY_X_UPLOAD_EXECUTOR` runs one scoped alarm executor per upload request.
+PostgreSQL action requests own encrypted frozen inputs, consumption and
+terminal outcomes; the executor retains references, phase and bounded retry
+state only. Both approved and explicit-allow uploads await durable admission
+before acknowledging the command, then return their result through a stable
+Channel message. A restarted `started` job never repeats provider mutations.
+An uncertain upload fails closed; unattached provider media is left to expire.
+Result delivery retries at most twelve times with backoff capped at sixty
+seconds. Re-admitting the same executing request resumes recovery/delivery,
+never a provider transfer. Encrypted outcomes are cleared after confirmed
+publication and expire with the request's twenty-four-hour retention window.
+
+### Connector Instance wake
+
+Agent action receipts queue a new turn only for the authenticated calling
+Instance; they never interrupt its active turn. Native subscription events
+queue for existing Channel Instances. The same committed messages resume
+sleeping/interrupted recipients through the existing bounded wake authority;
+stopped Instances stay stopped. Other Instances see action receipts as context.
+Older receipts without a retained caller remain context. To diagnose delivery,
+check the App author, reply reference, Hub-only
+`xmatrixConnectorRequesterInstanceId` metadata, and the recipient's rest state;
+mutable Agent names and provider text are not routing authority.

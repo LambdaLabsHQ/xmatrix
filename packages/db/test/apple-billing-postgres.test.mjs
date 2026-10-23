@@ -36,11 +36,11 @@ integration("Apple purchase ownership is immutable under concurrent claims and b
     const winner = claims[0].status === "fulfilled" ? a : b;
     const binding = await apple.resolve(randomUUID(), winner.appAccountToken);
     await apple.claim(randomUUID(), "Production", "1000001", winner.appAccountToken);
-    const apply = (end, commandId, signedAt) => billing.applyProviderEvent({ requestId: commandId,
+    const apply = (end, commandId, signedAt, quantity = 1) => billing.applyProviderEvent({ requestId: commandId,
       commandId, providerEventId: commandId, eventType: "apple.subscription.reconciled",
       payloadDigest: "a".repeat(64), eventCreatedAt: signedAt,
       subscription: { billingProvider: "apple", id: "apple:Production:1000001", customerId: winner.appAccountToken,
-        priceId: "sh.xmatrix.app.pro.monthly", status: "active", quantity: 1,
+        priceId: "sh.xmatrix.app.pro.monthly", status: "active", quantity,
         currentPeriodEnd: end, cancelAtPeriodEnd: true, spaceId: binding.spaceId, billingOwnerUserId: "apple-owner" },
     });
     const signedAt = new Date().toISOString();
@@ -48,6 +48,13 @@ integration("Apple purchase ownership is immutable under concurrent claims and b
     const first = await apply(future, "apple-first", signedAt);
     assert.equal(first.plan, "pro");
     assert.equal((await apply(future, "apple-first", signedAt)).plan, "pro");
+    // A multiseat purchase covers a Space with more than one person.
+    await f.run(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
+      VALUES ($1,'apple-member','member',1,now(),now())`, [binding.spaceId]);
+    const multiseat = await apply(future, "apple-multiseat", new Date(Date.parse(signedAt) + 1_000).toISOString(), 3);
+    assert.equal(multiseat.plan, "pro");
+    const seats = await billing.readSpaceBilling({ requestId: randomUUID(), spaceId: binding.spaceId, actorUserId: "apple-owner" });
+    assert.deepEqual(seats.billing.seats, { used: 2, limit: 3 });
     await assert.rejects(billing.createCheckoutIntent({ requestId: "stripe-conflict", commandId: "stripe-conflict",
       actorUserId: "apple-owner", spaceId: binding.spaceId, interval: "month", priceId: "price_test", seatQuantity: 1 }));
     await f.run("UPDATE data.space_billing_subscriptions SET current_period_end=now()-interval '1 second' WHERE space_id=$1", [binding.spaceId]);
@@ -62,5 +69,39 @@ integration("Apple purchase ownership is immutable under concurrent claims and b
     // Restore cannot silently move the original transaction even after expiry.
     await assert.rejects(apple.claim(randomUUID(), "Production", "1000001",
       winner === a ? b.appAccountToken : a.appAccountToken), { code: "apple_subscription_bound_elsewhere" });
+  } finally { await f.close(); }
+});
+
+integration("an organization's assigned seats bind for good and are counted in the Space their group started in", async () => {
+  const f = await isolatedPostgres("apple_assigned_seats", { shard: true });
+  const db = createAuthorityDatabase({ connectionString: f.url.toString(), shardId: "shard-0" });
+  const apple = new PostgresAppleBillingRepository(db, new PostgresBillingRepository(db, "shard-0"));
+  try {
+    for (const [user, space, role] of [["org-owner", "org-space", "owner"], ["org-member", "member-space", "owner"], ["org-member", "org-space", "viewer"]]) {
+      await f.run(`INSERT INTO control.user_space_memberships(user_id,space_id,role,membership_version,updated_at)
+        VALUES ($1,$2,$3,1,now())`, [user, space, role]);
+    }
+    const signedAt = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+    const seat = (originalTransactionId, extra = {}) => ({ environment: "Production", originalTransactionId,
+      productId: "sh.xmatrix.app.pro.monthly", expiresAt, active: true, signedAt, ...extra });
+    await assert.rejects(apple.claimAssignedSeat(randomUUID(), { ...seat("500"), userId: "org-member", spaceId: "org-space", groupKey: "org:9" }),
+      { code: "apple_seat_space_owner_required" }, "a group starts only in a Space its first restorer owns");
+    const first = await apple.claimAssignedSeat(randomUUID(), { ...seat("500"), userId: "org-owner", spaceId: "org-space", groupKey: "org:9" });
+    assert.deepEqual({ ...first, periodEnd: undefined }, { groupKey: "org:9", spaceId: "org-space", ownerUserId: "org-owner",
+      holderRole: "owner", activeSeats: 1, productId: "sh.xmatrix.app.pro.monthly", periodEnd: undefined });
+    const second = await apple.claimAssignedSeat(randomUUID(), { ...seat("501"), userId: "org-member", spaceId: "member-space", groupKey: "org:9" });
+    assert.equal(second.spaceId, "org-space", "a later seat of the group joins the group's Space, not the restorer's own");
+    assert.equal(second.holderRole, "viewer");
+    assert.equal(second.activeSeats, 2);
+    await assert.rejects(apple.claimAssignedSeat(randomUUID(), { ...seat("501"), userId: "org-owner", spaceId: "org-space", groupKey: "org:9" }),
+      { code: "apple_subscription_bound_elsewhere" });
+    assert.equal(await apple.seatGroupSpace(randomUUID(), "Production", "org:9"), "org-space");
+    assert.equal(await apple.seatGroupSpace(randomUUID(), "Production", "org:unknown"), null);
+    const stale = await apple.refreshAssignedSeat(randomUUID(), seat("501", { active: false, signedAt: new Date(Date.parse(signedAt) - 60_000).toISOString() }));
+    assert.equal(stale.activeSeats, 2, "an older signature never replaces a newer one");
+    const revoked = await apple.refreshAssignedSeat(randomUUID(), seat("501", { active: false, signedAt: new Date(Date.parse(signedAt) + 60_000).toISOString() }));
+    assert.equal(revoked.activeSeats, 1);
+    assert.equal(await apple.refreshAssignedSeat(randomUUID(), seat("999")), null, "a seat no one restored is not counted");
   } finally { await f.close(); }
 });

@@ -1,3 +1,4 @@
+import { AGENT_BOOTSTRAP_PROMPTS } from "../agent-bootstrap";
 import { plainRecord } from "@xmatrix/protocol";
 import { machineHostnameObservation } from "../machine-hostname-observation";
 import type {
@@ -12,11 +13,13 @@ import type {
   MachineDaemonHarnessActionCommand,
   MachineDaemonStopCommand,
   MachineDaemonTextTaskCommand,
+  MachineDaemonSleepCommand,
   MachineDaemonWorktreeActionCommand,
   MachineDaemonWorktreeCleanupCommand,
 } from "@xmatrix/protocol/connections/machine-daemon";
 import type { SerializedMachineDaemon } from "@xmatrix/protocol";
-import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_TEXT_TASK_CAPABILITY, MACHINE_WORKTREE_ACTION_CAPABILITY,
+import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_SLEEP_CAPABILITY, MACHINE_TEXT_TASK_CAPABILITY,
+  MACHINE_WORKTREE_ACTION_CAPABILITY,
   parseHarnessActionRequest, parseRoutingQuotaProbeRequest, parseTextTaskRequest, parseWorktreeActionRequest,
   type TextTaskResult,
   withMachineSpawnHarness, sha256Hex } from "@xmatrix/protocol";
@@ -27,13 +30,12 @@ import {
   type MachineDaemonPrincipal,
 } from "../connections/machine-daemon/auth";
 import type { Env } from "../types";
-import { dispatchProductChannelAbout } from "../product-agent-mention-authority-adapter";
+import { channelAboutAnswered, channelAboutRequest } from "../channel-about";
 import {
   MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES,
   machineDaemonRouteKey,
   type MachineDaemonAuthorityPrincipal,
   type MachineDaemonSocketBackend,
-  type MachineDaemonRouteIdentity,
   type MachineDaemonRuntimeSession,
 } from "./machine-daemon-port";
 import {
@@ -50,6 +52,7 @@ import type { ScheduledStep } from "../postgres-agent-launch-schedule";
 import { machineDaemonCommand } from "../machines";
 import { machineRunLifecycleReport } from "../machine-run-lifecycle-report";
 import { updateAgentLaunch } from "../runtime";
+import { supersededMachineDaemonConnection } from "./runtime-operation-failure";
 
 type ExecutableMessage = Exclude<
   MachineDaemonClientMessage,
@@ -66,6 +69,16 @@ const COMPLETION_EVENTS = new Set([
   "machine_harness_action_result",
   "machine_worktree_action_result",
   "machine_text_task_result",
+  "machine_sleep_result",
+]);
+// A completed command that names a Run still has a Channel route. Only these
+// reports are Run lifecycle. A sleep or reply-recovery result is not: the
+// lifecycle authority rejects it as invalid_machine_lifecycle, and the daemon
+// never receives the completion it already committed.
+const RUN_LIFECYCLE_REPLICA_TYPES = new Set<string>([
+  "machine_spawn_result",
+  "machine_run_exited",
+  "machine_stop_result",
 ]);
 const PRIVATE_AUDIT_FIELDS = new Set([
   "token",
@@ -83,27 +96,17 @@ export interface PostgresMachineDaemonPortDependencies {
   /** Moves an Agent Launch along as the daemon admits or spawns it. */
   launchUpdate(input: Parameters<typeof updateAgentLaunch>[1]): Promise<unknown>;
   terminateInstance?(instanceId: string): void;
-  dispatchChannelAboutFollowUp?(input: {
-    spaceId: string;
-    channelId: string;
-    requestId: string;
-    triggerMessageId?: string;
-    successorOfRunId: string;
-    actorUserId: string;
-  }): Promise<unknown>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
   /**
    * Hand committed work to its Channel's coordinator before answering.
    * Best-effort: finalization and reborn also advance on the coordinator's alarm.
    */
   wakeCoordinator?(channelId: string, work: readonly ScheduledStep[]): Promise<void>;
-  /** Deliver this machine's pending commands on its socket, behind that socket's frames. */
-  deliverPending?(identity: MachineDaemonRouteIdentity): Promise<unknown>;
   /** Retain work that outlives the frame that started it. */
   keepAlive?(task: Promise<unknown>): void;
   quotaChanged?(route: { ownerUserId: string; machineId: string }): Promise<void>;
-  /** A Machine answered a text task; whoever issued it decides what the answer is for. */
-  textTaskAnswered?(task: { requestId: string; result: TextTaskResult }): Promise<void>;
+  /** A Machine of `ownerUserId` answered a text task; whoever issued it decides what the answer is for. */
+  textTaskAnswered?(task: { requestId: string; result: TextTaskResult; ownerUserId: string }): Promise<void>;
   /** The daemon connected: wake the Channels whose work waits on this Machine. */
   machineConnected?(route: { ownerUserId: string; machineId: string }): Promise<unknown>;
 }
@@ -117,8 +120,8 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
   private readonly snapshotFanouts = new Map<string, { next?: () => Promise<void> }>();
 
   static fromEnv(input: { env: Env; terminateInstance?: (instanceId: string) => void;
-    deliverPending?: PostgresMachineDaemonPortDependencies["deliverPending"];
     quotaChanged?: PostgresMachineDaemonPortDependencies["quotaChanged"];
+    runtimeSelf?: { cellName(): string; fetch(request: Request): Promise<Response> };
     keepAlive?: (task: Promise<unknown>) => void }): PostgresMachineDaemonPort {
     return new PostgresMachineDaemonPort({
       authenticate: (token) => verifyMachineDaemonCredential(token, input.env),
@@ -126,19 +129,16 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       runLifecycleReport: (report) => machineRunLifecycleReport(input.env, report),
       launchUpdate: (update) => updateAgentLaunch(input.env, update),
       machineConnected: (route) => wakeMachineChannels(input.env, route),
-      textTaskAnswered: (task) => pageSummaryAnswered(input.env, task),
+      textTaskAnswered: (task) => channelAboutRequest(task.requestId)
+        ? channelAboutAnswered(input.env, task, input.runtimeSelf ? { runtimeSelf: {
+          cellName: input.runtimeSelf.cellName(), fetch: request => input.runtimeSelf!.fetch(request),
+        } } : {}) : pageSummaryAnswered(input.env, task),
       terminateInstance: input.terminateInstance,
       quotaChanged: input.quotaChanged,
-      dispatchChannelAboutFollowUp: (followUp) => dispatchProductChannelAbout({
-        env: input.env,
-        ...followUp,
-        skipDaemonWake: true,
-      }),
       observeAgentLaunchStage: (stage, outcome, durationMs) => recordAgentLaunchStage({
         env: input.env, stage, outcome, durationMs,
       }),
       wakeCoordinator: (channelId, work) => wakeAgentLaunchCoordinator(input.env, channelId, work),
-      ...(input.deliverPending ? { deliverPending: input.deliverPending } : {}),
       ...(input.keepAlive ? { keepAlive: input.keepAlive } : {}),
     });
   }
@@ -250,6 +250,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     if (message.type === "machine_text_task_result" && !session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) {
       throw new Error("Text task result does not come from a capable connection");
     }
+    if (message.type === "machine_sleep_result" && !session.capabilities.includes(MACHINE_SLEEP_CAPABILITY)) {
+      throw new Error("Sleep result does not come from a capable connection");
+    }
     if (message.type === "machine_worktree_action_result" &&
         !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
       throw new Error("Worktree action result does not come from a capable connection");
@@ -277,6 +280,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     if (message.type === "machine_run_snapshot" && message.registryConnectionEpoch !== undefined &&
         message.registrySequence !== undefined) {
       machineControlInput.commandId = await causalSnapshotCommandId(session, message);
+      // A full snapshot reconciles every Run, so it keeps its replay. A partial
+      // one is sent once and never answered, so nothing asks for it again.
+      if (message.snapshotComplete === true) delete machineControlInput.replayable;
     }
     const result = await this.dependencies.daemonCommand(machineControlInput);
     if (message.type === "machine_quota_probe_result") {
@@ -284,7 +290,8 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     }
     if (message.type === "machine_text_task_result") {
       // The command is complete either way; what the answer is for must not fail the Machine's report.
-      await this.dependencies.textTaskAnswered?.({ requestId: message.requestId, result: message.result })
+      await this.dependencies.textTaskAnswered?.({ requestId: message.requestId, result: message.result,
+        ownerUserId: session.principal.ownerUserId })
         .catch((error: unknown) => console.error("Text task answer was not applied", {
           requestId: message.requestId, error: error instanceof Error ? error.message : String(error) }));
     }
@@ -321,14 +328,13 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     const runLifecycleChannelId = optionalString(result.runLifecycleChannelId) ?? messageChannelId ??
       (runId ? this.activeRunChannels.get(runId) : undefined);
     // A committed terminal report is the Authority's to finalize: the
-    // coordinator commits the Run lifecycle and issues
-    // Channel About successors. The frame answers now instead of holding this
-    // socket's order through those round trips.
+    // coordinator commits the Run lifecycle. The frame answers now instead of
+    // holding this socket's order through those round trips.
     const terminalRecorded = result.runTerminalReportRecorded === true;
     if (terminalRecorded) {
       if (runLifecycleChannelId) await this.dependencies.wakeCoordinator?.(runLifecycleChannelId, ["runTerminal", "reborn"]);
       if (runId) this.activeRunChannels.delete(runId);
-    } else if (runLifecycleChannelId && runId) {
+    } else if (runLifecycleChannelId && runId && RUN_LIFECYCLE_REPLICA_TYPES.has(message.type)) {
       const lifecycleResult = await this.dependencies.runLifecycleReport({
         ...sessionCommand(session, "report", message),
         commandId: runtimeCommandId(
@@ -350,7 +356,6 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         // now. Best effort — the parked stop is also re-checked on its own.
         await this.dependencies.wakeCoordinator?.(runLifecycleChannelId, ["registrationStop"])?.catch(() => undefined);
       }
-      await this.dispatchChannelAboutFollowUps(lifecycleResult);
       this.closeCommittedTerminalInstances(lifecycleResult);
       if (message.type === "machine_run_exited" || message.type === "machine_stop_result") {
         this.activeRunChannels.delete(runId);
@@ -363,7 +368,6 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       if (message.snapshotComplete === true) this.fanOutSnapshot(session, message, requestId, result);
       else await this.reconcileSnapshotChannels(session, message, requestId, result);
     }
-    await this.dispatchChannelAboutFollowUps(result);
     if (action === "complete" && leaseKey) this.activeLeases.delete(leaseKey);
     if (message.type === "machine_request_notice") {
       const messageId = requiredString(
@@ -388,6 +392,11 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     // too, or the daemon would resend it forever.
     if (message.type === "machine_run_exited" && requestId && runId) {
       return { type: "machine_run_report_acked", requestId, runId };
+    }
+    // A partial snapshot is the daemon's minute report: answered, it proves this
+    // session too, so the daemon need not also probe it (each probe wakes us).
+    if (message.type === "machine_run_snapshot" && message.snapshotComplete !== true) {
+      return { type: "machine_run_snapshot_acked" };
     }
     return message.type === "unregister"
       ? { type: "unregistered", requestId: message.requestId }
@@ -452,7 +461,6 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       ? `${message.registryConnectionEpoch}:${message.registrySequence}`
       : requestId ?? crypto.randomUUID();
     const retiredRunIds = new Set<string>();
-    let followUps = 0;
     for (const channelId of channels) {
       const lifecycleResult = await this.dependencies.runLifecycleReport({
         ...sessionCommand(session, "report", message),
@@ -469,39 +477,16 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         }
       }
       this.closeCommittedTerminalInstances(lifecycleResult);
-      followUps += await this.dispatchChannelAboutFollowUps(lifecycleResult);
     }
     for (const retiredRunId of retiredRunIds) this.activeRunChannels.delete(retiredRunId);
-    // Successors were issued without a wake; no frame of this socket will
-    // catch them up, so deliver them now.
-    if (followUps > 0) await this.dependencies.deliverPending?.(session.principal);
-  }
-
-  private async dispatchChannelAboutFollowUps(result: Record<string, unknown>): Promise<number> {
-    if (!this.dependencies.dispatchChannelAboutFollowUp ||
-        !Array.isArray(result.channelAboutFollowUps)) return 0;
-    if (result.channelAboutFollowUps.length > 50) {
-      throw new Error("PostgreSQL returned oversized Channel About follow-up work");
-    }
-    for (const item of result.channelAboutFollowUps) {
-      const followUp = recordValue(item, "channelAboutFollowUps[]");
-      await this.dependencies.dispatchChannelAboutFollowUp({
-        spaceId: requiredString(followUp.spaceId, "channelAboutFollowUps[].spaceId"),
-        channelId: requiredString(followUp.channelId, "channelAboutFollowUps[].channelId"),
-        requestId: requiredString(followUp.requestId, "channelAboutFollowUps[].requestId"),
-        successorOfRunId: requiredString(
-          followUp.successorOfRunId,
-          "channelAboutFollowUps[].successorOfRunId",
-        ),
-        actorUserId: requiredString(followUp.actorUserId, "channelAboutFollowUps[].actorUserId"),
-        ...(followUp.triggerMessageId !== undefined ? { triggerMessageId: requiredString(followUp.triggerMessageId, "channelAboutFollowUps[].triggerMessageId") } : {}),
-      });
-    }
-    return result.channelAboutFollowUps.length;
   }
 
   async disconnected(session: Readonly<MachineDaemonRuntimeSession>): Promise<void> {
     await this.dependencies.daemonCommand(sessionCommand(session, "unregister"));
+  }
+
+  async confirmOnline(session: Readonly<MachineDaemonRuntimeSession>): Promise<void> {
+    await this.dependencies.daemonCommand(sessionCommand(session, "confirm-online"));
   }
 
   connected(
@@ -529,7 +514,12 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         // Claim already advanced Authority to leased. If the reverse frame cannot be
         // written, release immediately so wake/re-connect/HTTP pull can reclaim
         // instead of waiting out the full lease window on a dead push path.
-        await this.releaseClaimedCommand(session, command);
+        // The whole batch was leased before its first send. Commands after
+        // this one have not reached the socket either; release those too,
+        // while preserving every lease whose frame was already written.
+        for (const pending of commands.slice(delivered)) {
+          await this.releaseClaimedCommand(session, pending);
+        }
         throw error;
       }
     }
@@ -546,7 +536,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
   async claimCommands(
     session: Readonly<MachineDaemonRuntimeSession>,
     commandTypes: readonly ("spawn" | "stop" | "cleanup" | "request_resolve" | "recover_reply" | "quota_probe" |
-      "harness_action" | "worktree_action" | "text_task")[] = [
+      "harness_action" | "worktree_action" | "text_task" | "sleep")[] = [
       "spawn", "stop", "cleanup", "request_resolve",
     ],
   ): Promise<readonly MachineDaemonServerMessage[]> {
@@ -561,7 +551,8 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         commandTypes: [...commandTypes.filter(type => (type !== "quota_probe" || session.capabilities.includes("machine_quota_probe_v2")) &&
             (type !== "harness_action" || session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) &&
             (type !== "worktree_action" || session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) &&
-            (type !== "text_task" || session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY))),
+            (type !== "text_task" || session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) &&
+            (type !== "sleep" || session.capabilities.includes(MACHINE_SLEEP_CAPABILITY))),
           ...(session.capabilities.includes("reply_recovery_v1") && !commandTypes.includes("recover_reply") ? ["recover_reply"] : []),
           ...(session.capabilities.includes("machine_quota_probe_v2") && !commandTypes.includes("quota_probe") ? ["quota_probe"] : []),
           ...(session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY) && !commandTypes.includes("harness_action")
@@ -569,7 +560,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
           ...(session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY) && !commandTypes.includes("worktree_action")
             ? ["worktree_action"] : []),
           ...(session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY) && !commandTypes.includes("text_task")
-            ? ["text_task"] : [])],
+            ? ["text_task"] : []),
+          ...(session.capabilities.includes(MACHINE_SLEEP_CAPABILITY) && !commandTypes.includes("sleep")
+            ? ["sleep"] : [])],
         // Reverse push is primary; lease covers in-flight host execution until
         // complete. Delivery failure must release (see deliverPendingOnce), not rely on
         // shortening this window for bounded HTTP recovery.
@@ -597,6 +590,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       }
       if (command.type === "machine_text_task" && !session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) {
         throw new Error("Text task command does not match a capable connection");
+      }
+      if (command.type === "machine_sleep_agent" && !session.capabilities.includes(MACHINE_SLEEP_CAPABILITY)) {
+        throw new Error("Sleep command does not match a capable connection");
       }
       if (command.type === "machine_worktree_action" && !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
         throw new Error("Worktree action command does not match a capable connection");
@@ -640,6 +636,13 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         backoffMs: 0,
       });
     } catch (error) {
+      // A replacement may have committed its epoch while this claim was in
+      // flight. Its fence must stay intact; the old leases expire under the
+      // existing bound, rather than turning normal replacement into a fault.
+      if (supersededMachineDaemonConnection(error)) {
+        console.warn("Machine Daemon lease release was fenced by a newer connection");
+        return;
+      }
       console.error("Machine Daemon reverse delivery failed to release lease after send error", {
         ownerUserId: session.principal.ownerUserId,
         machineId: session.principal.machineId,
@@ -674,6 +677,7 @@ type MachineDaemonLeasedCommand =
   | MachineDaemonHarnessActionCommand
   | MachineDaemonWorktreeActionCommand
   | MachineDaemonTextTaskCommand
+  | MachineDaemonSleepCommand
   | MachineDaemonQuotaProbeCommand
   | MachineDaemonRecoverReplyCommand
   | MachineDaemonSpawnCommand
@@ -763,7 +767,7 @@ function machineCommand(
 
 function sessionCommand(
   session: Readonly<MachineDaemonRuntimeSession>,
-  action: "report" | "complete" | "unregister" | "renew" | "activation_begin" | "activation_prepare" | "activation_advance",
+  action: "report" | "complete" | "unregister" | "renew" | "confirm-online" | "activation_begin" | "activation_prepare" | "activation_advance",
   message?: ExecutableMessage,
   relayLease?: MachineCommandLease,
 ): Record<string, unknown> {
@@ -776,6 +780,9 @@ function sessionCommand(
   const payload = message ? redactAuditPayload(message) : {};
   return {
     commandId: runtimeCommandId(`machine-${action}`, requestId),
+    // Without the daemon's request id no caller asks for this command's result
+    // again; Authority decides what may then skip a replay.
+    ...(requestId === undefined ? { replayable: false } : {}),
     action,
     ...(action === "complete" ? {
       controlId: requestId,
@@ -886,6 +893,16 @@ function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
     return { type, requestId, presetId: action.presetId, action: action.action,
       ...(action.code === undefined ? {} : { code: action.code }) };
   }
+  if (type === "machine_sleep_agent") {
+    if (!["runId", "executionKey", "instanceId"].every(key => optionalString(payload[key])) ||
+        !Number.isSafeInteger(payload.idleForMillis) || Number(payload.idleForMillis) < 0 ||
+        Object.keys(payload).some(key =>
+          !["type", "requestId", "runId", "executionKey", "instanceId", "idleForMillis", "relayLease"].includes(key))) {
+      throw new Error("PostgreSQL returned an invalid sleep command");
+    }
+    return { type, requestId, runId: String(payload.runId), executionKey: String(payload.executionKey),
+      instanceId: String(payload.instanceId), idleForMillis: Number(payload.idleForMillis) };
+  }
   if (type === "machine_text_task") {
     const task = parseTextTaskRequest(payload);
     if (task.requestId !== requestId || Object.keys(payload).some(key =>
@@ -963,7 +980,8 @@ function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
     throw new Error(`PostgreSQL returned unsupported Machine Daemon command ${type}`);
   }
   if (type === "machine_spawn_agent") {
-    return withMachineSpawnHarness({ ...payload, type, requestId }) as MachineDaemonSpawnCommand;
+    return withMachineSpawnHarness({ ...payload, type, requestId,
+      bootstrapPrompts: AGENT_BOOTSTRAP_PROMPTS }) as MachineDaemonSpawnCommand;
   }
   if (type === "machine_stop_agent") {
     return { ...payload, type, requestId } as MachineDaemonStopCommand;

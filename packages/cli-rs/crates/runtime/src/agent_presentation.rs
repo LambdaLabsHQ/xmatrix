@@ -11,15 +11,15 @@ use crate::protocol;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentPresentationFacts {
     pub(crate) model: Option<String>,
-    pub(crate) models: Vec<protocol::AgentModelInfo>,
+    pub models: Vec<protocol::AgentModelInfo>,
     pub(crate) models_reported: bool,
     pub(crate) effort: Option<String>,
     pub(crate) effort_config_id: Option<String>,
-    pub(crate) parameters: Option<Vec<protocol::HarnessParameter>>,
+    pub parameters: Option<Vec<protocol::HarnessParameter>>,
     pub(crate) parameter_revision: u64,
-    pub(crate) supported_efforts: Vec<protocol::AgentModelReasoningEffort>,
-    pub(crate) commands: Vec<protocol::AgentInstanceCommand>,
-    pub(crate) status_chips: Vec<protocol::AgentStatusChip>,
+    pub supported_efforts: Vec<protocol::AgentModelReasoningEffort>,
+    pub commands: Vec<protocol::AgentInstanceCommand>,
+    pub status_chips: Vec<protocol::AgentStatusChip>,
     pub(crate) usage: Option<protocol::LlmUsage>,
 }
 
@@ -28,11 +28,11 @@ pub(crate) struct AgentPresentationFacts {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentPresentationSnapshot {
     pub(crate) model: Option<String>,
-    pub(crate) models: Option<Vec<protocol::AgentModelInfo>>,
+    pub models: Option<Vec<protocol::AgentModelInfo>>,
     pub(crate) effort: Option<String>,
-    pub(crate) commands: Option<Vec<protocol::AgentInstanceCommand>>,
-    pub(crate) parameters: Option<Vec<protocol::HarnessParameter>>,
-    pub(crate) status_chips: Option<Vec<protocol::AgentStatusChip>>,
+    pub commands: Option<Vec<protocol::AgentInstanceCommand>>,
+    pub parameters: Option<Vec<protocol::HarnessParameter>>,
+    pub status_chips: Option<Vec<protocol::AgentStatusChip>>,
     pub(crate) usage: Option<protocol::LlmUsage>,
 }
 
@@ -45,6 +45,12 @@ pub(crate) trait AgentPresentationAdapter {
 
     fn command_catalog_json(&self) -> Option<&'static str> {
         None
+    }
+
+    /// Whether the runtime's command overlay enumerates every slash command
+    /// it can execute, so docs-catalog passthrough entries it omits are dead.
+    fn overlay_is_complete(&self) -> bool {
+        false
     }
 
     fn observe_acp(&self, value: &Value, facts: &mut AgentPresentationFacts) {
@@ -65,6 +71,7 @@ pub(crate) trait AgentPresentationAdapter {
             self.command_catalog_json(),
             facts,
             command_overlay,
+            self.overlay_is_complete(),
         )
     }
 }
@@ -115,6 +122,12 @@ impl AgentPresentationAdapter for BuiltinAgentPresentationAdapter {
             Self::Zcode => Some(AGENT_COMMAND_CATALOG_ZCODE),
             Self::GenericAcp { .. } | Self::Legacy { .. } => None,
         }
+    }
+
+    /// Claude's `system/init.slash_commands` lists everything its headless
+    /// session runs; interactive-only commands answer "isn't available".
+    fn overlay_is_complete(&self) -> bool {
+        matches!(self, Self::Claude)
     }
 }
 
@@ -262,6 +275,27 @@ fn commands_from_catalog_json(
     (!commands.is_empty()).then_some(commands)
 }
 
+fn catalog_controls(
+    has_models: bool,
+    has_efforts: bool,
+) -> Vec<protocol::AgentInstanceCommand> {
+    [
+        ("/model", "Switch model", "agent-models", has_models),
+        ("/effort", "Switch effort", "agent-efforts", has_efforts),
+    ]
+    .into_iter()
+    .filter(|(.., available)| *available)
+    .map(|(token, label, source, _)| protocol::AgentInstanceCommand {
+        token: token.into(),
+        label: label.into(),
+        description: None,
+        mode: Some("typed".into()),
+        argument_source: Some(source.into()),
+        freeform: None,
+    })
+    .collect()
+}
+
 /// Normalize vendor slash names (`goal`, `/goal`, `local:commit`) into `/token`.
 pub(crate) fn normalize_slash_command_token(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
@@ -365,7 +399,7 @@ pub(crate) fn resolve_switchable_model(
         .ok_or_else(|| format!("Model '{}' is not available", requested.trim()))
 }
 
-pub(crate) fn models_support_efforts(models: &[protocol::AgentModelInfo]) -> bool {
+pub fn models_support_efforts(models: &[protocol::AgentModelInfo]) -> bool {
     models.iter().any(|item| {
         item.supported_reasoning_efforts
             .as_ref()
@@ -503,12 +537,27 @@ fn normalized_presentation(
     catalog_json: Option<&str>,
     facts: &AgentPresentationFacts,
     command_overlay: &[String],
+    overlay_is_complete: bool,
 ) -> AgentPresentationSnapshot {
     let has_models = !facts.models.is_empty();
     let has_efforts = facts.effort.is_some() || models_support_efforts(&facts.models);
-    let catalog_commands = catalog_json
+    let mut catalog_commands = catalog_json
         .and_then(|raw| commands_from_catalog_json(raw, has_models, has_efforts))
         .unwrap_or_default();
+    if overlay_is_complete && !command_overlay.is_empty() {
+        let live: HashSet<String> = command_overlay
+            .iter()
+            .filter_map(|raw| normalize_slash_command_token(raw))
+            .map(|token| token.to_ascii_lowercase())
+            .collect();
+        catalog_commands.retain(|command| {
+            command.mode.as_deref() == Some("typed")
+                || live.contains(&command.token.to_ascii_lowercase())
+        });
+    }
+    // Every channel-controlled runtime switches model and effort, so a live
+    // catalog alone earns the control, whether or not the vendor lists it.
+    catalog_commands.extend(catalog_controls(has_models, has_efforts));
     // Live commands are authoritative for their own tokens; the docs catalog
     // supplies typed controls and commands the provider cannot enumerate.
     let mut commands = merge_commands_with_token_overlay(
@@ -655,7 +704,7 @@ fn reasoning_efforts_from_value(value: &Value) -> Option<Vec<protocol::AgentMode
     (!efforts.is_empty()).then_some(efforts)
 }
 
-pub(crate) fn acp_model_catalog_from_value(value: &Value) -> Vec<protocol::AgentModelInfo> {
+pub fn acp_model_catalog_from_value(value: &Value) -> Vec<protocol::AgentModelInfo> {
     value
         .get("availableModels")
         .or_else(|| value.get("available_models"))
@@ -730,6 +779,46 @@ fn commands_from_acp_value(value: &Value) -> Vec<protocol::AgentInstanceCommand>
         .collect()
 }
 
+fn is_effort_config(key: &str, category: Option<&str>) -> bool {
+    matches!(
+        key,
+        "effort"
+            | "reasoning"
+            | "reasoning_effort"
+            | "thinking"
+            | "thinking_effort"
+            | "thought_level"
+    ) || category == Some("thought_level")
+}
+
+/// Cursor's Claude models advertise a boolean `thinking` toggle beside the
+/// leveled `effort` select. True/false is that toggle, not a reasoning level.
+fn boolean_effort_toggle(values: &[protocol::AgentModelReasoningEffort]) -> bool {
+    !values.is_empty()
+        && values.iter().all(|effort| {
+            matches!(
+                effort.reasoning_effort.to_ascii_lowercase().as_str(),
+                "true" | "false"
+            )
+        })
+}
+
+/// Higher wins when a snapshot has more than one effort-shaped control.
+/// Boolean toggles are not selectable.
+fn effort_control_rank(key: &str, values: &[protocol::AgentModelReasoningEffort]) -> Option<u8> {
+    if boolean_effort_toggle(values) {
+        return None;
+    }
+    Some(match key {
+        "effort" => 50,
+        "reasoning_effort" => 40,
+        "reasoning" => 30,
+        "thinking_effort" | "thought_level" => 20,
+        "thinking" => 10,
+        _ => 10,
+    })
+}
+
 fn attach_config_efforts_to_selected_model(facts: &mut AgentPresentationFacts) {
     let Some(selected) = facts.model.as_deref() else {
         return;
@@ -772,6 +861,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
 
     facts.parameter_revision = facts.parameter_revision.saturating_add(1);
     facts.parameters = Some(crate::harness_parameters::acp_parameters(options));
+    let mut best_effort_rank = 0_u8;
     for option in options {
         let Some(id) = clean_string(option.get("id"), 64) else {
             continue;
@@ -815,11 +905,12 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             attach_config_efforts_to_selected_model(facts);
             continue;
         }
-        if matches!(
-            key.as_str(),
-            "effort" | "reasoning_effort" | "thinking" | "thinking_effort" | "thought_level"
-        ) {
-            facts.effort_config_id = Some(id);
+        let category = option.get("category").and_then(Value::as_str);
+        if is_effort_config(&key, category) {
+            // Cursor publishes one leveled control per model (`reasoning`,
+            // `effort`, or `reasoning_effort`, category `thought_level`) and,
+            // on Claude, a separate boolean `thinking` toggle. The boolean is
+            // not a reasoning level. Keep the leveled control when both exist.
             let supported: Vec<_> = option
                 .get("options")
                 .and_then(Value::as_array)
@@ -829,13 +920,22 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
                     let reasoning_effort = option_value(entry)?;
                     Some(protocol::AgentModelReasoningEffort {
                         reasoning_effort,
-                        description: clean_string(entry.get("description"), 256),
+                        description: clean_string(
+                            entry.get("description").or_else(|| entry.get("name")),
+                            256,
+                        ),
                     })
                 })
                 .collect();
-            facts.supported_efforts = supported;
-            facts.effort = current;
-            attach_config_efforts_to_selected_model(facts);
+            if let Some(rank) = effort_control_rank(&key, &supported)
+                && rank > best_effort_rank
+            {
+                best_effort_rank = rank;
+                facts.effort_config_id = Some(id);
+                facts.supported_efforts = supported;
+                facts.effort = current;
+                attach_config_efforts_to_selected_model(facts);
+            }
             continue;
         }
         if key == "mode" {
@@ -913,6 +1013,11 @@ fn observe_acp_presentation(
     facts.usage =
         super::merge_llm_usage(facts.usage.clone(), super::extract_llm_usage(value));
     observe_acp_node(value, facts, source, 0);
+    if revision != facts.parameter_revision {
+        // session/new and session/load can also carry a model inventory.
+        // Attach config-derived levels after that inventory has been read.
+        attach_config_efforts_to_selected_model(facts);
+    }
     if model != facts.model && revision == facts.parameter_revision {
         facts.parameters = Some(Vec::new());
     }

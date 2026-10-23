@@ -1,4 +1,3 @@
-import { recordAboutInput } from "./channel-metadata-revisions.js";
 import { authorizeDingTalkEffect, finishDingTalkEffect, type DingTalkEffectAuthority } from "./dingtalk-effect-authority.js";
 import { lockAgentRunChannels, requireAgentChannelAccess } from "./agent-channel-access.js";
 import type { QueryResultRow } from "pg";
@@ -8,7 +7,8 @@ import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
 import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
-import { channelVisibilityScope, isReservedAnnotationNamespace, SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength } from "@xmatrix/protocol";
+import { parseAgentRegistrationKey, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+  SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -113,6 +113,8 @@ export interface AppendPostgresMessage {
   sentAt: string;
   requestDigest: string;
   prepared: PreparedPostgresMessageRecord;
+  /** The deployment does not charge this Space Agent credits (docs/design/agent-credits.md). */
+  creditsWaived?: boolean;
   /** Computed from raw HTTP content by the trusted Agent send boundary. */
   agentSendFingerprint?: string;
   /** Explicit final intent, bound to the authenticated sender's Run below. */
@@ -521,13 +523,6 @@ async function effectiveAppendPrincipal(
       ? { presentation }
       : {}),
   };
-  if (metadata.routedAs === "management_channel_about") throw new MessageAuthorityError(
-    "agent_run_forbidden", 403, "Channel About Runs cannot post Channel messages",
-  );
-  // The retired management delegate; a Run started before it was retired posts nothing.
-  if (metadata.routedAs === "management_assistant_mention") throw new MessageAuthorityError(
-    "agent_run_forbidden", 403, "The xMatrix management agent is retired",
-  );
   if (run.channel_id !== input.channelId) {
     await requireAgentChannelAccess(transaction, {
       spaceId: input.spaceId, channelId: input.channelId, agentId: input.principal.id,
@@ -709,6 +704,62 @@ async function liveRecipientUserIds(
   return recipients.map((row) => row.user_id);
 }
 
+/**
+ * Who a committed message reaches live, and which of them it notifies with
+ * their unread attention summary. `attention` is the message's attention rows;
+ * the append computes this in its own transaction so the message can be
+ * delivered the moment it commits, with no read after it.
+ */
+async function messageLiveRouting(
+  transaction: DatabaseTransaction,
+  spaceId: string,
+  channelId: string,
+  attention: readonly { subject_id: string; kind: string }[],
+): Promise<MessageLiveRouting> {
+  const recipientUserIds = await liveRecipientUserIds(transaction, spaceId, channelId);
+  const recipientSet = new Set(recipientUserIds);
+  const notifications = new Map<string, Record<string, unknown>>();
+  const notified = attention.filter(row => recipientSet.has(row.subject_id.slice("user:".length)));
+  // A mention notification carries the recipient's unread attention summary
+  // (everything after their acknowledged cursor), exactly as a later catalog
+  // read would report it; without it the client cannot badge the Channel.
+  const summaries = new Map((notified.length ? await transaction.query<QueryResultRow & {
+    subject_id: string; unread_count: string | number; message_id: string; kind: string;
+    timeline_sequence: string | number; created_at: Date | string; kinds: string[];
+  }>({
+    name: "message_live_routing_attention_summary_v3",
+    text: `SELECT subject.subject_id,COUNT(*) AS unread_count,
+        (ARRAY_AGG(a.message_id ORDER BY a.timeline_sequence DESC))[1] AS message_id,
+        (ARRAY_AGG(a.kind ORDER BY a.timeline_sequence DESC))[1] AS kind,
+        MAX(a.timeline_sequence) AS timeline_sequence,
+        (ARRAY_AGG(a.created_at ORDER BY a.timeline_sequence DESC))[1] AS created_at,
+        ARRAY_AGG(DISTINCT a.kind) AS kinds
+      FROM unnest($3::text[]) subject(subject_id)
+      JOIN data.message_attention a ON a.space_id=$1 AND a.channel_id=$2 AND a.subject_id=subject.subject_id
+      WHERE (${declaredWaitStandsSql("a")} OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
+        WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0))
+      GROUP BY subject.subject_id`,
+    values: [spaceId, channelId, notified.map(row => row.subject_id)], maxRows: notified.length,
+  }) : []).map(row => {
+    const at = row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at);
+    return [row.subject_id, { channelId, unreadAttentionCount: Number(row.unread_count), lastAttentionAt: at,
+      lastMessageId: row.message_id, lastMessageSequence: Number(row.timeline_sequence),
+      primaryTriggerKind: row.kind,
+      triggerKinds: ["broadcast", "mention", "reply"].filter(kind => row.kinds.includes(kind)), updatedAt: at }];
+  }));
+  for (const row of notified) {
+    const attentionSummary = summaries.get(row.subject_id);
+    notifications.set(row.subject_id.slice("user:".length), { userId: row.subject_id.slice("user:".length),
+      notification: { reason: row.kind, ...(attentionSummary ? { attention: attentionSummary } : {}) } });
+  }
+  return { recipientUserIds, recipientNotifications: [...notifications.values()] };
+}
+
+export interface MessageLiveRouting {
+  recipientUserIds: string[];
+  recipientNotifications: Record<string, unknown>[];
+}
+
 interface MessagePublishRow extends QueryResultRow {
   channel_id: string | null;
   accepted: boolean;
@@ -735,7 +786,10 @@ function publishedResult(
   if (!admission.result_json) throw new MessageAuthorityError(
     "message_receipt_unavailable", 500, "Message receipt is unavailable",
   );
-  return admission.result_json;
+  const notice = input.billable ? billing.message.notice?.(admission) : null;
+  // The notice is this commit's alone: it is not part of the stored receipt,
+  // so a replay of the same command never repeats it.
+  return notice ? { ...admission.result_json, billingNotice: notice } : admission.result_json;
 }
 
 function serializeMessage(row: MessageRow): Record<string, unknown> {
@@ -815,15 +869,10 @@ export interface MessageHistoryPage {
   principalAckedSequence: number;
   contentRevision: number;
   historyHeadSequence: number;
-  aboutInput?: { inputId: string; expectedRevision: number };
 }
 
 type HistoryPageRow = QueryResultRow & {
   history_authorized: boolean | null;
-  channel_name?: string;
-  channel_metadata?: Record<string, unknown>;
-  channel_updated_at?: Date | string;
-  about_run_id?: string | null;
   acknowledged_sequence: string | number | null;
   content_revision: string | number | null;
   history_head_sequence: string | number | null;
@@ -933,6 +982,46 @@ export class PostgresMessageRepository {
     });
   }
 
+  /**
+   * How many messages after `afterSequence` the sender has not read: what
+   * people, Agents and Apps wrote there, except the sender's own messages and
+   * the Hub's own facts (system notices, activity entries). `replay` is set
+   * when `messageId` is already committed, so a retried send is answered by
+   * its receipt rather than refused for messages that came after it.
+   */
+  async unreadSince(input: {
+    requestId: string;
+    spaceId: string;
+    channelId: string;
+    principal: MessagePrincipal;
+    messageId: string;
+    afterSequence: number;
+    activityMessageKind: string;
+    placement?: PostgresMessagePlacement;
+  }): Promise<{ unread: number; replay: boolean }> {
+    const { requestId, spaceId, channelId, principal } = messageScope(input);
+    const messageId = bounded(input.messageId, "messageId");
+    const afterSequence = nonnegative(input.afterSequence, "afterSequence");
+    return this.inSpace(requestId, "message.unread-since", spaceId, async (transaction) => {
+      const row = (await transaction.query<QueryResultRow & { unread: string | number; replay: boolean }>({
+        name: "message_unread_since_v1",
+        text: `SELECT EXISTS(SELECT 1 FROM data.messages
+              WHERE space_id=$1 AND channel_id=$2 AND message_id=$3) AS replay,
+            (SELECT COUNT(*) FROM (SELECT 1 FROM data.messages
+              WHERE space_id=$1 AND channel_id=$2 AND timeline_sequence>$4
+                AND deleted_at IS NULL AND recalled_at IS NULL
+                AND author_kind IN ('user','agent','app')
+                AND NOT (author_kind=$5 AND author_id=$6)
+                AND message_kind<>$7
+              LIMIT 100) unread) AS unread`,
+        values: [spaceId, channelId, messageId, afterSequence, principal.kind, principal.id,
+          bounded(input.activityMessageKind, "activityMessageKind")],
+        maxRows: 1,
+      }))[0];
+      return { unread: Number(row?.unread ?? 0), replay: row?.replay === true };
+    }, input.placement);
+  }
+
   async prepareAppend(input: {
     requestId: string;
     spaceId: string;
@@ -956,16 +1045,18 @@ export class PostgresMessageRepository {
       if (!input.runProof && senderPrincipal &&
           senderPrincipal.kind === principal.kind && senderPrincipal.id === principal.id) {
         const row = (await transaction.query<PreparedAppendContextRow>({
-          name: "message_prepare_context_v8",
+          name: "message_prepare_context_v9",
           text: `WITH message_input AS (
               SELECT $1::text AS space_id,$2::text AS channel_id,
                 $3::text AS principal_kind,$4::text AS principal_id
             ), ${channelCapabilityCte({ capability: "message_active_command_preflight",
               inputCte: "message_input" })}, sender_identity AS (
               SELECT jsonb_build_object('kind','user','id',member.user_id,
-                'email',member.email,'displayName',member.display_name,
-                'avatarUrl',member.avatar_url,'version',member.version) AS value
+                'email',member.email,'displayName',COALESCE(profile.name,member.display_name),
+                'avatarUrl',profile.image,
+                'version',member.version) AS value
               FROM data.space_members member
+              LEFT JOIN control.auth_users profile ON profile.id=member.user_id
               WHERE $3='user' AND member.space_id=$1 AND member.user_id=$4
               UNION ALL
               SELECT jsonb_build_object('kind','agent','id',instance.instance_id,
@@ -1105,22 +1196,23 @@ export class PostgresMessageRepository {
       }>({
         name: collidedSequence === undefined
           ? "message_sequence_reservation_insert_v1"
-          : "message_sequence_reservation_reallocate_v1",
+          : "message_sequence_reservation_reallocate_v2",
         text: collidedSequence === undefined
           ? `INSERT INTO data.message_sequence_reservations
               (space_id,command_id,channel_id,sequence,state,fact_digest,created_at,updated_at,expires_at)
             VALUES ($1,$2,$3,$4,'reserved',NULL,$5,$5,$6)
             ON CONFLICT (space_id,command_id) DO NOTHING
             RETURNING channel_id,sequence,state`
+          // Every parameter must appear in the statement: PostgreSQL cannot
+          // type one it never reads, and refuses the whole reallocation.
           : `UPDATE data.message_sequence_reservations SET sequence=$4,updated_at=$5
             WHERE space_id=$1 AND command_id=$2 AND channel_id=$3
-              AND sequence=$7 AND state='reserved' AND fact_digest IS NULL
+              AND sequence=$6 AND state='reserved' AND fact_digest IS NULL
             RETURNING channel_id,sequence,state`,
         values: collidedSequence === undefined
           ? [spaceId, commandId, channelId, sequence, now.toISOString(),
               new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString()]
-          : [spaceId, commandId, channelId, sequence, now.toISOString(),
-              new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString(), collidedSequence],
+          : [spaceId, commandId, channelId, sequence, now.toISOString(), collidedSequence],
         maxRows: 1,
       }))[0];
       if (inserted) return { sequence: Number(inserted.sequence), state: inserted.state };
@@ -1146,9 +1238,13 @@ export class PostgresMessageRepository {
   ): Promise<PostgresMessageSenderIdentity> {
     if (principal.kind === "user") {
       const row = (await transaction.query<QueryResultRow>({
-        name: "message_sender_user_identity_v1",
-        text: `SELECT user_id,email,display_name,avatar_url,version FROM data.space_members
-          WHERE space_id=$1 AND user_id=$2 LIMIT 1`,
+        name: "message_sender_user_identity_v2",
+        text: `SELECT member.user_id,member.email,COALESCE(profile.name,member.display_name) AS display_name,
+            profile.image AS avatar_url,
+            member.version
+          FROM data.space_members member
+          LEFT JOIN control.auth_users profile ON profile.id=member.user_id
+          WHERE member.space_id=$1 AND member.user_id=$2 LIMIT 1`,
         values: [spaceId, principal.id], maxRows: 1,
       }))[0];
       if (!row) throw new MessageAuthorityError(
@@ -1501,6 +1597,8 @@ export class PostgresMessageRepository {
       // former makes the first (or second) message in every new Channel collide.
       // The database sequence is shared with the other PostgreSQL authority
       // writers and gives each inserted message its own stable ordering key.
+      // A preflight that waited on a concurrent writer keeps its old statement
+      // snapshot. The insert itself must arbitrate the durable message identity.
       const committedFacts = (await transaction.query<AppendCommittedFactsRow>({
         name: "message_append_commit_facts_v5",
         text: `WITH search_rank AS MATERIALIZED (
@@ -1518,6 +1616,7 @@ export class PostgresMessageRepository {
             SELECT $1,$2,$3,$4,1,$5,$6,$7,$8,'hot-inline',$3,NULL,'[]','[]',$9::jsonb,
               $10,NULL,NULL,NULL,$10,search_rank.value,$11,$12,$13,$14,NULL,$8,$15,$16,$17,
               NULL,$10,1,$21::jsonb,$22,$23,$24,$25::jsonb FROM search_rank
+            ON CONFLICT (space_id,message_id) DO NOTHING
             RETURNING message_id,channel_id
           ), mutation_row AS (
             INSERT INTO data.message_mutations
@@ -1547,7 +1646,7 @@ export class PostgresMessageRepository {
         maxRows: 1,
       }))[0];
       if (!committedFacts?.channel_id) throw new MessageAuthorityError(
-        "channel_not_found", 404, "Channel not found",
+        "message_exists", 409, "Message already exists",
       );
       const searchRank = bounded(committedFacts.search_rank, "searchRank");
       if (agentTargets.length || invocationSelections) {
@@ -1635,7 +1734,7 @@ export class PostgresMessageRepository {
       // statement, so a metered counter is never locked across another round trip.
       const billing = this.billing.message;
       const admission = (await transaction.query<MessagePublishRow>({
-        name: `message_append_publish_${this.billing.id}_v1`,
+        name: `message_append_publish_${this.billing.id}_v3`,
         text: `WITH ${billing.ctes}, accepted AS MATERIALIZED (
             SELECT admission.*,$5::jsonb AS result_json FROM admission
             WHERE NOT $10 OR (${billing.accepts})
@@ -1658,27 +1757,33 @@ export class PostgresMessageRepository {
              commit_sequence,created_at,expires_at)
             SELECT $2,$7,'message-append',$8,outbox_row.payload_json,$4,$6,$9 FROM outbox_row
             RETURNING result_json
+          -- The Channel's sequence row is locked before this command's
+          -- reservation, the order a reservation takes them in: a concurrent
+          -- reserve holds the sequence row while it checks for this command's
+          -- reservation, so the reverse order deadlocks the two.
+          ), sequence_confirm AS (
+            UPDATE data.channel_message_sequences SET
+              confirmed_sequence=GREATEST(confirmed_sequence,$4),updated_at=$6
+            WHERE space_id=$2 AND channel_id=$11
+              AND EXISTS (SELECT 1 FROM receipt)
+            RETURNING channel_id
           ), reservation_commit AS (
             UPDATE data.message_sequence_reservations SET
               state='committed',fact_digest=$12,
               updated_at=GREATEST(updated_at,$6::timestamptz)
             WHERE space_id=$2 AND command_id=$7 AND channel_id=$11 AND sequence=$4
               AND (fact_digest IS NULL OR fact_digest=$12)
-              AND EXISTS (SELECT 1 FROM receipt)
-            RETURNING channel_id
-          ), sequence_confirm AS (
-            UPDATE data.channel_message_sequences SET
-              confirmed_sequence=GREATEST(confirmed_sequence,$4),updated_at=$6
-            WHERE space_id=$2 AND channel_id=$11
-              AND EXISTS (SELECT 1 FROM reservation_commit)
+              AND EXISTS (SELECT 1 FROM sequence_confirm)
             RETURNING channel_id
           ) SELECT admission.*,(SELECT result_json FROM receipt) AS result_json,
               (SELECT channel_id FROM activity_row) AS channel_id,
               EXISTS (SELECT 1 FROM accepted) AS accepted,
-              EXISTS (SELECT 1 FROM sequence_confirm) AS sequence_confirmed FROM admission`,
+              EXISTS (SELECT 1 FROM reservation_commit) AS sequence_confirmed,
+              $13::text AS author_kind,$14::boolean AS credits_waived FROM admission`,
         values: [`message:${spaceId}:${messageId}:1`, spaceId, messageId, sequence,
           JSON.stringify(result), sentAt, commandId, requestDigest, expiresAt,
-          !messageKind.startsWith("xmatrix.system."), channelId, recordDigest],
+          !messageKind.startsWith("xmatrix.system."), channelId, recordDigest, senderKind,
+          input.creditsWaived === true],
         maxRows: 1,
       }))[0];
       if (admission?.accepted && !admission.channel_id) throw new MessageAuthorityError(
@@ -1689,9 +1794,16 @@ export class PostgresMessageRepository {
         "Message sequence confirmation failed",
       );
       if (dingtalkEffect) await finishDingTalkEffect(transaction,dingtalkEffect);
-      return publishedResult(admission, this.billing, {
+      const published = publishedResult(admission, this.billing, {
         billable: !messageKind.startsWith("xmatrix.system."), now: sentAt,
       });
+      // Who the message reaches, read in its own transaction: it is delivered
+      // the moment it commits, never after a second read. Not part of the
+      // stored receipt; a replay reads it again (liveDeliveryRouting).
+      const liveRouting = await messageLiveRouting(transaction, spaceId, channelId,
+        [...targets].filter(([subjectId]) => subjectId.startsWith("user:")).sort(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0).map(([subject_id, kind]) => ({ subject_id, kind })));
+      return { ...published, liveRouting };
     });
   }
 
@@ -1794,6 +1906,23 @@ export class PostgresMessageRepository {
           ? { agentSendFingerprint: receipt.agentSendFingerprint } : {}),
         sender: { kind: sender.kind, id: senderId,
           ...(typeof sender.instanceId === "string" ? { instanceId: sender.instanceId } : {}) } };
+    });
+  }
+
+  /** A committed identity stays written even after recall, deletion or replay expiry. */
+  async exists(input: {
+    requestId: string; spaceId: string; channelId: string; messageId: string; principal: MessagePrincipal;
+  }): Promise<boolean> {
+    const { requestId, spaceId, channelId, messageId, principal } = messageIdentity(input);
+    return this.inSpace(requestId, "message.exists", spaceId, async (transaction) => {
+      await messageChannelCapability(transaction, { spaceId, channelId, principal }, "message_content_read");
+      const rows = await transaction.query({
+        name: "message_exists_v1",
+        text: `SELECT message_id FROM data.messages
+          WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 LIMIT 1`,
+        values: [spaceId, channelId, messageId], maxRows: 1,
+      });
+      return rows.length > 0;
     });
   }
 
@@ -2184,6 +2313,80 @@ export class PostgresMessageRepository {
         mutationKind: input.kind, mutation: result, principal, result, now,
       });
       return result;
+    });
+  }
+
+  /**
+   * Settle a questionnaire card once: answered by its person, or withdrawn by
+   * the Instance that asked. The Hub's own annotation records the state and
+   * the card's wait on its person ends with it, in one transaction. A card
+   * that is already settled keeps its first state. Returns the card's state,
+   * or null when it is gone or, for a withdrawal, not the asking Instance's.
+   */
+  async settleQuestionnaire(input: {
+    requestId: string;
+    spaceId: string;
+    channelId: string;
+    messageId: string;
+    settlement: QuestionnaireState;
+    /** A withdrawal names the Instance that asked; only its own card settles. */
+    askedByInstanceId?: string;
+    requestDigest: string;
+  }): Promise<{ state: QuestionnaireState; changed: boolean } | null> {
+    const { requestId, spaceId, channelId } = channelRequest(input);
+    const messageId = bounded(input.messageId, "messageId");
+    const commandKind = "message-questionnaire-settle";
+    const principal = { kind: "system" as const, id: "xmatrix" };
+    return this.inSpace(requestId, commandKind, spaceId, async (transaction) => {
+      const candidate = (await transaction.query<MutableMessageRow>({
+        name: "message_questionnaire_candidate_v1",
+        text: `SELECT m.* FROM data.messages m WHERE m.space_id = $1 AND m.channel_id = $2
+          AND m.message_id = $3 AND m.deleted_at IS NULL AND m.recalled_at IS NULL
+          LIMIT 1 FOR UPDATE`,
+        values: [spaceId, channelId, messageId], maxRows: 1,
+      }))[0];
+      if (!candidate) return null;
+      if (input.askedByInstanceId !== undefined &&
+          (candidate.author_kind !== "agent" || candidate.author_id !== input.askedByInstanceId)) return null;
+      const collection = structuredClone(candidate.annotations_json) as Record<string, unknown>[];
+      const settled = questionnaireStateOf(collection);
+      if (settled) return { state: settled, changed: false };
+      const now = new Date().toISOString();
+      const expectedVersion = Number(candidate.entity_version);
+      const entityVersion = expectedVersion + 1;
+      const annotationId = `questionnaire:${messageId}`.slice(0, 200);
+      const annotation = await putMessageAnnotation(transaction, "message_questionnaire_annotation_upsert_v1", {
+        spaceId, channelId, messageId, annotationId, namespace: QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE,
+        collection, index: -1, authorUserId: SYSTEM_ANNOTATION_AUTHOR, authorLabel: "xMatrix",
+        payload: input.settlement, now,
+      });
+      await writeMessageCollection(transaction, "message_questionnaire_collection_update_v1", {
+        spaceId, channelId, messageId, column: "annotations_json", invocationInputVersion: null,
+        collection, entityVersion, expectedVersion, now,
+      });
+      await finalizeMutation(transaction, {
+        spaceId, channelId, messageId, entityVersion,
+        requestDigest: digest(input.requestDigest, "requestDigest"),
+        commandId: `questionnaire-settle:${messageId}:${entityVersion}`.slice(0, 200),
+        commandKind, mutationKind: "annotation", mutation: annotation, principal,
+        result: annotation, now,
+      });
+      // A settled card no longer waits on anyone.
+      await transaction.query({
+        name: "message_questionnaire_wait_end_v1",
+        text: `WITH ended AS (
+            UPDATE data.message_attention SET awaiting_response=FALSE
+            WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 AND awaiting_response
+            RETURNING subject_id
+          ) INSERT INTO data.message_attention_revisions
+            (space_id,subject_id,channel_id,revision,updated_at)
+          SELECT DISTINCT $1,subject_id,$2,1,$4::timestamptz FROM ended
+          ON CONFLICT (space_id,subject_id,channel_id) DO UPDATE SET
+            revision=data.message_attention_revisions.revision+1,
+            updated_at=EXCLUDED.updated_at`,
+        values: [spaceId, channelId, messageId, now], maxRows: 0,
+      });
+      return { state: input.settlement, changed: true };
     });
   }
 
@@ -2660,8 +2863,6 @@ export class PostgresMessageRepository {
         values: [spaceId, channelId, messageId], maxRows: 1,
       });
       if (!messages[0]) throw new MessageAuthorityError("message_not_found", 404, "Message not found");
-      const recipientUserIds = await liveRecipientUserIds(transaction, spaceId, channelId);
-      const recipientSet = new Set(recipientUserIds);
       const attention = await transaction.query<QueryResultRow & {
         subject_id: string; kind: string;
       }>({
@@ -2671,41 +2872,7 @@ export class PostgresMessageRepository {
           ORDER BY subject_id LIMIT 10000`,
         values: [spaceId, channelId, messageId], maxRows: 10_000,
       });
-      const notifications = new Map<string, Record<string, unknown>>();
-      const notified = attention.filter(row => recipientSet.has(row.subject_id.slice("user:".length)));
-      // A mention notification carries the recipient's unread attention summary
-      // (everything after their acknowledged cursor), exactly as a later catalog
-      // read would report it; without it the client cannot badge the Channel.
-      const summaries = new Map((notified.length ? await transaction.query<QueryResultRow & {
-        subject_id: string; unread_count: string | number; message_id: string; kind: string;
-        timeline_sequence: string | number; created_at: Date | string; kinds: string[];
-      }>({
-        name: "message_live_routing_attention_summary_v3",
-        text: `SELECT subject.subject_id,COUNT(*) AS unread_count,
-            (ARRAY_AGG(a.message_id ORDER BY a.timeline_sequence DESC))[1] AS message_id,
-            (ARRAY_AGG(a.kind ORDER BY a.timeline_sequence DESC))[1] AS kind,
-            MAX(a.timeline_sequence) AS timeline_sequence,
-            (ARRAY_AGG(a.created_at ORDER BY a.timeline_sequence DESC))[1] AS created_at,
-            ARRAY_AGG(DISTINCT a.kind) AS kinds
-          FROM unnest($3::text[]) subject(subject_id)
-          JOIN data.message_attention a ON a.space_id=$1 AND a.channel_id=$2 AND a.subject_id=subject.subject_id
-          WHERE (${declaredWaitStandsSql("a")} OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
-            WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0))
-          GROUP BY subject.subject_id`,
-        values: [spaceId, channelId, notified.map(row => row.subject_id)], maxRows: notified.length,
-      }) : []).map(row => {
-        const at = row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at);
-        return [row.subject_id, { channelId, unreadAttentionCount: Number(row.unread_count), lastAttentionAt: at,
-          lastMessageId: row.message_id, lastMessageSequence: Number(row.timeline_sequence),
-          primaryTriggerKind: row.kind,
-          triggerKinds: ["broadcast", "mention", "reply"].filter(kind => row.kinds.includes(kind)), updatedAt: at }];
-      }));
-      for (const row of notified) {
-        const attentionSummary = summaries.get(row.subject_id);
-        notifications.set(row.subject_id.slice("user:".length), { userId: row.subject_id.slice("user:".length),
-          notification: { reason: row.kind, ...(attentionSummary ? { attention: attentionSummary } : {}) } });
-      }
-      return { recipientUserIds, recipientNotifications: [...notifications.values()] };
+      return messageLiveRouting(transaction, spaceId, channelId, attention);
     });
   }
 
@@ -2821,13 +2988,11 @@ export class PostgresMessageRepository {
       }, callback);
     const direction = after === null ? "DESC" : "ASC";
     const rows = await read((transaction) => transaction.query<HistoryPageRow>({
-      name: "message_history_page_v3",
-      // A Channel About session reads the history of the Channel it summarizes.
+      name: "message_history_page_v4",
       text: `WITH history_input AS (
           SELECT $1::text AS space_id,$2::text AS channel_id,
             $7::text AS principal_kind,$8::text AS principal_id
-        ), ${channelCapabilityCte({ capability: "message_content_read", inputCte: "history_input",
-          channelAboutSessionRead: true })},
+        ), ${channelCapabilityCte({ capability: "message_content_read", inputCte: "history_input" })},
         history_page AS MATERIALIZED (
           SELECT message_id, channel_id, timeline_sequence, entity_version, author_kind,
             author_id, message_kind, content_hash, payload_kind, payload_ref, reactions_json,
@@ -2880,10 +3045,6 @@ export class PostgresMessageRepository {
           ) preview ON TRUE
         ), history_metadata AS MATERIALIZED (
           SELECT COALESCE(granted.authorized, FALSE) AS history_authorized,
-            context.name AS channel_name,context.metadata_json AS channel_metadata,
-            context.updated_at AS channel_updated_at,
-            (SELECT run_id FROM data.runs WHERE $7='agent' AND run_id=$8 AND channel_id=$2
-              AND metadata_json->>'routedAs'='management_channel_about' AND granted.authorized) AS about_run_id,
             CASE WHEN granted.authorized THEN COALESCE((SELECT acknowledged_sequence
               FROM data.delivery_cursors
               WHERE space_id=$1 AND channel_id=$2 AND subject_id=$10 LIMIT 1), 0) END
@@ -2895,10 +3056,9 @@ export class PostgresMessageRepository {
               FROM data.messages WHERE space_id = $1 AND channel_id = $2), 0) END
               AS history_head_sequence
           FROM (SELECT 1) one LEFT JOIN authorized_channel granted ON TRUE
-          LEFT JOIN data.channels context ON context.space_id=$1 AND context.channel_id=$2 AND granted.authorized
         )
         SELECT meta.history_authorized,meta.acknowledged_sequence,meta.content_revision,
-          meta.history_head_sequence,meta.channel_name,meta.channel_metadata,meta.channel_updated_at,meta.about_run_id,
+          meta.history_head_sequence,
           page.*,thread.thread_channel_id,thread.thread_updated_at,
           thread.reply_count,thread.reply_rows
         FROM history_metadata meta
@@ -2928,23 +3088,7 @@ export class PostgresMessageRepository {
     const threadSummaries = new Map(threadRows.map((row) => [
       row.root_message_id, serializeThreadSummary(row),
     ]));
-    const aboutInput = head?.about_run_id ? await this.database.transaction({
-      requestId, operation: "message.history.about-input",
-      placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
-    }, (tx) => recordAboutInput(tx, {
-      channel: { space_id: spaceId, channel_id: channelId, name: head.channel_name!,
-        metadata_json: head.channel_metadata!, updated_at: head.channel_updated_at! },
-      runId: head.about_run_id!, contentRevision: Number(head.content_revision),
-      references: page.map((row) => ({ messageId: row.message_id, channelId: row.channel_id,
-        sequence: Number(row.timeline_sequence), entityVersion: Number(row.entity_version),
-        contentHash: row.content_hash, payloadKind: row.payload_kind, payloadRef: row.payload_ref,
-        recordDigest: row.record_digest, bodyHash: row.body_hash,
-        // Bundled records are stored inline rather than in a separately fetchable object.
-        ...(row.payload_bundle_base64 ? { payloadBundleBase64: row.payload_bundle_base64,
-          codecId: row.codec_id, payloadSchemaVersion: row.payload_schema_version } : {}) })),
-    })) : undefined;
     return {
-      ...(aboutInput ? { aboutInput } : {}),
       messages: page.map((row) => {
         const message = serializeMessage(row);
         const threadSummary = threadSummaries.get(row.message_id);
@@ -2964,11 +3108,12 @@ export class PostgresMessageRepository {
  *  names its exact Instance, so live delivery of the relay can skip it: an
  *  Instance answering its own link must not get its answer back as a turn. */
 function replierPresentation(snapshot: Record<string, unknown>): {
-  kind: "user" | "agent"; label: string; avatarUrl?: string; agentId?: string; instanceId?: string;
+  kind: "user" | "agent"; label: string; avatarUrl?: string; agentId?: string; instanceId?: string; registration?: AgentRegistrationKey;
 } {
   const text = (value: unknown) => typeof value === "string" && value.trim() ? value : undefined;
   const agent = snapshot.kind === "agent";
   return {
+    ...(agent && snapshot.registration ? { registration: parseAgentRegistrationKey(snapshot.registration) } : {}),
     kind: agent ? "agent" : "user",
     label: text(snapshot.label) ?? text(snapshot.name) ?? text(snapshot.agentName) ?? "Someone",
     ...(text(snapshot.avatarUrl) ? { avatarUrl: text(snapshot.avatarUrl) } : {}),

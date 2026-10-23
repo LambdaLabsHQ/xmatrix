@@ -84,10 +84,6 @@ export interface AgentRunPrincipal {
   channelId: string;
   machineId: string;
   hostId: string;
-  /** A Channel About session's Space; no other Run carries it. */
-  managementSpaceId?: string;
-  runKind?: "channel-instance" | "channel-about-session";
-  channelWriteAllowed?: boolean;
   permissions: AgentRunPermission[];
 }
 
@@ -248,11 +244,6 @@ async function verifyAgentRunToken(token: string, env: Env): Promise<AuthUser | 
       channelId: stringValue(value.channelId) || "",
       machineId: stringValue(value.machineId) || "",
       hostId: stringValue(value.hostId) || "",
-      managementSpaceId: stringValue(value.managementSpaceId),
-      runKind: value.runKind === "channel-about-session"
-        ? "channel-about-session"
-        : "channel-instance",
-      channelWriteAllowed: value.channelWriteAllowed !== false,
       permissions: parseAgentRunPermissions(value.permissions),
     };
     const email = stringValue((payload as { email?: unknown }).email);

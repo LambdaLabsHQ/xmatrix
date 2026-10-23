@@ -1,4 +1,5 @@
 import { formatZonedDateTime } from "./time-display";
+import { machineNetworkText } from "./machine-network";
 import { parsePresentedRoutingDecision, routingChoiceIdentity, type LaunchParameterEvidence, routingDecisionCopy, routingExclusionText,
   routingQuotaText, routingHarnessLabel, visibleRoutingChoiceRows, type LaunchDecisionStage, type PresentedRoutingDecision,
   type RoutingChoiceRow } from "@xmatrix/protocol";
@@ -31,6 +32,7 @@ function JointPlacement({ parameters }: { parameters: LaunchParameterEvidence })
         {routingHarnessLabel(item.harness)} on {item.machineName || "Unnamed machine"} · fit {percent(item.fit)} ·
         headroom {item.headroom === undefined ? "unmeasured" : percent(item.headroom)}
         {item.quotaPace === undefined ? "" : ` · quota pace ${item.quotaPace.toFixed(2)}×`}
+        {` · ${machineNetworkText(item.network)}`}
         {item.frontier ? "" : " · outweighed"}</li>)}
     </ol>}
   </div>;
@@ -127,7 +129,8 @@ export function RoutingDecisionBoard({ decision, compact = false, evidenceOnly =
       {!evidenceOnly && (decision.parameters.fit || decision.parameters.placement) && <JointPlacement parameters={decision.parameters} />}
       {decision.parameters.environment && <DecisionStage label="Environment" stage={decision.parameters.environment} />}
       {decision.parameters.choices.map(choice => <p key={choice.key}>{choice.key}: {choice.selected}
-        {Object.entries(choice.probabilities).map(([option, probability]) => <span key={option}> · {option}: {(probability * 100).toFixed(1)}%</span>)}
+        {choice.only ? <span> · the only option; Jev was not asked</span>
+          : Object.entries(choice.probabilities).map(([option, probability]) => <span key={option}> · {option}: {(probability * 100).toFixed(1)}%</span>)}
       </p>)}
       <code>Input digest: {decision.parameters.inputDigest}</code>
     </details>}

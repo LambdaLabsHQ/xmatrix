@@ -1,24 +1,7 @@
 impl AcpSession {
+    /// Every ACP vendor, Grok included, speaks JSON-RPC over the child's
+    /// stdio: no loopback port to wait on, no server key to pass.
     async fn spawn(
-        cmd: &str,
-        cmd_args: &[String],
-        cwd: Option<&str>,
-        config: AcpVendorConfig,
-    ) -> error::Result<Self> {
-        match config.flavor {
-            // Grok keeps its WebSocket serve transport (stdio optional); the
-            // generic ACP path is stdio-only.
-            AcpVendorFlavor::Grok => match grok_transport_kind(cmd_args) {
-                AcpTransportKind::WebSocket => {
-                    Self::spawn_websocket(cmd, cmd_args, cwd, config).await
-                }
-                AcpTransportKind::Stdio => Self::spawn_stdio(cmd, cmd_args, cwd, config).await,
-            },
-            AcpVendorFlavor::Generic => Self::spawn_stdio(cmd, cmd_args, cwd, config).await,
-        }
-    }
-
-    async fn spawn_stdio(
         cmd: &str,
         cmd_args: &[String],
         cwd: Option<&str>,
@@ -35,16 +18,19 @@ impl AcpSession {
         config: AcpVendorConfig,
     ) -> error::Result<Self> {
         let mut app_args = prefix_args.to_vec();
-        app_args.extend(config.acp_spawn_args(cmd_args, AcpTransportKind::Stdio, None, None));
+        app_args.extend(config.acp_spawn_args(cmd_args));
         let mut server = AppServerChild::spawn(
             cmd,
             &app_args,
             cwd,
             Stdio::piped(),
             "ACP agent stdio",
-            |_| {},
+            |command| {
+                command.stderr(Stdio::piped());
+            },
         )?;
         let stdin = server.take_stdin()?;
+        let stderr_tail = server.tee_stderr();
         let AppServerChild {
             child,
             process_tree,
@@ -53,112 +39,21 @@ impl AcpSession {
         } = server;
         let inbox = spawn_stdio_json_value_reader(stdout, config.display_name.clone());
 
-        Ok(Self::from_transport(
-            AppServerWrite::Stdio(Arc::new(AsyncMutex::new(stdin))),
+        Ok(Self {
+            write: AppServerWrite::Stdio(Arc::new(AsyncMutex::new(stdin))),
             inbox,
             process_tree,
             child,
-            config,
-        ))
-    }
-
-    async fn spawn_websocket(
-        cmd: &str,
-        cmd_args: &[String],
-        cwd: Option<&str>,
-        config: AcpVendorConfig,
-    ) -> error::Result<Self> {
-        let secret = uuid::Uuid::new_v4().simple().to_string();
-        let bind = loopback_ws_bind_address("XMATRIX_GROK_WS_BIND", "grok serve")?;
-        let app_args = config.acp_spawn_args(
-            cmd_args,
-            AcpTransportKind::WebSocket,
-            Some(&bind),
-            Some(&secret),
-        );
-        let AppServerChild {
-            mut child,
-            mut process_tree,
-            stdout,
-            ..
-        } = AppServerChild::spawn(
-            cmd,
-            &app_args,
-            cwd,
-            Stdio::null(),
-            "ACP agent WebSocket serve",
-            |_| {},
-        )?;
-
-        let expected_url = format!("ws://{bind}/ws?server-key={secret}");
-        let (url_tx, url_rx) = tokio::sync::oneshot::channel::<String>();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            let mut url_tx = Some(url_tx);
-            while let Ok(Some(line)) = lines.next_line().await {
-                if let Some(url) = grok_ws_url_from_banner_line(&line)
-                    && let Some(tx) = url_tx.take()
-                {
-                    let _ = tx.send(url);
-                }
-            }
-        });
-        // Grok 1.0.3 prints the WebSocket banner on stderr and, on Windows, can
-        // take longer than 15s to bind. Poll the deterministic bind URL (and
-        // any stdout banner) instead of waiting for a banner that never arrives.
-        let (ws, _ws_url) = match connect_grok_websocket(
-            &mut child,
-            &expected_url,
-            url_rx,
-            Duration::from_secs(30),
-        )
-        .await
-        {
-            Ok(pair) => pair,
-            Err(err) => {
-                terminate_app_server(&mut process_tree, &mut child).await;
-                return Err(err);
-            }
-        };
-
-        let (write, read) = ws.split();
-        let inbox = spawn_ws_json_value_reader(read, config.display_name.clone());
-
-        eprintln!(
-            "{} Connected to {} ACP WebSocket at {bind}",
-            "✓".green().bold(),
-            config.display_name
-        );
-
-        Ok(Self::from_transport(
-            AppServerWrite::WebSocket(Arc::new(AsyncMutex::new(write))),
-            inbox,
-            process_tree,
-            child,
-            config,
-        ))
-    }
-
-    fn from_transport(
-        write: AppServerWrite,
-        inbox: ProviderInbox,
-        process_tree: process_tree::ProcessTreeGuard,
-        child: Child,
-        config: AcpVendorConfig,
-    ) -> Self {
-        Self {
-            write,
-            inbox,
-            process_tree,
-            child,
+            stderr_tail,
             next_id: 1,
             session_id: None,
             loaded_goal: None,
+            auth_method_ids: Vec::new(),
             presentation: AgentPresentationFacts::default(),
             config,
             activity: ChannelActivityReporter::default(),
             questions: Default::default(),
-        }
+        })
     }
 
     fn current_model(&self) -> Option<&str> {
@@ -270,9 +165,11 @@ impl AcpSession {
             return Ok(message.get("result").cloned().unwrap_or(Value::Null));
         }
 
+        // The agent closed its stdout: whatever it printed on stderr last is
+        // the only account of why, so the failure notice carries it.
         Err(AcpRequestError {
             code: None,
-            detail: self.inbox.error().to_string(),
+            detail: with_stderr_tail(self.inbox.error().to_string(), &self.stderr_tail),
         })
     }
 
@@ -283,7 +180,9 @@ impl AcpSession {
     }
 
     /// Generic vendors skip `authenticate` up front; when the agent still
-    /// answers authRequired (-32000), retry once after `methodId: "login"`.
+    /// answers authRequired (-32000), retry once after authenticating with
+    /// `login`, or the agent's own method when it does not advertise `login`
+    /// (current Cursor CLI accepts only `cursor_login`).
     async fn request_with_login_retry(
         &mut self,
         method: &str,
@@ -295,11 +194,20 @@ impl AcpSession {
                 if self.config.authenticate.is_none()
                     && err.code == Some(ACP_AUTH_REQUIRED_CODE) =>
             {
+                let method_id = acp_retry_auth_method(&self.auth_method_ids);
+                // The agent itself said it needs credentials and refused the
+                // ones it has: whatever its wording, that is a sign-in problem.
                 self.request(
                     "authenticate",
-                    Some(serde_json::json!({ "methodId": "login" })),
+                    Some(serde_json::json!({ "methodId": method_id })),
                 )
-                .await?;
+                .await
+                .map_err(|err| {
+                    CliError::Launch(format!(
+                        "{} authentication required: {err}",
+                        self.config.display_name
+                    ))
+                })?;
                 self.request(method, Some(params)).await
             }
             Err(err) => Err(CliError::Launch(err.detail)),
@@ -328,9 +236,10 @@ impl AcpSession {
         resume_requested: bool,
         trusted_rules: Option<&str>,
     ) -> error::Result<AgentPresentationSnapshot> {
-        let _ = self
+        let initialized = self
             .request_with_login_retry("initialize", acp_initialize_params())
             .await?;
+        self.auth_method_ids = acp_auth_method_ids(&initialized);
         self.notify("notifications/initialized", None).await?;
 
         if let Some(authenticate) = self.config.authenticate.clone() {
@@ -361,7 +270,7 @@ impl AcpSession {
                     serde_json::json!({
                         "sessionId": session_id,
                         "cwd": workspace_path.clone(),
-                        "mcpServers": crate::runtime_connector_mcp::acp_connector_mcp_servers(),
+                        "mcpServers": [],
                     }),
                 )
                 .await
@@ -423,6 +332,19 @@ impl AcpSession {
         })?;
         if self.presentation.model.as_deref() == Some(model_id) {
             return Ok(model_id.to_string());
+        }
+        // Native config selection returns the complete model-dependent controls.
+        // Cursor's legacy session/set_model returns {}, leaving effort stale.
+        let model_config_id = self
+            .presentation
+            .parameters
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .find(|parameter| matches!(parameter.id.as_str(), "model" | "models"))
+            .map(|parameter| parameter.id.clone());
+        if let Some(config_id) = model_config_id {
+            return self.set_parameter(&config_id, model_id).await;
         }
         let result = self
             .request(
@@ -510,42 +432,13 @@ impl AcpSession {
                 self.config.display_name
             )));
         }
-        let config_id = self
-            .presentation
-            .effort_config_id
-            .as_deref()
-            .ok_or_else(|| {
-                CliError::Launch(format!(
-                    "{} does not advertise an ACP effort control",
-                    self.config.display_name
-                ))
-            })?;
-        let session_id = self.session_id.clone().ok_or_else(|| {
+        let config_id = self.presentation.effort_config_id.clone().ok_or_else(|| {
             CliError::Launch(format!(
-                "{} agent session not initialized",
-                self.config.log_name()
+                "{} does not advertise an ACP effort control",
+                self.config.display_name
             ))
         })?;
-        let result = self
-            .request(
-                "session/set_config_option",
-                Some(serde_json::json!({
-                    "sessionId": session_id,
-                    "configId": config_id,
-                    "value": effort,
-                })),
-            )
-            .await?;
-        self.config
-            .presentation_adapter
-            .observe_acp(&result, &mut self.presentation);
-        let selected = self
-            .presentation
-            .effort
-            .clone()
-            .unwrap_or_else(|| effort.to_string());
-        self.presentation.effort = Some(selected.clone());
-        Ok(selected)
+        self.set_parameter(&config_id, effort).await
     }
 
     /// Show a form elicitation as a card and park it for the answer; with no
@@ -566,7 +459,7 @@ impl AcpSession {
                     .and_then(Value::as_str)
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("acp-{}", uuid::Uuid::new_v4()));
-                crate::runtime_harness_questions::publish_questionnaire(
+                let card = crate::runtime_harness_questions::publish_questionnaire(
                     relay,
                     channel_id,
                     crate::runtime_harness_questions::questionnaire_message(
@@ -576,7 +469,7 @@ impl AcpSession {
                         &questions,
                     ),
                 );
-                self.questions.park(key, (id, params));
+                self.questions.park(key, (id, params), card);
                 Ok(())
             }
             _ => {
@@ -1039,111 +932,9 @@ fn acp_is_session_load_replay(request: &Value, message: &Value) -> bool {
             })
 }
 
-fn grok_transport_kind(cmd_args: &[String]) -> AcpTransportKind {
-    if cmd_args.iter().any(|arg| arg == "stdio") {
-        return AcpTransportKind::Stdio;
-    }
-    if cmd_args.iter().any(|arg| arg == "serve") {
-        return AcpTransportKind::WebSocket;
-    }
-    match std::env::var("XMATRIX_GROK_TRANSPORT") {
-        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
-            "stdio" | "std" | "pipe" => AcpTransportKind::Stdio,
-            // Default and explicit WebSocket labels.
-            "ws" | "websocket" | "serve" | "server" | "" => AcpTransportKind::WebSocket,
-            other => {
-                eprintln!(
-                    "{} Unknown XMATRIX_GROK_TRANSPORT={other:?}; using WebSocket serve",
-                    "⚠".yellow().bold()
-                );
-                AcpTransportKind::WebSocket
-            }
-        },
-        Err(_) => AcpTransportKind::WebSocket,
-    }
-}
-
-async fn connect_grok_websocket(
-    child: &mut tokio::process::Child,
-    expected_url: &str,
-    mut url_rx: tokio::sync::oneshot::Receiver<String>,
-    timeout: Duration,
-) -> error::Result<(
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
-    String,
-)> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    let mut banner_url: Option<String> = None;
-    let mut last_err = String::from("no connection attempt completed");
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                return Err(CliError::Launch(format!(
-                    "ACP agent WebSocket serve exited before accepting connections ({status})"
-                )));
-            }
-            Ok(None) => {}
-            Err(err) => {
-                return Err(CliError::Launch(format!(
-                    "Failed to poll ACP agent WebSocket serve: {err}"
-                )));
-            }
-        }
-        if let Ok(url) = url_rx.try_recv() {
-            banner_url = Some(url);
-        }
-        let mut candidates = Vec::with_capacity(2);
-        if let Some(url) = banner_url.as_deref() {
-            candidates.push(url);
-        }
-        if !candidates.contains(&expected_url) {
-            candidates.push(expected_url);
-        }
-        for url in candidates {
-            match tokio::time::timeout(
-                Duration::from_millis(400),
-                tokio_tungstenite::connect_async_with_config(
-                    url,
-                    Some(provider_websocket_config()),
-                    false,
-                ),
-            )
-            .await
-            {
-                Ok(Ok((ws, _))) => return Ok((ws, url.to_string())),
-                Ok(Err(err)) => last_err = err.to_string(),
-                Err(_) => last_err = "connect timed out".to_string(),
-            }
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(CliError::Launch(format!(
-                "Failed to connect to ACP agent WebSocket ({expected_url}): {last_err}"
-            )));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-}
-
-fn grok_ws_url_from_banner_line(line: &str) -> Option<String> {
-    let marker = "WebSocket URL:";
-    let idx = line.find(marker)?;
-    let rest = line[idx + marker.len()..].trim();
-    let url = rest.split_whitespace().next()?.trim();
-    if url.starts_with("ws://") || url.starts_with("wss://") {
-        Some(url.to_string())
-    } else {
-        None
-    }
-}
-
-fn grok_acp_spawn_args(
-    cmd_args: &[String],
-    transport: AcpTransportKind,
-    bind: Option<&str>,
-    secret: Option<&str>,
-) -> Vec<String> {
+fn grok_acp_spawn_args(cmd_args: &[String]) -> Vec<String> {
     // Prefer an explicit agent-mode argv when callers already pass one.
-    if cmd_args.iter().any(|arg| arg == "stdio" || arg == "serve") {
+    if cmd_args.iter().any(|arg| arg == "stdio") {
         let mut args = cmd_args.to_vec();
         if !args.iter().any(|arg| arg == "agent") {
             args.insert(0, "agent".to_string());
@@ -1152,28 +943,8 @@ fn grok_acp_spawn_args(
             .iter()
             .any(|arg| arg == "--always-approve" || arg == "--yolo")
         {
-            if let Some(idx) = args.iter().position(|arg| arg == "stdio" || arg == "serve") {
-                args.insert(idx, "--always-approve".to_string());
-            } else {
-                args.push("--always-approve".to_string());
-            }
-        }
-        if transport == AcpTransportKind::WebSocket {
-            // `serve` owns --bind/--secret; place them after the subcommand.
-            if let Some(serve_idx) = args.iter().position(|arg| arg == "serve") {
-                let mut insert_at = serve_idx + 1;
-                if let Some(bind) = bind
-                    && !args.iter().any(|arg| arg == "--bind") {
-                        args.insert(insert_at, "--bind".to_string());
-                        args.insert(insert_at + 1, bind.to_string());
-                        insert_at += 2;
-                    }
-                if let Some(secret) = secret
-                    && !args.iter().any(|arg| arg == "--secret") {
-                        args.insert(insert_at, "--secret".to_string());
-                        args.insert(insert_at + 1, secret.to_string());
-                    }
-            }
+            let idx = args.iter().position(|arg| arg == "stdio").unwrap_or(args.len());
+            args.insert(idx, "--always-approve".to_string());
         }
         return args;
     }
@@ -1186,28 +957,11 @@ fn grok_acp_spawn_args(
             args.push(model.to_string());
         }
     }
-    for arg in cmd_args {
-        // Surface user-supplied flags before the transport subcommand.
-        args.push(arg.clone());
-    }
+    // User-supplied flags go before the transport subcommand:
+    // `grok agent [agent-opts] stdio`.
+    args.extend(cmd_args.iter().cloned());
     args.push("--always-approve".to_string());
-    match transport {
-        AcpTransportKind::Stdio => {
-            args.push("stdio".to_string());
-        }
-        AcpTransportKind::WebSocket => {
-            // clap shape: `grok agent [agent-opts] serve [serve-opts]`
-            args.push("serve".to_string());
-            if let Some(bind) = bind {
-                args.push("--bind".to_string());
-                args.push(bind.to_string());
-            }
-            if let Some(secret) = secret {
-                args.push("--secret".to_string());
-                args.push(secret.to_string());
-            }
-        }
-    }
+    args.push("stdio".to_string());
     args
 }
 
@@ -1237,13 +991,7 @@ fn acp_message_id_matches(value: Option<&Value>, expected: u64) -> bool {
 }
 
 fn acp_error_message(error: &Value) -> String {
-    if let Some(message) = error.get("message").and_then(Value::as_str) {
-        if let Some(data) = error.get("data") {
-            return format!("{message}: {data}");
-        }
-        return message.to_string();
-    }
-    error.to_string()
+    crate::runtime_failure_detail::provider_error_detail(error)
 }
 
 fn acp_turn_cancellation_detail(display_name: &str, result: &Value) -> Option<String> {
@@ -1445,3 +1193,65 @@ fn redact_data_urls_value(value: &Value) -> Value {
     reason = "each #[tokio::test] runs on its own thread; the guard only serializes process-global env across test threads"
 )]
 mod tests;
+
+fn acp_auth_method_ids(initialize_result: &Value) -> Vec<String> {
+    initialize_result
+        .get("authMethods")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|method| method.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+fn acp_retry_auth_method(advertised: &[String]) -> String {
+    if advertised.is_empty() || advertised.iter().any(|id| id == "login") {
+        "login".to_string()
+    } else {
+        advertised[0].clone()
+    }
+}
+
+/// How long a readiness check may take, from spawn to an open session.
+const ACP_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether an ACP harness can take work on this machine, asked the way a
+/// launch asks it: the same spawn, `initialize`, credential retry and
+/// `session/new`, then closed before any prompt, so no model is called. A
+/// vendor's status command can be missing or wrong (an expired sign-in still
+/// reads signed in); this cannot. `Some(Err(reason))` is the harness's own
+/// account of why it refused; `None` is no answer (no start, a timeout, or a
+/// failure that is not about credentials).
+pub(crate) async fn acp_harness_readiness(
+    preset: &xmatrix_cli_agent::AgentPreset,
+    launcher: &std::path::Path,
+) -> Option<Result<(), String>> {
+    let config = match preset.backend.as_str() {
+        "grok-acp" => AcpVendorConfig::grok(),
+        "acp" => AcpVendorConfig::generic(&preset.runtime),
+        _ => return None,
+    };
+    // A scratch project, so the session it opens never lands in the owner's
+    // own project history.
+    let cwd = dirs::config_dir()?.join("xmatrix").join("harness-check");
+    std::fs::create_dir_all(&cwd).ok()?;
+    let cwd = cwd.to_str()?.to_string();
+    let program = launcher.to_str()?.to_string();
+    let mut app = AcpSession::spawn(&program, &preset.default_args, Some(&cwd), config)
+        .await
+        .ok()?;
+    let opened = tokio::time::timeout(
+        ACP_READINESS_TIMEOUT,
+        app.initialize(Some(&cwd), None, false, None),
+    )
+    .await;
+    app.shutdown().await;
+    match opened.ok()? {
+        Ok(_) => Some(Ok(())),
+        Err(err) => {
+            let detail = err.to_string();
+            harness_signed_out_error(&detail).then_some(Err(detail))
+        }
+    }
+}

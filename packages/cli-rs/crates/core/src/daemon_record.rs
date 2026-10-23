@@ -21,7 +21,7 @@ use crate::error::{CliError, Result};
 
 /// Bounds the read. The record holds a handful of short fields.
 const MAX_RECORD_BYTES: u64 = 8 * 1024;
-pub const DAEMON_RECORD_SCHEMA_VERSION: u32 = 1;
+pub(crate) const DAEMON_RECORD_SCHEMA_VERSION: u32 = 1;
 const DAEMON_RECORD_FILE: &str = "daemon-record.json";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -58,7 +58,7 @@ pub struct DaemonRecord {
 /// working directory — and an Agent Run's working directory is its workspace,
 /// never the daemon's. A locator that resolves differently per process is worse
 /// than no locator, so this refuses instead.
-pub fn record_dir() -> Result<PathBuf> {
+pub(crate) fn record_dir() -> Result<PathBuf> {
     let dir = config::config_dir();
     if dir.is_absolute() {
         return Ok(dir);
@@ -73,7 +73,7 @@ pub fn record_dir() -> Result<PathBuf> {
 /// Longest socket path the platform will bind. macOS caps `sun_path` at 104
 /// bytes and Linux at 108; use the smaller so a path that works on one host is
 /// not silently unbindable on another.
-pub const MAX_SOCKET_PATH_BYTES: usize = 104;
+pub(crate) const MAX_SOCKET_PATH_BYTES: usize = 104;
 
 /// Where a daemon listener lives. A socket path is stable across restarts —
 /// unlike an ephemeral port — which is the whole reason to prefer it, and it
@@ -98,13 +98,13 @@ pub fn socket_path(name: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-pub fn record_path() -> Result<PathBuf> {
+pub(crate) fn record_path() -> Result<PathBuf> {
     Ok(record_dir()?.join(DAEMON_RECORD_FILE))
 }
 
 /// Read the record. `Ok(None)` means no daemon has written one; every other
 /// failure is returned rather than folded into "absent".
-pub fn read_record() -> Result<Option<DaemonRecord>> {
+pub(crate) fn read_record() -> Result<Option<DaemonRecord>> {
     let path = record_path()?;
     let Some(metadata) = crate::fs::metadata_if_exists(&path).map_err(CliError::Io)? else {
         return Ok(None);
@@ -155,7 +155,7 @@ pub fn read_record_for_active_profile() -> Result<Option<DaemonRecord>> {
     Ok(Some(record))
 }
 
-pub fn write_record(record: &DaemonRecord) -> Result<()> {
+pub(crate) fn write_record(record: &DaemonRecord) -> Result<()> {
     let path = record_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(CliError::Io)?;

@@ -43,6 +43,20 @@ hash-named JS/CSS only. See [Channel startup performance](../performance/channel
 The iOS shell is one WKWebView. Native tab taps switch the web shell's mounted
 dock panes, so tabs never reload or rebuild. See the [iOS shell](../../apps/ios/README.md).
 
+The shared shell subscribes to live Channel presence by Channel key; catalog
+and message-reference snapshots stay stable across presence-only changes.
+Ordered Instance/card/snapshot batches share member/global Instance routing
+and publish once before message, history and control barriers. Completed runs
+publish small live replacement batches, retaining immutable full commits for
+catalog and ordering changes, without a second full collection reconciliation.
+Routing and Channel positions pass only to the exact next published snapshot;
+a sealed producer cannot change it again. The work dock selects only its rendered
+presentation; activity-only reports do not commit its cards. Trace and lifecycle
+actions resolve the exact current Instance key when executed, including a second
+confirmation press. A Run's
+presentation stays in its own Channel while account quota remains shared.
+See [live Instance load](../performance/channel-startup.md#live-instance-load).
+
 ### Markdown autolinks
 
 Web message bodies, Markdown attachments and page previews use the same GFM
@@ -64,9 +78,30 @@ precedence. Existing immutable references and authenticated media loading are
 unchanged. HTTPS links to direct audio/video files offer a reader-initiated
 preview; external media is not contacted before that click. Playback failure
 keeps a download or original link available. Codec support depends on the host
-browser; this does not add transcoding, DRM, streaming manifests, or third-party
+browser; playback does not add DRM, streaming manifests, or third-party
 website embeds. Coverage is in `multimedia-attachments.spec.ts` and
 `attachment-media-type.test.cjs`.
+
+The shared Web composer compresses videos above 1 MB before upload using native
+WebCodecs through a lazily loaded Mediabunny converter. It fits the longest edge
+within 1280 pixels and targets 2.5 Mbps, preferring H.264 MP4 with a WebM fallback.
+Audio and video track counts and packet presence are checked in the result;
+unsupported codecs, missing/empty result tracks, failures, a two-minute
+deadline, or a result that is no smaller retain the original. Removing a pending
+attachment cancels conversion. Metadata describes the uploaded result.
+Removed draft attachments and cancelled uploads release their local preview URLs,
+including while awaiting
+video metadata or an earlier file in the same batch.
+Each image and video preview has its own **Original** checkbox once preparation
+finishes. Checking it prepares the retained local source without compression;
+unchecking it restores automatic compression. Choices are independent and stay
+with the in-memory Channel draft. Originals retain their bytes, filename and
+MIME type, subject to the existing 64 MiB attachment limit. Images otherwise keep
+the 1 MB compression target. A quality change blocks sending until it finishes,
+preserves attachment order and restores the previous file on failure or cancel.
+Local source files remain browser-only and are excluded from send snapshots and
+message bindings. Failed image compression still permits choosing Original on
+that preview.
 
 ### Registration-backed Channel presence
 

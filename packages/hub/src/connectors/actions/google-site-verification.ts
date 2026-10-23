@@ -12,7 +12,7 @@ const DOMAIN_METHODS = new Set(["DNS_TXT", "DNS_CNAME"]);
 const SITE_METHODS = new Set(["FILE", "META", "ANALYTICS", "TAG_MANAGER"]);
 
 function headers(credentials: Readonly<Record<string, string>>): Record<string, string> {
-  if (!credentials.oauthScopes?.split(/\s+/u).includes(SCOPE)) {
+  if (!new Set(credentials.oauthScopes?.split(/\s+/u)).has(SCOPE)) {
     throw new ProviderRequestError(403, "Reconnect Google Search Console to authorize site verification; existing Search Console actions still work");
   }
   return googleHeaders(credentials, "Google Search Console");

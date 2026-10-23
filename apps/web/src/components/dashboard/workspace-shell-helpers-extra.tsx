@@ -10,15 +10,16 @@ import {
   channelMatchesSearch,
   channelReadCountsStorageKey,
   normalizeChannelSearchText,
-  searchResultRank,
 } from "./workspace-shell-search-model";
+import {
+  rankSearchResults, searchActivityMs, searchMatchTier, type SearchMatchTier,
+} from "./workspace-search-rank";
 
 export type { ChannelTreeNode, WorkspaceSearchResult } from "./workspace-shell-search-model";
 export {
   channelMatchesSearch,
   channelReadCountsStorageKey,
   normalizeChannelSearchText,
-  searchResultRank,
 } from "./workspace-shell-search-model";
 
 import {
@@ -127,7 +128,7 @@ import type {
   ChannelMessage,
   ObservabilityEvent,
   SerializedAgent,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedMachineDaemon,
   SerializedAutomation,
   SerializedSpace,
@@ -276,18 +277,6 @@ export function latestIso(left: string | undefined, right: string | undefined): 
   return Date.parse(right) > Date.parse(left) ? right : left;
 }
 
-export function latestTimestamp(values: Array<string | undefined>): string | undefined {
-  return values
-    .filter((value): value is string => Boolean(value && Number.isFinite(Date.parse(value))))
-    .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
-}
-
-/** Earliest finite ISO timestamp. Used for stable agent birth order (connectedAt). */
-export function earliestTimestamp(values: Array<string | undefined>): string | undefined {
-  return values
-    .filter((value): value is string => Boolean(value && Number.isFinite(Date.parse(value))))
-    .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
-}
 
 export function sortSpaces(spaces: SerializedSpace[]): SerializedSpace[] {
   return [...spaces].sort((a, b) => a.name.localeCompare(b.name));
@@ -309,11 +298,29 @@ export function sortAutomations(automations: SerializedAutomation[]): Serialized
   });
 }
 
-export function sortChannels(channels: SerializedChannel[]): SerializedChannel[] {
+export function sortChannels(channels: ChannelSnapshot[]): ChannelSnapshot[] {
   return [...channels].sort(compareChannelsForSidebar);
 }
 
-export function compareChannelsForSidebar(a: SerializedChannel, b: SerializedChannel): number {
+// Channel snapshots are immutable. Parse their ordering timestamps once even
+// when a catalog sort compares the same row many times; replaced snapshots get
+// fresh keys and discarded rows do not remain retained by this cache.
+const channelSortTimes = new WeakMap<ChannelSnapshot, { recent: number; pinned: number }>();
+
+function channelSortTimestamps(channel: ChannelSnapshot) {
+  let times = channelSortTimes.get(channel);
+  if (!times) {
+    const pinnedAt = channel.metadata?.pinnedAt ?? channel.metadata?.pinned_at;
+    times = {
+      recent: Math.max(timestampMs(channel.lastMessage?.sentAt), timestampMs(channel.updatedAt), timestampMs(channel.createdAt)),
+      pinned: typeof pinnedAt === "string" ? timestampMs(pinnedAt) : 0,
+    };
+    channelSortTimes.set(channel, times);
+  }
+  return times;
+}
+
+export function compareChannelsForSidebar(a: ChannelSnapshot, b: ChannelSnapshot): number {
   const leftPinned = channelIsPinned(a);
   const rightPinned = channelIsPinned(b);
   if (leftPinned !== rightPinned) return rightPinned ? 1 : -1;
@@ -333,8 +340,8 @@ export function compareChannelsForSidebar(a: SerializedChannel, b: SerializedCha
  * timestamp.
  */
 export function compareChannelsByRecentActivity(
-  a: SerializedChannel,
-  b: SerializedChannel
+  a: ChannelSnapshot,
+  b: ChannelSnapshot
 ): number {
   const byActivity = channelRecentActivityMs(b) - channelRecentActivityMs(a);
   if (byActivity !== 0) return byActivity;
@@ -350,24 +357,33 @@ export function compareChannelsByRecentActivity(
  * one until the next read. Pinned rows keep the lead the Hub gives them.
  */
 export function rankCatalogChannels(
-  channels: readonly SerializedChannel[],
+  channels: readonly ChannelSnapshot[],
   pinnedChannelIds: readonly string[]
-): SerializedChannel[] {
+): ChannelSnapshot[] {
   const pinRank = new Map(pinnedChannelIds.map((id, index) => [id, index]));
-  const rank = (channel: SerializedChannel) => pinRank.get(channel.id) ?? pinnedChannelIds.length;
+  const rank = (channel: ChannelSnapshot) => pinRank.get(channel.id) ?? pinnedChannelIds.length;
   return [...channels].sort((a, b) =>
     rank(a) - rank(b) || channelRecentActivityMs(b) - channelRecentActivityMs(a));
 }
 
-export function channelRecentActivityMs(channel: SerializedChannel): number {
-  return Math.max(
-    timestampMs(channel.lastMessage?.sentAt),
-    timestampMs(channel.updatedAt),
-    timestampMs(channel.createdAt)
-  );
+export function channelRecentActivityMs(channel: ChannelSnapshot): number {
+  return channelSortTimestamps(channel).recent;
 }
 
-export function channelIsPinned(channel: SerializedChannel): boolean {
+/**
+ * Conversations matching a search, best first by match and then by recent
+ * activity, so a wide word such as a product name still surfaces the
+ * conversation the reader was just in.
+ */
+export function searchMatchingChannels(channels: readonly ChannelSnapshot[], query: string): ChannelSnapshot[] {
+  const needle = normalizeChannelSearchText(query);
+  if (!needle) return [];
+  return rankSearchResults(channels.filter((channel) => channelMatchesSearch(channel, needle)), (channel) => ({
+    tier: searchMatchTier(needle, channelTitle(channel)), activityMs: channelRecentActivityMs(channel),
+  }));
+}
+
+export function channelIsPinned(channel: ChannelSnapshot): boolean {
   const metadata = channel.metadata;
   return (
     metadata?.pinned === true ||
@@ -376,10 +392,8 @@ export function channelIsPinned(channel: SerializedChannel): boolean {
   );
 }
 
-export function channelPinnedAtMs(channel: SerializedChannel): number {
-  const metadata = channel.metadata;
-  const pinnedAt = metadata?.pinnedAt ?? metadata?.pinned_at;
-  return typeof pinnedAt === "string" ? timestampMs(pinnedAt) : 0;
+export function channelPinnedAtMs(channel: ChannelSnapshot): number {
+  return channelSortTimestamps(channel).pinned;
 }
 
 export function timestampMs(value: string | undefined): number {
@@ -388,7 +402,7 @@ export function timestampMs(value: string | undefined): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-export function isThreadChannel(channel: SerializedChannel): boolean {
+export function isThreadChannel(channel: ChannelSnapshot): boolean {
   return (
     channel.metadata?.kind === "thread" ||
     Boolean(metadataString(channel.metadata, "threadRootMessageId")) ||
@@ -399,9 +413,9 @@ export function isThreadChannel(channel: SerializedChannel): boolean {
 /* channelMatchesSearch owned by workspace-shell-search-model */
 
 export function quickOpenChannelSubtitle(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   spaces: SerializedSpace[],
-  channels: SerializedChannel[] = []
+  channels: ChannelSnapshot[] = []
 ): string {
   const space = spaces.find((item) => item.id === channel.spaceId);
   if (isThreadChannel(channel)) {
@@ -437,7 +451,7 @@ export function buildWorkspaceSearchResults({
   pages = [],
 }: {
   query: string;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
   spaces: SerializedSpace[];
   agents: SerializedAgent[];
   projects: SerializedWorkspace[];
@@ -453,16 +467,20 @@ export function buildWorkspaceSearchResults({
   const results: WorkspaceSearchResult[] = [];
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
   const seenMessages = new Set<string>();
+  /** Ranks by the title shown unless the match was only in a message's text. */
+  const push = (result: Omit<WorkspaceSearchResult, "rank">, activityMs = 0, tier?: SearchMatchTier) => {
+    results.push({ ...result, rank: { tier: tier ?? searchMatchTier(normalizedQuery, result.title), activityMs } });
+  };
 
   for (const channel of channels) {
     if (!channelMatchesSearch(channel, normalizedQuery)) continue;
-    results.push({
+    push({
       id: `channel:${channel.id}`,
       kind: "channel",
       title: `#${channelTitle(channel)}`,
       subtitle: quickOpenChannelSubtitle(channel, spaces, channels),
       channelId: channel.id,
-    });
+    }, channelRecentActivityMs(channel));
   }
 
   // Catalog last-message previews (what the mobile channel list shows under the
@@ -476,14 +494,14 @@ export function buildWorkspaceSearchResults({
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
     seenMessages.add(last.messageId);
-    results.push({
+    push({
       id: `message:${last.messageId}`,
       kind: "message",
       title: (last.bodyPreview || "").trim() || "Message",
       subtitle: `${last.from?.label || "Someone"} in #${channelTitle(channel)} - ${formatDateTime(last.sentAt)}`,
       channelId: channel.id,
       messageId: last.messageId,
-    });
+    }, searchActivityMs(last.sentAt), 3);
   }
 
   for (const message of messages) {
@@ -499,25 +517,25 @@ export function buildWorkspaceSearchResults({
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
     seenMessages.add(message.messageId);
-    results.push({
+    push({
       id: `message:${message.messageId}`,
       kind: "message",
       title: message.body.trim() || attachmentNames.find((name) => name.trim()) || "Attachment",
       subtitle: `${message.from.label} in #${channel ? channelTitle(channel) : shortId(message.channelId)} - ${formatDateTime(message.sentAt)}`,
       channelId: message.channelId,
       messageId: message.messageId,
-    });
+    }, searchActivityMs(message.sentAt), 3);
   }
 
   for (const page of pages) {
     if (!normalizeChannelSearchText(page.title).includes(normalizedQuery)) continue;
-    results.push({
+    push({
       id: `page:${page.pageId}`,
       kind: "page",
       title: page.title,
       subtitle: "Page",
       pageId: page.pageId,
-    });
+    }, searchActivityMs(page.updatedAt));
   }
 
   for (const space of spaces) {
@@ -535,7 +553,7 @@ export function buildWorkspaceSearchResults({
         member.email && member.email !== title ? member.email : undefined,
         member.handle && member.handle !== title ? `@${member.handle}` : undefined,
       ].filter(Boolean);
-      results.push({
+      push({
         id: `member:${space.id}:${member.userId}`,
         kind: "member",
         title,
@@ -555,7 +573,7 @@ export function buildWorkspaceSearchResults({
       agent.id,
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
-    results.push({
+    push({
       id: `agent:${agent.id}`,
       kind: "agent",
       title: agent.name,
@@ -567,7 +585,7 @@ export function buildWorkspaceSearchResults({
     const searchable = normalizeChannelSearchText([space.name, space.id].join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
     const channel = channels.find((item) => item.spaceId === space.id);
-    results.push({
+    push({
       id: `space:${space.id}`,
       kind: "space",
       title: space.name,
@@ -584,7 +602,7 @@ export function buildWorkspaceSearchResults({
       project.canonicalCwd,
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
-    results.push(workspaceSearchResult(project));
+    push(workspaceSearchResult(project));
   }
 
   for (const daemon of machineDaemons) {
@@ -598,7 +616,7 @@ export function buildWorkspaceSearchResults({
       hostName,
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
-    results.push(machineSearchResult(daemon));
+    push(machineSearchResult(daemon));
   }
 
   for (const event of events) {
@@ -610,20 +628,16 @@ export function buildWorkspaceSearchResults({
       eventMetadataString(event, "summary"),
     ].filter(Boolean).join(" "));
     if (!searchable.includes(normalizedQuery)) continue;
-    results.push({
+    push({
       id: `event:${event.id}`,
       kind: "event",
       title: eventLabel(event),
       subtitle: `${channel ? `#${channelTitle(channel)} - ` : ""}${formatDateTime(event.timestamp)}`,
       channelId: event.channelId,
-    });
+    }, searchActivityMs(event.timestamp), 3);
   }
 
-  return results
-    .sort((left, right) =>
-      searchResultRank(left.kind) - searchResultRank(right.kind) || left.id.localeCompare(right.id)
-    )
-    .slice(0, 80);
+  return rankSearchResults(results, (result) => result.rank).slice(0, 80);
 }
 
 export function searchResultIcon(kind: WorkspaceSearchResult["kind"]): React.ComponentType<{ className?: string }> {
@@ -681,7 +695,7 @@ export function isOwnChannelMessage(message: ChannelMessage, userId: string): bo
 }
 
 export function channelUnreadCount(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   readCounts: Record<string, number>,
   readCountsBaselineReady: boolean
 ): number {
@@ -692,8 +706,24 @@ export function channelUnreadCount(
   return Math.max(0, channel.messageCount - readCount);
 }
 
+/**
+ * The unread count of the Channel as a row holds it. The list counted
+ * `listed`, its own copy; the row's copy is ahead of it by the messages that
+ * have reached only the row so far.
+ */
+export function rowUnreadCount(
+  channel: ChannelSnapshot,
+  listed: ChannelSnapshot,
+  listedCount: number,
+  readCount: number | undefined,
+  readCountsBaselineReady: boolean | undefined,
+): number {
+  if (channel === listed || readCountsBaselineReady === undefined) return listedCount;
+  return channelUnreadCount(channel, readCount === undefined ? {} : { [channel.id]: readCount }, readCountsBaselineReady);
+}
+
 function unreadAttentionIsMention(
-  attention: SerializedChannel["attention"],
+  attention: ChannelSnapshot["attention"],
 ): boolean {
   if (!attention || attention.unreadAttentionCount <= 0) return false;
   if (attention.triggerKinds?.includes("mention")) return true;
@@ -703,7 +733,7 @@ function unreadAttentionIsMention(
 }
 
 export function channelHasUnreadMention(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   events: readonly ObservabilityEvent[],
   mentionClearedAt: Record<string, number>,
   unreadCount: number
@@ -714,7 +744,7 @@ export function channelHasUnreadMention(
 }
 
 export function channelUnreadMentionJumpId(
-  channel: SerializedChannel,
+  channel: ChannelSnapshot,
   events: readonly ObservabilityEvent[],
   mentionClearedAt: Record<string, number>,
   unreadCount: number,
@@ -944,14 +974,14 @@ export function channelMentionClearedStorageKey(userId: string): string {
    was momentarily incomplete, and a second copy of the same fact could only
    re-introduce that. */
 
-export function workspaceSearchResult(project: SerializedWorkspace): WorkspaceSearchResult {
+export function workspaceSearchResult(project: SerializedWorkspace): Omit<WorkspaceSearchResult, "rank"> {
   return {
     id: `workspace:${workspaceKey(project)}`, kind: "machine", title: project.displayName,
     subtitle: [project.hostName || project.hostId, project.canonicalCwd].filter(Boolean).join(" - "),
   };
 }
 
-export function machineSearchResult(daemon: SerializedMachineDaemon): WorkspaceSearchResult {
+export function machineSearchResult(daemon: SerializedMachineDaemon): Omit<WorkspaceSearchResult, "rank"> {
   const hostName = daemon.hostName || metadataString(daemon.metadata, "hostName");
   return {
     id: `machine:${daemon.id}`, kind: "machine", title: daemon.name,

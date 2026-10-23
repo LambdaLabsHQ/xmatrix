@@ -11,7 +11,6 @@ import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 const navLinks = [
   { href: "/download", label: "Download" },
-  { href: "/#how-it-works", label: "Setup" },
   { href: "/#connectors", label: "Connectors" },
   { href: "/#pricing", label: "Pricing" },
 ];
@@ -64,7 +63,7 @@ export function Navbar() {
           </span>
           <BrandMark
             href="/"
-            iconSrc="/brand/xmatrix-icon-transparent.png"
+            iconSrc="/brand/xmatrix-icon-transparent-128.png"
             className="relative z-10"
             iconClassName="overflow-visible"
           />

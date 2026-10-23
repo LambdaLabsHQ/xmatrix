@@ -73,7 +73,7 @@ function committedAppend(query, searchRank) {
   if (query.name === "message_append_commit_facts_v5") return [{
     search_rank: searchRank, content_revision: 0, channel_id: "channel-1",
   }];
-  if (query.name === "message_append_publish_unmetered_v1") return [appendPublication({
+  if (query.name === "message_append_publish_unmetered_v3") return [appendPublication({
     result_json: JSON.parse(query.values[4]),
   })];
   return undefined;
@@ -137,8 +137,13 @@ test("append commits structured invocation intent with its source and excludes o
       : query.name === "message_append_commit_facts_v5"
         ? [{ search_rank: "pg:00000000000000000043", content_revision: 0, channel_id: "channel-1" }]
       : query.name === "message_agent_targets_commit_v1" ? [{ message_id: "message-1" }]
-      : query.name === "message_append_publish_unmetered_v1"
+      : query.name === "message_append_publish_unmetered_v3"
         ? [{ accepted: true, channel_id: "channel-1", sequence_confirmed: true, result_json: JSON.parse(query.values[4]) }]
+      : query.name === "message_live_routing_recipients_v4"
+        ? [{ user_id: "alice", recipient_count: "2" }, { user_id: "bob", recipient_count: "2" }]
+      : query.name === "message_live_routing_attention_summary_v3"
+        ? [{ subject_id: "user:alice", unread_count: "1", message_id: "message-1", kind: "mention",
+          timeline_sequence: "7", created_at: "2026-09-20T00:00:00.000Z", kinds: ["mention"] }]
       : []));
   const input = appendRequest({
     sentAt: "2026-09-20T00:00:00.000Z",
@@ -146,7 +151,15 @@ test("append commits structured invocation intent with its source and excludes o
     attentionBody: body,
     invocationSelections,
   });
-  await new PostgresMessageRepository(db).append(input);
+  const appended = await new PostgresMessageRepository(db).append(input);
+  // Who it reaches is read in the append's own transaction, so it is delivered as it commits;
+  // the stored receipt the sender gets back does not carry it.
+  assert.deepEqual(appended.liveRouting, { recipientUserIds: ["alice", "bob"], recipientNotifications: [{
+    userId: "alice", notification: { reason: "mention", attention: { channelId: "channel-1", unreadAttentionCount: 1,
+      lastAttentionAt: "2026-09-20T00:00:00.000Z", lastMessageId: "message-1", lastMessageSequence: 7,
+      primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: "2026-09-20T00:00:00.000Z" } } }] });
+  const receipt = JSON.parse(db.calls.find(call => call.name === "message_append_publish_unmetered_v3").values[4]);
+  assert.equal("liveRouting" in receipt, false);
   const stored = JSON.parse(db.calls.find(call => call.name === "message_agent_targets_commit_v1").values[3]);
   assert.deepEqual(stored, { entityVersion: 1, bodyHash, targets: [], selections: invocationSelections });
   assert.deepEqual(JSON.parse(db.calls.find(call => call.name === "message_append_attention_batch_v5").values[0]),
@@ -174,7 +187,7 @@ function historyPage(rows = [], meta = {}) {
 
 test("Message history reads the fenced page in one statement of the request session", async () => {
   const db = database((query) => placement(query) ?? (
-    query.name === "message_history_page_v3"
+    query.name === "message_history_page_v4"
       ? historyPage([], { acknowledged_sequence: 4, content_revision: 9, history_head_sequence: 17 })
       : []
   ));
@@ -193,13 +206,13 @@ test("Message history reads the fenced page in one statement of the request sess
   assert.equal(db.sessionOpens, 1);
   assert.equal(db.sessionCloses, 1);
   assert.deepEqual(db.calls.filter((call) => call.name).map((call) => call.name),
-    ["space_placement_resolve_v1", "message_history_page_v3"],
+    ["space_placement_resolve_v1", "message_history_page_v4"],
     "capability, page, Thread summaries and head counters share one statement");
-  const pageContext = db.calls[db.calls.findIndex((call) => call.name === "message_history_page_v3") - 1].context;
+  const pageContext = db.calls[db.calls.findIndex((call) => call.name === "message_history_page_v4") - 1].context;
   assert.equal(pageContext.statement, "single_read");
   assert.deepEqual(pageContext.placement, { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 },
     "the single read carries the placement it must fence");
-  const page = db.calls.find((call) => call.name === "message_history_page_v3");
+  const page = db.calls.find((call) => call.name === "message_history_page_v4");
   assert.match(page.text, /authorized_channel AS MATERIALIZED/u);
   assert.match(page.text, /thread_summaries AS MATERIALIZED/u,
     "each Thread's reply count runs once, not once per history row");
@@ -211,7 +224,7 @@ test("Message history reads the fenced page in one statement of the request sess
 
 test("Message history refuses a reader without the Channel capability and reads nothing further", async () => {
   const db = database((query) => placement(query) ?? (
-    query.name === "message_history_page_v3"
+    query.name === "message_history_page_v4"
       ? [{ history_authorized: false, acknowledged_sequence: null, content_revision: null,
           history_head_sequence: null, message_id: null }]
       : []
@@ -221,7 +234,7 @@ test("Message history refuses a reader without the Channel capability and reads 
     principal: { kind: "user", id: "stranger" },
   }), (error) => error instanceof MessageAuthorityError && error.code === "channel_not_found");
   assert.deepEqual(db.calls.filter((call) => call.name).map((call) => call.name),
-    ["space_placement_resolve_v1", "message_history_page_v3"]);
+    ["space_placement_resolve_v1", "message_history_page_v4"]);
   const empty = database((query) => placement(query) ?? []);
   await assert.rejects(new PostgresMessageRepository(empty).history({
     requestId: "history-no-row", spaceId: "space-1", channelId: "channel-1",
@@ -232,7 +245,7 @@ test("Message history refuses a reader without the Channel capability and reads 
 test("Message history uses a caller-resolved placement only while it is active", async () => {
   const resolvedPlacement = { spaceId: "space-1", shardId: "shard-2", placementEpoch: 5,
     state: "active", targetShardId: null, planClass: "shared" };
-  const db = database((query) => query.name === "message_history_page_v3" ? historyPage() : []);
+  const db = database((query) => query.name === "message_history_page_v4" ? historyPage() : []);
   const input = { requestId: "history-placed", spaceId: "space-1", channelId: "channel-1",
     principal: { kind: "user", id: "user-1" }, resolvedPlacement };
   await new PostgresMessageRepository(db).history(input);
@@ -258,7 +271,7 @@ test("Message history accepts the protocol's initial afterSequence zero cursor",
     afterSequence: 0,
   });
 
-  const historyQuery = db.calls.find((call) => call.name === "message_history_page_v3");
+  const historyQuery = db.calls.find((call) => call.name === "message_history_page_v4");
   assert.deepEqual(historyQuery.values,
     ["space-1", "channel-1", null, 0, null, 51, "agent", "instance-1", 50, "agent:instance-1"]);
   assert.match(historyQuery.text, /ORDER BY timeline_sequence ASC LIMIT \$6/u);
@@ -268,7 +281,7 @@ test("Message history is a pure read, so an owner-scoped cross-Space read moves 
   // docs/cross-space-read-grants.md: a granted Agent reads history as its owner.
   // That is safe only while this read writes nothing a Human's own read would.
   const db = database((query) => placement(query) ?? (
-    query.name === "message_history_page_v3"
+    query.name === "message_history_page_v4"
       ? historyPage([], { acknowledged_sequence: 3, content_revision: 1 })
       : []
   ));
@@ -294,7 +307,7 @@ test("Message history applies the protocol's before timestamp bound", async () =
     before: "2026-09-10T00:00:00.000Z",
   });
 
-  const historyQuery = db.calls.find((call) => call.name === "message_history_page_v3");
+  const historyQuery = db.calls.find((call) => call.name === "message_history_page_v4");
   assert.deepEqual(historyQuery.values, [
     "space-1", "channel-1", null, null, "2026-09-10T00:00:00.000Z", 51,
     "agent", "instance-1", 50, "agent:instance-1",
@@ -315,7 +328,7 @@ test("Message history projects an authorized Thread summary without counting its
     ...overrides,
   });
   const db = database((query) => placement(query) ?? (
-    query.name === "message_history_page_v3"
+    query.name === "message_history_page_v4"
       ? historyPage([row({
           attachments_json: [{ id: "image-1", contentHash: "a".repeat(64) }],
           thread_channel_id: "thread-1", thread_updated_at: "2026-09-02T01:00:00.000Z", reply_count: 1,
@@ -336,7 +349,7 @@ test("Message history projects an authorized Thread summary without counting its
   assert.equal(result.messages[0].attachments[0].version, 5);
   assert.equal(result.messages[0].threadSummary.replyCount, 1);
   assert.deepEqual(result.messages[0].threadSummary.replies.map((reply) => reply.messageId), ["reply-1"]);
-  const page = db.calls.find((call) => call.name === "message_history_page_v3");
+  const page = db.calls.find((call) => call.name === "message_history_page_v4");
   assert.match(page.text, /root_copy_message_id/u);
   assert.match(page.text, /ORDER BY reply.timeline_sequence DESC LIMIT 2/u);
   assert.match(page.text, /jsonb_agg\(to_jsonb\(reply_row\) ORDER BY reply_row.timeline_sequence\)/u);
@@ -345,7 +358,7 @@ test("Message history projects an authorized Thread summary without counting its
   assert.doesNotMatch(page.text, /author_kind NOT IN \('agent','app'\)/u);
   // Only the legacy attachment edge needed a further read; it is fenced like the page.
   assert.deepEqual(db.calls.filter((call) => call.name).map((call) => call.name),
-    ["space_placement_resolve_v1", "message_history_page_v3", "message_history_attachment_versions_v1"]);
+    ["space_placement_resolve_v1", "message_history_page_v4", "message_history_attachment_versions_v1"]);
   const followUp = db.calls[db.calls.findIndex((call) => call.name === "message_history_attachment_versions_v1") - 1];
   assert.equal(followUp.context.statement, "single_read");
   assert.equal(followUp.context.placement.shardId, "shard-0");
@@ -416,7 +429,7 @@ test("Message sender identity resolves from the exact PostgreSQL Space", async (
   const db = database((query) => placement(query) ?? (
     query.name?.startsWith("channel_capability_message_")
       ? [{ channel_id: "channel-1", space_id: "space-1", mode: "open", metadata_json: {} }]
-      : query.name === "message_sender_user_identity_v1"
+      : query.name === "message_sender_user_identity_v2"
         ? [{ user_id: "user-1", email: "user@example.com", display_name: "User One",
             avatar_url: "https://example.com/avatar.png", version: 7 }]
         : []
@@ -430,13 +443,13 @@ test("Message sender identity resolves from the exact PostgreSQL Space", async (
     kind: "user", id: "user-1", email: "user@example.com", displayName: "User One",
     avatarUrl: "https://example.com/avatar.png", version: 7,
   });
-  const query = db.calls.find((call) => call.name === "message_sender_user_identity_v1");
+  const query = db.calls.find((call) => call.name === "message_sender_user_identity_v2");
   assert.deepEqual(query.values, ["space-1", "user-1"]);
 });
 
 test("Message append preparation combines authorization, sender identity, and observed head", async () => {
   const db = database((query) => placement(query) ?? (
-    query.name === "message_prepare_context_v8"
+    query.name === "message_prepare_context_v9"
       ? [{ sequence: 41, sender_identity: { kind: "user", id: "user-1", email: null,
           displayName: "User", avatarUrl: null, version: 2 },
           channel_authorized: true }]
@@ -459,7 +472,7 @@ test("Message append preparation combines authorization, sender identity, and ob
     (call) => call.context?.operation === "message.prepare-append",
   );
   assert.equal(prepareTransactions.length, 1, "the request route is reused by one placed prepare transaction");
-  assert.equal(db.calls.some((call) => call.name === "message_prepare_context_v8"), true);
+  assert.equal(db.calls.some((call) => call.name === "message_prepare_context_v9"), true);
   assert.equal(db.calls.filter((call) => call.name?.startsWith("message_prepare_")).length, 1);
 });
 
@@ -541,7 +554,7 @@ test("Message sequence reservation reallocates an uncommitted rollout collision"
         ? [{ message_id: "message-from-prior-worker" }]
         : query.name === "message_sequence_allocate_v1"
           ? [{ allocated_sequence: 9 }]
-          : query.name === "message_sequence_reservation_reallocate_v1"
+          : query.name === "message_sequence_reservation_reallocate_v2"
             ? [{ channel_id: "channel-1", sequence: 9, state: "reserved" }]
             : []
   ));
@@ -550,10 +563,13 @@ test("Message sequence reservation reallocates an uncommitted rollout collision"
     channelId: "channel-1", observedPostgresHead: 8,
   }), { sequence: 9, state: "reserved" });
   const reallocation = db.calls.find(
-    (call) => call.name === "message_sequence_reservation_reallocate_v1",
+    (call) => call.name === "message_sequence_reservation_reallocate_v2",
   );
-  assert.equal(reallocation.values[6], 7);
+  assert.equal(reallocation.values[5], 7);
   assert.match(reallocation.text, /state='reserved'/u);
+  // PostgreSQL refuses a statement with a parameter it never reads.
+  const read = new Set([...reallocation.text.matchAll(/\$(\d+)/gu)].map(match => Number(match[1])));
+  assert.deepEqual([...read].sort((a, b) => a - b), reallocation.values.map((_value, index) => index + 1));
 });
 
 test("Message append reconciliation reads the command idempotency receipt", async () => {
@@ -657,6 +673,26 @@ test("Message acknowledge serializes an exact command before its idempotency rea
   assert.match(lock.text, /message-ack:/u);
 });
 
+test("a billing notice goes back with its commit, never into the stored receipt", async () => {
+  const noticing = { id: "noticing", metered: true,
+    async spaceCreated() {}, async spaceDeletion() { return null; }, async seatAdmission() { return null; },
+    async durableWrite() { return null; },
+    message: { ctes: "admission AS MATERIALIZED (SELECT TRUE AS raised)", accepts: "TRUE", rejection: () => null,
+      notice: (row) => row.raised ? { key: "credits:2026-09-01:1", body: "80% used" } : null } };
+  const db = database((query) => placement(query) ?? appendReservation(query) ?? (
+    query.name === "message_append_preflight_v4" ? [appendPreflight()]
+      : query.name === "message_append_commit_facts_v5"
+        ? [{ search_rank: "pg:00000000000000000042", content_revision: 0, channel_id: "channel-1" }]
+      : query.name === "message_append_publish_noticing_v3"
+        ? [appendPublication({ raised: true, result_json: JSON.parse(query.values[4]) })]
+      : []));
+  const result = await new PostgresMessageRepository(db, false, noticing).append(appendRequest());
+  assert.deepEqual(result.billingNotice, { key: "credits:2026-09-01:1", body: "80% used" });
+  const publish = db.calls.find((call) => call.name === "message_append_publish_noticing_v3");
+  assert.equal("billingNotice" in JSON.parse(publish.values[4]), false);
+  assert.equal(publish.values[12], "user", "the policy is told who wrote it");
+});
+
 test("Message append reauthorizes and commits every relational fact with one outbox", async () => {
   const db = database((query) => placement(query) ?? appendReservation(query) ?? (
     query.name === "message_append_preflight_v4"
@@ -678,10 +714,10 @@ test("Message append reauthorizes and commits every relational fact with one out
     "message_append_preflight_v4",
     "message_append_commit_facts_v5",
     "message_append_attention_batch_v5",
-    "message_append_publish_unmetered_v1",
+    "message_append_publish_unmetered_v3",
   ]) assert.equal(db.calls.some((call) => call.name === queryName), true, queryName);
   const billingAdvance = db.calls.find(
-    (call) => call.name === "message_append_publish_unmetered_v1",
+    (call) => call.name === "message_append_publish_unmetered_v3",
   );
   assert.doesNotMatch(billingAdvance.text, /space_billing_/u,
     "the default deployment meters nothing, so publishing reads no billing table");
@@ -712,7 +748,7 @@ test("a Human stop command fences its Runs before the message's first write", as
     const db = database((query) => placement(query) ?? appendReservation(query) ?? (
       query.name === "message_append_preflight_v4"
         ? [appendPreflight()]
-        : (committedAppend(query, "pg:00000000000000000042") ?? (query.name === "channel_stop_fence_v3"
+        : (committedAppend(query, "pg:00000000000000000042") ?? (query.name === "channel_stop_fence_v4"
           ? [{ run_id: "run-1", version: 2, instance_id: "instance-1" }]
         : query.name === "message_agent_target_resolve_v5"
           ? JSON.parse(query.values[2]).filter((request) => request.address === "@codex:1")
@@ -731,7 +767,7 @@ test("a Human stop command fences its Runs before the message's first write", as
 
   const { db, result } = await append({ attentionBody: "/kill all" });
   assert.equal(result.messageId, "message-1");
-  const fence = db.calls.findIndex((call) => call.name === "channel_stop_fence_v3");
+  const fence = db.calls.findIndex((call) => call.name === "channel_stop_fence_v4");
   assert.ok(fence >= 0);
   assert.deepEqual([...db.calls[fence].values.slice(0, 3), ...db.calls[fence].values.slice(4)],
     ["space-1", "channel-1", "user-1", null]);
@@ -742,13 +778,13 @@ test("a Human stop command fences its Runs before the message's first write", as
   // An exact address fences only the Run its message resolves to.
   for (const attentionBody of ["@codex:1:stop", "/stop codex:1 wrong branch"]) {
     const exact = await append({ attentionBody });
-    const call = exact.db.calls.find((query) => query.name === "channel_stop_fence_v3");
+    const call = exact.db.calls.find((query) => query.name === "channel_stop_fence_v4");
     assert.deepEqual(call?.values.slice(4), ["run-1"], attentionBody);
   }
   // `@xMatrix:stop` addressed the retired management delegate; it fences nothing now.
   for (const attentionBody of ["@xMatrix:stop", "please /kill all", "`/kill all`", "@codex:2:stop", "@codex:stop", "hello", undefined]) {
     const ordinary = await append(attentionBody === undefined ? {} : { attentionBody });
-    assert.equal(ordinary.db.calls.some((call) => call.name === "channel_stop_fence_v3"), false,
+    assert.equal(ordinary.db.calls.some((call) => call.name === "channel_stop_fence_v4"), false,
       String(attentionBody));
   }
 });
@@ -762,7 +798,7 @@ instance_status: "online",
 channel_instance_id: 1})]
         : query.name?.startsWith("channel_capability_message_")
           ? [{ channel_id: "channel-1", space_id: "space-1", mode: "open", metadata_json: {} }]
-          : (committedAppend(query, "pg:00000000000000000044") ?? (query.name === "channel_stop_fence_v3"
+          : (committedAppend(query, "pg:00000000000000000044") ?? (query.name === "channel_stop_fence_v4"
           ? [{ run_id: "run-2", version: 2, instance_id: "instance-2" }]
         : query.name === "runtime_control_head_advance_v1"
           ? [{ commit_sequence: 9 }]
@@ -784,13 +820,13 @@ channel_instance_id: 1})]
   };
 
   const db = await append("/stop all verification");
-  const fence = db.calls.findIndex((call) => call.name === "channel_stop_fence_v3");
+  const fence = db.calls.findIndex((call) => call.name === "channel_stop_fence_v4");
   assert.ok(fence >= 0, "an Agent's stop takes effect when its message commits");
   assert.deepEqual(db.calls[fence].values.slice(0, 3), ["space-1", "channel-1", "user-owner"],
     "the stop acts with the Run owner's authority, never the Agent's");
   assert.ok(fence < db.calls.findIndex((call) => call.name === "message_append_commit_facts_v5"));
   for (const body of ["hello", "please /stop all", undefined]) {
-    assert.equal((await append(body)).calls.some((call) => call.name === "channel_stop_fence_v3"), false,
+    assert.equal((await append(body)).calls.some((call) => call.name === "channel_stop_fence_v4"), false,
       String(body));
   }
 });
@@ -1057,24 +1093,6 @@ channel_instance_id: 7,
   }
 });
 
-test("a Run routed to the retired xMatrix management agent posts nothing", async () => {
-  const db = database(query => placement(query) ?? (
-    query.name === "message_append_run_proof_v3" ? [provenMessageRun({ channel_instance_id: 7,
-      metadata_json: { executionKey: "execution-1", routedAs: "management_assistant_mention",
-        managementSpaceId: "space-1", managementConfigGeneration: 3 } })]
-      : query.name?.startsWith("channel_capability_message_")
-        ? [{ channel_id: "channel-1", space_id: "space-1", mode: "open", metadata_json: {} }]
-        : agentPreparationRows(query)));
-  await assert.rejects(new PostgresMessageRepository(db).prepareAppend({ requestId: "retired-management",
-    spaceId: "space-1", channelId: "channel-1",
-    principal: { kind: "agent", id: "instance-1" }, senderPrincipal: { kind: "agent", id: "instance-1" },
-    runProof: { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" } }),
-  error => error instanceof MessageAuthorityError && error.code === "agent_run_forbidden" &&
-    error.status === 403 && /management agent is retired/u.test(error.message));
-  assert.equal(db.calls.some((call) => /space_management_configs/u.test(call.text ?? "")), false,
-    "no Space management configuration is consulted");
-});
-
 function crossChannelRunDatabase({ handling } = { handling: "source-1" }) {
   return database((query) => placement(query) ?? (
     query.name === "message_append_run_proof_v3"
@@ -1138,7 +1156,7 @@ async function appendReplyTo(replyTarget, senderSnapshot =
       : query.name === "message_attention_authorize_v3" ? query.values[2].map(subject_id => ({ subject_id }))
       : query.name === "message_append_commit_facts_v5"
         ? [{ search_rank: "pg:00000000000000000043", content_revision: 0, channel_id: "channel-1" }]
-      : query.name === "message_append_publish_unmetered_v1"
+      : query.name === "message_append_publish_unmetered_v3"
         ? [{ accepted: true, channel_id: "channel-1", sequence_confirmed: true, result_json: JSON.parse(query.values[4]) }]
       : []));
   const result = await new PostgresMessageRepository(db).append(appendRequest({
@@ -1172,11 +1190,12 @@ test("a reply to a cross-Channel link returns where to relay it, under the link 
 });
 
 test("an Agent's reply to a link names its exact Instance so the relay can skip it", async () => {
+  const registration = { ownerUserId: "owner-1", machineId: "server", harness: "claude" };
   const { result } = await appendReplyTo({ author_kind: "agent", author_id: "instance-1",
     origin_channel_id: "channel-origin", origin_owner_user_id: "owner-1" },
-  { kind: "agent", agentId: "agent-7", instanceId: "channel-origin:2", label: "claude:2", userId: "owner-1" });
+  { registration, kind: "agent", agentId: "agent-7", instanceId: "channel-origin:2", label: "claude:2", userId: "owner-1" });
   assert.deepEqual(result.replyOrigin.replier,
-    { kind: "agent", label: "claude:2", agentId: "agent-7", instanceId: "channel-origin:2" });
+    { registration, kind: "agent", label: "claude:2", agentId: "agent-7", instanceId: "channel-origin:2" });
 });
 
 test("a reply to an ordinary message, or to a link whose Run is gone, relays nothing", async () => {
@@ -1215,5 +1234,5 @@ function messageCommandFields() {
 }
 
 function historyDatabase() {
-  return database(query => placement(query) ?? (query.name === "message_history_page_v3" ? historyPage() : []));
+  return database(query => placement(query) ?? (query.name === "message_history_page_v4" ? historyPage() : []));
 }

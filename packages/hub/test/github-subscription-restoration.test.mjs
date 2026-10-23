@@ -13,7 +13,7 @@ import {
 test("repository subscription commands preserve explicit and all feature selections", () => {
   assert.deepEqual(
     githubRepositoryFeaturesFromCommand("@\u200Bgithub:subscribe:LambdaLabsHQ/xmatrix all"),
-    ["issues", "pulls", "comments", "reviews", "commits", "checks", "status", "releases"],
+    ["issues", "pulls", "comments", "reviews", "commits", "checks", "status", "releases", "code-scanning"],
   );
   assert.deepEqual(
     githubRepositoryFeaturesFromCommand("@github:subscribe:LambdaLabsHQ/xmatrix commits,checks"),
@@ -64,7 +64,22 @@ test("GitHub webhook event classes map to repository subscription features", () 
   assert.equal(githubFeatureForWebhookEvent("check_run", {}), "checks");
   assert.equal(githubFeatureForWebhookEvent("workflow_run", {}), "status");
   assert.equal(githubFeatureForWebhookEvent("release", {}), "releases");
+  assert.equal(githubFeatureForWebhookEvent("code_scanning_alert", {}), "code-scanning");
   assert.equal(githubFeatureForWebhookEvent("installation", {}), undefined);
+});
+
+test("code scanning messages identify the alert without copying untrusted analysis details", () => {
+  const repository = { owner: "acme", repo: "app", url: "https://github.com/acme/app" };
+  const alert = { number: 97, html_url: "https://attacker.invalid/", rule: { description: "private source" },
+    most_recent_instance: { message: { text: "sensitive data" } } };
+  for (const action of ["created", "reopened", "reopened_by_user", "appeared_in_branch", "fixed", "closed_by_user"]) {
+    assert.equal(githubWebhookMessageBody("code_scanning_alert", { action, alert }, repository),
+      `GitHub code scanning alert [acme/app#97](https://github.com/acme/app/security/code-scanning/97): ${action}.`);
+  }
+  for (const number of [0, -1, "97", 1.5, undefined]) {
+    assert.equal(githubWebhookMessageBody("code_scanning_alert", { action: "created", alert: { number } }, repository), "");
+  }
+  assert.equal(githubWebhookMessageBody("code_scanning_alert", { action: "unknown", alert }, repository), "");
 });
 
 test("push webhook messages are bounded summaries with repository context", () => {

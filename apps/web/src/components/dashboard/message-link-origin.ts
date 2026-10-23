@@ -1,4 +1,4 @@
-import { crossChannelReplyRelay, type ChannelMessage, type SerializedChannel } from "@xmatrix/protocol";
+import { crossChannelReplyRelay, type ChannelMessage, type ChannelSnapshot } from "@xmatrix/protocol";
 import { channelAppPath, channelTitle } from "./channel-links";
 
 /**
@@ -25,7 +25,7 @@ function text(value: unknown): string | undefined {
 
 export function messageLinkOrigin(
   message: ChannelMessage,
-  channels: SerializedChannel[],
+  channels: ChannelSnapshot[] | ReadonlyMap<string, ChannelSnapshot>,
 ): MessageLinkOrigin | undefined {
   const relayed = crossChannelReplyRelay(message.metadata);
   const origin: Omit<MessageLinkOrigin, "channelName" | "href"> | undefined =
@@ -45,7 +45,9 @@ export function messageLinkOrigin(
           }
         : undefined;
   if (!origin) return undefined;
-  const channel = channels.find((candidate) => candidate.id === origin.channelId);
+  const channel = Array.isArray(channels)
+    ? channels.find((candidate) => candidate.id === origin.channelId)
+    : channels.get(origin.channelId);
   if (!channel) return origin;
   const path = channelAppPath(channel, []);
   return {

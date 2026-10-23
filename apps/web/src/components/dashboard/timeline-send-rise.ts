@@ -24,15 +24,20 @@ const SEND_RISE_MS = 260;
 /* The share of the distance left that goes in each millisecond: fast out of
    the composer, a hundredth of the way left when the rise is over. */
 const SEND_RISE_PER_MS = Math.log(100) / SEND_RISE_MS;
-const SEND_RISE_FRAME_MAX_MS = 34;
 const SEND_RISE_QUIET_FRAMES = 1;
 /* A short timeline has nothing to scroll, so its rows stay put and the new row
    alone rises this far. */
 const SEND_RISE_MIN_PX = 24;
 /* A row counts as just sent only this long after the send. The virtualizer
    mounts rows again as they scroll back into view, and a queued send can be
-   restored much later; neither is a send the reader is watching. */
+   restored much later; neither is a send the reader is watching. The layout
+   can also still be corrected this long after a rise began. */
 const SEND_RISE_FRESH_MS = 1_500;
+/* Closer to its place than this, the list is drawn in it. */
+const SEND_RISE_REST_PX = 0.25;
+/* The way to rest is given to the compositor as this many straight pieces of
+   the same curve, so it is drawn without a frame of the page's own work. */
+const SEND_RISE_PIECES = 24;
 
 /** Marks the elements that are as tall as the list's content (see their component). */
 export const TIMELINE_HEIGHT_PROBE_ATTRIBUTE = "data-timeline-height-probe";
@@ -45,14 +50,16 @@ export function isJustSentRow(message: { own?: boolean; sendStatus?: string; sen
 /** The rise each timeline is playing: a layout move reported to it, and its end. */
 const risingTimelines = new WeakMap<HTMLElement, {
   moved: () => void;
-  arrived: () => void;
+  /** The new row is in, coming up on its own `entrance` (none under reduced motion). */
+  arrived: (entrance: Animation | null) => void;
   /** Ends the rise and gives back how far below its place the list was drawn. */
   stop: () => number;
 }>();
 
-/* The virtualizer's content box: the header, every row it has mounted and the
-   footer, in one element. */
-const TIMELINE_CONTENT = "[data-viewport-type]";
+/* The visual layer holds the header, mounted rows and footer together. Its
+   measured Virtuoso viewport stays still, so a rise cannot change the layout
+   offset reported to the custom scroll parent. */
+const TIMELINE_CONTENT = "[data-timeline-rise-content]";
 
 /** The timeline's layout was just moved by code; the rise draws from before it. */
 export function timelineLayoutMoved(scrollRoot: HTMLElement | null) {
@@ -63,24 +70,107 @@ function motionReduced(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** The new row itself comes up out of the composer as it appears. */
+/* The new row's own way up, fading in over the first three fifths of it: on
+   this curve, as straight pieces of it, so the same way can be given a still
+   end without being drawn any differently. */
+const ENTRANCE_CURVE = [0.2, 0.8, 0.2, 1] as const;
+const ENTRANCE_PIECES = 16;
+
+/** How far along the entrance is `time` of SEND_RISE_MS in (cubic-bezier ENTRANCE_CURVE). */
+function entranceProgress(time: number): number {
+  if (time <= 0) return 0;
+  if (time >= 1) return 1;
+  const [x1, y1, x2, y2] = ENTRANCE_CURVE;
+  const at = (a: number, b: number, u: number) => 3 * a * u * (1 - u) ** 2 + 3 * b * u * u * (1 - u) + u ** 3;
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 24; step += 1) {
+    const middle = (low + high) / 2;
+    if (at(x1, x2, middle) < time) low = middle;
+    else high = middle;
+  }
+  return at(y1, y2, (low + high) / 2);
+}
+
+/**
+ * The entrance drawn over `duration` ms: the way up in its first
+ * SEND_RISE_MS, the row standing in its place for the rest.
+ */
+function entranceKeyframes(duration: number): Keyframe[] {
+  const frames: Keyframe[] = Array.from({ length: ENTRANCE_PIECES + 1 }, (_, piece) => {
+    const progress = entranceProgress(piece / ENTRANCE_PIECES);
+    return {
+      offset: (SEND_RISE_MS * piece) / ENTRANCE_PIECES / duration,
+      opacity: Math.min(1, progress / 0.6),
+      transform: piece === ENTRANCE_PIECES ? "none" : `translateY(${SEND_RISE_MIN_PX * (1 - progress)}px)`,
+    };
+  });
+  return duration > SEND_RISE_MS ? [...frames, { offset: 1, opacity: 1, transform: "none" }] : frames;
+}
+
+/**
+ * The new row itself comes up out of the composer as it appears, from as far
+ * below as a short timeline's rows rise: its height is not read, which would
+ * lay the page out in the middle of putting the row in.
+ */
 export function playSentRowEntrance(scrollRoot: HTMLElement | null, sentRow: HTMLElement) {
-  if (scrollRoot) risingTimelines.get(scrollRoot)?.arrived();
-  if (typeof sentRow.animate !== "function" || motionReduced()) return;
-  sentRow.animate(
-    [
-      { opacity: 0, transform: `translateY(${Math.min(sentRow.offsetHeight, SEND_RISE_MIN_PX)}px)` },
-      { opacity: 1, offset: 0.6 },
-      { opacity: 1, transform: "none" },
-    ],
-    { duration: SEND_RISE_MS, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
-  );
+  const entrance = typeof sentRow.animate === "function" && !motionReduced()
+    ? sentRow.animate(entranceKeyframes(SEND_RISE_MS), { duration: SEND_RISE_MS, easing: "linear" })
+    : null;
+  if (scrollRoot) risingTimelines.get(scrollRoot)?.arrived(entrance);
+}
+
+/** Has the row's entrance last `duration` ms: its way up, then standing still. */
+function lastEntrance(entrance: Animation | null, duration: number) {
+  const effect = entrance?.effect as KeyframeEffect | null | undefined;
+  if (!entrance || !effect || entrance.playState !== "running") return;
+  const length = Math.max(SEND_RISE_MS, duration);
+  effect.setKeyframes(entranceKeyframes(length));
+  effect.updateTiming({ duration: length });
+}
+
+/**
+ * Has the row's entrance end when the list's rise does, standing still after
+ * its way up. The end of an animation wakes the page ahead of it and lays its
+ * layers out again once it is over; ending together, the two do that once.
+ */
+function endEntranceWith(entrance: Animation | null, rise: Animation, riseDuration: number) {
+  if (!entrance) return;
+  // The rise starts when the compositor gets to it, which a busy page learns a
+  // few frames late; the row stands still in its place until then.
+  void rise.ready.then(() => {
+    const riseStart = rise.startTime === null ? NaN : Number(rise.startTime);
+    const entranceStart = entrance.startTime === null ? NaN : Number(entrance.startTime);
+    if (Number.isFinite(riseStart) && Number.isFinite(entranceStart)) lastEntrance(entrance, riseStart + riseDuration - entranceStart);
+  }, () => undefined);
+}
+
+/** How long the list takes from `from` to rest, slowing all the way. */
+function riseDuration(from: number): number {
+  return Math.log(Math.abs(from) / SEND_RISE_REST_PX) / SEND_RISE_PER_MS;
+}
+
+/** Where a rise from `from` draws the list `elapsed` ms in: on the pieces the compositor draws. */
+function riseOffset(from: number, duration: number, elapsed: number): number {
+  if (elapsed <= 0) return from;
+  if (elapsed >= duration) return 0;
+  const corner = (piece: number) => piece >= SEND_RISE_PIECES
+    ? 0
+    : from * Math.exp(-SEND_RISE_PER_MS * duration * (piece / SEND_RISE_PIECES));
+  const position = (elapsed / duration) * SEND_RISE_PIECES;
+  const piece = Math.floor(position);
+  return corner(piece) + (corner(piece + 1) - corner(piece)) * (position - piece);
 }
 
 /**
  * Starts drawing the rows from where they stand now. Called while the page
  * still shows the timeline without the new row: the list makes room for it,
  * and the timeline is scrolled there, before the row itself has mounted.
+ *
+ * The page's own work is only the holding: each move of the layout is met,
+ * before it is painted, by drawing the list as far from its new place as it
+ * stood. Once the new row is in and a frame has passed without a move, the
+ * way to rest belongs to the compositor. Nothing runs between two moves.
  */
 export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   if (motionReduced()) return;
@@ -98,60 +188,118 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   const anchor = Array.from(rows).reverse().find(row => row.getAnimations().length === 0);
   if (!content || !clip || !anchor) return;
 
-  /* How far below its place in the layout the list is drawn. A move of the
-     layout adds to it, so the rows stay where they were on screen; time takes
-     it away. A reader who sent from further up is brought down by more than a
-     screen: that is a jump, not a rise, and is not drawn. */
-  let lag = carried;
-  let laidOutAt = anchor.getBoundingClientRect().top - lag;
-  /* Time only counts between painted frames. A move is found in the middle of
-     a long task as often as not, and one slow frame must not use up the rise:
-     a frame takes away no more than two frames' worth.
-
-     The layout arrives in steps a frame or two apart, and not all the same
+  /* How far below its place in the layout the list is held. A move of the
+     layout adds to it, so the rows stay where they were on screen. A reader
+     who sent from further up is brought down by more than a screen: that is a
+     jump, not a rise, and is not drawn. */
+  let held = 0;
+  /* The way to rest while the compositor draws it: the list is where that
+     has brought it, which only the animation's own clock can say. */
+  let resting: { animation: Animation; from: number; duration: number } | null = null;
+  const drawn = () => resting
+    ? riseOffset(resting.from, resting.duration, Number(resting.animation.currentTime ?? 0))
+    : held;
+  /* Draws the list standing still, `offset` below its place. Whatever was
+     bringing it to rest ends in the same task, so no frame shows the list
+     anywhere else in between. */
+  const hold = (offset: number) => {
+    held = Math.abs(offset) < SEND_RISE_REST_PX ? 0 : offset;
+    content.style.translate = held === 0 ? "" : `0 ${held}px`;
+    clip.style.overflow = held === 0 ? "" : "clip";
+    const ended = resting;
+    resting = null;
+    ended?.animation.cancel();
+  };
+  hold(carried);
+  let laidOutAt = anchor.getBoundingClientRect().top - held;
+  /* The layout arrives in steps a frame or two apart, and not all the same
      way: room for the row by an estimate, the estimate corrected, the composer
      shrinking. The list waits where it is until a frame passes without one,
      and then travels the sum, so it sets off once and in one direction. */
-  let paintedAt = 0;
   let quietFrames = 0;
   // Not before the new row is in: the composer can give way a frame ahead of it.
   let arrived = false;
+  let entrance: Animation | null = null;
+  let stopped = false;
+  let frame = 0;
   const startedAt = performance.now();
-  const until = performance.now() + SEND_RISE_FRESH_MS;
-  const draw = (frameAt?: number) => {
+  const until = startedAt + SEND_RISE_FRESH_MS;
+
+  /** Meets a move of the layout by holding the list where it was drawn. */
+  const measure = (): boolean => {
+    const offset = drawn();
+    // Remove the offset drawn to measure where the layout put the row.
+    const top = anchor.getBoundingClientRect().top - offset;
+    const moved = top - laidOutAt;
+    laidOutAt = top;
+    if (Math.abs(moved) > scrollRoot.clientHeight) hold(0);
+    else if (Math.abs(moved) >= 0.01) hold(offset - moved);
+    else return false;
+    return true;
+  };
+  /** The list sets off for its place, and the page's part in the rise is over. */
+  const rest = () => {
+    if (held === 0 || typeof content.animate !== "function") {
+      hold(0);
+      lastEntrance(entrance, Number(entrance?.currentTime ?? 0));
+      return;
+    }
+    const from = held;
+    const duration = riseDuration(from);
+    const animation = content.animate(
+      Array.from({ length: SEND_RISE_PIECES + 1 }, (_, piece) => ({
+        translate: `0 ${riseOffset(from, duration, (duration * piece) / SEND_RISE_PIECES)}px`,
+      })),
+      { duration, easing: "linear" },
+    );
+    resting = { animation, from, duration };
+    endEntranceWith(entrance, animation, duration);
+    // The animation draws the list from here on; this is where it leaves it.
+    held = 0;
+    content.style.translate = "";
+    animation.addEventListener("finish", () => {
+      if (resting?.animation !== animation) return;
+      resting = null;
+      clip.style.overflow = "";
+      if (anchor.isConnected) laidOutAt = anchor.getBoundingClientRect().top;
+      if (performance.now() > until) stop();
+    });
+  };
+  /* Counts the frames since the last move. Only a held list has frames to
+     count: at rest, or on its way there, the next move wakes this again. */
+  const eachFrame = (frameAt: number) => {
+    frame = 0;
+    if (stopped) return;
     if (!anchor.isConnected) {
       stop();
       return;
     }
-    // Remove the offset last drawn to measure where the layout put the row.
-    const top = anchor.getBoundingClientRect().top - lag;
-    const moved = top - laidOutAt;
-    laidOutAt = top;
-    if (Math.abs(moved) > scrollRoot.clientHeight) lag = 0;
-    else if (Math.abs(moved) >= 0.01) {
-      lag -= moved;
-      quietFrames = 0;
-    } else if (frameAt !== undefined) {
+    if (measure()) quietFrames = 0;
+    else {
       quietFrames += 1;
       if (!arrived && frameAt - startedAt > SEND_RISE_MS) arrived = true;
       if (arrived && quietFrames > SEND_RISE_QUIET_FRAMES) {
-        lag *= Math.exp(-SEND_RISE_PER_MS * Math.min(frameAt - paintedAt, SEND_RISE_FRAME_MAX_MS));
+        rest();
+        if (!resting && performance.now() > until) stop();
+        return;
       }
-      paintedAt = frameAt;
     }
-    if (Math.abs(lag) < 0.25) lag = 0;
-    content.style.translate = lag === 0 ? "" : `0 ${lag}px`;
-    clip.style.overflow = lag === 0 ? "" : "clip";
+    frame = requestAnimationFrame(eachFrame);
   };
-  const moved = () => draw();
-
   /* A move reaches the page in a task between two frames, while a frame lays
-     out, or when code scrolls the timeline; each is drawn before it is painted. */
-  let frame = requestAnimationFrame(function eachFrame(frameAt) {
-    draw(frameAt);
-    if (lag === 0 && performance.now() > until) stop();
-    else frame = requestAnimationFrame(eachFrame);
-  });
+     out, or when the timeline is scrolled; each is met before it is painted. */
+  const moved = () => {
+    if (stopped) return;
+    if (!anchor.isConnected) {
+      stop();
+      return;
+    }
+    if (!measure()) return;
+    quietFrames = 0;
+    if (!frame) frame = requestAnimationFrame(eachFrame);
+  };
+
+  frame = requestAnimationFrame(eachFrame);
   const sizes = new ResizeObserver(moved);
   observeTimelineBoxes(scrollRoot, sizes);
   for (const probe of scrollRoot.querySelectorAll(`[${TIMELINE_HEIGHT_PROBE_ATTRIBUTE}]`)) sizes.observe(probe);
@@ -159,22 +307,44 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   // anything an observer is told about in the same frame; it says so itself.
   const surface = messageSurfaceOf(scrollRoot);
   surface?.addEventListener(MESSAGE_SURFACE_METRICS_EVENT, moved);
+  // The list scrolling itself to its new end moves every row and resizes nothing.
+  scrollRoot.addEventListener("scroll", moved, { passive: true });
   // The reader's own scrolling is theirs: nothing is held back against it.
   const release = () => stop();
   scrollRoot.addEventListener("wheel", release, { passive: true });
   scrollRoot.addEventListener("touchmove", release, { passive: true });
+  // A correction can still come once the list is at rest; after this none is waited for.
+  const expiry = window.setTimeout(() => {
+    if (!frame && !resting) stop();
+  }, SEND_RISE_FRESH_MS);
   const stop = (): number => {
+    if (stopped) return 0;
+    stopped = true;
+    const left = anchor.isConnected ? drawn() : 0;
     cancelAnimationFrame(frame);
+    frame = 0;
+    window.clearTimeout(expiry);
     sizes.disconnect();
+    scrollRoot.removeEventListener("scroll", moved);
     scrollRoot.removeEventListener("wheel", release);
     scrollRoot.removeEventListener("touchmove", release);
     surface?.removeEventListener(MESSAGE_SURFACE_METRICS_EVENT, moved);
-    content.style.translate = "";
-    clip.style.overflow = "";
+    hold(0);
+    lastEntrance(entrance, Number(entrance?.currentTime ?? 0));
     if (risingTimelines.get(scrollRoot)?.stop === stop) risingTimelines.delete(scrollRoot);
-    const left = anchor.isConnected ? lag : 0;
-    lag = 0;
     return left;
   };
-  risingTimelines.set(scrollRoot, { moved, arrived: () => { arrived = true; }, stop });
+  risingTimelines.set(scrollRoot, {
+    moved,
+    arrived: (rowEntrance) => {
+      arrived = true;
+      entrance = rowEntrance;
+      /* A busy page can take longer than the row's way up to see the layout
+         settle and the list set off. The row stands still in its place until
+         then, so the two can still end together. */
+      lastEntrance(entrance, SEND_RISE_FRESH_MS);
+      if (resting) endEntranceWith(entrance, resting.animation, resting.duration);
+    },
+    stop,
+  });
 }

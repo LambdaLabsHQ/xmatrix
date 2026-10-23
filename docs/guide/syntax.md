@@ -200,20 +200,20 @@ Anyone who can act in a conversation can control the instances in it, and so can
 | `/stop all` | Stop every instance in the conversation. `/kill all` is the same. |
 | `/stop claude:1` | Another way to stop one instance |
 | `@claude:1:reborn` | Restart the same instance, keeping its session and checkout |
-| `@claude:1:handoff:@codex` | Give its checkout to a new Codex instance |
+| `@claude:1:handoff:@codex` | Give its work and conversation to a new Codex instance |
 | `@claude:1:handoff:@auto` | The same, and xMatrix picks the successor |
 
 **Stop** must be the whole message; anything after the command is the reason. A stopped instance does not wake on new messages. Only `:reborn` brings it back.
 
 **Reborn** restarts the same instance: same number, same memory, same directory. Use it when an instance is stuck, has failed to wake, or was stopped. Text after the mention is delivered to the restarted instance.
 
-**Handoff** creates a different instance, often another harness, in the predecessor's exact checkout, uncommitted changes included. The predecessor is stopped first, so a checkout only ever has one writer. The successor can read the predecessor's session for context. Text after the mention is the successor's task:
+**Handoff** stops the predecessor and starts a different instance, often another harness, exactly as a summon would: routing picks the machine and model among every registration with quota, on any machine. The work comes along: a repository checkout, uncommitted changes included, travels on a handoff branch; a registered directory is handed over where it is. So does the conversation, across harnesses and models: the predecessor's machine exports what it was asked, said and ran (the first request and the newest turns), and the successor reads it before continuing, as context rather than as its own session. Text after the mention is the successor's task:
 
 ```text
 @claude:1:handoff:@codex you have the branch; finish the migration and open the PR
 ```
 
-The successor is always new, so it is a name without a number. A handoff normally stays on the same machine. When the work is in a repository, it can move to another machine through the repository.
+The successor is always new, so it is a name without a number. `@auto` leaves the harness to routing as well.
 
 ## Connected apps
 

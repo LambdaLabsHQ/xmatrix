@@ -1,6 +1,7 @@
 "use client";
 
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentAvatarUrlFromMetadata, agentLaunchExecutable } from "@xmatrix/protocol";
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentLaunchExecutable } from "@xmatrix/protocol";
 import Image from "next/image";
 import { openRepositoryToStar } from "./star-prompt";
 import { registrationStatus } from "./my-agents-registrations";
@@ -26,10 +27,6 @@ import {
 } from "./workspace-shell-constants";
 
 import {
-  localManagedAgentAvatarUrl,
-} from "./workspace-shell-formatters";
-
-import {
   LocalManagedAgent,
   MachineSummary,
 } from "./workspace-shell-helpers";
@@ -42,7 +39,6 @@ import {
 } from "./workspace-shell-navigation";
 
 import {
-  avatarInitials,
   eventLabel,
   formatTime,
   relativeTime,
@@ -115,7 +111,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { Input } from "@/components/ui/input";
 
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { Face } from "@/components/dashboard/face";
 import { ListSectionHeading } from "./list-section-heading";
 
 import {
@@ -132,10 +128,12 @@ import {
   type DesktopWorkspaceCandidate,
 } from "@/lib/desktop/bridge";
 
-import { type AppConnectorManifest } from "@/lib/app-connectors";
+import { orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
 import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCredentials, connectorWritableCredentials } from "./connector-credentials";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 import { GmailMailboxes } from "./gmail-mailboxes";
+import { CloudflareLogins } from "./cloudflare-logins";
+import { XAccounts } from "./x-accounts";
 
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, unexpectedResponse } from "@/lib/query/api-client";
@@ -154,7 +152,7 @@ import type {
   ObservabilityEvent,
   SerializedAppConnectorConnection,
   SerializedAppConnectorExecution,
-  SerializedChannel,
+  ChannelSnapshot,
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -211,8 +209,7 @@ export function MoreView({
           description: profile.handle ? `@${profile.handle}` : "Set up your @handle",
           // An icon's width, so your name starts where the other rows' names do.
           leading: (
-            <IdentityAvatar kind="human" label={profile.displayName} imageUrl={profile.avatarUrl}
-              initials={profile.displayName.slice(0, 2)} size="xs" showKindBadge={false}
+            <Face of={{ kind: "user", id: profile.userId, name: profile.displayName }} size="xs" showKindBadge={false}
               className="-mx-0.5" />
           ),
           onSelect: () => onChangeView("profile"),
@@ -271,8 +268,8 @@ export function MoreView({
   /* Settings' list on its paper: section headings over plain list rows, no
      cards, boards or glass. You are the first row, as Slack's "You" is. */
   return (
-    <div className="app-tool-detail-scroll min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl md:pt-6">
+    <div className="app-tool-detail-scroll app-below-band min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-3xl">
         {groups.map((group) => (
           <section key={group.label} aria-label={group.label}>
             <ListSectionHeading label={group.label} />
@@ -371,7 +368,7 @@ function DiscoveredAgentWorkspaceList({
               <span className="flex items-center gap-1 px-2 text-xs text-muted-foreground"><Check className="size-3.5" /> Added</span>
             ) : (
               <Button size="xs" variant="ghost" disabled={importing} onClick={() => onImportWorkspace(candidate)}>
-                {importing ? <Loader2 className="animate-spin" /> : <Plus />} Add
+                {importing ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add
               </Button>
             )}
           />
@@ -497,7 +494,7 @@ export function LocalMacView({
           title="Set up this machine"
           action={(
             <Button size="xs" disabled={!setupReady || busy === "setup:complete"} onClick={onCompleteSetup}>
-              {busy === "setup:complete" ? <Loader2 className="animate-spin" /> : <Check />}
+              {busy === "setup:complete" ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Check />}
               Complete setup
             </Button>
           )}
@@ -514,7 +511,7 @@ export function LocalMacView({
                   disabled={!desktopContext?.machineId || machineName === undefined || busy === "machine:name"} />
               </label>
               <Button type="submit" size="sm" disabled={!nameDraft.trim() || machineName === undefined || busy === "machine:name"}>
-                {busy === "machine:name" ? <Loader2 className="animate-spin" /> : null} Save name
+                {busy === "machine:name" ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null} Save name
               </Button>
             </form>
           )}
@@ -537,7 +534,7 @@ export function LocalMacView({
           <Button size="xs" variant="ghost" disabled={daemonStarting} onClick={onRestartDaemon}><RefreshCw /> Restart</Button>
         ) : (
           <Button size="xs" variant="outline" disabled={daemonStarting || !machineName} onClick={onStartDaemon}>
-            {daemonStarting ? <Loader2 className="animate-spin" /> : <Radio />}
+            {daemonStarting ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Radio />}
             {daemonStarting ? "Starting" : "Start"}
           </Button>
         )}
@@ -580,8 +577,7 @@ export function LocalMacView({
                   key={agent.id}
                   quiet
                   leading={(
-                    <IdentityAvatar kind="agent" label={agent.name} imageUrl={localManagedAgentAvatarUrl(agent)}
-                      initials={avatarInitials(agent.name)} size="sm" showKindBadge={false} />
+                    <Face of={{ kind: "agent", name: agent.name, harness: agent.harness }} size="sm" showKindBadge={false} />
                   )}
                   title={(
                     <>
@@ -627,7 +623,7 @@ export function LocalMacView({
         concealAction={workspaces.length > 0}
         action={(
           <Button size="xs" variant="ghost" disabled={busy === "workspace:add"} onClick={onAddWorkspace}>
-            {busy === "workspace:add" ? <Loader2 className="animate-spin" /> : <Plus />} Add directory
+            {busy === "workspace:add" ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add directory
           </Button>
         )}
       >
@@ -657,7 +653,7 @@ export function LocalMacView({
                       </Button>
                       <Button size="icon-sm" variant="ghost" className={iconButton} title="Remove local directory"
                         aria-label="Remove local directory" disabled={removing} onClick={() => onRemoveWorkspace(workspace)}>
-                        {removing ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                        {removing ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Trash2 />}
                       </Button>
                     </>
                   )}
@@ -674,7 +670,7 @@ export function LocalMacView({
         action={(
           <Button size="icon-xs" variant="ghost" className={iconButton} onClick={onRefreshDiscoveries}
             disabled={loadingDiscoveries} title="Scan again" aria-label="Scan again">
-            <RefreshCw className={cn(loadingDiscoveries && "animate-spin")} />
+            <AnimatedIcon icon={RefreshCw} className={cn(loadingDiscoveries && "animate-spin")} />
           </Button>
         )}
       >
@@ -693,9 +689,8 @@ export function LocalMacView({
                   <ul>
                     <LocalLine
                       leading={(
-                        <IdentityAvatar kind="agent" label={discovery.displayName}
-                          imageUrl={agentAvatarUrlFromMetadata({ presetId: discovery.presetId }, discovery.presetId)}
-                          initials={avatarInitials(discovery.displayName)} size="sm" showKindBadge={false} />
+                        <Face of={{ kind: "agent", name: discovery.displayName, harness: discovery.presetId }} size="sm"
+                          showKindBadge={false} />
                       )}
                       title={(
                         <>
@@ -715,7 +710,7 @@ export function LocalMacView({
                         <span className="flex items-center gap-1 px-2 text-xs text-muted-foreground"><Check className="size-3.5" /> Added</span>
                       ) : (
                         <Button size="xs" variant="outline" disabled={importing} onClick={() => onImportAgent(discovery)}>
-                          {importing ? <Loader2 className="animate-spin" /> : <Plus />} Add agent
+                          {importing ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add agent
                         </Button>
                       )}
                     />
@@ -979,14 +974,14 @@ export function MachinesView({
               aria-label={unnamed ? "Name it" : "Rename"}
               onClick={() => { setRenameError(null); setEditing({ machineId: machine.machineId!,
                 draft: unnamed ? "" : name, create: unnamed }); }}>
-              {renameBusy ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
+              {renameBusy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Pencil className="size-4" />}
             </button>
             <button type="button" className={cn(titleControl, "hover:text-destructive")}
               title={`Remove ${name}`}
               aria-label={`Remove ${name}`}
               disabled={Boolean(removingId)}
               onClick={() => void remove(machine)}>
-              {removingId === machine.machineId ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              {removingId === machine.machineId ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
             </button>
           </>
         ) : undefined}
@@ -1080,7 +1075,7 @@ const NO_CONNECTIONS: SerializedAppConnectorConnection[] = [];
 const NO_EXECUTIONS: SerializedAppConnectorExecution[] = [];
 
 export function AppsView({
-  connectors,
+  connectors: catalog,
   currentSpace,
   token,
   channels,
@@ -1088,13 +1083,12 @@ export function AppsView({
   connectors: AppConnectorManifest[];
   currentSpace: SerializedSpace | null;
   token?: string;
-  channels: SerializedChannel[];
+  channels: ChannelSnapshot[];
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   // The connector open beside the list is named in the address, like every rail destination's item.
   const [connectorItem, selectConnector] = useToolItem();
-  const selectedConnectorId = connectorItem ?? connectors[0]?.id ?? "";
   const setSelectedConnectorId = (id: string) => selectConnector(id, { replace: true });
   const [connectionActionError, setConnectionsError] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<{ tone: "success" | "warning"; message: string } | null>(null);
@@ -1154,6 +1148,8 @@ export function AppsView({
       }),
   });
   const connections = connectionsQuery.data ?? NO_CONNECTIONS;
+  const connectors = useMemo(() => orderConnectorsForList(catalog, connections), [catalog, connections]);
+  const selectedConnectorId = connectorItem ?? connectors[0]?.id ?? "";
   const executions = executionsQuery.data ?? NO_EXECUTIONS;
   const connectionsError = connectionActionError ?? userErrorMessage(connectionsQuery.error, "Couldn't load app connections");
   const executionsError = executionActionError ?? userErrorMessage(executionsQuery.error, "Couldn't load app actions");
@@ -1185,11 +1181,30 @@ export function AppsView({
     const url = new URL(window.location.href);
     const outcome = url.searchParams.get("oauth");
     const providerId = url.searchParams.get("connector");
+    if (providerId === "gmail" && (url.searchParams.has("gmailWatchState") || url.searchParams.has("gmailWatch"))) {
+      // The mailbox view consumes its single-use code after connection data loads.
+      // Select it without claiming that the notification grant has completed.
+      if (url.searchParams.get("gmailWatch") === "failed") {
+        setSetupNotice({ tone: "warning", message: "Gmail notification authorization did not finish. Turn notifications on to try again." });
+        url.searchParams.delete("gmailWatch");
+      }
+      url.searchParams.delete("connector");
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+      setSelectedConnectorId("gmail");
+      return;
+    }
     if (!outcome || !providerId) return;
     const name = connectors.find((connector) => connector.id === providerId)?.name ?? providerId;
     setSetupNotice(outcome === "connected"
-      ? { tone: "success", message: `${name} is connected. Subscribe a channel or allow its actions below.` }
-      : { tone: "warning", message: `${name} did not finish connecting. Try again, or paste a token under Credentials.` });
+      ? { tone: "success", message: providerId === "x"
+        ? "X account connected. Confirm its handle below and use Add X account to authorize your other account."
+        : `${name} is connected. Subscribe a channel or allow its actions below.` }
+      : outcome === "elsewhere"
+      ? { tone: "warning", message: `This ${name} workspace is already connected to another xMatrix Space. ` +
+        "To move it here, a Slack workspace admin removes the xMatrix app from the workspace first, then connect again." }
+      : { tone: "warning", message: providerId === "x"
+        ? "X authorization did not finish. Use Add X account to try again."
+        : `${name} did not finish connecting. Try again, or paste a token under Credentials.` });
     url.searchParams.delete("oauth");
     url.searchParams.delete("connector");
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
@@ -1242,7 +1257,7 @@ export function AppsView({
 
   async function configureConnector(
     connector: AppConnectorManifest,
-    options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
+    options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string; xAccountId?: string }
   ) {
     if (!token || !currentSpace) return;
     const existingConnection = connectionsByProvider.get(connector.id);
@@ -1302,6 +1317,7 @@ export function AppsView({
         const started = await connectionMutation.mutateAsync({
           url: WEB_PROXY_ROUTES.space_app_connection_oauth_start(currentSpace.id, connector.id),
           method: "POST",
+          body: connector.id === "x" && options?.xAccountId ? { accountId: options.xAccountId } : undefined,
         });
         if (!started.url) throw unexpectedResponse("The sign-in link");
         window.location.assign(started.url);
@@ -1454,7 +1470,7 @@ export function AppsView({
       connection, available, configured, needsAttention,
       label: configured ? "Connected" : needsAttention ? "Needs attention" : connection ? "Disconnected"
         : available ? "Not connected" : "Coming soon",
-      summary: configured ? "Ready in every channel in this space"
+      summary: configured ? connector.id === "x" ? "Connected accounts are available to their owners and their Agents" : "Ready in every channel in this space"
         : needsAttention ? connection.error || "The connection needs to be authorized again"
           : connection ? "Reconnect to resume channel delivery"
             : available ? "Connect an account and choose what xMatrix can access" : "This connector is not available yet",
@@ -1521,7 +1537,7 @@ export function AppsView({
                 <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id || configuring}
                   onClick={() => void configureConnector(connector)}
                   title={`Reconnect ${connector.name}`} aria-label={`Reconnect ${connector.name}`}>
-                  {updating ? <Loader2 className="animate-spin" /> : <PlugZap />} Reconnect
+                  {updating ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />} Reconnect
                 </Button>
               ) : null}
               <Button size="sm" variant="ghost" disabled={updating || checking}
@@ -1534,7 +1550,7 @@ export function AppsView({
           ) : state.available && (connector.id === "github" || oauthProviders.includes(connector.id) || nativeProviders.includes(connector.id)
             || connectorWritableCredentials(connector).length === 0) ? (
             <Button size="sm" variant="outline" disabled={updating || checking} onClick={() => void configureConnector(connector)}>
-              {updating ? <Loader2 className="animate-spin" /> : <PlugZap />}
+              {updating ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />}
               {state.connection ? "Reconnect" : connector.id === "github" ? "Connect GitHub"
                 : oauthProviders.includes(connector.id) ? `Connect with ${connector.name}` : "Connect"}
             </Button>
@@ -1543,7 +1559,7 @@ export function AppsView({
             <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id}
               onClick={() => void checkConnector(connector)}
               title={`Check ${connector.name} connection`} aria-label={`Check ${connector.name} connection`}>
-              {checking ? <Loader2 className="animate-spin" /> : <RefreshCw />} Check
+              {checking ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <RefreshCw />} Check
             </Button>
           ) : null}
         </div>
@@ -1594,6 +1610,22 @@ export function AppsView({
             onAdd={() => void configureConnector(connector)} />
         </ToolDetailSection>
       ) : null}
+      {(connector.id === "cloudflare" || connector.id === "x") && token && currentSpace && user?.id ? (() => {
+        // Both keep one OAuth grant per connected login; Connect adds one.
+        const grants = { spaceId: currentSpace.id, token, userId: user.id, members: currentSpace.members,
+          adding: updatingProviderId === connector.id, canAdd: oauthProviders.includes(connector.id),
+          onAdd: () => void configureConnector(connector), onChanged: async () => { await connectionsQuery.refetch(); } };
+        return connector.id === "cloudflare" ? (
+          <ToolDetailSection title="Cloudflare logins">
+            <CloudflareLogins key={currentSpace.id} {...grants} />
+          </ToolDetailSection>
+        ) : (
+          <ToolDetailSection title="X accounts">
+            <XAccounts key={currentSpace.id} {...grants}
+              onReconnect={(accountId) => void configureConnector(connector, { xAccountId: accountId })} />
+          </ToolDetailSection>
+        );
+      })() : null}
       {configuring && selectedConnection && configurationDraft ? (
         <ToolDetailSection title="Configuration">
           <p className="mb-4 text-sm text-muted-foreground">Choose where this connector can run and which write actions are allowed.</p>
@@ -1638,7 +1670,7 @@ export function AppsView({
           <div className="mb-2 flex justify-end">
             <Button size="xs" variant="ghost" onClick={() => void loadExecutions()} disabled={loadingExecutions}
               title="Refresh connector activity">
-              <RefreshCw className={cn(loadingExecutions && "animate-spin")} /> Refresh
+              <AnimatedIcon icon={RefreshCw} className={cn(loadingExecutions && "animate-spin")} /> Refresh
             </Button>
           </div>
           {executionsError && <p className="mb-3 text-sm font-medium text-destructive">{executionsError}</p>}
@@ -1757,7 +1789,7 @@ export function ConnectorConfiguration({
           disabled={saving}
           className={actionClass({ variant: "primary" })}
         >
-          {saving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+          {saving ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
           {saving ? "Saving" : "Save configuration"}
         </button>
       </div>

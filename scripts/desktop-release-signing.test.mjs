@@ -12,10 +12,7 @@ test("macOS desktop releases use one isolated keychain for the pinned complete c
   assert.match(workflow, /source scripts\/macos-signing-keychain\.sh/u);
   assert.match(workflow, /prepare_developer_id_keychain "\$certificate" "\$intermediate" "\$keychain" "\$keychain_password"/u);
   assert.ok(chainStep < buildStep);
-  assert.match(
-    signingPreparation,
-    /https:\/\/www\.apple\.com\/certificateauthority\/DeveloperIDG2CA\.cer/,
-  );
+  assert.ok(signingPreparation.includes("https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer"));
   assert.match(
     signingPreparation,
     /f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a/,

@@ -1,17 +1,19 @@
 import { Hono, type Context } from "hono";
-import { HUB_ROUTES, isAgentStatus, isTerminalRunStatus, sha256Hex, hasControlCharacter } from "@xmatrix/protocol";
+import {
+  HUB_ROUTES, isAgentStatus, isTerminalRunStatus, sha256Hex, hasControlCharacter,
+  isPlaceholderHumanName,
+} from "@xmatrix/protocol";
 import type { Env } from "./types";
 import type { AuthUser } from "./auth";
 import { awaitAuthorityProbeBackoff } from "./authority-probe-backoff";
 import { RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH } from "./runtime-transport/relay-runtime-product-adapter";
 import { INSTANCE_ABANDON_RESULT_TIMEOUT_MS, requireAuth, requireHumanAuth, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
-import { deterministicConversationId } from "./system-conversation";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
 import { machineCommandStatus, machineDaemonCommand, machineRepository } from "./machines";
 import { runtimeRepository } from "./runtime";
 import { ControlError } from "@xmatrix/db";
-import { createSpace, getSpace, listSpaces, updateSpace, updateSpaceMemberCreationPolicy } from "./spaces";
+import { createSpace, getSpace, listSpaces, personalSpaceId, updateSpace, updateSpaceMemberCreationPolicy } from "./spaces";
 
 /** One status read of a daemon control; a status the authority leaves out counts as failed. */
 async function readDaemonControlStatus(
@@ -25,20 +27,23 @@ async function readDaemonControlStatus(
 
 const INSTANCE_ROUTE = "/api/spaces/:spaceId/channels/:channelId/agent-instances/:instanceId";
 
-/** The caller's own membership row carries their current profile, not the stored copy. */
-/** "Ada Lovelace's Space"; the email's name part when the account has none. */
-export function personalSpaceName(user: Pick<AuthUser, "name" | "email">): string {
-  const owner = user.name?.trim() || user.email.split("@")[0]?.trim() || "My";
-  return owner === "My" ? "My Space" : `${owner.slice(0, 60)}'s Space`;
+/** "Ada Lovelace's Space"; "My Space" while the account has no name its person chose. */
+export function personalSpaceName(user: Pick<AuthUser, "id" | "name">): string {
+  const name = user.name?.trim() ?? "";
+  return isPlaceholderHumanName(name, user.id) ? "My Space" : `${name.slice(0, 60)}'s Space`;
 }
 
+/**
+ * The caller's own membership row carries their current name and email, not the stored copy. Their picture is not
+ * among them: a face is read from the account by id (protocol faces.ts), never from a session's copy of it.
+ */
 function withCallerMemberProfile(space: Record<string, unknown>, authUser: AuthUser): Record<string, unknown> {
   return {
     ...space,
     members: Array.isArray(space.members)
       ? (space.members as Array<Record<string, unknown>>).map((member) =>
           member.userId === authUser.id
-            ? { ...member, email: authUser.email, name: authUser.name, avatarUrl: authUser.avatarUrl }
+            ? { ...member, email: authUser.email, name: authUser.name }
             : member
         )
       : [],
@@ -587,7 +592,6 @@ export function registerIndexRoutesAuthSpaceInstances(app: Hono<{ Bindings: Env 
           userId: authUser.id,
           email: authUser.email,
           name: authUser.name,
-          avatarUrl: authUser.avatarUrl,
           role: "owner",
           joinedAt: space.createdAt,
         }],
@@ -607,7 +611,7 @@ export function registerIndexRoutesAuthSpaceInstances(app: Hono<{ Bindings: Env 
     const authUser = await requireAuth(c.req.raw, c.env);
     const principal = { kind: "user" as const, id: authUser.id };
     if ((await listSpaces(c.env, principal)).length > 0) return c.json({ space: null });
-    const spaceId = await deterministicConversationId("personal-space", authUser.id);
+    const spaceId = await personalSpaceId(authUser.id);
     try {
       await createSpace(c.env, {
         commandId: `personal-space:${authUser.id}`,

@@ -71,6 +71,16 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 - [参与开发](../../README.md#hack-on-xmatrix)
 - [贡献方式：提 prompt request，而不是 pull request](../../README.md#contributing-prompt-requests-not-pull-requests)
 
+## Star 历史
+
+<a href="https://www.star-history.com/?repos=LambdaLabsHQ%2Fxmatrix&amp;type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date" />
+    <img src="https://api.star-history.com/chart?repos=lambdalabshq/xmatrix&amp;type=date" width="820" alt="xMatrix 的 GitHub Star 增长历史" />
+  </picture>
+</a>
+
 ## 许可证
 
 xMatrix 在 [Functional Source License 1.1, Apache 2.0 future license](../../LICENSE)（FSL-1.1-ALv2）下**源码公开**。你可以出于任何目的阅读、运行、修改和自托管这些代码，但不能用它提供与之竞争的产品。**每个版本在发布两年后转为 Apache 2.0。** FSL 不是 OSI 认可的开源许可证。

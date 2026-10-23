@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import { bundleFrame, consoleLine, reportError, sendErrorReports, startErrorReporting } from "../dist/error-reporting.js";
 
 const sent = [];
@@ -59,7 +60,9 @@ test("a bundled Worker frame is reported under the uploaded source map's URL", a
   ].join("\n");
   reportError(error);
   await sendErrorReports();
-  const frames = events()[0].exception.values[0].stacktrace.frames;
+  const exception = events()[0].exception.values[0];
+  assert.equal(exception.mechanism.data?.stack_origin, undefined);
+  const frames = exception.stacktrace.frames;
   assert.deepEqual(frames.map(({ filename, abs_path, lineno }) => [filename, abs_path, lineno]), [
     ["app:///index.js", "app:///index.js", 88818],
     ["app:///index.js", "app:///index.js", 165430],
@@ -93,4 +96,25 @@ test("a logged line spells out scalar fields and leaves nested values to the rep
     "failed errorClass=TypeError origin=a,b");
   assert.equal(consoleLine(["plain line"]), "plain line");
   assert.equal(consoleLine(["x", { text: "y".repeat(1000) }]).length, 400);
+});
+
+// The platform can transport an Error without its originating JavaScript stack.
+// Protect the reporting boundary: the existing normal-Error tests cannot catch
+// losing every application frame for that different runtime shape.
+test("a stackless platform error retains a labeled, source-mappable capture boundary (XMATRIX-HUB-9C/88)", async () => {
+  sent.length = 0;
+  const error = new Error("Durable Object storage is no longer accessible.");
+  error.stack = undefined;
+  runInNewContext('function recordDirectoryFailure() { console.error("Runtime route-directory register failed", error); } recordDirectoryFailure();',
+    { console, error }, { filename: "index.js" });
+  await sendErrorReports();
+  const [event] = events();
+  const exception = event.exception.values[0];
+  assert.equal(exception.value, error.message);
+  assert.equal(exception.mechanism.data.stack_origin, "capture_boundary");
+  const caller = exception.stacktrace.frames.find(frame => frame.function?.includes("recordDirectoryFailure"));
+  assert.equal(caller?.filename, "app:///index.js");
+  assert.equal(caller?.abs_path, "app:///index.js");
+  assert.equal(caller?.lineno, 1);
+  assert.equal(error.stack, undefined, "reporting must not mutate the originating error");
 });

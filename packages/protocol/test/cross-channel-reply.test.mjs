@@ -12,6 +12,7 @@ const {
 test("a relayed cross-Channel reply reads back what the Hub wrote", () => {
   const relay = {
     sourceChannelId: "c2", sourceMessageId: "r1", linkMessageId: "l1",
+    replierRegistration: { ownerUserId: "owner", machineId: "server", harness: "codex" },
     replierKind: "agent", replierAgentId: "c1:6", replierInstanceId: "c1:6",
   };
   assert.deepEqual(crossChannelReplyRelay(crossChannelReplyMetadata(relay)), relay);
@@ -24,10 +25,12 @@ test("a relayed cross-Channel reply reads back what the Hub wrote", () => {
 test("only an Agent replier names an Instance, and only a relay is read", () => {
   const metadata = (relay) => ({ xmatrixProvenance: "cross_channel_reply", crossChannelReply: relay });
   assert.equal(
-    crossChannelReplyRelay(metadata({ sourceChannelId: "c2", replierKind: "user", replierInstanceId: "i1" }))
+    crossChannelReplyRelay(metadata({ sourceChannelId: "c2", replierKind: "user", replierInstanceId: "i1", replierRegistration: { ownerUserId: "o", machineId: "m", harness: "codex" } }))
       .replierInstanceId,
     undefined,
   );
+  assert.equal(crossChannelReplyRelay(metadata({ sourceChannelId: "c2", replierKind: "agent", replierRegistration: { machineId: "m" } })).replierRegistration, undefined);
+  assert.equal(crossChannelReplyRelay(metadata({ sourceChannelId: "c2", replierKind: "user", replierRegistration: { ownerUserId: "o", machineId: "m", harness: "codex" } })).replierRegistration, undefined);
   assert.equal(crossChannelReplyRelay(metadata({ replierKind: "agent", replierInstanceId: "i1" })), undefined);
   assert.equal(crossChannelReplyRelay({ crossChannelReply: { sourceChannelId: "c2" } }), undefined);
   assert.equal(crossChannelReplyRelay(undefined), undefined);

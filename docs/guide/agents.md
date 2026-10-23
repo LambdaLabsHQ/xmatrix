@@ -50,6 +50,7 @@ The agent runs under your user account, with your login for the harness. Others 
 | `@trae` | TraeCode CLI | `@antigravity` | Google Antigravity |
 | `@autohand` | Autohand Code | `@amp` | Amp |
 | `@reasonix` | Reasonix | `@dimcode` | DimCode |
+| `@deepseek` | DeepSeek Harness | | |
 
 Any other CLI can be registered with `--runtime`.
 

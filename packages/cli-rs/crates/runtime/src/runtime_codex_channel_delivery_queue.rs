@@ -89,7 +89,8 @@ struct InboundChannelMessage {
 impl InboundChannelMessage {
     /// This message as `agent` reads it in a turn prompt. The first message
     /// of a turn also carries what its channel saw as context since the last
-    /// one, which is taken here so the run reads it once.
+    /// one, which is taken here so the run reads it once, and the run has
+    /// now read its channel through the newest of them.
     fn prompt_text(
         &self,
         agent: &protocol::SerializedAgent,
@@ -108,6 +109,14 @@ impl InboundChannelMessage {
             local_files,
         );
         let context = agent_instance_connection::take_context_for_next_turn(&self.channel_id);
+        if let Some(through) = context
+            .iter()
+            .filter_map(|message| message.sequence)
+            .chain(self.sequence)
+            .max()
+        {
+            xmatrix_cli_core::read_through::record(&self.channel_id, through);
+        }
         match runtime_channel_history_bootstrap::render_channel_context_block(
             &self.channel_id,
             &context,

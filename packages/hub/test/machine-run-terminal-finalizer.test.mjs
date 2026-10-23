@@ -19,25 +19,22 @@ function fixture(claimed, port = {}) {
   const effects = {
     commitLifecycle: async (value) => { events.push(`lifecycle:${value.runId}`); return {}; },
     terminateInstance: async (instanceId) => { events.push(`terminate:${instanceId}`); },
-    dispatchChannelAbout: async (followUp) => { events.push(`about:${followUp.requestId}`); },
+    endInstanceClaims: async (conversationId, instanceIds) => { events.push(`claims:${conversationId}:${instanceIds}`); },
     ...port,
   };
   return { events, settlements, run: () => finalizeMachineRunTerminalReportsWith(repository, effects, "channel-1") };
 }
 
-test("a report is finalized only after lifecycle and About successors all commit", async () => {
+test("a report is finalized only after its lifecycle commits and its ended Instances close", async () => {
   const f = fixture([report("run-1", "machine_stop_result")], {
     commitLifecycle: async (value) => {
       f.events.push(`lifecycle:${value.runId}`);
-      return { terminalInstanceIds: ["instance-1"],
-        channelAboutFollowUps: [{ spaceId: "space", channelId: "channel", requestId: "about-1",
-          successorOfRunId: "run-1", actorUserId: "owner" }] };
+      return { terminalInstanceIds: ["instance-1"] };
     },
   });
   assert.equal(await f.run(), 1);
-  // The ended Instance's lingering socket closes before anything else follows.
-  assert.deepEqual(f.events, ["prune", "lifecycle:run-1", "terminate:instance-1",
-    "about:about-1"]);
+  assert.deepEqual(f.events, ["prune", "lifecycle:run-1", "terminate:instance-1", "claims:channel:instance-1"],
+    "the ended Instance's page claims end with it");
   assert.deepEqual(f.settlements, [{ runId: "run-1", finalized: true }]);
 });
 
@@ -54,15 +51,6 @@ test("one failing report retries alone and never blocks the others", async () =>
     { runId: "run-1", finalized: false, errorCode: "Lifecycle unavailable" },
     { runId: "run-2", finalized: true },
   ]);
-});
-
-test("an invalid About successor keeps the report pending", async () => {
-  const f = fixture([report("run-1")], {
-    commitLifecycle: async () => ({ channelAboutFollowUps: [{ spaceId: "space" }] }),
-  });
-  assert.equal(await f.run(), 0);
-  assert.equal(f.settlements[0].finalized, false);
-  assert.match(f.settlements[0].errorCode, /channelId is invalid/);
 });
 
 test("only a valid committed Instance list closes sockets", async () => {

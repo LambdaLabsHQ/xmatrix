@@ -31,6 +31,9 @@ pub(crate) fn claude_stream_extra_args(
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        // Text as it is generated (`stream_event`), so a page co-written live
+        // sees the words come rather than whole blocks.
+        "--include-partial-messages".to_string(),
         // Echo each submitted user message back on stdout (`isReplay:true`) so
         // the reader can confirm the turn was accepted.
         "--replay-user-messages".to_string(),
@@ -51,10 +54,6 @@ pub(crate) fn claude_stream_extra_args(
         .filter(|value| !value.is_empty())
     {
         args.extend(["--append-system-prompt".to_string(), prompt.to_string()]);
-    }
-    // The Space's connector actions, as MCP tools for this Run's harness.
-    if let Some(config) = crate::runtime_connector_mcp::claude_connector_mcp_config() {
-        args.extend(["--mcp-config".to_string(), config]);
     }
     if let Some(session_id) = resume_id.map(str::trim).filter(|value| !value.is_empty()) {
         args.extend(["--resume".to_string(), session_id.to_string()]);
@@ -86,11 +85,19 @@ pub(crate) fn trusted_role_is_active() -> bool {
     trusted_initial_prompt_from_env().is_some()
 }
 
-pub(crate) fn grok_acp_trusted_rules(bootstrap_prompt: Option<&str>) -> Option<String> {
-    bootstrap_prompt
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+/// Only trusted registration instructions and the official Channel contract
+/// enter Grok's native system channel. Never accept a composed user bootstrap:
+/// it may already contain Channel history, names, task text and attachments.
+pub(crate) fn grok_acp_trusted_rules(channel_id: Option<&str>) -> Option<String> {
+    let mut rules = trusted_role_system_prompt_from_env()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let Some(channel) = channel_id.map(str::trim).filter(|id| !id.is_empty()) {
+        rules.push(xmatrix_cli_core::bootstrap::channel_collaboration_policy(
+            channel,
+        ));
+    }
+    (!rules.is_empty()).then(|| rules.join("\n\n"))
 }
 
 pub(crate) fn ensure_runtime_supports_trusted_role(

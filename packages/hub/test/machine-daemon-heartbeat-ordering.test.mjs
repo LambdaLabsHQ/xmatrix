@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  MachineDaemonRuntimeTransport,
-  MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES,
-} from "../src/runtime-transport/machine-daemon-port.ts";
-import { FakeSocket } from "./support/runtime-transport.mjs";
+  FakeSocket,
+  machineDaemonConnectFrame,
+  machineDaemonTransport,
+  socketFrame as frame,
+} from "./support/runtime-transport.mjs";
 
 const principal = {
   ownerUserId: "heartbeat-owner",
@@ -13,34 +14,8 @@ const principal = {
   machineId: "heartbeat-machine",
   hostId: "heartbeat-host",
 };
-const frame = (type, fields = {}) => JSON.stringify({ type, ...fields });
-const connect = () => frame("machine_daemon_connect", {
-  requestId: "connect", token: "test-token", displayName: "Laptop",
-  machineId: principal.machineId, hostId: principal.hostId,
-  clientVersion: "1.0.350", protocolVersion: 2,
-});
-
-function transport(overrides = {}) {
-  return new MachineDaemonRuntimeTransport({
-    capabilities: new Set(MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES),
-    async authenticate() {
-      return {
-        principal,
-        connected: {
-          type: "machine_daemon_connected", connectionEpoch: 1,
-          daemon: {
-            id: "heartbeat-daemon", userId: principal.ownerUserId,
-            email: principal.ownerEmail, machineId: principal.machineId,
-          },
-        },
-      };
-    },
-    async refresh() { return principal; },
-    async execute() {},
-    async disconnected() {},
-    ...overrides,
-  });
-}
+const connect = () => machineDaemonConnectFrame(principal);
+const transport = (overrides) => machineDaemonTransport(principal, overrides);
 
 test("daemon heartbeat answers while authenticated connect catches up commands", async () => {
   const started = Promise.withResolvers();
@@ -113,4 +88,24 @@ test("unauthenticated and disconnected sockets cannot use the heartbeat fast pat
   assert.equal(connected.sent.at(-1).type, "error");
   assert.match(connected.sent.at(-1).message, /authenticate/u);
   assert.equal(runtime.isRouteReachable(principal), false);
+});
+
+test("a probe that wakes the Runtime checks the catalog once per interval, across hibernation", async () => {
+  const confirmed = [];
+  const backend = { async confirmOnline(session) { confirmed.push(session.connectionEpoch); } };
+  const awake = transport(backend);
+  const socket = new FakeSocket();
+  awake.accept(socket);
+  await awake.handleFrame(socket, connect());
+  await awake.handleFrame(socket, frame("ping", { requestId: "probe-1" }));
+  await awake.handleFrame(socket, frame("ping", { requestId: "probe-2" }));
+  assert.deepEqual(confirmed, [1]);
+
+  // Every probe wakes a hibernated object into a fresh transport; the check it
+  // already made rides the socket's attachment instead of being repeated.
+  const woken = transport(backend);
+  assert.equal(woken.rehydrate(socket, awake.hibernationAttachment(socket)), true);
+  await woken.handleFrame(socket, frame("ping", { requestId: "probe-3" }));
+  assert.deepEqual(confirmed, [1]);
+  assert.equal(socket.sent.at(-1).type, "pong");
 });

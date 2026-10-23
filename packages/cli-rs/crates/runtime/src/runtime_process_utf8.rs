@@ -57,8 +57,7 @@ use agent_presentation::{
     resolve_switchable_model,
 };
 use cli::{
-    AttachmentCommand, Cli, CliEnvironmentArg, Commands, DaemonCommand, EnvironmentCommand,
-    MigrateCommand, MigrationHistoryMode, ProfileCommand, RequestCommand, SecretCommand,
+    AttachmentCommand, Cli, Commands, DaemonCommand, MigrateCommand, MigrationHistoryMode, ProfileCommand, RequestCommand, SecretCommand,
     SetupCommand,
 };
 use config::CliSession;
@@ -66,12 +65,13 @@ use error::CliError;
 use machine_daemon_connection::{
     MachineDaemonActivationConnect, MachineDaemonCommand, MachineDaemonCommandLease,
     MachineDaemonConnectionClient, MachineDaemonConnectionEvent, MachineDaemonReport,
-    MachineHandoffExport, MachineHandoffExportResult, MachineRunSnapshotItem,
+    MachineHandoffContext, MachineHandoffContextRequest, MachineHandoffExport,
+    MachineHandoffExportResult, MachineRunSnapshotItem,
     MachineWorktreeDisposition, SerializedMachineDaemon,
 };
 #[cfg(windows)]
 use machine_daemon_connection::{MachineDaemonActivationReceipt, MachineDaemonAdoptedRunEvidence};
-use protocol::{DEFAULT_HUB_URL, HubRoutes, TEST_HUB_URL, normalize_hub_url, with_route};
+use protocol::{DEFAULT_HUB_URL, HubRoutes, normalize_hub_url, with_route};
 use xmatrix_cli_memory::{cmd_annotation, cmd_page};
 #[cfg(windows)]
 use xmatrix_cli_update::WindowsStagedDaemonCandidate;
@@ -81,7 +81,7 @@ pub use xmatrix_cli_update::{
     release_version_is_newer, update_hint_lines,
 };
 use xmatrix_cli_update::{
-    CliUpdateCheck, DEFAULT_CLI_RELEASE_API_URL, UpdateHintTarget, check_cli_update, cmd_update,
+    CliUpdateCheck, UpdateHintTarget, check_cli_update, cmd_update, default_cli_release_api_url,
     print_update_hint,
 };
 use xmatrix_cli_update::{InstalledCliUpdate, install_cli_update_for_daemon_restart};
@@ -194,12 +194,97 @@ impl AppServerChild {
         })
     }
 
+    /// Echo a piped stderr to this process's stderr (the Run's err.log) and
+    /// keep its last lines. Drains bytes, not UTF-8 lines, so a stray byte
+    /// never stops the drain and blocks the child on a full pipe.
+    fn tee_stderr(&mut self) -> StderrTail {
+        let tail = StderrTail::default();
+        let Some(stderr) = self.child.stderr.take() else {
+            return tail;
+        };
+        let sink = tail.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr);
+            let mut line = Vec::new();
+            while matches!(reader.read_until(b'\n', &mut line).await, Ok(n) if n > 0) {
+                let _ = std::io::stderr().write_all(&line);
+                sink.push(&String::from_utf8_lossy(&line));
+                line.clear();
+            }
+        });
+        tail
+    }
+
     fn take_stdin(&mut self) -> error::Result<tokio::process::ChildStdin> {
         self.child
             .stdin
             .take()
             .ok_or_else(|| CliError::Launch(format!("{} stdin unavailable", self.label)))
     }
+}
+
+/// The last few non-blank stderr lines of an app-server, ANSI escapes and
+/// control bytes removed.
+#[derive(Clone, Default)]
+struct StderrTail(Arc<Mutex<VecDeque<String>>>);
+
+impl StderrTail {
+    const LINES: usize = 6;
+    const CHARS: usize = 600;
+
+    fn push(&self, raw: &str) {
+        let line = strip_terminal_escapes(raw);
+        let line = line.trim();
+        if line.is_empty() {
+            return;
+        }
+        let mut lines = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if lines.len() == Self::LINES {
+            lines.pop_front();
+        }
+        lines.push_back(line.to_string());
+    }
+
+    /// The kept lines joined, cut from the front to `CHARS`; None when the
+    /// child wrote nothing.
+    fn text(&self) -> Option<String> {
+        let lines = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if lines.is_empty() {
+            return None;
+        }
+        let joined = lines.iter().cloned().collect::<Vec<_>>().join(" | ");
+        let skip = joined.chars().count().saturating_sub(Self::CHARS);
+        Some(joined.chars().skip(skip).collect())
+    }
+}
+
+fn with_stderr_tail(detail: String, tail: &StderrTail) -> String {
+    match tail.text() {
+        Some(text) => format!("{detail}; stderr: {text}"),
+        None => detail,
+    }
+}
+
+fn strip_terminal_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            // CSI `ESC [ ... final` and two-byte `ESC x` sequences.
+            if chars.next_if_eq(&'[').is_some() {
+                for next in chars.by_ref() {
+                    if ('@'..='~').contains(&next) {
+                        break;
+                    }
+                }
+            } else {
+                chars.next();
+            }
+        } else if !ch.is_control() || ch == '\t' {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 type AppServerWsWrite = futures_util::stream::SplitSink<
@@ -442,7 +527,6 @@ const DAEMON_AUTH_CAPABILITY_ENV: &str = "XMATRIX_DAEMON_AUTH_CAPABILITY";
 const DAEMON_REQUEST_URL_ENV: &str = "XMATRIX_DAEMON_REQUEST_URL";
 const DAEMON_REQUEST_CAPABILITY_ENV: &str = "XMATRIX_DAEMON_REQUEST_CAPABILITY";
 const DAEMON_REQUEST_OUTPUT_LIMIT: usize = 1024 * 1024;
-const DAEMON_HUB_UPLOAD_INPUT_LIMIT: usize = 64 * 1024 * 1024;
 const DAEMON_AUTH_REFRESH_RETRY_SECS: u64 = 30;
 const DAEMON_RUN_STATUS_HEARTBEAT_SECS: u64 = 30;
 const DAEMON_RUN_RECOVERY_MAX_AGE_MILLIS: u64 = 2 * 60 * 1000;
@@ -564,7 +648,7 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
                 .flatten()
         });
         let (hub_url, profile_context) =
-            resolve_target_profile(admitted_selector, cli.environment, cli.hub_url.as_deref())
+            resolve_target_profile(admitted_selector, cli.hub_url.as_deref())
                 .await?;
         let cross_hub_override = cli.hub_url.is_some() && hub_url != profile_context.hub_origin;
         let long_lived_hub_runtime = matches!(
@@ -593,30 +677,6 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         config::install_process_profile_context(profile_context)?;
         hub_url
     };
-    let local_harness = matches!(
-        &cli.command,
-        Some(Commands::Harness {
-            command: xmatrix_cli_args::HarnessCommand::List { local: true, .. }
-                | xmatrix_cli_args::HarnessCommand::Apply { .. }
-        })
-    ) || (xmatrix_cli_channel::running_inside_agent_execution_context()
-        && matches!(
-            &cli.command,
-            Some(Commands::Harness {
-                command: xmatrix_cli_args::HarnessCommand::List { machine: None, .. }
-            })
-        ));
-    if !local_harness
-        && !matches!(
-            &cli.command,
-            Some(Commands::Login { .. })
-                | Some(Commands::Logout { .. })
-                | Some(Commands::Session { .. })
-                | Some(Commands::Env { .. })
-        )
-    {
-        xmatrix_cli_core::access::prepare_for_hub(&hub_url, false).await?;
-    }
 
     match cli.command {
         Some(Commands::Login {
@@ -658,7 +718,6 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
                 }
             }
         }
-        Some(Commands::Env { command }) => cmd_environment(command).await,
         Some(Commands::Profile { .. }) => unreachable!("profile commands return before admission"),
         Some(Commands::Star) => unreachable!("star returns before admission"),
         Some(Commands::GitCredential { operation }) => cmd_git_credential(&operation).await,
@@ -700,7 +759,11 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         Some(Commands::Update {
             release_api_url,
             force,
-        }) => cmd_update(&release_api_url, force, &hub_url).await,
+        }) => {
+            let release_api_url =
+                release_api_url.unwrap_or_else(|| default_cli_release_api_url().to_string());
+            cmd_update(&release_api_url, force, &hub_url).await
+        }
         Some(Commands::UpdateSelf) => cmd_update_self().await,
         Some(Commands::Setup {
             machine_name,
@@ -712,9 +775,14 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
                     json,
                 },
         }) => {
+            // The name is settled before anything is installed: a setup that
+            // cannot name its Machine leaves no CLI behind for a daemon to run
+            // unnamed.
+            if daemon {
+                ensure_setup_machine_name(&hub_url, machine_name.as_deref()).await?;
+            }
             let installed = install_cli_from_seed(from.as_deref(), into.as_deref())?;
             let service = if daemon {
-                ensure_setup_machine_name(&hub_url, machine_name.as_deref()).await?;
                 Some(install_daemon_service(Some(&installed.path))?)
             } else {
                 None
@@ -810,15 +878,10 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         }
         Some(Commands::Goal { command }) => cmd_goal(command),
         Some(Commands::Connector {
-            command: xmatrix_cli_args::ConnectorCliCommand::Mcp,
+            command: xmatrix_cli_args::ConnectorCliCommand::List,
         }) => {
-            let token_override = cli.token.clone();
-            crate::runtime_connector_mcp::cmd_connector_mcp(&hub_url, || {
-                let hub_url = hub_url.clone();
-                let token_override = token_override.clone();
-                async move { resolve_auth_token(token_override.as_deref(), &hub_url).await }
-            })
-            .await
+            let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
+            crate::runtime_connector::cmd_connector_list(&hub_url, &token).await
         }
         Some(Commands::Send(args)) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
@@ -866,8 +929,6 @@ fn print_daemon_environment(hub_url: &str) {
     let origin = config::normalized_hub_origin(hub_url);
     let environment = if origin == DEFAULT_HUB_URL {
         "production"
-    } else if origin == TEST_HUB_URL {
-        "test"
     } else {
         "custom"
     };
@@ -889,7 +950,7 @@ async fn cmd_daemon_installation(
     let context = store.context_for_default(&registry)?;
     store.prepare_context_state_root(&context)?;
     if let Some(hint) = legacy_hub_hint {
-        let normalized = resolve_target_hub_choice(None, Some(hint), "production")?;
+        let normalized = resolve_target_hub(hint)?;
         if normalized != context.hub_origin {
             eprintln!(
                 "{} ignoring legacy daemon Hub hint {}; registry default {} is authoritative",
@@ -912,67 +973,29 @@ async fn cmd_daemon_installation(
 
 async fn resolve_target_profile(
     profile_selector: Option<&str>,
-    environment: Option<CliEnvironmentArg>,
     hub_url: Option<&str>,
 ) -> error::Result<(String, xmatrix_cli_core::profile::ProfileContext)> {
     let store = xmatrix_cli_core::profile::ProfileStore::discover();
-    let mut registry = store.load_or_bootstrap()?;
+    let registry = store.load_or_bootstrap()?;
     let context = if let Some(selector) = profile_selector {
         store.context_for_selector(&registry, selector, false)?
-    } else if let Some(environment) = environment {
-        let selector = environment.as_str();
-        match store.context_for_selector(&registry, selector, false) {
-            Ok(context) => context,
-            Err(_)
-                if !registry.profiles.iter().any(|profile| {
-                    profile.is_selectable() && profile.name.eq_ignore_ascii_case(selector)
-                }) =>
-            {
-                let hub_url = if environment == CliEnvironmentArg::Test {
-                    TEST_HUB_URL
-                } else {
-                    DEFAULT_HUB_URL
-                };
-                registry = store.create(registry.revision, selector, hub_url, true)?;
-                store.context_for_selector(&registry, selector, false)?
-            }
-            Err(error) => return Err(error),
-        }
     } else {
         store.context_for_default(&registry)?
     };
     let selected_hub = if let Some(hub_url) = hub_url {
-        resolve_target_hub_choice(None, Some(hub_url), "production")?
+        resolve_target_hub(hub_url)?
     } else {
         context.hub_origin.clone()
     };
     Ok((selected_hub, context))
 }
 
-fn resolve_target_hub_choice(
-    environment: Option<CliEnvironmentArg>,
-    hub_url: Option<&str>,
-    active_environment: &str,
-) -> error::Result<String> {
-    if environment.is_some() && hub_url.is_some() {
-        return Err(CliError::Auth(
-            "`--environment` and `--hub-url` cannot be used together".into(),
-        ));
-    }
-    if let Some(hub_url) = hub_url {
-        return http::normalize_hub_origin(
-            hub_url,
-            "Hub URL must be an absolute HTTP(S) URL",
-            "Hub URL must be an absolute HTTP(S) origin without credentials, query, or fragment",
-        );
-    }
-    let environment = environment
-        .map(|environment| environment.as_str().to_string())
-        .unwrap_or_else(|| active_environment.to_string());
-    Ok(match environment.as_str() {
-        "test" => TEST_HUB_URL.to_string(),
-        _ => DEFAULT_HUB_URL.to_string(),
-    })
+fn resolve_target_hub(hub_url: &str) -> error::Result<String> {
+    http::normalize_hub_origin(
+        hub_url,
+        "Hub URL must be an absolute HTTP(S) URL",
+        "Hub URL must be an absolute HTTP(S) origin without credentials, query, or fragment",
+    )
 }
 
 async fn cmd_profile(command: ProfileCommand) -> error::Result<()> {
@@ -1371,17 +1394,16 @@ fn request_os_managed_daemon_start() -> bool {
         let Ok(executable) = std::env::current_exe() else {
             return false;
         };
-        return std::process::Command::new(executable)
+        std::process::Command::new(executable)
             .args(["machine", "supervisor", "start-daemon"])
             .env_remove("XMATRIX_PROFILE")
-            .env_remove("XMATRIX_ENVIRONMENT")
             .env_remove("XMATRIX_HUB_URL")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
-            .is_ok();
+            .is_ok()
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     false
@@ -1403,77 +1425,6 @@ async fn reconcile_profile_mutation(
         DaemonHostQueryOutcome::Available(_)
         | DaemonHostQueryOutcome::Unavailable
         | DaemonHostQueryOutcome::Unsupported => Ok(()),
-    }
-}
-
-async fn cmd_environment(command: EnvironmentCommand) -> error::Result<()> {
-    if let Some(hub) = config::agent_cli_hub() {
-        if !matches!(command, EnvironmentCommand::Current) {
-            return Err(CliError::Auth(
-                "Agent commands cannot inspect or change installation environments".into(),
-            ));
-        }
-        print_daemon_environment(hub);
-        return Ok(());
-    }
-    let store = xmatrix_cli_core::profile::ProfileStore::discover();
-    match command {
-        EnvironmentCommand::List => {
-            let registry = store.load_or_bootstrap()?;
-            for (name, hub) in [("production", DEFAULT_HUB_URL), ("test", TEST_HUB_URL)] {
-                let profile = registry.profiles.iter().find(|profile| {
-                    profile.is_selectable() && profile.name.eq_ignore_ascii_case(name)
-                });
-                let marker =
-                    if profile.is_some_and(|profile| profile.id == registry.default_profile_id) {
-                        "*"
-                    } else {
-                        " "
-                    };
-                let status = match profile {
-                    Some(profile) if profile.enabled => "enabled",
-                    Some(_) => "disabled",
-                    None => "not created",
-                };
-                println!("{marker} {name:<10} {hub} ({status})");
-            }
-            Ok(())
-        }
-        EnvironmentCommand::Current => {
-            let registry = store.load_or_bootstrap()?;
-            let context = store.context_for_default(&registry)?;
-            println!("Environment: {}", context.name);
-            println!("Hub: {}", context.hub_origin);
-            println!("Profile ID: {}", context.id);
-            Ok(())
-        }
-        EnvironmentCommand::Use { environment } => {
-            if env_flag("XMATRIX_HEADLESS") || env_flag("XMATRIX_AGENT_SESSION") {
-                return Err(CliError::Auth(
-                    "Agent runs cannot change the installation default profile".into(),
-                ));
-            }
-            let target = environment.as_str();
-            let hub = if target == "test" {
-                TEST_HUB_URL
-            } else {
-                DEFAULT_HUB_URL
-            };
-            let mut registry = store.load_or_bootstrap()?;
-            if store.context_for_selector(&registry, target, true).is_err() {
-                registry = store.create(registry.revision, target, hub, true)?;
-            }
-            let before = registry.revision;
-            let updated = store.set_default(before, target)?;
-            let context = store.context_for_default(&updated)?;
-            report_default_profile_apply(
-                &store,
-                &context,
-                updated.revision,
-                updated.revision == before,
-            )
-            .await
-        }
     }
 }
 
@@ -1869,8 +1820,13 @@ async fn cmd_attachment(command: AttachmentCommand) -> error::Result<()> {
 async fn ensure_setup_machine_name(hub_url: &str, name: Option<&str>) -> error::Result<()> {
     // Installing a service before login creates no Machine. Its enrollment is
     // separately guarded; once signed in, setup must resolve the required name.
+    // Like a setup command's login, setup names a new Machine after its
+    // hostname instead of asking: it runs without a terminal (the desktop App
+    // installs this way) and its owner asked for this computer to be set up.
+    // A Machine that already has a name keeps it.
     if let Some(session) = config::load_session_for_hub(hub_url).await {
-        xmatrix_cli_core::machine_naming::ensure_machine_name(&session, name, None).await?;
+        let hostname = xmatrix_cli_core::auth::local_hostname();
+        xmatrix_cli_core::machine_naming::ensure_machine_name(&session, name, Some(&hostname)).await?;
     }
     Ok(())
 }

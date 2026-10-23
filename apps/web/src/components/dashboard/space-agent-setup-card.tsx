@@ -1,37 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useDesktopDaemonFailureDelivered } from "@/lib/desktop-daemon-failure-report";
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
-import { agentPresetAvatarUrl } from "@xmatrix/protocol";
-import { Check, CloudOff, Copy, Download, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
+import { Check, CloudOff, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { noticeClass } from "@/components/ui/status-tone";
-import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
-import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
-import { cn } from "@/lib/utils";
+import type { OnboardingCopy } from "@/lib/onboarding-copy";
+import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
-import { IdentityAvatar } from "./identity-avatar";
-import { useNow } from "./agent-work-intent";
-import {
-  connectStep, defaultInstallPlatform, listNames, setupInstallCommand,
-  type ConnectStep, type InstallPlatform,
-} from "./connect-machine";
-import { useSetupIntent } from "./use-setup-intent";
+import { Face } from "./face";
+import { defaultInstallPlatform, type InstallPlatform } from "./connect-machine";
 import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
+import { AgentInstallPicker } from "./supported-agents";
+import { BringAgentsIn, RemoteMachineHint } from "./bring-agents-in";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
-import type {
-  SpaceAgentSetupCandidate,
-  SpaceAgentSetupState,
+import {
+  daemonFailureSentence,
+  shownDaemonFailure,
+  type SpaceAgentSetupCandidate,
+  type SpaceAgentSetupState,
 } from "./space-agent-setup";
+import type { DesktopDaemonFailure, DesktopDaemonStatus } from "@/lib/desktop/bridge";
+import { cn } from "@/lib/utils";
 
 /* The first screen of a Space that has no agent yet. It replaces the bare
-   "No channels" empty state: instead of asking the human to understand
+   "No conversations yet" empty state: instead of asking the human to understand
    channels and directories first, it reports what is already on this machine
    and offers one action that ends in a working agent. */
-
-const RUNTIME_INSTALL_COMMANDS: Array<{ command: string; description: string }> = [
-  { command: "curl -fsSL https://claude.ai/install.sh | bash", description: "Claude Code" },
-  { command: "npm i -g @openai/codex", description: "Codex" },
-];
 
 /* What runs `xmatrix agent add` for this Space on another machine. The
    Space id is filled in: a placeholder would send the reader looking for an
@@ -55,6 +50,8 @@ export function SpaceAgentSetupCard({
   fleet,
   onBringAll,
   onManageMachines,
+  daemonStatus,
+  phone = false,
 }: {
   state: SpaceAgentSetupState;
   spaceId: string | null;
@@ -70,44 +67,58 @@ export function SpaceAgentSetupCard({
   fleet?: ReturnType<typeof useInstalledHarnesses>;
   onBringAll: () => void;
   onManageMachines: () => void;
+  /** The App's background service, when this is the desktop App. */
+  daemonStatus?: DesktopDaemonStatus | null;
+  /** On a phone: the command is run on a computer, and only approved here. */
+  phone?: boolean;
 }) {
+  const copy = useOnboardingCopy(spaceId, token, userId);
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
-    <SetupCardHeader title="Your installed agents" body="Turn them on to summon them. Choose a working folder when you send the first task." />
+    <SetupCardHeader title={copy.installedTitle} body={copy.installedBody} />
     <InstalledHarnessSwitchList fleet={fleet} />
     <button type="button" disabled={!fleet.ready || Boolean(fleet.pending) || fleet.enablingAll}
       onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
-      {fleet.enablingAll ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-      {fleet.enablingAll ? "Enabling…" : "Bring them in"}
+      {fleet.enablingAll ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
+      {fleet.enablingAll ? copy.enabling : copy.bringThemIn}
     </button>
-    <button type="button" onClick={onManageMachines} className={actionClass({ variant: "secondary", size: "md" }, "mt-4 ml-2")}>Manage machines</button>
+    <button type="button" onClick={onManageMachines} className={actionClass({ variant: "secondary", size: "md" }, "mt-4 ml-2")}>{copy.manageMachines}</button>
   </SetupCardShell>;
   if (state.kind === "hidden") return null;
+  const daemonFailure = state.kind === "unreachable" || state.kind === "no-local-machine"
+    ? null : shownDaemonFailure(daemonStatus);
 
   return (
     <SetupCardShell>
-        {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
-        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} />}
+        {daemonFailure && state.kind !== "daemon-stopped" && (
+          <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mb-6" />
+        )}
+        {state.kind === "unreachable" && <UnreachablePanel copy={copy} onRetry={onRetryAgents} />}
+        {/* Web and phone: the same flow xMatrix sends in a welcome conversation. */}
+        {state.kind === "no-local-machine" && <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="space" phone={phone} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
             iconClassName="animate-spin"
-            title="Looking for agents on this machine"
-            body="Checking which agent runtimes are installed and which directories they have worked in."
+            title={copy.discoveringTitle}
+            body={copy.discoveringBody}
           />
         )}
         {state.kind === "no-runtime" && (
-          <NoRuntimePanel hostLabel={hostLabel} onRefresh={onRefresh} />
+          <NoRuntimePanel copy={copy} hostLabel={hostLabel} onRefresh={onRefresh} />
         )}
         {(state.kind === "daemon-stopped" || state.kind === "ready-to-bind") && (
           <>
             <SetupCardHeader
-              title={`Found ${describeCandidates(state.candidates)} on ${hostLabel}`}
-              body="Turn on the installed agents so they can take work."
+              title={copy.foundOn(describeCandidates(copy, state.candidates), hostLabel)}
+              body={copy.turnOnInstalled}
             />
-            {state.kind === "daemon-stopped" && (
+            {state.kind === "daemon-stopped" && daemonFailure && (
+              <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mt-4" />
+            )}
+            {state.kind === "daemon-stopped" && !daemonFailure && (
               <div className={noticeClass("attention", "mt-4 p-3")}>
                 <p className="text-sm">
-                  The background service that launches agents on this machine is not running yet.
+                  {copy.serviceStopped}
                 </p>
                 <button
                   type="button"
@@ -115,7 +126,7 @@ export function SpaceAgentSetupCard({
                   className={actionClass({ variant: "primary", size: "md" }, "mt-3")}
                 >
                   <PlayCircle className="size-4" />
-                  Start it
+                  {copy.startIt}
                 </button>
               </div>
             )}
@@ -124,6 +135,7 @@ export function SpaceAgentSetupCard({
                 <CandidateRow
                   key={candidate.presetId}
                   candidate={candidate}
+                  copy={copy}
                   disabled={state.kind === "daemon-stopped" || Boolean(busy)}
                   onBind={() => onBindAgent(candidate)}
                 />
@@ -131,10 +143,10 @@ export function SpaceAgentSetupCard({
             </div>
             <button type="button" disabled={state.kind === "daemon-stopped" || Boolean(busy) || !fleet?.ready}
               onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
-              <Check className="size-4" /> Bring them in
+              <Check className="size-4" /> {copy.bringThemIn}
             </button>
             <p className="mt-4 text-xs text-muted-foreground">
-              Detected by checking installed commands. Manage installed harnesses and their Space switches from Machines.
+              {copy.detectedBy}
             </p>
           </>
         )}
@@ -147,12 +159,53 @@ export function SpaceAgentSetupCard({
   );
 }
 
+/* The background service did not start: what that means, one way to try
+   again, and the CLI's last lines (already redacted on this machine), which
+   the App also sends to xMatrix. */
+function DaemonFailureNotice({
+  copy,
+  failure,
+  starting,
+  onRetry,
+  className,
+}: {
+  copy: OnboardingCopy;
+  failure: DesktopDaemonFailure;
+  starting: boolean;
+  onRetry: () => void;
+  className?: string;
+}) {
+  const delivered = useDesktopDaemonFailureDelivered(failure);
+  return (
+    <div className={noticeClass("attention", cn("p-3", className))} role="alert">
+      <p className="text-sm">{daemonFailureSentence(failure, copy)}</p>
+      {failure.detail && (
+        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
+          {failure.detail}
+        </pre>
+      )}
+      {delivered && <p className="mt-2 text-xs text-muted-foreground">{copy.failureReported}</p>}
+      <button
+        type="button"
+        disabled={starting}
+        onClick={onRetry}
+        className={actionClass({ variant: "primary", size: "md" }, "mt-3")}
+      >
+        {starting ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+        {starting ? copy.tryingAgain : copy.tryAgain}
+      </button>
+    </div>
+  );
+}
+
 function CandidateRow({
   candidate,
+  copy,
   disabled,
   onBind,
 }: {
   candidate: SpaceAgentSetupCandidate;
+  copy: OnboardingCopy;
   disabled: boolean;
   onBind: () => void;
 }) {
@@ -160,11 +213,8 @@ function CandidateRow({
     <div className="border-b border-border py-4 last:border-0">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          <IdentityAvatar
-            kind="agent"
-            label={candidate.displayName}
-            imageUrl={agentPresetAvatarUrl(candidate.presetId)}
-            initials={candidate.displayName.slice(0, 2)}
+          <Face
+            of={{ kind: "agent", name: candidate.displayName, harness: candidate.presetId }}
             size="md"
             className="app-space-agent-vendor-avatar shrink-0"
           />
@@ -173,7 +223,7 @@ function CandidateRow({
               <span className="font-black">{candidate.displayName}</span>
               {candidate.usedBefore && (
                 <span className="app-space-agent-used-label text-xs font-bold">
-                  used on this machine
+                  {copy.usedHere}
                 </span>
               )}
             </div>
@@ -182,7 +232,7 @@ function CandidateRow({
                 for, and this card is rendered inside one Space. The working
                 folder is chosen explicitly in the next step. */}
             <p className="mt-2 text-sm text-foreground">
-              You will choose the folder it works in when you send the first task.
+              {copy.chooseFolderLater}
             </p>
           </div>
         </div>
@@ -193,7 +243,7 @@ function CandidateRow({
           className={actionClass({ variant: "primary", size: "md" })}
         >
           <Check className="size-4" />
-          Enable
+          {copy.enable}
         </button>
       </div>
     </div>
@@ -201,9 +251,11 @@ function CandidateRow({
 }
 
 function NoRuntimePanel({
+  copy,
   hostLabel,
   onRefresh,
 }: {
+  copy: OnboardingCopy;
   hostLabel: string;
   onRefresh: () => void;
 }) {
@@ -211,31 +263,19 @@ function NoRuntimePanel({
     <>
       <SetupCardHeader
         icon={Terminal}
-        title={`No agent runtime found on ${hostLabel}`}
-        body="xMatrix launches an agent CLI that already lives on a machine — it does not ship one. Install one here, or point xMatrix at the machine you actually code on."
+        title={copy.noRuntimeTitle(hostLabel)}
+        body={copy.noRuntimeBody}
       />
-      <div className="mt-4 rounded-md border border-border bg-background p-4">
-        {RUNTIME_INSTALL_COMMANDS.map((entry) => (
-          <div
-            key={entry.command}
-            className="flex min-w-0 flex-col gap-1 border-t border-border/70 py-3 first:border-t-0 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
-          >
-            <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono text-xs [overflow-wrap:anywhere]">
-              {entry.command}
-            </code>
-            <span className="min-w-0 text-sm text-muted-foreground sm:text-right">{entry.description}</span>
-          </div>
-        ))}
-      </div>
+      <AgentInstallPicker className="mt-4" copy={copy} platform={localInstallPlatform()} />
       <button
         type="button"
         onClick={onRefresh}
         className={actionClass({ variant: "secondary", size: "md" }, "mt-4")}
       >
         <RefreshCw className="size-4" />
-        Check again
+        {copy.checkAgain}
       </button>
-      <RemoteMachineHint />
+      <div className="mt-6 text-xs text-muted-foreground"><RemoteMachineHint copy={copy} /></div>
     </>
   );
 }
@@ -243,13 +283,13 @@ function NoRuntimePanel({
 /* The registration read failed. This screen deliberately says nothing about
    whether the Space has agents — that is exactly what is not known — and
    reports the one thing that is known instead. */
-function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
+function UnreachablePanel({ copy, onRetry }: { copy: OnboardingCopy; onRetry: () => void }) {
   return (
     <>
       <SetupCardHeader
         icon={CloudOff}
-        title="Cannot reach xMatrix right now"
-        body="This Space's agents could not be loaded, so nothing here is up to date. Your agents and their work are unaffected — this is a connection problem, not a change to the Space."
+        title={copy.unreachableTitle}
+        body={copy.unreachableBody}
       />
       <button
         type="button"
@@ -257,166 +297,19 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
         className={actionClass({ variant: "secondary", size: "md" }, "mt-4")}
       >
         <RefreshCw className="size-4" />
-        Try again
+        {copy.tryAgain}
       </button>
     </>
   );
 }
 
-/* Web and mobile: agents are not in this tab, so the one thing to learn here
-   is where they are. The desktop app finds the ones already installed; any
-   other machine connects with one command approved on this page. */
-function BringAgentsInPanel({ spaceId, token, userId }: {
-  spaceId: string | null; token: string | undefined; userId: string | undefined;
-}) {
-  return (
-    <>
-      <SetupCardHeader
-        icon={HardDrive}
-        title="Bring your agents into xMatrix"
-        body="Your agents run on your own computer, and xMatrix connects them with the people they work with. Open the desktop app on that computer and it finds the agents already installed there."
-      />
-      <a href="/download" className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
-        <Download className="size-4" />
-        Download xMatrix
-      </a>
-      <ConnectMachine spaceId={spaceId} token={token} userId={userId} />
-      <RemoteMachineHint />
-    </>
-  );
+function localInstallPlatform(): InstallPlatform {
+  return typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent);
 }
 
-/* One command for the machine, then what happened to it, as it happens: the
-   terminal asking to be approved, the machine coming online and the agents it
-   has. Once they are reported, the installed-agent switches take over. */
-export function ConnectMachine({ spaceId, token, userId, centered = false }: {
-  spaceId: string | null; token: string | undefined; userId: string | undefined; centered?: boolean;
-}) {
-  const intent = useSetupIntent(spaceId, token, userId);
-  const [platform, setPlatform] = useState<InstallPlatform>(() =>
-    typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent));
-  const now = useNow(1_000);
-  const command = intent.intentId ? setupInstallCommand(intent.intentId, platform) : null;
-  const { copied, copy } = useCopyToClipboard(command ?? "");
-  const step = intent.status ? connectStep(intent.status, now - intent.shownAt) : null;
-  return (
-    <div className="mt-4" data-testid="connect-machine">
-      <p className="text-sm text-muted-foreground">Or run this on the computer your agents use:</p>
-      <div className={cn("mt-2 flex min-w-0 flex-wrap items-center gap-2", centered && "justify-center")}>
-        <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono text-xs [overflow-wrap:anywhere]">
-          {command ?? "Preparing a command…"}
-        </code>
-        <button type="button" disabled={!command} onClick={() => void copy()}
-          className={actionClass({ variant: "secondary", size: "sm" })}>
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
-        className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:underline">
-        {platform === "windows" ? "On macOS or Linux?" : "On Windows?"}
-      </button>
-      {step && <ConnectStepLine step={step} busy={intent.busy} centered={centered}
-        onApprove={(code) => void intent.approve(code)} onDecline={() => void intent.decline()} />}
-      {intent.error && <div className="mt-2">
-        <p role="alert" className="text-sm text-destructive">{intent.error}</p>
-        <button type="button" disabled={intent.busy || intent.retrying} onClick={intent.retry}
-          className={actionClass({ variant: "secondary", size: "sm" }, "mt-2")}>
-          <RefreshCw className="size-4" /> Try again
-        </button>
-      </div>}
-    </div>
-  );
-}
-
-function ConnectStepLine({ step, busy, centered, onApprove, onDecline }: {
-  step: ConnectStep; busy: boolean; centered: boolean;
-  onApprove: (userCode: string) => void; onDecline: () => void;
-}) {
-  const row = cn("flex min-w-0 flex-wrap items-center gap-2 text-sm", centered && "justify-center");
-  const waiting = <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />;
-  const done = <Check className="size-4 shrink-0 text-primary" />;
-  switch (step.kind) {
-    case "waiting":
-      return (
-        <div role="status" className="mt-3 text-sm text-muted-foreground">
-          <p className={row}>{waiting} Waiting for the command…</p>
-          {step.hint === "check-terminal" && <p className="mt-1">Nothing yet? The terminal says what went wrong.</p>}
-          {step.hint === "try-desktop" && <p className="mt-1">Still nothing? The desktop app connects without a terminal.</p>}
-        </div>
-      );
-    case "approval":
-      return (
-        <div role="status" className={cn(row, "mt-3")}>
-          <span><strong>{step.hostname}</strong> wants to connect with code{" "}
-            <code className="font-mono font-semibold">{step.userCode}</code>.
-            Approve it only if the terminal shows the same code.</span>
-          <button type="button" disabled={busy} onClick={() => onApprove(step.userCode)}
-            className={actionClass({ variant: "primary", size: "sm" })}>Approve</button>
-          <button type="button" disabled={busy} onClick={onDecline}
-            className={actionClass({ variant: "quiet", size: "sm" })}>Not mine</button>
-        </div>
-      );
-    case "connecting":
-      return <p role="status" className={cn(row, "mt-3")}>{waiting} {step.hostname} is signing in…</p>;
-    case "looking":
-      return <p role="status" className={cn(row, "mt-3")}>{done} {step.machineName} is connected. Looking for agents…</p>;
-    case "found":
-      return (
-        <p role="status" className={cn(row, "mt-3")}>
-          {done} {step.machineName} is connected. Found {listNames(step.harnesses.map((harness) => harness.name))}.
-        </p>
-      );
-    case "none-installed":
-      return (
-        <div role="status" className="mt-3 text-sm">
-          <p className={row}>{done} {step.machineName} is connected, but no agent is installed there yet.</p>
-          <p className="mt-1 text-muted-foreground">
-            Install one there, for example <code className="font-mono text-xs">{RUNTIME_INSTALL_COMMANDS[0]!.command}</code>
-          </p>
-        </div>
-      );
-  }
-}
-
-/* The remote path from the landing page: a machine with no GUI (a server, a
-   build box) is set up by handing this prompt to an agent that already runs
-   there, so it does not need the desktop app at all. */
-function RemoteMachineHint() {
-  const { copied, copy } = useCopyToClipboard(quickStartSeedPrompt);
-
-  return (
-    <div className="mt-4 rounded-md border border-border bg-muted/40 p-4">
-      <p className="text-sm font-bold">Setting up a remote machine?</p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Paste this prompt to any coding agent that already runs there. It installs the CLI and
-        registers the machine without the desktop app.
-      </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void copy()}
-          className={actionClass({ variant: "secondary", size: "md" })}
-        >
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          {copied ? "Copied" : "Copy setup prompt"}
-        </button>
-        <a
-          href={quickStartRunbookUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex h-9 items-center justify-center rounded px-2 text-sm font-bold text-muted-foreground hover:text-foreground"
-        >
-          Read the steps
-        </a>
-      </div>
-    </div>
-  );
-}
-
-function describeCandidates(candidates: SpaceAgentSetupCandidate[]): string {
+function describeCandidates(copy: OnboardingCopy, candidates: SpaceAgentSetupCandidate[]): string {
   const [first] = candidates;
-  if (!first) return "an agent";
+  if (!first) return copy.anAgent;
   if (candidates.length === 1) return first.displayName;
-  return `${first.displayName} and ${candidates.length - 1} more`;
+  return copy.andMore(first.displayName, candidates.length - 1);
 }

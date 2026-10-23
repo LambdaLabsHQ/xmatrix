@@ -1,4 +1,4 @@
-import { assert, execFileSync, mkdtempSync, rmSync, writeFileSync, tmpdir, path, test } from "./script-test-fixture.mjs";
+import { assert, disableDetachedGitMaintenance, execFileSync, gitMaintenanceCloneArgs, mkdtempSync, removeTemporaryDirectory, writeFileSync, tmpdir, path, test } from "./script-test-fixture.mjs";
 import { claimDecision, claimHolder, claimMessage, claimRef, claimRelease } from "./release-claim.mjs";
 
 test("claims name their run and only finished holders can be displaced", () => {
@@ -26,9 +26,10 @@ function fixture() {
   const origin = path.join(root, "origin.git");
   const run = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
   execFileSync("git", ["init", "--quiet", "--bare", origin]);
+  disableDetachedGitMaintenance(origin);
   const clone = (name) => {
     const dir = path.join(root, name);
-    execFileSync("git", ["clone", "--quiet", origin, dir], { stdio: "ignore" });
+    execFileSync("git", ["clone", "--quiet", ...gitMaintenanceCloneArgs(), origin, dir], { stdio: "ignore" });
     run(dir, "config", "tag.gpgsign", "false");
     run(dir, "config", "commit.gpgsign", "false");
     return dir;
@@ -67,6 +68,6 @@ test("one version, two requests: the running holder wins, a finished one is take
       /held by running request 200/u,
     );
   } finally {
-    rmSync(repo.root, { recursive: true, force: true });
+    removeTemporaryDirectory(repo.root);
   }
 });

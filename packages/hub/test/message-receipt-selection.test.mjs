@@ -5,7 +5,7 @@ import {
   messageReceiptSelection,
 } from "../src/message-receipt-selection.ts";
 const human = { id: "human", email: "human@example.test" };
-const agent = { ...human, id: "agent-run:one", agentRun: { runKind: "channel-instance",
+const agent = { ...human, id: "agent-run:one", agentRun: {
   agentId: "agent", runId: "run", instanceId: "instance", executionKey: "signed-execution",
   channelId: "channel", ownerUserId: "human" } };
 
@@ -25,8 +25,6 @@ test("receipt selection rejects request-supplied authority and preserves verifie
   assert.deepEqual(foreign.input.runProof, selected.input.runProof);
   assert.equal(messageReceiptSelection("channel", { messageId: "message" }, {
     ...agent, agentRun: { ...agent.agentRun, instanceId: undefined } }).status, 403);
-  assert.equal(messageReceiptSelection("channel", { messageId: "message" }, {
-    ...agent, agentRun: { ...agent.agentRun, runKind: "channel-about-session" } }).status, 403);
 });
 
 test("receipt selections are bounded and Humans keep their own identity", () => {

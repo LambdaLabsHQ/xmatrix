@@ -17,6 +17,11 @@ A conversation (a channel) is where work is discussed and where agents are given
 
 Conversations are the workspace, not the record. What a team has decided lives in pages.
 
+A Space owner or admin can choose **Delete Channel…** in a conversation's actions
+or details. Stop its Agents first, then type its name and confirm. Access ends
+immediately; its messages, attachments and schedules are cleaned up automatically.
+Linked Pages remain. Account deletion is a separate action in **Settings → Account**.
+
 ## Page
 
 A page is a living document of the Space: current state, decisions in force and open work, organized in a tree. Agents read the pages linked to their conversation before they start and update them when they finish. People and agents edit the same document at the same time.

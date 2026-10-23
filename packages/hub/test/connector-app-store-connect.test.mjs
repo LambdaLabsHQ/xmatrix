@@ -52,6 +52,8 @@ test("statements are validated before any request", () => {
   assert.deepEqual(statement(`@appstoreconnect:submit:${BUNDLE} macos/1.2`), { app: BUNDLE, platform: "MAC_OS", version: "1.2" });
   assert.deepEqual(statement(`@appstoreconnect:create_version:${BUNDLE} 2.0 release=after_approval`),
     { app: BUNDLE, platform: "IOS", version: "2.0", release: "AFTER_APPROVAL" });
+  assert.deepEqual(statement(`@appstoreconnect:release:${BUNDLE} 1.2.0 phased`),
+    { app: BUNDLE, platform: "IOS", version: "1.2.0", phased: "yes" });
   assert.deepEqual(statement(`@appstoreconnect:set_metadata:${BUNDLE} 1.2.0 {"locale":"en-US","whatsNew":"Fixes"}`),
     { app: BUNDLE, platform: "IOS", version: "1.2.0", locale: "en-US", fields: '{"whatsNew":"Fixes"}' });
   for (const bad of [`submit:${BUNDLE}`, `submit:${BUNDLE} v1.2`, `submit:${BUNDLE} android/1.2`, `submit:has_underscore 1.2`,
@@ -59,7 +61,8 @@ test("statements are validated before any request", () => {
     `set_metadata:${BUNDLE} 1.2 {"whatsNew":"no locale"}`, `set_metadata:${BUNDLE} 1.2 {"locale":"en-US"}`,
     `set_metadata:${BUNDLE} 1.2 {"locale":"en-US","reviewNotes":"x"}`, `set_metadata:${BUNDLE} 1.2 {"locale":"en-US","keywords":"${"k".repeat(101)}"}`,
     `set_metadata:${BUNDLE} 1.2 {"locale":"en-US","supportUrl":"http://example.com"}`, `set_metadata:${BUNDLE} 1.2 not-json`,
-    `reply_review:bad/id thanks`, `reply_review:abc-123`, `cancel_submission:${BUNDLE} android`]) {
+    `reply_review:bad/id thanks`, `reply_review:abc-123`, `cancel_submission:${BUNDLE} android`,
+    `release:${BUNDLE} 1.2.0 now`, `release:${BUNDLE} 1.2.0 phased extra`, `pause_phased_release:${BUNDLE}`]) {
     assert.equal(typeof statement(`@appstoreconnect:${bad}`), "string", bad);
   }
 });
@@ -216,6 +219,69 @@ test("release publishes only an approved version, and cancel names the submissio
     ACTIONS.cancel_submission.execute({ credentials }, { app: BUNDLE, platform: "IOS" }), /no open review submission/u));
 });
 
+const phasedRelease = (state, day) => ({ type: "appStoreVersionPhasedReleases", id: "phase-1",
+  attributes: { phasedReleaseState: state, ...(day ? { currentDayNumber: day } : {}) } });
+const pending = { ...apps, ...versions(version("v22", "1.2.0", "PENDING_DEVELOPER_RELEASE", "build-7")) };
+const phasedPath = "GET /v1/appStoreVersions/v22/appStoreVersionPhasedRelease";
+
+test("release can start a 7-day rollout, and pause, resume and complete move only a rollout that has started", async () => {
+  const enabled = await run({ ...pending, [phasedPath]: { status: 404, errors: [{ code: "NOT_FOUND", detail: "There is no phased release." }] },
+    "POST /v1/appStoreVersionPhasedReleases": { data: phasedRelease("INACTIVE") },
+    "POST /v1/appStoreVersionReleaseRequests": { data: { type: "appStoreVersionReleaseRequests", id: "rel-1" } } },
+  `@appstoreconnect:release:${BUNDLE} 1.2.0 phased`);
+  assert.deepEqual(writes(enabled.calls), ["POST /v1/appStoreVersionPhasedReleases", "POST /v1/appStoreVersionReleaseRequests"]);
+  assert.deepEqual(enabled.calls.at(-2).body, { type: "appStoreVersionPhasedReleases", attributes: { phasedReleaseState: "INACTIVE" },
+    relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: "v22" } } } });
+  assert.match(enabled.value.summary, /7-day phased release/u);
+
+  /* A rollout already waiting is not created again, and releasing without the word still starts the one that exists. */
+  const waiting = await run({ ...pending, [phasedPath]: { data: phasedRelease("INACTIVE") },
+    "POST /v1/appStoreVersionReleaseRequests": { data: { type: "appStoreVersionReleaseRequests", id: "rel-1" } } },
+  `@appstoreconnect:release:${BUNDLE} 1.2.0`);
+  assert.deepEqual(writes(waiting.calls), ["POST /v1/appStoreVersionReleaseRequests"]);
+  assert.match(waiting.value.summary, /7-day phased release/u);
+  const again = await run({ ...pending, [phasedPath]: { data: phasedRelease("INACTIVE") },
+    "POST /v1/appStoreVersionReleaseRequests": { data: { type: "appStoreVersionReleaseRequests", id: "rel-1" } } },
+  `@appstoreconnect:release:${BUNDLE} 1.2.0 phased`);
+  assert.deepEqual(writes(again.calls), ["POST /v1/appStoreVersionReleaseRequests"]);
+
+  const first = await withApple({ ...pending, [phasedPath]: { status: 404, errors: [{ code: "NOT_FOUND", detail: "none" }] },
+    "POST /v1/appStoreVersionPhasedReleases": { status: 409, errors: [{ code: "ENTITY_ERROR", detail: "Phased release is not available for the first version." }] } },
+  () => assert.rejects(ACTIONS.release.execute({ credentials }, { app: BUNDLE, platform: "IOS", version: "1.2.0", phased: "yes" }), /first version of an app/u));
+  assert.deepEqual(writes(first.calls), ["POST /v1/appStoreVersionPhasedReleases"]);
+
+  const live = { ...apps, ...versions(version("v22", "1.2.0", "READY_FOR_SALE", "build-7")) };
+  const paused = await run({ ...live, [phasedPath]: { data: phasedRelease("ACTIVE", 3) },
+    "PATCH /v1/appStoreVersionPhasedReleases/phase-1": { data: phasedRelease("PAUSED", 3) } },
+  `@appstoreconnect:pause_phased_release:${BUNDLE} 1.2.0`);
+  assert.deepEqual(paused.calls.at(-1).body.attributes, { phasedReleaseState: "PAUSED" });
+  assert.match(paused.value.summary, /Paused the phased release of com\.example\.app 1\.2\.0; it is PAUSED, day 3 of 7\./u);
+  const held = await run({ ...live, [phasedPath]: { data: phasedRelease("PAUSED", 3) } }, `@appstoreconnect:pause_phased_release:${BUNDLE} 1.2.0`);
+  assert.deepEqual(writes(held.calls), []);
+  assert.match(held.value.summary, /already paused, day 3 of 7/u);
+
+  const resumed = await run({ ...live, [phasedPath]: { data: phasedRelease("PAUSED", 3) },
+    "PATCH /v1/appStoreVersionPhasedReleases/phase-1": { data: phasedRelease("ACTIVE", 3) } },
+  `@appstoreconnect:resume_phased_release:${BUNDLE} 1.2.0`);
+  assert.deepEqual(resumed.calls.at(-1).body, { type: "appStoreVersionPhasedReleases", id: "phase-1", attributes: { phasedReleaseState: "ACTIVE" } });
+  const finished = await run({ ...live, [phasedPath]: { data: phasedRelease("ACTIVE", 3) },
+    "PATCH /v1/appStoreVersionPhasedReleases/phase-1": { data: phasedRelease("COMPLETE") } },
+  `@appstoreconnect:complete_phased_release:${BUNDLE} 1.2.0`);
+  assert.match(finished.value.summary, /Published the phased release .* COMPLETE\. This cannot be undone\./u);
+  const done = await run({ ...live, [phasedPath]: { data: phasedRelease("COMPLETE") } }, `@appstoreconnect:complete_phased_release:${BUNDLE} 1.2.0`);
+  assert.deepEqual(writes(done.calls), []);
+
+  for (const [action, routes, body, reason] of [
+    ["pause_phased_release", { ...live, [phasedPath]: { status: 404, errors: [{ code: "NOT_FOUND", detail: "none" }] } }, `@appstoreconnect:pause_phased_release:${BUNDLE} 1.2.0`, /has no phased release/u],
+    ["resume_phased_release", { ...live, [phasedPath]: { data: phasedRelease("INACTIVE") } }, `@appstoreconnect:resume_phased_release:${BUNDLE} 1.2.0`, /has not started/u],
+    ["pause_phased_release", { ...live, [phasedPath]: { data: phasedRelease("COMPLETE") } }, `@appstoreconnect:pause_phased_release:${BUNDLE} 1.2.0`, /is COMPLETE; only an active phased release can be paused/u],
+    ["release", { ...pending, [phasedPath]: { data: phasedRelease("ACTIVE") } }, `@appstoreconnect:release:${BUNDLE} 1.2.0 phased`, /already has a phased release \(ACTIVE\)/u],
+  ]) {
+    const refused = await withApple(routes, () => assert.rejects(ACTIONS[action].execute({ credentials }, statement(body)), reason));
+    assert.deepEqual(writes(refused.calls), []);
+  }
+});
+
 function delivery(payload, { secret = "hook-secret", query = `?app=${BUNDLE}&id=6760000001` } = {}) {
   const rawBody = JSON.stringify(payload);
   return { rawBody, url: new URL(`https://hub.test/ingress${query}`), credentials: { webhookSecret: "hook-secret" },
@@ -283,6 +349,6 @@ test("every declared App Store Connect action has an executor with the declared 
   const catalog = connectorActionCatalog("appstoreconnect", ACTIONS);
   assert.deepEqual([...catalog.keys()].sort(), Object.keys(ACTIONS).sort());
   assert.deepEqual([...catalog.values()].filter((entry) => entry.definition.effect === "read").map((entry) => entry.definition.id).sort(),
-    ["build_uploads", "builds", "crash_log", "feedback", "list_apps", "read_app", "read_certificate", "read_profile", "read_upload", "read_version", "reviews",
-      "screenshot_specs", "screenshots", "signing", "status", "testflight"]);
+    ["build_uploads", "builds", "crash_log", "feedback", "list_apps", "privacy", "read_app", "read_certificate", "read_profile", "read_upload", "read_version", "review_messages", "reviews",
+      "screenshot_specs", "screenshots", "signing", "status", "testflight", "web_session"]);
 });

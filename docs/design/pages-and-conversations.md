@@ -125,12 +125,20 @@ The production x-matrix Space on 2026-09-26:
 - Anyone starts one from anywhere: the conversation list, a page block
   ("Discuss"), a mention, an Automation or Focus.
 - **"Discuss" on any selected passage**, of a page or of a message, starts a
-  new conversation named by the passage. Its composer opens holding the
-  passage as a quote and a link back to where it came from, so the first
-  message carries that context to every Agent in it; a mention inside the
-  quote stays quoted text. One from a page is linked to the passage; one from
-  a message is as open as its source conversation and linked to the same
-  pages.
+  new conversation named by what its first message says, as New conversation
+  is, and by the passage only until something is written. Its first message opens with the
+  passage as a quote and a link back to where it came from, so every Agent in
+  it reads that context; a mention inside the quote stays quoted text, and
+  previews show what was written after it. People see the passage once: one
+  from a page is linked to the passage, which is its anchor (marked in the
+  text, and the head of its margin thread), so neither its composer nor its
+  first message in that thread shows it again, while the conversation opened
+  anywhere else (Conversations, docked beside the page) shows its first
+  message whole, passage and link back included; one from a message is as open as its source
+  conversation and linked to the same pages, and its composer shows the quote
+  until it is sent. Its first sent message uses the same automatic summon and
+  author choice window as New conversation, despite its preset title; the
+  quoted passage and source link remain part of the message Jev reads.
 
 ### 3.3 Link
 
@@ -195,6 +203,11 @@ it belongs in the repository.**
    executions read through the ordinary page authority as the selected
    Machine's owner, so restricted pages and inherited restrictions apply
    before any text is sent to that Machine.
+   Summary startup retries a transient PostgreSQL failure once per preparation
+   or command issue. Preparation rechecks page access; command replay keeps the
+   same request and payload so an uncertain commit cannot start a second task.
+   Concurrent startup callbacks share their pending dispatch. Exhausted retries
+   still report an error; failed harness executions wait for a new page revision.
    Conversation page bookmarks and page-reference hover previews share these
    inline marks. Extracting a status line removes block markers while keeping
    leading emphasis delimiters intact.
@@ -390,32 +403,39 @@ A Space owner or admin publishes a page, and anyone can read it at
 
 A claim is a lease on a page block (a heading slug, or the whole page) that
 says "alice's claude:1 is on this". Presence shows who is looking; a claim
-shows who took the work.
+shows Agents who took the work. It locks nothing (decided 2026-10-19:
+coordination is lock-free; only effects that cannot be undone, such as a
+release or a deploy, run one at a time where they happen).
 
 - **Whoever can edit the page claims.** An Agent's claim is held by its
   Instance and counts against its owner; it points at the conversation doing the
   work.
-- **One holder per block.** A second claim on a held block is refused with who
-  holds it. A Space owner or admin can open a block for competition, and then
-  several claims run at once.
-- **Claims lapse.** Each lasts 5 minutes to a day (two hours by default);
-  claiming again renews it. A lapsed claim frees the block with no cleanup.
+- **Several holders, each told of the others.** A second claim on a held
+  block is taken like the first, and its answer names who else is there. Each
+  conversation on the block gets a notice naming the others, so they can talk,
+  pick other work, or carry on side by side. The competition setting is no
+  longer needed.
+- **Claims live as long as their Run.** When an Agent's Instance ends, its
+  claims in its conversation end with it, so nobody has to release them. Each
+  also lasts 5 minutes to a day (two hours by default) as a backstop; claiming
+  again renews it. A lapsed claim frees the block with no cleanup.
   The holder, the person it counts against, or a Space owner or admin releases
   it early.
-- **Live.** Everyone on the page sees claims appear and go under "Who is on
-  what" as they change. Agents use `xmatrix page claim`, `page claims` and
+- **For Agents, not people.** People neither claim nor see claims; a person
+  sees an Agent through what it writes. Agents use `xmatrix page claim`, `page claims` and
   `page release`.
-- **Pull requests do claimed work.** A pull request names the block it works on
-  with the block's link (Link, next to the block). The GitHub App publishes an
-  `xmatrix/claim` check on it: it passes when the author holds a claim on that
-  block, directly or through one of their Agents. The author is identified by
-  the GitHub account they linked in their profile. Otherwise it fails and says
-  how to claim. Maintainers can make the check required. A pull request that
-  names no block gets no check, so a required check keeps it out. Merging the
-  pull request completes the claim.
-- **Pre-review before a maintainer.** When a claimed pull request opens or
-  gets new commits (drafts excepted), it gets its own review conversation on
-  the block. An Agent of the Space owner's reviews it there. The Hub hands it
+- **Pull requests name the block they work on** with the block's link (Link,
+  next to the block). Naming it gates nothing: there is no `xmatrix/claim`
+  check, and nobody has to hold anything to open one (decided 2026-10-19:
+  coordination is lock-free, see `pages-live-document.md` §3). The author is
+  identified by the GitHub account they linked in their profile. Merging it
+  leaves each block it names owing an update (`pages-live-document.md` §5.2),
+  claimed or not; a claim the author still held there is completed by it.
+- **Pre-review before a maintainer.** When a pull request a member of the
+  Space (owner, admin or member) opens names a block, or gets new commits
+  (drafts excepted), it gets its own review conversation on the block. It
+  spends the Space owner's Agent, so a participant's or a stranger's pull
+  request is left to the maintainers. An Agent of the Space owner's reviews it there. The Hub hands it
   the change, the checks on its head commit and the repository's other open
   pull requests. It checks four things: the change matches the block's scope,
   tests pass, it duplicates no other pull request, and it follows the Space's

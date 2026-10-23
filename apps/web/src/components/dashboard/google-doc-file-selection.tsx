@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useRef, useState } from "react";
 import { Copy, FileText, Loader2 } from "lucide-react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
@@ -61,7 +62,7 @@ export function GoogleDocFileSelection({ spaceId, token }: { spaceId: string; to
   return <div className="space-y-3">
     <p className="text-sm text-muted-foreground">Choose a Google Doc or Sheet using the Google account connected to this Space. This grants xMatrix access to that file.</p>
     <Button size="sm" variant="outline" disabled={!ready || busy} onClick={select}>
-      {busy ? <Loader2 className="animate-spin" /> : <FileText />} {busy ? "Selecting file" : "Choose Google Doc or Sheet"}
+      {busy ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <FileText />} {busy ? "Selecting file" : "Choose Google Doc or Sheet"}
     </Button>
     {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     {file ? <div className="space-y-2 text-sm">

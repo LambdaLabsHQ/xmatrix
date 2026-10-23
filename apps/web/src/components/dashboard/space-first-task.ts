@@ -1,7 +1,6 @@
 /* The screen right after an agent is bound to a Space. Without it the shell
-   falls back to the timeline's "No channels — Mention an agent to create an
-   instance." empty state, which asks for a mention inside a channel the human
-   does not have yet; the action they actually need is a `+` in the sidebar.
+   falls back to the timeline's "No conversations yet" empty state, which can
+   only point at New conversation in the sidebar.
 
    The first channel is therefore not something to explain up front — it is
    created by sending the first task, and the concept lands because the human

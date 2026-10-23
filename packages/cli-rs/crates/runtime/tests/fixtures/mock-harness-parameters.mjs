@@ -10,6 +10,15 @@ const reply = (request, result) => send({ jsonrpc: "2.0", id: request.id, result
 const option = currentValue => ({ id: "future-speed", name: "Speed", type: "select", currentValue,
   options: ["turbo", "steady", "no-snapshot", "unconfirmed", "remove"].map(value => ({ value, name: value === "turbo" ? "Turbo speed" : value, description: "Native choice" })) });
 const acpOptions = value => [option(value), { id:"quiet", name:"Quiet", description:"Reduce chatter", category:"model_config", type:"boolean", currentValue:acpBoolean }, { id:"stringSwitch", name:"Text switch", type:"select", currentValue:"off", options:[{value:"on",name:"On choice"},{value:"off",name:"Off choice"}] }];
+let acpModel = "model-a", acpEffort = "high";
+const modelEffortBackend = backend.startsWith("acp-model-effort");
+const modelEffortOptions = () => [
+  { id: "model", name: "Model", category: "model", type: "select", currentValue: acpModel,
+    options: ["model-a", "model-b", "model-c", "plain"].map(value => ({ value, name: value })) },
+  ...(acpModel === "plain" ? [] : [{ id: acpModel === "model-a" ? "reasoning" : acpModel === "model-b" ? "reasoning_effort" : "thinking",
+    name: "Effort", category: "thought_level", type: "select", currentValue: acpEffort,
+    options: ["low", "high"].map(value => ({ value, name: value })) }]),
+];
 
 readline.createInterface({ input: process.stdin }).on("line", line => {
   const request = JSON.parse(line);
@@ -18,7 +27,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       if (backend === "acp" && !request.params.clientCapabilities?.session?.configOptions?.boolean) throw new Error("Boolean capability was not declared");
       reply(request, {}); break;
     case "thread/start":
-      reply(request, { thread: { id: "parameter-thread", model: "model" }, ...(native ? {serviceTier:settings.serviceTier} : {}) }); break;
+      reply(request, { thread: { id: "parameter-thread", model: "model" }, ...(native || backend === "codex-turn-only" ? {serviceTier:settings.serviceTier} : {}) }); break;
     case "model/list":
       reply(request, { data: [{ id: "model", model: "model", displayName: "Model",
         supportedReasoningEfforts: [], serviceTiers: removed ? [] : [{ id: "future-priority", name: "Fast" }] }] });
@@ -49,6 +58,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       const { threadId, serviceTier, futureSpeed, futureQuiet } = request.params;
       const turnId = "parameter-turn";
       reply(request, { turn: { id: turnId } });
+      if (backend === "codex-turn-only") send({ method: "thread/settings/updated", params: { threadId, threadSettings: { serviceTier } } });
       send({ method: "turn/started", params: { threadId, turn: { id: turnId } } });
       send({ method: "item/completed", params: { threadId, turnId,
         item: { id: "reply", type: "agentMessage", phase: "final_answer", text: JSON.stringify({ serviceTier, futureSpeed, futureQuiet }) } } });
@@ -56,8 +66,16 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       break;
     }
     case "session/new":
-      reply(request, { sessionId: "parameter-session", configOptions: acpOptions("steady") }); break;
+      reply(request, { sessionId: "parameter-session", configOptions: modelEffortBackend ? modelEffortOptions() : acpOptions("steady") }); break;
     case "session/set_config_option": {
+      if (modelEffortBackend) {
+        const { configId, value, sessionId } = request.params;
+        if (sessionId !== "parameter-session" || !modelEffortOptions().some(o => o.id === configId && o.options.some(v => v.value === value))) throw new Error("Unsupported model/effort request");
+        if (configId === "model") { acpModel = value; acpEffort = "high"; }
+        else if (backend !== "acp-model-effort-mismatch") acpEffort = value;
+        reply(request, configId !== "model" && backend === "acp-model-effort-no-snapshot" ? {} : { configOptions: modelEffortOptions() });
+        break;
+      }
       if (backend === "acp" && request.params.configId === "quiet") {
         if (request.params.type !== "boolean" || typeof request.params.value !== "boolean") throw new Error("Native boolean must be typed");
         acpBoolean = request.params.value;

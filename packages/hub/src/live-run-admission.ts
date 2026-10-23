@@ -67,8 +67,7 @@ function recordMetadata(value: unknown): Record<string, unknown> {
 /** Snapshot a `get-run` / productGatewayRun payload. */
 export function snapshotLiveRunFromProductGateway(run: Record<string, unknown>): LiveRunSnapshot {
   const metadata = recordMetadata(run.metadata);
-  // A registered background session has no Channel Instance; its session id acts as one.
-  const instanceId = run.instanceId ?? metadata.runtimeSessionId;
+  const instanceId = run.instanceId;
   return {
     // A Run acts as its Instance.
     agentId: instanceId,
