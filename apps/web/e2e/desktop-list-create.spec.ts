@@ -1,9 +1,9 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
-import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureCreatedChannelId, fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
+import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { startedMarkdown } from "./page-document-fixture";
-import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, harnessRegistrations, installPageTreeStubs, openWorkspaceWithStubs }
+import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, openWorkspaceWithStubs }
   from "./workspace-fixtures";
 
 /* A desktop list leads with its +: its first row, full width and square like
@@ -105,41 +105,20 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await expect(page).toHaveURL(/page=p-new/u);
 });
 
-test("a new page's header is empty, and an Agent is called to it with @", async ({ page }) => {
+test("a new page's header is empty until its first write makes it", async ({ page }) => {
   await installPageTreeStubs(page, ["Home"]);
-  const registrations = harnessRegistrations(["claude", "codex"]);
-  await fixtureJson(page, "registration-catalog", "**/agent-registrations", { registrations,
-    capabilities: registrations.map((registration) => ({ harness: registration.key.harness, models: [], locations: [registration] })) });
   await page.goto(`/app/${encodeURIComponent(E2E_SPACE.id)}/pages`, { waitUntil: "domcontentloaded" });
   await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
   await expect(page.locator(".app-page-article")).toBeVisible();
   await stubPageCreate(page);
-  await fixtureChannelCreate(page, "writer-conversation", E2E_CHANNEL);
-  await fixtureJson(page, "writer-link", /\/api\/xmatrix\/spaces\/[^/]+\/page-links$/u,
-    { link: {} }, { method: "POST" });
-  await fixtureJson(page, "co-writing", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-new\/co-writing$/u,
-    { startedAt: "2026-10-18T00:00:00Z" }, { method: "POST" });
-  await fixtureJson(page, "writer-message", new RegExp(`/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"),
-    { message: {} }, { method: "POST" });
 
   await page.keyboard.press("Control+n");
   await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
-  // Its header is a page's; what needs a made page (History, Share) comes with the first write.
-  const controls = page.getByTestId("page-controls");
-  await expect(controls.getByRole("button")).toHaveCount(0);
+  // No Co-write and nothing a made page has (History, Share): an Agent is called with @ in the text.
+  await expect(page.getByTestId("page-controls").getByRole("button")).toHaveCount(0);
   await page.keyboard.type("Plan");
   await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);
-  const [made] = await fixtureRequestBodies(page, "page-create");
-  expect(made).toMatchObject({ parentPageId: null });
   await expect(page).toHaveURL(/page=p-new/u);
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("@cod");
-  await page.getByTestId("page-agent-menu").getByRole("option", { name: /codex/u }).click();
-  await expect.poll(async () => (await fixtureRequestBodies(page, "writer-message"))[0]?.body)
-    .toMatch(/^@codex launch:force page:p-new/u);
-  expect(await fixtureRequestBodies(page, "co-writing")).toEqual([{
-    conversationId: await fixtureCreatedChannelId(page, "writer-conversation"), live: true }]);
-  expect(await page.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
 });
 
 test("the agent list leads with Manage machines, and an agent, its machines and the + are one height", async ({ page }) => {

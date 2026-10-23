@@ -469,7 +469,13 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
     if (!openId) return;
     const frame = window.requestAnimationFrame(() => {
       const item = openedItem.current;
-      if (item) nodes.current.get(item)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      const node = item ? nodes.current.get(item) : undefined;
+      if (!node) return;
+      // Where it will stand, not where its move there has got to: it slides to its place.
+      const moving = node.style.transition;
+      node.style.transition = "none";
+      node.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      node.style.transition = moving;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [openId]);
