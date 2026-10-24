@@ -110,9 +110,9 @@ export function createMessageMarkdownComponents(
       <NonOperationalMentions>{children}</NonOperationalMentions>
     </blockquote>
   ),
-  ul: ({ children }) => <ul className="mt-4 list-disc space-y-2 pl-5 first:mt-0">{children}</ul>,
+  ul: ({ children }) => <ul className="mt-4 list-disc space-y-1 pl-5 first:mt-0">{children}</ul>,
   ol: ({ children, start }) => (
-    <ol start={start} className="mt-4 list-decimal space-y-2 pl-5 first:mt-0">{children}</ol>
+    <ol start={start} className="mt-4 list-decimal space-y-1 pl-5 first:mt-0">{children}</ol>
   ),
   li: ({ children, node }) => <li>{renderMentionChildren(children, node)}</li>,
   a: ({ href, children }) => {
