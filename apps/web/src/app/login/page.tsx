@@ -964,32 +964,9 @@ function LoginContent() {
             </AuthRequest>
           ) : null}
           <div className="auth-stack">
-            {inAppSignIn && desktopBridge?.signInWithApple ? (
-              <AuthSecondaryButton onClick={() => void handleAppleSignIn()} disabled={loading || socialLoading !== null}>
-                {socialLoading === "apple" ? <Spinner /> : <AppleIcon className="size-[18px]" />}
-                Continue with Apple
-                <LastUsed shown={lastUsed === "apple"} />
-              </AuthSecondaryButton>
-            ) : null}
-            <AuthSecondaryButton onClick={() => signInWithProvider("google")} disabled={loading || socialLoading !== null}>
-              {socialLoading === "google" ? <Spinner /> : <GoogleIcon className="size-[18px]" />}
-              Continue with Google
-              <LastUsed shown={lastUsed === "google"} />
-            </AuthSecondaryButton>
-            <AuthSecondaryButton onClick={() => signInWithProvider("github")} disabled={loading || socialLoading !== null}>
-              {socialLoading === "github" ? <Spinner /> : <Image src="/app-connectors/github.svg" alt="" width={18} height={18} />}
-              Continue with GitHub
-              <LastUsed shown={lastUsed === "github"} />
-            </AuthSecondaryButton>
-            {inAppSignIn && desktopBridge?.client === "desktop" && (socialLoading === "google" || socialLoading === "github") ? (
-              <p role="status" className="auth-hint">
-                Finish signing in in your browser.{" "}
-                <button type="button" className="auth-text-button" onClick={stopWaitingForBrowser}>Cancel</button>
-              </p>
-            ) : null}
-            <AuthDivider />
             <form onSubmit={handleSendEmail} className="auth-stack">
-              <label htmlFor="login-email" className="auth-label">
+              {/* The field's placeholder already says what goes in it. */}
+              <label htmlFor="login-email" className="sr-only">
                 Email address
               </label>
               <Input
@@ -1013,6 +990,38 @@ function LoginContent() {
                 <LastUsed shown={lastUsed === "email"} />
               </AuthPrimaryButton>
             </form>
+            <AuthDivider>or continue with</AuthDivider>
+            {/* Every other way in is one round button, Apple as prominent as the rest. */}
+            <div className="auth-providers">
+              {inAppSignIn && desktopBridge?.signInWithApple ? (
+                <AuthSecondaryButton className="auth-provider" onClick={() => void handleAppleSignIn()}
+                  disabled={loading || socialLoading !== null}>
+                  {socialLoading === "apple" ? <Spinner /> : <AppleIcon className="size-[18px]" />}
+                  <span className="sr-only">Continue with Apple</span>
+                  <LastUsed shown={lastUsed === "apple"} />
+                </AuthSecondaryButton>
+              ) : null}
+              <AuthSecondaryButton className="auth-provider" onClick={() => signInWithProvider("google")}
+                disabled={loading || socialLoading !== null}>
+                {socialLoading === "google" ? <Spinner /> : <GoogleIcon className="size-[18px]" />}
+                <span className="sr-only">Continue with Google</span>
+                <LastUsed shown={lastUsed === "google"} />
+              </AuthSecondaryButton>
+              <AuthSecondaryButton className="auth-provider" onClick={() => signInWithProvider("github")}
+                disabled={loading || socialLoading !== null}>
+                {socialLoading === "github"
+                  ? <Spinner />
+                  : <Image src="/app-connectors/github.svg" alt="" width={18} height={18} />}
+                <span className="sr-only">Continue with GitHub</span>
+                <LastUsed shown={lastUsed === "github"} />
+              </AuthSecondaryButton>
+            </div>
+            {inAppSignIn && desktopBridge?.client === "desktop" && (socialLoading === "google" || socialLoading === "github") ? (
+              <p role="status" className="auth-hint">
+                Finish signing in in your browser.{" "}
+                <button type="button" className="auth-text-button" onClick={stopWaitingForBrowser}>Cancel</button>
+              </p>
+            ) : null}
           </div>
           <AuthLinks>
             {passkeysOffered ? (

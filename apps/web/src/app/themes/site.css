@@ -331,7 +331,8 @@ html:has(.site-page) {
    paper with one column of controls on the other. The main action is the
    homepage's wood "Start Free" plank; everything else is white paper.
    On a phone the art runs edge to edge from the top of the screen, under
-   the status bar, like an app's welcome screen. */
+   the status bar, like an app's welcome screen, and the art stands for the
+   xMatrix mark there. */
 .auth-page {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -340,25 +341,29 @@ html:has(.site-page) {
 
 .auth-art {
   position: relative;
-  height: calc(env(safe-area-inset-top) + 9.5rem);
+  height: calc(env(safe-area-inset-top) + 17rem);
   overflow: hidden;
-  border-radius: 0 0 1.75rem 1.75rem;
   background: #f0ecec;
 }
 
 /* The blocks sit in the right of the art; keep all of them in frame. */
 .auth-art img {
-  object-position: 80% 70%;
+  object-position: right center;
+}
+
+/* Beside the full art a phone shows no separate mark. */
+.auth-page .auth-brand {
+  display: none;
 }
 
 .auth-column {
   display: flex;
   flex-direction: column;
-  gap: 1.75rem;
+  gap: 1.25rem;
   width: 100%;
   max-width: 26rem;
   margin: 0 auto;
-  padding: 1.5rem 1.5rem calc(env(safe-area-inset-bottom) + 0.75rem);
+  padding: 1.5rem 1.5rem calc(env(safe-area-inset-bottom) + 0.5rem);
 }
 
 .auth-body {
@@ -385,6 +390,10 @@ html:has(.site-page) {
     object-position: 88% 50%;
   }
 
+  .auth-page .auth-brand {
+    display: inline-flex;
+  }
+
   .auth-column {
     gap: 2rem;
     padding: 2.5rem 2rem;
@@ -399,6 +408,10 @@ html:has(.site-page) {
   }
 }
 
+.auth-heading {
+  text-align: center;
+}
+
 .auth-heading h1 {
   color: var(--site-ink);
   font-size: 1.75rem;
@@ -407,9 +420,9 @@ html:has(.site-page) {
 }
 
 .auth-heading p {
-  margin-top: 0.75rem;
+  margin-top: 0.4rem;
   color: var(--site-ink-muted);
-  font-size: 15px;
+  font-size: 14.5px;
   line-height: 1.55;
 }
 
@@ -422,14 +435,14 @@ html:has(.site-page) {
 .auth-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .auth-heading + .auth-stack,
 .auth-heading + form.auth-stack,
 .auth-request + .auth-stack,
 .auth-error + .auth-stack {
-  margin-top: 1.75rem;
+  margin-top: 1.25rem;
 }
 
 .auth-stack .auth-stack {
@@ -535,6 +548,40 @@ html:has(.site-page) {
     border-color: oklch(0.46 0.05 60 / 30%);
     background: oklch(0.995 0.004 86);
   }
+}
+
+/* The other ways in: one row of equal round buttons under the email action. */
+.auth-providers {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+}
+
+.auth-button.auth-provider {
+  position: relative;
+  width: 3.5rem;
+  height: 3.5rem;
+  flex: none;
+  padding: 0;
+}
+
+.auth-button.auth-provider::before {
+  content: none;
+}
+
+.auth-provider > :is(svg, img) {
+  width: 22px;
+  height: 22px;
+}
+
+/* Under the round button rather than inside it. */
+.auth-provider > .auth-last-used {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 50%;
+  font-size: 11px;
+  transform: translateX(-50%);
 }
 
 .auth-divider {
@@ -647,7 +694,7 @@ html:has(.site-page) {
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.5rem 1.25rem;
-  margin-top: 1.5rem;
+  margin-top: 1rem;
 }
 
 .auth-links a,
@@ -681,7 +728,8 @@ html:has(.site-page) {
 
 .auth-legal {
   color: var(--site-ink-muted);
-  font-size: 12px;
+  font-size: 11.5px;
+  text-align: center;
   line-height: 1.6;
 }
 
