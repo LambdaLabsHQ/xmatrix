@@ -70,7 +70,7 @@ test("a phone stacks messages without reserved rows and wraps every header tag w
   await expect(buttons.getByText("Copy", { exact: true })).toBeVisible();
   const layout = await first.evaluate((row) => {
     const body = row.querySelector(".rich-message")!.getBoundingClientRect();
-    const toolbar = row.querySelector("[role=toolbar]")!.getBoundingClientRect();
+    const toolbar = row.querySelector("[data-mobile-inline-actions='true']")!.getBoundingClientRect();
     const tops = Array.from(row.querySelectorAll(".app-mobile-inline-action"))
       .map((button) => Math.round(button.getBoundingClientRect().top));
     return { below: toolbar.top >= body.bottom - 0.5, oneRow: new Set(tops).size === 1, count: tops.length };
