@@ -98,3 +98,41 @@ test("two successive unknown Instance reports both obtain authoritative cards", 
   }
   await expect(page.locator(".app-agent-work-avatar img")).toHaveCount(2);
 });
+
+/* An Instance joining a Channel is reported twice, together: the Hub sends the
+   Agent's card and then the Channel that now holds it. The card used to be
+   placed first, into a Channel without the Instance, which counted as a
+   conflict and read the Channel again on every join. A catalog read that
+   races the join can still lack the Instance, and the work dock went and came
+   back: the whole timeline moved by its height and back. */
+test("an Instance that joins with its card and its Channel together is placed without reading the Channel again", async ({ page }) => {
+  const { fixtureChannelCatalog } = await import("./workspace-fixtures");
+  const initial = { ...E2E_CHANNEL, memberPresence: {} };
+  const warnings: string[] = [];
+  page.on("console", (message) => { if (message.text().includes("[presence]")) warnings.push(message.text()); });
+  let send: ((frame: unknown) => void) | undefined;
+  await routeHumanSocket(page, (frame, reply) => {
+    if (frame.type === "human_connect") send = reply;
+    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
+    if (frame.type === "user_focus_channel") reply({ type: "channel_history",
+      requestId: frame.requestId, channelId: initial.id, messages: [], hasMore: false });
+  });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [initial] });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => Boolean(send)).toBe(true);
+  // A read now would be the one that races the join: it still has no Instance.
+  await fixtureChannelCatalog(page, "join-reread", [initial]);
+  const instance = { id: "joining-1", channelId: initial.id, channelInstanceId: "1",
+    label: "Claude:1", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "busy", activity: "Reading" };
+  send!({ type: "enhanced_presence", agent: { id: instance.id, instanceId: instance.id, name: "Claude",
+    userId: "owner", type: "claude", lifetime: "short", email: "", metadata: {},
+    status: "busy", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, instances: [instance] } });
+  send!({ type: "channel_updated", channel: { ...initial, memberPresence: { [instance.id]: { kind: "agent",
+    label: "Claude", instances: [instance], registration: { ownerUserId: "owner", machineId: "machine", harness: "claude" } } } } });
+  await expect(page.locator(".app-agent-work-avatar")).toHaveCount(1);
+  // Past the batch and a catalog read's round trip: the dock stays and nothing was read again.
+  await page.waitForTimeout(600);
+  await expect(page.locator(".app-agent-work-avatar")).toHaveCount(1);
+  expect(await fixtureRequests(page, "join-reread")).toEqual([]);
+  expect(warnings).toEqual([]);
+});
