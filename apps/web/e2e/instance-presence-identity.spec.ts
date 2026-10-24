@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import {
   E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, E2E_USER_SENDER,
@@ -63,19 +64,25 @@ for (const { memberId, retainedAlias } of [
   });
 }
 
-test("two successive unknown Instance reports both obtain authoritative cards", async ({ page }) => {
-  const { fixtureChannelCatalog } = await import("./workspace-fixtures");
+/** #general holding no Instance yet, open, and the Human socket's send once it is connected. */
+async function openChannelWithoutInstances(page: Page) {
   const initial = { ...E2E_CHANNEL, memberPresence: {} };
-  let send: ((frame: unknown) => void) | undefined;
-  await routeHumanSocket(page, (frame, reply) => {
-    if (frame.type === "human_connect") send = reply;
-    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
-    if (frame.type === "user_focus_channel") reply({ type: "channel_history",
+  let reply: ((frame: unknown) => void) | undefined;
+  await routeHumanSocket(page, (frame, answer) => {
+    if (frame.type === "human_connect") reply = answer;
+    if (frame.type === "ping") answer({ type: "pong", requestId: frame.requestId });
+    if (frame.type === "user_focus_channel") answer({ type: "channel_history",
       requestId: frame.requestId, channelId: initial.id, messages: [], hasMore: false });
   });
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [initial] });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  await expect.poll(() => Boolean(send)).toBe(true);
+  await expect.poll(() => Boolean(reply)).toBe(true);
+  return { initial, send: (frame: unknown) => reply!(frame) };
+}
+
+test("two successive unknown Instance reports both obtain authoritative cards", async ({ page }) => {
+  const { fixtureChannelCatalog } = await import("./workspace-fixtures");
+  const { initial, send } = await openChannelWithoutInstances(page);
   const members: Record<string, unknown> = {};
   for (const slot of [1, 2]) {
     const instance = { id: `rapid-${slot}`, channelId: initial.id, channelInstanceId: String(slot),
@@ -86,14 +93,14 @@ test("two successive unknown Instance reports both obtain authoritative cards", 
     if (slot === 1) {
       // The first catalog read races ahead of the new Instance's commit.
       await fixtureChannelCatalog(page, "rapid-before-commit", [initial]);
-      send!(report);
+      send(report);
       await expect.poll(async () => (await fixtureRequests(page, "rapid-before-commit")).length).toBeGreaterThan(0);
       await page.clock.setFixedTime(Date.now() + 1_001);
     }
     members[instance.id] = { kind: "agent", label: "Claude", instances: [instance],
       registration: { ownerUserId: "owner", machineId: "machine", harness: "claude" } };
     await fixtureChannelCatalog(page, `rapid-authority-${slot}`, [{ ...initial, memberPresence: { ...members } }]);
-    send!(report);
+    send(report);
     await expect(page.locator(".app-agent-work-avatar")).toHaveCount(slot);
   }
   await expect(page.locator(".app-agent-work-avatar img")).toHaveCount(2);
@@ -107,27 +114,17 @@ test("two successive unknown Instance reports both obtain authoritative cards", 
    back: the whole timeline moved by its height and back. */
 test("an Instance that joins with its card and its Channel together is placed without reading the Channel again", async ({ page }) => {
   const { fixtureChannelCatalog } = await import("./workspace-fixtures");
-  const initial = { ...E2E_CHANNEL, memberPresence: {} };
   const warnings: string[] = [];
   page.on("console", (message) => { if (message.text().includes("[presence]")) warnings.push(message.text()); });
-  let send: ((frame: unknown) => void) | undefined;
-  await routeHumanSocket(page, (frame, reply) => {
-    if (frame.type === "human_connect") send = reply;
-    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
-    if (frame.type === "user_focus_channel") reply({ type: "channel_history",
-      requestId: frame.requestId, channelId: initial.id, messages: [], hasMore: false });
-  });
-  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [initial] });
-  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  await expect.poll(() => Boolean(send)).toBe(true);
+  const { initial, send } = await openChannelWithoutInstances(page);
   // A read now would be the one that races the join: it still has no Instance.
   await fixtureChannelCatalog(page, "join-reread", [initial]);
   const instance = { id: "joining-1", channelId: initial.id, channelInstanceId: "1",
     label: "Claude:1", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "busy", activity: "Reading" };
-  send!({ type: "enhanced_presence", agent: { id: instance.id, instanceId: instance.id, name: "Claude",
+  send({ type: "enhanced_presence", agent: { id: instance.id, instanceId: instance.id, name: "Claude",
     userId: "owner", type: "claude", lifetime: "short", email: "", metadata: {},
     status: "busy", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, instances: [instance] } });
-  send!({ type: "channel_updated", channel: { ...initial, memberPresence: { [instance.id]: { kind: "agent",
+  send({ type: "channel_updated", channel: { ...initial, memberPresence: { [instance.id]: { kind: "agent",
     label: "Claude", instances: [instance], registration: { ownerUserId: "owner", machineId: "machine", harness: "claude" } } } } });
   await expect(page.locator(".app-agent-work-avatar")).toHaveCount(1);
   // Past the batch and a catalog read's round trip: the dock stays and nothing was read again.
