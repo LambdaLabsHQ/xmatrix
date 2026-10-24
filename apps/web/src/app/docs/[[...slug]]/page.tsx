@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { GuideDocument } from "@/components/docs/guide-document";
 import { guidePages } from "@/lib/docs/guide";
+import { shareImage } from "@/lib/site-url";
 
 /**
  * The user guide, one address per file of docs/guide: /docs, /docs/syntax, …
@@ -25,8 +26,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     description: page.description,
     alternates: { canonical: page.href },
     openGraph: { title: page.searchTitle, description: page.description, url: page.href, siteName: "xMatrix",
-      type: "article", images: ["/android-chrome-512x512.png"] },
-    twitter: { card: "summary", title: page.searchTitle, description: page.description },
+      type: "article", images: [shareImage] },
+    twitter: { card: "summary_large_image", title: page.searchTitle, description: page.description, images: [shareImage] },
   };
 }
 

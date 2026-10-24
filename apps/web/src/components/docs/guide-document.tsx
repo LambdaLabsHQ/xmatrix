@@ -7,7 +7,7 @@ import { Footer } from "@/components/landing/footer";
 import { Navbar } from "@/components/shared/navbar";
 import { guideLinkHref, guidePages, type GuidePage } from "@/lib/docs/guide";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
-import { siteUrl } from "@/lib/site-url";
+import { shareImage, siteUrl } from "@/lib/site-url";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 function plainText(node: ReactNode): string {
@@ -48,7 +48,7 @@ function guideStructuredData(page: GuidePage): string {
   return JSON.stringify({ "@context": "https://schema.org", "@graph": [
     { "@type": "TechArticle", headline: page.title, description: page.description, url: url(page.href),
       mainEntityOfPage: url(page.href), inLanguage: "en", author: publisher, publisher,
-      image: url("/android-chrome-512x512.png") },
+      image: url(shareImage.url) },
     { "@type": "BreadcrumbList", itemListElement: [
       { "@type": "ListItem", position: 1, name: "xMatrix", item: url("/") },
       { "@type": "ListItem", position: 2, name: "Docs", item: url("/docs") },

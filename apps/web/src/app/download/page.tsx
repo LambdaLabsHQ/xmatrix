@@ -4,8 +4,8 @@ import { Footer } from "@/components/landing/footer";
 import { Navbar } from "@/components/shared/navbar";
 
 export const metadata: Metadata = {
-  title: "Download xMatrix",
-  description: "Download xMatrix for macOS, Windows, and Android.",
+  title: "Download xMatrix for macOS, Windows and Android",
+  description: "Download the xMatrix desktop app for macOS (Apple Silicon and Intel) and Windows, or the Android APK, to follow and answer your AI coding agents from anywhere.",
   alternates: { canonical: "/download" },
 };
 

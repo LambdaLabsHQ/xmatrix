@@ -4,7 +4,7 @@ import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 // X verifies the organization by this link back to its account.
-const X_ACCOUNT_URL = "https://x.com/xMatrix_hq";
+export const X_ACCOUNT_URL = "https://x.com/xMatrix_hq";
 
 const links = {
   Product: [

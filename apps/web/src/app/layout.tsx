@@ -8,7 +8,7 @@ import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
 import { OverlayScrollbars } from "@/components/ui/overlay-scrollbars";
 import { OVERLAY_SCROLLBARS_MODE_SCRIPT } from "@/components/ui/overlay-scrollbars-mode";
-import { siteUrl } from "@/lib/site-url";
+import { shareImage, siteUrl } from "@/lib/site-url";
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
     url: "https://xmatrix.sh",
     siteName: "xMatrix",
     type: "website",
-    images: ["/android-chrome-512x512.png"],
+    images: [shareImage],
   },
 };
 
