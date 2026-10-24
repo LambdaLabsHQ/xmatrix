@@ -3,8 +3,10 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { preload } from "react-dom";
 import { WoodPanel } from "@/components/ui/material-surfaces";
+import { landingCopy, type Locale } from "@/lib/landing-copy";
 
-export function Hero() {
+export function Hero({ locale = "en" }: { locale?: Locale }) {
+  const copy = landingCopy[locale].hero;
   // The display face must be in before the first scroll: a late swap reflows
   // the page mid smooth-scroll and leaves it a few pixels off the top.
   preload("/fonts/manrope-latin-wght-normal.a30ddcd349.woff2", { as: "font", type: "font/woff2", crossOrigin: "anonymous" });
@@ -13,7 +15,7 @@ export function Hero() {
       <div className="pointer-events-none relative mx-auto mb-8 aspect-square w-[calc(100%+3rem)] -translate-x-6 overflow-hidden md:absolute md:inset-0 md:mb-0 md:aspect-auto md:w-auto md:translate-x-0">
         <Image
           src="/brand/xmatrix-hero-wood-liquid-glass-ai-logos-compact.png"
-          alt="A modular array of warm wood and liquid-glass blocks engraved with AI marks"
+          alt={copy.art}
           fill
           sizes="100vw"
           priority
@@ -26,7 +28,7 @@ export function Hero() {
           <h1 className="site-display max-w-full text-5xl font-semibold leading-[0.96] text-[#171714] sm:text-6xl lg:text-7xl">
             xMatrix
             <span className="mt-3 block text-3xl leading-[1.02] text-[#6d6c67] sm:text-4xl lg:text-5xl">
-              Attention is all you need.
+              {copy.slogan}
             </span>
           </h1>
 
@@ -36,7 +38,7 @@ export function Hero() {
               href="/login"
               className="site-wood-pill inline-flex h-12 w-full items-center justify-center px-7 text-sm sm:w-auto"
             >
-              Start Free
+              {copy.startFree}
               <ArrowRight className="ml-2 size-5" />
             </WoodPanel>
           </div>
