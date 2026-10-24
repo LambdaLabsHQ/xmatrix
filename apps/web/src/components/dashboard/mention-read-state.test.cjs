@@ -415,7 +415,7 @@ test("a draft mention carries the face its sent chip leads with; @auto has no on
   const faces = composerMentionSpans(text, INDEX).map(({ start, end, face }) => [text.slice(start, end), face?.kind, face?.harness ?? face?.id]);
   assert.deepEqual(faces, [
     ["@legend", "user", "u-legend"],
-    ["@codex 看", "agent", "codex"],
+    ["@codex", "agent", "codex"],
     ["@auto", undefined, undefined],
   ]);
 });
