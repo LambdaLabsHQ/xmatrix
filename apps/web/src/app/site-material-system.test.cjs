@@ -74,7 +74,7 @@ test("navbar is one glass bar with no wood slab, and woods the mobile sheet", ()
   assert.doesNotMatch(navbarSource, /<WoodPanel/);
   assert.doesNotMatch(siteCss, /site-navbar-inner|navbar-wood-reveal/);
   assert.match(navbarSource, /<span aria-hidden className="site-navbar-glass">\s*<LiquidGlassPill className="size-full">/);
-  assert.match(navbarSource, /href="\/login"\s*onSlab/, "Start Free sits on the bar glass without a nested backdrop");
+  assert.match(navbarSource, /<Link\s+href="\/login"\s+className="site-navbar-cta[\s\S]*?\{copy\.startFree\}\s*<ArrowRight/, "Start Free is text with an arrow on the bar glass, not a second pill");
   assert.match(navbarSource, /site-nav-sheet app-material-wood-panel/);
 });
 
