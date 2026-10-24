@@ -410,6 +410,16 @@ test("a summon paints its whole written expression, flagging force and malformed
   assert.equal(spans[1].invalid, true);
 });
 
+test("a draft mention carries the face its sent chip leads with; @auto has no one yet", () => {
+  const text = "@legend @codex 看 @auto";
+  const faces = composerMentionSpans(text, INDEX).map(({ start, end, face }) => [text.slice(start, end), face?.kind, face?.harness ?? face?.id]);
+  assert.deepEqual(faces, [
+    ["@legend", "user", "u-legend"],
+    ["@codex", "agent", "codex"],
+    ["@auto", undefined, undefined],
+  ]);
+});
+
 test("an index is the same only while every written name resolves to the same member drawn the same way", () => {
   const rebuilt = (change = (candidate) => candidate) => buildMentionReadIndex(CANDIDATES.map((candidate) => change({ ...candidate })));
   // A Channel replaced by a message or a presence report: same members, new objects.
