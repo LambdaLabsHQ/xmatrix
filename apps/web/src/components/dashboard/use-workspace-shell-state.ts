@@ -97,7 +97,7 @@ import { invalidateWorkspaceResources, refetchUnlessHumanPush, setHumanPushConne
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -210,6 +210,10 @@ import { readCountsFromHub } from "./channel-read-sync";
 import { useChannelReadSync } from "./use-channel-read-sync";
 import { createRealtimeFrameBatcher, humanFrameBatchKey } from "./realtime-frame-batcher";
 import { patchChannelsRegistrationQuota } from "./registration-quota-patch";
+
+/* How long a report of an Instance its Channel does not hold yet waits for
+   the Channel the Hub sends right behind it before the Channel is read again. */
+const UNPLACED_PRESENCE_GRACE_MS = 250;
 
 export function useWorkspaceShellState({ children }: { children?: React.ReactNode }) {
 
@@ -1528,6 +1532,20 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       }));
     });
 
+    /* A busy page can take the Channel that places a joining Instance in the
+       next flush window rather than its card's: it is read again only if that
+       Channel has not come by then. */
+    const repairUnplacedPresence = (error: unknown) => {
+      if (!(error instanceof ChannelPresenceConflict) || !error.instanceId) {
+        repairPresenceConflict(error);
+        return;
+      }
+      const { channelId, instanceId } = error;
+      window.setTimeout(() => {
+        if (!realtimeChannels.get(channelId)?.presence?.instances.has(presenceInstanceId(instanceId))) repairPresenceConflict(error);
+      }, UNPLACED_PRESENCE_GRACE_MS);
+    };
+
     // Presence and activity from many working Agents land as one commit per
     // flush window instead of one per frame (realtime-frame-batcher.ts).
     let routedBatch: ReturnType<typeof createChannelPresenceBatch> | undefined;
@@ -1545,12 +1563,31 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           const current = realtimeChannels.getSnapshot();
           return channelBatch = createChannelPresenceBatch(current, previous?.takeRouting(current));
         };
+        /* Reports of an Instance its Channel does not hold yet. An Instance
+           that joins is reported by its card just ahead of the Channel that
+           now holds it, so a report waits for the rest of its batch; only one
+           that still has no place after it makes the Channel be read again. */
+        let unplaced: SerializedAgent[] = [];
         const flushPresence = () => {
           const incoming = presence;
           presence = [];
           for (const agent of incoming) {
             try { channels().applyPresence([agent]); }
-            catch (error) { repairPresenceConflict(error); }
+            catch (error) {
+              if (error instanceof ChannelPresenceConflict) unplaced.push(agent);
+              else repairPresenceConflict(error);
+            }
+          }
+        };
+        const placeUnplaced = (last: boolean) => {
+          const waiting = unplaced;
+          unplaced = [];
+          for (const agent of waiting) {
+            try { channels().applyPresence([agent]); }
+            catch (error) {
+              if (last) repairUnplacedPresence(error);
+              else unplaced.push(agent);
+            }
           }
         };
         const flushState = (kind: "live" | "catalog" = "live") => {
@@ -1589,6 +1626,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               // Roster/access/catalog transitions publish before their side
               // effects. Ordinary state pairs share one collection publication.
               // An unloaded snapshot hydrates its live key, never the catalog.
+              placeUnplaced(false);
               if (previous && !presenceOnly) flushState("catalog");
               if (previous && (previous.spaceId !== updated.spaceId || previous.name !== updated.name ||
                   previous.mode !== updated.mode || previous.metadata?.kind !== updated.metadata?.kind)) {
@@ -1608,6 +1646,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             // One bad frame must not drop the rest of its batch.
           }
         }
+        flushPresence();
+        placeUnplaced(true);
         flushState();
         if (events.length) setEvents(current => mergeObservabilityEvents(current, events, TRACE_EVENT_LIMIT));
       },
