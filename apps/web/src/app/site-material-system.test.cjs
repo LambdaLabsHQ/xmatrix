@@ -87,7 +87,9 @@ test("navbar glass spans the logo and every link on a centered sticky bar", () =
   assert.match(navbarSource, /--navbar-glass-reveal/);
   assert.match(navbarSource, /className="site-navbar fixed top-0/);
   assert.match(siteCss, /\.site-navbar-layout \{[\s\S]*?justify-content:\s*center/);
-  assert.match(siteCss, /\.site-navbar-glass \{[\s\S]*?inset:\s*0;[\s\S]*?opacity:\s*var\(--navbar-glass-reveal\)/);
+  assert.match(siteCss, /\.site-navbar-glass \{[^}]*inset:\s*0;/);
+  assert.doesNotMatch(siteCss, /\.site-navbar-glass \{[^}]*opacity/, "a translucent wrapper cuts the glass off its backdrop and paints it grey");
+  assert.match(siteCss, /\.site-navbar-glass > \.app-liquid-glass-surface \{\s*opacity:\s*var\(--navbar-glass-reveal\)/);
   assert.match(siteCss, /\.site-navbar \{[\s\S]*background:\s*transparent/);
   assert.doesNotMatch(siteCss, /\.site-navbar::before/);
   assert.doesNotMatch(navbarSource, /xmatrix-icon\.png/);
