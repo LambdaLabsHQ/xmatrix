@@ -163,6 +163,7 @@ import {
   isLlmTraceEvent,
   isMobileChannelDetailsHistoryState,
   isMobileChannelDetailsLocation,
+  MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY,
   isOwnChannelMessage,
   isThreadChannel,
   isTimelineNearBottom,
@@ -402,6 +403,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const desktopCliSessionSyncTokenRef = useRef("");
 
   const desktopSetupAutoOpenRef = useRef(false);
+
+  const channelLandingSettledRef = useRef(false);
 
   const previousRouteSelectionRef = useRef<{
     routeChannelId: string | null;
@@ -2794,7 +2797,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   useEffect(() => {
     if (workingSpaceRedirectedRef.current) return;
     if (spaces.length === 0) return;
-    if (routeSpaceId) {
+    // `/app?channel=<id>`, what a tapped notification opens, names its
+    // conversation without a space; that conversation decides the space.
+    if (routeSpaceId || routeInfo.legacyChannelId) {
       workingSpaceRedirectedRef.current = true;
       return;
     }
@@ -2810,7 +2815,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     const nextPath = `${spaceAppPath(target, spaces)}/channels`;
     replaceBrowserPath(nextPath);
     setBrowserPath(nextPath);
-  }, [routeSpaceId, spaces, workingSpaceId, workingSpaceLoaded]);
+  }, [routeInfo.legacyChannelId, routeSpaceId, spaces, workingSpaceId, workingSpaceLoaded]);
 
   /* Persist the working workspace whenever the user settles in a space
      (explicit switch or channel deep-link), write-through to local + cloud. */
@@ -2832,6 +2837,25 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       resolveSpaceRouteKey(spaces, locationRoute.spaceKey));
     if (locationRoute.view !== "messages" || locationChannel?.id !== selectedChannel.id) return;
     const canonicalPath = channelAppPath(selectedChannel, spaces);
+    const landing = !channelLandingSettledRef.current;
+    channelLandingSettledRef.current = true;
+    const historyState: unknown = window.history.state;
+    const openedInApp = Boolean(
+      historyState && typeof historyState === "object" && MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY in historyState
+    );
+    // On a phone a Channel entered from outside the app (a notification, a link,
+    // a cold start) sits on its list, as one opened from the list does: Back,
+    // the edge swipe and Android's Back return there, not to the page before.
+    if (landing && isMobileViewportRef.current && !openedInApp) {
+      const listPath = `${spaceAppPath(selectedChannel.spaceId, spaces)}/channels`;
+      const { hash } = window.location;
+      // Both entries keep Next.js's router state, so the router does not move
+      // to the list underneath the open Channel; Back restores it from there.
+      window.history.replaceState({ ...window.history.state }, "", listPath);
+      pushBrowserPath(`${canonicalPath}${hash}`, { [MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY]: listPath });
+      setBrowserPath(canonicalPath);
+      return;
+    }
     if (currentBrowserLocation() !== canonicalPath) {
       replaceBrowserPath(canonicalPath);
       setBrowserPath(canonicalPath);
