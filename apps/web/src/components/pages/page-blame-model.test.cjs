@@ -6,7 +6,7 @@ const { carryPageDocKnown, markdownToPageDoc, pageBlameFirst, pageBlameStep } = 
 const { blameDoc, blameOf, pageWriters } = require("./page-blame-model.ts");
 
 const daniel = { kind: "user", id: "u1", label: "Daniel" };
-const claude = { kind: "agent", id: "c:1", label: "claude" };
+const claude = { kind: "agent", id: "c:1", label: "claude", ownerUserId: "u1" };
 const revision = (number, author, createdAt, conversationIds = []) =>
   ({ revision: number, kind: "edit", authors: [author], conversationIds, basedOnRevision: null, createdAt });
 
@@ -75,4 +75,31 @@ test("someone whose words were all taken out is no longer an author", () => {
   const now = markdownToPageDoc(one);
   const writers = pageWriters(base, carryPageDocKnown(base.doc, base.known, now), now);
   assert.deepEqual(writers.map((writer) => writer.author.label), ["Daniel"]);
+});
+
+test("an Agent's Runs are one author, in the byline and beside a paragraph", () => {
+  const three = two.replace("keep sessions 30 days", "keep sessions 30 days; sign out everywhere");
+  const base = blameDoc({
+    ...blame, revision: 3, body: three,
+    runs: pageBlameStep(two, blame.runs, three, 3),
+    revisions: [...blame.revisions, revision(3, { ...claude, id: "c:2" }, "2026-10-22T08:00:00.000Z")],
+  });
+  const now = markdownToPageDoc(three);
+  const carried = carryPageDocKnown(base.doc, base.known, now);
+  assert.deepEqual(pageWriters(base, carried, now).map((writer) => writer.author.label), ["Daniel", "claude"]);
+  const { from } = rangeOf(now, "No setup");
+  const { to } = rangeOf(now, "everywhere");
+  assert.deepEqual(blameOf(base, carried, now, from, to).writers.map((writer) => [writer.author.label, writer.revision]),
+    [["claude", 3], ["Daniel", 1]]);
+});
+
+test("another person's Agent of the same name is an author of its own", () => {
+  const three = two.replace("keep sessions 30 days", "keep sessions 30 days; sign out everywhere");
+  const base = blameDoc({
+    ...blame, revision: 3, body: three,
+    runs: pageBlameStep(two, blame.runs, three, 3),
+    revisions: [...blame.revisions, revision(3, { ...claude, id: "c:2", ownerUserId: "u2" }, "2026-10-22T08:00:00.000Z")],
+  });
+  const now = markdownToPageDoc(three);
+  assert.equal(pageWriters(base, carryPageDocKnown(base.doc, base.known, now), now).length, 3);
 });

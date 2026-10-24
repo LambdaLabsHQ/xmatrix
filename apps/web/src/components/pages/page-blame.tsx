@@ -8,7 +8,7 @@ import { Face } from "@/components/dashboard/face";
 import type { Node as DocNode } from "prosemirror-model";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { MARGIN_ITEM } from "./page-margin";
-import { blameDoc, blameOf, pageWriters, type BlameDoc, type BlameSummary, type BlameWriter } from "./page-blame-model";
+import { blameDoc, blameOf, pageAuthorKey, pageWriters, type BlameDoc, type BlameSummary, type BlameWriter } from "./page-blame-model";
 
 /** Where a page reads who wrote it. */
 export interface PageBlameSource {
@@ -261,7 +261,7 @@ export function PageByline({ view, doc, frame, source, writing }: {
   // including while another editor moves or removes the words under the pointer.
   useEffect(() => {
     if (typeof CSS === "undefined" || !("highlights" in CSS) || typeof Highlight === "undefined") return;
-    const writer = writers.find(({ author }) => author.kind === pointedAt?.kind && author.id === pointedAt.id);
+    const writer = pointedAt && writers.find(({ author }) => pageAuthorKey(author) === pageAuthorKey(pointedAt));
     if (!writer) return;
     const ranges = writer.ranges.map((range) => domRange(view, range.from, range.to)).filter((range) => range !== null);
     // Register alongside the browser-only highlight: the development CSS parser cannot parse ::highlight.
@@ -277,7 +277,7 @@ export function PageByline({ view, doc, frame, source, writing }: {
     <div className="page-byline absolute left-0 flex max-w-full items-center overflow-hidden" style={{ top }}
       data-testid="page-byline" aria-label="Written by">
       {writers.map((writer, index) => (
-        <span key={`${writer.author.kind}:${writer.author.id}`} className="flex shrink-0 items-center"
+        <span key={pageAuthorKey(writer.author)} className="flex shrink-0 items-center"
           onMouseEnter={() => setPointedAt(writer.author)} onMouseLeave={() => setPointedAt(null)}>
           {index > 0 && <span aria-hidden="true" className="page-byline-rule" />}
           <Face of={faceOfPageAuthor(writer.author)} size="xs" shape="circle" glass={false}
