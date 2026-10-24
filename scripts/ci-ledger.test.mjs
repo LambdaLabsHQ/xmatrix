@@ -248,7 +248,7 @@ test("the Hub suite is recorded only from a run that passed all of it", () => {
 });
 
 test("pull request jobs never vouch for the full tier a release reuses", () => {
-  const fast = ["node-static", "web-unit", "web-build", "web-check", "hub-check", "rust-clippy"];
+  const fast = ["node-tests", "node-tests (duplicates)", "web-unit", "web-build", "web-check", "hub-check", "rust-clippy"];
   assert.deepEqual(passedLedgerJobs(fast.map((name) => ({ name, conclusion: "success" }))), []);
 });
 

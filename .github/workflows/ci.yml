@@ -122,13 +122,17 @@ jobs:
         run: node scripts/version.mjs check-release-order --merged-tags-only
 
       # CI has two tiers, chosen here and nowhere else. A pull request runs
-      # the fast tier, each job within about two minutes: the static Node
-      # checks (node-static), the Web unit tests (web-unit), production build
-      # (web-build) and its lint and typecheck (web-check), the Hub
-      # typecheck and deploy bundle (hub-check) and Linux Clippy
-      # (rust-clippy). A release train runs the full tier for what it ships:
-      # the package and script tests and the duplicate scan, and the Hub
-      # suite with its PostgreSQL tests when it ships the Hub. The Web suites
+      # the fast tier, each job within about two minutes: the Node checks
+      # with the package, PostgreSQL package and script tests (node-tests)
+      # and the duplicate scan beside them (node-tests (duplicates)), the
+      # Web unit tests (web-unit), production build (web-build) and its lint
+      # and typecheck (web-check), the Hub typecheck and deploy bundle
+      # (hub-check) and Linux Clippy (rust-clippy). The Node tests and the
+      # duplicate scan gate every release train, so a pull request runs them
+      # too: one that fails them after merge fails the train for every change
+      # riding it. A release train runs the full tier for what it ships: the
+      # Node checks and duplicate scan again on the merged revision, and the
+      # Hub suite with its PostgreSQL tests when it ships the Hub. The Web suites
       # (checked build, browser shards, performance budget) and the client
       # suites (Rust tests on Linux and Windows, Desktop, Android) gate the
       # stable train that ships them, not each beta (scripts/ci-areas.mjs,
@@ -173,9 +177,9 @@ jobs:
           areas="$(node scripts/ci-areas.mjs < "$immediate_diff")"
           cli="$(printf '%s\n' "$areas" | sed -n 's/^cli=//p')"
           areas="$(printf '%s\ncli_windows=%s\n' "$areas" "$cli")"
-          # The fast tier has no Desktop, Android, Windows or duplicate job.
+          # The fast tier has no Desktop, Android or Windows job.
           if [ "$TIER" = fast ]; then
-            areas="$(printf '%s\n' "$areas" | sed -E 's/^(desktop|android|cli_windows|duplicates)=.*/\1=false/')"
+            areas="$(printf '%s\n' "$areas" | sed -E 's/^(desktop|android|cli_windows)=.*/\1=false/')"
           fi
           printf '%s\n' "$areas" | tee -a "$GITHUB_OUTPUT"
 
@@ -222,18 +226,19 @@ jobs:
     # This common gate runs for every change; the aggregate still fails on an
     # unselected failure. It waits only for the tier. Shared checks use the
     # existing Linux CI pool by default; release callers retain their explicit
-    # offload_runner override. A pull request runs the static checks
-    # (node-static). In the full tier hosted runners give the repository-wide
-    # duplicate scan a job of its own beside the Node checks: on one 4-CPU VM
-    # it could only follow them, as the job's longest stage. A persistent
-    # runner runs both as one job. The ledger records node-checks only when
-    # every entry passed.
+    # offload_runner override. Both tiers run the Node checks and give the
+    # repository-wide duplicate scan a job of its own beside them: on one
+    # 4-CPU VM it could only follow them, as the job's longest stage. A
+    # persistent full-tier runner runs both as one job. A pull request names
+    # them node-tests, which the ledger never records, so only the full tier
+    # vouches for the content a release reuses; it records node-checks only
+    # when every entry passed.
     needs: changes
     name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"node-static","partitions":"node-static"}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"node-checks","partitions":"node-checks"},{"name":"node-checks (duplicates)","partitions":"duplicates"}]' || '[{"name":"node-checks","partitions":"node-checks duplicates"}]') }}
+        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"node-tests","partitions":"node-checks"},{"name":"node-tests (duplicates)","partitions":"duplicates"}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"node-checks","partitions":"node-checks"},{"name":"node-checks (duplicates)","partitions":"duplicates"}]' || '[{"name":"node-checks","partitions":"node-checks duplicates"}]') }}
     runs-on: *offload_runner
     steps:
       - &checkout_selected_ref
