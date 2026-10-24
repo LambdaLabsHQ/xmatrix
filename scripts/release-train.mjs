@@ -48,6 +48,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { claimRelease } from "./release-claim.mjs";
+import { githubRead } from "./github-read.mjs";
 import { releaseCommitProblemAt } from "./release-commit.mjs";
 import { authoredReleaseNotes } from "./release-notes.mjs";
 import {
@@ -331,24 +332,8 @@ function sourceOf(root, commit, mainSha) {
 }
 
 /** A read of the GitHub API, retried through runner network failures and 5xx. */
-export async function api(pathname, token, { attempts = 5, delayMs = 2_000 } = {}) {
-  for (let attempt = 1; ; attempt += 1) {
-    let response;
-    try {
-      response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${pathname}`, {
-        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "cache-control": "no-cache" },
-        cache: "no-store",
-        signal: AbortSignal.timeout(10_000),
-      });
-    } catch (error) {
-      if (attempt >= attempts) throw new Error(`GitHub ${pathname}: ${error.message}`);
-      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
-      continue;
-    }
-    if (response.ok) return response.json();
-    if (response.status < 500 || attempt >= attempts) throw new Error(`GitHub ${pathname}: ${response.status}`);
-    await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
-  }
+export async function api(pathname, token, options) {
+  return githubRead(`/repos/${process.env.GITHUB_REPOSITORY}${pathname}`, token, options);
 }
 
 /** "success", "failed", "active" or "none" for the latest Production Release of `tag`. */

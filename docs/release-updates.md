@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Retry transient CI ledger evidence reads
+
+The CI ledger now shares the release train's bounded GitHub read transport:
+network errors and HTTP 5xx receive at most five attempts, with a ten-second
+deadline per attempt and increasing backoff. The deadline also covers JSON
+and artifact bodies. Client errors and malformed JSON still fail closed;
+only the original verified run, tested commit and successful jobs can earn
+ledger entries. An unavailable ledger still makes later gates run in full.
+
 Hub releases apply and read back an exact-host `/mcp` Browser Integrity Check
 exception with the existing protected deployment credential, then require an
 anonymous Python-style client to reach the Hub's 401 OAuth challenge. Other

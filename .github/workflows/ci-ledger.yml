@@ -33,6 +33,8 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Record the run's passed jobs
+        # Read-only evidence requests retry transient GitHub failures within
+        # bounded attempts and deadlines; proof validation still fails closed.
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
