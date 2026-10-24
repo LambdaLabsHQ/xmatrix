@@ -46,7 +46,12 @@ export interface BlameSummary {
   stretches: Array<{ from: number; to: number; color: string }>;
 }
 
-const authorKey = (author: PageAuthor) => `${author.kind}:${author.id}`;
+/**
+ * Who an author is to the reader: a person by their account; an Agent by its owner and name, so its Runs
+ * (each a principal of its own) read as the one Agent they are.
+ */
+export const pageAuthorKey = (author: PageAuthor) =>
+  author.kind === "agent" ? `agent:${author.ownerUserId ?? ""}:${author.label}` : `user:${author.id}`;
 
 /**
  * Who wrote `from`..`to` of `now`, the page as it is, given `carried`: the blame carried to it
@@ -74,7 +79,7 @@ export function blameOf(base: BlameDoc, carried: Int32Array, now: DocNode, from:
         continue;
       }
       for (const author of revision.authors) {
-        const key = authorKey(author);
+        const key = pageAuthorKey(author);
         const known = writers.get(key);
         if (!known || known.revision < revision.revision) {
           const writer = writerOf({ ...revision, authors: [author] });
@@ -114,7 +119,7 @@ export function pageWriters(base: BlameDoc, carried: Int32Array, now: DocNode): 
       const revision = base.revisions.get(carried[at] ?? -1);
       if (!revision || !node.text![offset]!.trim()) continue;
       for (const author of revision.authors) {
-        const key = authorKey(author);
+        const key = pageAuthorKey(author);
         let writer = writers.get(key);
         if (!writer) writers.set(key, writer = { author, chars: 0, ranges: [] });
         writer.chars++;
