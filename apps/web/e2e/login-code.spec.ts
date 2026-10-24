@@ -106,13 +106,20 @@ test("an app's sign-in that stopped for the second factor goes back to the Hub, 
     state.signedIn = true;
     return route.fulfill({ json: { token: "s", user: { id: "user-1" } } });
   });
-  await page.route("https://xmatrix-hub.xmatrix.sh/api/auth/app/finish**", route =>
-    route.fulfill({ contentType: "text/html", body: "<p>Handing the app its code</p>" }));
+  // The Hub's answer is left out: the page must leave only for it, with nothing else overtaking it.
+  const finishes: string[] = [];
+  await page.route("https://xmatrix-hub.xmatrix.sh/api/auth/app/finish**", route => {
+    finishes.push(route.request().url());
+    return route.abort();
+  });
+  const pages: string[] = [];
+  page.on("framenavigated", frame => { if (frame === page.mainFrame()) pages.push(new URL(frame.url()).pathname); });
 
   const finish = "https://xmatrix-hub.xmatrix.sh/api/auth/app/finish?flow=f";
   await page.goto(`/login?two_factor=1&continue=${encodeURIComponent(finish)}`);
   await page.getByLabel("Authentication code").fill("123456");
 
-  await page.waitForURL(finish);
-  await expect(page.getByText("Handing the app its code")).toBeVisible();
+  await expect.poll(() => finishes).toEqual([finish]);
+  await page.waitForTimeout(1_500);
+  expect(pages).not.toContain("/app");
 });
