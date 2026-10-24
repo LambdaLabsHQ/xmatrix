@@ -108,6 +108,7 @@ try {
     "packages/db/test/automation-run-links-postgres.test.mjs",
     "packages/db/test/postgres-fixture-lifecycle.test.mjs",
     "packages/db/test/client-postgres.test.mjs",
+    "packages/db/test/content-ref-commit-postgres.test.mjs",
     "packages/db/test/page-control-postgres.test.mjs",
     "packages/db/test/agent-registration-launch-postgres.test.mjs", "packages/db/test/agent-lifecycle-cleanup.test.mjs",
     // Withdrawn, ended and retired registration Runs get exact stop obligations.

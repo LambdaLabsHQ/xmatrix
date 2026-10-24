@@ -470,74 +470,71 @@ export class PostgresContentRepository {
           );
         }
         const objectId = scope.readerUserId ? `scoped:${scopeId}:sha256:${checksum}` : `sha256:${checksum}`;
+        // Elect the immutable object before reading it. A row lock cannot lock
+        // an absent object: concurrent first uploads used to race its insert.
+        await tx.query({
+          name: "content_object_insert_v1",
+          text: `INSERT INTO data.content_objects
+            (space_id,object_id,object_kind,storage_key,checksum,byte_length,
+             direct_child_count,direct_child_bytes,direct_children_digest,created_at,gc_not_before)
+            VALUES ($1,$2,'xmatrix.blob.v1',$3,$4,$5,0,0,$6,$7,$8)
+            ON CONFLICT DO NOTHING`,
+          values: [scope.spaceId, objectId, input.objectKey, checksum, encodedBytes,
+            EMPTY_CHILDREN_DIGEST, now, new Date(Date.parse(now) + GC_SAFETY_MS).toISOString()],
+          maxRows: 0,
+        });
         const objects = await tx.query<QueryResultRow>({
           name: "content_object_lock_v1",
           text: `SELECT * FROM data.content_objects WHERE space_id = $1 AND object_id = $2 FOR UPDATE`,
           values: [scope.spaceId, objectId], maxRows: 1,
         });
-        if (objects[0] && (objects[0].object_kind !== "xmatrix.blob.v1" ||
+        if (!objects[0] || objects[0].object_kind !== "xmatrix.blob.v1" ||
             objects[0].storage_key !== input.objectKey || objects[0].checksum !== checksum ||
             Number(objects[0].byte_length) !== encodedBytes ||
-            Number(objects[0].direct_child_count) !== 0)) {
+            Number(objects[0].direct_child_count) !== 0) {
           throw new ContentControlError(
             "blob_object_mismatch", 409, "content object identity is immutable",
           );
         }
-        if (!objects[0]) await tx.query({
-          name: "content_object_insert_v1",
-          text: `INSERT INTO data.content_objects
-            (space_id,object_id,object_kind,storage_key,checksum,byte_length,
-             direct_child_count,direct_child_bytes,direct_children_digest,created_at,gc_not_before)
-            VALUES ($1,$2,'xmatrix.blob.v1',$3,$4,$5,0,0,$6,$7,$8)`,
-          values: [scope.spaceId, objectId, input.objectKey, checksum, encodedBytes,
-            EMPTY_CHILDREN_DIGEST, now, new Date(Date.parse(now) + GC_SAFETY_MS).toISOString()],
-          maxRows: 0,
+        // One owner/object hold, whether this upload inserts it or adopts it.
+        const inserted = await tx.query<QueryResultRow>({
+          name: "content_ref_insert_v1",
+          text: `INSERT INTO data.content_refs
+            (space_id,root_set_id,generation,ref_id,owner_kind,owner_id,parent_object_id,
+             child_object_id,edge_ordinal,edge_key,parent_manifest_digest,child_checksum,
+             child_bytes,logical_bytes,owner_descriptor,created_at)
+            VALUES ($1,$2,0,$3,$4,$5,NULL,$6,NULL,NULL,NULL,$7,$8,$8,NULL,$9)
+            ON CONFLICT DO NOTHING RETURNING ref_id`,
+          values: [scope.spaceId, scopeId, refId, ownerKind, ownerId, objectId,
+            checksum, encodedBytes, now], maxRows: 1,
         });
-        const expected = { scopeId, objectKey: input.objectKey, checksum, encodedBytes };
-        const hold = () => tx.query<QueryResultRow>({
-          name: "content_ref_owner_hold_v1",
-          text: `SELECT r.*,o.storage_key,o.checksum,o.byte_length FROM data.content_refs r
-            JOIN data.content_objects o ON o.space_id = r.space_id AND o.object_id = r.child_object_id
-            WHERE r.space_id = $1 AND r.generation = 0 AND r.child_object_id = $2
-              AND r.owner_kind = $3 AND r.owner_id = $4
-            LIMIT 2 FOR UPDATE OF r`,
-          values: [scope.spaceId, objectId, ownerKind, ownerId], maxRows: 2,
-        });
-        // The unique index is one generation-0 ref per owner and object. A second
-        // attachment of the same bytes uses a new ref id; inserting it is the
-        // unhandled content_refs_owner_object_idx violation (XMATRIX-HUB-8W).
-        const held = await hold();
-        if (held.length > 0) {
-          result = heldOwnerRef(held, expected);
+        if (inserted.length === 1) {
+          result = { refId, scopeId, ownerKind, ownerId, contentHash: checksum,
+            objectKey: input.objectKey, encodedBytes, checksum, version: 1, createdAt: now };
         } else {
-          const inserted = await tx.query<QueryResultRow>({
-            name: "content_ref_insert_v1",
-            text: `INSERT INTO data.content_refs
-              (space_id,root_set_id,generation,ref_id,owner_kind,owner_id,parent_object_id,
-               child_object_id,edge_ordinal,edge_key,parent_manifest_digest,child_checksum,
-               child_bytes,logical_bytes,owner_descriptor,created_at)
-              VALUES ($1,$2,0,$3,$4,$5,NULL,$6,NULL,NULL,NULL,$7,$8,$8,NULL,$9)
-              ON CONFLICT DO NOTHING RETURNING ref_id`,
-            values: [scope.spaceId, scopeId, refId, ownerKind, ownerId, objectId,
-              checksum, encodedBytes, now], maxRows: 1,
+          const held = await tx.query<QueryResultRow>({
+            name: "content_ref_owner_hold_v1",
+            text: `SELECT r.*,o.storage_key,o.checksum,o.byte_length FROM data.content_refs r
+              JOIN data.content_objects o ON o.space_id = r.space_id AND o.object_id = r.child_object_id
+              WHERE r.space_id = $1 AND r.generation = 0 AND r.child_object_id = $2
+                AND r.owner_kind = $3 AND r.owner_id = $4
+              LIMIT 2 FOR UPDATE OF r`,
+            values: [scope.spaceId, objectId, ownerKind, ownerId], maxRows: 2,
           });
-          if (inserted.length === 1) {
-            await tx.query({
-              name: "content_ref_intent_consume_v1",
-              text: "DELETE FROM data.blob_upload_intents WHERE space_id = $1 AND intent_id = $2",
-              values: [scope.spaceId, intentId], maxRows: 0,
-            });
-            await tx.query({
-              name: "content_ref_gc_cancel_v1",
-              text: "DELETE FROM data.content_gc_candidates WHERE space_id = $1 AND object_id = $2",
-              values: [scope.spaceId, objectId], maxRows: 0,
-            });
-            result = { refId, scopeId, ownerKind, ownerId, contentHash: checksum,
-              objectKey: input.objectKey, encodedBytes, checksum, version: 1, createdAt: now };
-          } else {
-            result = heldOwnerRef(await hold(), expected);
-          }
+          result = heldOwnerRef(held, { scopeId, objectKey: input.objectKey, checksum, encodedBytes });
         }
+        // Both successful resolutions finish this verified upload. Choosing an
+        // existing ref must not leave a live intent behind its deleted route.
+        await tx.query({
+          name: "content_ref_intent_consume_v1",
+          text: "DELETE FROM data.blob_upload_intents WHERE space_id = $1 AND intent_id = $2",
+          values: [scope.spaceId, intentId], maxRows: 0,
+        });
+        await tx.query({
+          name: "content_ref_gc_cancel_v1",
+          text: "DELETE FROM data.content_gc_candidates WHERE space_id = $1 AND object_id = $2",
+          values: [scope.spaceId, objectId], maxRows: 0,
+        });
       }
       await this.commit(tx, { spaceId: scope.spaceId, commandId, kind: "commit-blob-ref",
         requestDigest, aggregateId: String(result.refId), result, now });
@@ -546,11 +543,8 @@ export class PostgresContentRepository {
     await this.publishEntityRoute(
       requestId, placement, "content-intent", intentId, "deleted", input.expectedIntentVersion + 1,
     );
-    // A reused owner hold already has its route. Publishing the caller's new
-    // ref id would name a reference that was never inserted.
-    if (String(result.refId) === refId) {
-      await this.publishEntityRoute(requestId, placement, "content-ref", refId, "active", 1);
-    }
+    // Always repair the canonical route, including after a prior lost publish.
+    await this.publishEntityRoute(requestId, placement, "content-ref", String(result.refId), "active", 1);
     return result;
   }
 
@@ -592,7 +586,7 @@ export class PostgresContentRepository {
       await this.authorize(tx, scope, input.principal, "content_history_read");
       const rows = await tx.query<QueryResultRow>({
         name: "content_ref_read_v1",
-        text: `SELECT r.*,o.storage_key,o.checksum,o.byte_length,o.created_at
+        text: `SELECT r.*,o.storage_key,o.checksum,o.byte_length
           FROM data.content_refs r JOIN data.content_objects o
             ON o.space_id = r.space_id AND o.object_id = r.child_object_id
           WHERE r.space_id = $1 AND r.root_set_id = $2 AND r.generation = 0
