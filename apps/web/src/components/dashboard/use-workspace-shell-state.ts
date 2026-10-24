@@ -2797,7 +2797,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   useEffect(() => {
     if (workingSpaceRedirectedRef.current) return;
     if (spaces.length === 0) return;
-    if (routeSpaceId) {
+    // `/app?channel=<id>`, what a tapped notification opens, names its
+    // conversation without a space; that conversation decides the space.
+    if (routeSpaceId || routeInfo.legacyChannelId) {
       workingSpaceRedirectedRef.current = true;
       return;
     }
@@ -2813,7 +2815,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     const nextPath = `${spaceAppPath(target, spaces)}/channels`;
     replaceBrowserPath(nextPath);
     setBrowserPath(nextPath);
-  }, [routeSpaceId, spaces, workingSpaceId, workingSpaceLoaded]);
+  }, [routeInfo.legacyChannelId, routeSpaceId, spaces, workingSpaceId, workingSpaceLoaded]);
 
   /* Persist the working workspace whenever the user settles in a space
      (explicit switch or channel deep-link), write-through to local + cloud. */
