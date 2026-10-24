@@ -9,7 +9,9 @@ run-name: Production Release train from ${{ github.sha }}
 # ships the union of every open beta it contains as X.Y.Z-beta.N; a stable
 # train ships one stable intent alone, rebuilding the verified beta's source as
 # X.Y.Z. Trains run one at a time; one GitHub displaces while pending loses
-# nothing, because intents live in refs.
+# nothing, because intents live in refs. Their releases deploy in two lanes,
+# the service (Hub, Web) and the clients (scripts/release-lanes.mjs): a train
+# waits only for the active releases its scope waits for.
 on:
   workflow_dispatch:
 
@@ -241,17 +243,46 @@ jobs:
       actions: write
       contents: read
     steps:
-      # One train deploys at a time: this one's gates may run while the previous
-      # train deploys, but it tags and dispatches only once no Production
-      # Release, PostgreSQL contract migration, or lifecycle cleanup is active, so the
-      # production group never holds a pending run that a later one could
-      # displace, and a contract never runs beside a deploy.
-      - name: Wait for the previous train to finish deploying
+      # The lane rule, from the reviewed main revision this train runs.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # One train deploys at a time in each lane: this one's gates may run
+      # while earlier trains deploy, but it tags and dispatches only once no
+      # Production Release it waits for (scripts/release-lanes.mjs), PostgreSQL
+      # contract migration, or lifecycle cleanup is active, so neither lane's
+      # production group ever holds a pending run that a later one could
+      # displace, and a contract never runs beside a deploy. The service never
+      # waits for a client release; a client waits for an earlier Hub.
+      - name: Wait for the earlier trains it waits for to finish deploying
         uses: actions/github-script@v7
+        env:
+          RELEASE_SCOPE: ${{ needs.plan.outputs.scope }}
         with:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
           script: |
+            const { waitsFor } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/release-lanes.mjs`);
+            // Each release's tag records the scope its train shipped. A scope
+            // that cannot be read waits like every lane.
+            const scopes = new Map();
+            const scopeOf = async (run) => {
+              if (!scopes.has(run.id)) {
+                let scope = "";
+                try {
+                  const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: `tags/${run.head_branch}` });
+                  if (ref.object.type === "tag") {
+                    const { data: tag } = await github.rest.git.getTag({ ...context.repo, tag_sha: ref.object.sha });
+                    scope = /^scope: (\S+)$/mu.exec(tag.message)?.[1] ?? "";
+                  }
+                } catch (error) {
+                  if (error.status >= 500) throw error;
+                }
+                scopes.set(run.id, scope);
+              }
+              return scopes.get(run.id);
+            };
             const deadline = Date.now() + 3 * 60 * 60 * 1000;
             for (;;) {
               // Migration and lifecycle cleanup workflows also hold the train,
@@ -262,7 +293,10 @@ jobs:
                   const { data } = await github.rest.actions.listWorkflowRuns({
                     ...context.repo, workflow_id, per_page: 20,
                   });
-                  active.push(...data.workflow_runs.filter((run) => run.status !== "completed"));
+                  for (const run of data.workflow_runs.filter((run) => run.status !== "completed")) {
+                    if (workflow_id !== "production-release.yml" ||
+                        waitsFor(process.env.RELEASE_SCOPE, await scopeOf(run))) active.push(run);
+                  }
                 }
               } catch (error) {
                 // GitHub answering 5xx says nothing about the trains; ask again

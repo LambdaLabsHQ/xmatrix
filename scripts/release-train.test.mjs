@@ -12,6 +12,7 @@ import {
   checkStable,
   codeqlLanguages,
   COMPONENTS,
+  deferClientIntents,
   inflightRef,
   intentRef,
   nextBetaVersion,
@@ -112,6 +113,33 @@ test("a train ships the union of every open beta its revision contains, never a 
   assert.deepEqual(result.scope, ["hub", "web"], "an intent from after the freeze waits for the next train");
   assert.deepEqual(result.stable.map((intent) => intent.id), ["25", "40"], "stables are offered oldest first, apart");
   assert.deepEqual(result.updates, []);
+});
+
+test("while a client release is active, service changes ship and client intents wait for the next train", () => {
+  const refs = [
+    { ref: "refs/release-intents/10/web", sha: OLD },
+    { ref: "refs/release-intents/20/cli", sha: OLD },
+    { ref: "refs/release-intents/30/hub+web+cli", sha: MAIN },
+    { ref: "refs/release-intents/40/hub", sha: MAIN },
+  ];
+  const { eligible, updates } = train({ refs });
+  assert.deepEqual(updates, [], "deferred intents stay open, untouched");
+  const busy = deferClientIntents(eligible, [["cli", "desktop"]]);
+  assert.deepEqual(busy.eligible.map((intent) => intent.id), ["10", "40"]);
+  assert.deepEqual(busy.deferred.map((intent) => intent.id), ["20", "30"], "an intent naming any client waits whole");
+  assert.deepEqual(busy.scope, ["hub", "web"]);
+
+  const unreadable = deferClientIntents(eligible, [[]]);
+  assert.deepEqual(unreadable.scope, ["hub", "web"], "a release whose scope cannot be read holds the client lane");
+
+  for (const activeScopes of [[], [["hub"]], [["web"], ["hub", "web"]]]) {
+    const free = deferClientIntents(eligible, activeScopes);
+    assert.deepEqual(free.deferred, [], JSON.stringify(activeScopes));
+    assert.deepEqual(free.scope, ["hub", "web", "cli"], "with no client release active, every contained beta ships");
+  }
+
+  const onlyClients = deferClientIntents(eligible.filter((intent) => intent.id === "20"), [["android"]]);
+  assert.deepEqual(onlyClients.scope, [], "nothing ships until the client release finishes and wakes the train");
 });
 
 test("in-flight betas close on success, wait while deploying and reopen on failure", () => {
@@ -270,8 +298,62 @@ function releaseRepository() {
     run(["checkout", "--quiet", "main"]);
     return commit;
   };
-  return { directory, root, commitMain, release, push: () => run(["push", "--quiet", "origin", "main"]) };
+  // The real planner CLI, from the train's revision, with only GitHub's HTTP
+  // transport (and whatever else `preload` sets) replaced.
+  const plan = (source, preload) => {
+    const file = path.join(directory, "github.mjs");
+    writeFileSync(file, preload);
+    return spawnSync(process.execPath,
+      ["--import", file, fileURLToPath(new URL("./release-train.mjs", import.meta.url)), "plan"], {
+        cwd: root, encoding: "utf8", timeout: 15_000,
+        env: { ...process.env, GITHUB_REPOSITORY: "test/repo", GITHUB_TOKEN: "test-token",
+          GITHUB_SHA: source, GITHUB_RUN_ID: "1234", GITHUB_OUTPUT: "" },
+      });
+  };
+  const remoteIntents = () => run(["ls-remote", "origin", "refs/release-intents/*", "refs/release-inflight/*"]);
+  return {
+    directory, root, commitMain, release, plan, remoteIntents,
+    pushRefs: (...refspecs) => run(["push", "origin", ...refspecs]),
+    push: () => run(["push", "--quiet", "origin", "main"]),
+  };
 }
+
+/** Runs each case in a temporary release repository of its own. */
+async function eachInRepository(t, cases, body) {
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const repo = releaseRepository();
+      t.after(() => rmSync(repo.directory, { recursive: true, force: true }));
+      body(scenario, repo);
+    });
+  }
+}
+
+test("a train planned while a client release runs ships the service and leaves client intents open", async (t) => {
+  const cases = [
+    { name: "client release active", status: "in_progress", ships: "web", open: true },
+    { name: "client release finished", status: "completed", ships: "web,cli", open: false },
+  ];
+  await eachInRepository(t, cases, (scenario, repo) => {
+    const source = repo.commitMain("service and client changes");
+    repo.release(source, "1.0.1-beta.1", { scope: "cli", source, channel: "beta" });
+    repo.push();
+    repo.pushRefs(`${source}:${intentRef("50", ["web"])}`, `${source}:${intentRef("60", ["cli"])}`);
+    // The only GitHub read is the list of Production Release runs: one on the
+    // client tag, still running or finished.
+    const result = repo.plan(source, `
+      globalThis.fetch = async () => new Response(JSON.stringify({ workflow_runs: [
+        { id: 30, status: ${JSON.stringify(scenario.status)}, conclusion: null, head_branch: "xmatrix-v1.0.1-beta.1" },
+      ] }));
+    `);
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.match(result.stdout, new RegExp(`^scope=${scenario.ships}$`, "mu"));
+    const refs = repo.remoteIntents();
+    assert.ok(refs.includes("refs/release-inflight/xmatrix-v1.0.1-beta.2/50/web"), refs);
+    assert.equal(refs.includes(intentRef("60", ["cli"])), scenario.open, refs);
+    assert.equal(refs.includes("refs/release-inflight/xmatrix-v1.0.1-beta.2/60/cli"), !scenario.open, refs);
+  });
+});
 
 test("the train distinguishes unavailable production evidence from a failed candidate", async (t) => {
   const successful = { id: 20, status: "completed", conclusion: "success" };
@@ -285,9 +367,7 @@ test("the train distinguishes unavailable production evidence from a failed cand
     { name: "latest run failed", responses: [[successful, { id: 21, status: "completed", conclusion: "failure" }]],
       invalid: true, reads: 1 },
   ];
-  for (const scenario of cases) await t.test(scenario.name, () => {
-    const repo = releaseRepository();
-    t.after(() => rmSync(repo.directory, { recursive: true, force: true }));
+  await eachInRepository(t, cases, (scenario, repo) => {
     mkdirSync(path.join(repo.root, "docs/releases"), { recursive: true });
     writeFileSync(path.join(repo.root, "docs/releases/1.0.1.md"), "# xMatrix 1.0.1\n\nUser-facing fixes.\n");
     const source = repo.commitMain("candidate");
@@ -296,13 +376,11 @@ test("the train distinguishes unavailable production evidence from a failed cand
     repo.push();
     const stableRef = intentRef("77", ["web"], { candidate, bump: "patch" });
     const betaRef = intentRef("88", ["hub"]);
-    const git = (...args) => execFileSync("git", args, { cwd: repo.root, encoding: "utf8", stdio: "pipe" }).trim();
-    git("push", "origin", `${beta}:${stableRef}`, `${source}:${betaRef}`);
-    const preload = path.join(repo.directory, "github.mjs");
+    repo.pushRefs(`${beta}:${stableRef}`, `${source}:${betaRef}`);
     const callsFile = path.join(repo.directory, "reads.json");
     // Only the HTTP transport and clock are replaced; the real CLI reconciles
     // actual remote refs, verifies tags/notes/ancestry and claims the version.
-    writeFileSync(preload, `
+    const result = repo.plan(source, `
       import { writeFileSync } from "node:fs";
       const responses = ${JSON.stringify(scenario.responses)};
       let reads = 0;
@@ -318,14 +396,8 @@ test("the train distinguishes unavailable production evidence from a failed cand
       };
       process.on("exit", () => writeFileSync(${JSON.stringify(callsFile)}, JSON.stringify(reads)));
     `);
-    const result = spawnSync(process.execPath,
-      ["--import", preload, fileURLToPath(new URL("./release-train.mjs", import.meta.url)), "plan"], {
-        cwd: repo.root, encoding: "utf8", timeout: 15_000,
-        env: { ...process.env, GITHUB_REPOSITORY: "test/repo", GITHUB_TOKEN: "test-token",
-          GITHUB_SHA: source, GITHUB_RUN_ID: "1234", GITHUB_OUTPUT: "" },
-      });
     assert.equal(result.status, scenario.ships || scenario.invalid ? 0 : 1, result.stderr + result.stdout);
-    const refs = git("ls-remote", "origin", "refs/release-intents/*", "refs/release-inflight/*");
+    const refs = repo.remoteIntents();
     assert.equal(refs.includes(betaRef), !scenario.invalid, "only a definitive refusal may fall through to a beta");
     assert.equal(refs.includes(stableRef), !scenario.ships && !scenario.invalid,
       "unavailable evidence cannot delete the stable decision");

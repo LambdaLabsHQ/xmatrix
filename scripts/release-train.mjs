@@ -5,7 +5,10 @@
 // workflow records it in a ref and wakes the train. The train (Production
 // Release Request) is serialized repository-wide and chooses the version
 // itself. A train that GitHub displaces while pending loses nothing: the
-// intents stay in refs and the next train takes them.
+// intents stay in refs and the next train takes them. Its releases deploy in
+// two lanes, the service and the clients (release-lanes.mjs): while a client
+// release is active, a beta train leaves client intents open for the train
+// that release wakes, so service changes do not queue behind it.
 //
 // Releases come in two channels, and the version alone says which one
 // (release-version-order.mjs):
@@ -50,6 +53,7 @@ import { fileURLToPath } from "node:url";
 import { claimRelease } from "./release-claim.mjs";
 import { githubRead } from "./github-read.mjs";
 import { releaseCommitProblemAt } from "./release-commit.mjs";
+import { releaseLanes } from "./release-lanes.mjs";
 import { authoredReleaseNotes } from "./release-notes.mjs";
 import {
   compareSemver,
@@ -212,6 +216,21 @@ export function planTrain({ refs, trainSha, isAncestor, tagExists, productionSta
   return { updates, pending, stable, eligible, scope: COMPONENTS.filter((item) => selected.has(item)) };
 }
 
+/**
+ * Pure: the betas a train ships beside the releases still running, whose
+ * scopes are `activeScopes`. While one publishes clients, a beta that names a
+ * client stays open in `deferred`: it would only wait for that release, and
+ * hold every service change behind it. The release wakes the train when it
+ * finishes, and that train takes them.
+ */
+export function deferClientIntents(eligible, activeScopes) {
+  const clientsBusy = activeScopes.some((scope) => releaseLanes(scope).client);
+  const deferred = clientsBusy ? eligible.filter((intent) => releaseLanes(intent.scope).client) : [];
+  const shipping = eligible.filter((intent) => !deferred.includes(intent));
+  const selected = new Set(shipping.flatMap((intent) => intent.scope));
+  return { eligible: shipping, deferred, scope: COMPONENTS.filter((item) => selected.has(item)) };
+}
+
 /** Pure: `version` raised by a patch, minor or major bump. */
 export function bumpVersion(version, bump) {
   const [major, minor, patch] = parseSemver(version).core;
@@ -354,6 +373,30 @@ async function productionStateOf(tag, token) {
   return "none";
 }
 
+/**
+ * The scopes of the Production Releases still running, read from their tags'
+ * annotations. A run whose scope cannot be read counts as both lanes. Only
+ * planning reads this, to keep client intents out of the way: dispatch checks
+ * the lanes again, so a list GitHub cannot serve costs that, not an overlap.
+ */
+async function activeReleaseScopes(root, token) {
+  let runs;
+  try {
+    ({ workflow_runs: runs } = await api(
+      "/actions/workflows/production-release.yml/runs?event=workflow_dispatch&per_page=20", token));
+  } catch (error) {
+    console.log(`::warning::Active releases could not be listed (${error.message}); no intent is deferred.`);
+    return [];
+  }
+  return runs.filter((run) => run.status !== "completed").map((run) => {
+    try {
+      return RELEASE_TAG_PATTERN.test(run.head_branch ?? "") ? tagRecord(root, run.head_branch).scope : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 class ProductionEvidenceUnavailable extends Error {}
 
 /**
@@ -493,8 +536,17 @@ async function plan(root) {
     return;
   }
 
-  if (!result.eligible.length) {
-    console.log("No open release intent is contained in this revision; nothing to release.");
+  let { eligible, scope } = result;
+  if (eligible.some((intent) => releaseLanes(intent.scope).client)) {
+    const lanes = deferClientIntents(eligible, await activeReleaseScopes(root, token));
+    if (lanes.deferred.length) {
+      console.log(`A client release is active; intents ${lanes.deferred.map((intent) => intent.id).join(", ")} ` +
+        "stay open for the train it wakes when it finishes.");
+    }
+    ({ eligible, scope } = lanes);
+  }
+  if (!eligible.length) {
+    console.log("No open release intent this revision contains can ship now; nothing to release.");
     output("scope", "");
     return;
   }
@@ -502,7 +554,7 @@ async function plan(root) {
   const version = nextBetaVersion({ tagNames, mainVersion });
   await claimAndShip(root, {
     tag: `xmatrix-v${version}`, version, channel: "beta", sourceSha: trainSha, runId,
-    intents: result.eligible, scope: result.scope, token,
+    intents: eligible, scope, token,
   });
 }
 
