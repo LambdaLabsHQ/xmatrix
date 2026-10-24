@@ -60,7 +60,7 @@ export function passedLedgerJobs(jobs) {
  * The CI jobs whose success the ledger records and every lookup names. The
  * `node-checks` job also runs the duplicate scan (on hosted runners as its
  * `node-checks (duplicates)` entry). Pull request CI's fast-tier jobs carry
- * other names (`node-static`, `web-unit`, `hub-check`, ...), so they never
+ * other names (`node-tests`, `web-unit`, `hub-check`, ...), so they never
  * vouch for the full tier that main and release trains reuse.
  */
 export const LEDGER_JOBS = new Set([

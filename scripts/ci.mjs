@@ -272,9 +272,9 @@ function browserTestStages() {
   ];
 }
 
-// Pull request CI runs only the static Node checks (`node-static`); after
-// merge, `node-checks` adds the package, PostgreSQL and script tests. The
-// tiers are chosen in .github/workflows/ci.yml (`changes`).
+// `node-checks` runs the static Node checks with the package, PostgreSQL and
+// script tests, in pull request CI and in every release train alike
+// (.github/workflows/ci.yml, `changes`).
 const nodeSetupStages = [
   {
     label: "Check Oxlint (--deny-warnings)",
@@ -355,7 +355,6 @@ const nodeStaticStages = [
 
 const partitions = {
   "node-checks": [...nodeSetupStages, ...nodeTestLanes, ...nodeStaticStages],
-  "node-static": [...nodeSetupStages, ...nodeStaticStages],
   web: [
     webBuildStep,
   ],

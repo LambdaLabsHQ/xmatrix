@@ -21,8 +21,10 @@ CI validates in two tiers, chosen in one place: the `changes` job of `ci.yml`
 (its `tier` output). Pull request CI is the fast tier, a pre-merge check whose
 jobs each finish in about two minutes including setup:
 
-- `node-static`: Oxlint, synchronized versions, dependency reachability,
-  unused imports, duplicate CSS rules and the source line limit;
+- `node-tests`: Oxlint, synchronized versions, dependency reachability,
+  unused imports, duplicate CSS rules, the source line limit, and the
+  protocol, billing, PostgreSQL package and script tests;
+- `node-tests (duplicates)`: the duplicate-code scan, on its own runner;
 - `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
   build, and the lint and typecheck that build would run (`next typegen`, then
   `tsc`, beside `next lint`); in the full tier the checked build stays the
@@ -32,7 +34,10 @@ jobs each finish in about two minutes including setup:
 
 A release train runs the full tier for what it ships. Every train runs the
 protocol, billing, PostgreSQL package and script tests and the duplicate-code
-scan, and a train that ships the Hub runs the Hub suite. The Web suites (the
+scan again on the merged revision, and a train that ships the Hub runs the Hub
+suite. Pull requests run the Node tests and the duplicate scan too: a change
+that fails them only after merge fails the train for every change riding it.
+The Web suites (the
 checked build, browser shards and performance budget) and the client suites
 (the Rust tests on Linux and Windows, Desktop, Android and the iOS simulator
 gate) gate the stable train that ships them, not each beta: a beta Web or
