@@ -1037,4 +1037,3 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 @media (prefers-reduced-motion: reduce) {
   .page-byline-writing { animation: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 24%, transparent); }
 }
-::highlight(page-author) { background-color: color-mix(in oklab, var(--primary) 16%, transparent); }
