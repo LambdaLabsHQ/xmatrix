@@ -42,18 +42,23 @@ test("a complete login code signs in once without a click, and a resend waits ou
   await expect(resend).toBeDisabled();
 });
 
-/** A Hub whose session appears once `signedIn` is set, and whose code check answers per call. */
-async function codeCheck(page: import("@playwright/test").Page, answer: (call: number, state: { signedIn: boolean }) => "drop" | "ok" | "invalid" | "lost") {
-  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
-  const state = { signedIn: false };
-  let calls = 0;
-  await page.route("**/api/xmatrix/login", route => route.fulfill({ json: { ok: true } }));
+/** A Hub with no session until `state.signedIn` is set. */
+async function hubSessionOnceSignedIn(page: import("@playwright/test").Page, state: { signedIn: boolean }) {
   await page.route("**/api/auth/get-session", route => route.fulfill({ json: state.signedIn
     ? { user: { id: "user-1", email: "reviewer@example.test" }, session: { token: "s", expiresAt: "2099-01-01T00:00:00.000Z" } }
     : null }));
   await page.route("**/api/auth/token", route => state.signedIn
     ? route.fulfill({ json: { token: "fixture-jwt" } })
     : route.fulfill({ status: 401, json: {} }));
+}
+
+/** A Hub whose session appears once `signedIn` is set, and whose code check answers per call. */
+async function codeCheck(page: import("@playwright/test").Page, answer: (call: number, state: { signedIn: boolean }) => "drop" | "ok" | "invalid" | "lost") {
+  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
+  const state = { signedIn: false };
+  let calls = 0;
+  await page.route("**/api/xmatrix/login", route => route.fulfill({ json: { ok: true } }));
+  await hubSessionOnceSignedIn(page, state);
   await page.route("**/api/auth/sign-in/email-otp", route => {
     calls += 1;
     const kind = answer(calls, state);
@@ -96,12 +101,7 @@ test("three unanswered code checks keep the code and offer to try again", async 
 test("an app's sign-in that stopped for the second factor goes back to the Hub, not into the web", async ({ page }) => {
   await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
   const state = { signedIn: false };
-  await page.route("**/api/auth/get-session", route => route.fulfill({ json: state.signedIn
-    ? { user: { id: "user-1", email: "reviewer@example.test" }, session: { token: "s", expiresAt: "2099-01-01T00:00:00.000Z" } }
-    : null }));
-  await page.route("**/api/auth/token", route => state.signedIn
-    ? route.fulfill({ json: { token: "fixture-jwt" } })
-    : route.fulfill({ status: 401, json: {} }));
+  await hubSessionOnceSignedIn(page, state);
   await page.route("**/api/auth/two-factor/verify-totp", route => {
     state.signedIn = true;
     return route.fulfill({ json: { token: "s", user: { id: "user-1" } } });
