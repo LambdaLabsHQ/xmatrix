@@ -45,7 +45,7 @@ test("same-name Agents collapse to one shout without offering retired launch suf
 });
 
 test("selected category option is inset and rounded inside a single glass surface", async ({ page }) => {
-  const draft = await draftCodexMention(page);
+  await draftCodexMention(page);
   const panel = page.locator(".app-mention-suggestions");
   const option = panel.getByRole("option").filter({ hasText: "codex" }).first();
   await expect(option).toBeVisible();
