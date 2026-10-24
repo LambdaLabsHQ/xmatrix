@@ -88,6 +88,7 @@ import {
 } from "./workspace-shell-helpers-extra";
 
 import { threadChipState } from "./thread-chip-state";
+import { MessageHoverToolbar } from "./message-hover-toolbar";
 import { parsePresentedRoutingDecision, RoutingDecisionBoard } from "./routing-decision-board";
 
 import {
@@ -116,7 +117,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ElementType,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -192,7 +192,6 @@ import {
   MESSAGE_COLUMN_CLASS_NAME,
   MESSAGE_HEADER_TIMESTAMP_CLASS_NAME,
   MESSAGE_HEAD_CLASS_NAME,
-  MESSAGE_HEAD_HEADED_CLASS_NAME,
   MESSAGE_META_CLASS_NAME,
   MESSAGE_ROW_CLASS_NAME,
   MESSAGE_ROW_HEADED_CLASS_NAME,
@@ -1559,7 +1558,7 @@ export function MessageTimelineSkeleton({ messageCount }: { messageCount?: numbe
             <span className={cn(MESSAGE_AVATAR_CLASS_NAME, "app-message-skeleton-avatar")} />
           </div>
           <div className={MESSAGE_COLUMN_CLASS_NAME}>
-            <div className={cn(MESSAGE_HEAD_CLASS_NAME, MESSAGE_HEAD_HEADED_CLASS_NAME)}>
+            <div className={MESSAGE_HEAD_CLASS_NAME}>
               <div className={MESSAGE_META_CLASS_NAME}>
                 <span className={MESSAGE_AUTHOR_NAME_CLASS_NAME}>
                   <span className="app-skeleton-bar app-message-skeleton-line" style={{ width: "5rem" }} />
@@ -1737,7 +1736,6 @@ export const MessageRow = memo(function MessageRow({
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
   onOpenHumanProfile: (userId: string) => void;
 } & MessageRowProps) {
-  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const [copied, setCopied] = useState(false);
   const [copiedAttachmentId, setCopiedAttachmentId] = useState<string | null>(null);
@@ -1757,10 +1755,9 @@ export const MessageRow = memo(function MessageRow({
   // repaint after a shared load settles, so an authority change cannot render
   // the previous store for one commit while an effect catches up.
   const [, setAttachmentMediaRevision] = useState(0);
-  useAndroidBackHandler(Boolean(openAttachment || actionsOpen || reactionPickerOpen), () => {
+  useAndroidBackHandler(Boolean(openAttachment || actionsOpen), () => {
     if (openAttachment) setOpenAttachment(null);
-    else if (actionsOpen) setActionsOpen(false);
-    else setReactionPickerOpen(false);
+    else setActionsOpen(false);
     return true;
   });
   const attachmentMediaMountedRef = useRef(true);
@@ -1839,7 +1836,6 @@ export const MessageRow = memo(function MessageRow({
   const unsentStatus = message.sendStatus === "unconfirmed" || message.sendStatus === "failed"
     ? message.sendStatus : undefined;
   const canEditMessage = message.own && !recalled && !isOutboundPending && Boolean(message.messageId);
-  const MessageHead: ElementType = message.continuation ? FloatingMessageActions : "div";
   const sourceApplication = messageExternalAppSource(message.metadata);
   const canSaveEdit = Boolean(editingBody.trim()) && editingBody.trim() !== message.body;
 
@@ -2346,15 +2342,27 @@ export const MessageRow = memo(function MessageRow({
       className={cn(
         MESSAGE_ROW_CLASS_NAME,
         // Every message sits on the same paper: whose it is reads from the
-        // header, not from a tinted row. An open action row is a state, not
-        // an author, so it keeps its tone.
+        // header, not from a tinted row. An open action row or the row under
+        // the pointer is a state, not an author, so it keeps its tone; the
+        // hover tone says which message the bar above it acts on.
         // Only a header row opens with extra room, which sets one sender's
         // run apart from the last; every row closes alike, so the lines of a
         // run sit at one even pitch.
         message.continuation ? "py-0.5" : MESSAGE_ROW_HEADED_CLASS_NAME,
+        "md:hover:bg-foreground/[0.035]",
         actionsOpen && "bg-muted"
       )}
     >
+      {!recalled && !isOutboundPending && !editing && (
+        <MessageHoverToolbar
+          copied={copied}
+          onCopy={() => void copyMessage()}
+          onReply={() => onReply(message)}
+          onReact={(emoji) => onReact(message, emoji)}
+          onEdit={canEditMessage ? requestEdit : undefined}
+          onRecall={canEditMessage ? requestRecall : undefined}
+        />
+      )}
       {message.continuation ? (
         // Same sender, moments later, same tags: the header above still says who.
         // The hidden time is one body line tall and never wraps: wrapped, it
@@ -2477,19 +2485,14 @@ export const MessageRow = memo(function MessageRow({
       </div>
       )}
       <div className={MESSAGE_COLUMN_CLASS_NAME}>
-        <MessageHead className={cn(
-          MESSAGE_HEAD_CLASS_NAME,
-          // As tall as the hover actions a sent message has beside its name,
-          // so a row does not grow when the server confirms it.
-          message.continuation ? "hidden items-center gap-0.5 p-0.5 md:flex" : MESSAGE_HEAD_HEADED_CLASS_NAME,
-        )} {...(message.continuation ? { pinned: reactionPickerOpen } : {})}>
+        {!message.continuation && (
+        <div className={MESSAGE_HEAD_CLASS_NAME}>
           {/* Sender, then the time, then every tag. The time is a property of the
               message itself, so it stays next to the author instead of being
               pushed around by however many tags the sender happens to carry.
               Tags that do not fit wrap whole onto the next line: every tag says
               something about the sender, so none is hidden or cut at the edge
               (user 2026-09-27, a phone showed half a Goal pill). */}
-          {!message.continuation && (
           <div className={MESSAGE_META_CLASS_NAME}>
           <span className={MESSAGE_AUTHOR_NAME_CLASS_NAME}>{message.author}</span>
           {sourceApplication && (
@@ -2545,77 +2548,8 @@ export const MessageRow = memo(function MessageRow({
           </>)}
           </span>
           </div>
-          )}
-          {!recalled && !isOutboundPending && (
-            <MessageCopyButton copied={copied} onCopy={() => void copyMessage()} className="hidden md:flex" />
-          )}
-          {!recalled && !isOutboundPending && (
-            <button
-              type="button"
-              title="Reply"
-              aria-label="Reply"
-              onClick={() => onReply(message)}
-              className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
-            >
-              <Reply className="size-3.5" />
-            </button>
-          )}
-          {!recalled && !isOutboundPending && (
-            // With the other hover actions, not as a row under the body: a row
-            // that is invisible until hover still spaced every message apart,
-            // and a phone never hovers (it reacts from the row a tap opens).
-            <div className="relative hidden shrink-0 md:block">
-              <button
-                type="button"
-                title="Add reaction"
-                aria-label="Add reaction"
-                aria-expanded={reactionPickerOpen}
-                onClick={() => setReactionPickerOpen((open) => !open)}
-                className={cn(
-                  "flex size-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                  reactionPickerOpen ? "opacity-100" : "opacity-0"
-                )}
-              >
-                <SmilePlus className="size-3.5" />
-              </button>
-              {reactionPickerOpen && (
-                // The popover is glass, and glass is always position: relative,
-                // so a plain frame floats it below the button.
-                <div className="absolute right-0 top-full z-20 mt-1">
-                  <QuickReactionPicker
-                    className="rounded-full border border-border bg-popover p-1 shadow-lg"
-                    onReact={(emoji) => {
-                      setReactionPickerOpen(false);
-                      onReact(message, emoji);
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-          {canEditMessage && !editing && (
-            <>
-              <button
-                type="button"
-                title="Edit message"
-                aria-label="Edit message"
-                onClick={requestEdit}
-                className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
-              >
-                <Pencil className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                title="Recall message"
-                aria-label="Recall message"
-                onClick={requestRecall}
-                className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 md:flex"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </>
-          )}
-        </MessageHead>
+        </div>
+        )}
         {recalled ? (
           <p className="py-1 text-sm italic text-muted-foreground">This message was recalled.</p>
         ) : editing ? (
@@ -3124,45 +3058,14 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
 
 
 
-export /* Without a header the actions float over the body, so they show on a glass
-   pill of their own instead of on top of the text. The pill sits behind them
-   in the same grid cell rather than around them: glass repositions its
-   children, which would pull the reaction picker into the pill. */
-function FloatingMessageActions({ className, children, pinned }: {
-  className?: string;
-  children: ReactNode;
-  pinned?: boolean;
-}) {
-  return (
-    <div className={cn(
-      "app-message-floating-actions absolute right-5 top-0 z-10 grid opacity-0 transition group-hover:opacity-100 has-[:focus-visible]:opacity-100",
-      pinned && "opacity-100",
-    )}>
-      <LiquidGlassPill aria-hidden="true" className="pointer-events-none rounded-full [grid-area:1/1]" />
-      <div className={cn("relative z-[1] [grid-area:1/1]", className)}>{children}</div>
-    </div>
-  );
-}
-
-function MessageCopyButton({
-  copied,
-  onCopy,
-  className,
-}: {
-  copied: boolean;
-  onCopy: () => void;
-  className?: string;
-}) {
+function MessageCopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
   return (
     <button
       type="button"
       title={copied ? "Copied" : "Copy message"}
       aria-label={copied ? "Copied" : "Copy message"}
       onClick={onCopy}
-      className={cn(
-        "ml-auto flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-        className
-      )}
+      className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
     >
       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
     </button>

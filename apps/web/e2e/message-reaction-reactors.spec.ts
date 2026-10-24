@@ -69,7 +69,6 @@ test.describe("desktop", () => {
       { method: "POST" },
     );
     await page.locator(".app-message-timeline").getByText(MESSAGE_BODY).hover();
-    await page.getByRole("button", { name: "Add reaction" }).click();
     await page.getByRole("button", { name: "React 👍" }).click();
     await expect(page.getByRole("button", { name: "You reacted with 👍" })).toBeVisible();
   });
