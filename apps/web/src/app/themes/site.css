@@ -181,6 +181,12 @@ html:has(.site-page) {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
+}
+
+/* Fade the glass itself, never its wrapper: an ancestor below full opacity
+   becomes the glass's backdrop root, so the blur samples nothing and the bar
+   paints grey until the fade ends and it snaps to the real page. */
+.site-navbar-glass > .app-liquid-glass-surface {
   opacity: var(--navbar-glass-reveal);
 }
 
