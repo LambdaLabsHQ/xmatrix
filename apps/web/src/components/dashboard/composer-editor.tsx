@@ -141,6 +141,9 @@ export function ComposerEditor(props: ComposerEditorProps) {
         replaceSelectionWithText(view, text);
         return true;
       },
+      // Dropped files are attachments, taken by the window's drop sink as the
+      // event bubbles on; the editor must not also insert whatever text they carry.
+      handleDrop: (_view, event) => Boolean((event as DragEvent).dataTransfer?.types.includes("Files")),
       handleDOMEvents: {
         beforeinput: (_view, event) => {
           const input = event as InputEvent;
@@ -442,7 +445,10 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
           const lead = document.createElement("span");
           lead.className = `${chip} app-composer-chip-lead`;
           lead.contentEditable = "false";
-          for (const [name, value] of Object.entries(data)) lead.setAttribute(name, value);
+          // The colours the chip's state gives it; the text half alone is the addressable mention.
+          for (const [name, value] of Object.entries(data)) {
+            if (name !== "data-mention" && name !== "data-start") lead.setAttribute(name, value);
+          }
           const avatar = document.createElement("span");
           avatar.className = "app-mention-chip-avatar";
           avatar.setAttribute("aria-hidden", "true");
