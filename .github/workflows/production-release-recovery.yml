@@ -222,6 +222,8 @@ jobs:
   unlock:
     needs: validate
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    # Only a Hub release has the shape validated above, and every release that
+    # deploys the service holds this group (production-release.yml).
     concurrency:
       group: production-release-train
       cancel-in-progress: true

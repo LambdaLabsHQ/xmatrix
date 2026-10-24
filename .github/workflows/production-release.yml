@@ -1,4 +1,5 @@
 name: Production Release
+run-name: Production Release ${{ github.ref_name }} ${{ inputs.release_scope }}
 
 on:
   workflow_dispatch:
@@ -20,8 +21,21 @@ permissions:
   contents: read
   actions: read
 
+# Releases deploy one at a time in each lane (scripts/release-lanes.mjs): one
+# that deploys the service (Hub or Web), alone or with clients, holds
+# production-release-train, the group Production Release Recovery acquires;
+# one that only publishes clients holds production-release-clients. The train
+# dispatches a release only once no release it waits for is active, so
+# neither group ever holds a pending run that a later one could displace.
 concurrency:
-  group: production-release-train
+  group: >-
+    ${{ (contains(format(',{0},', inputs.release_scope), ',hub,') ||
+    contains(format(',{0},', inputs.release_scope), ',web,') ||
+    !(contains(format(',{0},', inputs.release_scope), ',cli,') ||
+    contains(format(',{0},', inputs.release_scope), ',desktop,') ||
+    contains(format(',{0},', inputs.release_scope), ',android,') ||
+    contains(format(',{0},', inputs.release_scope), ',ios,')))
+    && 'production-release-train' || 'production-release-clients' }}
   cancel-in-progress: false
 
 jobs:
