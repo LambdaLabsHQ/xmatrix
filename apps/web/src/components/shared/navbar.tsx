@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Menu } from "lucide-react";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { Button } from "@/components/ui/button";
-import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
+import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
@@ -15,10 +15,10 @@ const navLinks = [
   { href: "/#pricing", label: "Pricing" },
 ];
 
-const WOOD_REVEAL_DISTANCE_PX = 120;
+const GLASS_REVEAL_DISTANCE_PX = 120;
 
 export function Navbar() {
-  const [woodReveal, setWoodReveal] = useState(0);
+  const [glassReveal, setGlassReveal] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -30,8 +30,8 @@ export function Navbar() {
         ? window.scrollY > 24
           ? 1
           : 0
-        : Math.min(1, Math.max(0, window.scrollY / WOOD_REVEAL_DISTANCE_PX));
-      setWoodReveal(next);
+        : Math.min(1, Math.max(0, window.scrollY / GLASS_REVEAL_DISTANCE_PX));
+      setGlassReveal(next);
     };
 
     const onScroll = () => {
@@ -53,14 +53,14 @@ export function Navbar() {
   return (
     <header
       className="site-navbar fixed top-0 z-50 w-full"
-      data-scrolled={woodReveal > 0.04 ? "true" : "false"}
-      style={{ ["--navbar-wood-reveal" as string]: String(woodReveal) }}
+      data-scrolled={glassReveal > 0.04 ? "true" : "false"}
+      style={{ ["--navbar-glass-reveal" as string]: String(glassReveal) }}
     >
       <div className="site-navbar-layout mx-auto">
+        <span aria-hidden className="site-navbar-glass">
+          <LiquidGlassPill className="size-full">{null}</LiquidGlassPill>
+        </span>
         <div className="site-navbar-brand shrink-0">
-          <span aria-hidden className="site-navbar-brand-glass">
-            <LiquidGlassPill className="size-full">{null}</LiquidGlassPill>
-          </span>
           <BrandMark
             href="/"
             iconSrc="/brand/xmatrix-icon-transparent-128.png"
@@ -69,7 +69,6 @@ export function Navbar() {
           />
         </div>
         <div className="site-navbar-bar">
-          <WoodPanel className="site-navbar-inner">{null}</WoodPanel>
           <div className="site-navbar-content relative z-10 flex h-full items-center justify-end gap-4 lg:justify-between">
             <nav className="hidden items-center gap-6 lg:flex">
               {navLinks.map((link) => (
@@ -107,6 +106,7 @@ export function Navbar() {
               <LiquidGlassPill
                 as={Link}
                 href="/login"
+                onSlab
                 className="inline-flex h-8 items-center justify-center px-4 text-[13px] font-semibold text-[#2f281f]"
               >
                 Start Free
