@@ -267,3 +267,49 @@ test("a Machine tag and its hover card open that Machine's page, only for a Mach
   await ownTag.locator("[data-status-chip=machine]").click();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?item=machine%3Agrok$/);
 });
+
+test("a picked mention is the message's chip in the draft: face and @name in one pill, text still the draft", async ({ page }, testInfo) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
+    registrations: [{
+      key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "machine-0", harness: "codex" },
+      displayName: "codex", machineName: "MacBook",
+    }],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/channel-general");
+  const draft = page.locator(".composer-textarea").first();
+  await draft.fill("@codex");
+  await page.locator(".app-mention-suggestions").getByRole("option").filter({ hasText: "codex" }).first().click();
+  await expectDraft(draft, "@codex ");
+  const lead = draft.locator(".app-composer-chip-lead");
+  const tail = draft.locator(".app-mention-chip.app-composer-chip-tail");
+  await expect(tail).toHaveText("@codex");
+  await expect(lead.locator(".app-mention-chip-avatar-face")).toBeVisible();
+  const parts = await draft.evaluate((node) => {
+    const box = (selector: string) => node.querySelector(selector)!.getBoundingClientRect().toJSON();
+    const style = (selector: string) => getComputedStyle(node.querySelector(selector)!);
+    return {
+      lead: box(".app-composer-chip-lead"), tail: box(".app-composer-chip-tail"),
+      avatar: box(".app-composer-chip-lead .app-mention-chip-avatar"),
+      leadFill: style(".app-composer-chip-lead").backgroundColor, tailFill: style(".app-composer-chip-tail").backgroundColor,
+      weight: style(".app-composer-chip-tail").fontWeight,
+    };
+  });
+  // The halves meet without a seam on one line, in one fill, as the sent chip's single pill.
+  expect(Math.abs(parts.lead.right - parts.tail.left)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs((parts.lead.top + parts.lead.bottom) / 2 - (parts.tail.top + parts.tail.bottom) / 2)).toBeLessThanOrEqual(0.5);
+  expect(parts.leadFill).toBe(parts.tailFill);
+  expect(Number(parts.weight)).toBeGreaterThanOrEqual(600);
+  // The face sits inside the pill's height, before the `@`.
+  expect(parts.avatar.top).toBeGreaterThanOrEqual(parts.tail.top - 0.5);
+  expect(parts.avatar.bottom).toBeLessThanOrEqual(parts.tail.bottom + 0.5);
+  expect(parts.avatar.right).toBeLessThanOrEqual(parts.tail.left + 0.5);
+  await page.screenshot({ path: testInfo.outputPath("draft-chip.png") });
+
+  // Typing goes on after the chip as text; editing the name takes the chip away.
+  await page.keyboard.type("fix it");
+  await expectDraft(draft, "@codex fix it");
+  await expect(tail).toHaveText("@codex");
+  for (let index = 0; index < "  fix it".length; index += 1) await page.keyboard.press("Backspace");
+  await expectDraft(draft, "@code");
+  await expect(draft.locator(".app-mention-chip")).toHaveCount(0);
+});
