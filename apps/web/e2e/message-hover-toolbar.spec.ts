@@ -93,6 +93,9 @@ test("a common reaction is one click, and R replies to the message under the poi
   await expect.poll(() => fixtureRequestBodies(page, REACTION_RULE)).toEqual([{ emoji: "✅" }]);
 
   // The picker holds the rest, so the bar and the picker never repeat one.
+  // The bar answers only once its own row is under the pointer, and the
+  // reaction may have moved the row out from under it.
+  await row.hover();
   await row.getByRole("button", { name: "Add reaction" }).click();
   const picker = row.getByRole("toolbar", { name: "Quick reactions" });
   await expect(picker).toBeVisible();
