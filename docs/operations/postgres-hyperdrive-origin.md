@@ -139,6 +139,13 @@ Once COMMIT has been sent, connection loss is an unknown result: no immediate
 replay occurs, and the next bounded cleanup pass or expired-lease recovery
 reconciles it. Provider calls and notification delivery are outside the replay.
 
+Sentry recovery claims try the same transaction advisory capacity lock that
+webhook admission takes exclusively. A busy app returns no jobs for that pass,
+without changing attempts, leases or receipt cleanup; the minute recovery wake
+tries again. Successful claims still serialize the eight-active-lease bound.
+Webhook admission retains its waiting lock to enforce receipt and backlog bounds;
+database failures other than a busy try-lock still propagate normally.
+
 Gmail pending notification IDs use one lock-free `single_read`; retrying a
 completion never reruns provider calls or delivery. Its lease ID and expiry
 remain the write fence, and an unknown completion commit retains cursor/lease
