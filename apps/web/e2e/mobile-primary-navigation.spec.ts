@@ -193,6 +193,28 @@ test("returning to the mobile channel list does not create a history loop", asyn
   );
 });
 
+test("a conversation opened from a notification goes back to the channel list, not the conversation before it", async ({ page }) => {
+  const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
+  await page.goto("/app/personal-sspaceperso/channels");
+  await generalChannelRow(page).tap();
+  await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+
+  // The app shells open a tapped notification by loading its conversation link.
+  await page.goto("/app?channel=channel-ops");
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/channels\/ops--channel-ops$/);
+  await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
+
+  // The edge swipe / system Back.
+  await page.goBack();
+  await expectChannelListVisible(page);
+
+  await page.locator('[data-mobile-channel-row-id="channel-ops"]').tap();
+  await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
+  await page.getByRole("button", { name: "Back to channels" }).tap();
+  await expectChannelListVisible(page);
+});
+
 test("back from a conversation shows the channel list that was already painted", async ({ page }) => {
   const space = workingAgentsSpace(1, "mobile-decoration");
   await openGeneralChannelList(page, space.channels[0]);

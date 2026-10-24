@@ -163,6 +163,7 @@ import {
   isLlmTraceEvent,
   isMobileChannelDetailsHistoryState,
   isMobileChannelDetailsLocation,
+  MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY,
   isOwnChannelMessage,
   isThreadChannel,
   isTimelineNearBottom,
@@ -402,6 +403,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const desktopCliSessionSyncTokenRef = useRef("");
 
   const desktopSetupAutoOpenRef = useRef(false);
+
+  const channelLandingSettledRef = useRef(false);
 
   const previousRouteSelectionRef = useRef<{
     routeChannelId: string | null;
@@ -2832,6 +2835,23 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       resolveSpaceRouteKey(spaces, locationRoute.spaceKey));
     if (locationRoute.view !== "messages" || locationChannel?.id !== selectedChannel.id) return;
     const canonicalPath = channelAppPath(selectedChannel, spaces);
+    const landing = !channelLandingSettledRef.current;
+    channelLandingSettledRef.current = true;
+    const historyState: unknown = window.history.state;
+    const openedInApp = Boolean(
+      historyState && typeof historyState === "object" && MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY in historyState
+    );
+    // On a phone a Channel entered from outside the app (a notification, a link,
+    // a cold start) sits on its list, as one opened from the list does: Back,
+    // the edge swipe and Android's Back return there, not to the page before.
+    if (landing && isMobileViewportRef.current && !openedInApp) {
+      const listPath = `${spaceAppPath(selectedChannel.spaceId, spaces)}/channels`;
+      const { hash } = window.location;
+      window.history.replaceState(null, "", listPath);
+      pushBrowserPath(`${canonicalPath}${hash}`, { [MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY]: listPath });
+      setBrowserPath(canonicalPath);
+      return;
+    }
     if (currentBrowserLocation() !== canonicalPath) {
       replaceBrowserPath(canonicalPath);
       setBrowserPath(canonicalPath);
