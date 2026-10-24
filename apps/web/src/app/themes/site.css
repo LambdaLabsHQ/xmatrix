@@ -201,7 +201,7 @@ html:has(.site-page) {
 }
 
 .site-navbar-content {
-  padding-inline: 1.75rem 0.5rem;
+  padding-inline: 1.75rem 1.5rem;
 }
 
 .site-navbar a:not(.app-material-liquid-pill) {
@@ -211,6 +211,12 @@ html:has(.site-page) {
 
 .site-navbar a:not(.app-material-liquid-pill):hover {
   color: var(--site-ink);
+}
+
+/* Start Free is text on the bar glass like its neighbours, set apart by full ink and an arrow. */
+.site-navbar a.site-navbar-cta {
+  color: var(--site-ink);
+  font-weight: 800;
 }
 
 .site-nav-sheet {
