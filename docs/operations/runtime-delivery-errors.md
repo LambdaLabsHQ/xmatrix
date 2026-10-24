@@ -22,6 +22,18 @@ deployed head sampling rate is one; an empty query is not proof of no failure.
 Keep unresolved incidents open until the originating failure is understood and
 any fix is verified in production.
 
+Machine Daemon credential failures (HUB-A7/7H) retain a fixed `machine_credential_reason`
+in a single Sentry event and the issue reader: signing configuration, expiry, not-before,
+signature, algorithm, JWT claims, missing/incomplete principal, revoked identity,
+or unclassified verification failure. JOSE payloads, token bytes, exception text
+and owner/Machine identity are discarded. The socket still returns its existing
+non-retryable failure and fallback copy; verification and revocation remain
+fail-closed. Reports group by reason so unlike failures are not deduplicated.
+On recurrence, read this reason before deciding whether the
+daemon delivered a stale credential, the signing configuration diverged, or
+the token/principal contract needs repair. A generic refresh stack alone cannot
+establish any of those causes, and does not justify ignoring the issue.
+
 HUB-9Y exhausted the platform's subrequest depth while sending Agent presence;
 the receiving presence handler only writes local Human sockets and does not
 republish. The original event does not establish where the depth accumulated.

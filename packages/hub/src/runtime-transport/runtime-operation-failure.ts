@@ -1,4 +1,5 @@
 import { ControlError } from "@xmatrix/db";
+import { reportMachineDaemonCredentialFailure } from "../connections/machine-daemon/credential-failure";
 import { reportPostgresConflict } from "../postgres-conflict-diagnostic";
 
 import { transientDurableObjectFailure } from "../durable-object-failure";
@@ -117,9 +118,10 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
     retryable: false, stage: "runtime.session" };
   // Where it was thrown, never what it said: an unclassified error's message
   // may carry request data, so the log keeps only its class and call sites.
-  // The explicit database report owns the event, including the failing phase
-  // and original deployed frames. A second console capture would lose both.
-  const reported = reportRuntimeDatabaseFailure(error, failure.diagnosticId);
+  // Typed credential and database reports own their event and fixed diagnosis.
+  // A second console capture would discard those fields and duplicate it.
+  const reported = reportMachineDaemonCredentialFailure(error, failure.diagnosticId) ||
+    reportRuntimeDatabaseFailure(error, failure.diagnosticId);
   (reported ? console.warn : console.error)("xMatrix runtime session failure", { ...failure, ...runtimeFailureOrigin(error) });
   return failure;
 }
