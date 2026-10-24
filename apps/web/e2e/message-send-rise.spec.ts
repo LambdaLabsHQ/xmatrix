@@ -486,3 +486,35 @@ test("a step of the layout on the way keeps the rows moving as fast as they were
     .toEqual([]);
   expect(movesOfRowAbove(frames).filter((by) => by > 0)).toEqual([]);
 });
+
+/* The end of the timeline can still change once a send's rise is over: the
+   server's copy laid out differently, the work dock coming or going, a chip.
+   The reader stays on the newest message, and the rows used to get there in
+   one frame (user 2026-10-24: "现在看起来像是状态在变化…和卡片的那个idle，还有
+   Busy是相关的"). They go there along the rise's spring now, either way. */
+for (const { change, answer } of [
+  { change: "grows", answer: "Late one\n\nwith a line that came later\n\nand another" },
+  { change: "shrinks", answer: "Late" },
+]) {
+  test(`the end of the timeline that ${change} after the rise is over moves the rows along the way`, async ({ page }) => {
+    await openChannelRecordingRises(page);
+    const draft = page.locator("textarea.composer-textarea").first();
+    const body = "Late one\n\nwith a line";
+    await answerNextSend(page, HISTORY_LENGTH + 1, answer, 3_500);
+    await draft.fill(body);
+    await draft.press("Enter");
+    await listAtRest(page);
+    // Past the rise: the timeline stands still on its newest message.
+    await page.waitForTimeout(1_700);
+    await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1}"]`)).toHaveCount(0);
+    const frames = await framesOfSend(page, async () => {
+      await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1}"]`)).toBeVisible({ timeout: 5_000 });
+    });
+    const moves = movesOfRowAbove(frames);
+    const travelled = Math.abs(moves.reduce((sum, by) => sum + by, 0));
+    expect(travelled, JSON.stringify(moves)).toBeGreaterThan(8);
+    // One way, over several frames, none of them most of the way.
+    expect(moves.every((by) => Math.sign(by) === Math.sign(moves[0]!)), JSON.stringify(moves)).toBe(true);
+    expect(Math.max(...moves.map((by) => Math.abs(by))), JSON.stringify(moves)).toBeLessThan(travelled * 0.5);
+  });
+}
