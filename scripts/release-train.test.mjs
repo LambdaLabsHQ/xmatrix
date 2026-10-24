@@ -10,6 +10,7 @@ import {
   api,
   bumpVersion,
   checkStable,
+  codeqlAnalyses,
   codeqlLanguages,
   COMPONENTS,
   deferClientIntents,
@@ -58,6 +59,42 @@ test("no component ships unscanned; the workflows that release it are scanned to
     assert.equal(workflows, "actions", component);
     assert.equal(typeof language, "string", component);
     assert.deepEqual(rest, [], component);
+    const analysed = codeqlAnalyses([component]);
+    assert.deepEqual([...new Set(analysed.map((analysis) => analysis.language))], [workflows, language], component);
+    assert.equal(new Set(analysed.map((analysis) => analysis.category)).size, analysed.length, "one category per analysis");
+  }
+});
+
+test("the JavaScript and TypeScript halves read every shipped file exactly once, and no test", () => {
+  // Paths as CodeQL reads them: a listed directory and everything under it;
+  // `**/<dir>/**` anywhere in the path; `**/*.<kind>.*` in the file name.
+  const matches = (pattern, file) => {
+    if (!pattern.includes("*")) return file === pattern || file.startsWith(`${pattern}/`);
+    const dir = /^\*\*\/([^*/]+)\/\*\*$/u.exec(pattern)?.[1];
+    if (dir) return file.split("/").slice(0, -1).includes(dir);
+    const kind = /^\*\*\/\*(\.[a-z]+\.)\*$/u.exec(pattern)?.[1];
+    if (kind) return path.posix.basename(file).includes(kind);
+    throw new Error(`unread pattern ${pattern}`);
+  };
+  const reads = (config, file) => {
+    const list = (key) => [...config.matchAll(new RegExp(`^${key}:\\n((?:  - .*\\n?)*)`, "gmu"))]
+      .flatMap((match) => match[1].split("\n").filter(Boolean).map((line) => JSON.parse(line.slice(4))));
+    const paths = list("paths");
+    return (!paths.length || paths.some((pattern) => matches(pattern, file))) &&
+      !list("paths-ignore").some((pattern) => matches(pattern, file));
+  };
+  const halves = codeqlAnalyses(["hub", "web"]).filter((analysis) => analysis.language === "javascript-typescript");
+  assert.deepEqual(halves.map((half) => half.part), ["web", "server"]);
+  const shipped = ["apps/web/src/app/page.tsx", "apps/web/worker.mjs", "packages/hub/src/index.ts",
+    "packages/protocol/src/index.ts", "packages/db/src/space-control.ts", "scripts/release-train.mjs",
+    "apps/desktop/src/main.ts", "apps/webhooks/index.ts"];
+  for (const file of shipped) {
+    assert.equal(halves.filter((half) => reads(half.config, file)).length, 1, file);
+  }
+  const tests = ["apps/web/e2e/login.spec.ts", "apps/web/src/lib/x.test.ts", "packages/hub/test/a.mjs",
+    "packages/cli-rs/crates/core/src/tests/mod.rs", "scripts/release-train.test.mjs", "apps/web/src/__tests__/a.ts"];
+  for (const file of tests) {
+    assert.equal(halves.filter((half) => reads(half.config, file)).length, 0, file);
   }
 });
 
