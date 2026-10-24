@@ -32,7 +32,7 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       channel: ${{ steps.plan.outputs.channel }}
       source_sha: ${{ steps.plan.outputs.source_sha }}
-      codeql_languages: ${{ steps.plan.outputs.codeql_languages }}
+      codeql_analyses: ${{ steps.plan.outputs.codeql_analyses }}
     steps:
       - name: Require the default branch
         uses: actions/github-script@v7
@@ -164,15 +164,15 @@ jobs:
   # Code scanning before anything ships: CodeQL's security-extended queries
   # on the frozen source, for the languages this train's components are
   # written in and the workflows that release them
-  # (scripts/release-train.mjs, codeqlLanguages). Pull requests and merges
+  # (scripts/release-train.mjs, codeqlAnalyses). Pull requests and merges
   # are not scanned. The analysis must finish before the train ships; its
   # findings are code scanning alerts on main, not a verdict. Test code never
-  # ships, so it is not scanned: it is about a third of the JavaScript and
-  # TypeScript, and the analysis of the rest is the gates' longest job.
+  # ships, so it is not scanned. The JavaScript and TypeScript analysis, the
+  # longest gate, runs as two halves side by side.
   codeql:
     needs: plan
     if: needs.plan.outputs.scope != ''
-    name: CodeQL (${{ matrix.language }})
+    name: CodeQL (${{ matrix.language }}${{ matrix.part != 'all' && format(' {0}', matrix.part) || '' }})
     runs-on: ${{ matrix.language == 'swift' && 'macos-26' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     permissions:
@@ -182,7 +182,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ${{ fromJSON(needs.plan.outputs.codeql_languages) }}
+        include: ${{ fromJSON(needs.plan.outputs.codeql_analyses) }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -193,17 +193,10 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.language == 'swift' && 'autobuild' || 'none' }}
           queries: security-extended
-          config: |
-            paths-ignore:
-              - "**/*.test.*"
-              - "**/*.spec.*"
-              - "**/test/**"
-              - "**/tests/**"
-              - "**/e2e/**"
-              - "**/__tests__/**"
+          config: ${{ matrix.config }}
       - uses: github/codeql-action/analyze@v4
         with:
-          category: /language:${{ matrix.language }}
+          category: ${{ matrix.category }}
           ref: refs/heads/${{ github.event.repository.default_branch }}
           sha: ${{ needs.plan.outputs.source_sha }}
 

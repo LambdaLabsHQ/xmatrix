@@ -107,6 +107,40 @@ export function codeqlLanguages(scope) {
   return [...new Set(["actions", ...scope.map((component) => CODEQL_LANGUAGE[component])])];
 }
 
+// Test code never ships, so no analysis reads it.
+const CODEQL_TEST_PATHS = Object.freeze(["**/*.test.*", "**/*.spec.*", "**/test/**", "**/tests/**", "**/e2e/**", "**/__tests__/**"]);
+// The JavaScript and TypeScript analysis is the gates' longest job, so it runs
+// as two halves side by side: the Web app, and everything else. Each half
+// uploads to its own alert category; together they read all of it. Other
+// languages are analysed whole.
+const CODEQL_PARTS = Object.freeze({
+  "javascript-typescript": [{ part: "web", paths: ["apps/web"] }, { part: "server", ignore: ["apps/web"] }],
+});
+
+function codeqlConfig({ paths = [], ignore = [] }) {
+  const list = (items) => items.map((item) => `  - ${JSON.stringify(item)}`);
+  return [
+    ...(paths.length ? ["paths:", ...list(paths)] : []),
+    "paths-ignore:", ...list([...ignore, ...CODEQL_TEST_PATHS]),
+  ].join("\n");
+}
+
+/**
+ * The CodeQL analyses a train runs before it ships `scope`: its languages
+ * (codeqlLanguages), each whole or in its parts, with the alert category each
+ * uploads to and its configuration. The configuration comes from the train's
+ * own revision, not the source it scans, so a stable of an older beta reads
+ * the same paths.
+ */
+export function codeqlAnalyses(scope) {
+  return codeqlLanguages(scope).flatMap((language) => (CODEQL_PARTS[language] ?? [{ part: "all" }]).map((part) => ({
+    language,
+    part: part.part,
+    category: part.part === "all" ? `/language:${language}` : `/language:${language}/${part.part}`,
+    config: codeqlConfig(part),
+  })));
+}
+
 function isBetaTag(tag) {
   return RELEASE_TAG_PATTERN.test(tag ?? "") && releaseChannel(tag.slice("xmatrix-v".length)) === "beta";
 }
@@ -471,7 +505,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   output("tag", tag);
   output("channel", channel);
   output("source_sha", sourceSha);
-  output("codeql_languages", JSON.stringify(codeqlLanguages(scope)));
+  output("codeql_analyses", JSON.stringify(codeqlAnalyses(scope)));
   output("intents", intents.map((intent) => intent.id).join(","));
 }
 
