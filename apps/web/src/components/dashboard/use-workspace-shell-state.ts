@@ -61,7 +61,6 @@ import {
   filterHistoryForChannel,
   mergeChannelHistory,
   sortChannelHistory,
-  supersededHistoryMessage,
   commandResultHistoryMessage,
 } from "@/components/dashboard/channel-history";
 import { sameValue } from "../../lib/same-value";
@@ -1756,15 +1755,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           // updates in place, without refetching the channel.
           if (message.event.type === "channel_member_read_updated") {
             setChannels((current) => applyMemberReadEvent(current, message.event));
-          }
-          // The Hub folded a progress report under its sender's next one.
-          // Whichever window holds it, open or cached, folds it now, so the
-          // Channel never opens on rows its next read would rearrange.
-          if (message.event.type === "channel_message_superseded" && message.event.channelId) {
-            const channelId = message.event.channelId;
-            const folded = supersededHistoryMessage(
-              heldChannelWindow(channelId, false).messages, message.event.metadata);
-            if (folded) mergeAndRememberChannelHistory(channelId, [folded], undefined, false);
           }
           // A launch, stop, continuation, execution or launch choice moved: the
           // chips of the messages shown re-read their records. Nothing polls.

@@ -1035,7 +1035,6 @@ export function buildTimeline(
         : loadedThreadReplyParticipants,
       editedAt: message.editedAt,
       recalledAt: message.recalledAt,
-      ...(message.supersededBy && !message.recalledAt ? { supersededBy: message.supersededBy } : {}),
       ...(message.questionnaireState && !message.recalledAt ? { questionnaireState: message.questionnaireState } : {}),
       ...(commandNotices.noticesBySource.has(message.messageId)
         ? { commandNotices: commandNotices.noticesBySource.get(message.messageId) } : {}),

@@ -2392,7 +2392,7 @@ export class PostgresMessageRepository {
 
   /**
    * Record a judgment the Hub made about a message, authored by `system`
-   * rather than by any principal (docs/design/conversation-activity.md §3.3).
+   * rather than by any principal.
    * Only trusted Hub code calls this; public annotation writes may not use a
    * reserved `xmatrix.` namespace. Returns null when the message is gone,
    * recalled, or already carries this exact judgment.

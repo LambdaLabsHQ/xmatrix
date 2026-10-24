@@ -10,8 +10,6 @@ export const CHANNEL_ACTIVITY_MESSAGE_KIND = "xmatrix.activity";
 /** Metadata provenance of an activity entry: context for Agents, never unread for people. */
 export const CHANNEL_ACTIVITY_PROVENANCE = "activity";
 
-/** Annotation namespace of the Hub's judgment that a later message superseded this one. */
-export const SUPERSEDED_ANNOTATION_NAMESPACE = "xmatrix.superseded";
 /** The Hub's record that a questionnaire card was answered or withdrawn. */
 export const QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE = "xmatrix.questionnaire";
 
@@ -184,14 +182,6 @@ function hubJudgments(annotations: unknown, namespace: string): Record<string, u
     if (annotation?.namespace !== namespace || annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) return [];
     return [annotation.payload && typeof annotation.payload === "object" ? annotation.payload as Record<string, unknown> : {}];
   });
-}
-
-/** The id of the message that superseded this one, when the Hub judged so. */
-export function supersededByOf(annotations: unknown): string | undefined {
-  for (const payload of hubJudgments(annotations, SUPERSEDED_ANNOTATION_NAMESPACE)) {
-    if (typeof payload.supersededBy === "string" && payload.supersededBy) return payload.supersededBy;
-  }
-  return undefined;
 }
 
 /** One thing the Hub said about a command, in its own words. */

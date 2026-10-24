@@ -126,24 +126,6 @@ export function sortChannelHistory<T extends ChannelHistoryLike>(messages: T[]):
   });
 }
 
-/**
- * The held message a live supersession judgment folds, carrying it; undefined
- * when this window does not hold it or already shows the judgment. The event
- * names only the two messages (docs/design/conversation-activity.md §3.3).
- */
-export function supersededHistoryMessage<
-  T extends ChannelHistoryLike & { recalledAt?: string; supersededBy?: string },
->(messages: readonly T[], metadata: Record<string, unknown> | undefined): T | undefined {
-  const messageId = metadata?.messageId;
-  const supersededBy = metadata?.supersededBy;
-  if (typeof messageId !== "string" || typeof supersededBy !== "string" || !messageId || !supersededBy) {
-    return undefined;
-  }
-  const held = messages.find((message) => message.messageId === messageId);
-  if (!held || held.recalledAt || held.supersededBy === supersededBy) return undefined;
-  return { ...held, supersededBy };
-}
-
 /** The held message with one command-result annotation the Hub just recorded
  * applied, or undefined when it is not held or is recalled. */
 export function commandResultHistoryMessage<
@@ -178,7 +160,7 @@ export function mergeChannelHistory<T extends ChannelHistoryLike>(
    echo) cannot carry one and knows nothing of it, so it never erases one the
    reader already holds. A sent `/effort`'s answer is pushed before the send
    returns, and that answer must survive the send's reply. */
-const HUB_JUDGMENTS = ["supersededBy", "questionnaireState", "commandResult"] as const;
+const HUB_JUDGMENTS = ["questionnaireState", "commandResult"] as const;
 
 function withHeldJudgments<T extends ChannelHistoryLike>(held: T, incoming: T): T {
   if ((incoming as { recalledAt?: string }).recalledAt) return incoming;

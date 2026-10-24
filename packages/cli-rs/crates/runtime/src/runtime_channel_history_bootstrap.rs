@@ -315,7 +315,7 @@ fn render_history_entry(
         .as_deref()
         .map(|parent| format!(" [replyToMessageId={parent}]"))
         .unwrap_or_default();
-    // Activity and superseded reports fold to one line, as they do on the web.
+    // Activity folds to one line, as it does on the web.
     if let Some(folded) = xmatrix_cli_core::protocol::folded_history_line(message) {
         return format!(
             "{}{age}{sequence} {} [{}] [messageId={}]{reply}{thread_marker}: {folded}\n",
@@ -550,18 +550,17 @@ mod tests {
     }
 
     #[test]
-    fn activity_and_superseded_reports_are_one_line_in_launch_context() {
+    fn activity_is_one_line_and_talk_stays_whole_in_launch_context() {
         let mut activity = message("m-1", 1, "claude:1", "✓ Run e2e");
         activity.metadata = Some(serde_json::json!({
             "xmatrixProvenance": "activity",
             "xmatrixActivity": { "kind": "plan", "completed": ["Run e2e"], "steps": [] },
         }));
-        let mut superseded = message("m-2", 2, "claude:1", "Progress: writing the CLI\nmore");
-        superseded.superseded_by = Some("m-3".into());
+        let report = message("m-2", 2, "claude:1", "Progress: writing the CLI\nmore");
         let spoken = message("m-3", 3, "claude:1", "CLI merged into PR 2");
         let block = render_channel_history_block(
             "channel-1",
-            &[activity, superseded, spoken],
+            &[activity, report, spoken],
             None,
             10_000,
             None,
@@ -571,7 +570,7 @@ mod tests {
         .text;
         assert!(block.contains("[messageId=m-1]: ▸ ✓ Run e2e\n"), "{block}");
         assert!(
-            block.contains("[messageId=m-2]: [superseded by m-3] Progress: writing the CLI…\n"),
+            block.contains("[messageId=m-2]:\n  Progress: writing the CLI\n  more\n"),
             "{block}"
         );
         assert!(

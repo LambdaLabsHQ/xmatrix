@@ -37,7 +37,7 @@ export type UsageCostEnv = Pick<Env, "XMATRIX_USAGE_COST_AE" | "CF_VERSION_METAD
 export type UsageScope = { spaceId: string } | { ownerUserId: string };
 
 /** What a Jev call was for. */
-export type JevFeature = "summon_intent" | "launch_choice" | "input_launch" | "start_intent" | "supersession"
+export type JevFeature = "summon_intent" | "launch_choice" | "input_launch" | "start_intent"
   | "page_attachment" | "evaluate" | "search_rerank";
 
 export type UpstreamSource = "composio" | "x";

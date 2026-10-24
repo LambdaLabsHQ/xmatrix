@@ -114,12 +114,7 @@ test("the hub frame builder ships exactly the shared message fields", () => {
   });
   assert.equal(framed.bodyHash, undefined, "recalled content cannot expose a source fingerprint");
   assert.equal(framed.entityVersion, 2, "redaction markers carry the committed entity version");
-  // Supersession is derived from the Hub's own annotation, and only for a
-  // message that is still there (docs/design/conversation-activity.md §3.3).
-  const judgment = [{ namespace: "xmatrix.superseded", authorUserId: "system:xmatrix",
-    payload: { supersededBy: "message-5" } }];
-  assert.equal(channelMessage({ ...framed, annotations: judgment }).supersededBy, undefined);
-  // A questionnaire card's settled state is likewise the Hub's own annotation.
+  // A questionnaire card's settled state is the Hub's own annotation.
   const settled = [{ namespace: "xmatrix.questionnaire", authorUserId: "system:xmatrix",
     payload: { state: "answered", answers: { branch: ["main"] } } }];
   // So is what a command the message wrote came to.
@@ -127,10 +122,9 @@ test("the hub frame builder ships exactly the shared message fields", () => {
     authorUserId: "system:xmatrix",
     payload: { controls: [{ kind: "effort", target: "claude:1", status: "switched", selected: "max" }] } }];
   const published = channelMessage({ ...framed, recalledAt: undefined, recalledBy: undefined,
-    entityVersion: 2, bodyHash: "a".repeat(64), annotations: [...judgment, ...settled, ...answered] });
+    entityVersion: 2, bodyHash: "a".repeat(64), annotations: [...settled, ...answered] });
   assert.equal(published.bodyHash, "a".repeat(64));
   assert.equal(published.entityVersion, 2);
-  assert.equal(published.supersededBy, "message-5");
   assert.deepEqual(published.questionnaireState, { state: "answered", answers: { branch: ["main"] } });
   assert.deepEqual(published.commandResult, { controls: answered[0].payload.controls });
   const deleted = channelMessage({ ...framed, body: "", recalledAt: undefined, recalledBy: undefined,

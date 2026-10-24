@@ -68,20 +68,6 @@ test("anyone else's entry ends a run, so interleaving stays visible", () => {
     [["claude:1"], ["codex:2"], ["claude:1"], ["claude:2"]]);
 });
 
-test("a superseded report folds; the newest and any engaged message stay whole", () => {
-  const rows = buildConversationRows([
-    said(claude1, "Progress: running e2e", 27, { supersededBy: "m-2" }),
-    said(claude1, "Progress: e2e passed", 29),
-  ]);
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0].folded.length, 1);
-  assert.equal(rows[1].folded, undefined);
-  const recalled = buildConversationRows([
-    said(claude1, "", 27, { supersededBy: "m-9", recalledAt: at(28) }),
-  ]);
-  assert.equal(recalled[0].folded, undefined);
-});
-
 test("a message right after its sender's own drops the header, until tags or time change", () => {
   const first = said(yiming, "one", 0);
   const second = said(yiming, "two", 5);

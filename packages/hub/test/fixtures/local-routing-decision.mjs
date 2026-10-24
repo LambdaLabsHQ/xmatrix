@@ -3,7 +3,7 @@ export { MAX_INPUT_BYTES } from "../../../decision-model/src/jev.mjs";
 export function createJevClient() {
   return { async evaluate(input) {
     return { answers: Object.fromEntries(Object.entries(input.questions).map(([name, question]) => {
-      // A yes/no judgment (message supersession) answers no: the message stays whole.
+      // A yes/no judgment answers no.
       if (question.type === "boolean") return [name, { type: "boolean", probability: 0 }];
       const keys = Object.keys(question.criteria);
       const choice = keys[0];

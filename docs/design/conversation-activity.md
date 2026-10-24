@@ -39,17 +39,15 @@ progress to where it belongs: an ordered, compact activity record, a live
 1. **Order lives in one sequence.** Everything that happens in a conversation
    is an entry in the Channel's timeline sequence. Presentation may make an
    entry smaller; it never moves it.
-2. **State is superseded, speech is not.** A status report stops mattering
-   once a newer one exists; a question, decision, finding or result does not.
-   Superseded state folds into one line where it was. Speech stays whole.
+2. **Speech stays whole.** Whatever a person or an Agent writes is shown as
+   written, however soon its sender writes again. Only activity entries, the
+   facts a runtime recorded, fold; an Instance's current state is on its card
+   in the work dock (§4.2).
 3. **Facts are recorded by their source.** A step completed in an Agent's own
    plan is reported by the runtime that saw the plan change; a pull request is
    reported by the Run that opened it. The Agent does not restate them
    (parent design §2.4: facts with an authority are referenced, not restated).
-4. **Language decides salience, not syntax or author kind.** Whether a
-   message is superseded is judged from what the messages say (Jev), with one
-   rule for people and Agents. No flag, command or sender kind decides it.
-5. **People and Agents read the same structure.** The web timeline and
+4. **People and Agents read the same structure.** The web timeline and
    `xmatrix channel history` fold the same entries the same way.
 
 ## 3. Model
@@ -91,35 +89,15 @@ by supplying metadata (§6).
 - **Billing.** Billable like any Agent message, so a read-only Space refuses
   it the same way.
 
-### 3.3 Supersession
+### 3.3 No supersession
 
-When a person or an Agent posts a message M2, the Hub looks at the same
-sender's previous message M1 in the conversation (for an Agent, the same
-Instance). If M1 is **eligible**, the Hub asks Jev one boolean question: is
-M1 a report of work in progress that a reader no longer needs once they have
-read M2?
-
-- **Eligible** means none of: a mention of anyone, a reply to a message, a
-  reply or reaction from anyone, an attachment, a thread, an edit or recall,
-  an existing judgment, or an age above 24 hours. These are the cases in
-  which a message is plainly addressed to someone or has been engaged with,
-  so they are never folded.
-- **Recorded as** a system annotation on M1 in the reserved namespace
-  `xmatrix.superseded` with payload `{ supersededBy: <M2 id> }`. The
-  annotation is written by the Hub as `system`, not as the author. History
-  reads and message frames carry it as the message's `supersededBy` field,
-  derived only from that annotation; other annotations never enter frames.
-  Clients that already hold the message hear a judgment made after it
-  arrived as a `channel_message_superseded` event to the Channel's people,
-  naming the two messages; every window holding M1 folds it then, whether
-  its Channel is open or not, so a Channel never opens on rows that fold a
-  moment later. A client that missed the event gets the field on its next
-  history read.
-- **Failure is harmless.** No key, a timeout or an error records nothing and
-  M1 stays whole. The judgment runs after the append commits and never delays
-  a send.
-- **The newest message of each sender is never superseded**, because only a
-  later message can supersede it.
+A message is never judged obsolete or folded. The Hub used to ask Jev, after
+each message, whether the same sender's previous one was a progress report a
+reader no longer needed, and fold it under a `superseded` line. People's
+messages were folded too and the fold landed after the reader had seen the row
+whole; it was removed on 2026-10-24 (user: "这种功能我觉得很奇怪，去掉吧").
+Annotations it wrote in `xmatrix.superseded` remain in history and are
+ignored.
 
 ### 3.4 Now
 
@@ -134,8 +112,7 @@ state. Pages already use the same line for heading avatars
 When a reader opens a conversation with unread entries, a divider above the
 first unread entry summarizes what happened after it, computed from the
 typed entries rather than written by a model: messages that mention the
-reader, pull requests opened, how many steps and superseded reports were
-folded, and who posted. Jev only answers choice, score and boolean
+reader, pull requests opened, how many steps were folded, and who posted. Jev only answers choice, score and boolean
 questions, and the Hub has no text-generation dependency; this digest needs
 none.
 
@@ -212,12 +189,11 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 - **Activity rows.** An activity entry renders as one compact line: time,
   sender, and the entry's own glyphs (`✓` completed, `→` in progress,
   `↗` pull request). No avatar and no identity tags.
-- **Folding.** Consecutive *foldable* entries (activity entries and
-  superseded messages) from the same Instance merge into one row with a time
-  range and a count; the newest items are shown inline. Any entry from anyone
-  else, or any unfolded message, ends the fold, so interleaving between
-  participants always stays visible. Opening a fold shows each entry in
-  place; a superseded message opens to its full text.
+- **Folding.** Consecutive activity entries from the same Instance merge into
+  one row with a time range and a count; the newest items are shown inline.
+  Any entry from anyone else, or any message, ends the fold, so interleaving
+  between participants always stays visible. Opening a fold shows each entry
+  in place.
 - **Header continuation.** A message from the same sender as the entry above
   it, within ten minutes and with the same identity tags, drops the avatar
   and header. Identity tags reappear only when they change, and a header that
@@ -235,9 +211,8 @@ rather than hidden behind a green state ([`agent-status.md`](agent-status.md) §
 ### 4.3 Agents
 
 `xmatrix channel history` and the launch-time channel context print an
-activity entry as one line (`claude:1 ▸ ✓ Run e2e regression`) and a
-superseded message as one line naming what superseded it. Order and message
-ids are preserved, so an Agent can still reply to or quote any entry.
+activity entry as one line (`claude:1 ▸ ✓ Run e2e regression`). Order and
+message ids are preserved, so an Agent can still reply to or quote any entry.
 
 ## 5. Channel contract
 
@@ -292,9 +267,9 @@ output and is published to a Channel only through an explicit send.
 Built:
 
 1. Hub (#3053): activity entries (typed socket report, context delivery, no
-   unread, no attention), supersession judgment and system annotation,
-   `supersededBy` on messages, reserved metadata and annotation namespaces,
-   `hubCapabilities` on connect.
+   unread, no attention), reserved metadata and annotation namespaces,
+   `hubCapabilities` on connect. (Its supersession judgment was removed in
+   #947.)
 2. Runtime and CLI (#3065): plan and pull request reports from Claude Code,
    Codex and ACP runtimes; presence intent; history and launch-context
    folding; the new contract.

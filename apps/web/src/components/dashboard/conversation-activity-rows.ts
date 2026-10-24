@@ -4,8 +4,8 @@ import type { TimelineItem } from "./workspace-shell-message-model";
 /**
  * How a conversation reads (docs/design/conversation-activity.md §4.1).
  *
- * Talk stays whole. Activity entries, and reports the Hub judged superseded,
- * fold into one row per run of the same Instance; anything from anyone else
+ * Talk stays whole. Activity entries fold into one row per run of the same
+ * Instance; anything from anyone else
  * ends the run, so who did what in which order stays visible. A message that
  * directly follows its sender's own message drops the repeated header.
  */
@@ -27,7 +27,7 @@ function actorKey(item: TimelineItem): string | undefined {
 
 function foldable(item: TimelineItem): boolean {
   if (!item.messageId || item.recalledAt || item.sendStatus || item.isEvent) return false;
-  return Boolean(item.supersededBy) || Boolean(timelineItemActivity(item));
+  return Boolean(timelineItemActivity(item));
 }
 
 /** The header tags a message carries, by the key its tag is drawn with. */
@@ -157,29 +157,19 @@ export function buildConversationRows(timeline: readonly TimelineItem[]): Timeli
 }
 
 export type FoldSummary = {
-  /** One segment per fact, oldest first: `✓ step`, `↗ owner/repo#1`, `“report…”`. */
+  /** One segment per fact, oldest first: `✓ step`, `↗ owner/repo#1`. */
   segments: string[];
   steps: number;
-  reports: number;
   pullRequests: { repository: string; number: number; url: string }[];
   /** The step in progress at the fold's newest plan entry. */
   inProgress?: string;
 };
 
-function firstLine(body: string): string {
-  const line = body.split("\n").map((part) => part.trim()).find(Boolean) ?? "";
-  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
-}
-
 export function foldSummary(items: readonly TimelineItem[]): FoldSummary {
-  const summary: FoldSummary = { segments: [], steps: 0, reports: 0, pullRequests: [] };
+  const summary: FoldSummary = { segments: [], steps: 0, pullRequests: [] };
   for (const item of items) {
     const activity = timelineItemActivity(item);
-    if (!activity) {
-      summary.reports += 1;
-      summary.segments.push(`“${firstLine(item.body)}”`);
-      continue;
-    }
+    if (!activity) continue;
     if (activity.kind === "pull_request") {
       summary.pullRequests.push({ repository: activity.repository, number: activity.number, url: activity.url });
       summary.segments.push(`↗ ${activity.repository}#${activity.number}`);

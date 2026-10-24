@@ -9,15 +9,15 @@ import { openMessageChannel, recordingDatabase, storedMessageRow } from "./recor
 
 /**
  * `xmatrix.` annotation namespaces hold the Hub's own judgments
- * (docs/design/conversation-activity.md §3.3): only annotateAsSystem writes
+ * (command results, questionnaire states): only annotateAsSystem writes
  * them, so no principal writes, replaces or removes one.
  */
 
 const at = "2026-09-27T00:00:00.000Z";
 const judgment = {
-  id: "xmatrix.superseded:message-1", namespace: "xmatrix.superseded",
+  id: "xmatrix.command-result:message-1", namespace: "xmatrix.command-result",
   target: { kind: "message", messageId: "message-1" }, authorUserId: "system:xmatrix",
-  authorLabel: "xMatrix", payload: { supersededBy: "message-2" }, version: 1,
+  authorLabel: "xMatrix", payload: { note: "message-2" }, version: 1,
   createdAt: at, updatedAt: at,
 };
 
@@ -45,7 +45,7 @@ async function refused(fields) {
 }
 
 test("the author cannot write an annotation in a reserved namespace", async () => {
-  await refused({ action: "upsert", annotationId: "mine", namespace: " XMatrix.superseded" });
+  await refused({ action: "upsert", annotationId: "mine", namespace: " XMatrix.command-result" });
 });
 
 test("the author cannot replace the Hub's judgment under another namespace", async () => {

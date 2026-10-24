@@ -15,7 +15,6 @@ The code is `packages/hub/src/usage-cost-metering.ts`.
 | `jev` | Launch choice for a message's summon (intent, workspace, fit, model) | `launch_choice` | `none` / model |
 | `jev` | Any-input launch: handoff successors, system conversations | `input_launch` | `none` / model |
 | `jev` | First message that summons nobody: start intent and launch choice | `start_intent` | `none` / model |
-| `jev` | Message supersession judgment | `supersession` | `none` / model |
 | `jev` | Attaching a new conversation to a Page | `page_attachment` | `none` / model |
 | `jev` | `POST /api/ai/jev/evaluate` | `evaluate` | `none` / model |
 | `composio` | Gmail actions, Connect, check, mailbox removal, disconnect | `gmail` | Hub action (`search`, `read`, `send`, `reply`, `connect`, `verify`, `mailbox_remove`, `disconnect`) / `proxy`, `connect_link`, `connected_accounts`, `account_delete` |
@@ -31,8 +30,9 @@ key, an endpoint the Hub does not call) make no request and no point.
 Attribution:
 
 - A Channel's calls go to the Space the Channel is placed in. Launch calls
-  take it from the placement the launch already resolved; supersession from
-  its history read; nothing is looked up only to meter.
+  take it from the placement the launch already resolved; nothing is looked
+  up only to meter. Points with feature `supersession` predate its removal
+  (#947) and remain readable.
 - `evaluate` uses the verified Space membership for a Human caller, or the
   live Agent Run's birth Space; its scope kind is `space`. Earlier deployment
   points used the owner user id with scope kind `user` and remain readable.

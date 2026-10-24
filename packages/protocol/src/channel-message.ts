@@ -62,12 +62,6 @@ export interface ChannelMessage {
   deletedAt?: string;
   recalledBy?: MessageSender;
   /**
-   * The later message from the same sender that the Hub judged makes this one
-   * obsolete, so readers fold it to a line (docs/design/conversation-activity.md
-   * §3.3). Derived from the Hub's own annotation; never supplied by a sender.
-   */
-  supersededBy?: string;
-  /**
    * A questionnaire card's settled state: answered by its person or withdrawn
    * by the Instance that asked. Derived from the Hub's own annotation; absent
    * while the card is open.

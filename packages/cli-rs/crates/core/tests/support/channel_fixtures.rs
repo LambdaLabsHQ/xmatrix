@@ -53,7 +53,6 @@ pub(crate) fn message(
         recalled_at: None,
         deleted_at: None,
         recalled_by: None,
-        superseded_by: None,
         sent_at: sent_at.into(),
     }
 }

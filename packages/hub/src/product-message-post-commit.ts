@@ -31,7 +31,6 @@ import { firstMessageSummonId, PostgresPageRepository, XMATRIX_SYSTEM_AUTHOR_ID 
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { guideAgentlessFirstMessage } from "./index-routes-welcome";
 import { attachConversationToPage } from "./product-page-attachment";
-import { judgeMessageSupersession } from "./message-supersession";
 import { CHANNEL_ACTIVITY_MESSAGE_KIND } from "@xmatrix/protocol";
 
 /** Product control and durable video admission finish before the HTTP response.
@@ -286,18 +285,9 @@ export async function dispatchProductMessagePostCommit(
   // said: nothing in its body is a mention, command, page link or launch.
   if (input.messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND) return;
   const tasks: Promise<unknown>[] = [];
-  // Interpretation nobody waits on (supersession, page links, the About) never
+  // Interpretation nobody waits on (page links, the About) never
   // holds a launch's HTTP response: given a background scheduler, it runs there.
   const sideTasks: Promise<unknown>[] = [];
-  if (input.senderKind !== "system" && input.sequence !== undefined && Number.isSafeInteger(input.sequence) &&
-      input.sequence > 0) {
-    sideTasks.push(judgeMessageSupersession({
-      env: input.env, channelId: input.channelId, messageId: input.messageId,
-      sequence: input.sequence, principal: { kind: input.senderKind, id: input.senderId },
-    }).catch((error) => {
-      logPostCommitFailure("Message supersession judgment failed", input, error);
-    }));
-  }
   const interaction = parseMessageInteraction(input.body);
   const lifecycleMention = interaction.reborn.length > 0 || interaction.handoff.length > 0;
   if (lifecycleMention) {

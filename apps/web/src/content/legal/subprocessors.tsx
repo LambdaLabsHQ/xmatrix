@@ -39,7 +39,7 @@ const subprocessors: Provider[] = [
   {
     name: "Vercel, Inc. (AI Gateway)",
     purpose:
-      "Gateway routing for Jev structured evaluations used by enabled message supersession, conversation-to-Page linking, and other decision features.",
+      "Gateway routing for Jev structured evaluations used by conversation-to-Page linking and other decision features.",
     data:
       "Selected message context, Page titles and paths, attachment descriptions, evaluation questions, decision answers, and request or usage metadata required by the feature.",
     region:
