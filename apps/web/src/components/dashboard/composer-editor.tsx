@@ -6,7 +6,7 @@ import { baseKeymap, splitBlock } from "prosemirror-commands";
 import { keymap } from "prosemirror-keymap";
 import { EditorState, TextSelection, type Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
-import { faceKey, type DraftSummonIntent, type FaceOf } from "@xmatrix/protocol";
+import type { DraftSummonIntent, FaceOf } from "@xmatrix/protocol";
 import { composerHintParts } from "./composer-hints";
 import {
   composerDocFromText,
@@ -440,7 +440,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
       const chip = span.self ? "app-mention-chip app-mention-chip-self" : "app-mention-chip";
       const face = span.face;
       if (face) {
-        const key = `face\u0000${written}\u0000${count}\u0000${faceKey(face)}`;
+        const key = `face\u0000${written}\u0000${count}\u0000${JSON.stringify(face)}`;
         decorations.push(Decoration.widget(from, () => {
           const lead = document.createElement("span");
           lead.className = `${chip} app-composer-chip-lead`;
