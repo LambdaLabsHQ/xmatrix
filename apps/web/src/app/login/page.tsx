@@ -989,8 +989,7 @@ function LoginContent() {
             ) : null}
             <AuthDivider />
             <form onSubmit={handleSendEmail} className="auth-stack">
-              {/* The field's placeholder already says what goes in it. */}
-              <label htmlFor="login-email" className="sr-only">
+              <label htmlFor="login-email" className="auth-label">
                 Email address
               </label>
               <Input

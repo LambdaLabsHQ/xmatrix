@@ -77,15 +77,20 @@ test("someone whose words were all taken out is no longer an author", () => {
   assert.deepEqual(writers.map((writer) => writer.author.label), ["Daniel"]);
 });
 
-test("an Agent's Runs are one author, in the byline and beside a paragraph", () => {
+/** The page after a third revision `author` wrote: "sign out everywhere". */
+function writtenAgainBy(author) {
   const three = two.replace("keep sessions 30 days", "keep sessions 30 days; sign out everywhere");
   const base = blameDoc({
     ...blame, revision: 3, body: three,
     runs: pageBlameStep(two, blame.runs, three, 3),
-    revisions: [...blame.revisions, revision(3, { ...claude, id: "c:2" }, "2026-10-22T08:00:00.000Z")],
+    revisions: [...blame.revisions, revision(3, author, "2026-10-22T08:00:00.000Z")],
   });
   const now = markdownToPageDoc(three);
-  const carried = carryPageDocKnown(base.doc, base.known, now);
+  return { base, now, carried: carryPageDocKnown(base.doc, base.known, now) };
+}
+
+test("an Agent's Runs are one author, in the byline and beside a paragraph", () => {
+  const { base, now, carried } = writtenAgainBy({ ...claude, id: "c:2" });
   assert.deepEqual(pageWriters(base, carried, now).map((writer) => writer.author.label), ["Daniel", "claude"]);
   const { from } = rangeOf(now, "No setup");
   const { to } = rangeOf(now, "everywhere");
@@ -94,12 +99,6 @@ test("an Agent's Runs are one author, in the byline and beside a paragraph", () 
 });
 
 test("another person's Agent of the same name is an author of its own", () => {
-  const three = two.replace("keep sessions 30 days", "keep sessions 30 days; sign out everywhere");
-  const base = blameDoc({
-    ...blame, revision: 3, body: three,
-    runs: pageBlameStep(two, blame.runs, three, 3),
-    revisions: [...blame.revisions, revision(3, { ...claude, id: "c:2", ownerUserId: "u2" }, "2026-10-22T08:00:00.000Z")],
-  });
-  const now = markdownToPageDoc(three);
-  assert.equal(pageWriters(base, carryPageDocKnown(base.doc, base.known, now), now).length, 3);
+  const { base, now, carried } = writtenAgainBy({ ...claude, id: "c:2", ownerUserId: "u2" });
+  assert.equal(pageWriters(base, carried, now).length, 3);
 });

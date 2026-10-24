@@ -341,10 +341,8 @@ html:has(.site-page) {
    paper with one column of controls on the other. The main action is the
    homepage's wood "Start Free" plank; everything else is white paper.
    On a phone the art runs edge to edge from the top of the screen, under
-   the status bar, like an app's welcome screen, with the blocks on its right
-   and the xMatrix mark on its empty left. */
+   the status bar, like an app's welcome screen. */
 .auth-page {
-  position: relative;
   display: grid;
   grid-template-rows: auto 1fr;
   background: var(--site-paper);
@@ -352,42 +350,25 @@ html:has(.site-page) {
 
 .auth-art {
   position: relative;
-  height: calc(env(safe-area-inset-top) + 17rem);
+  height: calc(env(safe-area-inset-top) + 9.5rem);
   overflow: hidden;
+  border-radius: 0 0 1.75rem 1.75rem;
   background: #f0ecec;
 }
 
 /* The blocks sit in the right of the art; keep all of them in frame. */
 .auth-art img {
-  object-position: right center;
-}
-
-/* The mark sits on the art's empty left, centred in the art below the status bar. */
-.auth-brand {
-  position: absolute;
-  top: calc(env(safe-area-inset-top) + 8.5rem);
-  left: 1.5rem;
-  z-index: 1;
-  transform: translateY(-50%);
-}
-
-.auth-page .auth-brand-icon {
-  width: 2.5rem;
-  height: 2.5rem;
-}
-
-.auth-page .auth-brand-name {
-  font-size: 1.375rem;
+  object-position: 80% 70%;
 }
 
 .auth-column {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1.75rem;
   width: 100%;
   max-width: 26rem;
   margin: 0 auto;
-  padding: 1.5rem 1.5rem calc(env(safe-area-inset-bottom) + 0.5rem);
+  padding: 1.5rem 1.5rem calc(env(safe-area-inset-bottom) + 0.75rem);
 }
 
 .auth-body {
@@ -414,20 +395,6 @@ html:has(.site-page) {
     object-position: 88% 50%;
   }
 
-  .auth-brand {
-    position: static;
-    transform: none;
-  }
-
-  .auth-page .auth-brand-icon {
-    width: 2rem;
-    height: 2rem;
-  }
-
-  .auth-page .auth-brand-name {
-    font-size: 1.125rem;
-  }
-
   .auth-column {
     gap: 2rem;
     padding: 2.5rem 2rem;
@@ -450,9 +417,9 @@ html:has(.site-page) {
 }
 
 .auth-heading p {
-  margin-top: 0.4rem;
+  margin-top: 0.75rem;
   color: var(--site-ink-muted);
-  font-size: 14.5px;
+  font-size: 15px;
   line-height: 1.55;
 }
 
@@ -465,14 +432,14 @@ html:has(.site-page) {
 .auth-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.75rem;
 }
 
 .auth-heading + .auth-stack,
 .auth-heading + form.auth-stack,
 .auth-request + .auth-stack,
 .auth-error + .auth-stack {
-  margin-top: 1.25rem;
+  margin-top: 1.75rem;
 }
 
 .auth-stack .auth-stack {
@@ -690,7 +657,7 @@ html:has(.site-page) {
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.5rem 1.25rem;
-  margin-top: 1rem;
+  margin-top: 1.5rem;
 }
 
 .auth-links a,
@@ -724,8 +691,7 @@ html:has(.site-page) {
 
 .auth-legal {
   color: var(--site-ink-muted);
-  font-size: 11.5px;
-  text-align: center;
+  font-size: 12px;
   line-height: 1.6;
 }
 
