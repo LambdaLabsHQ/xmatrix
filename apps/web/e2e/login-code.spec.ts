@@ -42,18 +42,23 @@ test("a complete login code signs in once without a click, and a resend waits ou
   await expect(resend).toBeDisabled();
 });
 
-/** A Hub whose session appears once `signedIn` is set, and whose code check answers per call. */
-async function codeCheck(page: import("@playwright/test").Page, answer: (call: number, state: { signedIn: boolean }) => "drop" | "ok" | "invalid" | "lost") {
-  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
-  const state = { signedIn: false };
-  let calls = 0;
-  await page.route("**/api/xmatrix/login", route => route.fulfill({ json: { ok: true } }));
+/** A Hub with no session until `state.signedIn` is set. */
+async function hubSessionOnceSignedIn(page: import("@playwright/test").Page, state: { signedIn: boolean }) {
   await page.route("**/api/auth/get-session", route => route.fulfill({ json: state.signedIn
     ? { user: { id: "user-1", email: "reviewer@example.test" }, session: { token: "s", expiresAt: "2099-01-01T00:00:00.000Z" } }
     : null }));
   await page.route("**/api/auth/token", route => state.signedIn
     ? route.fulfill({ json: { token: "fixture-jwt" } })
     : route.fulfill({ status: 401, json: {} }));
+}
+
+/** A Hub whose session appears once `signedIn` is set, and whose code check answers per call. */
+async function codeCheck(page: import("@playwright/test").Page, answer: (call: number, state: { signedIn: boolean }) => "drop" | "ok" | "invalid" | "lost") {
+  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
+  const state = { signedIn: false };
+  let calls = 0;
+  await page.route("**/api/xmatrix/login", route => route.fulfill({ json: { ok: true } }));
+  await hubSessionOnceSignedIn(page, state);
   await page.route("**/api/auth/sign-in/email-otp", route => {
     calls += 1;
     const kind = answer(calls, state);
@@ -91,4 +96,30 @@ test("three unanswered code checks keep the code and offer to try again", async 
   await expect(page.getByLabel("Login code")).toHaveValue("123456");
   await page.getByRole("button", { name: "Try again" }).click();
   await expect.poll(() => check.calls()).toBe(6);
+});
+
+test("an app's sign-in that stopped for the second factor goes back to the Hub, not into the web", async ({ page }) => {
+  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
+  const state = { signedIn: false };
+  await hubSessionOnceSignedIn(page, state);
+  await page.route("**/api/auth/two-factor/verify-totp", route => {
+    state.signedIn = true;
+    return route.fulfill({ json: { token: "s", user: { id: "user-1" } } });
+  });
+  // The Hub's answer is left out: the page must leave only for it, with nothing else overtaking it.
+  const finishes: string[] = [];
+  await page.route("https://xmatrix-hub.xmatrix.sh/api/auth/app/finish**", route => {
+    finishes.push(route.request().url());
+    return route.abort();
+  });
+  const pages: string[] = [];
+  page.on("framenavigated", frame => { if (frame === page.mainFrame()) pages.push(new URL(frame.url()).pathname); });
+
+  const finish = "https://xmatrix-hub.xmatrix.sh/api/auth/app/finish?flow=f";
+  await page.goto(`/login?two_factor=1&continue=${encodeURIComponent(finish)}`);
+  await page.getByLabel("Authentication code").fill("123456");
+
+  await expect.poll(() => finishes).toEqual([finish]);
+  await page.waitForTimeout(1_500);
+  expect(pages).not.toContain("/app");
 });
