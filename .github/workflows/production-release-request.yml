@@ -164,7 +164,9 @@ jobs:
   # written in and the workflows that release them
   # (scripts/release-train.mjs, codeqlLanguages). Pull requests and merges
   # are not scanned. The analysis must finish before the train ships; its
-  # findings are code scanning alerts on main, not a verdict.
+  # findings are code scanning alerts on main, not a verdict. Test code never
+  # ships, so it is not scanned: it is about a third of the JavaScript and
+  # TypeScript, and the analysis of the rest is the gates' longest job.
   codeql:
     needs: plan
     if: needs.plan.outputs.scope != ''
@@ -189,6 +191,14 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.language == 'swift' && 'autobuild' || 'none' }}
           queries: security-extended
+          config: |
+            paths-ignore:
+              - "**/*.test.*"
+              - "**/*.spec.*"
+              - "**/test/**"
+              - "**/tests/**"
+              - "**/e2e/**"
+              - "**/__tests__/**"
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
