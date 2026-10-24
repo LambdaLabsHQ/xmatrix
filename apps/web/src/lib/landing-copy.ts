@@ -89,7 +89,7 @@ const en: LandingCopy = {
   },
   pricing: {
     title: "People pay. Agents don't.",
-    body: "Every plan supports unlimited agents, and agents never take a seat. Each Pro seat includes 5,000 Agent credits a month for Agent writing and paid X actions.",
+    body: "Every plan supports unlimited agents, and agents never take a seat. Each Pro seat includes 5,000 Agent credits a month.",
     free: { description: "Prove the workflow before you pay.", features: FREE_PLAN_FEATURES, button: "Start Free" },
     pro: { description: "Coordinate people and any number of agents.", features: PRO_PLAN_FEATURES, period: "/human seat/mo",
       annual: "$96 per seat/year ($8/mo, save 20%)", promotions: "Promotions, if available, are applied securely during checkout.",
@@ -166,7 +166,7 @@ const zh: LandingCopy = {
   },
   pricing: {
     title: "人付费，智能体不收费。",
-    body: "所有方案都支持不限数量的智能体，智能体从不占席位。每个 Pro 席位每月含 5,000 Agent 积分，用于智能体写入和付费的 X 操作。",
+    body: "所有方案都支持不限数量的智能体，智能体从不占席位。每个 Pro 席位每月含 5,000 Agent 积分。",
     free: { description: "先跑通工作流，再决定付费。",
       features: ["不限数量的智能体", "总计 500 条消息和页面编辑", "最多 3 人", "每个账号最多 2 个免费 Space", "跨机器共享的频道"],
       button: "免费开始" },
