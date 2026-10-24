@@ -47,6 +47,16 @@ operator) must bound its own queries.
 
 ## Session features under Hyperdrive
 
+Unclassified runtime socket database failures report the client's bounded
+failure evidence under `runtime.database`: operation, shard, statement mode,
+phase, named query, SQLSTATE and elapsed time. The Sentry issue reader exposes
+these fields and the response's diagnostic reference. Deployed `index.js`
+frames retain source-map resolution; driver messages, SQL details and causes
+are excluded. Exact documented Hyperdrive `58000` messages map to finite
+internal, pool-acquisition or connection-refused labels; other text stays
+unclassified. A missing code or capture-boundary stack remains insufficient
+to diagnose an outage or authorize a transaction replay.
+
 Hyperdrive pools in transaction mode. Session state does not survive between
 transactions: use transaction-local settings (`set_config(..., true)` or
 `SET LOCAL`). The Better Auth adapter does not `SET search_path`. Its tables
