@@ -1,3 +1,4 @@
+import { expectDraft } from "./composer-draft";
 import { encodePageSync } from "../src/lib/pages/page-sync-codec";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
@@ -1232,11 +1233,11 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   await expect(box).toHaveCount(0);
   await expect(editor.locator(".page-discussion")).toHaveCount(0);
   await selectLine(browser, "In progress");
-  await expect(box.getByRole("textbox", { name: "Comment" })).toHaveValue("Is this still accurate?");
+  await expectDraft(box.getByRole("textbox", { name: "Comment" }), "Is this still accurate?");
   await browser.mouse.click(1100, 700);
   await expect(box).toHaveCount(0);
   await selectLine(browser, "In progress");
-  await expect(box.getByRole("textbox", { name: "Comment" })).toHaveValue("Is this still accurate?");
+  await expectDraft(box.getByRole("textbox", { name: "Comment" }), "Is this still accurate?");
   await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
   await browser.keyboard.press("Enter");
   // Sent, the box goes and the page stays in front of the reader; nothing opens over it.

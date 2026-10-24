@@ -41,7 +41,8 @@
 .page-document blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); }
 .page-document ul { list-style: disc; padding-left: 1.5em; }
 .page-document ol { list-style: decimal; padding-left: 1.5em; }
-.page-document li + li { margin-top: 8px; }
+.page-document li + li { margin-top: 4px; }
+.page-document li > :is(ul, ol) { margin-top: 4px; }
 .page-document li.page-task { list-style: none; margin-left: -1.5em; display: flex; gap: 0.5em; align-items: flex-start; }
 .page-document li.page-task > input { margin-top: 0.4em; width: 1em; height: 1em; accent-color: var(--primary); cursor: pointer; }
 .page-document li.page-task > div { flex: 1; min-width: 0; }
@@ -132,7 +133,7 @@
   .page-document h2 { font-size: 1.3em; margin-top: 1.6em; }
   .page-document h3 { margin-top: 1.4em; }
   .page-document :is(ul, ol) { padding-left: 1.3em; }
-  .page-document li + li { margin-top: 8px; }
+  .page-document li + li { margin-top: 4px; }
   .page-document li.page-task { margin-left: -1.3em; }
   .page-document blockquote { padding-left: 0.75em; }
 }

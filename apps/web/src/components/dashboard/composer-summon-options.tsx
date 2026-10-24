@@ -9,22 +9,24 @@ import type { DraftSummonIntent } from "@xmatrix/protocol";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { useAppPortalContainer } from "./app-portal-container";
 import { sameValue } from "../../lib/same-value";
+import type { ComposerField } from "./composer-editor";
 
 type PositionedReading = { reading: DraftSummonIntent; left: number; top: number; width: number; height: number };
 
 /** Only declined mentions get an interactive underline. The hint opens at
  * the address itself; normal summons leave the input free of extra copy. */
-export function ComposerSummonOptions({ readings, textareaRef, disabled, onStartAnyway }: {
+export function ComposerSummonOptions({ readings, fieldRef, disabled, onStartAnyway }: {
   readings: ReadonlyArray<DraftSummonIntent>;
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  fieldRef: RefObject<ComposerField | null>;
   disabled?: boolean;
   onStartAnyway: (reading: DraftSummonIntent) => void;
 }) {
   const [positions, setPositions] = useState<PositionedReading[]>([]);
   useLayoutEffect(() => {
-    const input = textareaRef.current;
+    const field = fieldRef.current;
+    const input = field?.element;
     const currentReadings = () => readings.filter(reading => reading.choice !== "summon" &&
-      input?.value.slice(reading.start, reading.end) === reading.mention);
+      field?.value.slice(reading.start, reading.end) === reading.mention);
     const clearPositions = () => setPositions(previous => previous.length ? [] : previous);
     // An activity report can replace an empty readings array. There is no
     // address to position in that case: do not read layout or observe the input.
@@ -32,7 +34,7 @@ export function ComposerSummonOptions({ readings, textareaRef, disabled, onStart
       clearPositions();
       return;
     }
-    const host = input.parentElement;
+    const host = input.closest<HTMLElement>(".composer-field-host");
     if (!host) {
       clearPositions();
       return;
@@ -72,7 +74,7 @@ export function ComposerSummonOptions({ readings, textareaRef, disabled, onStart
       input.removeEventListener("scroll", sync);
       document.fonts?.removeEventListener("loadingdone", sync);
     };
-  }, [readings, textareaRef]);
+  }, [readings, fieldRef]);
   return <div className="pointer-events-none absolute inset-0 z-10">
     {positions.map(position => <DeclinedSummonOption key={`${position.reading.start}:${position.reading.end}`}
       position={position} disabled={disabled} onStartAnyway={onStartAnyway} />)}

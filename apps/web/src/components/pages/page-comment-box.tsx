@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, type KeyboardEvent } from "react";
+import { useRef } from "react";
+import type { ComposerField, ComposerKeyEvent } from "@/components/dashboard/composer-editor";
 import { ComposerInputAuthority } from "@/components/dashboard/composer-input";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 import { WorkingLine } from "./page-margin";
@@ -25,21 +26,21 @@ export function PageCommentBox({ text, taker, onText, onSend, onClose, onPassage
   /** `away`: the reader left it for somewhere else, which keeps the focus it went to. */
   onClose: (away?: boolean) => void;
   /** A key for the passage itself, pressed while nothing is typed; true when the passage took it. */
-  onPassageKey: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  onPassageKey: (event: ComposerKeyEvent) => boolean;
 }) {
-  const field = useRef<HTMLTextAreaElement | null>(null);
+  const field = useRef<ComposerField | null>(null);
   return (
     <PaperPopover className="page-comment-box py-1 pr-1.5 pl-3" data-testid="page-comment-box" onMouseDown={(event) => {
       event.stopPropagation();
       // Its buttons act without taking the focus from the text, which would close it first.
-      if (event.target !== field.current) event.preventDefault();
+      if (!(event.target instanceof Node && field.current?.element.contains(event.target))) event.preventDefault();
     }}>
       <ComposerInputAuthority draft={text} onDraftChange={onText} channel={null} space={null} token={null}
-        workspaces={[]} enabled autoFocus textareaRef={field} canSend={Boolean(text.trim())}
+        workspaces={[]} enabled autoFocus fieldRef={field} canSend={Boolean(text.trim())}
         placeholder="Comment, or ask for a change" ariaLabel="Comment" sendTitle="Comment"
         onSend={() => { if (text.trim()) onSend(text.trim()); else onClose(); }} onEscape={() => onClose()}
         onKeyDownExtra={(event) => { if (!text && onPassageKey(event)) event.preventDefault(); }}
-        onTextareaBlur={() => onClose(true)} />
+        onFieldBlur={() => onClose(true)} />
       {taker && <WorkingLine agents={[taker]} className="pb-1.5" />}
     </PaperPopover>
   );

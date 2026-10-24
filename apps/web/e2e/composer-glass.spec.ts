@@ -9,6 +9,7 @@ import {
   installApiFixtures,
 } from "./in-page-api-fixtures";
 import { fixtureSpaceResources } from "./workspace-fixtures";
+import { expectDraft } from "./composer-draft";
 
 const LEGACY_BIND_RULE = "legacy-attachment-bind";
 const SEND_MESSAGE_RULE = "channel-launch-send";
@@ -183,7 +184,7 @@ test.describe("mock-auth app fixture", () => {
         objectKey: expect.stringMatching(/^objects\/[0-9a-f]{64}$/u),
       }),
     ]);
-    await expect(page.getByRole("textbox", { name: "Message composer" })).toHaveValue("");
+    await expectDraft(page.getByRole("textbox", { name: "Message composer" }), "");
     expect(await fixtureRequests(page, "r2-uploads")).toEqual([
       expect.stringMatching(
         /\/relay-v2\/private-r2\/uploads\/[^/]+\/scope\/space%3Afixture-space$/u,

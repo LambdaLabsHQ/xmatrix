@@ -610,6 +610,13 @@
     margin-top: 0;
   }
 
+  /* A nested list follows its item's text inline, so first:mt-0 would glue it
+     to that text. Give it the same 4px an item has from its sibling, so a
+     child never sits farther from its parent than siblings sit apart. */
+  .xmatrix-app .rich-message li > :is(ul, ol) {
+    margin-top: 0.25rem;
+  }
+
   .xmatrix-app :is(.app-search, .app-composer-box, .bg-popover, .app-sidebar .ring-sidebar-border),
   .xmatrix-app .app-sidebar :is(button, a).bg-sidebar-accent {
     position: relative;
@@ -7542,27 +7549,45 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-intent-launch[data-state="launching"] [data-slot="animated-icon"] { animation: intent-zap 700ms ease-in-out infinite alternate; }
 @keyframes intent-zap { to { transform: scale(1.25); filter: drop-shadow(0 0 4px oklch(0.72 0.16 70)); } }
 
-/* The draft's mention bands (composer-mention-bands.ts places them). They sit
-   in the mirror behind the textarea's own glyphs, one per line of a mention,
-   in the sent chip's ink. */
-.app-composer-mention-bands { position: absolute; left: 0; top: 0; width: 0; height: 0; }
-.app-composer-mention-probe { position: absolute; left: 0; top: 0; visibility: hidden; white-space: pre; }
-.app-composer-mention-probe > span { display: inline-block; width: 0; height: 0; }
-.app-composer-mention-band {
-  --band-ink: var(--primary);
-  --band-fill: color-mix(in oklab, var(--band-ink) 10%, transparent);
-  position: absolute;
-  border-radius: 0.3em;
-  background: var(--band-fill);
+/* The composer's editor (composer-editor.tsx): plain text in paragraphs, one per line. */
+.xmatrix-app .composer-textarea.ProseMirror {
+  position: relative;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  font-variant-ligatures: none;
+  outline: none;
+  cursor: text;
 }
-.app-composer-mention-band[data-self="true"] { --band-fill: color-mix(in oklab, var(--band-ink) 20%, transparent); }
-.app-composer-mention-band[data-forced="true"] { --band-ink: oklch(0.72 0.16 70); --band-fill: color-mix(in oklab, var(--band-ink) 24%, transparent); }
-.app-composer-mention-band[data-intent="summon"] { --band-ink: oklch(0.62 0.16 285); --band-fill: color-mix(in oklab, var(--band-ink) 18%, transparent); }
-.app-composer-mention-band[data-intent="declined"] { --band-ink: var(--muted-foreground); --band-fill: color-mix(in oklab, var(--band-ink) 7%, transparent); }
-.app-composer-mention-band[data-intent="reading"] { opacity: 0.55; }
-/* The face a mention's chip will lead with, over its `@` (composer-text-highlight.tsx places it). */
-.app-composer-mention-face { position: absolute; }
-.app-composer-mention-face[hidden] { display: none; }
+.xmatrix-app .composer-textarea.ProseMirror p { margin: 0; }
+.xmatrix-app .composer-textarea.ProseMirror[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
+/* A mention in the draft is the sent message's chip (.app-mention-chip). Its face
+   is a widget beside the decorated `@name`, so the pill is drawn in two halves
+   that meet without a seam. */
+.xmatrix-app .composer-textarea .app-mention-chip.app-composer-chip-lead {
+  padding-right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  user-select: none;
+}
+.xmatrix-app .composer-textarea .app-mention-chip.app-composer-chip-tail {
+  padding-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+/* What the draft knows before it is sent: a forced launch, a malformed one, and Jev's reading of a summon. */
+.xmatrix-app .composer-textarea .app-mention-chip:is([data-forced="true"], [data-invalid="true"], [data-intent]) {
+  background: color-mix(in oklab, var(--chip-ink) var(--chip-fill, 14%), transparent);
+  color: var(--chip-ink);
+}
+.xmatrix-app .composer-textarea .app-mention-chip[data-forced="true"] { --chip-ink: oklch(0.62 0.16 70); --chip-fill: 22%; }
+.xmatrix-app .composer-textarea .app-mention-chip[data-invalid="true"] { --chip-ink: var(--destructive); }
+.xmatrix-app .composer-textarea .app-mention-chip[data-intent="summon"] { --chip-ink: oklch(0.55 0.17 285); --chip-fill: 16%; }
+.xmatrix-app .composer-textarea .app-mention-chip[data-intent="declined"] { --chip-ink: var(--muted-foreground); --chip-fill: 9%; }
+.xmatrix-app .composer-textarea .app-mention-chip[data-intent="reading"] { --chip-ink: var(--primary); --chip-fill: 10%; opacity: 0.6; }
+.app-composer-hint-overlay { position: absolute; pointer-events: none; user-select: none; white-space: pre; }
 .app-composer-summon-declined {
   position: absolute; pointer-events: auto; padding: 0; border: 0; background: transparent; cursor: help;
   border-bottom: 1.5px dotted var(--muted-foreground); border-radius: 2px;
@@ -7572,13 +7597,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-composer-summon-declined:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .app-composer-summon-popup { font-size: 14px; }
 .app-composer-summon-explanation { margin: 12px 0; font-size: 15px; line-height: 1.5; }
-.app-composer-mention-band[data-invalid="true"] { --band-ink: var(--destructive); --band-fill: color-mix(in oklab, var(--band-ink) 14%, transparent); }
-.app-composer-mention-band[data-entering="true"] { animation: composer-mention-band-in 160ms ease-out; }
-@keyframes composer-mention-band-in { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .app-composer-mention-band[data-entering="true"] { animation: none; }
-}
-/* The empty composer's hint (composer-hints.ts), painted in the same mirror.
+/* The empty composer's hint (composer-hints.ts), drawn where the text would start.
    The words stay faint; the trigger they teach sits in the band it will become,
    and @ wears the summon violet because typing it calls an Agent in. It starts
    a hair after the caret, so the caret never touches the chip. */
@@ -7618,7 +7637,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   background: linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%);
   animation: composer-hint-summon 2.4s cubic-bezier(.45, 0, .25, 1) 300ms infinite;
 }
-/* The composer's own caret (ComposerTextHighlight draws it in the mirror):
+/* The composer's own caret (composer-editor.tsx draws it over the field):
    a rounded 2px bar over the font's box that fades instead of snapping on and
    off, in place of the native hairline. The native caret returns for IME
    composition and on touch screens, where the system's handles depend on it. */

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Menu } from "lucide-react";
+import { ArrowRight, Menu } from "lucide-react";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { Button } from "@/components/ui/button";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
@@ -99,14 +99,16 @@ export function Navbar({ locale = "en" }: { locale?: Locale }) {
               >
                 {copy.openApp}
               </Link>
-              <LiquidGlassPill
-                as={Link}
+              <Link
                 href="/login"
-                onSlab
-                className="inline-flex h-8 items-center justify-center px-4 text-[13px] font-semibold text-[#2f281f]"
+                className="site-navbar-cta group inline-flex items-center gap-1 text-[13px] tracking-[-0.015em]"
               >
                 {copy.startFree}
-              </LiquidGlassPill>
+                <ArrowRight
+                  aria-hidden
+                  className="size-3.5 transition-transform group-hover:translate-x-0.5"
+                />
+              </Link>
             </div>
 
             <Button

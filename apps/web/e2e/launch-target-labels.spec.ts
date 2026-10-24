@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { expectDraft } from "./composer-draft";
 
 // The former suffix wizard is retired. auto-launch.spec.ts covers tag selection,
 // sequential keyboard conditions and the submitted invocation.
@@ -17,22 +18,22 @@ test.describe("tag launch targets and retired suffixes", () => {
       }] },
     });
     await page.goto("/app/personal-sspaceperso/channels/channel-general");
-    await expect(page.locator("textarea.composer-textarea").first()).toBeVisible();
+    await expect(page.locator(".composer-textarea").first()).toBeVisible();
   });
 
   test("retired suffixes never open the start-action or target wizard", async ({ page }) => {
-    const textarea = page.locator("textarea.composer-textarea").first();
+    const textarea = page.locator(".composer-textarea").first();
     for (const draft of ["@codex:", "@codex:new:", "@codex:once:"]) {
       await textarea.fill(draft);
       await expect(page.getByRole("option").filter({ hasText: "Start persistent instance" })).toHaveCount(0);
       await expect(page.getByRole("option").filter({ hasText: "Run one-shot task" })).toHaveCount(0);
       await expect(page.getByRole("option").filter({ hasText: "LambdaLabsHQ/xmatrix" })).toHaveCount(0);
-      await expect(textarea).toHaveValue(draft);
+      await expectDraft(textarea, draft);
     }
   });
 
   test("tag search distinguishes repositories from machine-bound directories", async ({ page }) => {
-    const textarea = page.locator("textarea.composer-textarea").first();
+    const textarea = page.locator(".composer-textarea").first();
     await textarea.fill("@auto repo:LambdaLabsHQ");
     const overlay = page.locator(".app-mention-suggestions");
     const repo = overlay.getByRole("option").filter({ hasText: "LambdaLabsHQ/xmatrix" });
@@ -49,7 +50,7 @@ test.describe("tag launch targets and retired suffixes", () => {
   });
 
   test("IME Enter does not accept a mention or create a launch tag", async ({ page }) => {
-    const textarea = page.locator("textarea.composer-textarea").first();
+    const textarea = page.locator(".composer-textarea").first();
     await textarea.fill("@codex");
     const overlay = page.locator(".app-mention-suggestions");
     await expect(overlay).toBeVisible();
@@ -59,7 +60,7 @@ test.describe("tag launch targets and retired suffixes", () => {
         bubbles: true, cancelable: true, isComposing: true, key: "Enter", keyCode: 229,
       }));
     });
-    await expect(textarea).toHaveValue("@codex");
+    await expectDraft(textarea, "@codex");
     await expect(overlay).toBeVisible();
     await textarea.evaluate(node => node.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
   });

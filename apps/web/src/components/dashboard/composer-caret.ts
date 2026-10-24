@@ -7,14 +7,21 @@ export type ComposerSelectionRange = {
   end: number;
 };
 
+/** What a scheduled selection moves: the composer's field, or a textarea. */
+export type ComposerSelectionTarget = {
+  value: string;
+  focus(options?: FocusOptions): void;
+  setSelectionRange(start: number, end: number): void;
+};
+
 /**
- * Move a textarea selection on the next paint only while the exact DOM node
+ * Move a field's selection on the next paint only while the exact DOM node
  * and controlled value that requested the move are still current. This keeps
  * an old completion/paste callback from pulling the caret behind text entered
  * during the intervening frame.
  */
 export function scheduleTextareaSelection(
-  resolveTextarea: () => HTMLTextAreaElement | null,
+  resolveTextarea: () => ComposerSelectionTarget | null,
   expectedValue: string,
   selection: ComposerSelectionRange,
   focusOptions?: FocusOptions

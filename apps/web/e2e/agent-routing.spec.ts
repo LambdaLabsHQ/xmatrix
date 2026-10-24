@@ -1,3 +1,4 @@
+import { expectDraft } from "./composer-draft";
 import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_SPACE, fixtureJson, fixtureRequestBodies, harnessRegistrations,
@@ -14,7 +15,7 @@ test.beforeEach(async ({ page }) => {
 
 test("composer routes with @mentions and does not expose a separate auto-route form", async ({ page }) => {
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
-  await expect(page.locator("textarea.composer-textarea").first()).toBeVisible();
+  await expect(page.locator(".composer-textarea").first()).toBeVisible();
   await expect(page.getByText("Auto route this task", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send and auto route", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
@@ -49,7 +50,7 @@ for (const mobile of [false, true]) {
     capabilities: locations.map(location => ({ harness: location.key.harness, models: [], locations: [location] })),
   });
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   await draft.fill("@");
   await expect(page.getByRole("listbox").getByText("Instance", { exact: true })).toBeVisible();
   const instance = page.getByRole("option", { name: /^codex:1\s/u });
@@ -58,7 +59,7 @@ for (const mobile of [false, true]) {
     .evaluate(box => box.getAnimations().length)).toBe(0);
   await page.screenshot({ path: testInfo.outputPath("active-instance-mention.png") });
   await instance.click();
-  await expect(draft).toHaveValue("@codex:1 ");
+  await expectDraft(draft, "@codex:1 ");
   });
  });
 }
@@ -66,7 +67,7 @@ for (const mobile of [false, true]) {
 async function canonicalComposer(page: import("@playwright/test").Page) {
   const locations = await installCanonicalCatalog(page);
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   return { draft, locations };
 }
 
@@ -120,6 +121,6 @@ test("restored channel drafts keep an explicit machine selection", async ({ page
   await page.getByRole("button", { name: /random/i }).first().click();
   await draft.fill("Unrelated draft");
   await page.getByRole("button", { name: /general/i }).first().click();
-  await expect(draft).toHaveValue("@codex task");
+  await expectDraft(draft, "@codex task");
   await expectSelectedMachineSent(page, draft, locations[1].key);
 });

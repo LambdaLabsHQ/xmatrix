@@ -6,8 +6,6 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { ArrowUp, Loader2, PlugZap, } from "lucide-react";
@@ -20,11 +18,10 @@ import {
   type ComposerContextFields,
 } from "@/components/dashboard/composer-completion";
 import { LiquidGlassSurface } from "@/components/ui/liquid-glass-surface";
-import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { stripEmptyPasteSentinel } from "./composer-caret";
-import { ComposerTextHighlight } from "./composer-text-highlight";
+import { ComposerEditor, type ComposerField, type ComposerKeyEvent } from "./composer-editor";
 import { channelMentionCandidates } from "./mention-complete";
 import { buildMentionReadIndex } from "./mention-read-state";
 
@@ -59,27 +56,28 @@ export type ComposerInputAuthorityProps = ComposerContextFields & {
   /** Controls after the send button (thread cancel). */
   afterSend?: ReactNode;
   /** Extra key handling after shared completion/enter (e.g. attachment backspace). */
-  onKeyDownExtra?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  onKeyDownExtra?: (event: ComposerKeyEvent) => void;
   boxClassName?: string;
   onBoxPointerDown?: (event: React.PointerEvent<HTMLElement>) => void;
   disabled?: boolean;
   /** Live completion API for parent-only features (mention insert, empty-paste cursor). */
   completionApiRef?: React.MutableRefObject<ComposerCompletionApi | null>;
-  textareaValue?: string;
-  onTextareaChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  onTextareaBeforeInput?: (event: React.FormEvent<HTMLTextAreaElement>) => void;
-  onTextareaCompositionStart?: (event: React.CompositionEvent<HTMLTextAreaElement>) => void;
-  onTextareaFocus?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
-  onTextareaBlur?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
-  onTextareaTouchStart?: (event: React.TouchEvent<HTMLTextAreaElement>) => void;
-  onTextareaPointerDown?: (event: React.PointerEvent<HTMLTextAreaElement>) => void;
-  onTextareaPointerUp?: (event: React.PointerEvent<HTMLTextAreaElement>) => void;
-  onTextareaClick?: (event: ReactMouseEvent<HTMLTextAreaElement>) => void;
-  onTextareaPaste?: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
+  /** What the field shows when it differs from the draft (the empty-paste anchor). */
+  fieldValue?: string;
+  onFieldChange?: (value: string, field: ComposerField) => void;
+  onFieldBeforeInput?: (event: InputEvent, field: ComposerField) => void;
+  onFieldCompositionStart?: (field: ComposerField) => void;
+  onFieldFocus?: (field: ComposerField) => void;
+  onFieldBlur?: (field: ComposerField) => void;
+  onFieldTouchStart?: (field: ComposerField) => void;
+  onFieldPointerDown?: (event: PointerEvent, field: ComposerField) => void;
+  onFieldPointerUp?: (event: PointerEvent, field: ComposerField) => void;
+  onFieldClick?: (field: ComposerField) => void;
+  onFieldPaste?: (event: ClipboardEvent, field: ComposerField) => void;
   sendTitle?: string;
   formClassName?: string;
   shellClassName?: string;
-  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
+  fieldRef?: React.RefObject<ComposerField | null>;
 };
 
 /**
@@ -127,29 +125,29 @@ function ComposerInputSurface({
   onBoxPointerDown,
   disabled = false,
   completionApiRef,
-  textareaValue,
-  onTextareaChange,
-  onTextareaBeforeInput,
-  onTextareaCompositionStart,
-  onTextareaFocus,
-  onTextareaBlur,
-  onTextareaTouchStart,
-  onTextareaPointerDown,
-  onTextareaPointerUp,
-  onTextareaClick,
-  onTextareaPaste,
+  fieldValue,
+  onFieldChange,
+  onFieldBeforeInput,
+  onFieldCompositionStart,
+  onFieldFocus,
+  onFieldBlur,
+  onFieldTouchStart,
+  onFieldPointerDown,
+  onFieldPointerUp,
+  onFieldClick,
+  onFieldPaste,
   sendTitle,
   formClassName,
   shellClassName,
-  textareaRef: textareaRefProp,
+  fieldRef: fieldRefProp,
 }: ComposerInputAuthorityProps) {
-  const internalTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const textareaRef = textareaRefProp ?? internalTextareaRef;
+  const internalFieldRef = useRef<ComposerField | null>(null);
+  const fieldRef = fieldRefProp ?? internalFieldRef;
   const boxRef = useRef<HTMLElement | null>(null);
   const { user } = useAuth();
   // Plain text has no addresses to paint. Do not rebuild the interaction
   // registry on every activity report until a draft actually contains one.
-  const hasMention = /[@＠]/u.test(textareaValue ?? draft);
+  const hasMention = /[@＠]/u.test(fieldValue ?? draft);
   const mentionIndex = useMemo(() => hasMention ? buildMentionReadIndex(
     channelMentionCandidates(channel, localContext, [], space, instanceTargetScope)) : null,
   [hasMention, channel, localContext, space, instanceTargetScope]);
@@ -165,7 +163,7 @@ function ComposerInputSurface({
     localContext,
     enabled,
     instanceTargetScope,
-    textareaRef,
+    fieldRef,
     selectedWorkspaceId,
     onWorkspaceSelect,
     onConfigureAppConnector,
@@ -210,15 +208,15 @@ function ComposerInputSurface({
 
   useEffect(() => {
     if (!autoFocus) return;
-    const textarea = textareaRef.current;
+    const field = fieldRef.current;
     const activeElement = document.activeElement;
     const frame = window.requestAnimationFrame(() => {
-      if (!textarea || textareaRef.current !== textarea) return;
-      if (document.activeElement !== activeElement && document.activeElement !== textarea) return;
-      textarea.focus();
+      if (!field || fieldRef.current !== field) return;
+      if (document.activeElement !== activeElement && document.activeElement !== field.element) return;
+      field.focus();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [autoFocus, textareaRef]);
+  }, [autoFocus, fieldRef]);
 
   const readyToSend = (canSend ?? (draft.trim().length > 0 && !sending && enabled));
   const compact = density === "compact";
@@ -271,31 +269,30 @@ function ComposerInputSurface({
             panel and the controls stay on its bottom edge. */}
         <div className="composer-input-row flex min-w-0 items-end gap-2">
           {inputLeading}
-          <div className="relative min-w-0 flex-1">
-          <Textarea
-            ref={textareaRef}
-            value={textareaValue ?? draft}
-            onChange={(event) => {
-              if (onTextareaChange) {
-                onTextareaChange(event);
+          <ComposerEditor
+            fieldRef={fieldRef}
+            value={fieldValue ?? draft}
+            onChange={(value, field) => {
+              if (onFieldChange) {
+                onFieldChange(value, field);
                 return;
               }
-              onDraftChange(event.target.value);
-              completion.syncCursor(event.target);
+              onDraftChange(value);
+              completion.syncCursor(field);
             }}
-            onBeforeInput={onTextareaBeforeInput}
-            onCompositionStart={onTextareaCompositionStart}
-            onFocus={onTextareaFocus}
-            onBlur={onTextareaBlur}
-            onTouchStart={onTextareaTouchStart}
-            onPointerDown={onTextareaPointerDown}
-            onPointerUp={onTextareaPointerUp}
-            onClick={(event) => {
-              onTextareaClick?.(event);
-              completion.syncCursor(event.currentTarget);
+            onSelect={completion.syncCursor}
+            onBeforeInput={onFieldBeforeInput}
+            onCompositionStart={onFieldCompositionStart}
+            onFocus={onFieldFocus}
+            onBlur={onFieldBlur}
+            onTouchStart={onFieldTouchStart}
+            onPointerDown={onFieldPointerDown}
+            onPointerUp={onFieldPointerUp}
+            onClick={(field) => {
+              onFieldClick?.(field);
+              completion.syncCursor(field);
             }}
-            onKeyUp={(event) => completion.syncCursor(event.currentTarget)}
-            onPaste={onTextareaPaste}
+            onPaste={onFieldPaste}
             disabled={disabled || !enabled}
             onKeyDown={(event) => {
               if (
@@ -309,30 +306,25 @@ function ComposerInputSurface({
               }
               onKeyDownExtra?.(event);
             }}
-            aria-label={ariaLabel}
+            ariaLabel={ariaLabel}
             className={cn(
               "composer-textarea flex-1 resize-none border-0 bg-transparent shadow-none outline-none transition-[background-color,border-color,box-shadow,opacity] duration-200 focus-visible:ring-0",
               compact ? "min-h-0 p-0 text-sm" : "min-h-9 px-0 py-1.5 text-sm sm:min-h-11 sm:py-2 sm:text-[15px]"
             )}
-          />
-          {/* After the textarea: a later sibling's ref is still null while an
-              earlier one's layout effects run, and the mirror reads the
-              textarea's metrics in its own. */}
-          <ComposerTextHighlight value={textareaValue ?? draft} textareaRef={textareaRef}
             mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
             references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
-            hint={stripEmptyPasteSentinel(textareaValue ?? draft).length === 0 ? placeholder : undefined} />
-          {onSummonStartAnyway && summonReadings?.some(reading => reading.choice !== "summon") &&
-            <ComposerSummonOptions readings={summonReadings}
-            textareaRef={textareaRef} disabled={disabled || !enabled || sending} onStartAnyway={onSummonStartAnyway} />}
-          </div>
+            hint={stripEmptyPasteSentinel(fieldValue ?? draft).length === 0 ? placeholder : undefined}>
+            {onSummonStartAnyway && summonReadings?.some(reading => reading.choice !== "summon") &&
+              <ComposerSummonOptions readings={summonReadings}
+              fieldRef={fieldRef} disabled={disabled || !enabled || sending} onStartAnyway={onSummonStartAnyway} />}
+          </ComposerEditor>
           {inputTrailing}
           <button
             type={compact ? "submit" : "button"}
             title={sendTitle ?? "Send"}
             aria-label={sendTitle ?? "Send"}
             disabled={disabled || !enabled || !readyToSend || sending}
-            // Pressing Send leaves focus in the textarea, not on the button.
+            // Pressing Send leaves focus in the field, not on the button.
             onMouseDown={(event) => event.preventDefault()}
             onClick={
               compact
