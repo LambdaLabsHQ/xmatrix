@@ -137,7 +137,7 @@ remain context. Live and catch-up App work queues behind any active turn:
    | continuation source naming the asking message (`invocationSource`) | yes | none |
    | stop of a live predecessor before the spawn | when it is live | never (a resting Instance has no process) |
    | durable intent `data.agent_reborn_intents`, `kind` | `reborn` | `wake` |
-   | where a failure is reported | a `Reborn failed [code]` notice replying to the asking message, and the status chip on it | `rest_state = 'wake_failed'` with `rest_reason` on the Instance; no Channel message |
+   | where a failure is reported | a `Reborn failed [code]` notice replying to the asking message, and the status chip on it | `rest_state = 'wake_failed'` with `rest_reason` on the Instance, or `rest_reason = 'machine_offline'` while its machine is away (step 6); no Channel message |
 
    The owner's current Channel access and registration admission are checked
    exactly as for `@name:N:reborn`.
@@ -153,6 +153,21 @@ remain context. Live and catch-up App work queues behind any active turn:
    both leave the Instance `wake_failed` with the reason, so its Channel sees
    why and later messages do not repeat the failure. `:reborn` resumes it; a
    stop removes it.
+6. A wake refused because the Instance's machine is offline
+   (`registration_daemon_offline`) is not permanent: the Instance keeps its
+   rest with `rest_reason = 'machine_offline'`. Its presence carries
+   `offlineReason: "machine_offline"`, so its card reads "machine offline"
+   rather than promising that the next message wakes it, and mentions of it
+   show it cannot read them yet. When that machine's daemon is online again
+   (its connect, or for a recovering daemon its activation fence), the Hub
+   wakes each such Instance (`wakeInstancesAwaitingMachine`, beside
+   `wakeMachineChannels`), with the newest message anyone else wrote in its
+   Channel as the waking message; what came before it arrives by catch-up.
+   (2026-10-24: a returning user's machine dropped, their next messages were
+   refused silently, and nothing woke the Instance when it came back.)
+
+A wake that is recorded, or refused, pushes `presence_updated` to the
+Channel's people, whose clients read its presence again.
 
 A message committed in the few seconds between a sleep and its exit report
 reaches the closing socket rather than a resting Instance; it is caught up by

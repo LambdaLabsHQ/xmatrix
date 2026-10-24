@@ -47,6 +47,7 @@ import { isRecoverableLaunchFailure } from "../live-run-admission";
 import { boundedOccurrenceAt } from "../bounded-occurrence-time";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { wakeMachineChannels } from "../registration-authority-wake";
+import { wakeInstancesAwaitingMachine } from "../registration-launch-dispatch";
 import { pageSummaryAnswered } from "../page-summary-answer";
 import type { ScheduledStep } from "../postgres-agent-launch-schedule";
 import { machineDaemonCommand } from "../machines";
@@ -128,7 +129,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       daemonCommand: (command) => machineDaemonCommand(input.env, command),
       runLifecycleReport: (report) => machineRunLifecycleReport(input.env, report),
       launchUpdate: (update) => updateAgentLaunch(input.env, update),
-      machineConnected: (route) => wakeMachineChannels(input.env, route),
+      // Work queued for the machine moves, and Instances a message could not wake while it was away wake.
+      machineConnected: (route) => Promise.all([wakeMachineChannels(input.env, route),
+        wakeInstancesAwaitingMachine(input.env, route)]),
       textTaskAnswered: (task) => channelAboutRequest(task.requestId)
         ? channelAboutAnswered(input.env, task, input.runtimeSelf ? { runtimeSelf: {
           cellName: input.runtimeSelf.cellName(), fetch: request => input.runtimeSelf!.fetch(request),
@@ -161,10 +164,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       ? result.activation as Record<string, unknown>
       : undefined;
     // The connect is committed; waking its Channels must not delay or fail it.
-    const woken = this.dependencies.machineConnected?.({ ownerUserId: principal.ownerUserId,
-      machineId: principal.machineId })?.catch((error: unknown) => console.warn(
-      "Machine reconnect could not wake its Channels", { errorCode: error instanceof Error ? error.name : "unknown" }));
-    if (woken) this.dependencies.keepAlive?.(woken);
+    this.machineOnline(principal);
     return {
       principal,
       connected: {
@@ -174,6 +174,14 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         ...(activation ? { activation: activationReceipt(activation, message.requestId) } : {}),
       },
     };
+  }
+
+  /** The machine's daemon is online again: what waited on it moves. Neither delays nor fails the caller. */
+  private machineOnline(route: { ownerUserId: string; machineId: string }) {
+    const woken = this.dependencies.machineConnected?.({ ownerUserId: route.ownerUserId,
+      machineId: route.machineId })?.catch((error: unknown) => console.warn(
+      "Machine reconnect could not wake its Channels", { errorCode: error instanceof Error ? error.name : "unknown" }));
+    if (woken) this.dependencies.keepAlive?.(woken);
   }
 
   async refresh(token: string): Promise<MachineDaemonAuthorityPrincipal> {
@@ -192,6 +200,10 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
           : message.type === "machine_activation_prepare" ? "activation_prepare" : "activation_advance",
         message,
       ));
+      // A recovering daemon's connect left it offline; this fence is where it comes online.
+      if (message.type === "machine_activation_advance" && message.phase === "active_fenced") {
+        this.machineOnline(session.principal);
+      }
       return activationReceipt(recordValue(result.activation, "activation"), message.requestId);
     }
     if (message.type === "machine_command_lease_renew") {

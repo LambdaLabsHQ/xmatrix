@@ -1048,6 +1048,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       async () => assert.fail('a daemon without managed-cwd support must not be offered'));
     assert.equal(incapable.prepared.length, 0);
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_managed_v1"]'::jsonb`);
+    const managedLaunches = [];
     for (const [id, mention, target] of [
       ['managed-registration', '@codex', { kind: 'registration', key }],
       ['managed-capability', '@codex', { kind: 'capability', harness: 'codex' }],
@@ -1064,6 +1065,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       assert.deepEqual(result.rejected, []);
       assert.equal(result.prepared.length, 1);
       const launch = result.prepared[0];
+      managedLaunches.push(launch);
       const payload = (await sql('SELECT spawn_payload_json FROM data.agent_launches WHERE launch_id=$1', [launch.launchId]))
         .rows[0].spawn_payload_json;
       assert.deepEqual(payload.registration.resources.workspaces, []);
@@ -1080,6 +1082,25 @@ integration("launch survives a hostname change with stale Workspace metadata and
       assert.equal(refusal.prepared.length, 0);
       assert.equal(refusal.rejected.length, 1);
     }
+
+    // 2026-10-24: a message could not wake an interrupted Instance because its
+    // machine was offline, and nobody saw why. The refusal stays a rest, with
+    // the reason its Channel shows, for the machine's reconnect to wake.
+    const away = managedLaunches[0];
+    await sql(`UPDATE data.runs SET status='exited' WHERE run_id=$1`, [away.runId]);
+    await sql(`UPDATE data.instances SET status='offline',rest_state='interrupted',rest_reason=NULL WHERE instance_id=$1`,
+      [away.instanceId]);
+    await sql(`UPDATE data.machine_daemons SET status='offline'`);
+    const offline = await reborn.wakeResting({ commandId: "wake-offline", channelId: "channel",
+      sourceMessageId: "offline-message", targetInstanceId: away.instanceId, prompt: "hello" });
+    assert.deepEqual(offline, { woken: [], refused: [{ instanceId: away.instanceId, code: "registration_daemon_offline",
+      permanent: false }] });
+    assert.deepEqual((await sql(`SELECT rest_state,rest_reason FROM data.instances WHERE instance_id=$1`, [away.instanceId]))
+      .rows[0], { rest_state: "interrupted", rest_reason: "machine_offline" });
+    const awaiting = Object.values((await loadChannelAgentPresence(presenceReader, "space", ["channel"])).get("channel") ?? {})
+      .flatMap((member) => member.instances ?? []).find(instance => instance.id === away.instanceId);
+    assert.deepEqual({ rest: awaiting.rest, offlineReason: awaiting.offlineReason },
+      { rest: "interrupted", offlineReason: "machine_offline" });
 
   } finally { await setup.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); await setup.end(); }
 });

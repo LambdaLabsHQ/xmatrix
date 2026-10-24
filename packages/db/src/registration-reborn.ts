@@ -3,7 +3,7 @@ import { RegistrationPreparationAuthority } from "./registration-preparation-aut
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { canonicalRegistrationHarness, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
   parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RegistrationResourceLimits,
-  type SpaceAgentRegistrationKey, hasControlCharacter,
+  type SpaceAgentRegistrationKey, type AgentInstanceOfflineReason, hasControlCharacter,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
@@ -74,6 +74,11 @@ const PERMANENT_WAKE_REFUSALS = new Set(["instance_not_found", "registration_not
   "registration_reborn_unregistered", "registration_reborn_not_registered", "registration_environment_missing",
   "registration_reborn_repo_pool_invalid", "reborn_source_fenced",
   "handoff_source_transferred", "forbidden"]);
+
+/** The machine a resting Instance runs on is offline, so its wake is refused
+ * for now: the Instance keeps resting with `rest_reason='machine_offline'`,
+ * which its Channel shows, and the machine's reconnect wakes it then. */
+export const MACHINE_OFFLINE_REST_REASON: AgentInstanceOfflineReason = "machine_offline";
 
 /** A resting Instance whose wake failed stays in its Channel as `wake_failed`
  * with the reason (`$2`); nothing but an explicit `:reborn` resumes it. */
@@ -315,6 +320,13 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         if (code === "reborn_pending") continue;
         const permanent = PERMANENT_WAKE_REFUSALS.has(code) || status === 404;
         refused.push({ instanceId, code, permanent });
+        if (code === "registration_daemon_offline") await this.database.transaction({
+          requestId: `${commandId}:offline:${instanceId}`.slice(0, 200), operation: "registration.wake.machine-offline",
+          placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_machine_offline_v1",
+          text: `UPDATE data.instances SET rest_reason=$2,version=version+1,updated_at=GREATEST(updated_at,$3::timestamptz)
+            WHERE instance_id=$1 AND channel_id=$4 AND status='offline' AND rest_state IN ('sleeping','interrupted')
+              AND rest_reason IS DISTINCT FROM $2 RETURNING instance_id`,
+          values: [instanceId, MACHINE_OFFLINE_REST_REASON, new Date().toISOString(), channelId], maxRows: 1 }));
         if (permanent) await this.database.transaction({ requestId: `${commandId}:rest:${instanceId}`.slice(0, 200),
           operation: "registration.wake.retire", placement: this.placement }, tx => tx.query({
           name: "registration_wake_resting_fail_v1", text: WAKE_FAILED_SQL,

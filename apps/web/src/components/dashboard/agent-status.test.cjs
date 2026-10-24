@@ -70,6 +70,9 @@ test("a live Instance whose runtime reports a wait displays as waiting", () => {
   assert.equal(display({ ...base, status: "offline", rest: "sleeping", runtimeState: { status: "idle", waiting } }), "sleeping");
   assert.equal(display({ ...base, status: "offline", rest: "wake_failed", restReason: "reborn_spawn_failed" }), "wake_failed");
   assert.equal(display({ ...base, status: "offline", offlineReason: "machine_offline", runtimeState: { status: "running", waiting } }), "machine offline");
+  // A message could not wake it while its machine is away: "the next message
+  // wakes it" would be wrong until the machine reconnects.
+  assert.equal(display({ ...base, status: "offline", rest: "interrupted", offlineReason: "machine_offline" }), "machine offline");
 });
 
 test("the waiting phrase says what and how long, never a guess", () => {

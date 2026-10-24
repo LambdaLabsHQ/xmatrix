@@ -241,7 +241,7 @@ export type {
   AgentChannelRunProof,
 } from "./agent-channel-access.js";
 
-export { PostgresRegistrationRebornRepository, WAKE_FAILED_SQL } from "./registration-reborn.js";
+export { MACHINE_OFFLINE_REST_REASON, PostgresRegistrationRebornRepository, WAKE_FAILED_SQL } from "./registration-reborn.js";
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {

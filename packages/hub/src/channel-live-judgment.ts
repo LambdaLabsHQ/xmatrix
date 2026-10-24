@@ -45,6 +45,18 @@ export async function publishChannelInvocationsChanged(env: Env, channelId: stri
       channelId, error: error instanceof Error ? error.message : String(error) }));
 }
 
+/**
+ * Tell a Channel's people that one of its resting Agent Instances changed
+ * outside a live socket: a message woke it, or its machine is offline so the
+ * wake waits for it to reconnect. Clients read the Channel's presence again.
+ * Best effort, like the push above.
+ */
+export async function publishChannelPresenceChanged(env: Env, channelId: string): Promise<void> {
+  await publishChannelMessageJudgment(env, channelId, "presence_updated", {})
+    .catch((error: unknown) => console.warn("Channel presence push failed", {
+      channelId, error: error instanceof Error ? error.message : String(error) }));
+}
+
 /** A Hub judgment about one message, to every live member of its Channel. */
 async function publishChannelMessageJudgment(
   env: Env,
