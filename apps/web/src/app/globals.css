@@ -7544,7 +7544,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 
 /* The draft's mention bands (composer-mention-bands.ts places them). They sit
    in the mirror behind the textarea's own glyphs, one per line of a mention,
-   in the sent chip's ink. */
+   in the sent chip's ink and capsule. */
 .app-composer-mention-bands { position: absolute; left: 0; top: 0; width: 0; height: 0; }
 .app-composer-mention-probe { position: absolute; left: 0; top: 0; visibility: hidden; white-space: pre; }
 .app-composer-mention-probe > span { display: inline-block; width: 0; height: 0; }
@@ -7552,7 +7552,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   --band-ink: var(--primary);
   --band-fill: color-mix(in oklab, var(--band-ink) 10%, transparent);
   position: absolute;
-  border-radius: 0.3em;
+  border-radius: 999px;
   background: var(--band-fill);
 }
 .app-composer-mention-band[data-self="true"] { --band-fill: color-mix(in oklab, var(--band-ink) 20%, transparent); }

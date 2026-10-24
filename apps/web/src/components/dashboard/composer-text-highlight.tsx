@@ -349,6 +349,28 @@ function paintMentionBands(mirror: HTMLElement, layer: HTMLElement, spans: reado
   });
 
   const planned = planMentionBands(inputs, { fontSize, lineHeight, firstLineTop, baseline });
+
+  // The sent chip leads with its face; the draft draws that face over the `@`
+  // itself, since the textarea's text has no room before it. The disc fills
+  // the capsule's height, at least enough to cover the glyph's ink, and the
+  // capsule starts where it does, so the face rounds the capsule's end.
+  const discs = new Map<number, { left: number; top: number; size: number }>();
+  spans.forEach((span, index) => {
+    const band = span.face && planned.find((item) => item.mention === index && item.lineOrdinal === 0);
+    const box = band && charBox(span.start);
+    const at = value[span.start];
+    if (!band || !box || !at) return;
+    const glyph = ink(at);
+    const left = box.left + ink.bearing(at, "left");
+    const right = box.right - ink.bearing(at, "right");
+    const centreY = band.top + band.height / 2;
+    const rise = firstLineTop + lineOf(box.top, box.bottom) * lineHeight + baseline - centreY;
+    const size = Math.max(band.height, right - left + 1, 2 * Math.max(glyph.ascent - rise, rise + glyph.descent) + 1);
+    const disc = { left: (left + right - size) / 2, top: centreY - size / 2, size };
+    discs.set(index, disc);
+    band.width += band.left - disc.left;
+    band.left = disc.left;
+  });
   // Crisp edges: land every band edge on a device pixel.
   const dpr = window.devicePixelRatio || 1;
   const snapX = (value: number) => (Math.round((layerBox.left + value * scale) * dpr) / dpr - layerBox.left) / scale;
@@ -391,32 +413,13 @@ function paintMentionBands(mirror: HTMLElement, layer: HTMLElement, spans: reado
   }
   for (const element of previous.values()) if (!keep.has(element)) element.remove();
 
-  // The sent chip leads with its face; the draft draws that face over the `@`
-  // itself, since the textarea's text has no room before it. The disc is
-  // centred in its band, as the sent chip's face is on its name, and just
-  // large enough there to cover the glyph's ink.
   for (const element of layer.querySelectorAll<HTMLElement>(":scope > .app-composer-mention-face")) {
-    const index = Number(element.dataset.faceFor);
-    const span = spans[index];
-    const box = span && charBox(span.start);
-    const at = span && value[span.start];
-    const band = planned.find((item) => item.mention === index && item.lineOrdinal === 0);
-    if (!box || !at || !band) {
-      element.hidden = true;
-      continue;
-    }
-    const left = box.left + ink.bearing(at, "left");
-    const right = box.right - ink.bearing(at, "right");
-    const glyph = ink(at);
-    const lineBaseline = firstLineTop + lineOf(box.top, box.bottom) * lineHeight + baseline;
-    const centreY = band.top + band.height / 2;
-    const rise = lineBaseline - centreY;
-    const size = Math.max(right - left, 2 * Math.max(glyph.ascent - rise, rise + glyph.descent)) + 1;
-    const centreX = (left + right) / 2;
-    element.hidden = false;
-    element.style.left = `${snapX(centreX - size / 2)}px`;
-    element.style.top = `${snapY(centreY - size / 2)}px`;
-    element.style.width = element.style.height = `${size}px`;
+    const disc = discs.get(Number(element.dataset.faceFor));
+    element.hidden = !disc;
+    if (!disc) continue;
+    element.style.left = `${snapX(disc.left)}px`;
+    element.style.top = `${snapY(disc.top)}px`;
+    element.style.width = element.style.height = `${disc.size}px`;
   }
 }
 
