@@ -566,10 +566,13 @@ function LoginContent() {
     }
 
     if (user) {
-      router.replace(nextPath || "/app");
+      // An app's sign-in that stopped for the second factor goes back to the Hub, which hands the app its code.
+      if (continueAfterSecondFactor) window.location.replace(continueAfterSecondFactor);
+      else router.replace(nextPath || "/app");
     }
   }, [
     cliCallbackContext,
+    continueAfterSecondFactor,
     legacyApprovalConfirmed,
     deviceApprovalConfirmed,
     deviceCode,
@@ -778,12 +781,8 @@ function LoginContent() {
     setError("");
     setLoading(true);
     try {
+      // Signed in now: the page's signed-in exit takes it from here, so no second navigation races it.
       await verifySecondFactor(code, { backup: useBackupCode, trustDevice });
-      if (continueAfterSecondFactor) {
-        window.location.assign(continueAfterSecondFactor);
-        return;
-      }
-      if (!cliMode) router.push(nextPath || "/app");
     } catch (nextError) {
       setSecondCode("");
       setError(formatLoginError(nextError));

@@ -92,3 +92,27 @@ test("three unanswered code checks keep the code and offer to try again", async 
   await page.getByRole("button", { name: "Try again" }).click();
   await expect.poll(() => check.calls()).toBe(6);
 });
+
+test("an app's sign-in that stopped for the second factor goes back to the Hub, not into the web", async ({ page }) => {
+  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
+  const state = { signedIn: false };
+  await page.route("**/api/auth/get-session", route => route.fulfill({ json: state.signedIn
+    ? { user: { id: "user-1", email: "reviewer@example.test" }, session: { token: "s", expiresAt: "2099-01-01T00:00:00.000Z" } }
+    : null }));
+  await page.route("**/api/auth/token", route => state.signedIn
+    ? route.fulfill({ json: { token: "fixture-jwt" } })
+    : route.fulfill({ status: 401, json: {} }));
+  await page.route("**/api/auth/two-factor/verify-totp", route => {
+    state.signedIn = true;
+    return route.fulfill({ json: { token: "s", user: { id: "user-1" } } });
+  });
+  await page.route("https://xmatrix-hub.xmatrix.sh/api/auth/app/finish**", route =>
+    route.fulfill({ contentType: "text/html", body: "<p>Handing the app its code</p>" }));
+
+  const finish = "https://xmatrix-hub.xmatrix.sh/api/auth/app/finish?flow=f";
+  await page.goto(`/login?two_factor=1&continue=${encodeURIComponent(finish)}`);
+  await page.getByLabel("Authentication code").fill("123456");
+
+  await page.waitForURL(finish);
+  await expect(page.getByText("Handing the app its code")).toBeVisible();
+});
