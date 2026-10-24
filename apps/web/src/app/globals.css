@@ -7580,7 +7580,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .xmatrix-app .composer-textarea .app-mention-chip[data-intent="summon"] { --chip-ink: oklch(0.55 0.17 285); --chip-fill: 16%; }
 .xmatrix-app .composer-textarea .app-mention-chip[data-intent="declined"] { --chip-ink: var(--muted-foreground); --chip-fill: 9%; }
 .xmatrix-app .composer-textarea .app-mention-chip[data-intent="reading"] { --chip-ink: var(--primary); --chip-fill: 10%; opacity: 0.6; }
-.app-composer-hint-anchor { pointer-events: none; user-select: none; }
+.app-composer-hint-overlay { position: absolute; pointer-events: none; user-select: none; white-space: pre; }
 .app-composer-summon-declined {
   position: absolute; pointer-events: auto; padding: 0; border: 0; background: transparent; cursor: help;
   border-bottom: 1.5px dotted var(--muted-foreground); border-radius: 2px;

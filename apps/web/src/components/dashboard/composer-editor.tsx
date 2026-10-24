@@ -268,17 +268,41 @@ export function ComposerEditor(props: ComposerEditorProps) {
     setText(view, props.value, Math.min(start, props.value.length), Math.min(end, props.value.length), true);
   }, [props.value]);
 
-  // Anything the chips or the hint are drawn from: redraw them.
+  // The hint is drawn over the field where the text would start, outside the
+  // editable content: inside it, a select-all and type took its words along.
+  const showHint = Boolean(props.hint) && !props.value.replaceAll("\u200B", "");
+  const hintRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    const hint = hintRef.current;
+    if (!showHint || !view || !hint) return;
+    const input = view.dom;
+    const place = () => {
+      const style = getComputedStyle(input);
+      for (const key of ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing"] as const) hint.style[key] = style[key];
+      hint.style.left = `${input.offsetLeft + input.clientLeft + (parseFloat(style.paddingLeft) || 0)}px`;
+      hint.style.top = `${input.offsetTop + input.clientTop + (parseFloat(style.paddingTop) || 0)}px`;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(input);
+    document.fonts?.addEventListener("loadingdone", place);
+    return () => {
+      observer.disconnect();
+      document.fonts?.removeEventListener("loadingdone", place);
+    };
+  }, [showHint]);
+
+  // Anything the chips are drawn from: redraw them.
   useLayoutEffect(() => {
     viewRef.current?.setProps({});
-  }, [props.disabled, props.ariaLabel, props.className, props.hint, props.mentionIndex, props.currentUserIdentityId,
+  }, [props.disabled, props.ariaLabel, props.className, props.mentionIndex, props.currentUserIdentityId,
     props.references, props.summonReadings, props.summonReadingPending]);
 
   return <div ref={hostRef} className="composer-field-host relative min-w-0 flex-1">
     {props.children}
-    {portalEntries.map((entry) => createPortal(entry.kind === "face"
-      ? <MentionChipFace of={entry.face} />
-      : <ComposerHint hint={entry.hint} />, entry.element, entry.key))}
+    {portalEntries.map((entry) => createPortal(<MentionChipFace of={entry.face} />, entry.element, entry.key))}
+    {showHint && <span ref={hintRef} className="app-composer-hint-overlay" aria-hidden="true"><ComposerHint hint={props.hint!} /></span>}
   </div>;
 }
 
@@ -375,11 +399,9 @@ class TextHistory {
   }
 }
 
-type PortalEntry =
-  | { kind: "face"; key: string; element: HTMLElement; face: FaceOf }
-  | { kind: "hint"; key: string; element: HTMLElement; hint: string };
+type PortalEntry = { key: string; element: HTMLElement; face: FaceOf };
 
-/** The elements decorations drew that React fills: chip faces and the hint. */
+/** The elements decorations drew that React fills: the chips' faces. */
 class PortalRegistry {
   private entries = new Map<HTMLElement, PortalEntry>();
   private listeners = new Set<() => void>();
@@ -421,7 +443,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
     const props = propsRef.current!;
     const text = composerTextOf(state.doc);
     const inputs = [props.mentionIndex, props.currentUserIdentityId, props.references, props.summonReadings,
-      props.summonReadingPending, props.hint];
+      props.summonReadingPending];
     if (cache && cache.text === text && inputs.every((input, index) => input === cache!.inputs[index])) return cache.set;
     const decorations: Decoration[] = [];
     const seen = new Map<string, number>();
@@ -440,7 +462,10 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
       const chip = span.self ? "app-mention-chip app-mention-chip-self" : "app-mention-chip";
       const face = span.face;
       if (face) {
-        const key = `face\u0000${written}\u0000${count}\u0000${JSON.stringify(face)}`;
+        // Keyed by everything it draws but where it is, so a chip whose reading
+        // changes is drawn again while typing before it only moves it.
+        const drawn = Object.entries(data).filter(([name]) => name !== "data-start");
+        const key = `face\u0000${written}\u0000${count}\u0000${JSON.stringify(face)}\u0000${chip}\u0000${JSON.stringify(drawn)}`;
         decorations.push(Decoration.widget(from, () => {
           const lead = document.createElement("span");
           lead.className = `${chip} app-composer-chip-lead`;
@@ -456,7 +481,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
           element.className = "app-mention-chip-avatar-face";
           avatar.append(element);
           lead.append(avatar);
-          portals.add({ kind: "face", key, element, face });
+          portals.add({ key, element, face });
           return lead;
         }, { key, side: -1, ignoreSelection: true, destroy: (node) => {
           const element = (node as HTMLElement).querySelector<HTMLElement>(".app-mention-chip-avatar-face");
@@ -466,17 +491,6 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
       decorations.push(Decoration.inline(from, to, {
         nodeName: "span", class: face ? `${chip} app-composer-chip-tail` : chip, ...data,
       }));
-    }
-    if (props.hint && !text.replaceAll("​", "")) {
-      const hint = props.hint;
-      const key = `hint\u0000${hint}`;
-      decorations.push(Decoration.widget(state.doc.content.size - 1, () => {
-        const element = document.createElement("span");
-        element.className = "app-composer-hint-anchor";
-        element.contentEditable = "false";
-        portals.add({ kind: "hint", key, element, hint });
-        return element;
-      }, { key, side: 1, ignoreSelection: true, destroy: (node) => portals.remove(node as HTMLElement) }));
     }
     const set = DecorationSet.create(state.doc, decorations);
     cache = { text, inputs, set };

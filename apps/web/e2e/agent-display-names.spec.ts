@@ -1,9 +1,24 @@
 import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
+import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, installWorkspaceStubs } from "./workspace-fixtures";
 import { expectDraft } from "./composer-draft";
 
 test.use(E2E_DESKTOP_CONTEXT);
+
+/** A Channel with one codex registration, `@codex` typed into its composer. */
+async function draftCodexMention(page: Page) {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
+    registrations: [{
+      key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "machine-0", harness: "codex" },
+      displayName: "codex", machineName: "MacBook",
+    }],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/channel-general");
+  const draft = page.locator(".composer-textarea").first();
+  await draft.fill("@codex");
+  return draft;
+}
 
 test("same-name Agents collapse to one shout without offering retired launch suffixes", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
@@ -30,15 +45,7 @@ test("same-name Agents collapse to one shout without offering retired launch suf
 });
 
 test("selected category option is inset and rounded inside a single glass surface", async ({ page }) => {
-  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
-    registrations: [{
-      key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "machine-0", harness: "codex" },
-      displayName: "codex", machineName: "MacBook",
-    }],
-  });
-  await page.goto("/app/personal-sspaceperso/channels/channel-general");
-  const draft = page.locator(".composer-textarea").first();
-  await draft.fill("@codex");
+  const draft = await draftCodexMention(page);
   const panel = page.locator(".app-mention-suggestions");
   const option = panel.getByRole("option").filter({ hasText: "codex" }).first();
   await expect(option).toBeVisible();
@@ -269,15 +276,7 @@ test("a Machine tag and its hover card open that Machine's page, only for a Mach
 });
 
 test("a picked mention is the message's chip in the draft: face and @name in one pill, text still the draft", async ({ page }, testInfo) => {
-  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
-    registrations: [{
-      key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "machine-0", harness: "codex" },
-      displayName: "codex", machineName: "MacBook",
-    }],
-  });
-  await page.goto("/app/personal-sspaceperso/channels/channel-general");
-  const draft = page.locator(".composer-textarea").first();
-  await draft.fill("@codex");
+  const draft = await draftCodexMention(page);
   await page.locator(".app-mention-suggestions").getByRole("option").filter({ hasText: "codex" }).first().click();
   await expectDraft(draft, "@codex ");
   const lead = draft.locator(".app-composer-chip-lead");
