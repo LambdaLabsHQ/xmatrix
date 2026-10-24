@@ -7,17 +7,13 @@ import { BrandMark } from "@/components/shared/brand-mark";
 import { Button } from "@/components/ui/button";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { landingCopy, type Locale } from "@/lib/landing-copy";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
-
-const navLinks = [
-  { href: "/download", label: "Download" },
-  { href: "/#connectors", label: "Connectors" },
-  { href: "/#pricing", label: "Pricing" },
-];
 
 const GLASS_REVEAL_DISTANCE_PX = 120;
 
-export function Navbar() {
+export function Navbar({ locale = "en" }: { locale?: Locale }) {
+  const { home, nav: copy } = landingCopy[locale];
   const [glassReveal, setGlassReveal] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -62,7 +58,7 @@ export function Navbar() {
         </span>
         <div className="site-navbar-brand shrink-0">
           <BrandMark
-            href="/"
+            href={home}
             iconSrc="/brand/xmatrix-icon-transparent-128.png"
             className="relative z-10"
             iconClassName="overflow-visible"
@@ -71,13 +67,13 @@ export function Navbar() {
         <div className="site-navbar-bar">
           <div className="site-navbar-content relative z-10 flex h-full items-center justify-end gap-4 lg:justify-between">
             <nav className="hidden items-center gap-6 lg:flex">
-              {navLinks.map((link) => (
+              {copy.links.map(([href, label]) => (
                 <a
-                  key={link.href}
-                  href={link.href}
+                  key={href}
+                  href={href}
                   className="text-[13px] font-medium tracking-[-0.015em] text-foreground/65 transition-colors hover:text-foreground"
                 >
-                  {link.label}
+                  {label}
                 </a>
               ))}
             </nav>
@@ -95,13 +91,13 @@ export function Navbar() {
                 href="/docs"
                 className="text-[13px] font-medium tracking-[-0.015em] text-foreground/65 transition-colors hover:text-foreground"
               >
-                Docs
+                {copy.docs}
               </Link>
               <Link
                 href="/app"
                 className="text-[13px] font-medium tracking-[-0.015em] text-foreground/65 transition-colors hover:text-foreground"
               >
-                Open App
+                {copy.openApp}
               </Link>
               <LiquidGlassPill
                 as={Link}
@@ -109,7 +105,7 @@ export function Navbar() {
                 onSlab
                 className="inline-flex h-8 items-center justify-center px-4 text-[13px] font-semibold text-[#2f281f]"
               >
-                Start Free
+                {copy.startFree}
               </LiquidGlassPill>
             </div>
 
@@ -117,7 +113,7 @@ export function Navbar() {
               variant="ghost"
               size="icon"
               className="lg:hidden"
-              aria-label="Open navigation menu"
+              aria-label={copy.menu}
               onClick={() => setMenuOpen(true)}
             >
               <Menu className="size-5" />
@@ -128,15 +124,15 @@ export function Navbar() {
         <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
           <SheetContent side="right" className="site-nav-sheet app-material-wood-panel w-72 border-0">
             <nav className="flex flex-col gap-2">
-              {navLinks.map((link) => (
+              {copy.links.map(([href, label]) => (
                 <LiquidGlassPill
-                  key={link.href}
+                  key={href}
                   as="a"
-                  href={link.href}
+                  href={href}
                   onClick={() => setMenuOpen(false)}
                   className="inline-flex h-10 w-full items-center px-3 text-sm font-medium"
                 >
-                  {link.label}
+                  {label}
                 </LiquidGlassPill>
               ))}
               <LiquidGlassPill
@@ -153,7 +149,7 @@ export function Navbar() {
                 onClick={() => setMenuOpen(false)}
                 className="inline-flex h-10 w-full items-center px-3 text-sm font-medium"
               >
-                Docs
+                {copy.docs}
               </LiquidGlassPill>
               <LiquidGlassPill
                 as={Link}
@@ -161,7 +157,7 @@ export function Navbar() {
                 onClick={() => setMenuOpen(false)}
                 className="inline-flex h-10 w-full items-center px-3 text-sm font-medium"
               >
-                Open App
+                {copy.openApp}
               </LiquidGlassPill>
               <LiquidGlassPill
                 as={Link}
@@ -169,7 +165,7 @@ export function Navbar() {
                 onClick={() => setMenuOpen(false)}
                 className="mt-2 inline-flex h-11 w-full items-center justify-center text-sm font-semibold text-[#2f281f]"
               >
-                Start Free
+                {copy.startFree}
               </LiquidGlassPill>
             </nav>
           </SheetContent>

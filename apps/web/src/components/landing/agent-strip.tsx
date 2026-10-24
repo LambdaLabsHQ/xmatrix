@@ -1,6 +1,7 @@
 import Image from "next/image";
 
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { landingCopy, type Locale } from "@/lib/landing-copy";
 
 const AGENTS = [
   ["Claude Code", "claude.svg"], ["Codex", "openai.svg"], ["Cursor", "cursor.png"], ["Gemini", "gemini.svg"],
@@ -9,7 +10,8 @@ const AGENTS = [
 ] as const;
 
 /** The agents people already use, passing by under the hero. */
-export function AgentStrip() {
+export function AgentStrip({ locale = "en" }: { locale?: Locale }) {
+  const label = landingCopy[locale].agentStrip;
   const row = (hidden: boolean) => (
     <ul className="site-agent-strip-row" aria-hidden={hidden || undefined}>
       {AGENTS.map(([name, logo]) => (
@@ -21,8 +23,8 @@ export function AgentStrip() {
     </ul>
   );
   return (
-    <section aria-label="Works with the agents you already use" className="site-agent-strip">
-      <p className="site-agent-strip-label">Works with the agents you already use</p>
+    <section aria-label={label} className="site-agent-strip">
+      <p className="site-agent-strip-label">{label}</p>
       <div className="site-agent-strip-track">{row(false)}{row(true)}</div>
     </section>
   );

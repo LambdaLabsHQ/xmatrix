@@ -1,31 +1,36 @@
 import { BrandMark } from "@/components/shared/brand-mark";
 import { WoodPanel } from "@/components/ui/material-surfaces";
 import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
+import { landingCopy, type LandingCopy, type Locale } from "@/lib/landing-copy";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 // X verifies the organization by this link back to its account.
 export const X_ACCOUNT_URL = "https://x.com/xMatrix_hq";
 
-const links = {
-  Product: [
-    { label: "Online App", href: "/app" },
-    { label: "Download", href: "/download" },
-    { label: "Pricing", href: "/#pricing" },
-    { label: "Docs", href: "/docs" },
-    { label: "GitHub", href: REPOSITORY_URL },
-    { label: "X", href: X_ACCOUNT_URL },
-    { label: "Console", href: "/console" },
-    { label: "Sign In", href: "/login" },
-  ],
-  Legal: [
-    { label: "Privacy Policy", href: "/privacy" },
-    { label: "Terms of Service", href: "/terms" },
-    { label: "Cookies and Storage", href: "/cookies" },
-    { label: "Subprocessors", href: "/subprocessors" },
-  ],
-};
+function footerLinks(copy: LandingCopy) {
+  const { links, legalLinks } = copy.footer;
+  return {
+    [copy.footer.product]: [
+      { label: links.app, href: "/app" },
+      { label: links.download, href: "/download" },
+      { label: links.pricing, href: `${copy.home}#pricing` },
+      { label: links.docs, href: "/docs" },
+      { label: "GitHub", href: REPOSITORY_URL },
+      { label: "X", href: X_ACCOUNT_URL },
+      { label: links.console, href: "/console" },
+      { label: links.signIn, href: "/login" },
+    ],
+    [copy.footer.legal]: [
+      { label: legalLinks.privacy, href: "/privacy" },
+      { label: legalLinks.terms, href: "/terms" },
+      { label: legalLinks.cookies, href: "/cookies" },
+      { label: legalLinks.subprocessors, href: "/subprocessors" },
+    ],
+  };
+}
 
-export function Footer() {
+export function Footer({ locale = "en" }: { locale?: Locale }) {
+  const copy = landingCopy[locale];
   return (
     <WoodPanel as="footer" className="site-footer pt-16 pb-8">
 
@@ -34,13 +39,12 @@ export function Footer() {
           <div className="space-y-4">
             <BrandMark iconClassName="size-10" wordmarkClassName="text-xl" />
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground/80">
-              Talk with your team and AI agents in one Space. Keep decisions, open work
-              and next steps in living pages as the work changes.
+              {copy.footer.tagline}
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
-            {Object.entries(links).map(([category, items]) => (
+            {Object.entries(footerLinks(copy)).map(([category, items]) => (
               <div key={category} className="space-y-4">
                 <h4 className="text-sm font-bold text-foreground">{category}</h4>
                 <ul className="space-y-3">
@@ -61,7 +65,7 @@ export function Footer() {
         </div>
 
         <div className="space-y-4 border-b border-border py-8">
-          <h4 className="text-sm font-bold text-foreground">Agents</h4>
+          <h4 className="text-sm font-bold text-foreground">{copy.footer.agents}</h4>
           <ul className="flex flex-wrap gap-x-6 gap-y-2">
             {agentDocFiles.map((file) => (
               <li key={file}>
@@ -76,7 +80,7 @@ export function Footer() {
           </ul>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
-              See what ChatGPT, Claude, Perplexity, Gemini or Grok say about xMatrix.
+              {copy.footer.askAi}
             </p>
             <ul className="flex flex-wrap gap-2">
               {aiAskLinks.map((link) => (
@@ -97,11 +101,15 @@ export function Footer() {
 
         <div className="mt-8 flex flex-col items-center justify-between gap-4 sm:flex-row">
           <p className="text-xs text-muted-foreground/60">
-            &copy; {new Date().getFullYear()} MadeByRobot, LLC. xMatrix and its related marks are reserved.
+            &copy; {new Date().getFullYear()} MadeByRobot, LLC. {copy.footer.rights}
           </p>
           <div className="flex items-center gap-4">
-             <div className="size-1.5 rounded-full bg-primary/50 shadow-[0_0_18px_rgba(255,255,255,0.35)]" />
-             <span className="text-xs font-medium text-muted-foreground/40">Built for coordinated agent work</span>
+            <a href={copy.otherLanguage.href} hrefLang={copy.otherLanguage.hrefLang}
+              className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+              {copy.otherLanguage.label}
+            </a>
+            <div className="size-1.5 rounded-full bg-primary/50 shadow-[0_0_18px_rgba(255,255,255,0.35)]" />
+            <span className="text-xs font-medium text-muted-foreground/40">{copy.footer.motto}</span>
           </div>
         </div>
       </div>

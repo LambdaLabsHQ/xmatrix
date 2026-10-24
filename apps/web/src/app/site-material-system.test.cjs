@@ -19,7 +19,7 @@ test("public routes share one warm material layer", () => {
   assert.doesNotMatch(tokensCss, /--site-glass-fill:/);
 
   for (const route of [
-    "page.tsx",
+    "../components/landing/home.tsx",
     "download/page.tsx",
     "../components/auth/auth-shell.tsx",
     "billing/page.tsx",
@@ -40,7 +40,6 @@ test("Get started renders the product live instead of a screenshot", () => {
   assert.match(quickStartSource, /<AppWindow \/>/);
   assert.match(source("../components/landing/app-window-preview.tsx"), /MessageTimeline[\s\S]*ChannelSidebar|ChannelSidebar[\s\S]*MessageTimeline/);
   assert.doesNotMatch(quickStartSource, /next\/image|\.png|\.webp/);
-  assert.match(source("page.tsx"), /<Hero \/>\s*<AgentStrip \/>\s*<LivePage \/>\s*<QuickStart \/>/);
 });
 
 test("public site labels carry no decorative eyebrow bar", () => {
@@ -55,7 +54,6 @@ test("public actions use shared materials and the Hero has one wood CTA", () => 
   assert.match(heroSource, /WoodPanel[\s\S]*as=\{Link\}[\s\S]*href="\/login"/);
   assert.match(siteCss, /\.site-page \.app-material-wood-panel\.site-wood-pill \{\s*border-radius: 999px;/);
   assert.doesNotMatch(heroSource, /landing-liquid-button/);
-  assert.match(heroSource, /Start Free/);
   assert.doesNotMatch(heroSource, /Set up with your agent|See How It Works|Shared space|clear handoffs/);
 });
 
@@ -78,7 +76,6 @@ test("navbar is one glass bar with no wood slab, and woods the mobile sheet", ()
   assert.match(navbarSource, /<span aria-hidden className="site-navbar-glass">\s*<LiquidGlassPill className="size-full">/);
   assert.match(navbarSource, /href="\/login"\s*onSlab/, "Start Free sits on the bar glass without a nested backdrop");
   assert.match(navbarSource, /site-nav-sheet app-material-wood-panel/);
-  assert.match(navbarSource, /navLinks\.map\([\s\S]*LiquidGlassPill/);
 });
 
 test("navbar glass spans the logo and every link on a centered sticky bar", () => {

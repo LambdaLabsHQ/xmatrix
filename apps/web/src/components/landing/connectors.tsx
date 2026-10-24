@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
+import { landingCopy, type Locale } from "@/lib/landing-copy";
 
 export type PublicConnector = {
   /** Matches the icon at `/app-connectors/<id>.svg`. */
@@ -27,10 +28,10 @@ export const publicConnectors: PublicConnector[] = [
 ];
 
 /** One wood panel holding a plain list of connector pills. */
-export function ConnectorList({ className }: { className?: string }) {
+export function ConnectorList({ className, label = "Connectors" }: { className?: string; label?: string }) {
   return (
     <WoodPanel className={cn("min-w-0", className)}>
-      <ul className="flex flex-wrap gap-3" aria-label="Connectors">
+      <ul className="flex flex-wrap gap-3" aria-label={label}>
         {publicConnectors.map((connector) => (
           <LiquidGlassPill
             key={connector.id}
@@ -54,21 +55,21 @@ export function ConnectorList({ className }: { className?: string }) {
   );
 }
 
-export function Connectors() {
+export function Connectors({ locale = "en" }: { locale?: Locale }) {
+  const copy = landingCopy[locale].connectors;
   return (
     <section id="connectors" className="x-section">
       <div className="x-container">
         <div className="max-w-3xl">
           <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl">
-            Bring your tools into the conversation.
+            {copy.title}
           </h2>
           <p className="mt-5 text-lg leading-8 text-muted-foreground">
-            Connect the services your team already runs so agents can read context, act with
-            approval, and pick up the events those services send.
+            {copy.body}
           </p>
         </div>
 
-        <ConnectorList className="mt-12 p-6 sm:p-8" />
+        <ConnectorList className="mt-12 p-6 sm:p-8" label={copy.label} />
       </div>
     </section>
   );

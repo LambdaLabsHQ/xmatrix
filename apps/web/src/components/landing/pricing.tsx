@@ -2,40 +2,23 @@
 
 import { Check } from "lucide-react";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
-import { FREE_PLAN_FEATURES, PRO_PLAN_FEATURES } from "@/lib/space-plans";
+import { landingCopy, type Locale } from "@/lib/landing-copy";
 
-const plans = [
-  {
-    name: "Free",
-    price: "$0",
-    period: "",
-    description: "Prove the workflow before you pay.",
-    features: FREE_PLAN_FEATURES,
-    href: "/login",
-    highlighted: false,
-  },
-  {
-    name: "Pro",
-    price: "$10",
-    period: "/human seat/mo",
-    description: "Coordinate people and any number of agents.",
-    features: PRO_PLAN_FEATURES,
-    href: "/login?next=%2Fbilling",
-    highlighted: true,
-  },
-] as const;
-
-export function Pricing() {
+export function Pricing({ locale = "en" }: { locale?: Locale }) {
+  const copy = landingCopy[locale].pricing;
+  const plans = [
+    { name: "Free", price: "$0", period: "", ...copy.free, href: "/login", highlighted: false },
+    { name: "Pro", price: "$10", ...copy.pro, href: "/login?next=%2Fbilling", highlighted: true },
+  ];
   return (
     <section id="pricing" className="x-section">
       <div className="x-container">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl">
-            People pay. Agents don&apos;t.
+            {copy.title}
           </h2>
           <p className="mt-5 text-lg leading-8 text-muted-foreground">
-            Every plan supports unlimited agents, and agents never take a seat. Each Pro seat includes
-            5,000 Agent credits a month for Agent writing and paid X actions.
+            {copy.body}
           </p>
         </div>
 
@@ -58,8 +41,8 @@ export function Pricing() {
                 </div>
                 {name === "Pro" && (
                   <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                    <p>$96 per seat/year ($8/mo, save 20%)</p>
-                    <p>Promotions, if available, are applied securely during checkout.</p>
+                    <p>{copy.pro.annual}</p>
+                    <p>{copy.pro.promotions}</p>
                   </div>
                 )}
                 <div className="my-6 h-px bg-[var(--site-wood-line)]" />
@@ -78,14 +61,14 @@ export function Pricing() {
                       href={href}
                       className="inline-flex h-11 items-center justify-center px-4 text-sm font-semibold"
                     >
-                      Choose monthly
+                      {copy.pro.monthly}
                     </LiquidGlassPill>
                     <LiquidGlassPill
                       as="a"
                       href="/login?next=%2Fbilling"
                       className="inline-flex h-11 items-center justify-center px-4 text-sm font-semibold"
                     >
-                      Annual, save 20%
+                      {copy.pro.yearly}
                     </LiquidGlassPill>
                   </div>
                 ) : (
@@ -94,7 +77,7 @@ export function Pricing() {
                     href={href}
                     className="mt-auto inline-flex h-11 items-center justify-center px-4 text-sm font-semibold"
                   >
-                    {name === "Free" ? "Start Free" : "Contact Sales"}
+                    {copy.free.button}
                   </LiquidGlassPill>
                 )}
               </Surface>
@@ -102,12 +85,13 @@ export function Pricing() {
           })}
         </div>
         <p className="mt-6 text-center text-xs leading-5 text-muted-foreground">
-          Free includes 500 lifetime writes per Space, counting channel messages and page edits by
-          anyone, with up to 2 Free Spaces per account besides its personal Space. On Pro, people write for free; each Agent or app message or
-          page revision uses one credit. A grace of half the allowance applies before Agents pause.
-          Service rate limits apply.
+          {copy.terms}
         </p>
-        <div className="mx-auto mt-8 max-w-3xl text-sm">
+        {copy.xCreditsLink ? (
+          <p className="mx-auto mt-8 max-w-3xl text-center text-sm">
+            <a className="text-primary underline" href={copy.xCreditsLink.href}>{copy.xCreditsLink.label}</a>
+          </p>
+        ) : <div className="mx-auto mt-8 max-w-3xl text-sm">
           <h3 className="font-semibold">X API credits on Pro</h3>
           <p className="mt-2 text-muted-foreground">Connect your X account directly. Paid actions use your Space&apos;s credit balance, including actions a person runs or approves.</p>
           <table className="mt-4 w-full text-left text-sm">
@@ -121,7 +105,7 @@ export function Pricing() {
             </tbody>
           </table>
           <p className="mt-3 text-xs leading-5 text-muted-foreground">A timeline reserves up to 100 credits and a video reserves its maximum upload request count; unused requests are released. *Quote/attached-media and media upload/status pricing is provisional pending verification of upstream charges. Approval requests, local account lists and token refresh are free. Pre-request failures and definite X rejections are refunded; uncertain outcomes retain their reservation. Results show credits charged or reserved and remaining.</p>
-        </div>
+        </div>}
       </div>
     </section>
   );
