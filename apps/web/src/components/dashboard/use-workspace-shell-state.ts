@@ -2847,10 +2847,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     if (landing && isMobileViewportRef.current && !openedInApp) {
       const listPath = `${spaceAppPath(selectedChannel.spaceId, spaces)}/channels`;
       const { hash } = window.location;
-      window.history.replaceState(null, "", listPath);
-      // A fresh state, not the list entry's: Next.js ignores a push whose state
-      // already carries its own router tree and would stay on the list.
-      window.history.pushState({ [MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY]: listPath }, "", `${canonicalPath}${hash}`);
+      // Both entries keep Next.js's router state, so the router does not move
+      // to the list underneath the open Channel; Back restores it from there.
+      window.history.replaceState({ ...window.history.state }, "", listPath);
+      pushBrowserPath(`${canonicalPath}${hash}`, { [MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY]: listPath });
       setBrowserPath(canonicalPath);
       return;
     }
