@@ -6,6 +6,7 @@ import {
   E2E_DESKTOP_CONTEXT,
   E2E_NOW,
   E2E_USER_SENDER,
+  conversationOpened,
   openGeneralChannelWithHistory,
 } from "./workspace-fixtures";
 
@@ -71,6 +72,8 @@ async function openChannelWithAgents(page: Page, agentCount: number, additionalC
   );
   await expect(page.locator(".app-message-row").last()).toBeVisible();
   await expect(page.locator(".app-agent-work-scroller")).toBeVisible();
+  // Geometry is read from the conversation's own list, not the rows it opens on.
+  await conversationOpened(page);
 }
 
 async function tailGeometry(page: Page) {
