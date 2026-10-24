@@ -154,6 +154,13 @@ test.describe("mobile launch syntax", () => {
     await page.getByRole("option").filter({ hasText: "@codex" }).tap();
     await expectDraft(input, "@codex ");
     await input.pressSequentially("effort:h");
+    // TEMP diagnostics
+    await page.waitForTimeout(500);
+    console.log("DIAG", JSON.stringify(await input.evaluate((node) => {
+      const field = (node as HTMLElement & { composerField?: { value: string; selectionStart: number } }).composerField;
+      return { value: field?.value, at: field?.selectionStart, focused: document.activeElement === node, html: node.innerHTML,
+        options: [...document.querySelectorAll('[role="option"]')].map((option) => option.textContent) };
+    })));
     await page.getByRole("option").filter({ hasText: "effort:high" }).tap();
     await expectDraft(input, "@codex effort:high ");
     await expect(page.getByLabel("Task launch conditions")).toHaveCount(0);

@@ -108,6 +108,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
     if (!host) return;
     const history = new TextHistory();
     let reporting = true;
+    let placeCaret = () => {};
     const fieldRef = propsRef.current.fieldRef;
     const decorationsFor = spanDecorations(propsRef, portals);
     const view: EditorView = new EditorView(host, {
@@ -198,6 +199,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
       dispatchTransaction(transaction: Transaction) {
         const before = view.state;
         view.updateState(before.apply(transaction));
+        placeCaret();
         if (transaction.docChanged) {
           if (reporting && !transaction.getMeta(EXTERNAL)) {
             history.record(snapshotOf(before));
@@ -255,9 +257,10 @@ export function ComposerEditor(props: ComposerEditorProps) {
     fieldRef.current = field;
     // The field on its element too, where tests and devtools read the draft as text.
     (view.dom as FieldElement).composerField = field;
-    const stopCaret = softCaret(view, host);
+    const caret = softCaret(view, host);
+    placeCaret = caret.place;
     return () => {
-      stopCaret();
+      caret.stop();
       if (fieldRef.current === field) fieldRef.current = null;
       viewRef.current = null;
       view.destroy();
@@ -553,8 +556,8 @@ function ComposerHint({ hint }: { hint: string }) {
  * every move. IME composition and touch screens keep the native caret: the
  * composition's own underline and the system's handles follow it.
  */
-function softCaret(view: EditorView, host: HTMLElement): () => void {
-  if (!window.matchMedia("(pointer: fine)").matches) return () => {};
+function softCaret(view: EditorView, host: HTMLElement): { place: () => void; stop: () => void } {
+  if (!window.matchMedia("(pointer: fine)").matches) return { place: () => {}, stop: () => {} };
   const input = view.dom;
   const caret = document.createElement("span");
   caret.className = "app-composer-caret";
@@ -614,7 +617,8 @@ function softCaret(view: EditorView, host: HTMLElement): () => void {
   input.addEventListener("compositionend", compose);
   const observer = new ResizeObserver(place);
   observer.observe(input);
-  return () => {
+  // Each view update places it too, so it moves with the selection in the same frame.
+  return { place, stop: () => {
     cancelAnimationFrame(frame);
     document.removeEventListener("selectionchange", soon);
     input.removeEventListener("keydown", soon);
@@ -628,5 +632,5 @@ function softCaret(view: EditorView, host: HTMLElement): () => void {
     observer.disconnect();
     caret.remove();
     delete input.dataset.softCaret;
-  };
+  } };
 }
