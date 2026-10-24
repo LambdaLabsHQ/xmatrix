@@ -25,6 +25,8 @@ type Page = Parameters<Parameters<typeof test>[2]>[0]["page"];
 type Rise = { sent: boolean; fromPx: number; fades: boolean };
 /** A way to rest the list was given to the compositor: where from, how long, and whether it only slows towards rest. */
 type ListRise = { fromPx: number; durationMs: number; oneWay: boolean; slowing: boolean };
+/** A way to rest as handed to the compositor: the list's offsets at even steps, and when it set off on the document's clock. */
+type ListWay = { offsets: number[]; durationMs: number; startMs: number };
 
 const HISTORY_LENGTH = 40;
 const SENT_BODY = "Rising message";
@@ -45,8 +47,28 @@ async function openChannelRecordingRises(page: Page) {
     const listRises: ListRise[] = [];
     (window as unknown as { __timelineRises: Rise[] }).__timelineRises = rises;
     (window as unknown as { __timelineListRises: ListRise[] }).__timelineListRises = listRises;
+    const ways: ListWay[] = [];
+    (window as unknown as { __listWays: ListWay[] }).__listWays = ways;
+    /* Each time the list was held still, without a way to rest, after it had
+       already set off on one: the way it was going stopped dead. */
+    const stops: string[] = [];
+    let travelling = false;
+    (window as unknown as { __listStops: string[] }).__listStops = stops;
+    (window as unknown as { __listAtRestBeforeSend: () => void }).__listAtRestBeforeSend = () => {
+      travelling = false;
+      stops.length = 0;
+      ways.length = 0;
+    };
+    new MutationObserver((records) => {
+      for (const { target } of records) {
+        const list = target as HTMLElement;
+        if (!list.hasAttribute?.("data-timeline-rise-content")) continue;
+        if (travelling && list.style.translate !== "" && list.getAnimations().length === 0) stops.push(list.style.translate);
+      }
+    }).observe(document, { subtree: true, attributes: true, attributeFilter: ["style"] });
     const animate = Element.prototype.animate;
     Element.prototype.animate = function recordRise(this: Element, keyframes, options) {
+      const animation = animate.call(this, keyframes, options);
       const kind = this.getAttribute("data-timeline-rise-row");
       const first = Array.isArray(keyframes) ? keyframes[0] : undefined;
       const from = /translateY\(([\d.]+)px\)/u.exec(String(first?.transform ?? ""));
@@ -55,16 +77,21 @@ async function openChannelRecordingRises(page: Page) {
       }
       // The list's own way to rest: the offsets the compositor draws it at, in order.
       if (this.hasAttribute("data-timeline-rise-content") && Array.isArray(keyframes)) {
+        travelling = true;
         const offsets = keyframes.map((frame) => Number(/^0 (-?[\d.]+)px$/u.exec(String(frame.translate ?? ""))?.[1]));
         const steps = offsets.slice(1).map((offset, index) => Math.abs(offsets[index]!) - Math.abs(offset));
+        const listed = { offsets, durationMs: Number(typeof options === "number" ? options : options?.duration), startMs: NaN };
+        ways.push(listed);
+        // When it set off; one replaced before the compositor started it never moved the list.
+        void animation.ready.then(() => { listed.startMs = Number(animation.startTime ?? NaN); }, () => undefined);
         listRises.push({
           fromPx: offsets[0]!,
-          durationMs: Number(typeof options === "number" ? options : options?.duration),
+          durationMs: listed.durationMs,
           oneWay: offsets.every(Number.isFinite) && offsets.at(-1) === 0 && steps.every((step) => step >= 0),
           slowing: steps[0]! > steps.at(-1)!,
         });
       }
-      return animate.call(this, keyframes, options);
+      return animation;
     };
   });
   await openGeneralChannelWithHistory(page, channelAt(HISTORY_LENGTH), channelHistoryFixture(HISTORY_LENGTH, "rise"));
@@ -410,4 +437,52 @@ test("a draft of several lines is sent without the rows above dropping", async (
   expect(dropped).toBeLessThan(8);
   const above = `message:rise-${HISTORY_LENGTH}`;
   expect(frames[frames.length - 1]!.tops[above]).toBeLessThan(frames[0]!.tops[above]!);
+});
+
+/**
+ * Each hand-over from one way to rest to the next while the list was moving,
+ * at which the speed it was drawn at changed by more than the spring's own
+ * change over one piece of it (px/ms).
+ */
+function speedChangesAtHandOvers(ways: readonly ListWay[]): string[] {
+  const speedOf = (way: ListWay, at: number) => {
+    const step = way.durationMs / (way.offsets.length - 1);
+    const piece = Math.min(way.offsets.length - 2, Math.max(0, Math.floor((at - way.startMs) / step)));
+    return (way.offsets[piece + 1]! - way.offsets[piece]!) / step;
+  };
+  const started = ways.filter((way) => Number.isFinite(way.startMs));
+  expect(started.length).toBeGreaterThan(1);
+  return started.slice(1).flatMap((way, index) => {
+    const before = started[index]!;
+    if (way.startMs >= before.startMs + before.durationMs) return [];
+    const was = speedOf(before, way.startMs);
+    const is = speedOf(way, way.startMs);
+    return Math.abs(is - was) > 0.25 ? [`${was.toFixed(3)} -> ${is.toFixed(3)} at ${Math.round(way.startMs - started[0]!.startMs)} ms`] : [];
+  });
+}
+
+/* The layout reaches the new row's place in steps: here the server's copy of
+   the message, a line longer than the draft, lands while the rows are still
+   rising. The rows used to stop dead at each step and set off again at full
+   speed, and a step after they had stopped set them off once more (user
+   2026-10-24: "挺住了之后，还会有轻微的小抖动，那个运动曲线有问题。数学上就不太对").
+   A step now changes where they are going, never how fast they were going. */
+test("a step of the layout on the way keeps the rows moving as fast as they were", async ({ page }) => {
+  await openChannelRecordingRises(page);
+  await answerNextSend(page, HISTORY_LENGTH + 1, "Short one\n\nand a line the server's copy has", 120);
+  const draft = page.locator("textarea.composer-textarea").first();
+  await draft.fill("Short one");
+  await page.evaluate(() => (window as unknown as { __listAtRestBeforeSend: () => void }).__listAtRestBeforeSend());
+  const frames = await framesOfSend(page, async () => {
+    await draft.press("Enter");
+    await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1}"]`)).toContainText("and a line");
+  });
+  // The row's own copy took more room, so the rows above went on further.
+  const rises = await listRises(page);
+  expect(rises.length, JSON.stringify(rises)).toBeGreaterThan(1);
+  expectDrawnRises(rises, 1);
+  expect(await page.evaluate(() => (window as unknown as { __listStops: string[] }).__listStops)).toEqual([]);
+  expect(speedChangesAtHandOvers(await page.evaluate(() => (window as unknown as { __listWays: ListWay[] }).__listWays)))
+    .toEqual([]);
+  expect(movesOfRowAbove(frames).filter((by) => by > 0)).toEqual([]);
 });
