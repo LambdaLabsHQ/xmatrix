@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 
+import { credentialFailure, MachineDaemonCredentialError } from "./credential-failure";
 import { accountIdentityRevoked } from "../../account-identity-status";
 import type { Env } from "../../types";
 
@@ -30,7 +31,7 @@ function claimString(value: unknown): string | undefined {
 
 function machineDaemonTokenSecret(env: Env): Uint8Array {
   const root = env.BETTER_AUTH_SECRET?.trim() || env.XMATRIX_MOCK_AUTH_TOKEN?.trim();
-  if (!root) throw new Error("Machine Daemon credential signing is not configured");
+  if (!root) throw new MachineDaemonCredentialError("signing_unconfigured");
   return new TextEncoder().encode(`xmatrix-machine-daemon\0${root}`);
 }
 
@@ -66,7 +67,7 @@ async function verifySignedMachineDaemonCredential(
       audience: MACHINE_DAEMON_TOKEN_AUDIENCE,
     });
     const raw = (payload as { xmatrixMachineDaemon?: unknown }).xmatrixMachineDaemon;
-    if (!raw || typeof raw !== "object") throw new Error("missing principal");
+    if (!raw || typeof raw !== "object") throw new MachineDaemonCredentialError("principal_missing");
     const value = raw as Record<string, unknown>;
     const principal: MachineDaemonPrincipal = {
       ownerUserId: claimString(value.ownerUserId) || "",
@@ -80,16 +81,16 @@ async function verifySignedMachineDaemonCredential(
       !principal.ownerEmail ||
       !principal.machineId
     ) {
-      throw new Error("incomplete principal");
+      throw new MachineDaemonCredentialError("principal_incomplete");
     }
     return principal;
-  } catch {
-    throw new Error("Invalid or expired Machine Daemon credential");
+  } catch (error) {
+    throw credentialFailure(error);
   }
 }
 
 export async function verifyMachineDaemonCredential(token: string, env: Env): Promise<MachineDaemonPrincipal> {
   const principal = await verifySignedMachineDaemonCredential(token, env);
-  if (await accountIdentityRevoked(env, principal.ownerUserId)) throw new Error("Invalid or expired Machine Daemon credential");
+  if (await accountIdentityRevoked(env, principal.ownerUserId)) throw new MachineDaemonCredentialError("identity_revoked");
   return principal;
 }
