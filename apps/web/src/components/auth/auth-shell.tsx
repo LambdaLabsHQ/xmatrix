@@ -26,8 +26,8 @@ export function AuthShell({ children, legal = true }: { children: ReactNode; leg
           href="/"
           className="auth-brand"
           iconSrc="/brand/xmatrix-icon-transparent-128.png"
-          iconClassName="auth-brand-icon"
-          wordmarkClassName="site-display auth-brand-name"
+          iconClassName="size-8"
+          wordmarkClassName="site-display text-lg"
         />
         <div className="auth-body">{children}</div>
         {legal ? (

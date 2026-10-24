@@ -331,10 +331,9 @@ html:has(.site-page) {
    paper with one column of controls on the other. The main action is the
    homepage's wood "Start Free" plank; everything else is white paper.
    On a phone the art runs edge to edge from the top of the screen, under
-   the status bar, like an app's welcome screen, with the blocks on its right
-   and the xMatrix mark on its empty left. */
+   the status bar, like an app's welcome screen, and the art stands for the
+   xMatrix mark there. */
 .auth-page {
-  position: relative;
   display: grid;
   grid-template-rows: auto 1fr;
   background: var(--site-paper);
@@ -352,22 +351,9 @@ html:has(.site-page) {
   object-position: right center;
 }
 
-/* The mark sits on the art's empty left, centred in the art below the status bar. */
-.auth-brand {
-  position: absolute;
-  top: calc(env(safe-area-inset-top) + 8.5rem);
-  left: 1.5rem;
-  z-index: 1;
-  transform: translateY(-50%);
-}
-
-.auth-page .auth-brand-icon {
-  width: 2.5rem;
-  height: 2.5rem;
-}
-
-.auth-page .auth-brand-name {
-  font-size: 1.375rem;
+/* Beside the full art a phone shows no separate mark. */
+.auth-page .auth-brand {
+  display: none;
 }
 
 .auth-column {
@@ -404,18 +390,8 @@ html:has(.site-page) {
     object-position: 88% 50%;
   }
 
-  .auth-brand {
-    position: static;
-    transform: none;
-  }
-
-  .auth-page .auth-brand-icon {
-    width: 2rem;
-    height: 2rem;
-  }
-
-  .auth-page .auth-brand-name {
-    font-size: 1.125rem;
+  .auth-page .auth-brand {
+    display: inline-flex;
   }
 
   .auth-column {
@@ -430,6 +406,10 @@ html:has(.site-page) {
   .auth-body {
     justify-content: center;
   }
+}
+
+.auth-heading {
+  text-align: center;
 }
 
 .auth-heading h1 {
@@ -568,6 +548,40 @@ html:has(.site-page) {
     border-color: oklch(0.46 0.05 60 / 30%);
     background: oklch(0.995 0.004 86);
   }
+}
+
+/* The other ways in: one row of equal round buttons under the email action. */
+.auth-providers {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+}
+
+.auth-button.auth-provider {
+  position: relative;
+  width: 3.5rem;
+  height: 3.5rem;
+  flex: none;
+  padding: 0;
+}
+
+.auth-button.auth-provider::before {
+  content: none;
+}
+
+.auth-provider > :is(svg, img) {
+  width: 22px;
+  height: 22px;
+}
+
+/* Under the round button rather than inside it. */
+.auth-provider > .auth-last-used {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 50%;
+  font-size: 11px;
+  transform: translateX(-50%);
 }
 
 .auth-divider {
