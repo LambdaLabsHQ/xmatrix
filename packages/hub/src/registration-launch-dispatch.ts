@@ -1,4 +1,4 @@
-import { publishChannelInvocationsChanged } from "./channel-live-judgment";
+import { publishChannelInvocationsChanged, publishChannelPresenceChanged } from "./channel-live-judgment";
 import type { AppConnectorEnv } from "./app-connectors";
 import { registrationRepositoryCatalog } from "./registration-repository-catalog";
 import { registrationLaunchContextReader } from "./registration-launch-context";
@@ -9,13 +9,14 @@ import type { AutoLaunchTags, DraftSummonIntent, HarnessSignedOut, HarnessTooOld
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
-  PostgresFirstMessageLaunchChoiceRepository, PostgresMessageRepository,
+  PostgresFirstMessageLaunchChoiceRepository, PostgresMessageRepository, MACHINE_OFFLINE_REST_REASON,
 } from "@xmatrix/db";
 import { postgresProductMessage } from "./postgres-message-authority";
 import { dispatchPreparedAgentLaunchWake } from "./product-agent-mention-authority-adapter";
 import { scheduleAgentRoutingQuotaRefresh } from "./agent-routing-quota-refresh";
 import { jevEvaluator, refreshChannelRoutingQuota, runtimePlacement } from "./runtime";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
+import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 
 /** The Channel's active Space placement owns every registration launch in it. */
@@ -209,7 +210,65 @@ export async function wakeRestingInstances(env: Env, input: {
 }) {
   const value = await executeRestingInstanceWake({ ...runtimePlacement(env), ...input });
   if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
+  // Its card shows it waking, or waiting for its machine, now rather than at the next read.
+  if (value.woken.length > 0 || value.refused.length > 0) await publishChannelPresenceChanged(env, input.channelId);
   return value;
+}
+
+/** At most this many waiting Instances wake per reconnect; the rest wake on their next message. */
+const MACHINE_WAKE_LIMIT = 100;
+
+/**
+ * A machine's daemon is back: each resting Instance a message could not wake
+ * while it was away (`rest_reason='machine_offline'`) wakes now. Its prompt is
+ * the newest message anyone else wrote in its Channel; everything before it
+ * since the Instance rested arrives by catch-up (docs/instance-sleep.md §3).
+ */
+export async function wakeInstancesAwaitingMachine(env: Env, scope: { ownerUserId: string; machineId: string },
+  ports: { shards?: readonly { database: AuthorityDatabase }[]; wake?: typeof wakeRestingInstances;
+    newest?: typeof newestMessageFor } = {}): Promise<number> {
+  const shards = ports.shards ?? createPostgresAuthorityFleet(env, { applicationName: "xmatrix-hub-machine-reconnect",
+    statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000 }).physicalShards;
+  const wake = ports.wake ?? wakeRestingInstances, newest = ports.newest ?? newestMessageFor;
+  const waiting: Array<{ channelId: string; instanceId: string; ownerUserId: string }> = [];
+  for (const { database } of shards) {
+    const rows = await database.transaction({ requestId: `machine-reconnect-instances:${crypto.randomUUID()}`,
+      operation: "registration.machine.waiting-instances" }, tx => tx.query<{ channel_id: string; instance_id: string }>({
+      name: "machine_waiting_instances_v1",
+      text: `SELECT i.channel_id,i.instance_id FROM data.instances i
+        JOIN data.run_agent_registrations b ON b.run_id=i.run_id
+        WHERE i.rest_state IN ('sleeping','interrupted') AND i.rest_reason=$3
+          AND b.owner_user_id=$1 AND b.machine_id=$2 LIMIT ${MACHINE_WAKE_LIMIT}`,
+      values: [scope.ownerUserId, scope.machineId, MACHINE_OFFLINE_REST_REASON], maxRows: MACHINE_WAKE_LIMIT }));
+    for (const row of rows) waiting.push({ channelId: String(row.channel_id), instanceId: String(row.instance_id),
+      ownerUserId: scope.ownerUserId });
+  }
+  const woken = await Promise.allSettled(waiting.map(async item => {
+    const prompt = await newest(env, item);
+    if (!prompt) return;
+    await wake(env, { commandId: `machine-wake:${prompt.messageId}:${item.instanceId}`.slice(0, 200),
+      channelId: item.channelId, sourceMessageId: prompt.messageId, targetInstanceId: item.instanceId, prompt: prompt.body });
+  }));
+  const failed = woken.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failed) throw failed.reason;
+  return waiting.length;
+}
+
+/** The newest message in the Channel someone other than the Instance wrote, read as the Instance's owner. */
+async function newestMessageFor(env: Env, input: { channelId: string; instanceId: string; ownerUserId: string }) {
+  const { database, directory } = runtimePlacement(env);
+  const commandId = `machine-wake-prompt:${input.instanceId}`.slice(0, 200);
+  const { placement } = await channelLaunchRepository({ database, directory, commandId, channelId: input.channelId });
+  const page = await new PostgresMessageRepository(database).history({ requestId: commandId, spaceId: placement.spaceId,
+    principal: { kind: "user", id: input.ownerUserId }, channelId: input.channelId, limit: 20 });
+  const newest = page.messages
+    // What someone said: not a notice xMatrix records under a person's name.
+    .filter(row => (row.senderKind === "user" || row.senderKind === "agent") && row.senderId !== input.instanceId &&
+      row.messageKind === "xmatrix.message.text" && !row.recalledAt && !row.deletedAt)
+    .map(postgresProductMessage)
+    .filter(message => typeof message.messageId === "string" && typeof message.body === "string" && message.body)
+    .sort((a, b) => Number(b.sequence) - Number(a.sequence))[0];
+  return newest ? { messageId: newest.messageId as string, body: newest.body as string } : undefined;
 }
 
 /** Holds a source Instance whose provider quota ran out until its window resets. */

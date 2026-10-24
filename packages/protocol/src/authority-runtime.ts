@@ -861,6 +861,7 @@ export type ObservabilityEventType =
   | "channel_worktree_cleanup_finished"
   | "daemon_request_resolved"
   | "broadcast_sent"
+  /** A resting Agent Instance of the Channel began to wake, or waits for its offline machine. */
   | "presence_updated"
   | "rate_limit_hit"
   | "space_created"

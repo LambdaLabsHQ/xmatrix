@@ -5,6 +5,7 @@ import {
   type LlmUsage,
   agentFaceUrl,
   isLiveAgentStatus,
+  isAgentInstanceOfflineReason,
   type AgentInstanceRest,
   type AgentStatusChip,
   repoSummonReference,
@@ -306,6 +307,9 @@ function addPresenceRow(
     ...(localLlmUsage(row.instance_usage ?? undefined) ? { usage: localLlmUsage(row.instance_usage ?? undefined) } : {}),
     ...(rest ? { rest } : {}),
     ...(rest === "wake_failed" && row.rest_reason ? { restReason: row.rest_reason } : {}),
+    // A message could not wake it: its machine is offline, and wakes it on reconnect.
+    ...((rest === "sleeping" || rest === "interrupted") && isAgentInstanceOfflineReason(row.rest_reason)
+      ? { offlineReason: row.rest_reason } : {}),
     ...(metadataText(runMetadata, "clientVersion")
       ? { clientVersion: metadataText(runMetadata, "clientVersion") }
       : {}),

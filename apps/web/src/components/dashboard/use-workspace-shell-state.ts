@@ -1764,6 +1764,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           if (message.event.type === "channel_invocations_changed" && message.event.channelId) {
             void queryClient.invalidateQueries({ queryKey: ["agent-launches", message.event.channelId] });
           }
+          // A resting Instance began to wake, or waits for its machine: read its card again.
+          if (message.event.type === "presence_updated" && message.event.channelId) {
+            const spaceId = channelsRef.current.find((channel) => channel.id === message.event.channelId)?.spaceId;
+            if (spaceId) window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
+              detail: { kind: "presence", spaceId, channelId: message.event.channelId },
+            }));
+          }
           // The Hub recorded what a message's command came to: its chip answers now.
           if (message.event.type === "channel_message_interactions_updated" && message.event.channelId) {
             const channelId = message.event.channelId;

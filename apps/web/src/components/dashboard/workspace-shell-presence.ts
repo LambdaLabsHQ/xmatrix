@@ -189,10 +189,11 @@ export function agentInstanceDisplayStatus({
   name: string;
   activity?: string;
 }): string {
+  // Its trace may still read as working, or its rest promise the next message
+  // wakes it, but the machine running it is gone until it reconnects.
+  if (isMachineOfflineInstance(instance)) return MACHINE_OFFLINE_DISPLAY_STATUS;
   // A resting Instance has no live trace to read; its rest is its status.
   if (instance?.status === "offline" && instance.rest) return instance.rest;
-  // Its trace may still read as working, but the machine running it is gone.
-  if (isMachineOfflineInstance(instance)) return MACHINE_OFFLINE_DISPLAY_STATUS;
   // Work in hand that its runtime says waits on something outside the model
   // (docs/design/agent-status.md). Only the runtime knows; a trace never says.
   if (instance && isLiveAgentStatus(instance.status) && instance.runtimeState?.waiting) return "waiting";

@@ -60,3 +60,22 @@ test("a returning Machine tells only the Channels whose work waited on it, with 
     { ownerUserId: "owner", machineId: "idle" }, [shard("shard-0", [])]), 0);
   assert.deepEqual(bodies, [], "nothing waited on the Machine, so no Channel is woken");
 });
+
+// 2026-10-24: a returning user's machine dropped; their next messages tried to
+// wake its interrupted Instance, were refused as offline, and nothing woke it
+// when the machine came back.
+test("a returning Machine wakes each Instance a message could not wake while it was away", async () => {
+  const { wakeInstancesAwaitingMachine } = await import("../src/registration-launch-dispatch.ts");
+  const asked = [], woken = [];
+  const shard = rows => ({ database: { transaction: async (_context, work) => work({
+    query: async ({ values }) => { asked.push(values); return rows; } }) } });
+  const count = await wakeInstancesAwaitingMachine({}, { ownerUserId: "owner", machineId: "machine" }, {
+    shards: [shard([{ channel_id: "c1", instance_id: "c1:1" }]), shard([{ channel_id: "c2", instance_id: "c2:1" }])],
+    newest: async (_env, { channelId }) => channelId === "c1" ? { messageId: "m9", body: "hello" } : undefined,
+    wake: async (_env, input) => { woken.push(input); return { woken: [], refused: [] }; },
+  });
+  assert.equal(count, 2);
+  assert.deepEqual(asked, [["owner", "machine", "machine_offline"], ["owner", "machine", "machine_offline"]]);
+  assert.deepEqual(woken, [{ commandId: "machine-wake:m9:c1:1", channelId: "c1", sourceMessageId: "m9",
+    targetInstanceId: "c1:1", prompt: "hello" }], "the newest message wakes it; a Channel with none to answer wakes nobody");
+});

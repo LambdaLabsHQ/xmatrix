@@ -642,6 +642,24 @@ test("a daemon connect wakes the Machine's Channels and never waits on or fails 
   } finally { console.warn = warn; }
 });
 
+// A recovering daemon's connect leaves it offline until its activation fences;
+// a wake run at the connect would find it offline and wait for the next one.
+test("a recovering daemon wakes the Machine's Channels when its activation brings it online", async () => {
+  const woken = [], kept = [];
+  const port = authorityPort({
+    commands: recordingCommands([], () => ({ activation: { transactionId: "tx-1", artifactSha256: "a".repeat(64),
+      connectionEpoch: 8, phase: "active_fenced", receiptId: "active_fenced:tx-1" } })),
+    machineConnected: async (route) => { woken.push(route); },
+    keepAlive: (task) => kept.push(task),
+  });
+  const advance = phase => port.execute({ ...session, connectionEpoch: 8 }, { type: "machine_activation_advance",
+    requestId: `advance-${phase}`, transactionId: "tx-1", artifactSha256: "a".repeat(64), connectionEpoch: 8, phase });
+  await advance("active_fenced");
+  await advance("active");
+  await Promise.all(kept);
+  assert.deepEqual(woken, [{ ownerUserId: "user-1", machineId: "machine-1" }], "only the fence brings the daemon online");
+});
+
 function lifecycleRecordingPort(order, result = {}, options = {}) {
   return authorityPort({ commands: { async command(_name, input) {
     order.push(input.runLifecycleReplica ? "lifecycle" : "report");

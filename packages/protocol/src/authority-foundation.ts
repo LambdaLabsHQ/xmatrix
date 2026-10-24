@@ -662,7 +662,9 @@ export function isAgentInstanceRest(value: unknown): value is AgentInstanceRest 
  * Instance's own socket is open, but the Machine Daemon that hosts its Run is
  * not (disconnected or failed delivery), so
  * nothing it is sent is acted on until that machine returns. It is a presence
- * projection only: it changes no membership, access or Run state.
+ * projection only: it changes no membership, access or Run state. A resting
+ * Instance carries it as its `rest_reason` once a message could not wake it
+ * because its machine is offline; the machine's reconnect wakes it.
  */
 export const AGENT_INSTANCE_OFFLINE_REASONS = ["machine_offline"] as const;
 export type AgentInstanceOfflineReason = (typeof AGENT_INSTANCE_OFFLINE_REASONS)[number];
@@ -910,7 +912,9 @@ export interface SerializedAgent {
   connectedAt: string;
   lastSeenAt: string;
   status: AgentStatus;
-  /** Set only with `status: "offline"` on a live Instance whose machine is unreachable. */
+  /** Set only with `status: "offline"`: a live Instance whose machine is unreachable, or a
+   * resting one (`sleeping`/`interrupted`) a message could not wake because its machine is
+   * offline; that one wakes when the machine reconnects. */
   offlineReason?: AgentInstanceOfflineReason;
   avatarUrl?: string;
   activity?: string;
