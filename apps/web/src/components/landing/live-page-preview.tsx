@@ -211,7 +211,7 @@ export function LivePagePreview() {
   return (
     <div ref={setHost} className="site-live-page" inert>
       <div className="site-live-page-column relative">
-        <PagePens pens={pens} room={170} onJump={() => {}} onOpen={() => {}} />
+        <PagePens pens={pens} room={230} onJump={() => {}} onOpen={() => {}} />
         <PageEditor session={stage.session} canEdit={false} onAnchorOffsets={setTops} />
       </div>
     </div>

@@ -21,7 +21,7 @@ export function QuickStart({ locale = "en" }: { locale?: Locale }) {
           <li className="px-2 text-sm text-muted-foreground">{copy.working}</li>
         </ul>
 
-        <div className="mt-10 hidden md:block">
+        <div className="mt-10">
           <AppWindow />
         </div>
       </div>
