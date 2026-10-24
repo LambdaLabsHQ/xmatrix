@@ -324,6 +324,8 @@ export type ComposerMentionSpan = {
   self?: boolean;
   /** Jev's reading of a summon while the author types: still reading, a request, or not one. */
   intent?: "reading" | "summon" | "declined";
+  /** The face the sent chip leads with, drawn over the `@`: a member's, or the harness a summon names. `@auto` has none yet. */
+  face?: FaceOf;
 };
 
 /**
@@ -341,6 +343,7 @@ export function composerMentionSpans(text: string, index: MentionReadIndex | nul
     start: mention.start, end: mention.end, kind: "summon",
     ...(mention.tags.launch === "force" ? { forced: true } : {}),
     ...(mention.error ? { invalid: true } : {}),
+    ...(mention.tags.harness ? { face: { kind: "agent" as const, name: mention.tags.harness, harness: mention.tags.harness } } : {}),
   }));
   const written = withWrittenInvocationTargets(index ?? { tokens: [], byToken: new Map() }, text);
   if (written.tokens.length) {
@@ -349,7 +352,7 @@ export function composerMentionSpans(text: string, index: MentionReadIndex | nul
       const target = written.byToken.get(match.token);
       if (!target || !isOperationalMentionStart(match.start, ranges)) continue;
       if (spans.some(span => span.start < match.end && match.start < span.end)) continue;
-      spans.push({ start: match.start, end: match.end, kind: target.kind,
+      spans.push({ start: match.start, end: match.end, kind: target.kind, face: target.face,
         ...(currentUserIdentityId && target.subjectId === currentUserIdentityId ? { self: true } : {}) });
     }
   }

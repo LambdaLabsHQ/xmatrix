@@ -5,6 +5,7 @@ import { neighbourRoom, planMentionBands, type MentionBandInput, type MentionFra
 import { composerHintParts } from "./composer-hints";
 import type { DraftSummonIntent } from "@xmatrix/protocol";
 import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
+import { MentionChipFace } from "./mention-chip-face";
 
 const NO_MENTION_SPANS: readonly ComposerMentionSpan[] = [];
 
@@ -103,10 +104,22 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
     offset = span.end;
     return [plain, <span key={span.start} data-mention={index} data-start={span.start}>{value.slice(span.start, span.end)}</span>];
   });
+  // Each face keyed by its mention's text and occurrence, as the bands are, so
+  // typing elsewhere moves it without reloading its picture.
+  const seen = new Map<string, number>();
+  const faces = spans.flatMap((span, index) => {
+    if (!span.face) return [];
+    const text = value.slice(span.start, span.end);
+    const count = seen.get(text) ?? 0;
+    seen.set(text, count + 1);
+    return [<span key={`${text}\u0000${count}`} className="app-composer-mention-face" data-face-for={index} hidden>
+      <span className="app-mention-chip-avatar-face"><MentionChipFace of={span.face} /></span>
+    </span>];
+  });
   return <div ref={mirrorRef} aria-hidden="true" data-testid="composer-text-highlight"
     className="pointer-events-none absolute left-0 top-0 overflow-hidden whitespace-pre-wrap break-words text-transparent"
     style={{ borderColor: "transparent", borderStyle: "solid", boxSizing: "border-box", overflowWrap: "break-word" }}>
-    <div ref={layerRef} className="app-composer-mention-bands" />
+    <div ref={layerRef} className="app-composer-mention-bands">{faces}</div>
     {pieces}{value.slice(offset)}
     {hint ? <ComposerHint hint={hint} /> : null}{"\n"}
   </div>;
@@ -374,6 +387,30 @@ function paintMentionBands(mirror: HTMLElement, layer: HTMLElement, spans: reado
     else delete element.dataset.intent;
   }
   for (const element of previous.values()) if (!keep.has(element)) element.remove();
+
+  // The sent chip leads with its face; the draft draws that face over the `@`
+  // itself, a disc just covering the glyph's ink, since the textarea's text
+  // has no room before it.
+  for (const element of layer.querySelectorAll<HTMLElement>(":scope > .app-composer-mention-face")) {
+    const span = spans[Number(element.dataset.faceFor)];
+    const box = span && charBox(span.start);
+    const at = span && value[span.start];
+    if (!box || !at) {
+      element.hidden = true;
+      continue;
+    }
+    const left = box.left + ink.bearing(at, "left");
+    const right = box.right - ink.bearing(at, "right");
+    const glyph = ink(at);
+    const lineBaseline = firstLineTop + lineOf(box.top, box.bottom) * lineHeight + baseline;
+    const size = Math.max(right - left, glyph.ascent + glyph.descent) + 1;
+    const centreX = (left + right) / 2;
+    const centreY = lineBaseline + (glyph.descent - glyph.ascent) / 2;
+    element.hidden = false;
+    element.style.left = `${snapX(centreX - size / 2)}px`;
+    element.style.top = `${snapY(centreY - size / 2)}px`;
+    element.style.width = element.style.height = `${size}px`;
+  }
 }
 
 function toggleData(element: HTMLElement, name: string, on: boolean | undefined) {

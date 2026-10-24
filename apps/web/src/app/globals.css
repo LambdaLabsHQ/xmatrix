@@ -7560,6 +7560,9 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-composer-mention-band[data-intent="summon"] { --band-ink: oklch(0.62 0.16 285); --band-fill: color-mix(in oklab, var(--band-ink) 18%, transparent); }
 .app-composer-mention-band[data-intent="declined"] { --band-ink: var(--muted-foreground); --band-fill: color-mix(in oklab, var(--band-ink) 7%, transparent); }
 .app-composer-mention-band[data-intent="reading"] { opacity: 0.55; }
+/* The face a mention's chip will lead with, over its `@` (composer-text-highlight.tsx places it). */
+.app-composer-mention-face { position: absolute; }
+.app-composer-mention-face[hidden] { display: none; }
 .app-composer-summon-declined {
   position: absolute; pointer-events: auto; padding: 0; border: 0; background: transparent; cursor: help;
   border-bottom: 1.5px dotted var(--muted-foreground); border-radius: 2px;
