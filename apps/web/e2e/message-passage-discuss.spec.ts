@@ -1,6 +1,7 @@
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, E2E_NOW, openGeneralChannelWithHistory } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
+import { expectDraft } from "./composer-draft";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -47,8 +48,8 @@ test("selecting a passage of a message starts a conversation holding it, linked 
   await expect.poll(() => fixtureRequestBodies(page, "link-create")).toEqual([
     { conversationId: expect.stringMatching(createdId), pageId: "p-relay", blockId: "status", source: "manual" }]);
   await expect(page).toHaveURL(new RegExp(`--${CREATED_CHANNEL_ID}`, "u"));
-  const composer = page.locator("textarea.composer-textarea").first();
-  await expect(composer).toHaveValue(/^\u200B?$/u);
+  const composer = page.locator(".composer-textarea").first();
+  await expectDraft(composer, /^\u200B?$/u);
   const quote = page.getByTestId("composer-quote");
   await expect(quote).toContainText("Retries back off too slowly.");
   await expect(quote).toContainText("E2E Tester in #general");

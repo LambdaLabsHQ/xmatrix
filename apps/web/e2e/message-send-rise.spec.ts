@@ -1,3 +1,4 @@
+import { expectDraft } from "./composer-draft";
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRule } from "./in-page-api-fixtures";
 import { paintedRowMoves, paintedRowOverlaps, paintedTimelineFrames, recordPaintedTimelineFrames } from "./painted-timeline-frames";
@@ -105,7 +106,7 @@ async function openChannelRecordingRises(page: Page) {
 }
 
 async function sendAndReadRises(page: Page): Promise<Rise[]> {
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   await draft.fill(SENT_BODY);
   await draft.press("Enter");
   await expect(page.locator(".app-message-row").filter({ hasText: SENT_BODY })).toBeInViewport();
@@ -216,7 +217,7 @@ test("a sent message rises from the composer and lifts the rows above it", async
    (user 2026-10-10: "整个消息页面会往上弹一下然后弹回来，像弹簧"). */
 test("messages sent one after another lift the rows without a bounce", async ({ page }) => {
   await openChannelRecordingRises(page);
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   for (const [index, body] of ["One", "Two", "Three"].entries()) {
     await answerNextSend(page, HISTORY_LENGTH + 1 + index, body, 150);
     const moves = movesOfRowAbove(await framesOfSend(page, async () => {
@@ -303,7 +304,7 @@ test("a message that comes in while the list is on its way to rest goes on from 
    list, and nothing brings the reader back to the newest message afterwards. */
 test("the reader's wheel takes the list from a rise that is still playing", async ({ page }) => {
   await openChannelRecordingRises(page);
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   const timeline = page.locator(".app-message-timeline");
   await answerNextSend(page, HISTORY_LENGTH + 1, "One", 150);
   await draft.fill("One");
@@ -354,7 +355,7 @@ async function answerSends(page: Page, sequence: number, bodies: readonly string
 
 /** Sends "One" while recording painted frames, and drafts a longer second message to send after it. */
 async function sendOneAndDraftTwo(page: Page) {
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   /* Both answers in one rule, in order: given as two, the later one takes over
      the route, the first send comes back as the second message, and the
      second send's row folds into it as the list rests. */
@@ -388,7 +389,7 @@ async function newestRowShape(page: Page, markAvatar: boolean) {
    (user 2026-10-10: "我发现发完消息还是会闪烁？"). */
 test("a message on its way is drawn as it will be once the server has it", async ({ page }) => {
   await openChannelRecordingRises(page);
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
 
   await answerNextSend(page, HISTORY_LENGTH + 1, "First of two", 1_500);
   await draft.fill("First of two");
@@ -423,9 +424,9 @@ test("a draft of several lines is sent without the rows above dropping", async (
   await openChannelRecordingRises(page);
   const body = ["One", "Two", "Three", "Four", "Five"].map((line) => `Line ${line}`).join("\n");
   await answerNextSend(page, HISTORY_LENGTH + 1, body, 150);
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   await draft.fill(body);
-  await expect(draft).toHaveValue(body);
+  await expectDraft(draft, body);
 
   const frames = await framesOfSend(page, async () => {
     await draft.press("Enter");
@@ -470,7 +471,7 @@ function speedChangesAtHandOvers(ways: readonly ListWay[]): string[] {
 test("a step of the layout on the way keeps the rows moving as fast as they were", async ({ page }) => {
   await openChannelRecordingRises(page);
   await answerNextSend(page, HISTORY_LENGTH + 1, "Short one\n\nand a line the server's copy has", 120);
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   await draft.fill("Short one");
   await page.evaluate(() => (window as unknown as { __listAtRestBeforeSend: () => void }).__listAtRestBeforeSend());
   const frames = await framesOfSend(page, async () => {
@@ -498,7 +499,7 @@ for (const { change, answer } of [
 ]) {
   test(`the end of the timeline that ${change} after the rise is over moves the rows along the way`, async ({ page }) => {
     await openChannelRecordingRises(page);
-    const draft = page.locator("textarea.composer-textarea").first();
+    const draft = page.locator(".composer-textarea").first();
     const body = "Late one\n\nwith a line";
     await answerNextSend(page, HISTORY_LENGTH + 1, answer, 3_500);
     await draft.fill(body);

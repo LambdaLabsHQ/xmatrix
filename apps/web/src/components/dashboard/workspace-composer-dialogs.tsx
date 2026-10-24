@@ -144,7 +144,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ClipboardEvent as ReactClipboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -195,6 +194,7 @@ import {
 import {
   ComposerInputAuthority,
 } from "@/components/dashboard/composer-input";
+import type { ComposerField } from "@/components/dashboard/composer-editor";
 
 import {
   type AgentTraceReplica,
@@ -400,7 +400,7 @@ export const Composer = memo(function Composer({
   const channel = useRealtimeChannel(catalogChannel);
   const writable = isJoined && (Boolean(channel) || startsConversation);
   const composerRef = useRef<HTMLDivElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fieldRef = useRef<ComposerField | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Local draft text so keystrokes re-render only Composer, not the message shell.
   // Parent `draft` is an external seed (channel restore / send clear / role inject).
@@ -508,8 +508,8 @@ export const Composer = memo(function Composer({
 
   useLayoutEffect(() => {
     if (!emptyPasteAnchorActive || localDraft.length > 0) return;
-    const textarea = textareaRef.current;
-    if (!textarea || document.activeElement !== textarea) return;
+    const textarea = fieldRef.current;
+    if (!textarea || document.activeElement !== textarea.element) return;
     if (stripEmptyPasteSentinel(textarea.value).length > 0) return;
 
     const selection = emptyPasteAnchorSelection(localDraft.length);
@@ -609,7 +609,7 @@ export const Composer = memo(function Composer({
     handledMentionInsertRequestIdRef.current = mentionInsertRequest.id;
     if (!writable) return;
 
-    const target = textareaRef.current;
+    const target = fieldRef.current;
     const nextCursor = target
       ? target.selectionStart || 0
       : cursor;
@@ -619,21 +619,21 @@ export const Composer = memo(function Composer({
     dismissCompletion();
     onWorkspaceSelect(null);
     scheduleTextareaSelection(
-      () => textareaRef.current,
+      () => fieldRef.current,
       next.value,
       { start: next.cursor, end: next.cursor }
     );
   }, [dismissCompletion, cursor, writable, localDraft, mentionInsertRequest, onWorkspaceSelect, setCursor, setDraftText]);
 
-  function syncCursor(target: HTMLTextAreaElement) {
+  function syncCursor(target: ComposerField) {
     setCursor(composerDraftCursor(target.value, target.selectionStart));
   }
 
-  function primeEmptyPasteAnchor(target?: HTMLTextAreaElement | null) {
+  function primeEmptyPasteAnchor(target?: ComposerField | null) {
     if (localDraft.length > 0 || emptyPasteAnchorActive) return;
     setEmptyPasteAnchorActive(true);
     window.requestAnimationFrame(() => {
-      const textarea = target || textareaRef.current;
+      const textarea = target || fieldRef.current;
       if (!textarea || stripEmptyPasteSentinel(textarea.value).length > 0) return;
       const selection = emptyPasteAnchorSelection(localDraft.length);
       textarea.focus();
@@ -645,7 +645,7 @@ export const Composer = memo(function Composer({
     setEmptyPasteAnchorActive(false);
   }
 
-  function clearEmptyPasteAnchorForIme(target: HTMLTextAreaElement) {
+  function clearEmptyPasteAnchorForIme(target: ComposerField) {
     if (!emptyPasteAnchorActive || localDraft.length > 0) return;
     flushSync(() => setEmptyPasteAnchorActive(false));
     target.value = "";
@@ -654,7 +654,7 @@ export const Composer = memo(function Composer({
   }
 
   function focusComposerTextarea() {
-    const textarea = textareaRef.current;
+    const textarea = fieldRef.current;
     if (!textarea || textarea.disabled) return;
     if (localDraft.length === 0) {
       setEmptyPasteAnchorActive(true);
@@ -669,7 +669,7 @@ export const Composer = memo(function Composer({
     if (localDraft.length === 0) {
       const scheduledTextarea = textarea;
       window.requestAnimationFrame(() => {
-        const currentTextarea = textareaRef.current;
+        const currentTextarea = fieldRef.current;
         if (
           currentTextarea !== scheduledTextarea ||
           currentTextarea.disabled ||
@@ -683,7 +683,7 @@ export const Composer = memo(function Composer({
       return;
     }
     scheduleTextareaSelection(
-      () => textareaRef.current,
+      () => fieldRef.current,
       textarea.value,
       selection,
       { preventScroll: true }
@@ -700,7 +700,7 @@ export const Composer = memo(function Composer({
     setDraftText(value);
     setCursor(nextCursor);
     scheduleTextareaSelection(
-      () => textareaRef.current,
+      () => fieldRef.current,
       value,
       { start: nextCursor, end: nextCursor }
     );
@@ -1000,7 +1000,7 @@ export const Composer = memo(function Composer({
     return accepted > 0;
   }
 
-  async function addPastedImages(event: ReactClipboardEvent<HTMLTextAreaElement>) {
+  async function addPastedImages(event: ClipboardEvent, target: ComposerField) {
     const files = pastedImageFiles(event.clipboardData);
     if (files.length > 0) {
       event.preventDefault();
@@ -1017,7 +1017,6 @@ export const Composer = memo(function Composer({
       return;
     }
 
-    const target = event.currentTarget;
     const text = stripEmptyPasteSentinel(event.clipboardData.getData("text/plain") || event.clipboardData.getData("text"));
     const selectionStart = emptyPasteAnchorActive ? 0 : target.selectionStart ?? localDraft.length;
     const selectionEnd = emptyPasteAnchorActive ? 0 : target.selectionEnd ?? selectionStart;
@@ -1185,11 +1184,11 @@ export const Composer = memo(function Composer({
             invocationDraftRef.current?.bindings.filter(isAgentBinding))}
           summonReadingPending={draftIntents.reading}
           onSummonStartAnyway={reading => {
-            const next = forceDraftSummon(textareaRef.current?.value ?? localDraft, reading);
+            const next = forceDraftSummon(fieldRef.current?.value ?? localDraft, reading);
             if (!next) return;
             setDraftText(next.body);
             requestAnimationFrame(() => {
-              const input = textareaRef.current;
+              const input = fieldRef.current;
               input?.focus();
               input?.setSelectionRange(next.caret, next.caret);
             });
@@ -1211,62 +1210,62 @@ export const Composer = memo(function Composer({
             if (space) onOpenAppsForSpace(space.id);
           }}
           completionApiRef={completionApiRef}
-          textareaRef={textareaRef}
+          fieldRef={fieldRef}
           placeholder={placeholder || (channel && !isJoined ? "Join channel to send" : composerHint)}
           ariaLabel={ariaLabel || "Message composer"}
           sendTitle={sendTitle || "Send"}
           onEscape={onEscape}
           boxClassName={cn(isDropTarget && "border-primary ring-2 ring-primary/20")}
           onBoxPointerDown={focusComposerTextareaFromPointer}
-          textareaValue={emptyPasteAnchorActive && localDraft.length === 0 ? EMPTY_COMPOSER_PASTE_SENTINEL : localDraft}
-          onTextareaChange={(event) => {
-            const value = stripEmptyPasteSentinel(event.target.value);
+          fieldValue={emptyPasteAnchorActive && localDraft.length === 0 ? EMPTY_COMPOSER_PASTE_SENTINEL : localDraft}
+          onFieldChange={(text, field) => {
+            const value = stripEmptyPasteSentinel(text);
             if (value.length > 0) {
               clearEmptyPasteAnchor();
             }
             setDraftText(value);
-            syncCursor(event.target);
+            syncCursor(field);
           }}
-          onTextareaBeforeInput={(event) => {
-            if (isComposerImeBeforeInput(event.nativeEvent as InputEvent)) {
-              clearEmptyPasteAnchorForIme(event.currentTarget);
+          onFieldBeforeInput={(event, field) => {
+            if (isComposerImeBeforeInput(event)) {
+              clearEmptyPasteAnchorForIme(field);
             }
           }}
-          onTextareaCompositionStart={(event) => {
-            clearEmptyPasteAnchorForIme(event.currentTarget);
+          onFieldCompositionStart={(field) => {
+            clearEmptyPasteAnchorForIme(field);
           }}
-          onTextareaFocus={(event) => {
-            primeEmptyPasteAnchor(event.currentTarget);
+          onFieldFocus={(field) => {
+            primeEmptyPasteAnchor(field);
           }}
-          onTextareaBlur={() => {
+          onFieldBlur={() => {
             if (localDraft.length === 0) {
               clearEmptyPasteAnchor();
             }
           }}
-          onTextareaTouchStart={(event) => {
-            primeEmptyPasteAnchor(event.currentTarget);
+          onFieldTouchStart={(field) => {
+            primeEmptyPasteAnchor(field);
           }}
-          onTextareaPointerDown={(event) => {
+          onFieldPointerDown={(event, field) => {
             if (event.pointerType === "touch" || event.pointerType === "pen") {
-              primeEmptyPasteAnchor(event.currentTarget);
+              primeEmptyPasteAnchor(field);
             }
           }}
-          onTextareaPointerUp={(event) => {
+          onFieldPointerUp={(_event, field) => {
             if (localDraft.length > 0) return;
             const selection = emptyPasteAnchorSelection(localDraft.length);
-            event.currentTarget.setSelectionRange(selection.start, selection.end);
+            field.setSelectionRange(selection.start, selection.end);
             setCursor(selection.start);
           }}
-          onTextareaClick={(event) => {
+          onFieldClick={(field) => {
             if (localDraft.length > 0) return;
             // Native touch selection may run after pointerup. Click is the last
             // event in that gesture, so enforce the empty-paste caret here too.
             const selection = emptyPasteAnchorSelection(localDraft.length);
-            event.currentTarget.setSelectionRange(selection.start, selection.end);
+            field.setSelectionRange(selection.start, selection.end);
             setCursor(selection.start);
           }}
-          onTextareaPaste={(event) => {
-            void addPastedImages(event);
+          onFieldPaste={(event, field) => {
+            void addPastedImages(event, field);
           }}
           onKeyDownExtra={(event) => {
             if (

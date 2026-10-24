@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -34,6 +33,7 @@ import {
   composerCompletionHandlesKeyDown,
   scheduleTextareaSelection,
 } from "@/components/dashboard/composer-caret";
+import type { ComposerField, ComposerKeyEvent } from "@/components/dashboard/composer-editor";
 import {
   CompletionOptionButton,
   stopTouchPropagation,
@@ -131,17 +131,17 @@ export type ComposerContextFields = {
 };
 
 export type ComposerCompletionInput = ComposerContextFields & {
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  fieldRef: RefObject<ComposerField | null>;
 };
 
 export type ComposerCompletionApi = {
   cursor: number;
   setCursor: (value: number) => void;
-  syncCursor: (target: HTMLTextAreaElement) => void;
+  syncCursor: (field: ComposerField) => void;
   isCompletionOpen: boolean;
   appMentions: ReturnType<typeof parseAppMentions>;
   /** Returns true when the key event was handled by completion navigation/accept. */
-  handleCompletionKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean;
+  handleCompletionKeyDown: (event: ComposerKeyEvent) => boolean;
   dismissCompletion: () => void;
   renderOverlays: () => React.ReactNode;
 };
@@ -152,9 +152,9 @@ export type ComposerCompletionApi = {
  * completion navigation is handled first when a suggestion panel is open.
  */
 export function handleComposerTextareaKeyDown(
-  event: ReactKeyboardEvent<HTMLTextAreaElement>,
+  event: ComposerKeyEvent,
   options: {
-    handleCompletionKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean;
+    handleCompletionKeyDown: (event: ComposerKeyEvent) => boolean;
     onSend: () => void;
     onEscape?: () => void;
   }
@@ -187,7 +187,7 @@ export function useComposerCompletion({
   localContext,
   enabled,
   instanceTargetScope = "channel",
-  textareaRef,
+  fieldRef,
   onConfigureAppConnector,
 }: ComposerCompletionInput): ComposerCompletionApi {
   const { user } = useAuth();
@@ -610,13 +610,13 @@ export function useComposerCompletion({
     visibleMentionItems.length,
   ]);
 
-  function syncCursor(target: HTMLTextAreaElement) {
-    setCursor(target.selectionStart || 0);
+  function syncCursor(field: ComposerField) {
+    setCursor(field.selectionStart || 0);
   }
 
   function focusAndSelect(expectedValue: string, nextCursor: number) {
     scheduleTextareaSelection(
-      () => textareaRef.current,
+      () => fieldRef.current,
       expectedValue,
       { start: nextCursor, end: nextCursor }
     );
@@ -735,7 +735,7 @@ export function useComposerCompletion({
     setCursor(-1);
   }
 
-  function handleCompletionKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean {
+  function handleCompletionKeyDown(event: ComposerKeyEvent): boolean {
     const optionCount = showSlashSuggestions
         ? slashItems.length
         : showReferenceSuggestions

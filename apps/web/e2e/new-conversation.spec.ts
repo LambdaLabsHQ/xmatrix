@@ -1,3 +1,4 @@
+import { expectDraft } from "./composer-draft";
 import { channelHistoryFixture, E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_SPACE, fixtureConversationCreate, installWorkspaceStubs, startNewConversation } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureJson, fixtureRequestBodies, releaseFixture } from "./in-page-api-fixtures";
@@ -17,7 +18,7 @@ test("a new conversation completes the Space's repos after a summon", async ({ p
   await expect(page.locator(".app-mention-suggestions").getByRole("option")
     .filter({ hasText: "repo:owner/xmatrix" })).toBeVisible();
   await input.press("Tab");
-  await expect(input).toHaveValue("@codex repo:owner/xmatrix ");
+  await expectDraft(input, "@codex repo:owner/xmatrix ");
 });
 
 test("the empty composer takes turns teaching what typing @, /, [[ and # opens, caret or not", async ({ page }) => {

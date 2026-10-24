@@ -19,7 +19,7 @@ test.describe("in another Space", () => {
     await fixtureJson(page, "elsewhere-history", "**/api/xmatrix/channels/channel-elsewhere/history**",
       { messages: [], hasMore: false });
     await page.goto("/app?channel=channel-elsewhere", { waitUntil: "domcontentloaded" });
-    await expect(page.locator("textarea.composer-textarea").first()).toBeVisible();
+    await expect(page.locator(".composer-textarea").first()).toBeVisible();
     await expect(page).toHaveURL(/\/channels\/elsewhere-/u);
   });
 });
@@ -33,7 +33,7 @@ for (const [name, context] of [["a computer", E2E_DESKTOP_CONTEXT], ["a phone", 
       await fixtureJson(page, "random-history", "**/api/xmatrix/channels/channel-random/history**",
         { messages: [], hasMore: false });
       await page.goto("/app?channel=channel-random", { waitUntil: "domcontentloaded" });
-      await expect(page.locator("textarea.composer-textarea").first()).toBeVisible();
+      await expect(page.locator(".composer-textarea").first()).toBeVisible();
       await expect(page).toHaveURL(/\/channels\/random-/u);
     });
   });

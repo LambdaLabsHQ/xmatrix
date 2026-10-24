@@ -2,6 +2,7 @@ import { expect, test } from "./fixtures";
 import type { Locator, Page } from "@playwright/test";
 import { fixtureJson } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { draftSelection, expectDraft } from "./composer-draft";
 
 const EMPTY_COMPOSER_PASTE_SENTINEL = "\u200B";
 const E2E_RANDOM_CHANNEL = {
@@ -12,14 +13,7 @@ const E2E_RANDOM_CHANNEL = {
 
 async function expectEmptyComposerCaret(textarea: Locator) {
   await expect
-    .poll(async () =>
-      textarea.evaluate((node) => ({
-        active: document.activeElement === node,
-        selectionStart: node.selectionStart,
-        selectionEnd: node.selectionEnd,
-        value: node.value,
-      }))
-    )
+    .poll(() => draftSelection(textarea))
     .toEqual({
       active: true,
       selectionStart: 0,
@@ -35,7 +29,7 @@ async function openTwoChannelWorkspace(page: Page) {
   });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
 
-  const textarea = page.locator("textarea.composer-textarea").first();
+  const textarea = page.locator(".composer-textarea").first();
   await expect(textarea).toBeVisible();
   return textarea;
 }
@@ -47,7 +41,7 @@ test("first tap on an empty composer shell shows a collapsed caret instead of se
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
 
   const composerBox = page.locator(".app-composer-box").first();
-  const textarea = page.locator("textarea.composer-textarea").first();
+  const textarea = page.locator(".composer-textarea").first();
   await expect(textarea).toBeVisible();
 
   const box = await composerBox.boundingBox();
@@ -65,7 +59,7 @@ test("selecting a channel on mobile leaves the composer unfocused", async ({ pag
   await page.getByRole("button", { name: /random/i }).first().click();
 
   await expect(textarea).not.toBeFocused();
-  await expect(textarea).toHaveValue("");
+  await expectDraft(textarea, "");
   // Unfocused, nothing changes the draft after mount: the hint stands where
   // the text starts from the first paint, on the send button's middle line.
   const middle = async (selector: string) => {
@@ -100,15 +94,15 @@ test.describe("desktop channel selection", () => {
     await textarea.focus();
     await textarea.pressSequentially("first");
     await page.keyboard.press("Enter");
-    await expect(textarea).toHaveValue(/^\u200B?$/u);
+    await expectDraft(textarea, /^\u200B?$/u);
     await expect(textarea).toBeFocused();
 
     await textarea.pressSequentially("second");
     await page.getByRole("button", { name: "Send", exact: true }).click();
-    await expect(textarea).toHaveValue(/^\u200B?$/u);
+    await expectDraft(textarea, /^\u200B?$/u);
     await expect(textarea).toBeFocused();
     await page.keyboard.type("third");
-    await expect(textarea).toHaveValue("third");
+    await expectDraft(textarea, "third");
   });
 
   test("draws a soft caret on one middle line with the hint chip and the attach button", async ({ page }) => {
