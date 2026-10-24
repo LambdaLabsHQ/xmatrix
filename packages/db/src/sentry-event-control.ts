@@ -136,7 +136,13 @@ export class PostgresSentryEventRepository {
     // Claim/cleanup has no effect outside this transaction. A lost pre-COMMIT
     // connection gets one fresh session; unknown commits retain lease recovery.
     return retryBeforeCommit(() => this.database.transaction({ requestId: request(input), operation: "app.sentry-event.claim" }, async tx => {
-      await this.lockApp(tx, values);
+      // Webhook admission and overlapping recovery passes share this capacity
+      // fence. A busy app already has an owner; leave its durable work for the
+      // next minute instead of waiting behind that owner's database round trips.
+      const lock = await tx.query<{ acquired: boolean }>({ name: "sentry_event_capacity_try_lock_v1",
+        text: "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+        values: [JSON.stringify(["sentry-events", ...values])], maxRows: 1 });
+      if (!lock[0]!.acquired) return [];
       await this.cleanup(tx, values);
       const active = await tx.query<QueryResultRow>({ name: "sentry_event_active_leases_v1", text: `SELECT count(*) AS count
         FROM (SELECT 1 FROM data.app_sentry_event_jobs WHERE app_client_id=$1 AND app_uuid=$2::uuid

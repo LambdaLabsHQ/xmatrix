@@ -175,12 +175,31 @@ integration("Sentry concurrent retirement and admission cannot leave a live acce
     assert.equal((await sql("SELECT count(*)::int n FROM data.app_connector_oauth_installations WHERE app_client_id=$1", [key.appClientId])).rows[0].n, 0);
   });
 });
+integration("Sentry recovery defers a busy app without consuming its pending job", async () => {
+  await fixture(async ({ sql, key, accept, claim, current }) => {
+    await accept();
+    await sql("BEGIN");
+    try {
+      await sql("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+        [JSON.stringify(["sentry-events", key.appClientId, key.appUuid])]);
+      assert.deepEqual(await claim(), [], "another admission or recovery pass owns the app");
+      const { rows } = await sql("SELECT state,attempts,lease_id FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId]);
+      assert.deepEqual(rows, [{ state: "pending", attempts: 0, lease_id: null }]);
+    } finally { await sql("ROLLBACK"); }
+    const jobs = await claim();
+    assert.equal(jobs.length, 1, "the next pass recovers the deferred job");
+    assert.deepEqual(await current(jobs[0]), { credentialVersion: 1 });
+  });
+});
 integration("Sentry overlapping recovery wakes never exceed eight active leases per app", async () => {
   await fixture(async ({ accept, claim }) => {
     for (let n = 1; n <= 12; n++) await accept(n.toString(16).padStart(64, "0"));
     const groups = await Promise.all([claim(), claim(), claim()]);
-    assert.equal(groups.flat().length, 8);
-    assert.equal(new Set(groups.flat().map(job => job.leaseId)).size, 8);
+    const jobs = groups.flat();
+    assert.ok(jobs.length >= 4 && jobs.length <= 8);
+    jobs.push(...await claim());
+    assert.equal(jobs.length, 8, "later passes fill remaining capacity after contention");
+    assert.equal(new Set(jobs.map(job => job.leaseId)).size, 8);
     assert.equal((await claim()).length, 0);
   });
 });
