@@ -118,6 +118,20 @@ A few examples:
 @slack:post:C0123456789 Deploy finished.
 ```
 
+## X credits
+
+On Pro, paid X actions draw on the Space's credit balance, whether an Agent runs them or a person runs or approves them.
+
+| Action | Credits |
+| --- | --- |
+| Plain text post | 30 |
+| Post with a URL, quote or media | 400 |
+| Read posts or a timeline | 10 per post returned |
+| Profile lookup, including Connect and Check | 20 per profile |
+| Media upload or status check | 30 |
+
+Listing accounts, approval requests and token refresh are free. A call X refuses, or one that fails before reaching X, is refunded. Rates for media and for posts with a URL, quote or media may change once X's own charges are confirmed.
+
 ## Managing Google Ads
 
 Connect Google Ads in **Apps**, choose the advertiser customer ID in Credentials
