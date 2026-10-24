@@ -425,7 +425,7 @@ fn claude_model_catalog_advertises_effort_levels() {
             .collect();
         assert_eq!(
             levels,
-            ["low", "medium", "high", "xhigh", "max"],
+            ["low", "medium", "high", "xhigh", "max", "ultracode"],
             "{}",
             entry.id
         );
@@ -433,13 +433,12 @@ fn claude_model_catalog_advertises_effort_levels() {
         // claiming one would be a guess.
         assert_eq!(entry.default_reasoning_effort, None, "{}", entry.id);
     }
-    // `ultracode` and `auto` are valid `/effort` arguments that this runtime
-    // deliberately does not offer; see `claude_effort_catalog`.
+    // `auto` is a valid `/effort` argument that this runtime deliberately
+    // does not offer; see `claude_effort_catalog`.
     let offered: Vec<String> = claude_effort_catalog()
         .into_iter()
         .map(|level| level.reasoning_effort)
         .collect();
-    assert!(!offered.iter().any(|level| level == "ultracode"));
     assert!(!offered.iter().any(|level| level == "auto"));
 }
 
@@ -497,6 +496,61 @@ fn claude_transcript_watcher_reads_the_effort_a_turn_ran_at() {
     assert_eq!(
         watcher.poll(Some("session-e")).effort.as_deref(),
         Some("max")
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Ultracode turns record `xhigh`; only the enter/exit attachments say
+/// ultracode is on (2.1.310). The state must outlast the poll that saw the
+/// attachment, or the chip falls back to `xhigh` on the next turn.
+#[test]
+fn claude_transcript_watcher_reports_ultracode_between_enter_and_exit() {
+    let dir = std::env::temp_dir().join(format!(
+        "xmatrix-ultracode-watcher-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create test dir");
+    let transcript = dir.join("session-u.jsonl");
+    let append = |records: &str| {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&transcript)
+            .expect("open transcript");
+        std::io::Write::write_all(&mut file, records.as_bytes()).expect("append records");
+    };
+    append(concat!(
+        r#"{"type":"attachment","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}"#,
+        "\n",
+        r#"{"type":"assistant","effort":"xhigh","perTurnEffort":"xhigh","message":{}}"#,
+        "\n",
+    ));
+    let mut watcher =
+        ClaudeTranscriptWatcher::bound_to(dir.clone(), "session-u", transcript.clone());
+    assert_eq!(
+        watcher.poll(Some("session-u")).effort.as_deref(),
+        Some("ultracode")
+    );
+
+    append(concat!(
+        r#"{"type":"assistant","effort":"xhigh","message":{}}"#,
+        "\n"
+    ));
+    assert_eq!(
+        watcher.poll(Some("session-u")).effort.as_deref(),
+        Some("ultracode")
+    );
+
+    append(concat!(
+        r#"{"type":"attachment","attachment":{"type":"ultra_effort_exit"}}"#,
+        "\n",
+        r#"{"type":"assistant","effort":"high","message":{}}"#,
+        "\n",
+    ));
+    assert_eq!(
+        watcher.poll(Some("session-u")).effort.as_deref(),
+        Some("high")
     );
 
     let _ = std::fs::remove_dir_all(&dir);
