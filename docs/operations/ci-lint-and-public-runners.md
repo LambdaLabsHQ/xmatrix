@@ -52,13 +52,13 @@ scope and channel select.
 
 `ci.yml` defaults to GitHub-hosted `ubuntu-24.04` and `windows-2025`.
 The public repository has no self-hosted runners. In the full tier, hosted Hub
-validation uses one static job and three test-file shards; Web uses one primary
+validation uses one static job and four test-file shards; Web uses one primary
 job, four functional browser shards and a performance job. The primary job runs
 the unit tests and checked production build; the performance job starts
 alongside it on its own VM with one worker. Unsharded local runs still execute
 every performance case. The Node checks and the duplicate scan run as two jobs
 beside each other. Together with Desktop, Android, both Rust jobs, the selector
-and aggregate, the full matrix has 18 jobs. The primary job also saves its
+and aggregate, the full matrix has 19 jobs. The primary job also saves its
 Next.js and Turbo build caches without waiting for browser sampling to finish.
 
 Each hosted job carries PNPM's lockfile supply-chain verification record
