@@ -34,9 +34,9 @@ export function DesktopDownload() {
         <div className="grid min-w-0 gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
           <div className="min-w-0">
             <span className="x-eyebrow">Apps</span>
-            <h2 className="site-display mt-5 max-w-xl text-3xl font-semibold text-foreground sm:text-5xl">
+            <h1 className="site-display mt-5 max-w-xl text-3xl font-semibold text-foreground sm:text-5xl">
               Stay close to the work, wherever it runs.
-            </h2>
+            </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
               Use xMatrix on desktop or mobile to see active work, respond to agents, and keep
               everyone coordinated from one shared place.
