@@ -2848,7 +2848,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       const listPath = `${spaceAppPath(selectedChannel.spaceId, spaces)}/channels`;
       const { hash } = window.location;
       window.history.replaceState(null, "", listPath);
-      pushBrowserPath(`${canonicalPath}${hash}`, { [MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY]: listPath });
+      // A fresh state, not the list entry's: Next.js ignores a push whose state
+      // already carries its own router tree and would stay on the list.
+      window.history.pushState({ [MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY]: listPath }, "", `${canonicalPath}${hash}`);
       setBrowserPath(canonicalPath);
       return;
     }
