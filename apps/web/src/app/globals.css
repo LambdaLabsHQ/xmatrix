@@ -610,6 +610,13 @@
     margin-top: 0;
   }
 
+  /* A nested list follows its item's text inline, so first:mt-0 would glue it
+     to that text. Give it the same 4px an item has from its sibling, so a
+     child never sits farther from its parent than siblings sit apart. */
+  .xmatrix-app .rich-message li > :is(ul, ol) {
+    margin-top: 0.25rem;
+  }
+
   .xmatrix-app :is(.app-search, .app-composer-box, .bg-popover, .app-sidebar .ring-sidebar-border),
   .xmatrix-app .app-sidebar :is(button, a).bg-sidebar-accent {
     position: relative;
