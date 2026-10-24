@@ -185,8 +185,6 @@ export type AppView =
   | "profile"
   | "settings"
   | "admin"
-  /** Every result of one search; its address names the search. */
-  | "search"
   | "more";
 
 
@@ -234,7 +232,6 @@ export const viewLabels: Record<AppView, string> = {
   profile: "Profile",
   settings: "Settings",
   admin: "Platform admin",
-  search: "Search",
   more: "More",
 };
 
@@ -279,7 +276,6 @@ export function isAppView(value: string | null): value is AppView {
     value === "profile" ||
     value === "settings" ||
     value === "admin" ||
-    value === "search" ||
     value === "more"
   );
 }
@@ -349,7 +345,7 @@ export function toolItemPath(viewPath: string, item: string | null): string {
 }
 
 /**
- * Admin/search filters and Settings/Apps provider return parameters live in the
+ * Admin filters and Settings/Apps provider return parameters live in the
  * query. Canonicalizing their Space path must preserve those parameters until
  * the owning view consumes them.
  */

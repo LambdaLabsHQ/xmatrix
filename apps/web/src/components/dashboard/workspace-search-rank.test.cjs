@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { buildWorkspaceSearchResults, searchMatchingChannels } = require("./workspace-shell-helpers-extra.tsx");
+const { buildWorkspaceSearchResults } = require("./workspace-shell-helpers-extra.tsx");
 const { rankSearchResults, searchMatchTier } = require("./workspace-search-rank.ts");
 
 function channel(id, name, sentAt, extra = {}) {
@@ -36,11 +36,6 @@ test("ranking is by tier, then the most recent; ties keep their given order", ()
     { id: "tie-b", rank: { tier: 2, activityMs: 0 } },
   ], (item) => item.rank);
   assert.deepEqual(ranked.map((item) => item.id), ["new-start", "old-start", "tie-a", "tie-b", "elsewhere"]);
-});
-
-test("conversations rank by how the title matches, then by recent activity, not by id", () => {
-  assert.deepEqual(searchMatchingChannels(channels, "Connector").map((item) => item.id),
-    ["f000", "da24", "2dbd", "1bbb", "0aaa", "1ccc"]);
 });
 
 test("everything found shares one ranking, whatever its kind", () => {

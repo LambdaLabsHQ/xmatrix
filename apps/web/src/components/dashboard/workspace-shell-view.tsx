@@ -102,9 +102,8 @@ import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, usePageCreation } from "@/components/pages/page-creation";
 import { searchWorkspacePages } from "./workspace-message-search";
 import { channelTitle } from "@/components/dashboard/channel-links";
-import { WorkspaceSearchDialog, WorkspaceSearchView } from "./workspace-search";
-import { searchRequestFromParams, searchRequestParams, type SearchFilters } from "./workspace-search-model";
-import { parseAppLocation } from "./workspace-shell-navigation";
+import { WorkspaceSearchDialog } from "./workspace-search";
+import type { SearchFilters } from "./workspace-search-model";
 import { OnboardingActionsContext, type OnboardingActions } from "./onboarding-actions";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
 
@@ -131,7 +130,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     loading,
     token,
     routeInfo,
-    browserPath,
     desktopBridge,
     desktopUpdateBridgeAvailable,
     channelsRef,
@@ -296,7 +294,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
-    openSearchResults,
     openSchedule,
     clearScheduleFocus,
     openAppsForSpace,
@@ -611,7 +608,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     if (!token || !currentSpaceId) return undefined;
     return (query: string) => searchWorkspacePages({ token, spaceId: currentSpaceId, query });
   }, [currentSpaceId, token]);
-  const searchRequest = useMemo(() => searchRequestFromParams(parseAppLocation(browserPath).searchParams), [browserPath]);
   // ⌘F searches where the reader is: inside a conversation, only that conversation.
   const searchHereFilters = useMemo<SearchFilters>(() => workspaceSearchHere && view === "messages" && selectedChannel
     ? { channel: { id: selectedChannel.id, label: channelTitle(selectedChannel) } }
@@ -917,8 +913,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const deleteDetailsAutomation = useStableCallback(deleteAutomation);
   const openDetailsSchedule = useStableCallback(openSchedule);
   const closeDetailsOverlay = useStableCallback(closeMobileChannelDetails);
-  const openSearchResultsFor = useStableCallback((request: Parameters<typeof searchRequestParams>[0]) =>
-    openSearchResults(searchRequestParams(request).toString()));
   const selectSearchChannel = useStableCallback((channelId: string) => navigateToChannel(channelId));
   const selectSearchMessage = useStableCallback((channelId: string, messageId: string) =>
     navigateToChannel(channelId, messageId));
@@ -1413,28 +1407,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onDeleteAgent={(agent) => void deleteAgent(agent)}
     />
   );
-  const searchSurface = view === "search" ? (
-    <WorkspaceSearchView
-      request={searchRequest}
-      spaceName={currentSpace?.name ?? "this Space"}
-      channels={channels}
-      pages={pageTree.data ?? []}
-      catalogPaging={currentSpaceCatalog}
-      searchMessages={messageSearch}
-      searchPages={searchPages}
-      onChangeRequest={(request) => openSearchResults(searchRequestParams(request).toString())}
-      onEditSearch={openWorkspaceSearch}
-      onSelectChannel={(channelId) => navigateToChannel(channelId)}
-      onSelectMessage={(channelId, messageId) => navigateToChannel(channelId, messageId)}
-      onSelectPage={(pageId, blockId) => openPageAt(pageId, blockId)}
-    />
-  ) : null;
-  const toolSurface = view === "search" ? searchSurface
-    : renderToolSurface(view === "messages" || view === "pages" ? "more" : view as Exclude<AppView, "messages" | "search">);
+  const toolSurface = renderToolSurface(view === "messages" || view === "pages" ? "more" : view as Exclude<AppView, "messages">);
   const statusSurface = dockTabMounted("status") ? renderToolSurface("status") : null;
   const moreSurface = dockTabMounted("more")
-    ? view === "search" ? searchSurface
-      : renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
+    ? renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
     : null;
 
   return (
@@ -1471,7 +1447,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         searchPages={searchPages}
         searchRerank={searchRerank}
         catalogPaging={currentSpaceCatalog}
-        onOpenResults={openSearchResultsFor}
         onSelectChannel={selectSearchChannel}
         onSelectMessage={selectSearchMessage}
         onSelectPage={selectSearchPage}
