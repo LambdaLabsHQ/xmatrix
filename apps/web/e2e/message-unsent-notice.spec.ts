@@ -32,7 +32,7 @@ async function sendRefused(page: Page, body: string) {
   );
   await fixtureJson(page, "send-refused", SEND_ROUTE, { error: "Channel is read-only" }, { method: "POST", status: 403 });
   await conversationOpened(page);
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   await draft.fill(body);
   await draft.press("Enter");
   const row = page.locator(".app-message-row").filter({ hasText: body });

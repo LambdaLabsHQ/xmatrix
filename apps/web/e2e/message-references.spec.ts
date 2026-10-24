@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, installWorkspaceStubs } from "./workspace-fixtures";
+import { expectDraft } from "./composer-draft";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -32,26 +33,26 @@ test("# and [[ pick channels, pages and sections by name, and the message carrie
   await fixtureJson(browser, "send", "**/api/xmatrix/channels/channel-general/messages",
     { message: { id: "sent-id" } }, { method: "POST" });
   await browser.goto("/app/personal-sspaceperso/channels/channel-general", { waitUntil: "domcontentloaded" });
-  const draft = browser.locator("textarea.composer-textarea").first();
+  const draft = browser.locator(".composer-textarea").first();
   const suggestions = browser.getByTestId("composer-reference-suggestions");
 
   await draft.fill("ship in #rel");
   await expect(suggestions.getByRole("option", { name: /release-train/u })).toBeVisible();
   await expect(suggestions).toContainText("Where trains ship");
   await draft.press("Enter");
-  await expect(draft).toHaveValue("ship in #release-train ");
+  await expectDraft(draft, "ship in #release-train ");
 
   await draft.pressSequentially("per [[Rel");
   await expect(suggestions.getByRole("option", { name: /Relay/u })).toBeVisible();
   await draft.press("Enter");
-  await expect(draft).toHaveValue("ship in #release-train per [[Relay]] ");
+  await expectDraft(draft, "ship in #release-train per [[Relay]] ");
 
   // A Chinese input method types 【【; # inside it lists the page's sections.
   await draft.pressSequentially("和【【Relay#sta");
   await expect(suggestions).toContainText("Sections");
   await expect(suggestions.getByRole("option", { name: /Status/u })).toBeVisible();
   await draft.press("Enter");
-  await expect(draft).toHaveValue("ship in #release-train per [[Relay]] 和[[Relay#Status]] ");
+  await expectDraft(draft, "ship in #release-train per [[Relay]] 和[[Relay#Status]] ");
 
   // A pull request number stays text.
   await draft.pressSequentially("#3484");

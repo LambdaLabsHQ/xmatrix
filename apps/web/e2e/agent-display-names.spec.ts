@@ -1,6 +1,7 @@
 import { FIXTURE_AGENT_REGISTRATION } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, installWorkspaceStubs } from "./workspace-fixtures";
+import { expectDraft } from "./composer-draft";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -12,20 +13,20 @@ test("same-name Agents collapse to one shout without offering retired launch suf
     })),
   });
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   await draft.fill("@codex");
   const choices = page.locator(".app-mention-suggestions").getByRole("option");
   await expect(choices.filter({ hasText: "codex" })).toHaveCount(1);
   await expect(choices.filter({ hasText: "MacBook" })).toHaveCount(0);
   await expect(choices.filter({ hasText: "Server" })).toHaveCount(0);
   await choices.filter({ hasText: "codex" }).click();
-  await expect(draft).toHaveValue("@codex ");
+  await expectDraft(draft, "@codex ");
   await expect(page.getByLabel("Task launch conditions")).toHaveCount(0);
   await expect(choices.filter({ hasText: "Start persistent instance" })).toHaveCount(0);
   await expect(choices.filter({ hasText: "Run one-shot task" })).toHaveCount(0);
 
   await expect(page.getByLabel("Task launch conditions")).toHaveCount(0);
-  await expect(draft).toHaveValue("@codex ");
+  await expectDraft(draft, "@codex ");
 });
 
 test("selected category option is inset and rounded inside a single glass surface", async ({ page }) => {
@@ -36,7 +37,7 @@ test("selected category option is inset and rounded inside a single glass surfac
     }],
   });
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
-  const draft = page.locator("textarea.composer-textarea").first();
+  const draft = page.locator(".composer-textarea").first();
   await draft.fill("@codex");
   const panel = page.locator(".app-mention-suggestions");
   const option = panel.getByRole("option").filter({ hasText: "codex" }).first();
