@@ -29,6 +29,7 @@ import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake"
 import { pageReferencesIn } from "@xmatrix/protocol";
 import { firstMessageSummonId, PostgresPageRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
+import { guideAgentlessFirstMessage } from "./index-routes-welcome";
 import { attachConversationToPage } from "./product-page-attachment";
 import { judgeMessageSupersession } from "./message-supersession";
 import { CHANNEL_ACTIVITY_MESSAGE_KIND } from "@xmatrix/protocol";
@@ -145,14 +146,17 @@ export function unconfirmedLaunchNoticeBody(error: unknown, diagnosticId: string
  * upstream; it is never supplied by the message body. PostgreSQL checks both
  * current Channel permission and the unchanged owner-bound source publication. */
 /** A new conversation's first message that summons nobody, from a Human or an Agent.
- * Its Channel's coordinator runs it again for a decision no request finished. */
+ * Its Channel's coordinator runs it again for a decision no request finished.
+ * A Human's message that found no agent at all is answered with how to bring one in. */
 export async function startNewConversation(input: Pick<ProductMessagePostCommitInput,
-  "env" | "channelId" | "messageId" | "body" | "actorUserId" | "senderKind">): Promise<void> {
-  const { harness } = await dispatchProductNewConversationStart({ env: input.env, channelId: input.channelId,
+  "env" | "channelId" | "messageId" | "body" | "actorUserId" | "senderKind">,
+  guide: typeof guideAgentlessFirstMessage = guideAgentlessFirstMessage): Promise<void> {
+  const { harness, refused } = await dispatchProductNewConversationStart({ env: input.env, channelId: input.channelId,
     messageId: input.messageId, body: input.body, actorUserId: input.actorUserId,
     authorKind: input.senderKind === "agent" ? "agent" : "user" });
   if (harness) await summonFirstMessageHarness({ env: input.env, channelId: input.channelId,
     messageId: input.messageId, actorUserId: input.actorUserId, harness });
+  else if (refused === "registration_not_found" && input.senderKind === "user") await guide(input.env, input);
 }
 
 /**

@@ -27,6 +27,15 @@ import { useInstalledHarnesses } from "./use-installed-harnesses";
 export function OnboardingMessage({ stage, spaceId, token, userId }: {
   stage: OnboardingStage; spaceId: string | null; token: string | null; userId: string;
 }) {
+  const copy = useOnboardingCopy(spaceId, token, userId);
+  // A first message in a new conversation that no agent could answer: xMatrix
+  // replies with the same steps that bring one in, under a line saying why.
+  if (stage === "connect-agents") return (
+    <div data-onboarding-stage="connect-agents">
+      <p className="mb-2 text-[15px] leading-6">{copy.unanswered}</p>
+      <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="conversation" />
+    </div>
+  );
   return stage === "bring-agents"
     ? <BringAgentsMessage spaceId={spaceId} token={token} userId={userId} />
     : <AgentsInMessage spaceId={spaceId} token={token} userId={userId} />;

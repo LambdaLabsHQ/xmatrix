@@ -366,7 +366,8 @@ test("a new conversation's first message asks Jev which harness to summon and a 
     port: port(true, { claimed: false }) }), {});
   assert.equal(decisions.at(-1).window, true, "a Human's first message gives its author the window");
   assert.equal(diagnostics.length, 0);
-  assert.deepEqual(await orchestrateProductNewConversationStart({ ...input, port: port(true, "registration_not_found") }), {});
+  assert.deepEqual(await orchestrateProductNewConversationStart({ ...input, port: port(true, "registration_not_found") }),
+    { refused: "registration_not_found" });
   assert.deepEqual(diagnostics.map(value => value.error), ["registration_not_found"]);
 });
 

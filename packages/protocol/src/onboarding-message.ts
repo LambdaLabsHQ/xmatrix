@@ -1,12 +1,13 @@
 /**
- * What xMatrix says to a new person in their welcome conversation
+ * What xMatrix says to a new person in their welcome conversation, and in
+ * reply to a first message no agent can answer (`connect-agents`)
  * (docs/architecture/first-space.md). A message names only its step; the
  * client reads what the step shows from the facts, so the Hub writes each
  * step once and never edits it.
  */
 export const ONBOARDING_MESSAGE_KIND = "xmatrix.onboarding.v1";
 
-export const ONBOARDING_STAGES = ["bring-agents", "agents-in"] as const;
+export const ONBOARDING_STAGES = ["bring-agents", "agents-in", "connect-agents"] as const;
 export type OnboardingStage = typeof ONBOARDING_STAGES[number];
 
 export function onboardingStageOf(metadata: Record<string, unknown> | undefined): OnboardingStage | null {

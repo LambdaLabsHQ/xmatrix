@@ -12,7 +12,7 @@ export type OnboardingFunnelStep = typeof ONBOARDING_FUNNEL_STEPS[number];
 
 /** Where the person was asked: the welcome conversation, an empty Space,
  * Agents; `shell` is the app itself, before any of them is on screen. */
-export const ONBOARDING_SURFACES = ["welcome", "space", "agents", "shell"] as const;
+export const ONBOARDING_SURFACES = ["welcome", "space", "agents", "shell", "conversation"] as const;
 export type OnboardingSurface = typeof ONBOARDING_SURFACES[number];
 
 /** What the person was looking at it on. */

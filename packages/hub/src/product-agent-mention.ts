@@ -192,8 +192,8 @@ export async function orchestrateProductAgentMentions(
  * its author wants an Agent to start on it now, and which harness. Only a
  * conversation nobody has named yet (the web's New conversation), or a
  * discussion named from its page or selected message passage, is asked;
- * Jev's "no" and every refusal start nothing and say nothing, because the
- * author never asked for an Agent. A Human author sees the harnesses and
+ * Jev's "no" and every refusal start nothing and say nothing here, because the
+ * author never asked for an Agent; a refusal's code is returned as `refused`. A Human author sees the harnesses and
  * "none" for a few seconds; a choice there is the decision, and Jev's reading
  * decides only once that window closes. The harness decided here is summoned
  * by the caller with an ordinary `@<harness>` message, never launched here.
@@ -202,7 +202,7 @@ export async function orchestrateProductNewConversationStart(input: {
   port: ProductAgentMentionPort; channelId: string; messageId: string; body: string;
   /** A Human's message offers its author a short window to choose first. */
   authorKind?: "user" | "agent";
-}): Promise<{ harness?: string }> {
+}): Promise<{ harness?: string; refused?: string }> {
   const channel = await input.port.getChannel(input.channelId);
   if (!channel || channel.archivedAt || !input.body.trim()) return {};
   const discussion = metadataString(channel.metadata, "fromPageId") ||
@@ -213,9 +213,9 @@ export async function orchestrateProductNewConversationStart(input: {
       body: input.body, window: input.authorKind === "user" });
     return harness ? { harness } : {};
   } catch (error) {
-    input.port.reportDiagnostic?.({ stage: "summon", channelId: channel.id, messageId: input.messageId,
-      error: registrationRefusalCode(error) });
-    return {};
+    const refused = registrationRefusalCode(error);
+    input.port.reportDiagnostic?.({ stage: "summon", channelId: channel.id, messageId: input.messageId, error: refused });
+    return { refused };
   }
 }
 

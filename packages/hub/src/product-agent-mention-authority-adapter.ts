@@ -304,7 +304,7 @@ export async function dispatchProductAgentMentionsAfterAuthorityMessage(
 export async function dispatchProductNewConversationStart(input: {
   env: ProductAgentMentionAuthorityEnv; channelId: string; messageId: string; body: string; actorUserId: string;
   authorKind?: "user" | "agent";
-}): Promise<{ harness?: string }> {
+}): Promise<{ harness?: string; refused?: string }> {
   return orchestrateProductNewConversationStart({
     channelId: input.channelId, messageId: input.messageId, body: input.body,
     ...(input.authorKind ? { authorKind: input.authorKind } : {}),

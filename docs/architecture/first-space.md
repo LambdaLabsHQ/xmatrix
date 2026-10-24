@@ -66,6 +66,15 @@ is how to connect one.
   xmatrix.sh on the computer and sign in with the same email, where the
   computer shows its own command; the phone then sees that computer's agents
   arrive.
+- A Human's first message in a new conversation (one xMatrix names, or a
+  page or passage discussion) that finds no agent to start
+  (`registration_not_found`) is not met with silence: when the Space has no
+  enabled agent at all, xMatrix replies to it with the `connect-agents` step,
+  written once per conversation (`system:connect-agents:<channel id>`). The
+  Web draws one line saying nothing could answer it yet, then the same three
+  setup steps as `bring-agents`. Its fallback text is in the person's saved
+  display locale for the Space, else Chinese when the message has Han
+  characters, else English.
 - The messages are `xmatrix.onboarding.v1` system notices (`xmatrixSystemNotice`,
   `system_fact` provenance), written under the owner's principal with the
   xMatrix label, so no Agent takes them as the owner's request. A message names
@@ -97,8 +106,9 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 | `approved` | the person approves it |
 | `starter_chosen` | a card in the welcome is chosen (`talk`, `together`, `cowrite`, `machines`) |
 
-- Each step names where it was shown (`welcome`, `space`, `agents`, or
-  `shell` for the app before any of them) and what
+- Each step names where it was shown (`welcome`, `space`, `agents`,
+  `conversation` for the reply to an unanswered first message, or `shell`
+  for the app before any of them) and what
   on: `phone` at the shell's phone width, `desktop_app` in the desktop app,
   otherwise `desktop_web`.
 - The Web reports each step once per showing. `POST

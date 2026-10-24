@@ -190,6 +190,31 @@ test("a step's append and a concurrent reserve of it take the sequence row in on
     });
   }));
 
+test("a first message no agent can answer is answered with how to bring one in", () =>
+  withOwnerWorker("Hedy Lamarr", async ({ call }) => {
+    const space = await personal(call);
+    const created = await call("/api/channels", { method: "POST", body: { spaceId: space.id, mode: "open",
+      name: "fix the flaky login test", metadata: { createdBy: "web", autoName: true }, access: [] } });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    const channelId = created.body.channel.id;
+    const sent = await call(`/api/channels/${encodeURIComponent(channelId)}/messages`, { method: "POST",
+      body: { body: "fix the flaky login test" } });
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    const firstId = sent.body.message?.messageId ?? sent.body.messageId;
+    let guide;
+    for (let waited = 0; !guide; waited += 100) {
+      const { body } = await call(`/api/channels/${encodeURIComponent(channelId)}/history?limit=20`);
+      guide = body.messages.find((message) => message.metadata?.stage === "connect-agents");
+      if (guide) break;
+      assert.ok(waited < 20_000, `no reply to an agentless first message: ${JSON.stringify(body.messages)}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(guide.metadata.kind, "xmatrix.onboarding.v1");
+    assert.equal(guide.from?.label, "xMatrix");
+    assert.match(guide.body, /^No agent can answer here yet/u);
+    if (firstId) assert.equal(guide.replyToMessageId ?? guide.replyTo?.messageId, firstId);
+  }));
+
 test("only a person's own personal Space gets a welcome", () =>
   withOwnerWorker("Alan Turing", async ({ worker, token, call }) => {
     const space = await personal(call);
