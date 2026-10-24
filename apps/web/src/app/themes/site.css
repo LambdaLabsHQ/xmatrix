@@ -157,13 +157,13 @@ html:has(.site-page) {
 }
 
 .site-navbar {
-  --navbar-wood-reveal: 0;
+  --navbar-glass-reveal: 0;
   padding: 0.75rem;
   pointer-events: none;
   background: transparent;
 }
 
-/* Logo glass and wood bar are one row, centered as a whole. */
+/* One glass capsule holds the logo, links and actions, centered as a whole. */
 .site-navbar-layout {
   pointer-events: auto;
   position: relative;
@@ -171,9 +171,17 @@ html:has(.site-page) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
   max-width: 76rem;
   min-height: 3.5rem;
+  border-radius: 999px;
+}
+
+.site-navbar-glass {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--navbar-glass-reveal);
 }
 
 .site-navbar-brand {
@@ -185,29 +193,11 @@ html:has(.site-page) {
   padding-inline: 0.75rem 1rem;
 }
 
-.site-navbar-brand-glass {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: var(--navbar-wood-reveal);
-}
-
 .site-navbar-bar {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   height: 3.5rem;
-  /* Capsule, like the logo glass beside it. */
-  border-radius: 999px;
-}
-
-.site-navbar .site-navbar-inner {
-  position: absolute;
-  inset: 0;
-  height: 100%;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: var(--navbar-wood-reveal);
 }
 
 .site-navbar-content {
@@ -912,8 +902,6 @@ html:has(.site-page) {
     justify-content: space-between;
   }
 
-  /* Below lg the bar holds only the menu button, so it wraps just that
-     instead of stretching an empty wood slab across the row. */
   .site-navbar-bar {
     width: 3.5rem;
     flex: none;

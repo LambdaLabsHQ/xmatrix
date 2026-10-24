@@ -49,7 +49,6 @@ test("public site labels carry no decorative eyebrow bar", () => {
 
 test("public actions use shared materials and the Hero has one wood CTA", () => {
   assert.match(layoutSource, /LiquidGlassFilter/);
-  assert.match(navbarSource, /WoodPanel/);
   assert.match(navbarSource, /LiquidGlassPill/);
   assert.doesNotMatch(navbarSource, /x-glass-button/);
   assert.doesNotMatch(navbarSource, /bg-\[#68462f\]|bg-\[#513522\]/);
@@ -73,23 +72,25 @@ test("homepage panels reuse app wood and liquid-glass primitives", () => {
   assert.match(siteCss, /font-weight:\s*700/);
 });
 
-test("navbar keeps wood chrome beside selected-channel glass pills and woods the mobile sheet", () => {
-  assert.match(navbarSource, /<WoodPanel className="site-navbar-inner\b[^"]*">/);
+test("navbar is one glass bar with no wood slab, and woods the mobile sheet", () => {
+  assert.doesNotMatch(navbarSource, /<WoodPanel/);
+  assert.doesNotMatch(siteCss, /site-navbar-inner|navbar-wood-reveal/);
+  assert.match(navbarSource, /<span aria-hidden className="site-navbar-glass">\s*<LiquidGlassPill className="size-full">/);
+  assert.match(navbarSource, /href="\/login"\s*onSlab/, "Start Free sits on the bar glass without a nested backdrop");
   assert.match(navbarSource, /site-nav-sheet app-material-wood-panel/);
   assert.match(navbarSource, /navLinks\.map\([\s\S]*LiquidGlassPill/);
-  assert.match(navbarSource, /WoodPanel/);
 });
 
-test("navbar keeps the 3D logo off a centered sticky wood bar", () => {
+test("navbar glass spans the logo and every link on a centered sticky bar", () => {
+  const glassIndex = navbarSource.indexOf('className="site-navbar-glass"');
   const brandIndex = navbarSource.indexOf("<BrandMark");
-  const woodIndex = navbarSource.indexOf('<WoodPanel className="site-navbar-inner');
-  assert.ok(brandIndex >= 0 && woodIndex > brandIndex, "brand mark must sit outside the wood bar");
+  const barIndex = navbarSource.indexOf('className="site-navbar-bar"');
+  assert.ok(glassIndex >= 0 && brandIndex > glassIndex && barIndex > brandIndex, "one glass layer sits behind brand and bar");
   assert.match(navbarSource, /iconSrc="\/brand\/xmatrix-icon-transparent-128\.png"/);
-  assert.match(navbarSource, /site-navbar-brand/);
-  assert.match(navbarSource, /--navbar-wood-reveal/);
+  assert.match(navbarSource, /--navbar-glass-reveal/);
   assert.match(navbarSource, /className="site-navbar fixed top-0/);
   assert.match(siteCss, /\.site-navbar-layout \{[\s\S]*?justify-content:\s*center/);
-  assert.match(siteCss, /\.site-navbar \.site-navbar-inner \{[\s\S]*opacity:\s*var\(--navbar-wood-reveal\)/);
+  assert.match(siteCss, /\.site-navbar-glass \{[\s\S]*?inset:\s*0;[\s\S]*?opacity:\s*var\(--navbar-glass-reveal\)/);
   assert.match(siteCss, /\.site-navbar \{[\s\S]*background:\s*transparent/);
   assert.doesNotMatch(siteCss, /\.site-navbar::before/);
   assert.doesNotMatch(navbarSource, /xmatrix-icon\.png/);
