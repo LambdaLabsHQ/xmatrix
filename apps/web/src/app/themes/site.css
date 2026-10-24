@@ -339,7 +339,9 @@ html:has(.site-page) {
 
 /* Sign-in screens (AuthShell): the homepage art on one side, a sheet of
    paper with one column of controls on the other. The main action is the
-   homepage's wood "Start Free" plank; everything else is white paper. */
+   homepage's wood "Start Free" plank; everything else is white paper.
+   On a phone the art runs edge to edge from the top of the screen, under
+   the status bar, like an app's welcome screen. */
 .auth-page {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -348,26 +350,25 @@ html:has(.site-page) {
 
 .auth-art {
   position: relative;
-  height: 7.5rem;
-  margin: 0.75rem 0.75rem 0;
+  height: calc(env(safe-area-inset-top) + 9.5rem);
   overflow: hidden;
-  border-radius: var(--site-surface-radius, 1.25rem);
+  border-radius: 0 0 1.75rem 1.75rem;
   background: #f0ecec;
 }
 
 /* The blocks sit in the right of the art; keep all of them in frame. */
 .auth-art img {
-  object-position: 88% 50%;
+  object-position: 80% 70%;
 }
 
 .auth-column {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.75rem;
   width: 100%;
   max-width: 26rem;
   margin: 0 auto;
-  padding: 1.5rem 1.5rem 2rem;
+  padding: 1.5rem 1.5rem calc(env(safe-area-inset-bottom) + 0.75rem);
 }
 
 .auth-body {
@@ -387,9 +388,15 @@ html:has(.site-page) {
     top: 1rem;
     height: calc(100dvh - 2rem);
     margin: 1rem 0 1rem 1rem;
+    border-radius: var(--site-surface-radius, 1.25rem);
+  }
+
+  .auth-art img {
+    object-position: 88% 50%;
   }
 
   .auth-column {
+    gap: 2rem;
     padding: 2.5rem 2rem;
   }
 
@@ -648,6 +655,7 @@ html:has(.site-page) {
 .auth-links {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 0.5rem 1.25rem;
   margin-top: 1.5rem;
 }
