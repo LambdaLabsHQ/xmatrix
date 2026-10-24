@@ -227,12 +227,12 @@ test("planner GitHub reads retry network failures and 5xx, not client errors", a
 
     calls = 0;
     globalThis.fetch = async () => { calls += 1; return new Response("", { status: 404 }); };
-    await assert.rejects(api("/x", "token", { delayMs: 1 }), /GitHub \/x: 404/);
+    await assert.rejects(api("/x", "token", { delayMs: 1 }), /GitHub .*\/x: 404/);
     assert.equal(calls, 1);
 
     calls = 0;
     globalThis.fetch = async () => { calls += 1; throw new TypeError("fetch failed"); };
-    await assert.rejects(api("/x", "token", { attempts: 3, delayMs: 1 }), /GitHub \/x: fetch failed/);
+    await assert.rejects(api("/x", "token", { attempts: 3, delayMs: 1 }), /GitHub .*\/x: fetch failed/);
     assert.equal(calls, 3);
   } finally {
     globalThis.fetch = realFetch;

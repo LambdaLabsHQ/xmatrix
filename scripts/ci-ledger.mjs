@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { releaseCommitProblemAt } from "./release-commit.mjs";
+import { githubRead } from "./github-read.mjs";
 
 // The complete Hub suite, recorded under a name that never held a single
 // shard's result. CI ran the suite as two jobs ("hub" and "hub-2") until
@@ -201,14 +202,6 @@ export function unzipSingleFile(zip) {
 /** Pull request CI, and the push CI that calls it on the public main. */
 export const RECORDED_WORKFLOWS = new Set([".github/workflows/ci.yml", ".github/workflows/public-ci.yml"]);
 
-async function github(pathname, token) {
-  const response = await fetch(`https://api.github.com${pathname}`, {
-    headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
-  });
-  if (!response.ok) throw new Error(`GitHub ${pathname}: ${response.status}`);
-  return response;
-}
-
 /**
  * Record the ledgered jobs one CI run passed. Runs from the default branch in
  * the ci-ledger workflow — never inside CI, which executes PR code and holds no
@@ -219,25 +212,25 @@ async function recordRun(runId) {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
   if (!token || !repo) throw new Error("GITHUB_TOKEN and GITHUB_REPOSITORY are required");
-  const run = await (await github(`/repos/${repo}/actions/runs/${runId}`, token)).json();
+  const run = await githubRead(`/repos/${repo}/actions/runs/${runId}`, token);
   if (!RECORDED_WORKFLOWS.has(run.path) || run.head_repository?.full_name !== repo) {
     console.error(`Run ${runId} is not this repository's CI; nothing recorded.`);
     return;
   }
-  const { jobs } = await (await github(`/repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, token)).json();
+  const { jobs } = await githubRead(`/repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, token);
   const passed = passedLedgerJobs(jobs);
   if (passed.length === 0) {
     console.error(`Run ${runId} passed no ledgered job; nothing recorded.`);
     return;
   }
-  const { artifacts } = await (await github(`/repos/${repo}/actions/runs/${runId}/artifacts?name=ci-ledger-subject`, token)).json();
+  const { artifacts } = await githubRead(`/repos/${repo}/actions/runs/${runId}/artifacts?name=ci-ledger-subject`, token);
   if (!artifacts?.length) {
     // Runs whose workflow predates the ledger, or that were cancelled before
     // naming their commit, simply record nothing.
     console.error(`Run ${runId} published no ci-ledger-subject; nothing recorded.`);
     return;
   }
-  const zip = Buffer.from(await (await github(new URL(artifacts[0].archive_download_url).pathname, token)).arrayBuffer());
+  const zip = await githubRead(new URL(artifacts[0].archive_download_url).pathname, token, { binary: true });
   const subject = String(JSON.parse(unzipSingleFile(zip).toString("utf8")).sha ?? "");
   git(["fetch", "--no-tags", "--depth=2", "origin", subject]);
   const parents = git(["rev-list", "--parents", "-n", "1", subject]).trim().split(" ").slice(1);

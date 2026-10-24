@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,6 +22,35 @@ import {
 import { stampVersionText, versionedPaths } from "./version.mjs";
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+
+// The recorder must recover a transient jobs-list failure before deciding
+// what can be recorded. Pure proof/key tests never exercise that HTTP boundary.
+test("the recorder recovers a GitHub 502 while reading CI jobs", () => {
+  const stub = `
+    let jobsReads = 0;
+    globalThis.fetch = async (url) => {
+      if (url.endsWith('/actions/runs/123')) return Response.json({
+        path: '.github/workflows/ci.yml', head_repository: { full_name: 'owner/repo' }
+      });
+      if (url.endsWith('/jobs?filter=latest&per_page=100')) {
+        if (++jobsReads === 1) return new Response('', { status: 502 });
+        return Response.json({ jobs: [] });
+      }
+      throw new Error('unexpected request: ' + url);
+    };
+    process.on('exit', () => console.log('jobs reads: ' + jobsReads));
+  `;
+  const result = spawnSync(process.execPath, [
+    "--import", `data:text/javascript,${encodeURIComponent(stub)}`,
+    "scripts/ci-ledger.mjs", "record-run", "123",
+  ], {
+    cwd: repoRoot, encoding: "utf8", timeout: 30_000,
+    env: { ...process.env, GITHUB_TOKEN: "test-token", GITHUB_REPOSITORY: "owner/repo" },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /jobs reads: 2/u);
+  assert.match(result.stderr, /passed no ledgered job; nothing recorded/u);
+});
 
 test("the key is the content tree, and a release commit reuses its source's", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "xmatrix-ledger-key-"));
