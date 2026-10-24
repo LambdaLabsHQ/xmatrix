@@ -141,6 +141,13 @@ export function ComposerEditor(props: ComposerEditorProps) {
         replaceSelectionWithText(view, text);
         return true;
       },
+      // Typed beside a chip, a space comes out of the browser as a no-break
+      // space (it keeps the space from collapsing). A draft is text as typed.
+      handleTextInput: (_view, from, to, text) => {
+        if (!text.includes("\u00A0")) return false;
+        view.dispatch(view.state.tr.insertText(text.replaceAll("\u00A0", " "), from, to));
+        return true;
+      },
       // Dropped files are attachments, taken by the window's drop sink as the
       // event bubbles on; the editor must not also insert whatever text they carry.
       handleDrop: (_view, event) => Boolean((event as DragEvent).dataTransfer?.types.includes("Files")),
@@ -259,13 +266,12 @@ export function ComposerEditor(props: ComposerEditorProps) {
   }, [portals]);
 
   // A draft written from outside (a channel's restored draft, a send that
-  // cleared it, a completion pick) replaces the text; the caret keeps its offset.
+  // cleared it, a completion pick) replaces the text and puts the caret at its
+  // end, as setting a textarea's value does; a completion then places it.
   useLayoutEffect(() => {
     const view = viewRef.current;
     if (!view || composerTextOf(view.state.doc) === props.value) return;
-    const start = composerOffsetOf(view.state.doc, view.state.selection.from);
-    const end = composerOffsetOf(view.state.doc, view.state.selection.to);
-    setText(view, props.value, Math.min(start, props.value.length), Math.min(end, props.value.length), true);
+    setText(view, props.value, props.value.length, props.value.length, true);
   }, [props.value]);
 
   // The hint is drawn over the field where the text would start, outside the
