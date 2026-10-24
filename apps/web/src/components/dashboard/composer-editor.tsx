@@ -247,8 +247,11 @@ export function ComposerEditor(props: ComposerEditorProps) {
         const selection = TextSelection.create(doc, composerPosOf(doc, start), composerPosOf(doc, end));
         if (!selection.eq(view.state.selection)) view.dispatch(view.state.tr.setSelection(selection).setMeta(EXTERNAL, true));
       },
-      focus(options?: FocusOptions) {
-        view.dom.focus(options);
+      // The view's own focus also puts the browser's caret where the state has
+      // it; a bare element focus left it where the browser last had it.
+      // It never scrolls, as callers here ask.
+      focus() {
+        view.focus();
       },
       blur() {
         view.dom.blur();
