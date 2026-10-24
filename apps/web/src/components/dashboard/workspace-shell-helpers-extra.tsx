@@ -370,19 +370,6 @@ export function channelRecentActivityMs(channel: ChannelSnapshot): number {
   return channelSortTimestamps(channel).recent;
 }
 
-/**
- * Conversations matching a search, best first by match and then by recent
- * activity, so a wide word such as a product name still surfaces the
- * conversation the reader was just in.
- */
-export function searchMatchingChannels(channels: readonly ChannelSnapshot[], query: string): ChannelSnapshot[] {
-  const needle = normalizeChannelSearchText(query);
-  if (!needle) return [];
-  return rankSearchResults(channels.filter((channel) => channelMatchesSearch(channel, needle)), (channel) => ({
-    tier: searchMatchTier(needle, channelTitle(channel)), activityMs: channelRecentActivityMs(channel),
-  }));
-}
-
 export function channelIsPinned(channel: ChannelSnapshot): boolean {
   const metadata = channel.metadata;
   return (

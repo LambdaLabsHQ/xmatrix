@@ -1,6 +1,6 @@
 /**
  * Search in one Space: what is being looked for (text plus the `in:` and
- * `from:` filters), how that is written into the results page's address, and
+ * `from:` filters), how that is written as a query string, and
  * the searches a reader ran recently. Pure; no React.
  */
 import type { AppView } from "./workspace-shell-navigation";
@@ -32,7 +32,7 @@ export function searchAuthorParam(author: SearchAuthor): string {
   return author.kind === "user" ? `user:${author.userId}` : `agent:${author.name}`;
 }
 
-/** The results page's query string; labels ride along so a shared link reads the same. */
+/** A search as a query string (`q`, `in`, `from`): its key, and how recent searches are stored. */
 export function searchRequestParams(request: SearchRequest): URLSearchParams {
   const params = new URLSearchParams();
   const text = request.text.trim();

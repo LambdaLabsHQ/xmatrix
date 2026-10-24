@@ -2495,20 +2495,6 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
   white-space: nowrap;
 }
 
-.xmatrix-app .app-search-result-row {
-  border-radius: 0.5rem;
-  padding-left: 0.5rem;
-  padding-right: 0.5rem;
-  margin-left: -0.5rem;
-  margin-right: -0.5rem;
-}
-
-@media (hover: hover) {
-  .xmatrix-app .app-search-result-row:hover {
-    background: oklch(0.42 0.012 238 / 0.06);
-  }
-}
-
 /* The search panel drops from the control that opened it (placed by
    SearchPanel): one glass sheet, its field row a capsule as tall as the
    composer's, the results under it. Rows, chips and the close button are ink
@@ -8280,11 +8266,6 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   /* A paper destination's wood bar already names it. */
   .xmatrix-app.xmatrix-app-shell .app-tool-paper .app-tool-detail-header {
     display: none;
-  }
-
-  /* …but not which search: the results page keeps its query and filters. */
-  .xmatrix-app.xmatrix-app-shell .app-tool-paper .app-search-paper .app-tool-detail-header {
-    display: block;
   }
 }
 

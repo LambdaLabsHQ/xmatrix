@@ -1,16 +1,15 @@
 "use client";
 
 /**
- * Search in a Space, reached by ⌘F or a search control. The panel that drops
- * from that control is where a search starts: it opens a place by name,
- * previews the first messages and pages, and its first row opens every result
- * on the search page. Pressed inside a
- * conversation, ⌘F starts with `in:` that conversation; Backspace takes it off.
+ * Search in a Space, reached by ⌘F or a search control. Every result shows in
+ * the panel that drops from that control: places by name, conversations,
+ * people, pages and messages, with older messages read on request. Pressed
+ * inside a conversation, ⌘F starts with `in:` that conversation; Backspace
+ * takes it off.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RealtimeCollection } from "./realtime-collection";
 import { ArrowRight, AtSign, Clock, FileText, Hash, MessageSquare, X } from "lucide-react";
-import { SearchGlyph } from "@/components/ui/search-glyph";
 import type {
   MessageSearchHit,
   ObservabilityEvent,
@@ -22,12 +21,11 @@ import type {
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
-import { cn } from "@/lib/utils";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { useCatalogSearch } from "./workspace-shell-chrome";
 import { SearchPanel, SearchResultRow } from "./workspace-search-panel";
 import {
-  buildWorkspaceSearchResults, scrollActiveCommandResultIntoView, searchMatchingChannels, searchResultIcon,
+  buildWorkspaceSearchResults, scrollActiveCommandResultIntoView, searchResultIcon,
 } from "./workspace-shell-helpers-extra";
 import {
   applySearchRerank, rankSearchResults, searchActivityMs, searchMatchTier, type SearchRank,
@@ -38,7 +36,6 @@ import type { WorkspaceMessageSearch } from "./workspace-shell-helpers";
 import type { SpaceChannelCatalog } from "./use-channel-catalog-paging";
 import type { AppView } from "./workspace-shell-navigation";
 import { relativeTime } from "./workspace-shell-presence";
-import { ToolDetail, ToolDetailSection, ToolPaper } from "./tool-split";
 import {
   matchingSearchDestinations,
   readRecentSearches,
@@ -202,19 +199,17 @@ function pendingFilter(text: string): { kind: "in" | "from"; needle: string; sta
 }
 
 type DialogRow =
-  | { key: string; kind: "all" }
   | { key: string; kind: "recent"; request: SearchRequest }
   | { key: string; kind: "filter-in"; channel: ChannelSnapshot }
   | { key: string; kind: "filter-from"; author: SearchAuthor; detail: string }
   | { key: string; kind: "destination"; view: AppView; label: string }
   | { key: string; kind: "directory"; result: ReturnType<typeof buildWorkspaceSearchResults>[number] }
   | { key: string; kind: "message"; hit: MessageSearchHit }
-  | { key: string; kind: "page"; hit: PageSearchHit };
+  | { key: string; kind: "page"; hit: PageSearchHit }
+  | { key: string; kind: "more" };
 
 type DialogSection = { title?: string; rows: DialogRow[] };
 
-/** Rows under "Search for …"; the results page shows everything. */
-const SEARCH_DIALOG_RESULT_LIMIT = 10;
 /** How many of the ranked rows Jev reads; the rest keep their place after them. */
 const RERANK_CANDIDATE_LIMIT = 20;
 
@@ -275,7 +270,6 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
   searchPages,
   searchRerank,
   catalogPaging,
-  onOpenResults,
   onSelectChannel,
   onSelectMessage,
   onSelectPage,
@@ -299,7 +293,6 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
   /** Jev's reordering of the first results; Pro Spaces only. */
   searchRerank?: WorkspaceSearchRerank;
   catalogPaging: SpaceChannelCatalog;
-  onOpenResults: (request: SearchRequest) => void;
   onSelectChannel: (channelId: string) => void;
   onSelectMessage: (channelId: string, messageId: string) => void;
   onSelectPage: (pageId: string, blockId?: string) => void;
@@ -394,28 +387,27 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
       return recent.length ? [{ title: "Recent", rows: recent.map((item) => ({
         key: `recent:${searchRequestKey(item)}`, kind: "recent" as const, request: item })) }] : [];
     }
-    const ranked = applySearchRerank(rankedRows, (item) => item.row.key, (item) => item.rank.tier, rerankReading)
-      .slice(0, SEARCH_DIALOG_RESULT_LIMIT);
-    const result: DialogSection[] = [{ rows: [{ key: "all", kind: "all" }] }];
-    if (ranked.length) result.push({ rows: ranked.map((item) => item.row) });
-    return result;
+    const ranked = applySearchRerank(rankedRows, (item) => item.row.key, (item) => item.rank.tier, rerankReading);
+    const rows: DialogRow[] = ranked.map((item) => item.row);
+    if (messages.more) rows.push({ key: "more", kind: "more" });
+    return rows.length ? [{ rows }] : [];
     // `request` is rebuilt every render; its parts are the dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, channels, filters, pending, rankedRows, rerankReading, searchText, space, spaceId]);
+  }, [agents, channels, filters, messages.more, pending, rankedRows, rerankReading, searchText, space, spaceId]);
 
   const rows = sections.flatMap((section) => section.rows);
   useLayoutEffect(() => {
     scrollActiveCommandResultIntoView(rowRefs.current[activeIndex]);
   }, [activeIndex, rows.length]);
 
-  const openResults = (next: SearchRequest) => {
-    rememberRecentSearch(spaceId, next);
-    onOpenResults(next);
-  };
-
   const choose = (row: DialogRow) => {
-    if (row.kind === "all") return openResults(request);
-    if (row.kind === "recent") return openResults(row.request);
+    if (row.kind === "more") return messages.loadMore();
+    if (row.kind === "recent") {
+      setFilters({ channel: row.request.channel, from: row.request.from });
+      setText(row.request.text);
+      inputRef.current?.focus();
+      return;
+    }
     if (row.kind === "filter-in" || row.kind === "filter-from") {
       setFilters((current) => row.kind === "filter-in"
         ? { ...current, channel: { id: row.channel.id, label: channelTitle(row.channel) } }
@@ -424,11 +416,9 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
       inputRef.current?.focus();
       return;
     }
+    rememberRecentSearch(spaceId, request);
     if (row.kind === "destination") return onChangeView(row.view);
-    if (row.kind === "message") {
-      rememberRecentSearch(spaceId, request);
-      return onSelectMessage(row.hit.channelId, row.hit.messageId);
-    }
+    if (row.kind === "message") return onSelectMessage(row.hit.channelId, row.hit.messageId);
     if (row.kind === "page") return onSelectPage(row.hit.pageId, row.hit.blockId || undefined);
     const item = row.result;
     if (item.kind === "page" && item.pageId) return onSelectPage(item.pageId, item.blockId);
@@ -438,8 +428,8 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
     if (item.channelId) onSelectChannel(item.channelId);
   };
 
-  const scopeLabel = searchRequestLabel({ text: "", ...filters });
-  const status = !pending && searchIsRunnable(request)
+  const runnable = !pending && searchIsRunnable(request);
+  const status = runnable
     ? messages.status === "loading" ? "Searching messages…"
       : messages.status === "unavailable" ? "Message search is unavailable right now."
         : undefined
@@ -455,7 +445,8 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
       placeholder={scoped ? "Search here" : `Search ${space?.name ?? "this Space"}`}
       emptyLabel={pending
         ? pending.kind === "in" ? "No conversation by that name" : "Nobody by that name"
-        : "Search messages, pages, conversations and people. Type in: or from: to narrow it."}
+        : runnable ? status ?? "No results"
+          : "Search messages, pages, conversations and people. Type in: or from: to narrow it."}
       activeIndex={activeIndex}
       resultCount={rows.length}
       chips={filterChips(filters, setFilters)}
@@ -485,11 +476,10 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
               onMouseEnter: () => setActiveIndex(rowIndex),
               onSelect: () => choose(row),
             };
-            if (row.kind === "all") {
-              return <SearchResultRow key={row.key} {...common} icon={SearchGlyph}
-                title={searchText ? `Search for “${searchText}”` : `Everything ${scopeLabel}`}
-                subtitle={scoped ? scopeLabel : `Every message and page in ${space?.name ?? "this Space"}`}
-                hint="↵" />;
+            if (row.kind === "more") {
+              return <SearchResultRow key={row.key} {...common} icon={Clock}
+                title={messages.loadingMore ? "Reading older messages…" : "Search older messages"}
+                subtitle={searchRequestLabel(request)} />;
             }
             if (row.kind === "recent") {
               return <SearchResultRow key={row.key} {...common} icon={Clock}
@@ -529,147 +519,3 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
     </SearchPanel>
   );
 });
-
-/**
- * Every result of one search, on paper. Its address names the search, so it
- * can be shared and Back returns to it.
- */
-export function WorkspaceSearchView({
-  request,
-  spaceName,
-  channels,
-  pages = [],
-  catalogPaging,
-  searchMessages,
-  searchPages,
-  onChangeRequest,
-  onEditSearch,
-  onSelectChannel,
-  onSelectMessage,
-  onSelectPage,
-}: {
-  request: SearchRequest;
-  spaceName: string;
-  channels: ChannelSnapshot[];
-  pages?: readonly PageSummary[];
-  /** Loads the Hub's title matches, so a conversation not yet paged in is still found. */
-  catalogPaging: SpaceChannelCatalog;
-  searchMessages?: WorkspaceMessageSearch;
-  searchPages?: (query: string) => Promise<{ results: PageSearchHit[] }>;
-  onChangeRequest: (request: SearchRequest) => void;
-  onEditSearch: () => void;
-  onSelectChannel: (channelId: string) => void;
-  onSelectMessage: (channelId: string, messageId: string) => void;
-  onSelectPage: (pageId: string, blockId?: string) => void;
-}) {
-  const runnable = searchIsRunnable(request);
-  const scoped = searchHasFilters(request);
-  const messages = useMessageSearch(searchMessages, request, runnable);
-  const pageHits = usePageSearch(searchPages, request.text, runnable && !scoped);
-  useCatalogSearch(runnable && !scoped, request.text, catalogPaging);
-  const channelById = useMemo(() => new Map(channels.map((channel) => [channel.id, channel])), [channels]);
-  const text = request.text.trim();
-  const needle = text.toLowerCase();
-  const channelHits = useMemo(() => !scoped && text ? searchMatchingChannels(channels, text).slice(0, 8) : [],
-    [channels, scoped, text]);
-  const titledPages = !scoped && needle
-    ? pages.filter((page) => page.title.toLowerCase().includes(needle)).slice(0, 8) : [];
-  const bodyPageHits = pageHits.filter((hit) => hit.field === "body");
-  const pageRows = [
-    ...titledPages.map((page) => ({ key: `title:${page.pageId}`, pageId: page.pageId, blockId: undefined,
-      title: page.title, detail: "Page" })),
-    ...bodyPageHits.map((hit) => ({ key: `body:${hit.pageId}:${hit.blockId}`, pageId: hit.pageId,
-      blockId: hit.blockId || undefined, title: hit.snippet.trim() || hit.title,
-      detail: hit.blockTitle ? `${hit.title} · ${hit.blockTitle}` : hit.title })),
-  ];
-
-  return (
-    <ToolPaper label="Search">
-      {/* The wood bar names the destination, not the search, so the query stays on a phone too. */}
-      <div className="app-search-paper contents">
-      <ToolDetail
-        context={<span>Search in {spaceName}</span>}
-        title={
-          <button type="button" onClick={onEditSearch} className="app-search-title text-left hover:opacity-80">
-            {text ? `“${text}”` : "Everything"}
-          </button>
-        }
-        status={scoped ? (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {filterChips(request, (filters) => onChangeRequest({ text: request.text, ...filters }))}
-          </div>
-        ) : undefined}
-      >
-        {!runnable && <p className="text-sm text-muted-foreground">Press ⌘F to search.</p>}
-        {(channelHits.length > 0 || pageRows.length > 0) && (
-          <div className="mb-8 grid gap-8 md:grid-cols-2">
-            {pageRows.length > 0 && (
-              <ToolDetailSection title={`Pages · ${pageRows.length}`}>
-                <div className="flex flex-col">
-                  {pageRows.map((row) => (
-                    <button key={row.key} type="button" onClick={() => onSelectPage(row.pageId, row.blockId)}
-                      className="app-search-result-row flex min-w-0 items-start gap-2.5 py-2 text-left">
-                      <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold"><Highlighted text={row.title} needle={text} /></span>
-                        <span className="block truncate text-xs text-muted-foreground">{row.detail}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </ToolDetailSection>
-            )}
-            {channelHits.length > 0 && (
-              <ToolDetailSection title={`Conversations · ${channelHits.length}`}>
-                <div className="flex flex-col">
-                  {channelHits.map((channel) => (
-                    <button key={channel.id} type="button" onClick={() => onSelectChannel(channel.id)}
-                      className="app-search-result-row flex min-w-0 items-center gap-2.5 py-2 text-left">
-                      <Hash className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 truncate text-sm font-semibold">
-                        <Highlighted text={channelTitle(channel)} needle={text} />
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </ToolDetailSection>
-            )}
-          </div>
-        )}
-        {runnable && (
-          <ToolDetailSection title={messages.hits.length ? `Messages · ${messages.hits.length}${messages.more ? "+" : ""}` : "Messages"}>
-            {messages.status === "loading" && <p className="py-2 text-sm text-muted-foreground">Searching…</p>}
-            {messages.status === "unavailable" && (
-              <p className="py-2 text-sm text-destructive" role="alert">Message search is unavailable right now.</p>
-            )}
-            {messages.status === "ready" && messages.hits.length === 0 && !messages.more && (
-              <p className="py-2 text-sm text-muted-foreground">No messages match.</p>
-            )}
-            <div className="flex flex-col">
-              {messages.hits.map((hit) => (
-                <button key={hit.entityId} type="button" onClick={() => onSelectMessage(hit.channelId, hit.messageId)}
-                  className="app-search-result-row flex min-w-0 flex-col gap-0.5 py-2.5 text-left">
-                  <span className="flex min-w-0 items-baseline gap-1.5 text-xs text-muted-foreground">
-                    <span className="truncate font-semibold text-foreground">{hit.senderLabel || "Someone"}</span>
-                    <span className="truncate">{hitChannelLabel(hit, channelById)}</span>
-                    {hit.sentAt && <span className="shrink-0">· {relativeTime(hit.sentAt)}</span>}
-                  </span>
-                  <span className={cn("line-clamp-2 text-sm leading-5", hit.field !== "body" && "text-muted-foreground")}>
-                    <Highlighted text={hit.snippet.trim() || "Attachment"} needle={text} />
-                  </span>
-                </button>
-              ))}
-            </div>
-            {messages.more && (
-              <button type="button" onClick={messages.loadMore} disabled={messages.loadingMore}
-                className="mt-2 text-sm font-semibold text-muted-foreground hover:text-foreground disabled:opacity-60">
-                {messages.loadingMore ? "Reading older messages…" : "Search older messages"}
-              </button>
-            )}
-          </ToolDetailSection>
-        )}
-      </ToolDetail>
-      </div>
-    </ToolPaper>
-  );
-}

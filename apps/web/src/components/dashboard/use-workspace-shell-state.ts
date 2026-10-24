@@ -2879,7 +2879,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     // A list destination's address names its open item the same way.
     const canonicalPath = view === "pages"
       ? pagesViewPath(viewPath, selectedPageId, routeInfo.conversationKey)
-      : view === "admin" || view === "search" || view === "settings" || view === "apps" ? adminViewPath(viewPath, currentBrowserLocation())
+      : view === "admin" || view === "settings" || view === "apps" ? adminViewPath(viewPath, currentBrowserLocation())
       : SPLIT_TOOL_VIEWS.includes(view) ? toolItemPath(viewPath, toolItemSelection(currentBrowserLocation())) : viewPath;
     if (currentBrowserLocation() !== canonicalPath) {
       replaceBrowserPath(canonicalPath);
