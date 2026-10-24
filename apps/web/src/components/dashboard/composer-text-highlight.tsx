@@ -319,7 +319,10 @@ function paintMentionBands(mirror: HTMLElement, layer: HTMLElement, spans: reado
       range.setEnd(node, word.index! + word[0].length);
       // A word the line breaker split reports one box per line.
       const boxes = [...range.getClientRects()].filter(box => box.width > 0).map(local);
-      const extents = ink(word[0]);
+      // A face hides the `@`, so its descending tail no longer pulls the band
+      // below the name: the band centres on the words that still show.
+      const shown = span.face && word.index === 0 ? word[0].slice(1) : word[0];
+      const extents = ink(shown || word[0]);
       for (const box of boxes) {
         fragments.push({ line: lineOf(box.top, box.bottom), left: box.left, right: box.right, ...extents });
       }
@@ -389,13 +392,16 @@ function paintMentionBands(mirror: HTMLElement, layer: HTMLElement, spans: reado
   for (const element of previous.values()) if (!keep.has(element)) element.remove();
 
   // The sent chip leads with its face; the draft draws that face over the `@`
-  // itself, a disc just covering the glyph's ink, since the textarea's text
-  // has no room before it.
+  // itself, since the textarea's text has no room before it. The disc is
+  // centred in its band, as the sent chip's face is on its name, and just
+  // large enough there to cover the glyph's ink.
   for (const element of layer.querySelectorAll<HTMLElement>(":scope > .app-composer-mention-face")) {
-    const span = spans[Number(element.dataset.faceFor)];
+    const index = Number(element.dataset.faceFor);
+    const span = spans[index];
     const box = span && charBox(span.start);
     const at = span && value[span.start];
-    if (!box || !at) {
+    const band = planned.find((item) => item.mention === index && item.lineOrdinal === 0);
+    if (!box || !at || !band) {
       element.hidden = true;
       continue;
     }
@@ -403,9 +409,10 @@ function paintMentionBands(mirror: HTMLElement, layer: HTMLElement, spans: reado
     const right = box.right - ink.bearing(at, "right");
     const glyph = ink(at);
     const lineBaseline = firstLineTop + lineOf(box.top, box.bottom) * lineHeight + baseline;
-    const size = Math.max(right - left, glyph.ascent + glyph.descent) + 1;
+    const centreY = band.top + band.height / 2;
+    const rise = lineBaseline - centreY;
+    const size = Math.max(right - left, 2 * Math.max(glyph.ascent - rise, rise + glyph.descent)) + 1;
     const centreX = (left + right) / 2;
-    const centreY = lineBaseline + (glyph.descent - glyph.ascent) / 2;
     element.hidden = false;
     element.style.left = `${snapX(centreX - size / 2)}px`;
     element.style.top = `${snapY(centreY - size / 2)}px`;
