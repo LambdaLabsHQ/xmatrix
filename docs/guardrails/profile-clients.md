@@ -71,6 +71,9 @@ coverage is in `apps/web/src/lib/markdown-plugins.test.cjs`.
 
 ### Timeline media playback
 
+Attachment commits share one completion for new and reused owner references,
+including concurrent uploads and directory repair. See [blob reference commits](../operations/blob-ref-commit.md).
+
 The shared timeline plays video and audio attachments using native HTML media
 controls, backed by Chromium in Electron. Generic MIME attachments use known
 media filename extensions for presentation; specific MIME metadata takes
