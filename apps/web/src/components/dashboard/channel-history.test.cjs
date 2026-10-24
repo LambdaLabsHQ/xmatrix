@@ -11,7 +11,6 @@ const {
   formatMessageTimestamp,
   mergeChannelHistory,
   commandResultHistoryMessage,
-  supersededHistoryMessage,
 } = history.exports;
 
 test.after(history.dispose);
@@ -137,23 +136,6 @@ test("a compacted cache advertises omitted history instead of claiming exact EOF
   assert.deepEqual(compacted.messages.map((message) => message.sequence),
     sequences(2, 120));
   assert.equal(compacted.hasOlderMessages, true);
-});
-
-test("a live supersession judgment folds the held message once", () => {
-  const window = [
-    { messageId: "m1", channelId: "a", sequence: 1, sentAt: "2026-07-20T00:00:01.000Z" },
-    { messageId: "m2", channelId: "a", sequence: 2, sentAt: "2026-07-20T00:00:02.000Z" },
-  ];
-  assert.deepEqual(supersededHistoryMessage(window, { messageId: "m1", supersededBy: "m2" }),
-    { ...window[0], supersededBy: "m2" });
-  // Already folded, not held, recalled meanwhile, or not a judgment: nothing to apply.
-  assert.equal(supersededHistoryMessage([{ ...window[0], supersededBy: "m2" }], { messageId: "m1", supersededBy: "m2" }),
-    undefined);
-  assert.equal(supersededHistoryMessage(window, { messageId: "m9", supersededBy: "m2" }), undefined);
-  assert.equal(supersededHistoryMessage([{ ...window[0], recalledAt: "2026-07-20T01:00:00.000Z" }],
-    { messageId: "m1", supersededBy: "m2" }), undefined);
-  assert.equal(supersededHistoryMessage(window, { messageId: "m1" }), undefined);
-  assert.equal(supersededHistoryMessage(window, undefined), undefined);
 });
 
 test("a send's own reply never erases the answer the Hub already pushed for it", () => {

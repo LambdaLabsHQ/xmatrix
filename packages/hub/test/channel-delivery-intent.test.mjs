@@ -206,24 +206,15 @@ test("an activity entry is context for every Instance, even when a step title na
   assert.equal(agentChannelMessageDeliveryIntent(activity, recipient), "context");
 });
 
-test("a frame carries the Hub's supersession judgment but never raw annotations", () => {
+test("a frame never carries raw annotations, nor a fold the Hub no longer judges", () => {
   const judged = framed({
     annotations: [
       { namespace: "xmatrix.superseded", authorUserId: "system:xmatrix", payload: { supersededBy: "msg-9" } },
       { namespace: "memory", authorUserId: "user-1", payload: { note: "private" } },
     ],
   });
-  assert.equal(judged.supersededBy, "msg-9");
+  assert.equal(judged.supersededBy, undefined);
   assert.equal(judged.annotations, undefined);
-  const forged = framed({
-    annotations: [{ namespace: "xmatrix.superseded", authorUserId: "user-1", payload: { supersededBy: "msg-9" } }],
-  });
-  assert.equal(forged.supersededBy, undefined);
-  const recalled = framed({
-    recalledAt: "2026-09-27T18:30:00Z",
-    annotations: [{ namespace: "xmatrix.superseded", authorUserId: "system:xmatrix", payload: { supersededBy: "msg-9" } }],
-  });
-  assert.equal(recalled.supersededBy, undefined);
 });
 
 test("a reborn or handoff is context: the Instance it stops spends no turn on it", () => {

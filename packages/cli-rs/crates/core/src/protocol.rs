@@ -886,10 +886,6 @@ pub struct ChannelMessage {
     pub deleted_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub recalled_by: Option<MessageSender>,
-    /// The later message from the same sender that the Hub judged makes this
-    /// one obsolete (docs/design/conversation-activity.md §3.3).
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub superseded_by: Option<String>,
     pub sent_at: String,
 }
 
@@ -947,31 +943,15 @@ pub(crate) fn channel_activity_of(metadata: Option<&serde_json::Value>) -> Optio
 }
 
 /// How history prints an entry nobody needs to read in full
-/// (docs/design/conversation-activity.md §4.3): an activity entry as its line,
-/// a superseded report as its first line and what superseded it. Order and the
-/// message id stay on the entry, so it can still be quoted or replied to.
+/// (docs/design/conversation-activity.md §4.3): an activity entry as its line.
+/// Order and the message id stay on the entry, so it can still be quoted or
+/// replied to.
 pub fn folded_history_line(message: &ChannelMessage) -> Option<String> {
     if message.recalled_at.is_some() {
         return None;
     }
-    if let Some(activity) = channel_activity_of(message.metadata.as_ref()) {
-        return Some(format!("▸ {}", channel_activity_line(&activity)));
-    }
-    let by = message
-        .superseded_by
-        .as_deref()
-        .filter(|id| !id.trim().is_empty())?;
-    let mut lines = message
-        .body
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty());
-    let first = lines.next().unwrap_or_default();
-    let mut line: String = first.chars().take(160).collect();
-    if first.chars().count() > 160 || lines.next().is_some() {
-        line.push('…');
-    }
-    Some(format!("[superseded by {by}] {line}"))
+    channel_activity_of(message.metadata.as_ref())
+        .map(|activity| format!("▸ {}", channel_activity_line(&activity)))
 }
 
 /// One plain line for an activity entry, the same glyphs the web shows.
@@ -1961,7 +1941,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_and_superseded_reports_fold_to_one_history_line() {
+    fn activity_entries_fold_to_one_history_line() {
         let activity = history_entry(serde_json::json!({
             "body": "✓ Run e2e · → Open PR 2",
             "metadata": { "xmatrixProvenance": "activity", "xmatrixActivity": {
@@ -1982,17 +1962,13 @@ mod tests {
             folded_history_line(&pull_request).as_deref(),
             Some("▸ ↗ Opened pull request LambdaLabsHQ/xmatrix#3043")
         );
-        let superseded = history_entry(serde_json::json!({ "supersededBy": "m-9" }));
-        assert_eq!(
-            folded_history_line(&superseded).as_deref(),
-            Some("[superseded by m-9] Progress: running the e2e regression.…")
-        );
         assert_eq!(
             folded_history_line(&history_entry(serde_json::json!({}))),
             None
         );
+        // A Hub that still sends a supersession leaves the message whole.
         assert_eq!(
-            folded_history_line(&history_entry(serde_json::json!({ "supersededBy": " " }))),
+            folded_history_line(&history_entry(serde_json::json!({ "supersededBy": "m-9" }))),
             None
         );
         let recalled = history_entry(serde_json::json!({

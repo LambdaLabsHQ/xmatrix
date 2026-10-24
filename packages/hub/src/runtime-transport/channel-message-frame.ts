@@ -15,7 +15,6 @@ import { connectorMessageWakeTarget } from "../connector-message-delivery";
  */
 import {
   CHANNEL_ACTIVITY_PROVENANCE,
-  supersededByOf,
   questionnaireStateOf,
   commandResultOf,
   mentionAddressTokens,
@@ -200,7 +199,7 @@ export type ChannelMessageFrameInput = {
   recalledAt?: unknown;
   deletedAt?: unknown;
   recalledBy?: unknown;
-  /** Read for the Hub's own supersession judgment only; never forwarded as is. */
+  /** Read for the Hub's own judgments only; never forwarded as is. */
   annotations?: unknown;
 };
 
@@ -265,7 +264,6 @@ export function channelMessage(
   const deletedAt = boundedId(input.deletedAt);
   const thread = normalizedThreadSummary(input.thread);
   // Only the Hub's own judgment crosses; other annotations stay out of frames.
-  const supersededBy = recalledAt ? undefined : boundedId(supersededByOf(input.annotations));
   const questionnaireState = recalledAt ? undefined : questionnaireStateOf(input.annotations);
   const commandResult = recalledAt ? undefined : commandResultOf(input.annotations);
   return {
@@ -312,7 +310,6 @@ export function channelMessage(
     ...(recalledAt && plainRecord(input.recalledBy)
       ? { recalledBy: input.recalledBy as ChannelMessage["recalledBy"] }
       : {}),
-    ...(supersededBy ? { supersededBy } : {}),
     ...(questionnaireState ? { questionnaireState } : {}),
     ...(commandResult ? { commandResult } : {}),
   };

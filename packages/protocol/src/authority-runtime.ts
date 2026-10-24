@@ -849,8 +849,6 @@ export type ObservabilityEventType =
   | "channel_mention"
   | "channel_attention_updated"
   | "channel_member_read_updated"
-  /** The Hub judged a message superseded by a later one; `metadata` names both. */
-  | "channel_message_superseded"
   /** What a message's commands came to changed; `metadata` carries `messageId` and the new `commandResult`. */
   | "channel_message_interactions_updated"
   /** A launch, stop, continuation, execution or launch choice of the Channel's messages changed. */

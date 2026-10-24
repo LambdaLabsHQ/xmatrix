@@ -2,7 +2,6 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import {
   E2E_CHANNEL,
-  E2E_DESKTOP_CONTEXT,
   E2E_MOBILE_CONTEXT,
   E2E_SPACE,
   E2E_USER_SENDER,
@@ -17,16 +16,11 @@ import {
 /* A conversation opens on the rows it keeps showing. It used to open on what
    this client last held of it and rearrange them a moment later, when its
    latest page arrived (user 2026-10-15: "点开频道有时候会闪一下…有时候会有旧消息"):
-   an Agent's progress report folded after the reader had seen it whole, and
    on a phone back from the background the messages sent meanwhile came in
    under the old screen. Every painted frame of the open is read. */
 
 const authority = { protocolVersion: 1, contentRevision: 1 };
 const OTHER = { ...E2E_CHANNEL, id: "channel-other", name: "other" };
-const AGENT = {
-  kind: "agent", identityId: "agent:claude", agentId: "agent:claude", agentName: "claude", label: "claude:1",
-  instanceId: "instance-claude-1", userId: "e2e-user", email: "",
-};
 
 function message(sequence: number, extra: Record<string, unknown> = {}) {
   return {
@@ -35,15 +29,6 @@ function message(sequence: number, extra: Record<string, unknown> = {}) {
     reactions: [], annotations: [], attachments: [], ...extra,
   };
 }
-
-/* An Agent's two reports in a row: the Hub folds the first under the second. */
-const REPORT_LINE = "Progress: running the e2e regression";
-const reports = (folded: boolean) => [
-  message(1),
-  message(2, { from: AGENT, body: `${REPORT_LINE}\nThe detail a reader no longer needs.`,
-    ...(folded ? { supersededBy: "other-3" } : {}) }),
-  message(3, { from: AGENT, body: "Progress: regression passed, opening the pull request." }),
-];
 
 const catalogAt = (head: number) => [
   { ...E2E_CHANNEL, updatedAt: new Date().toISOString(), messageCount: 1, historyHeadSequence: 1,
@@ -96,30 +81,6 @@ async function recordTimelineText(page: Page) {
 async function timelineTexts(page: Page): Promise<string[]> {
   return page.evaluate(() => (window as Window & { __timelineText?: string[] }).__timelineText ?? []);
 }
-
-test.describe("desktop", () => {
-  test.use(E2E_DESKTOP_CONTEXT);
-
-  test("a report folded while its conversation was closed opens folded", async ({ page }) => {
-    const send = await openGeneralWithOtherHeld(page, reports(false), "other-before-judgment");
-    // The Hub judges the report now; reads from here on carry the judgment.
-    await serveOther(page, "other-after-judgment", reports(true));
-    send({ type: "observable_event", event: {
-      id: "judgment-1", type: "channel_message_superseded", workspaceUserId: "system:xmatrix",
-      channelId: OTHER.id, metadata: { messageId: "other-2", supersededBy: "other-3" },
-      timestamp: new Date().toISOString(),
-    } });
-
-    await recordTimelineText(page);
-    await page.locator(`[data-channel-row-id="${OTHER.id}"]`).click();
-    await expect(page.locator(".app-message-timeline").getByText("Progress: regression passed")).toBeVisible();
-    await conversationOpened(page);
-    const open = (await timelineTexts(page)).filter((text) => text.includes("Other message 1"));
-    expect(open.length).toBeGreaterThan(0);
-    // Not one frame shows the folded report's whole text.
-    expect(open.filter((text) => text.includes("The detail a reader no longer needs."))).toEqual([]);
-  });
-});
 
 test.describe("phone", () => {
   test.use(E2E_MOBILE_CONTEXT);

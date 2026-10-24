@@ -20,7 +20,7 @@ import {
 
 import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message-command";
 import { agentAvatarUrlFromMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
-  questionnaireStateOf, supersededByOf, commandResultOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
+  questionnaireStateOf, commandResultOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
   type QuestionnaireState } from "@xmatrix/protocol";
 import { REDACTED_CONTENT_HASH, productGatewayAttachmentKind } from "./product-message-command";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
@@ -669,15 +669,6 @@ export async function postgresMessageHistory(
   input: PostgresMessageHistoryInput,
   dependencies: PostgresMessageDependencies = {},
 ): Promise<Record<string, unknown>> {
-  return (await postgresMessageHistoryInSpace(env, input, dependencies)).history;
-}
-
-/** A history page and the Space its Channel is placed in, which the read resolves anyway. */
-export async function postgresMessageHistoryInSpace(
-  env: Env,
-  input: PostgresMessageHistoryInput,
-  dependencies: PostgresMessageDependencies = {},
-): Promise<{ spaceId: string; history: Record<string, unknown> }> {
   // The Channel's route and its Space placement arrive in one directory read;
   // the page read still takes that placement's fence and checks the reader.
   const actor = principal(input.principal);
@@ -714,7 +705,7 @@ export async function postgresMessageHistoryInSpace(
     pageBytes += bytes;
   }
   const messages = forward ? selected : selected.slice().reverse();
-  return { spaceId, history: {
+  return {
     channelId,
     messages,
     hasMore: result.hasMore || selected.length < candidates.length,
@@ -727,7 +718,7 @@ export async function postgresMessageHistoryInSpace(
       admissibleForSteadyState: true,
       canCompleteWithoutLongLivedProjection: true,
     },
-  } };
+  };
 }
 
 function postgresProductThreadSummary(value: unknown): Record<string, unknown> | undefined {
@@ -791,8 +782,6 @@ export function postgresProductMessage(message: Record<string, unknown>): Record
       } : {}),
       reactions: message.reactions,
       annotations: message.annotations,
-      ...(!message.recalledAt && supersededByOf(message.annotations)
-        ? { supersededBy: supersededByOf(message.annotations) } : {}),
       ...(!message.recalledAt && questionnaireStateOf(message.annotations)
         ? { questionnaireState: questionnaireStateOf(message.annotations) } : {}),
       ...(!message.recalledAt && commandResultOf(message.annotations)
@@ -972,8 +961,7 @@ export async function postgresMessageMutation(
 
 /**
  * Record the Hub's own judgment about a message as a `system` annotation in a
- * reserved namespace (docs/design/conversation-activity.md §3.3). Not reachable
- * from any public route.
+ * reserved namespace. Not reachable from any public route.
  */
 export async function postgresMessageSystemAnnotation(
   env: Env,

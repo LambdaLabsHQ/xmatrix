@@ -2695,7 +2695,7 @@ pub(crate) fn format_history_message_with_local_images(
         .as_deref()
         .map(|id| format!(" [replyToMessageId={id}]"))
         .unwrap_or_default();
-    // Activity and superseded reports fold to one line, as they do on the web
+    // Activity folds to one line, as it does on the web
     // (docs/design/conversation-activity.md §4.3).
     if let Some(folded) = protocol::folded_history_line(message) {
         return format!(
@@ -3615,7 +3615,6 @@ mod tests {
             recalled_at: None,
             deleted_at: None,
             recalled_by: None,
-            superseded_by: None,
             sent_at: sent_at.to_string(),
         }
     }

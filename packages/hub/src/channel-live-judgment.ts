@@ -19,22 +19,6 @@ export function recipientBatches(userIds: string[]): string[][] {
 }
 
 /**
- * Tell a Channel's people that the Hub folded one message under a later one
- * (docs/design/conversation-activity.md §3.3). The judgment lands seconds
- * after the later message, so every client holding the Channel's rows,
- * opened or not, applies it as it comes instead of finding out when the
- * Channel is next read. Only the two ids travel; a dropped frame is repaired
- * by the next history read, which carries `supersededBy`.
- */
-export async function publishChannelMessageSuperseded(
-  env: Env,
-  input: { channelId: string; messageId: string; supersededBy: string },
-): Promise<void> {
-  await publishChannelMessageJudgment(env, input.channelId, "channel_message_superseded",
-    { messageId: input.messageId, supersededBy: input.supersededBy });
-}
-
-/**
  * Tell a Channel's people what a message's command came to, as the Hub just
  * recorded it on that message. Clients apply the one annotation to the result
  * they hold; a dropped frame is repaired by the next history read, which

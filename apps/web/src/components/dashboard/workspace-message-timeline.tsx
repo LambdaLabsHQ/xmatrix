@@ -692,8 +692,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   const [timelineFirstItemIndex, setTimelineFirstItemIndex] = useState(1_000_000);
   const previousTimelineRef = useRef<{ channelId?: string; itemIds: string[] }>({ itemIds: [] });
   const hasTimelineContent = timeline.length > 0 || Boolean(threadRootMessage);
-  // Talk stays whole; activity and superseded reports fold into one row per
-  // run of the same Instance (docs/design/conversation-activity.md §4.1).
+  // Talk stays whole; activity folds into one row per run of the same
+  // Instance (docs/design/conversation-activity.md §4.1).
   // Rows that say what they said stay the objects they were, so only a row
   // that changed draws again: folds and headed rows are rebuilt each time.
   const heldRowsRef = useRef<TimelineItem[]>([]);

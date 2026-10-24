@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 import { GMAIL_ACTIONS } from "../src/connectors/actions/gmail.ts";
 import { xProviderJson } from "../src/connectors/x-oauth.ts";
-import { judgeMessageSupersession } from "../src/message-supersession.ts";
-import { USAGE_COST_LAYOUT, upstreamMeter } from "../src/usage-cost-metering.ts";
+import { createJevClient } from "@xmatrix/decision-model";
+import { meterJev, USAGE_COST_LAYOUT, upstreamMeter } from "../src/usage-cost-metering.ts";
 import { withProviderResponses } from "./support/fetch-responses.mjs";
 
 /**
@@ -23,31 +23,28 @@ function sink(overrides = {}) {
     CF_VERSION_METADATA: { id: "version-1" }, JEV_AI_GATEWAY_API_KEY: "jev-test-key", ...overrides } };
 }
 
-const report = (from, body, sequence) => ({ messageId: `m-${sequence}`, sequence, body, from,
-  sentAt: new Date(Date.UTC(2026, 9, 16, 9, 0, sequence)).toISOString(), messageKind: "xmatrix.message.text" });
-const agent = { kind: "agent", identityId: "agent:claude", instanceId: "instance-1" };
-
-/** One supersession judgment through the real Jev client, against a stubbed AI Gateway. */
+/** One Jev evaluation through the real client, against a stubbed AI Gateway. */
 function judge(env, gateway) {
-  const window = [report(agent, EARLIER, 1), report(agent, LATER, 2)];
-  return withProviderResponses(gateway, () => judgeMessageSupersession({ env, channelId: "channel-1",
-    messageId: "m-2", sequence: 2, principal: { kind: "agent", id: "agent:claude" },
-    history: async () => ({ spaceId: SPACE, messages: window }),
-    annotate: async () => null, publish: async () => {} }));
+  return withProviderResponses(gateway, () => meterJev(env, { feature: "evaluate", scope: { spaceId: SPACE } },
+    createJevClient({ apiKey: env.JEV_AI_GATEWAY_API_KEY, timeoutMs: 5_000 }).evaluate)({
+    state: { channelId: "channel-1", sender: "agent:claude", earlier: EARLIER, later: LATER },
+    questions: { done: { type: "boolean", instructions: "Is the earlier report done?",
+      criteria: { true: "It is done.", false: "It is not." } } },
+  }));
 }
 
-const answered = { body: { answers: { superseded: { type: "boolean", probability: 0.2 } },
+const answered = { body: { answers: { done: { type: "boolean", probability: 0.2 } },
   usage: { inputTokens: 812, outputTokens: 3 } } };
 
 test("a Jev call is one datapoint in its Space with its feature and tokens, never its input", async () => {
   const { env, written } = sink();
   const { result, calls } = await judge(env, [answered]);
-  assert.equal(result.reason, "still_needed");
+  assert.equal(result.answers.done.probability, 0.2);
   assert.equal(calls.length, 1);
   assert.equal(written.length, 1);
   const [point] = written;
   assert.deepEqual(point.indexes, [SPACE]);
-  assert.deepEqual(point.blobs, [USAGE_COST_LAYOUT, "jev", "space", "supersession", "none", "typesafe-ai/jev",
+  assert.deepEqual(point.blobs, [USAGE_COST_LAYOUT, "jev", "space", "evaluate", "none", "typesafe-ai/jev",
     "ok", "none", "version-1"]);
   assert.deepEqual(point.doubles.slice(0, 3), [1, 812, 3]);
   assert.ok(point.doubles[3] >= 0);
@@ -62,16 +59,16 @@ test("a failed Jev call is metered with its code and no tokens; the caller still
   const failure = { status: 429, body: { error: { message: "private request text", type: "rate_limit_error" } } };
   await assert.rejects(judge(env, [failure]), error => error.code === "jev_rate_limited");
   assert.equal(written.length, 1);
-  assert.deepEqual(written[0].blobs.slice(1, 8), ["jev", "space", "supersession", "none", "unknown", "error", "jev_rate_limited"]);
+  assert.deepEqual(written[0].blobs.slice(1, 8), ["jev", "space", "evaluate", "none", "unknown", "error", "jev_rate_limited"]);
   assert.deepEqual(written[0].doubles.slice(0, 3), [1, 0, 0]);
   assert.ok(!JSON.stringify(written[0]).includes("private request text"));
 });
 
 test("without the dataset, or when its write throws, metered calls behave exactly as before", async () => {
   const { env: unbound } = sink({ XMATRIX_USAGE_COST_AE: undefined });
-  assert.equal((await judge(unbound, [answered])).result.reason, "still_needed");
+  assert.equal((await judge(unbound, [answered])).result.answers.done.probability, 0.2);
   const { env: broken } = sink({ XMATRIX_USAGE_COST_AE: { writeDataPoint: () => { throw new Error("dataset unavailable"); } } });
-  assert.equal((await judge(broken, [answered])).result.reason, "still_needed");
+  assert.equal((await judge(broken, [answered])).result.answers.done.probability, 0.2);
   await assert.rejects(judge(broken, [{ status: 429, body: {} }]), error => error.code === "jev_rate_limited");
   const meter = upstreamMeter(undefined, { spaceId: SPACE, connector: "x", action: "post" });
   assert.equal(await meter("x", "posts_create", async () => "posted"), "posted");

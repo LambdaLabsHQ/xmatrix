@@ -107,7 +107,7 @@ result below was a local CLI call, not a deployed Hub call.
 Every Jev call the Hub makes on its key is one datapoint in the
 `xmatrix_usage_cost` Analytics Engine dataset: the Space (the caller's owner
 for `/api/ai/jev/evaluate`), the feature (`summon_intent`, `launch_choice`,
-`input_launch`, `start_intent`, `supersession`, `page_attachment`, `evaluate`),
+`input_launch`, `start_intent`, `page_attachment`, `evaluate`),
 the outcome and its allowlisted code, input and output tokens as the AI
 Gateway reports them, and latency. Nothing from the evaluation input or answer
 is written. `packages/hub/scripts/usage-cost-report.mjs` sums it per Space; see

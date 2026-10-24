@@ -8,7 +8,7 @@ import { PostgresMessageRepository } from "../dist/index.js";
 /**
  * The Hub records its own judgment about a message as `system`, never as the
  * author, and without touching what the message invoked
- * (docs/design/conversation-activity.md §3.3).
+ * (command results, questionnaire states).
  */
 
 const now = "2026-09-27T00:00:00.000Z";
@@ -42,16 +42,16 @@ integration("a system annotation is the Hub's, idempotent, and leaves the invoca
   const repository = new PostgresMessageRepository(database);
   const judgment = {
     requestId: "judge", spaceId: SPACE, channelId: "conversation", messageId: "status",
-    namespace: "xmatrix.superseded", annotationId: "xmatrix.superseded:status",
-    payload: { supersededBy: "later" }, requestDigest: DIGEST,
+    namespace: "xmatrix.command-result", annotationId: "xmatrix.command-result:status",
+    payload: { note: "later" }, requestDigest: DIGEST,
   };
   const annotation = await repository.annotateAsSystem(judgment);
   assert.equal(annotation.authorUserId, "system:xmatrix");
-  assert.deepEqual(annotation.payload, { supersededBy: "later" });
+  assert.deepEqual(annotation.payload, { note: "later" });
   assert.equal(await repository.annotateAsSystem({ ...judgment, requestId: "again" }), null,
     "the same judgment twice records nothing new");
   assert.equal(await repository.annotateAsSystem({ ...judgment, messageId: "recalled",
-    annotationId: "xmatrix.superseded:recalled" }), null, "a recalled message is left alone");
+    annotationId: "xmatrix.command-result:recalled" }), null, "a recalled message is left alone");
   await assert.rejects(repository.annotateAsSystem({ ...judgment, namespace: "memory" }),
     /reserved namespace/u);
 
@@ -68,7 +68,7 @@ integration("a system annotation is the Hub's, idempotent, and leaves the invoca
     assert.deepEqual(ledger, [{ actor_kind: "system", actor_id: "xmatrix", mutation_kind: "annotation" }]);
     const stored = (await client.query(`SELECT author_user_id,namespace FROM data.message_annotations
       WHERE space_id=$1`, [SPACE])).rows;
-    assert.deepEqual(stored, [{ author_user_id: "system:xmatrix", namespace: "xmatrix.superseded" }]);
+    assert.deepEqual(stored, [{ author_user_id: "system:xmatrix", namespace: "xmatrix.command-result" }]);
   } finally {
     await client.end();
   }

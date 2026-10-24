@@ -6,7 +6,6 @@ import {
   channelActivityLine,
   channelActivityOf,
   normalizeChannelActivity,
-  supersededByOf,
 } from "../dist/channel-activity.js";
 
 const plan = {
@@ -74,15 +73,6 @@ test("only an activity entry's own metadata yields an activity", () => {
   assert.equal(channelActivityOf({ xmatrixProvenance: "system_fact", xmatrixActivity: plan }), undefined);
   assert.equal(channelActivityOf({ xmatrixProvenance: "activity", xmatrixActivity: { kind: "x" } }), undefined);
   assert.equal(channelActivityOf(undefined), undefined);
-});
-
-test("supersession is read only from the Hub's own annotation", () => {
-  const judged = { namespace: "xmatrix.superseded", authorUserId: "system:xmatrix", payload: { supersededBy: "m-2" } };
-  assert.equal(supersededByOf([judged]), "m-2");
-  assert.equal(supersededByOf([{ ...judged, authorUserId: "user-1" }]), undefined);
-  assert.equal(supersededByOf([{ ...judged, namespace: "memory" }]), undefined);
-  assert.equal(supersededByOf([{ ...judged, payload: {} }]), undefined);
-  assert.equal(supersededByOf(undefined), undefined);
 });
 
 test("caller metadata never carries a key only the Hub writes", () => {

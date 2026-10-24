@@ -10,7 +10,7 @@ import { foldSummary, timelineItemActivity } from "./conversation-activity-rows"
 import type { TimelineItem } from "./workspace-shell-message-model";
 
 /**
- * One folded run of an Instance's activity and superseded reports
+ * One folded run of an Instance's activity
  * (docs/design/conversation-activity.md §4.1): a single line where the run
  * began, opening in place to every entry it stands for.
  */
@@ -29,16 +29,7 @@ function entryAnchorId(item: TimelineItem): string | undefined {
 
 function FoldedEntry({ item }: { item: TimelineItem }) {
   const activity = timelineItemActivity(item);
-  if (!activity) {
-    return (
-      <div className="min-w-0">
-        <span className="mr-2 rounded bg-muted px-1 py-px text-[10px] font-bold uppercase tracking-wide">
-          superseded
-        </span>
-        <span className="whitespace-pre-wrap break-words text-foreground/80">{item.body}</span>
-      </div>
-    );
-  }
+  if (!activity) return null;
   if (activity.kind === "pull_request") {
     return (
       <a href={activity.url} target="_blank" rel="noreferrer"

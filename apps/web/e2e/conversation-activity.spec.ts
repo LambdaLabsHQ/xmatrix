@@ -50,7 +50,7 @@ function history() {
   return [
     entry(reviewer, 0, "Please ship the page Automations, then tell me when it is released."),
     entry(reviewer, 1, "Stack the CLI on top of PR 2."),
-    entry(claude, 20, "Progress: running jscpd, knip and tsc.", { supersededBy: "m-6" }),
+    entry(claude, 20, "Progress: running jscpd, knip and tsc."),
     plan(claude, 27, ["jscpd", "knip", "web tsc"], "e2e regression"),
     plan(claude, 28, ["e2e regression 191/191"], "Open PR 2"),
     entry(claude, 29, "The two db cross-space failures fail on main too: a known stale baseline."),
@@ -79,22 +79,23 @@ test("activity folds per run, anyone else's entry breaks the run, and talk stays
 
   const folds = page.locator(".app-activity-row");
   await expect(folds).toHaveCount(4);
-  // claude:1's superseded report and its two plan entries are one run; its
-  // finding ends it; its pull request starts a new run that codex:2 ends.
+  // claude:1's two plan entries are one run; its report before them and its
+  // finding after stay whole; its pull request starts a new run that codex:2 ends.
   await expect(folds.nth(0)).toContainText("claude:1");
   await expect(folds.nth(0)).toContainText("✓ e2e regression 191/191");
   await expect(folds.nth(1)).toContainText("↗ LambdaLabsHQ/xmatrix#3043");
   await expect(folds.nth(2)).toContainText("codex:2");
   await expect(folds.nth(3)).toContainText("→ Web");
   await expect(page.getByText("The two db cross-space failures fail on main too")).toBeVisible();
+  // What anyone said stays whole, however soon its sender said more.
+  await expect(page.locator(".app-message-timeline").getByText("Progress: running jscpd, knip and tsc.")).toBeVisible();
 
   // A second message moments later from the same person drops the header.
   await expect(page.locator(".app-message-continuation-gutter")).toHaveCount(1);
 
   // Opening a run shows every entry it stands for, in order.
   await folds.nth(0).getByRole("button").first().click();
-  await expect(folds.nth(0).getByText("superseded")).toBeVisible();
-  await expect(folds.nth(0).getByText("Progress: running jscpd, knip and tsc.")).toBeVisible();
+  await expect(folds.nth(0).getByText("e2e regression 191/191").last()).toBeVisible();
 
   // The work dock says what the Instance is on now.
   await expect(page.locator(".app-agent-work-intent")).toContainText("Writing the Web part");

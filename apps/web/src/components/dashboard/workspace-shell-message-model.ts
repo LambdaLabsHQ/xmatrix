@@ -250,8 +250,6 @@ export type TimelineItem = {
   senderStatusChips?: MessageStatusChip[];
   provenance?: "system_fact" | "management_judgment" | "approved_action_result";
   reservedSystemAgent?: boolean;
-  /** The later message from the same sender the Hub judged makes this one obsolete. */
-  supersededBy?: string;
   /** A questionnaire card's state as the Hub settled it: answered or withdrawn. */
   questionnaireState?: QuestionnaireState;
   /** Hub receipts for the command this message wrote, drawn on that command (command-notices.ts). */
