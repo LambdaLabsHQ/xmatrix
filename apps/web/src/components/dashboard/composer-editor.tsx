@@ -108,7 +108,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
     if (!host) return;
     const history = new TextHistory();
     let reporting = true;
-    let field: ComposerField;
+    const fieldRef = propsRef.current.fieldRef;
     const decorationsFor = spanDecorations(propsRef, portals);
     const view: EditorView = new EditorView(host, {
       state: EditorState.create({
@@ -208,7 +208,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
       return true;
     }
 
-    field = {
+    const field: ComposerField = {
       element: view.dom,
       get value() {
         return composerTextOf(view.state.doc);
@@ -242,13 +242,13 @@ export function ComposerEditor(props: ComposerEditorProps) {
         view.dom.blur();
       },
     };
-    propsRef.current.fieldRef.current = field;
+    fieldRef.current = field;
     // The field on its element too, where tests and devtools read the draft as text.
     (view.dom as FieldElement).composerField = field;
     const stopCaret = softCaret(view, host);
     return () => {
       stopCaret();
-      if (propsRef.current.fieldRef.current === field) propsRef.current.fieldRef.current = null;
+      if (fieldRef.current === field) fieldRef.current = null;
       viewRef.current = null;
       view.destroy();
     };
