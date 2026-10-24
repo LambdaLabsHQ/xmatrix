@@ -325,6 +325,111 @@ html:has(.site-page) {
 .site-app-window-lights > span:nth-child(2) { background: #febc2e; }
 .site-app-window-lights > span:nth-child(3) { background: #28c840; }
 
+/* On a phone the app sits in an iPhone: a dark bezel with side buttons, the
+   screen's rounded corners and the Dynamic Island over the status bar. The
+   app lays out at an iPhone's own width (390px, status bar included) and is
+   scaled to the 280px screen, so it reads as the iOS app does. */
+.site-phone {
+  --site-phone-scale: calc(280 / 390);
+  position: relative;
+  width: 300px;
+  height: 640px;
+  /* Centred even where the page column is narrower than the phone. */
+  margin-left: calc(50% - 150px);
+  padding: 10px;
+  border-radius: 50px;
+  background: linear-gradient(145deg, #3a3a3c, #1c1c1e 45%, #2c2c2e);
+  box-shadow:
+    inset 0 0 0 1.5px oklch(1 0 0 / 0.14),
+    0 0 0 1px oklch(0 0 0 / 0.35),
+    0 24px 60px oklch(0.25 0.03 60 / 0.35),
+    0 6px 16px oklch(0.25 0.03 60 / 0.15);
+}
+
+.site-phone::before,
+.site-phone::after {
+  content: "";
+  position: absolute;
+  width: 3px;
+  border-radius: 2px;
+  background: #2c2c2e;
+}
+
+/* The narrowest phones (320px) leave 272px inside the page's padding. */
+@media (max-width: 359px) {
+  .site-phone {
+    transform: scale(0.9);
+    transform-origin: top center;
+    margin-bottom: -64px;
+  }
+}
+
+/* Volume on the left, power on the right. */
+.site-phone::before { left: -3px; top: 22%; height: 16%; }
+.site-phone::after { right: -3px; top: 27%; height: 20%; }
+
+.site-phone-screen {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 40px;
+  background: var(--background);
+}
+
+.site-phone-screen > .site-app-window-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 390px;
+  height: calc(620px / var(--site-phone-scale));
+  /* The status bar's height; the composer keeps the home indicator's strip. */
+  padding-top: 54px;
+  transform: scale(var(--site-phone-scale));
+  transform-origin: 0 0;
+}
+
+.site-phone-island {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  width: 88px;
+  height: 25px;
+  border-radius: 999px;
+  background: #000;
+  transform: translateX(-50%);
+}
+
+.site-phone .xmatrix-app.xmatrix-app {
+  height: 100%;
+}
+
+.site-phone .xmatrix-app.xmatrix-app > .app-rail {
+  display: none;
+}
+
+/* The liquid-glass lens (a backdrop SVG filter) does not survive the
+   screen's scale and paints the composer grey; in the phone it is a plain
+   card. The app's own glass rules are stacked high, hence the !important. */
+.site-phone .app-composer-shell,
+.site-phone .app-composer-box {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.site-phone .app-composer {
+  padding-bottom: 30px;
+}
+
+.site-phone .app-composer-box {
+  background: var(--card) !important;
+  box-shadow: 0 0 0 1px oklch(0 0 0 / 0.08), 0 4px 14px oklch(0 0 0 / 0.06) !important;
+}
+
+.site-phone .xmatrix-app .app-workspace-panel.app-workspace-panel {
+  height: 100%;
+  width: 100%;
+}
+
 
 .site-login {
   background:

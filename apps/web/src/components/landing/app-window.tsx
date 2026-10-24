@@ -10,7 +10,8 @@ const AppWindowPreview = dynamic(
   { ssr: false },
 );
 
-// Desktop only for now: a phone neither shows nor loads the window.
+// A desktop shows the macOS window; a phone shows the same app in an iPhone,
+// the way the iOS app (a web container) shows it.
 const DESKTOP_QUERY = "(min-width: 768px)";
 
 function subscribeDesktop(onChange: () => void) {
@@ -19,14 +20,25 @@ function subscribeDesktop(onChange: () => void) {
   return () => query.removeEventListener("change", onChange);
 }
 
-/** The real xMatrix app in a macOS window: traffic lights over the rail, window shadow. */
+/** The real xMatrix app in a macOS window on a desktop, in an iPhone on a phone. */
 export function AppWindow() {
   const desktop = useSyncExternalStore(
     subscribeDesktop,
     () => window.matchMedia(DESKTOP_QUERY).matches,
     () => false,
   );
-  if (!desktop) return null;
+  if (!desktop) {
+    return (
+      <div className="site-phone" role="img" aria-label="xMatrix on an iPhone, in a conversation where a person, Claude and Codex work on a landing page">
+        <div className="site-phone-screen">
+          <div className="site-app-window-content" inert>
+            <AppWindowPreview />
+          </div>
+          <span className="site-phone-island" aria-hidden />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

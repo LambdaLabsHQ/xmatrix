@@ -42,7 +42,6 @@ export function Pricing({ locale = "en" }: { locale?: Locale }) {
                 {name === "Pro" && (
                   <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                     <p>{copy.pro.annual}</p>
-                    <p>{copy.pro.promotions}</p>
                   </div>
                 )}
                 <div className="my-6 h-px bg-[var(--site-wood-line)]" />
