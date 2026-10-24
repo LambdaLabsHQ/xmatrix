@@ -264,8 +264,12 @@ export function PageByline({ view, doc, frame, source, writing }: {
     const writer = writers.find(({ author }) => author.kind === pointedAt?.kind && author.id === pointedAt.id);
     if (!writer) return;
     const ranges = writer.ranges.map((range) => domRange(view, range.from, range.to)).filter((range) => range !== null);
+    // Register alongside the browser-only highlight: the development CSS parser cannot parse ::highlight.
+    const style = document.createElement("style");
+    style.textContent = `::highlight(${AUTHOR_HIGHLIGHT}) { background-color: color-mix(in oklab, var(--primary) 16%, transparent); }`;
+    document.head.append(style);
     CSS.highlights.set(AUTHOR_HIGHLIGHT, new Highlight(...ranges));
-    return () => { CSS.highlights.delete(AUTHOR_HIGHLIGHT); };
+    return () => { CSS.highlights.delete(AUTHOR_HIGHLIGHT); style.remove(); };
   }, [pointedAt, view, writers]);
 
   if (top === null || writers.length === 0) return null;

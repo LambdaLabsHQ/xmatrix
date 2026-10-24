@@ -1588,6 +1588,9 @@ test("paragraph attribution stays in the margin and selecting text leaves only d
   await expect.poll(() => browser.evaluate(() =>
     [...(CSS.highlights.get("page-author") ?? [])].map((range) => range.toString()).join("")))
     .toBe("In progress");
+  // The highlight must paint, including in the development server's CSS pipeline.
+  await expect.poll(() => editor.evaluate((element) =>
+    getComputedStyle(element, "::highlight(page-author)").backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
   editPageMarkdown(live, () => BODY.replace("In progress", "Waiting for review."), "agent");
   await expect(editor).not.toContainText("In progress");
   await expect(byline).toHaveText("Daniel");
