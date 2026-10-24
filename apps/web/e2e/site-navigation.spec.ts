@@ -75,10 +75,10 @@ test("the guide is a paper document: no wood or glass around its text, and a pho
 });
 
 for (const width of [393, 820, 1440]) {
-  test(`navigation logo glass follows scrolling at ${width}px`, async ({ page }) => {
+  test(`navigation glass follows scrolling at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
-    const glass = page.locator(".site-navbar-brand-glass");
+    const glass = page.locator(".site-navbar-glass");
     await expect(glass).toHaveCSS("opacity", "0");
 
     // The final small scroll back to zero must not retain partial opacity.
