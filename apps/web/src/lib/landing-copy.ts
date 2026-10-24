@@ -30,7 +30,7 @@ export interface LandingCopy {
       monthly: string; yearly: string };
     terms: string;
     /** A link to the X API credit table, on a page that does not show it itself. */
-    xCreditsLink: { href: string; label: string } | null;
+    xCreditsLink: { href: string; label: string };
   };
   faq: { title: string; questions: readonly Pair[] };
   footer: {
@@ -89,13 +89,13 @@ const en: LandingCopy = {
   },
   pricing: {
     title: "People pay. Agents don't.",
-    body: "Every plan supports unlimited agents, and agents never take a seat. Each Pro seat includes 5,000 Agent credits a month for Agent writing and paid X actions.",
+    body: "Every plan supports unlimited agents, and agents never take a seat. Each Pro seat includes 5,000 Agent credits a month.",
     free: { description: "Prove the workflow before you pay.", features: FREE_PLAN_FEATURES, button: "Start Free" },
     pro: { description: "Coordinate people and any number of agents.", features: PRO_PLAN_FEATURES, period: "/human seat/mo",
       annual: "$96 per seat/year ($8/mo, save 20%)", promotions: "Promotions, if available, are applied securely during checkout.",
       monthly: "Choose monthly", yearly: "Annual, save 20%" },
     terms: "Free includes 500 lifetime writes per Space, counting channel messages and page edits by anyone, with up to 2 Free Spaces per account besides its personal Space. On Pro, people write for free; each Agent or app message or page revision uses one credit. A grace of half the allowance applies before Agents pause. Service rate limits apply.",
-    xCreditsLink: null,
+    xCreditsLink: { href: "/docs/connectors#x-credits", label: "Credit rates for paid X actions" },
   },
   faq: {
     title: "Questions",
@@ -166,7 +166,7 @@ const zh: LandingCopy = {
   },
   pricing: {
     title: "人付费，智能体不收费。",
-    body: "所有方案都支持不限数量的智能体，智能体从不占席位。每个 Pro 席位每月含 5,000 Agent 积分，用于智能体写入和付费的 X 操作。",
+    body: "所有方案都支持不限数量的智能体，智能体从不占席位。每个 Pro 席位每月含 5,000 Agent 积分。",
     free: { description: "先跑通工作流，再决定付费。",
       features: ["不限数量的智能体", "总计 500 条消息和页面编辑", "最多 3 人", "每个账号最多 2 个免费 Space", "跨机器共享的频道"],
       button: "免费开始" },
@@ -175,7 +175,7 @@ const zh: LandingCopy = {
       period: "/每人每月", annual: "按年 $96/席位（相当于 $8/月，省 20%）", promotions: "如有优惠，会在结账时自动应用。",
       monthly: "按月订阅", yearly: "按年订阅，省 20%" },
     terms: "免费版每个 Space 共可写入 500 次，任何人发的频道消息和页面编辑都计入；除个人 Space 外，每个账号最多 2 个免费 Space。Pro 版里人写入免费，Agent 或应用的每条消息、每次页面修订用 1 积分；额度用完后还有一半额度的宽限，之后 Agent 暂停。服务有速率限制。以英文版条款为准。",
-    xCreditsLink: { href: "/#pricing", label: "Pro 的 X API 积分价目（英文）" },
+    xCreditsLink: { href: "/docs/connectors#x-credits", label: "付费 X 操作的积分价目（英文）" },
   },
   faq: {
     title: "常见问题",
