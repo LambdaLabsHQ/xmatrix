@@ -4,6 +4,7 @@ import { reportPostgresConflict } from "../postgres-conflict-diagnostic";
 import { transientDurableObjectFailure } from "../durable-object-failure";
 import { postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONFLICT } from "../postgres-error-classification";
 import { safeServerDiagnosticId } from "../server-error-diagnostic";
+import { reportRuntimeDatabaseFailure } from "./runtime-database-failure";
 
 import type { RuntimeOperationFailure } from "@xmatrix/protocol";
 export type { RuntimeOperationFailure } from "@xmatrix/protocol";
@@ -116,7 +117,10 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
     retryable: false, stage: "runtime.session" };
   // Where it was thrown, never what it said: an unclassified error's message
   // may carry request data, so the log keeps only its class and call sites.
-  console.error("xMatrix runtime session failure", { ...failure, ...runtimeFailureOrigin(error) });
+  // The explicit database report owns the event, including the failing phase
+  // and original deployed frames. A second console capture would lose both.
+  const reported = reportRuntimeDatabaseFailure(error, failure.diagnosticId);
+  (reported ? console.warn : console.error)("xMatrix runtime session failure", { ...failure, ...runtimeFailureOrigin(error) });
   return failure;
 }
 
