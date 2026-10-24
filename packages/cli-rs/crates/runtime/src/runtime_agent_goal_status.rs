@@ -287,10 +287,28 @@ fn claude_effort_from_transcript_line(value: &Value) -> Option<String> {
         .map(|effort| effort.chars().take(64).collect())
 }
 
+/// Whether an attachment record switches ultracode on or off.
+fn claude_ultracode_from_transcript_line(value: &Value) -> Option<bool> {
+    if value.get("type").and_then(Value::as_str) != Some("attachment") {
+        return None;
+    }
+    match value.pointer("/attachment/type").and_then(Value::as_str)? {
+        "ultra_effort_enter" => Some(true),
+        "ultra_effort_exit" => Some(false),
+        _ => None,
+    }
+}
+
 /// Incrementally follows the session transcript for the two facts a turn
 /// writes there and nowhere else: `goal_status` records — the claude-print
 /// counterpart of the codex `thread/goal/updated` capture — and the
 /// reasoning effort stamped on every `assistant` record.
+///
+/// Ultracode is the one level the records do not name: its turns record
+/// `xhigh`, and only the `ultra_effort_enter`/`ultra_effort_exit` attachments
+/// written when it is switched on or off say it is in force (2.1.310, for both
+/// `--effort ultracode` and a live `apply_flag_settings` switch). The watcher
+/// carries that state across polls and reports `ultracode` while it holds.
 ///
 /// The effort has no other source. `system/init` carries none, the stdout
 /// `assistant` frame carries none, and `apply_flag_settings` answers a bare
@@ -312,6 +330,7 @@ pub(crate) struct ClaudeTranscriptWatcher {
     transcript_path: Option<PathBuf>,
     offset: u64,
     latest: Option<protocol::AgentGoalStatus>,
+    ultracode: bool,
 }
 
 impl ClaudeTranscriptWatcher {
@@ -330,6 +349,7 @@ impl ClaudeTranscriptWatcher {
             transcript_path: None,
             offset: 0,
             latest: initial,
+            ultracode: false,
         }
     }
 
@@ -343,6 +363,7 @@ impl ClaudeTranscriptWatcher {
             transcript_path: Some(transcript),
             offset: 0,
             latest: None,
+            ultracode: false,
         }
     }
 
@@ -370,6 +391,7 @@ impl ClaudeTranscriptWatcher {
             self.session_id = Some(session_id.to_string());
             self.transcript_path = None;
             self.offset = 0;
+            self.ultracode = false;
         }
         if self.transcript_path.is_none() {
             self.transcript_path = find_claude_transcript(session_id, &self.cwd);
@@ -397,11 +419,12 @@ impl ClaudeTranscriptWatcher {
         };
         self.offset += consumed as u64;
         for line in appended[..consumed].lines() {
-            // Two cheap substring gates before paying for a parse: this runs
-            // over every line the turn appended, most of which are neither.
+            // Cheap substring gates before paying for a parse: this runs
+            // over every line the turn appended, most of which are none.
             let goal_line = line.contains("\"goal_status\"");
             let assistant_line = line.contains("\"effort\"");
-            if !goal_line && !assistant_line {
+            let ultra_line = line.contains("\"ultra_effort_");
+            if !goal_line && !assistant_line && !ultra_line {
                 continue;
             }
             let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -411,10 +434,17 @@ impl ClaudeTranscriptWatcher {
                 self.latest = Some(goal);
                 poll.goal_changed = true;
             }
+            if ultra_line && let Some(on) = claude_ultracode_from_transcript_line(&value) {
+                self.ultracode = on;
+            }
             // Last write wins: a turn appends one assistant record per API
             // block, and the newest is the level in force now.
             if let Some(effort) = claude_effort_from_transcript_line(&value) {
-                poll.effort = Some(effort);
+                poll.effort = Some(if self.ultracode {
+                    "ultracode".to_string()
+                } else {
+                    effort
+                });
             }
         }
         poll

@@ -590,15 +590,16 @@ pub fn claude_model_catalog() -> Vec<protocol::AgentModelInfo> {
 }
 
 /// The reasoning-effort levels Claude Code accepts, with the CLI's own
-/// descriptions. Both entry points were checked against 2.1.273: `--effort`
-/// takes each of these at launch, and `/effort <bad>` answers
+/// descriptions. Checked against 2.1.310: `--effort` takes each of these at
+/// launch, `apply_flag_settings` switches a live process to and from each,
+/// and `/effort <bad>` answers
 /// `Valid options are: low, medium, high, xhigh, max, ultracode, auto`.
 ///
-/// `ultracode` and `auto` are deliberately left out. `ultracode` is refused
-/// whenever a launch `--effort` pin is in force and needs dynamic workflows
-/// enabled, and `auto` (return to the model default) has no `--effort`
-/// spelling, so a selection would not survive the next respawn. Offering
-/// either would advertise a switch that can silently not stick.
+/// `ultracode` runs at xhigh with dynamic workflows on every task; the
+/// transcript marks it with `ultra_effort_enter`/`ultra_effort_exit`
+/// attachments, which is how the watcher keeps reporting it. `auto` (return
+/// to the model default) is left out: it has no `--effort` spelling, so a
+/// selection would not survive the next respawn.
 pub fn claude_effort_catalog() -> Vec<protocol::AgentModelReasoningEffort> {
     fn level(reasoning_effort: &str, description: &str) -> protocol::AgentModelReasoningEffort {
         protocol::AgentModelReasoningEffort {
@@ -615,6 +616,7 @@ pub fn claude_effort_catalog() -> Vec<protocol::AgentModelReasoningEffort> {
         ),
         level("xhigh", "Extended reasoning with thorough analysis"),
         level("max", "Maximum capability with deepest reasoning"),
+        level("ultracode", "xhigh with dynamic workflows on every task"),
     ]
 }
 
