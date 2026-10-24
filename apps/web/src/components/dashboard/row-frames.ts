@@ -10,8 +10,6 @@ export const MESSAGE_AVATAR_SLOT_CLASS_NAME = "app-message-author-avatar relativ
 export const MESSAGE_AVATAR_CLASS_NAME = "message-author-avatar size-9 min-h-9 min-w-9 max-h-9 max-w-9 p-0";
 export const MESSAGE_COLUMN_CLASS_NAME = "min-w-0 flex-1";
 export const MESSAGE_HEAD_CLASS_NAME = "app-message-head flex min-w-0 items-start gap-2";
-/** As tall as the hover actions a sent message has beside its name. */
-export const MESSAGE_HEAD_HEADED_CLASS_NAME = "md:min-h-7";
 export const MESSAGE_META_CLASS_NAME =
   "app-message-meta flex min-h-6 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1";
 export const MESSAGE_AUTHOR_NAME_CLASS_NAME = "app-message-author-name shrink-0 whitespace-nowrap text-[15px] font-black";
