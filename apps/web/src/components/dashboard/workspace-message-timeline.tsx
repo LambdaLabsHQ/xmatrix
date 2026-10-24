@@ -11,7 +11,7 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { channelPresenceInstances, harnessSignedOutNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
+import { harnessSignedOutNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { sameValue, shareByKey } from "../../lib/same-value";
 
@@ -220,7 +220,6 @@ import { PageReferenceScopeProvider } from "@/components/dashboard/page-referenc
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow,
   InteractionLaunchOption } from "@xmatrix/protocol";
 import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation } from "@xmatrix/protocol";
-import { UnpublishedTurnState } from "./unpublished-turn-status";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
@@ -287,7 +286,6 @@ import { cn } from "@/lib/utils";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
-import { queuedBehindTurns, type QueuedBehindTurn } from "@/components/dashboard/queued-behind-turn";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -1006,15 +1004,6 @@ export const MessageTimeline = memo(function MessageTimeline({
   }, [channel, localContext, space, launchedMentions]);
   const machineOfflineRef = useRef<ReadonlySet<string> | null>(null);
   const channelPresence = channel?.presence;
-  // Which of the person's messages wait on an Instance still on an earlier
-  // turn. Kept by value, so a presence report that changes none of them
-  // re-renders no row.
-  const queuedRef = useRef<Map<string, readonly QueuedBehindTurn[]> | null>(null);
-  const queuedByMessage = useMemo(() => {
-    const next = queuedBehindTurns(timeline, channelPresenceInstances(channelPresence));
-    const held = queuedRef.current;
-    return (queuedRef.current = held && sameValue(held, next) ? held : next);
-  }, [timeline, channelPresence]);
   const machineOfflineSubjectIds = useMemo(() => {
     const next = machineOfflineMentionSubjects({ presence: channelPresence });
     const held = machineOfflineRef.current;
@@ -1150,7 +1139,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onRetryAgentLaunch={retryAgentLaunch}
                   onLaunchAnyway={launchAnyway}
                   onResendSignedOutSummon={resendSignedOutSummon}
-                  queuedBehind={queuedByMessage.get(message.messageId || message.id)}
                   launchWindow={launchWindowsByMessage.get(message.messageId || message.id)}
                   launchChoiceOffered={offersLaunchChoice(message, channel)}
                   launchOptions={launchOptions}
@@ -1304,6 +1292,7 @@ export const MessageTimeline = memo(function MessageTimeline({
           atTopThreshold={240}
           atTopStateChange={handleTimelineAtTopStateChange}
           computeItemKey={(_index, message) => message.id}
+          itemSize={exactTimelineRowHeight}
           itemsRendered={handleTimelineItemsRendered}
           components={TIMELINE_VIRTUOSO_COMPONENTS}
           // Header and Footer are stable components that render this
@@ -1405,6 +1394,14 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
 }
 
 
+
+/* A row's height as laid out. react-virtuoso rounds the heights it measures,
+   and the rows' line height is not a whole pixel: the list came out a few
+   pixels shorter than its rows, which then overflowed it, and clipping the
+   list for a send's rise took that overflow away and scrolled the timeline. */
+function exactTimelineRowHeight(row: HTMLElement): number {
+  return row.getBoundingClientRect().height;
+}
 
 /* As tall as the list's whole content, and nested deeper than any of its rows.
    The list sets its height a step after measuring its rows, and a height that
@@ -1684,7 +1681,6 @@ export const MessageRow = memo(function MessageRow({
   onRetryAgentLaunch,
   onLaunchAnyway,
   onResendSignedOutSummon,
-  queuedBehind,
   launchWindow,
   launchChoiceOffered = false,
   launchOptions = NO_LAUNCH_OPTIONS,
@@ -1723,8 +1719,6 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable?: boolean;
   onRetryAgentLaunch: (launch: SerializedAgentLaunch) => Promise<void>;
   onLaunchAnyway?: (messageId: string, body: string, sourceMention: string) => Promise<void>;
-  /** Instances this message waits on, still on an earlier turn. */
-  queuedBehind?: readonly QueuedBehindTurn[];
   /** Sends a signed-out notice's summon again once its program is signed in; false when the viewer cannot. */
   onResendSignedOutSummon?: (sourceMessageId: string, sourceMention: string) => Promise<boolean>;
   /** A new conversation's first message: which Agent starts, chosen for a few seconds. */
@@ -2720,11 +2714,6 @@ export const MessageRow = memo(function MessageRow({
                 </div>
               </MentionReadMessageScopeProvider>
             )}
-            {!recalled && queuedBehind?.map((entry) => <p key={entry.address} role="status"
-              className="mt-1.5 text-xs text-muted-foreground" data-testid="queued-behind-turn">
-              {entry.address} is still on an earlier message (since {formatTime(entry.since)}); this one is next.</p>)}
-            {!recalled && message.senderKind === "user" && <UnpublishedTurnState
-              executions={mentionReadMessageScope.executions || []} unavailable={launchStatusUnavailable} />}
             {!recalled && collapsible && !expanded && (
               // Disclosure is a different layer from the message actions: the
               // body fades out under `.rich-message-collapsed::after` and its

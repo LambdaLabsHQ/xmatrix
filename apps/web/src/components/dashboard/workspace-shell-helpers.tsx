@@ -2,7 +2,7 @@
 import { decodeChannelSnapshot } from "@xmatrix/protocol";
 import type { UnsentMessageAction } from "./message-unsent-notice";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
-import { timelineLayoutMoved } from "./timeline-send-rise";
+import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, glideTimelineLanding, timelineLayoutMoved } from "./timeline-send-rise";
 
 import type {
   AgentTraceTarget,
@@ -470,8 +470,8 @@ export function usePointerFirstSelect(select: () => void) {
 
 export const productMessageAttachmentMediaClient = new ProductMessageAttachmentMediaClient();
 
-/** Where each timeline stood right after it was last landed on its newest message. */
-const timelineBottomLandings = new WeakMap<HTMLElement, number>();
+/** Where each timeline stood right after it was last landed on its newest message, and how tall it was. */
+const timelineBottomLandings = new WeakMap<HTMLElement, { scrollTop: number; clientHeight: number }>();
 
 export function scrollTimelineToBottom(
   scrollContainer: HTMLDivElement | null,
@@ -479,16 +479,37 @@ export function scrollTimelineToBottom(
 ) {
   if (scrollContainer) {
     scrollContainer.scrollTop = scrollContainer.scrollHeight;
-    timelineBottomLandings.set(scrollContainer, scrollContainer.scrollTop);
+    timelineBottomLandings.set(scrollContainer,
+      { scrollTop: scrollContainer.scrollTop, clientHeight: scrollContainer.clientHeight });
     timelineLayoutMoved(scrollContainer);
     return;
   }
   endMarker?.scrollIntoView({ block: "end" });
 }
 
+/**
+ * Keeps a timeline whose end grew or shrank on its newest message, and draws
+ * the rows' way there: they were where the last landing left them. The work
+ * dock coming or going, a chip changing, the server's copy of a message laid
+ * out differently: each used to move every row in one frame (user
+ * 2026-10-24: "现在看起来像是状态在变化…和卡片的那个idle，还有Busy是相关的"). A
+ * timeline that itself changed height (the window resizing) is only landed.
+ */
+export function followTimelineBottom(
+  scrollContainer: HTMLDivElement | null,
+  endMarker: HTMLDivElement | null
+) {
+  const landed = scrollContainer ? timelineBottomLandings.get(scrollContainer) : undefined;
+  if (!scrollContainer || !landed || landed.clientHeight !== scrollContainer.clientHeight) {
+    scrollTimelineToBottom(scrollContainer, endMarker);
+    return;
+  }
+  glideTimelineLanding(scrollContainer, () => scrollTimelineToBottom(scrollContainer, endMarker), landed.scrollTop);
+}
+
 /** Whether the timeline is scrolled to where its last landing put it, to the pixel. */
 export function timelineStandsWhereLanded(scrollContainer: HTMLElement | null, scrollTop: number): boolean {
-  const landedAt = scrollContainer ? timelineBottomLandings.get(scrollContainer) : undefined;
+  const landedAt = scrollContainer ? timelineBottomLandings.get(scrollContainer)?.scrollTop : undefined;
   return landedAt !== undefined && Math.abs(landedAt - scrollTop) <= 1;
 }
 
@@ -503,11 +524,31 @@ export function observeTimelineContentResize(
   onResize: () => void
 ): () => void {
   if (!scrollContainer || typeof ResizeObserver === "undefined") return () => undefined;
-  // The container itself only reports viewport changes; the content wrapper
-  // inside it is what grows as rows finish laying out.
-  const observer = new ResizeObserver(() => onResize());
-  observer.observe(scrollContainer);
-  for (const child of Array.from(scrollContainer.children)) observer.observe(child);
+  /* The container itself only reports viewport changes; the content wrapper
+     inside it is what grows as rows finish laying out. Within a frame a
+     resize observer is only told about elements deeper than those already
+     reported, and the list sets its height after its rows report theirs: a
+     shrinking list was learnt of a frame late, after the timeline had been
+     drawn scrolled. The list's height probes, nested deeper than its rows,
+     are told in the same frame (TimelineHeightProbe). The list mounts after
+     this starts and again for each conversation, so they are looked for on
+     each report. */
+  const observed = new Set<Element>();
+  const observe = (element: Element) => {
+    if (observed.has(element)) return;
+    observed.add(element);
+    observer.observe(element);
+  };
+  const observeContent = () => {
+    observe(scrollContainer);
+    for (const child of Array.from(scrollContainer.children)) observe(child);
+    for (const probe of scrollContainer.querySelectorAll(`[${TIMELINE_HEIGHT_PROBE_ATTRIBUTE}]`)) observe(probe);
+  };
+  const observer = new ResizeObserver(() => {
+    observeContent();
+    onResize();
+  });
+  observeContent();
   return () => observer.disconnect();
 }
 

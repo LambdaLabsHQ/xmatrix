@@ -206,13 +206,40 @@ function riseAt(way: RiseWay, elapsed: number): RiseState {
  * handing the compositor the spring from there. Nothing runs between two moves.
  */
 export function beginTimelineSendRise(scrollRoot: HTMLElement) {
+  beginTimelineRise(scrollRoot, null);
+}
+
+/**
+ * The timeline grew or shrank at its end (the work dock coming or going, a
+ * chip changing) and `land` keeps it on its newest message. The rows the
+ * reader saw stood with the timeline scrolled to `drawnAt`; they go to their
+ * new place along the same spring, instead of in one frame. A rise under way
+ * meets the move itself.
+ */
+export function glideTimelineLanding(scrollRoot: HTMLElement, land: () => void, drawnAt: number) {
+  const clip = scrollRoot.querySelector<HTMLElement>(TIMELINE_CONTENT)?.parentElement;
+  if (risingTimelines.has(scrollRoot) || motionReduced() || !clip) {
+    land();
+    return;
+  }
+  // Clipped as a rise draws it before landing, so the landing is where the rise leaves the list.
+  clip.style.overflow = "clip";
+  land();
+  const offset = scrollRoot.scrollTop - drawnAt;
+  if (Math.abs(offset) < SEND_RISE_REST_PX || Math.abs(offset) > scrollRoot.clientHeight) {
+    clip.style.overflow = "";
+    return;
+  }
+  beginTimelineRise(scrollRoot, offset);
+}
+
+/** A send's rise (`from` null: the new row is still to come), or a glide from `from` below. */
+function beginTimelineRise(scrollRoot: HTMLElement, from: number | null) {
   if (motionReduced()) return;
   // A rise still under way hands over what is left of it: the list goes on
   // from where it is drawn, as fast as it was going.
-  const carried = risingTimelines.get(scrollRoot)?.stop() ?? AT_REST;
+  const carried = from === null ? { ...risingTimelines.get(scrollRoot)?.stop() ?? AT_REST } : { offset: from, velocity: 0 };
   const content = scrollRoot.querySelector<HTMLElement>(TIMELINE_CONTENT);
-  // While the list is drawn lower its end must not reach past the footer: the
-  // timeline would count as scrolled up from the bottom.
   const clip = content?.parentElement;
   // Follow a row itself: its offset within the list can change too. A row
   // still playing its entrance has a transform of its own, so use the newest
@@ -220,6 +247,14 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   const rows = content?.querySelectorAll<HTMLElement>("[data-timeline-rise-row]") ?? [];
   const anchor = Array.from(rows).reverse().find(row => row.getAnimations().length === 0);
   if (!content || !clip || !anchor) return;
+  /* While the list is drawn lower its end must not reach past the footer, so
+     it is clipped to the virtualizer's height for the whole rise. That height
+     follows the rows a step late, and clipping can take the list's overflow
+     past it out of the timeline and scroll the timeline back: the rows are
+     met where they were drawn. */
+  const drawnAt = anchor.getBoundingClientRect().top;
+  clip.style.overflow = "clip";
+  carried.offset += drawnAt - anchor.getBoundingClientRect().top;
 
   /* How far below its place in the layout the list stands while it waits for
      the new row. A reader who sent from further up is brought down by more
@@ -238,15 +273,14 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   const stand = (offset: number) => {
     held = Math.abs(offset) < SEND_RISE_REST_PX ? 0 : offset;
     content.style.translate = held === 0 ? "" : `0 ${held}px`;
-    clip.style.overflow = held === 0 ? "" : "clip";
     const ended = way;
     way = null;
     ended?.animation.cancel();
   };
   // The list stands until the new row is in: the composer can give way a
   // frame ahead of it, and the list would set off the wrong way. A list that
-  // was already moving keeps moving.
-  let setOff = carried.velocity !== 0;
+  // was already moving keeps moving, and a glide has no row to wait for.
+  let setOff = from !== null || carried.velocity !== 0;
   let entrance: Animation | null = null;
   let stopped = false;
   const startedAt = performance.now();
@@ -301,16 +335,14 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
     // The animation draws the list from here on; this is where it leaves it.
     held = 0;
     content.style.translate = "";
-    clip.style.overflow = "clip";
     endWithEntrance();
     animation.addEventListener("finish", () => {
       if (way?.animation !== animation) return;
       way = null;
-      clip.style.overflow = "";
       if (performance.now() > until) stop();
     });
   };
-  if (setOff) travel(carried, true);
+  if (setOff) travel(carried, carried.velocity !== 0);
   else stand(carried.offset);
   let laidOutAt = anchor.getBoundingClientRect().top - drawn().offset;
 
@@ -369,6 +401,7 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
     scrollRoot.removeEventListener("touchmove", release);
     surface?.removeEventListener(MESSAGE_SURFACE_METRICS_EVENT, moved);
     stand(0);
+    clip.style.overflow = "";
     lastEntrance(entrance, Number(entrance?.currentTime ?? 0));
     if (risingTimelines.get(scrollRoot)?.stop === stop) risingTimelines.delete(scrollRoot);
     return left;

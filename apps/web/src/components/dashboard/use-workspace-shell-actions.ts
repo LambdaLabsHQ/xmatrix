@@ -153,6 +153,7 @@ import {
   replaceSpace,
   replaceWorkspace,
   replyPreviewSequence,
+  followTimelineBottom,
   observeTimelineContentResize,
   restoreTimelineScrollTop,
   scrollTimelineToBottom,
@@ -534,7 +535,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     s.timelineBottomStickCleanupRef.current?.();
     const stopObservingResize = observeTimelineContentResize(s.timelineScrollRef.current, () => {
       if (!stillHoldingBottom()) return;
-      scrollTimelineToBottom(s.timelineScrollRef.current, s.messagesEndRef.current);
+      // While a conversation opens it lands; once it has, its end growing or
+      // shrinking is drawn on its way (followTimelineBottom).
+      if (Date.now() <= s.timelineBottomStickUntilRef.current) {
+        scrollTimelineToBottom(s.timelineScrollRef.current, s.messagesEndRef.current);
+      } else {
+        followTimelineBottom(s.timelineScrollRef.current, s.messagesEndRef.current);
+      }
     });
     s.timelineBottomStickCleanupRef.current = () => {
       s.timelineBottomStickCleanupRef.current = null;
