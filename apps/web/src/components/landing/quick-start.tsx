@@ -1,4 +1,5 @@
 import { AppWindow } from "@/components/landing/app-window";
+import { SectionIntro } from "@/components/landing/section-intro";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 
@@ -7,14 +8,7 @@ export function QuickStart({ locale = "en" }: { locale?: Locale }) {
   return (
     <section id="quick-start" className="x-section">
       <div className="x-container">
-        <div className="flex flex-col gap-4 lg:max-w-3xl">
-          <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl lg:text-4xl xl:text-5xl">
-            {copy.title}
-          </h2>
-          <p className="max-w-2xl text-base leading-7 text-muted-foreground">
-            {copy.body}
-          </p>
-        </div>
+        <SectionIntro title={copy.title} body={copy.body} />
 
         <ul className="mt-8 flex flex-wrap items-center gap-2" aria-label={copy.machinesLabel}>
           {copy.machines.map(([machine, agents]) => (

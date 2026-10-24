@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
+import { SectionIntro } from "@/components/landing/section-intro";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 
 // The page editor reads browser-only state, so the live page renders on the client.
@@ -25,14 +26,7 @@ export function LivePage({ locale = "en" }: { locale?: Locale }) {
   return (
     <section id="live-page" className="x-section">
       <div className="x-container">
-        <div className="flex flex-col gap-4 lg:max-w-3xl">
-          <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl lg:text-4xl xl:text-5xl">
-            {copy.title}
-          </h2>
-          <p className="max-w-2xl text-base leading-7 text-muted-foreground">
-            {copy.body}
-          </p>
-        </div>
+        <SectionIntro title={copy.title} body={copy.body} />
         {desktop && (
           <div className="site-live-page-window mt-10" role="img" aria-label={copy.art}>
             <LivePagePreview />
