@@ -16,7 +16,6 @@ import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
-import type { PageReaderPace } from "./page-reader-pace";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
 
 /**
@@ -108,11 +107,6 @@ export interface PageSessionPorts {
   persist(state: PageSessionState): Promise<void>;
   send(connectionId: string, data: Uint8Array): void;
   broadcast(data: Uint8Array, exceptConnectionId?: string): void;
-  /**
-   * How fast the words a co-writer streams reach the page while a person has it open
-   * (page-reader-pace.ts). Absent: as they come. A committed edit is never paced: it lands whole.
-   */
-  readerPace?: PageReaderPace;
 }
 
 /** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
@@ -603,16 +597,6 @@ export class PageSession {
     return setPageFragmentMarkdown(this.fragment, merged.ok ? merged.text : live, origin);
   }
 
-  /**
-   * The pace a co-writer's streamed words reach the page at: a reader's, while a person has it open; as
-   * they come when nobody does, so nothing waits on nobody.
-   */
-  private readerPace(): PageReaderPace | null {
-    const pace = this.ports.readerPace;
-    if (!pace) return null;
-    return [...this.connections.values()].some((connection) => !connection.coWriter) ? pace : null;
-  }
-
   /** People on the page and their carets, as their editors share them. */
   private people(): PageCoWriterPerson[] {
     const people: PageCoWriterPerson[] = [];
@@ -652,7 +636,6 @@ export class PageSession {
           at: change.at })) });
       },
       people: () => this.people(),
-      pace: () => this.readerPace(),
       send: (request) => this.ports.send(connection.id, encodeCoWrite(request)),
       observe: (event) => this.ports.observeCoWriting?.(principal, event),
     };

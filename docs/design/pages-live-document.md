@@ -487,18 +487,14 @@ fact is about.
     after a streaming co-writer leaves, whose caret then rests at its last
     change as any Agent's does. Its edits commit with the
     session's idle commit, as its own, from its conversation.
-  - **At a reader's pace** (decided 2026-10-16). A harness writes far faster
-    than anyone reads, so while a person has the page open an Agent's words
-    reach it as fast as they read along (`page-reader-pace.ts`): a word at a
-    time (a Han character is one), each after the last had its reading time at
-    12 characters a second (a Han character reads as two), with a breath of
-    0.7 s after each sentence and line. This paces only words a co-writer
-    streams as its model writes them; a committed edit is never paced or
-    replayed (§2). With nobody on the page, words land
-    as they come. A turn ends, with its `outcome`, once all of it is on the
-    page; a turn the runtime opens meanwhile follows it. A `⟦write⟧` in a
-    message (`xmatrix send`), whose sender waits on its outcome, goes in at
-    once (`atOnce`).
+  - **As it is sent, nothing held back** (decided by Daniel 2026-10-25,
+    replacing the reader's pace of 2026-10-16). The page holds exactly what the
+    Agent has sent: the Hub keeps no buffer of words already written to show
+    them later at a reading pace, and draws no entrance animation over them.
+    What the session has taken is what everyone sees. A turn ends, with its
+    `outcome`, as soon as all of it is sent and on the page; a turn the runtime
+    opens meanwhile follows it. A pace, where there is one, belongs to what the
+    Agent may send, never to what the page shows of what it sent.
   - **Taking it back.** A person who may edit the page takes back the Agent's
     last change from its card (Undo; `POST …/co-writing/:conversationId/undo`):
     its blocks return to what they were, and what it is still writing counts as

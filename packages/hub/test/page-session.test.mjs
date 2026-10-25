@@ -1553,36 +1553,30 @@ test("what a co-writing Agent wrote is named with its presence, and stays marked
   assert.equal(left.undo, undefined, "nothing can be taken back from a writer that has left");
 });
 
-/** A pace a test can count in: a tenth of a second a character, half a second's breath after a sentence. */
-const READER = { readerPace: { charsPerSecond: 10, sentencePauseMs: 500 } };
 /** What stands after "none" on Ann's page: where the Agents write in these tests. */
 const afterNone = (ann) => ann.text.toString().split("none\n")[1].trim();
 
-test("while a person reads the page, an Agent's words reach it a word at a time, as long as reading each takes", async (t) => {
+// What a reader sees of an Agent's streamed words is what it has sent (pages-live-document.md §4.2): nothing
+// is held back to be shown at a reading pace later.
+test("while a person reads the page, an Agent's words reach it as they come, and its turn ends with them", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
-  const { ann, writer } = await annWithStreamingWriter(READER);
+  const { ann, writer } = await annWithStreamingWriter();
   writer.write(1, "⟦after \"none\"⟧\nOne two. Three");
-  writer.done(1);
-  assert.equal(afterNone(ann), "One", "its first word at once");
-  t.mock.timers.tick(399);
-  assert.equal(afterNone(ann), "One", "the next after reading \"One \" takes");
-  t.mock.timers.tick(1);
-  assert.equal(afterNone(ann), "One two.");
-  t.mock.timers.tick(999);
-  assert.equal(afterNone(ann), "One two.", "a sentence ends: a breath after it");
-  t.mock.timers.tick(1);
-  assert.equal(afterNone(ann), "One two. Three");
+  assert.equal(afterNone(ann), "One two. Three", "all it has sent, at once");
   assert.equal(coWriterOf(ann).activity, "writing");
-  assert.equal(writer.outcomes().length, 0, "its turn is not over while its words still come");
-  t.mock.timers.tick(500);
-  assert.deepEqual(writer.outcomes(), [{ type: "outcome", turn: 1, problems: [] }], "it ends once the reader has it all");
+  t.mock.timers.tick(1000);
+  writer.write(1, " four.");
+  t.mock.timers.tick(80);
+  assert.equal(afterNone(ann), "One two. Three four.");
+  assert.equal(writer.outcomes().length, 0, "its turn is not over while it still sends");
+  writer.done(1);
+  assert.deepEqual(writer.outcomes(), [{ type: "outcome", turn: 1, problems: [] }], "it ends as soon as it is sent");
   assert.equal(coWriterOf(ann).activity, "watching");
 });
 
 test("with nobody reading the page, or for a message's write, an Agent's words land as they come", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
   const unread = harness();
-  Object.assign(unread.ports, READER);
   await unread.session.ensureLoaded(agent);
   const alone = joinCoWriter(unread, "w-agent", { streams: true });
   alone.open(1);
@@ -1592,7 +1586,6 @@ test("with nobody reading the page, or for a message's write, an Agent's words l
   assert.deepEqual(alone.outcomes(), [{ type: "outcome", turn: 1, problems: [] }]);
 
   const h = harness();
-  Object.assign(h.ports, READER);
   const ann = await annConnected(h);
   const sending = joinCoWriter(h, "w-agent", { streams: true });
   sending.open(1, true);
@@ -1602,49 +1595,43 @@ test("with nobody reading the page, or for a message's write, an Agent's words l
   assert.deepEqual(sending.outcomes(), [{ type: "outcome", turn: 1, problems: [] }]);
 });
 
-test("a write an Agent opens while its last is still reaching the page follows it, each with its own outcome", async (t) => {
+test("an Agent's consecutive writes each reach the page with their own outcome", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
-  const { ann, writer } = await annWithStreamingWriter(READER);
+  const { ann, writer } = await annWithStreamingWriter();
   writer.write(1, "⟦after \"none\"⟧\nFirst words here.");
   writer.done(1);
   writer.open(2);
   writer.write(2, "⟦after \"In progress\"⟧\nSecond words follow.");
   writer.done(2);
   assert.equal(writer.asked.filter((frame) => frame.type === "interrupt").length, 0, "neither is refused");
-  while (writer.outcomes().length < 1) t.mock.timers.tick(100);
   assert.equal(afterNone(ann), "First words here.");
-  assert.doesNotMatch(ann.text.toString(), /follow/u, "the second waits for the first");
-  while (writer.outcomes().length < 2) t.mock.timers.tick(100);
   assert.match(ann.text.toString(), /In progress\n\nSecond words follow\.\n/u);
   assert.deepEqual(writer.outcomes().map((frame) => [frame.turn, frame.problems]), [[1, []], [2, []]]);
 });
 
-test("taking back what an Agent is writing at a reader's pace leaves the page as it was, and its next write goes on", async (t) => {
+test("taking back what an Agent is still writing leaves the page as it was, and its next write goes on", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
-  const { h, ann, writer } = await annWithStreamingWriter(READER);
+  const { h, ann, writer } = await annWithStreamingWriter();
   writer.write(1, "⟦after \"none\"⟧\nA paragraph Ann does not want.");
-  writer.done(1);
-  writer.open(2);
-  writer.write(2, "⟦after \"In progress\"⟧\nNext.");
-  writer.done(2);
-  t.mock.timers.tick(200);
-  assert.equal(afterNone(ann), "A paragraph");
+  assert.equal(afterNone(ann), "A paragraph Ann does not want.");
   assert.equal(h.session.undoCoWriting("conv-1", "Ann"), "undone");
   assert.deepEqual(writer.outcomes()[0], { type: "outcome", turn: 1,
     problems: ["You were stopped: Ann took back what you were writing."] });
-  while (writer.outcomes().length < 2) t.mock.timers.tick(100);
+  assert.equal(ann.text.toString(), HEAD, "the page is as it was");
+  writer.open(2);
+  writer.write(2, "⟦after \"In progress\"⟧\nNext.");
+  writer.done(2);
   assert.equal(ann.text.toString(), HEAD.replace("In progress\n", "In progress\n\nNext.\n"), "only its next write stands");
-  assert.deepEqual(writer.outcomes()[1], { type: "outcome", turn: 2, problems: [] });
+  assert.deepEqual(writer.outcomes().at(-1), { type: "outcome", turn: 2, problems: [] });
 });
 
-test("an Agent's committed edit reaches someone reading the page whole, and its author does not wait on a pace", async () => {
+test("an Agent's committed edit reaches someone reading the page whole, as soon as it is committed", async () => {
   const h = harness();
-  Object.assign(h.ports, READER);
   const ann = await annConnected(h);
   const body = HEAD.replace("In progress", "Shipped today. Next week");
   const result = await h.session.submitEdit(agent, { baseRevision: 1, body, conversationIds: ["conv-1"] });
   assert.equal(result.revision, 2);
-  assert.equal(ann.text.toString(), body, "the reader holds the committed page as soon as it is committed");
+  assert.equal(ann.text.toString(), body, "the reader holds the committed page");
   assert.equal(coWriterOf(ann).activity, "editing", "it is done writing");
 });
 

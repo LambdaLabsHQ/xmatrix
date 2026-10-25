@@ -158,10 +158,6 @@ export class RelayPageSession extends DurableObject<Env> {
           try { socket.send(data); } catch { /* closed */ }
         }
       },
-      // While someone has the page open, the words a co-writer streams come as fast as they read along: a
-      // word at a time, 12 characters a second (6 of Han), with a breath after each sentence and line. A
-      // committed edit is not paced: it reaches the page whole, as it was committed.
-      readerPace: { charsPerSecond: 12, sentencePauseMs: 700 },
     };
     return new PageSession(ports);
   }

@@ -9,7 +9,6 @@ import {
   absolutePositionToRelativePosition, initProseMirrorDoc, relativePositionToAbsolutePosition, updateYFragment,
 } from "y-prosemirror";
 import * as Y from "yjs";
-import { readingMs, readingStep, type PageReaderPace } from "./page-reader-pace";
 import { PageCoWriteTiming, type PageCoWriteObservation } from "./page-co-write-timing";
 
 /**
@@ -78,8 +77,6 @@ export interface PageCoWriterHost {
     stalled: boolean }): void;
   /** The people on the page now. */
   people(): PageCoWriterPerson[];
-  /** The pace its words reach the page at: a reader's while someone reads it, null when they land as they come. */
-  pace(): PageReaderPace | null;
   /** To the Agent's runtime. */
   send(request: PageCoWriteRequest): void;
   observe?(event: PageCoWriteObservation): void;
@@ -119,17 +116,15 @@ interface Turn {
   action: Action | null;
   /** Someone edited what it was writing, so the rest of its answer is not written. */
   stopped: boolean;
-  /** What the Agent sent that the page has not taken yet: given out at a reader's pace. */
+  /** What the Agent sent for a turn that is not the open one yet: written once it opens. */
   queue: PageCoWriteEvent[];
   /** The runtime has sent all of the turn, and how it ended. */
   sent: { failed: boolean; reason?: string } | null;
-  /** Written as it comes, whoever reads the page: a message's write, which its sender waits on. */
-  atOnce: boolean;
 }
 
-function newTurn(id: number, atOnce = false): Turn {
+function newTurn(id: number): Turn {
   return { id, askedAt: Date.now(), refreshable: true, wroteText: false,
-    parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null, atOnce };
+    parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null };
 }
 
 /** Queues what the parser made of the Agent's words, text that follows text as one. */
@@ -241,8 +236,6 @@ export class PageCoWriter {
   /** When the Agent's words last reached the page, and the write that waits to bring the rest. */
   private lastWrite = 0;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The next step giving the open turn's words to the page, at a reader's pace. */
-  private releaseTimer: ReturnType<typeof setTimeout> | null = null;
   /** Turns the runtime opened while the last was still reaching the page, in order. */
   private waiting: Turn[] = [];
 
@@ -291,8 +284,6 @@ export class PageCoWriter {
     this.turnTimer = null;
     if (this.writeTimer) clearTimeout(this.writeTimer);
     this.writeTimer = null;
-    if (this.releaseTimer) clearTimeout(this.releaseTimer);
-    this.releaseTimer = null;
     this.active = null;
   }
 
@@ -357,7 +348,7 @@ export class PageCoWriter {
   /** The runtime answers a turn: the Agent's words as they come, then the end of its turn. */
   receive(reply: PageCoWriteReply): void {
     if (reply.type === "write") {
-      this.own(reply.turn, reply.atOnce === true);
+      this.own(reply.turn);
       return;
     }
     const turn = this.active?.id === reply.turn ? this.active : this.waiting.find((item) => item.id === reply.turn);
@@ -375,38 +366,16 @@ export class PageCoWriter {
         this.turnTimer = null;
       }
     }
-    if (turn === this.active && !this.releaseTimer) this.step(turn);
+    if (turn === this.active) this.step(turn);
   }
 
   /**
-   * Gives what the Agent sent to the page: all of it as it comes when nobody reads the page, otherwise a
-   * word a step, the next after as long as reading it takes (page-reader-pace.ts).
+   * Gives what the Agent sent to the page as it comes: the page holds exactly what the Agent has sent,
+   * nothing is held back to be shown later (pages-live-document.md §4.2).
    */
   private step(turn: Turn): void {
-    this.releaseTimer = null;
-    const pace = turn.atOnce ? null : this.host.pace();
-    let wait = 0;
-    while (turn.queue.length && !wait && this.active === turn && !turn.stopped) {
-      const event = turn.queue.shift()!;
-      if (event.type !== "text" || !pace) {
-        this.apply(turn, event);
-        continue;
-      }
-      const word = readingStep(event.text);
-      if (word.length < event.text.length) turn.queue.unshift({ type: "text", text: event.text.slice(word.length) });
-      this.apply(turn, { type: "text", text: word });
-      const after = turn.queue[0];
-      const next = after ? (after.type === "text" ? after.text : "") : turn.sent ? "" : null;
-      wait = Math.max(CO_WRITER_WRITE_EVERY_MS, readingMs(word, next, pace));
-    }
-    if (this.active !== turn || turn.stopped) return;
-    if (wait) {
-      // The next word waits its time, even one that has not come yet.
-      this.releaseTimer = setTimeout(() => this.step(turn), wait);
-      (this.releaseTimer as { unref?: () => void }).unref?.();
-    } else if (turn.sent) {
-      this.complete(turn);
-    }
+    while (turn.queue.length && this.active === turn && !turn.stopped) this.apply(turn, turn.queue.shift()!);
+    if (this.active === turn && !turn.stopped && turn.sent) this.complete(turn);
   }
 
   /** The Agent's turn has reached the page whole: it ends, and the next one it opened goes on. */
@@ -449,14 +418,14 @@ export class PageCoWriter {
    * The Agent opens a turn itself: it is writing into the page from its conversation, as its words come.
    * Nobody asked it, so a co-writer that waits on the session's turns, or that may not write, is told no.
    */
-  private own(id: number, atOnce = false): void {
+  private own(id: number): void {
     const sending = this.active && !this.active.sent;
     if (this.ended || !this.options.streams || !this.writable || (sending && this.active!.id !== id)) {
       this.refuse(id, this.writable);
       return;
     }
     if (this.active?.id === id || this.waiting.some((item) => item.id === id)) return;
-    const turn = newTurn(id, atOnce);
+    const turn = newTurn(id);
     // A turn opened while the last is still reaching the page goes in after it.
     if (this.active) this.waiting.push(turn);
     else this.activate(turn);
