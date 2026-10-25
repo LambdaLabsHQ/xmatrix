@@ -216,7 +216,7 @@ function channelOwnedBy(owners) {
 
 /**
  * viewer-1's socket in their own cell, focusing Channels whose owners' cells
- * answer as `cells` does; `readable` says whether viewer-1 may read them.
+ * answer as `cells` does; viewer-1 may read channel-1 only, and not even that unless `readable`.
  * `shown()` waits for what the last focus started.
  */
 function viewerSocket(cells, { owners = ["owner-1"], readable = true } = {}) {
@@ -225,7 +225,7 @@ function viewerSocket(cells, { owners = ["owner-1"], readable = true } = {}) {
   const factory = createProductionRelayRuntimeProductPortFactory(env, {
     readChannel: async (channelId, userId) => {
       reads.push([channelId, userId]);
-      return readable ? { openChannelHumanMemberIdsBySpace: {}, channel: { ...channelOwnedBy(owners), id: channelId } } : undefined;
+      return readable && channelId === "channel-1" ? { openChannelHumanMemberIdsBySpace: {}, channel: channelOwnedBy(owners) } : undefined;
     },
     readHistory: async () => { throw new Error("unexpected history"); },
     analytics: { writeDataPoint() {} },
@@ -233,7 +233,8 @@ function viewerSocket(cells, { owners = ["owner-1"], readable = true } = {}) {
   });
   let started = Promise.resolve();
   const human = new HumanRuntimeTransport({ capabilities: new Set(HUMAN_AUTHORITY_REQUIRED_CAPABILITIES),
-    focusChannel: async () => undefined }, { onChannelFocus: (input) => (started = factory.onChannelFocus(input)) });
+    focusChannel: async () => undefined, disconnected: async () => {} },
+  { onChannelFocus: (input) => (started = factory.onChannelFocus(input)) });
   const socket = new FakeSocket();
   assert.equal(human.rehydrate(socket, { version: 1, domain: "human", expiresAt: new Date(Date.now() + 60_000).toISOString(),
     session: { user: { id: "viewer-1", email: "viewer-1@example.test" }, connectedAt: now, lastSeenAt: now,
@@ -242,6 +243,7 @@ function viewerSocket(cells, { owners = ["owner-1"], readable = true } = {}) {
     socket, reads, cells: () => calls.map((call) => call.cell),
     focus: (channelId = "channel-1") => human.handleFrame(socket, JSON.stringify({ type: "user_focus_channel", requestId: `focus-${channelId}`, channelId })),
     ping: () => human.handleFrame(socket, JSON.stringify({ type: "ping", requestId: "ping" })),
+    close: () => human.handleClose(socket, 1000, "closed", true),
     shown: () => started,
     cards: () => socket.sent.filter((frame) => frame.type === "enhanced_presence").map((frame) => frame.agent.instances[0]),
   };
@@ -313,17 +315,32 @@ for (const stalledAt of ["fetch", "body"]) {
   });
 }
 
-test("a card that arrives after the socket opened another Channel is dropped", async () => {
-  const stalled = stalledCell("fetch");
-  const viewer = viewerSocket(new Map([["user-owner-1", stalled]]));
-  await viewer.focus("channel-1");
-  const first = viewer.shown();
-  await viewer.focus("channel-2");
-  stalled.answer();
-  await first;
-  await viewer.shown();
-  assert.deepEqual(viewer.cards(), [], "nothing of channel-1 reaches a socket now showing channel-2");
-});
+for (const moved of ["stays", "switches", "returns", "closes"]) {
+  test(`a card read before the socket ${moved} reaches it only while that focus is its latest`, async () => {
+    // owner-1's cell answers the first read late with the old branch, later reads at once with the new one.
+    let answer;
+    const answered = new Promise((resolve) => { answer = resolve; });
+    let reads = 0;
+    const live = (gitBranch) => Response.json({ sessions: [{ ownerUserId: "owner-1", agentId: "agent-1", agentName: "Agent",
+      runId: "run-1", instanceId: "instance-1", channelId: "channel-1", channelInstanceId: "1", machineId: "machine-1",
+      hostId: "host-1", status: "idle", connectedAt: now, lastSeenAt: now, presentation: { gitBranch } }] });
+    const viewer = viewerSocket(new Map([["user-owner-1", { fetch: async () => {
+      if (++reads > 1) return live("new-read");
+      await answered;
+      return live("old-read");
+    } }]]));
+    await viewer.focus("channel-1");
+    const first = viewer.shown();
+    if (moved === "switches" || moved === "returns") await viewer.focus("channel-2");
+    if (moved === "returns") { await viewer.focus("channel-1"); await viewer.shown(); }
+    if (moved === "closes") await viewer.close();
+    answer();
+    await first;
+    await viewer.shown();
+    const branches = viewer.cards().filter((card) => card.channelId === "channel-1").map((card) => card.gitBranch);
+    assert.deepEqual(branches, moved === "stays" ? ["old-read"] : moved === "returns" ? ["new-read"] : []);
+  });
+}
 
 test("a Channel snapshot that speaks only for Agents goes only to sockets that read that", () => {
   const { human, socket: covered } = humanCell("reader", { presenceCoverage: true });
