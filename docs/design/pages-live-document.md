@@ -430,7 +430,10 @@ fact is about.
     start an ordinary invitation or bootstrap-only model turn. The Host's
     transport startup budget is two minutes; closure or expiry fails explicitly
     before model submission. The one-use input is not serialized into the
-    socket attachment or replayed after hibernation. Older Hub connections keep
+    socket attachment or replayed after hibernation. Pending live tickets are
+    capped at 64 per Page and expire after one minute; each initial input is
+    limited to 256 KiB, so failed connections cannot retain unbounded input.
+    Older Hub connections keep
     the legacy ten-second wait and local combination. Ordinary notices
     and caller-authored lookalikes stay context. Each later turn the session sends
     reaches the run loop as a resume of that conversation, so every backend runs
