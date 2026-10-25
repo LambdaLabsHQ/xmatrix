@@ -195,6 +195,27 @@ test("a failed persistence leaves the output unknown instead of allowing a repla
   assert.equal(h.session.markdown(), HEAD);
 });
 
+function pageObjectForTest(h) {
+  const object = Object.create(RelayPageSession.prototype);
+  Object.assign(object, { session: h.session, tickets: new Map(), spaceId: "space", pageId: "page",
+    rehydrated: Promise.resolve(),
+    env: { RELAY_POSTGRES_SHARD_ID: "test", RELAY_POSTGRES: { connectionString: "postgresql://localhost/unused" } },
+    ctx: { getWebSockets: () => [], storage: { put: async () => {}, get: async () => undefined } } });
+  return object;
+}
+
+test("pending Page tickets cannot retain unbounded launch input and expiry frees their capacity", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 10_000 });
+  const object = pageObjectForTest(harness());
+  const ticket = (id) => new Request("https://page-session/internal/ticket", { method: "POST",
+    body: JSON.stringify({ ticket: id, spaceId: "space", pageId: "page", principal: agent,
+      canEdit: true, coWriter: true, acknowledged: true, initialInput: "a".repeat(16_384) }) });
+  for (let i = 0; i < 64; i++) assert.equal((await object.fetch(ticket(`pending-${i}`))).status, 200);
+  assert.equal((await object.fetch(ticket("over-capacity"))).status, 503);
+  t.mock.timers.tick(60_001);
+  assert.equal((await object.fetch(ticket("after-expiry"))).status, 200);
+});
+
 test("Page output rechecks Run authority before serving even a cached receipt", async (t) => {
   const h = harness();
   await annConnected(h);
@@ -204,11 +225,7 @@ test("Page output rechecks Run authority before serving even a cached receipt", 
     checks.push(input);
     return { canEdit: mayEdit, agentSuggestOnly: false };
   });
-  const object = Object.create(RelayPageSession.prototype);
-  Object.assign(object, { session: h.session, tickets: new Map(), spaceId: "space", pageId: "page",
-    rehydrated: Promise.resolve(),
-    env: { RELAY_POSTGRES_SHARD_ID: "test", RELAY_POSTGRES: { connectionString: "postgresql://localhost/unused" } },
-    ctx: { getWebSockets: () => [], storage: { put: async () => {}, get: async () => undefined } } });
+  const object = pageObjectForTest(h);
   const write = { stream: "authorized-output", expiresAt: Date.now() + 60_000, seq: 0,
     reply: { type: "write", turn: 1 } };
   const request = (principal = agent, event = write) => new Request("https://page-session/internal/output", {

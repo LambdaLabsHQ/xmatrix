@@ -253,6 +253,11 @@ export class RelayPageSession extends DurableObject<Env> {
         this.bind(body.spaceId, body.pageId);
         await this.ctx.storage.put("identity", { spaceId: body.spaceId, pageId: body.pageId });
         for (const [key, ticket] of this.tickets) if (ticket.expiresAt < Date.now()) this.tickets.delete(key);
+        // A ticket may hold the complete first input until its socket opens.
+        // TTL alone does not bound memory when a caller keeps requesting tickets.
+        if (this.tickets.size >= MAX_CONNECTIONS) {
+          return Response.json({ error: "Too many pending page connections" }, { status: 503 });
+        }
         this.tickets.set(body.ticket, { spaceId: body.spaceId, pageId: body.pageId, principal: body.principal,
           canEdit: body.canEdit, ...(body.coWriter === true ? { coWriter: true } : {}),
           ...(body.coWriter === true && body.streams === true ? { streams: true } : {}), ...(body.coWriter === true && !body.streams && body.acknowledged === true ? { acknowledged: true } : {}),
