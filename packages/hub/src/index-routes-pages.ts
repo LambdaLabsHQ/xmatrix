@@ -857,6 +857,16 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get("/api/channels/:channelId/pages", async (c) => run(c, async () =>
     linkedPages(c.env, c.req.param("channelId"), await principal(c))));
 
+  // What the Agent messages a reader is shown changed on pages, each drawn with its message.
+  app.post("/api/channels/:channelId/page-edits/query", async (c) => run(c, async () => {
+    const body = await c.req.json().catch(() => ({})) as { messageIds?: unknown };
+    if (!Array.isArray(body.messageIds) || body.messageIds.some((id) => typeof id !== "string")) {
+      throw new PageControlError("invalid_request", 400, "messageIds must list message ids");
+    }
+    return repository(c.env).conversationPageEdits({ requestId: crypto.randomUUID(),
+      conversationId: c.req.param("channelId"), messageIds: body.messageIds as string[], principal: await principal(c) });
+  }));
+
   const daemonRead = <T>(c: Context<{ Bindings: Env }>, read: (caller: PagePrincipal) => Promise<T>) =>
     run(c, async () => {
       const machine = await requireMachineDaemonAuth(c.req.raw, c.env);

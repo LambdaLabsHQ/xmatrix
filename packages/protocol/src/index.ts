@@ -488,12 +488,12 @@ export {
   gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, mergePageWords,
   PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, PAGE_MEDIA_TYPES, pageMediaFile, pageMediaReference, pageMediaReferences,
   pageMediaRefId, parsePageMedia,
-  pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageHeadingSlug, pageLineDiff,
+  pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageEditGlimpses, pageHeadingSlug, pageLineDiff,
   pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
   removeAutomationReference, replaceAutomationReference,
 } from "./page-markdown.js";
 export type {
-  GitHubFileReference, PageBlock, PageLineDiff, PageMedia, PageMediaExtension, PageMergeResult, PageReferenceSpan,
+  GitHubFileReference, PageBlock, PageEditGlimpse, PageEditSegment, PageLineDiff, PageMedia, PageMediaExtension, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
   channelReferenceSpans, channelReferenceToken, loneMessageReference,
@@ -510,7 +510,7 @@ export { externalAppSource, messageExternalAppSource } from "./external-app-sour
 export type { ExternalAppSource } from "./external-app-source.js";
 export type {
   PageAuthor, PageAutomationAnchorChange, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageClaim, PageConversation,
-  PageDocument, PageGitHubFile, PageLink, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
+  PageDocument, PageGitHubFile, PageLink, PageMessageEdit, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
   PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PageOwedUpdate, PagePresent,
   PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
 } from "./pages.js";
