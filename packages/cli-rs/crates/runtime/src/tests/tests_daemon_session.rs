@@ -1405,9 +1405,11 @@ fn nested_unknown_subcommand_leaves_parent_run_status_untouched() {
         .enable_all()
         .build()
         .unwrap()
+        // A plain lowercase word goes to the Hub as a Hub-defined command
+        // (`runtime_hub_command`); this one cannot be, so it stays a nested runtime.
         .block_on(super::run(xmatrix_cli_args::Cli::parse_from([
             "xmatrix",
-            "future-subcommand",
+            "future_subcommand",
             "read",
         ])));
 
@@ -1419,11 +1421,11 @@ fn nested_unknown_subcommand_leaves_parent_run_status_untouched() {
     }
     let refusal = result.unwrap_err().to_string();
     assert!(
-        refusal.contains("nested xmatrix runtime 'future-subcommand'; expected 'grok'"),
+        refusal.contains("nested xmatrix runtime 'future_subcommand'; expected 'grok'"),
         "{refusal}"
     );
     assert!(
-        refusal.contains("/opt/xmatrix/bin/xmatrix future-subcommand"),
+        refusal.contains("/opt/xmatrix/bin/xmatrix future_subcommand"),
         "{refusal}"
     );
     assert_eq!(std::fs::read(&status_path).unwrap(), before);

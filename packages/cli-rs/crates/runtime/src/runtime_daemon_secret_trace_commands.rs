@@ -278,7 +278,12 @@ async fn cmd_daemon_profile_control(
     }
 }
 
-async fn cmd_secret(hub_url: &str, token: &str, command: SecretCommand) -> error::Result<()> {
+async fn cmd_secret(
+    hub_url: &str,
+    token: &str,
+    cli_token: Option<&str>,
+    command: SecretCommand,
+) -> error::Result<()> {
     match command {
         SecretCommand::List { space, json } => match space {
             Some(space) => cmd_secret_list(hub_url, token, &space, json).await,
@@ -327,7 +332,7 @@ async fn cmd_secret(hub_url: &str, token: &str, command: SecretCommand) -> error
             cmd_secret_delete(hub_url, token, &space, secret_ref).await
         }
         SecretCommand::Exec { secrets, command } => {
-            cmd_secret_exec(hub_url, token, secrets, command).await
+            cmd_secret_exec(&HubAuth { hub_url, cli_token }, secrets, command).await
         }
     }
 }
@@ -367,6 +372,21 @@ fn parse_secret_exec_mapping(value: &str) -> error::Result<(String, Option<Strin
     Ok((secret_ref.to_string(), env_name))
 }
 
+/// Where a long-running secret command gets its Hub credential: afresh for
+/// every request, through the same resolution as the command itself (the Run's
+/// auth broker inside an Agent Run, never the person's session there). A token
+/// read once at the start expires while a card waits for an admin.
+struct HubAuth<'a> {
+    hub_url: &'a str,
+    cli_token: Option<&'a str>,
+}
+
+impl HubAuth<'_> {
+    async fn token(&self) -> error::Result<String> {
+        resolve_auth_token(self.cli_token, self.hub_url).await
+    }
+}
+
 async fn read_run_secrets(
     hub_url: &str,
     token: &str,
@@ -391,8 +411,7 @@ async fn read_run_secrets(
 /// read yet is asked for on a card in its Channel, and the command runs once a
 /// Space admin answers it.
 async fn cmd_secret_exec(
-    hub_url: &str,
-    token: &str,
+    auth: &HubAuth<'_>,
     secrets: Vec<String>,
     command: Vec<String>,
 ) -> error::Result<()> {
@@ -404,7 +423,8 @@ async fn cmd_secret_exec(
         .iter()
         .map(|(secret_ref, _)| secret_ref)
         .collect::<Vec<_>>();
-    let response = match read_run_secrets(hub_url, token, &refs).await {
+    let hub_url = auth.hub_url;
+    let response = match read_run_secrets(hub_url, &auth.token().await?, &refs).await {
         Err(error) if error.http_message().is_some_and(secret_request_still_open) => {
             for (secret_ref, env_name) in &mappings {
                 let request = SecretAddRequest {
@@ -413,9 +433,10 @@ async fn cmd_secret_exec(
                     reason: None,
                     description: None,
                 };
-                request_secret_and_wait(hub_url, token, &request, false).await?;
+                request_secret_and_wait(auth, &request, false).await?;
             }
-            read_run_secrets(hub_url, token, &refs).await?
+            // Read with the credential of this moment: approval can come minutes later.
+            read_run_secrets(hub_url, &auth.token().await?, &refs).await?
         }
         result => result?,
     };
@@ -581,7 +602,8 @@ async fn cmd_request(
                 reason,
                 description,
             };
-            let env_name = request_secret_and_wait(hub_url, &token, &request, json).await?;
+            let auth = HubAuth { hub_url, cli_token };
+            let env_name = request_secret_and_wait(&auth, &request, json).await?;
             let Some(env_name) = env_name else {
                 return Ok(());
             };
@@ -593,8 +615,7 @@ async fn cmd_request(
                     })?;
                 }
                 return cmd_secret_exec(
-                    hub_url,
-                    &token,
+                    &auth,
                     vec![format!("{secret_ref}={env_name}")],
                     command,
                 )
@@ -670,17 +691,17 @@ struct SecretAddRequest {
 /// Agent may read it. Returns the environment name it reads as, or `None` when
 /// the wait ended with `--json` output. Nothing here passes through the daemon.
 async fn request_secret_and_wait(
-    hub_url: &str,
-    token: &str,
+    auth: &HubAuth<'_>,
     request: &SecretAddRequest,
     json: bool,
 ) -> error::Result<Option<String>> {
+    let hub_url = auth.hub_url;
     let secret_ref = &request.secret_ref;
     validate_secret_catalog_args(secret_ref, request.env_name.as_deref())?;
     let posted: serde_json::Value = http::request_json(
         &with_route(hub_url, HubRoutes::SECRET_REQUESTS),
         "POST",
-        Some(token),
+        Some(&auth.token().await?),
         Some(serde_json::json!({
             "secretRef": secret_ref,
             "envName": request.env_name,
@@ -697,7 +718,8 @@ async fn request_secret_and_wait(
     }
     let deadline = std::time::Instant::now() + SECRET_REQUEST_WAIT;
     loop {
-        match read_run_secrets(hub_url, token, &[secret_ref]).await {
+        // Each poll resolves the credential again; a revoked Run fails here.
+        match read_run_secrets(hub_url, &auth.token().await?, &[secret_ref]).await {
             Ok(read) => {
                 return Ok(read
                     .secrets
