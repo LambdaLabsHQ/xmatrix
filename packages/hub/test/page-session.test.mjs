@@ -122,19 +122,25 @@ async function annConnected(h) {
   return h.connect("c-ann", human("ann"));
 }
 
-test("Hub output retries acknowledge one document change, including after the Page session restarts", async (t) => {
-  let now = Date.now();
-  t.mock.method(Date, "now", () => now);
+/** A real live document and a controllable transport clock for output receipts. */
+async function outputSession(t) {
+  const clock = { now: Date.now() };
+  t.mock.method(Date, "now", () => clock.now);
   const h = harness();
   const ann = await annConnected(h);
-  const expiresAt = now + 60_000;
+  return { h, ann, clock };
+}
+
+test("Hub output retries acknowledge one document change, including after the Page session restarts", async (t) => {
+  const { h, ann, clock } = await outputSession(t);
+  const expiresAt = clock.now + 60_000;
   let seq = 0;
   let at = 0;
   const send = (reply) => h.session.output(agent, { stream: "reply-1", seq, expiresAt, reply });
   assert.equal((await send({ type: "write", turn: 1 })).status, "accepted");
   seq++;
   for (const text of "⟦after \"none\"⟧\nhello 😀".match(/.{1,5}/gsu)) {
-    now += 500;
+    clock.now += 500;
     const reply = { type: "delta", turn: 1, text, paced: { at } };
     const receipt = await send(reply);
     assert.equal(receipt.status, "accepted");
@@ -159,11 +165,8 @@ test("Hub output retries acknowledge one document change, including after the Pa
 });
 
 test("Hub output keeps refused text at the sender and never applies beyond the last confirmed sequence", async (t) => {
-  let now = Date.now();
-  t.mock.method(Date, "now", () => now);
-  const h = harness();
-  await annConnected(h);
-  const base = { stream: "reply-2", expiresAt: now + 60_000 };
+  const { h, clock } = await outputSession(t);
+  const base = { stream: "reply-2", expiresAt: clock.now + 60_000 };
   await h.session.output(agent, { ...base, seq: 0, reply: { type: "write", turn: 1 } });
   await h.session.output(agent, { ...base, seq: 1,
     reply: { type: "delta", turn: 1, text: "⟦after ", paced: { at: 0 } } });
@@ -175,7 +178,7 @@ test("Hub output keeps refused text at the sender and never applies beyond the l
   assert.equal(refused.at, 17);
   assert.match(h.session.markdown(), /abc\n$/u);
   assert.equal((await h.session.output(agent, { ...next, seq: 4 })).status, "out_of_order");
-  now += 500;
+  clock.now += 500;
   assert.equal((await h.session.output(agent, next)).status, "accepted");
   assert.match(h.session.markdown(), /abcdefghijklm\n$/u);
 });
@@ -245,17 +248,14 @@ test("an output receipt persists every applied character without waiting for a d
 });
 
 test("undo selects the latest acknowledged stream in a conversation", async (t) => {
-  let now = Date.now();
-  t.mock.method(Date, "now", () => now);
-  const h = harness();
-  await annConnected(h);
+  const { h, clock } = await outputSession(t);
   for (const stream of ["first", "second"]) {
-    const base = { stream, expiresAt: now + 60_000 };
+    const base = { stream, expiresAt: clock.now + 60_000 };
     await h.session.output(agent, { ...base, seq: 0, reply: { type: "write", turn: 1 } });
     let seq = 1;
     let at = 0;
     for (const text of `⟦after "none"⟧\n${stream}`.match(/.{1,5}/gsu)) {
-      now += 500;
+      clock.now += 500;
       assert.equal((await h.session.output(agent, { ...base, seq, reply: { type: "delta", turn: 1, text,
         paced: { at } } })).status, "accepted");
       seq++;
