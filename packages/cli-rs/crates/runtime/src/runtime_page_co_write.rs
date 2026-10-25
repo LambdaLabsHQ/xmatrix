@@ -21,6 +21,7 @@ use tokio_tungstenite::tungstenite::Message;
 use xmatrix_cli_core::agent_instance_connection::{
     AgentInstanceConnectionClient, AgentInstanceConnectionEvent,
 };
+use xmatrix_cli_core::page_assistant_output::{COWRITE_CAPABILITY, OutputTarget};
 use xmatrix_cli_core::page_co_write::{
     PAGE_SESSION_HEARTBEAT_PING, PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest,
     PageWriteOutbox, decode_request, send_due,
@@ -61,6 +62,8 @@ struct Bridge {
     queued: Option<u64>,
     /// The session's turn the harness is answering now.
     answering: Option<u64>,
+    hub_output: bool,
+    output_session: Option<String>,
     /// The answer's images, each held until it is whole (`page_media`).
     images: ToPage,
     /// Where the Agent hears what of its answer did not reach the page.
@@ -82,6 +85,9 @@ impl Bridge {
     /// Ends the session's `turn` with the rest of the answer, and tells the
     /// Agent of any image of a local file left out of it.
     fn end(&mut self, turn: u64, failed: bool) {
+        if self.hub_output {
+            return;
+        }
         let rest = self.images.finish();
         if !rest.is_empty() {
             self.send(Out::Text { turn, text: rest });
@@ -133,6 +139,7 @@ pub(crate) fn follow(
         return;
     }
     let (stop, stopped) = watch::channel(false);
+    let hub_output = relay.hub_accepts(COWRITE_CAPABILITY);
     let (initial_tx, initial_rx) = if initial {
         let (tx, rx) = oneshot::channel();
         (Some(tx), Some(rx))
@@ -147,6 +154,8 @@ pub(crate) fn follow(
             outgoing: None,
             queued: None,
             answering: None,
+            hub_output,
+            output_session: None,
             images: ToPage::default(),
             events: Some(relay.local_event_sender()),
             initial_tx,
@@ -159,6 +168,7 @@ pub(crate) fn follow(
         relay.local_event_sender(),
         channel_id.to_string(),
         page,
+        hub_output,
         stopped,
     ));
 }
@@ -214,6 +224,19 @@ pub(crate) fn answering(channel_id: &str) -> bool {
         .is_some_and(|bridge| bridge.answering.is_some())
 }
 
+pub(crate) fn output_target(channel_id: &str) -> Option<OutputTarget> {
+    let all = bridges();
+    let bridge = all.get(channel_id)?;
+    if !bridge.hub_output {
+        return None;
+    }
+    Some(OutputTarget {
+        page: bridge.page.1.clone(),
+        session: bridge.output_session.clone()?,
+        turn: bridge.answering?,
+    })
+}
+
 /// The run loop took the session's `turn` as its next input in `channel_id`.
 pub(crate) fn turn_queued(channel_id: &str, turn: u64) {
     if let Some(bridge) = bridges().get_mut(channel_id) {
@@ -239,7 +262,7 @@ pub(crate) fn observe_trace(channel_id: &str, phase: &str, payload: &serde_json:
             }
             bridge.answering = bridge.queued.take();
         }
-        "assistant_delta" => {
+        "assistant_delta" if !bridge.hub_output => {
             if let (Some(turn), Some(text)) = (
                 bridge.answering,
                 payload.get("delta").and_then(|value| value.as_str()),
@@ -267,11 +290,17 @@ async fn run_bridge(
     events: mpsc::UnboundedSender<AgentInstanceConnectionEvent>,
     channel_id: String,
     (space_id, page_id): (String, String),
+    hub_output: bool,
     mut stopped: watch::Receiver<bool>,
 ) {
     let mut attempt = 0usize;
     while !*stopped.borrow() {
-        match connector.connect(&space_id, &page_id, false).await {
+        let connected = if hub_output {
+            connector.connect_acknowledged(&space_id, &page_id).await
+        } else {
+            connector.connect(&space_id, &page_id, false).await
+        };
+        match connected {
             Ok(socket) => {
                 attempt = 0;
                 let (mut sink, mut stream) = socket.split();
@@ -305,8 +334,17 @@ async fn run_bridge(
                             Some(Ok(Message::Binary(data))) => {
                                 if let Some(request) = decode_request(&data) {
                                     let event = match request {
-                                        PageCoWriteRequest::Turn { turn, text } => PageCoWriteEvent::Turn {
-                                            channel_id: channel_id.clone(), turn, prompt: text,
+                                        PageCoWriteRequest::Turn { turn, text, output_session } => {
+                                            if hub_output && output_session.is_none() {
+                                                let _ = events.send(AgentInstanceConnectionEvent::PageCoWrite(PageCoWriteEvent::Outcome {
+                                                    channel_id: channel_id.clone(), prompt: "The Page did not provide an acknowledged output binding; this co-writing request was not submitted.".into(),
+                                                }));
+                                                break;
+                                            }
+                                            if let Some(bridge) = bridges().get_mut(&channel_id) {
+                                                bridge.output_session = output_session;
+                                            }
+                                            PageCoWriteEvent::Turn { channel_id: channel_id.clone(), turn, prompt: text }
                                         },
                                         PageCoWriteRequest::Interrupt { turn } => {
                                             outbox.stop(turn);
@@ -364,6 +402,7 @@ fn set_outgoing(channel_id: &str, outgoing: Option<mpsc::UnboundedSender<Out>>) 
         if outgoing.is_none() {
             bridge.queued = None;
             bridge.answering = None;
+            bridge.output_session = None;
         }
         bridge.outgoing = outgoing;
     }
@@ -384,6 +423,8 @@ mod tests {
                 outgoing: Some(outgoing),
                 queued: None,
                 answering: None,
+                hub_output: false,
+                output_session: None,
                 images: ToPage::default(),
                 events: None,
                 initial_tx: None,
@@ -413,6 +454,47 @@ mod tests {
         bridge.initial_tx = Some(initial_tx);
         bridge.initial_rx = Some(initial_rx);
         frames
+    }
+
+    #[test]
+    fn acknowledged_page_answers_keep_the_socket_binding_and_send_no_legacy_output() {
+        let channel = "acknowledged-page-answer";
+        let mut legacy = bridge_for_test(channel);
+        {
+            let mut all = bridges();
+            let bridge = all.get_mut(channel).unwrap();
+            bridge.hub_output = true;
+            bridge.output_session = Some("socket-one".into());
+        }
+        turn_queued(channel, 42);
+        observe_trace(channel, "turn_started", &serde_json::json!({}));
+        assert_eq!(
+            output_target(channel),
+            Some(OutputTarget {
+                page: "page".into(),
+                session: "socket-one".into(),
+                turn: 42,
+            })
+        );
+        observe_trace(
+            channel,
+            "assistant_delta",
+            &serde_json::json!({ "delta": "⟦pass⟧" }),
+        );
+        observe_trace(channel, "turn_completed", &serde_json::json!({}));
+        assert!(
+            legacy.try_recv().is_err(),
+            "only the acknowledged transport may deliver this answer"
+        );
+        assert!(output_target(channel).is_none());
+        turn_queued(channel, 43);
+        set_outgoing(channel, None);
+        observe_trace(channel, "turn_started", &serde_json::json!({}));
+        assert!(
+            output_target(channel).is_none(),
+            "a reconnect never carries the old binding"
+        );
+        bridges().remove(channel);
     }
 
     // Existing trace tests start after a page turn was queued. This protects

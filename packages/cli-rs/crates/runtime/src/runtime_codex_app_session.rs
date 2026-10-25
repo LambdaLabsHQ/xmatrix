@@ -2761,7 +2761,10 @@ impl CodexAppSession {
                         && method.starts_with("rawResponseItem/")
                         && method != "rawResponseItem/completed" =>
                 {
-                    if let Some(delta) = codex_raw_response_delta_text(params) {
+                    // Unknown raw deltas are diagnostic events, not verified
+                    // assistant output. Only a typed assistant message may
+                    // reach the acknowledged Page transport from this path.
+                    if let Some((delta, _)) = params.get("item").and_then(codex_raw_response_message_text) {
                         if let Some(item_id) = codex_response_item_id(params) {
                             raw_response_streamed_items.insert(item_id);
                         }

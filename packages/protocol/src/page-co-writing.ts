@@ -51,7 +51,7 @@ export type PageCoWriteEvent =
  * page and why, so the Agent hears it; nothing when all of it did.
  */
 export type PageCoWriteRequest =
-  | { type: "turn"; turn: number; text: string }
+  | { type: "turn"; turn: number; text: string; outputSession?: string }
   | { type: "interrupt"; turn: number }
   | { type: "outcome"; turn: number; problems: string[] }
   /**

@@ -368,6 +368,15 @@ export class PageCoWriter {
     }
   }
 
+  /** The output transport adopts only a live turn already issued by this writer. */
+  acceptsTurn(id: number): boolean {
+    return !this.ended && this.writable && this.active?.id === id && !this.active.stopped && !this.active.sent;
+  }
+
+  cancelTurn(id: number): void {
+    if (this.active?.id === id) this.yieldTurn("the runtime cancelled this answer");
+  }
+
   /** The runtime answers a turn: the Agent's words as they come, then the end of its turn. */
   receive(reply: PageCoWriteReply): boolean {
     if (reply.type === "write") {

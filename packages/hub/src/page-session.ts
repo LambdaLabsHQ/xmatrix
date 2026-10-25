@@ -139,6 +139,8 @@ export interface PageSessionConnection {
    * its turns itself and is asked nothing.
    */
   streams?: boolean;
+  /** Inputs stay on this socket; assistant output arrives through acknowledged HTTP. */
+  acknowledged?: boolean;
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -231,7 +233,10 @@ export class PageSession {
   /** Agents co-writing the page live, by their runtime's connection. */
   private readonly coWriters = new Map<string, PageCoWriter>();
   private readonly outputReceipts = new PageOutputReceipts();
-  private readonly outputConnections = new Map<string, { expiresAt: number; notices: PageCoWriteRequest[] }>();
+  private readonly outputConnections = new Map<string, {
+    expiresAt: number; notices: PageCoWriteRequest[]; source: string; turn: number; virtual: boolean;
+  }>();
+  private readonly sourceOutputs = new Map<string, string>();
   /** Bumped by every change to the document; its markdown is read at most once per change. */
   private version = 0;
   private cached: { version: number; markdown: string } | null = null;
@@ -418,20 +423,42 @@ export class PageSession {
         return { status: "rejected", seq: write.seq };
       }
       for (const [id, connection] of this.outputConnections) if (connection.expiresAt <= Date.now()) {
-        this.disconnect(id);
+        if (connection.virtual) this.disconnect(connection.source);
+        if (this.sourceOutputs.get(connection.source) === id) this.sourceOutputs.delete(connection.source);
         this.outputConnections.delete(id);
       }
       const id = JSON.stringify(["output", principal.id, principal.runProof, write.stream]);
       return this.outputReceipts.receive(id, write, {
         persist: () => this.persist(),
         apply: (first) => {
-          if (first) {
-            this.outputConnections.set(id, { expiresAt: write.expiresAt, notices: [] });
-            this.connect({ id, principal, canEdit: true, coWriter: true, streams: true });
+          const source = write.session ?? id;
+          const connection = this.connections.get(source);
+          const proof = connection?.principal.runProof;
+          const native = write.session !== undefined && connection?.acknowledged && !connection.streams &&
+            connection.principal.id === principal.id && connection.principal.kind === "agent" &&
+            proof?.runId === principal.runProof!.runId && proof?.instanceId === principal.runProof!.instanceId &&
+            proof?.executionKey === principal.runProof!.executionKey && this.canCoWrite(connection);
+          if (write.reply.type === "cancel") {
+            if (native || this.outputConnections.get(id)?.virtual) this.coWriters.get(source)?.cancelTurn(write.reply.turn);
+            return [];
           }
-          const output = this.outputConnections.get(id)!;
-          const accepted = this.coWriters.get(id)?.receive(write.reply);
-          const notices = output.notices.splice(0);
+          if (first) {
+            const linked = this.sourceOutputs.get(source);
+            if (write.session && (!native || write.reply.type !== "answer" ||
+                !this.coWriters.get(source)?.acceptsTurn(write.reply.turn) ||
+                (linked && this.outputConnections.get(linked)?.turn === write.reply.turn))) {
+              return [{ type: "interrupt", turn: write.reply.turn }];
+            }
+            this.outputConnections.set(id, { expiresAt: write.expiresAt, notices: [], source,
+              turn: write.reply.turn, virtual: !write.session });
+            this.sourceOutputs.set(source, id);
+            if (!write.session) this.connect({ id, principal, canEdit: true, coWriter: true, streams: true });
+          }
+          const output = this.outputConnections.get(id);
+          const writer = this.coWriters.get(source);
+          const accepted = output && (!write.session || native) && (write.reply.type === "answer"
+            ? writer?.acceptsTurn(write.reply.turn) : writer?.receive(write.reply));
+          const notices = output?.notices.splice(0) ?? [];
           if (!accepted && !notices.some((notice) => notice.type === "limited" || notice.type === "interrupt")) {
             notices.push({ type: "interrupt", turn: write.reply.turn });
           }
@@ -470,7 +497,7 @@ export class PageSession {
     this.connections.set(connection.id, connection);
     if (connection.coWriter) {
       const writer = new PageCoWriter(this.coWriterHost(connection), { streams: connection.streams === true,
-        immediate: this.outputConnections.has(connection.id) });
+        immediate: connection.acknowledged === true || this.outputConnections.has(connection.id) });
       this.coWriters.set(connection.id, writer);
       writer.start(this.canCoWrite(connection), options.resumed === true);
       return;
@@ -510,6 +537,7 @@ export class PageSession {
     }
     const owned = this.connectionClients.get(connectionId);
     this.connections.delete(connectionId);
+    this.sourceOutputs.delete(connectionId);
     this.connectionClients.delete(connectionId);
     if (owned?.size) awarenessProtocol.removeAwarenessStates(this.awareness, [...owned], "close");
   }
@@ -540,7 +568,7 @@ export class PageSession {
     const type = decoding.readVarUint(decoder);
     if (connection.coWriter) {
       // A co-writer only answers its turns; the document is written for it, under its caret.
-      if (type !== PAGE_MESSAGE_CO_WRITE) return;
+      if (type !== PAGE_MESSAGE_CO_WRITE || connection.acknowledged) return;
       const reply = parsePageCoWriteReply(JSON.parse(decoding.readVarString(decoder)) as unknown);
       if (reply) this.coWriters.get(connectionId)?.receive(reply);
       return;
@@ -678,12 +706,15 @@ export class PageSession {
       },
       people: () => this.people(),
       send: (request) => {
-        const output = this.outputConnections.get(connection.id);
-        if (output) {
+        const outputId = this.sourceOutputs.get(connection.id);
+        const output = outputId ? this.outputConnections.get(outputId) : undefined;
+        if (output && request.type !== "turn" && request.turn === output.turn) {
           // There is no socket to buffer behind. Only bounded control notices
           // survive until the next write; the host retains unaccepted text.
           if (output.notices.length < 32) output.notices.push(request);
-        } else this.ports.send(connection.id, encodeCoWrite(request));
+        }
+        if (!output?.virtual) this.ports.send(connection.id, encodeCoWrite(request.type === "turn" && connection.acknowledged
+          ? { ...request, outputSession: connection.id } : request));
       },
       observe: (event) => this.ports.observeCoWriting?.(principal, event),
     };

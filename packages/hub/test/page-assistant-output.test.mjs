@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as decoding from "lib0/decoding";
+import { PAGE_MESSAGE_CO_WRITE } from "@xmatrix/protocol";
 import { PageAssistantOutputReceiver, parsePageAssistantOutput } from "../src/page-assistant-output.ts";
 import { PageSession } from "../src/page-session.ts";
 
@@ -8,18 +10,28 @@ const agent = { kind: "agent", id: "writer", label: "Writer", ownerUserId: "owne
   runProof: { runId: "run", instanceId: "instance", executionKey: "generation" } };
 const head = { body: "# Page\n\nAnchor\n", revision: 1, agentSuggestOnly: false };
 
-async function setup(t) {
+async function setup(t, { native = false } = {}) {
   let now = Date.now();
   t.mock.method(Date, "now", () => now);
   const saved = new Map();
   let persisted;
+  const requests = [];
   const sessionPorts = { loadHead: async () => head, loadRevision: async () => head.body,
     commit: async () => ({ revision: 2, headRevision: 2, kind: "edit", agentSuggestOnly: false }),
-    persist: async (state) => { persisted = structuredClone(state); }, send: () => {}, broadcast: () => {} };
+    persist: async (state) => { persisted = structuredClone(state); }, broadcast: () => {},
+    send: (id, bytes) => {
+      const decoder = decoding.createDecoder(bytes);
+      if (decoding.readVarUint(decoder) === PAGE_MESSAGE_CO_WRITE) requests.push({ id,
+        ...JSON.parse(decoding.readVarString(decoder)) });
+    } };
   const sessions = [];
   let session = new PageSession(sessionPorts);
   sessions.push(session);
   await session.ensureLoaded(agent);
+  const join = (id) => session.connect({ id, principal: agent, canEdit: true, coWriter: true, acknowledged: true });
+  if (native) join("page-socket");
+  const turn = requests.find((request) => request.type === "turn");
+  const target = turn ? { page, session: turn.outputSession, turn: turn.turn } : undefined;
   t.after(() => sessions.forEach((s) => s.destroy()));
   const writes = [];
   const ports = {
@@ -33,6 +45,7 @@ async function setup(t) {
     },
   };
   const input = (seq, text) => ({ stream: "model-turn", startedAt: now, seq,
+    ...(target ? { target } : {}),
     type: text === undefined ? "end" : "text", ...(text === undefined ? {} : { text }) });
   const startedAt = now;
   let receiver = new PageAssistantOutputReceiver();
@@ -45,7 +58,9 @@ async function setup(t) {
     }
     throw new Error("output did not drain");
   }
-  return { ports, input: (seq, text) => ({ ...input(seq, text), startedAt }), send, writes, saved,
+  return { ports, input: (seq, text) => ({ ...input(seq, text), startedAt }), send, writes, saved, requests,
+    join, disconnect: (id) => session.disconnect(id), setCanEdit: (value) => session.setCanEdit("page-socket", value),
+    undo: () => session.undoCoWriting("channel", "human"),
     body: () => session.markdown(),
     restartRouter: () => { receiver = new PageAssistantOutputReceiver(); },
     restartPage: async () => {
@@ -73,6 +88,64 @@ test("assistant markers split at any character write one page through acknowledg
   assert.equal((await h.send(seq)).status, "accepted");
   assert.equal(h.body(), "# Page\n\nAnchor\n\nHello 😀\n");
   assert.ok(h.writes.filter((write) => write.reply.type === "delta").every((write) => [...write.reply.text].length <= 10));
+});
+
+// The Page issues the binding, owns the actual writer and persists its effects;
+// no mock here implements output delivery, cancellation or co-writing semantics.
+test("a Page-issued turn uses acknowledged raw output, keeps undo, and cannot change its target", async (t) => {
+  const h = await setup(t, { native: true });
+  const text = '⟦after "Anchor"⟧\nTogether 😀';
+  const result = await h.send(0, text);
+  assert.equal(result.status, "accepted");
+  assert.deepEqual(await h.send(0, text), result);
+  const router = new PageAssistantOutputReceiver();
+  const moved = h.input(1, "elsewhere");
+  moved.target = { ...moved.target, session: "another-socket" };
+  assert.equal((await router.receive("run-generation", moved, h.ports)).status, "rejected");
+  assert.equal((await h.send(1)).status, "accepted");
+  assert.equal(h.writes[0].reply.type, "answer");
+  assert.equal(h.body(), "# Page\n\nAnchor\n\nTogether 😀\n");
+  assert.equal(h.undo(), "undone");
+  assert.equal(h.body(), head.body);
+});
+
+test("a reconnect cannot adopt the old socket's turn even when its turn number repeats", async (t) => {
+  const h = await setup(t, { native: true });
+  h.disconnect("page-socket");
+  h.join("replacement-socket");
+  const turns = h.requests.filter((request) => request.type === "turn");
+  assert.equal(turns[0].turn, turns[1].turn, "both writers started on the same clock tick");
+  assert.equal((await h.send(0, '⟦after "Anchor"⟧Stale')).status, "rejected");
+  assert.equal(h.body(), head.body);
+});
+
+test("cancelling a lost Page acknowledgement stops its writer and fences the delayed operation", async (t) => {
+  const h = await setup(t, { native: true });
+  const write = h.ports.write;
+  let delayed;
+  h.ports.write = async (page, operation) => {
+    const result = await write(page, operation);
+    if (operation.reply.type === "delta") { delayed = operation; throw new Error("lost response"); }
+    return result;
+  };
+  await assert.rejects(h.send(0, '⟦after "Anchor"⟧Late'), /lost response/u);
+  h.ports.write = write;
+  const cancel = { ...h.input(0), type: "cancel" };
+  const router = new PageAssistantOutputReceiver();
+  assert.equal((await router.receive("run-generation", cancel, h.ports)).status, "accepted");
+  assert.ok(h.requests.some((request) => request.type === "interrupt" && request.turn === cancel.target.turn));
+  assert.equal((await write(page, delayed)).status, "rejected");
+  assert.equal((await h.send(1, "late suffix")).status, "unknown");
+  assert.equal(h.body(), head.body);
+});
+
+test("permission changes stop an adopted Page turn before accepting more assistant text", async (t) => {
+  const h = await setup(t, { native: true });
+  assert.equal((await h.send(0, '⟦after "Anchor"⟧First')).status, "accepted");
+  const before = h.body();
+  h.setCanEdit(false);
+  assert.equal((await h.send(1, " more")).status, "rejected");
+  assert.equal(h.body(), before);
 });
 
 test("lost Page RPC acknowledgements are retried against the receipt, including a cold router", async (t) => {
