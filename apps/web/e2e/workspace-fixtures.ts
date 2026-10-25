@@ -258,6 +258,9 @@ export async function installWorkspaceStubs(
   const automationResponses = buildAutomationResponses(fixtures);
   await installApiFixtures(page);
   await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
+  // A search the test did not set up finds nothing, as the Hub answers it: an
+  // empty page, which the catch-all's `{}` is not.
+  await fixtureJson(page, "message-search", "**/api/xmatrix/messages/search?**", { results: [], execution: "proven" });
   await fixtureJson(page, "client-compatibility", /\/api\/(?:xmatrix\/)?client-compatibility(?:\?.*)?$/, {
     compatible: true,
     code: "compatible",

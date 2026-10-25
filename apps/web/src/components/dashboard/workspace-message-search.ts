@@ -1,5 +1,5 @@
 import { WEB_PROXY_ROUTES, type MessageSearchPage, type PageSearchHit } from "@xmatrix/protocol";
-import { requireJson, xmatrixRawResponse } from "@/lib/query/api-client";
+import { requireJson, unexpectedResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 import { SearchRerankUnavailable, type SearchRerankCandidate, type SearchRerankReading } from "./workspace-search-rank";
 
 /**
@@ -25,7 +25,14 @@ export async function searchWorkspaceMessages(input: {
     headers: { Authorization: `Bearer ${input.token}` },
     cache: "no-store",
   });
-  return requireJson<MessageSearchPage>(response);
+  return searchPage(await requireJson<MessageSearchPage>(response), "message search");
+}
+
+/* A page without its results is no page: the panel shows the search as
+   unavailable instead of failing the whole screen. */
+function searchPage<Page extends { results: unknown }>(page: Page, what: string): Page {
+  if (!Array.isArray(page?.results)) throw unexpectedResponse(what);
+  return page;
 }
 
 /** Page search runs on the Hub over every page the reader may read: title and current text. */
@@ -39,7 +46,7 @@ export async function searchWorkspacePages(input: {
     headers: { Authorization: `Bearer ${input.token}` },
     cache: "no-store",
   });
-  return requireJson<{ results: PageSearchHit[] }>(response);
+  return searchPage(await requireJson<{ results: PageSearchHit[] }>(response), "page search");
 }
 
 /** Jev's reading of a search, from the Hub; Pro Spaces only (403 otherwise). */
