@@ -15,8 +15,11 @@ import {
   channelCreateId,
   HUB_ROUTES,
   sha256Hex,
+  type ChannelMessage,
+  type ChannelSummarySource,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
+import { readLaunchContext } from "./agent-launch-context";
 import { authorizeMachineDaemonAgentRun } from "./machine-daemon-agent-run-authorization";
 import { crossSpaceRetryOwner, retryDeniedAgentReadAcrossSpaces } from "./cross-space-read";
 import { loadLiveHumanPresenceFromRuntime, overlayChannelsWithLiveHumanPresence } from "./runtime-transport/human-presence-fanout";
@@ -504,6 +507,33 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       }, 400);
     }
     return privateResponse(familyHistory);
+  }));
+  // What a newly launched Run reads before its first turn (agent-launch-context.ts), read with the
+  // same access and cross-Space grant as `/history`.
+  app.get("/api/channels/:channelId/launch-context", (c) => jsonErrors(c, async () => {
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const channelId = c.req.param("channelId");
+    const run = authUser.agentRun;
+    const startedForId = c.req.query("startedFor")?.trim() || undefined;
+    const read = (principal: { kind: "user" | "agent"; id: string; agentSpaceId?: string }) =>
+      channelMessageResponse(async () => ({ ...await readLaunchContext({
+        channelId, startedForId, readAt: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
+        history: async (page) => {
+          const result = await channelMessageHistory(c.env, { channelId, principal, ...page });
+          return { messages: result.messages as ChannelMessage[], hasMore: result.hasMore === true };
+        },
+        about: async () => {
+          const { channel } = await getChannel(c.env, { channelId, principal, purpose: "launch-context" });
+          return channel as { summary?: string; summarySource?: ChannelSummarySource };
+        },
+      }) }));
+    let response = await read(run
+      ? { kind: "agent", id: run.agentId, agentSpaceId: run.spaceId }
+      : { kind: "user", id: authUser.id });
+    if (run) {
+      response = await retryDeniedAgentReadAcrossSpaces(c.env, run, { channelId }, response, read);
+    }
+    return response;
   }));
   app.post("/api/channels/:channelId/annotations", (c) => jsonErrors(c, async () => {
     const authUser = await requireHumanCaller(c, ANNOTATION_API_HUMAN_ONLY);
