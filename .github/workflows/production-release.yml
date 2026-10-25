@@ -21,21 +21,22 @@ permissions:
   contents: read
   actions: read
 
-# Releases deploy one at a time in each lane (scripts/release-lanes.mjs): one
-# that deploys the service (Hub or Web), alone or with clients, holds
-# production-release-train, the group Production Release Recovery acquires;
-# one that only publishes clients holds production-release-clients. The train
-# dispatches a release only once no release it waits for is active, so
-# neither group ever holds a pending run that a later one could displace.
+# Releases deploy side by side unless one ships a component the other ships
+# or depends on (scripts/release-dependencies.mjs). A release holds the group
+# of its first component in dependency order (releaseGroup): every release with
+# the Hub holds production-release-train, the group Production Release Recovery
+# acquires. Two releases share a group only when they share that component, so
+# each waits for the other and the train never dispatches them side by side;
+# the group backs that up, and no group holds a pending run a later one could
+# displace.
 concurrency:
   group: >-
-    ${{ (contains(format(',{0},', inputs.release_scope), ',hub,') ||
-    contains(format(',{0},', inputs.release_scope), ',web,') ||
-    !(contains(format(',{0},', inputs.release_scope), ',cli,') ||
-    contains(format(',{0},', inputs.release_scope), ',desktop,') ||
-    contains(format(',{0},', inputs.release_scope), ',android,') ||
-    contains(format(',{0},', inputs.release_scope), ',ios,')))
-    && 'production-release-train' || 'production-release-clients' }}
+    ${{ (contains(format(',{0},', inputs.release_scope), ',hub,') && 'production-release-train') ||
+    (contains(format(',{0},', inputs.release_scope), ',web,') && 'production-release-web') ||
+    (contains(format(',{0},', inputs.release_scope), ',cli,') && 'production-release-cli') ||
+    (contains(format(',{0},', inputs.release_scope), ',android,') && 'production-release-android') ||
+    (contains(format(',{0},', inputs.release_scope), ',ios,') && 'production-release-ios') ||
+    'production-release-train' }}
   cancel-in-progress: false
 
 jobs:

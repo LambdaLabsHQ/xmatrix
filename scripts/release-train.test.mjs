@@ -13,7 +13,6 @@ import {
   codeqlAnalyses,
   codeqlLanguages,
   COMPONENTS,
-  deferClientIntents,
   inflightRef,
   intentRef,
   nextBetaVersion,
@@ -150,33 +149,6 @@ test("a train ships the union of every open beta its revision contains, never a 
   assert.deepEqual(result.scope, ["hub", "web"], "an intent from after the freeze waits for the next train");
   assert.deepEqual(result.stable.map((intent) => intent.id), ["25", "40"], "stables are offered oldest first, apart");
   assert.deepEqual(result.updates, []);
-});
-
-test("while a client release is active, service changes ship and client intents wait for the next train", () => {
-  const refs = [
-    { ref: "refs/release-intents/10/web", sha: OLD },
-    { ref: "refs/release-intents/20/cli", sha: OLD },
-    { ref: "refs/release-intents/30/hub+web+cli", sha: MAIN },
-    { ref: "refs/release-intents/40/hub", sha: MAIN },
-  ];
-  const { eligible, updates } = train({ refs });
-  assert.deepEqual(updates, [], "deferred intents stay open, untouched");
-  const busy = deferClientIntents(eligible, [["cli", "desktop"]]);
-  assert.deepEqual(busy.eligible.map((intent) => intent.id), ["10", "40"]);
-  assert.deepEqual(busy.deferred.map((intent) => intent.id), ["20", "30"], "an intent naming any client waits whole");
-  assert.deepEqual(busy.scope, ["hub", "web"]);
-
-  const unreadable = deferClientIntents(eligible, [[]]);
-  assert.deepEqual(unreadable.scope, ["hub", "web"], "a release whose scope cannot be read holds the client lane");
-
-  for (const activeScopes of [[], [["hub"]], [["web"], ["hub", "web"]]]) {
-    const free = deferClientIntents(eligible, activeScopes);
-    assert.deepEqual(free.deferred, [], JSON.stringify(activeScopes));
-    assert.deepEqual(free.scope, ["hub", "web", "cli"], "with no client release active, every contained beta ships");
-  }
-
-  const onlyClients = deferClientIntents(eligible.filter((intent) => intent.id === "20"), [["android"]]);
-  assert.deepEqual(onlyClients.scope, [], "nothing ships until the client release finishes and wakes the train");
 });
 
 test("in-flight betas close on success, wait while deploying and reopen on failure", () => {
@@ -370,18 +342,23 @@ test("a train planned while a client release runs ships the service and leaves c
   const cases = [
     { name: "client release active", status: "in_progress", ships: "web", open: true },
     { name: "client release finished", status: "completed", ships: "web,cli", open: false },
+    // A list that still shows a finished release running would leave the CLI
+    // intent open with nothing left to wake the train.
+    { name: "a stale list shows it running", status: "in_progress", current: "completed", ships: "web,cli", open: false },
   ];
   await eachInRepository(t, cases, (scenario, repo) => {
     const source = repo.commitMain("service and client changes");
     repo.release(source, "1.0.1-beta.1", { scope: "cli", source, channel: "beta" });
     repo.push();
     repo.pushRefs(`${source}:${intentRef("50", ["web"])}`, `${source}:${intentRef("60", ["cli"])}`);
-    // The only GitHub read is the list of Production Release runs: one on the
-    // client tag, still running or finished.
+    // The only GitHub reads are the list of Production Release runs, one on
+    // the client tag, still running or finished, and that run read again.
     const result = repo.plan(source, `
-      globalThis.fetch = async () => new Response(JSON.stringify({ workflow_runs: [
-        { id: 30, status: ${JSON.stringify(scenario.status)}, conclusion: null, head_branch: "xmatrix-v1.0.1-beta.1" },
-      ] }));
+      const run = { id: 30, status: ${JSON.stringify(scenario.status)}, conclusion: null,
+        head_branch: "xmatrix-v1.0.1-beta.1", run_started_at: new Date().toISOString() };
+      const current = { ...run, status: ${JSON.stringify(scenario.current ?? scenario.status)} };
+      globalThis.fetch = async (url) => new Response(JSON.stringify(
+        new URL(url).pathname.endsWith("/actions/runs/30") ? current : { workflow_runs: [run] }));
     `);
     assert.equal(result.status, 0, result.stderr + result.stdout);
     assert.match(result.stdout, new RegExp(`^scope=${scenario.ships}$`, "mu"));
@@ -401,8 +378,10 @@ test("the train distinguishes unavailable production evidence from a failed cand
     { name: "still active", responses: [[{ ...successful, status: "in_progress", conclusion: null }]], reads: 1 },
     { name: "API denied", responses: [403], reads: 1 },
     { name: "API unavailable", responses: [502], reads: 5 },
+    // A refused stable falls through to the beta, whose plan also lists the
+    // releases still running (none here) before it ships.
     { name: "latest run failed", responses: [[successful, { id: 21, status: "completed", conclusion: "failure" }]],
-      invalid: true, reads: 1 },
+      invalid: true, reads: 2 },
   ];
   await eachInRepository(t, cases, (scenario, repo) => {
     mkdirSync(path.join(repo.root, "docs/releases"), { recursive: true });

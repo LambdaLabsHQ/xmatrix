@@ -1,47 +1,70 @@
 # Release Updates
 
-## Unreleased: Service releases stop waiting behind client releases
+## Unreleased: Releases deploy concurrently by component dependency
 
-Production Releases deploy in two lanes (`scripts/release-lanes.mjs`): the
-service (Hub, Web) and the clients (CLI, Desktop, Android, iOS). Releases in one
-lane still deploy one at a time in version order. The service never waits for a
-client release, because no Hub or Web deploy reads what a client publication
-writes. A client still waits for an earlier Hub release, so the Hub that admits
-it (client-readiness) is the one its train was cut beside. A release that names
-both lanes waits for everything before it. From 2026-10-22 to 2026-10-24, 17 of
-92 Hub- or Web-only release requests waited behind a 13–16 minute client release,
-231 minutes in total.
+Production Releases deploy side by side unless one has to wait for another
+(`scripts/release-dependencies.mjs`). This replaces the two fixed lanes (service
+and clients) of the previous change. A release waits for an active one when it
+ships a component that release also ships, or when that release ships a
+component it depends on. One component deploys in version order, because a later
+deploy that finished first would be overwritten and channel pointers only move
+forward. The dependencies are:
+
+- the Web, CLI, Desktop, Android and iOS depend on the Hub: the Web is built for
+  its train's Hub, and a client is admitted by that Hub and published against it;
+- the Desktop, Android and iOS apps also depend on the Web: they are shells
+  around the live Web of their channel and publish after it, as they do inside
+  one release (client-readiness);
+- Desktop also depends on the CLI, which it bundles.
+
+Everything else runs at once: a Web beside a CLI, Android beside iOS, a Hub
+beside any client. From 2026-10-22 to 2026-10-24, 17 of 92 Hub- or Web-only
+release requests waited behind a 13–16 minute client release, 231 minutes in
+total.
 
 - **Dispatch.** A train still runs one at a time and still waits before tagging,
-  but only for the active releases its scope waits for (each release's scope is
-  read from its tag annotation; one that cannot be read counts as both lanes),
-  and for any PostgreSQL contract migration or lifecycle cleanup, as before.
-- **Planning.** While a client release is active, a beta train leaves the intents
-  that name a client open and ships the rest. Waiting in the train would have
-  held every service change behind that release. The release wakes the train
-  when it finishes (Release Train Next), and that train takes them.
-- **Concurrency.** A release that deploys the Hub or the Web, alone or with
-  clients, keeps the `production-release-train` group. A release that only
-  publishes clients takes `production-release-clients`. Because the train
-  dispatches a release only once nothing it waits for is active, neither group
-  ever holds a pending run that a later one could displace. A test evaluates the
-  workflow's group for every scope against that rule. Run names now carry the
-  tag and scope.
+  but only for the active releases its scope waits for, and for any PostgreSQL
+  contract migration or lifecycle cleanup, as before. Each release's scope is
+  read from its tag annotation, and one that cannot be read waits and is waited
+  for. GitHub can keep serving one response for one URL, even across trains, so
+  every read of the run lists now names a new URL. A list frozen before the
+  previous train dispatched would otherwise show no earlier release, and this
+  release would deploy beside it.
+- **Planning.** A beta train that ships an intent waiting for an active release
+  holds the train until that release finishes: its gates run meanwhile, but no
+  later train can plan. It does so only when that release is expected to finish
+  within eight minutes, judged from each component's recent p90 duration and how
+  long the release has run. An intent behind a longer release stays open, and
+  that release wakes the train when it finishes (Release Train Next). Planning
+  reads each run the list shows running again by its ID. A stale "running"
+  would leave such intents open after the release that would wake the train had
+  already finished.
+- **Concurrency.** A release holds the group of its first component in
+  dependency order: `production-release-train` for every release with the Hub,
+  then `production-release-web`, `-cli`, `-android`, `-ios`. Two releases share
+  a group only when they share that component, so each waits for the other and
+  the train never dispatches them side by side; the group backs that wait up.
+  A test evaluates the workflow's group for every pair of scopes against the
+  rule. Run names carry the tag and scope.
 
-Migration evidence: releases dispatched from earlier tags keep the single group,
-so an old client-only release still holds `production-release-train`. A new
-service release dispatched beside it waits in that group, as every release did
-before. No second release can join that wait, because the next service train
-waits for the pending one. Publication order is unchanged within each lane. A
-release published after a newer one from the other lane keeps its own preflight
-and its notes baseline, which is the highest published version below it.
+Migration evidence: releases dispatched from earlier tags keep the group they
+were dispatched with (`production-release-train`, or `production-release-clients`
+for a client-only release). A new release that the train dispatches beside one
+of them either holds another group, or shares `production-release-train` with an
+earlier service release that it does not wait for; there it waits pending, as
+every release did before, and no second release can join that wait.
+Publication order is unchanged for each component. A release published after a
+newer one of other components keeps its own preflight and its notes baseline,
+which is the highest published version below it.
 
 Recovery evidence: Production Release Recovery applies only to the
 preflight-success/PostgreSQL-readiness-waiting shape, which only a Hub release
 has. Every Hub release holds `production-release-train`, the group the recovery
-`unlock` job acquires, so the proof and the unlock are unchanged. A client-only
-release never takes that shape. A failed one is recovered as before, by
-re-running its failed jobs.
+`unlock` job acquires, so the proof and the unlock are unchanged. A release
+without the Hub never takes that shape. A failed one is recovered as before, by
+re-running its failed jobs. A release without the Hub that hangs before its first
+mutation still holds back the releases that wait for it until their three-hour
+dispatch deadline, as before.
 
 ## Unreleased: Retry transient CI ledger evidence reads
 
