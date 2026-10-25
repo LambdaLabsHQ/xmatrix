@@ -6,9 +6,9 @@ import { fixtureJson } from "./in-page-api-fixtures";
 
 /* A Free Space that ran out mid-task left its owner looking at Agents that had
    gone quiet: the refusal was only on a failed row of their own, and an Agent's
-   refused reply leaves nothing in the timeline (user 2026-10-25). The
-   conversation now ends, before and after the limit, with what is about to
-   stop and where to go. */
+   refused reply leaves nothing in the timeline (user 2026-10-25). Before and
+   after the limit, an ask card where Pending approvals dock now says what is
+   about to stop and where to go. */
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -39,15 +39,21 @@ async function openConversation(page: Parameters<typeof installWorkspaceStubs>[0
   await conversationOpened(page);
 }
 
-test("a used-up Free Space ends the conversation with it, above the composer, and opens Billing", async ({ page }) => {
+test("a used-up Free Space asks above the composer, clear of the conversation, and opens Billing", async ({ page }) => {
   await openConversation(page, freeBilling(0));
   const notice = page.getByTestId("space-allowance-notice");
   await expect(notice).toHaveAttribute("data-allowance", "free-used");
   await expect(notice).toContainText("New messages and Agent replies can't be saved");
-  // The last row of the conversation, read where the reader already is: not under the composer.
+  // Docked where approvals are: in full view, not under the composer.
   await expect(notice).toBeInViewport({ ratio: 1 });
-  const [noticeBox, composerBox] = await Promise.all([notice.boundingBox(), page.locator(".app-composer").boundingBox()]);
+  // It sits above the composer, never under it.
+  const [noticeBox, composerBox] = await Promise.all([notice.boundingBox(), page.locator(".app-composer-box").first().boundingBox()]);
   expect(noticeBox!.y + noticeBox!.height).toBeLessThanOrEqual(composerBox!.y + 1);
+  // The conversation pads its tail for the dock, so the newest message stays readable above the card.
+  await expect.poll(async () => {
+    const [row, card] = await Promise.all([page.locator(".app-message-row").last().boundingBox(), notice.boundingBox()]);
+    return row!.y + row!.height - card!.y;
+  }).toBeLessThanOrEqual(1);
   await notice.getByRole("button", { name: "Upgrade to Pro" }).click();
   await expect(page).toHaveURL(/\/settings\?item=billing/u);
   await expect(page.getByTestId("space-billing")).toBeVisible();

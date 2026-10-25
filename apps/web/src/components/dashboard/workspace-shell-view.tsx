@@ -95,6 +95,7 @@ import { SpaceFirstTaskCard } from "./space-first-task-card";
 import { ListCreate, type CreateAction } from "./list-create";
 import { NewConversation } from "./new-conversation";
 import { SPACE_BILLING_SECTION } from "./settings-billing";
+import { SpaceAllowanceNotice, useSpaceAllowance } from "./space-allowance-notice";
 import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
@@ -654,7 +655,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
   }), [machineTargets]);
   const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
-  const timelineAllowance = useMemo(() => user ? {
+  const spaceAllowance = useSpaceAllowance(user?.id, currentSpaceId);
+  const composerAllowance = useMemo(() => user ? {
     userId: user.id,
     onOpenBilling: () => changeAppViewRef.current("settings", SPACE_BILLING_SECTION),
   } : undefined, [user]);
@@ -1071,7 +1073,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onSend={sendNewConversationMessage}
       onCancel={() => setComposingConversation(false)}
       onOpenAppsForSpace={openAppsForSpace}
-      allowance={timelineAllowance}
+      allowance={composerAllowance}
     />
   );
 
@@ -1157,7 +1159,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       )}
       {!showSpaceAgentSetup && !showSpaceFirstTask && (
       <MessageTimeline
-        allowance={timelineAllowance}
         channel={selectedChannel}
         space={currentSpace}
         token={token ?? null}
@@ -1172,7 +1173,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         )}
         highlightMessageId={highlightedMessageId ?? undefined}
         timeline={timeline}
-        hasWorkDock={channelHasAgentMembers(selectedChannel) || channelHasPendingApprovals}
+        hasWorkDock={channelHasAgentMembers(selectedChannel) || channelHasPendingApprovals || Boolean(spaceAllowance.notice)}
         hasChannels={channels.length > 0}
         hasOlderMessages={historyRenderAuthorized && hasOlderMessages}
         olderLoading={olderLoading}
@@ -1208,8 +1209,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       />
       )}
       <AgentWorkDetailsDock
-        approvals={channelHasPendingApprovals ? (
-          <ChannelApprovalsDock
+        approvals={channelHasPendingApprovals || spaceAllowance.notice ? (<>
+          {composerAllowance && currentSpaceId && <SpaceAllowanceNotice docked spaceId={currentSpaceId}
+            token={token ?? null} userId={composerAllowance.userId} onOpenBilling={composerAllowance.onOpenBilling} />}
+          {channelHasPendingApprovals && <ChannelApprovalsDock
             summaries={[...pendingCrossSpaceReads.map((request) => ({ key: `read:${request.grantId}`,
                 agent: request.agentName || "Agent", what: "read another Space" })),
               ...pendingConnectorActions.map(request => ({ key: request.requestId, agent: request.providerId, what: request.actionId }))]}
@@ -1220,8 +1223,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
               <CrossSpaceReadCard key={request.grantId} request={request} token={token}
                 userId={model.authenticatedUserId ?? ""} />
             ))}
-          </ChannelApprovalsDock>
-        ) : null}
+          </ChannelApprovalsDock>}
+        </>) : null}
         channel={selectedChannel}
         token={token ?? null}
         timeline={timeline}
