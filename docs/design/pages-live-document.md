@@ -495,6 +495,24 @@ fact is about.
     `outcome`, as soon as all of it is sent and on the page; a turn the runtime
     opens meanwhile follows it. A pace, where there is one, belongs to what the
     Agent may send, never to what the page shows of what it sent.
+  - **At a rate, as an API limits its callers** (decided by Daniel
+    2026-10-25). The session takes an Agent's live words at
+    `PAGE_CO_WRITE_RATE`: a runtime sends at most 10 characters at a time, 20
+    a second on average (`PageWriteOutbox` in `page_co_write.rs`), each write
+    saying where in the turn it starts (`paced.at`); an image's markdown goes
+    whole. The session keeps an allowance of 20 characters, refilled at the
+    same rate, so jitter between writes sent in time is never refused. A write
+    past the allowance, or one that does not follow on from what the turn has
+    taken, is refused whole, as an HTTP 429 refuses: the session takes nothing
+    of it and answers `limited` with where to go on from and when
+    (`retryAfterMs`); the runtime sends the turn again from there. A turn's end
+    says how many characters were sent and is refused the same way until the
+    session has them all. What the model has written and the runtime has not
+    sent yet is still the Agent's own, as words a person has thought of and
+    not typed yet: the page holds exactly what was sent and taken, the moment
+    it is taken. A message's `⟦write⟧` (`xmatrix send`, `atOnce`) is whole
+    when it is sent, so it is taken whole and not paced. A runtime that does
+    not pace (one released before the rate) is taken as it sends.
   - **Taking it back.** A person who may edit the page takes back the Agent's
     last change from its card (Undo; `POST …/co-writing/:conversationId/undo`):
     its blocks return to what they were, and what it is still writing counts as

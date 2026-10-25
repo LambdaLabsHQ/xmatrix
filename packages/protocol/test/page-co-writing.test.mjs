@@ -66,6 +66,11 @@ test("a reply from the runtime is read strictly", () => {
   assert.deepEqual(parsePageCoWriteReply({ type: "done", turn: 3 }), { type: "done", turn: 3 });
   assert.deepEqual(parsePageCoWriteReply({ type: "write", turn: 4, atOnce: true }), { type: "write", turn: 4, atOnce: true });
   assert.deepEqual(parsePageCoWriteReply({ type: "write", turn: 4, atOnce: "yes" }), { type: "write", turn: 4 });
+  assert.deepEqual(parsePageCoWriteReply({ type: "delta", turn: 3, text: "hi", paced: { at: 20 } }),
+    { type: "delta", turn: 3, text: "hi", paced: { at: 20 } });
+  assert.deepEqual(parsePageCoWriteReply({ type: "delta", turn: 3, text: "hi", paced: { at: -1 } }),
+    { type: "delta", turn: 3, text: "hi" }, "a paced write says where it starts, or it is not paced");
+  assert.deepEqual(parsePageCoWriteReply({ type: "done", turn: 3, paced: { at: 22 } }), { type: "done", turn: 3, paced: { at: 22 } });
   assert.equal(parsePageCoWriteReply({ type: "delta", turn: "3", text: "hi" }), null);
   assert.equal(parsePageCoWriteReply({ type: "other", turn: 1 }), null);
 });
