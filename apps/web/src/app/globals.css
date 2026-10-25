@@ -7084,7 +7084,6 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   width: 100%;
   height: 100%;
   border-radius: 999px;
-  object-fit: cover;
 }
 
 .xmatrix-app .app-mention-chip-initial {
