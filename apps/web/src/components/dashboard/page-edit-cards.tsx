@@ -82,14 +82,14 @@ function PageEditCard({ edit, spaceId, token, onOpen }: {
   const revisions = useMemo(() => [...new Set(runs.flatMap(({ from, to }) => [from, to]))], [runs]);
   const read = useQueries({
     queries: revisions.map((revision) => ({
-      // Shared with the conversation's page cards: a revision never changes once written.
+      // Shared with the conversation's page cards: cache the complete document, and derive its body below.
       queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-document-revision",
         [spaceId, edit.pageId, revision]),
       enabled: revision > 0, staleTime: Infinity, retry: false,
       queryFn: ({ signal }: { signal: AbortSignal }) =>
-        pageApi.read(spaceId, edit.pageId, token, revision, signal).then((result) => result.page.body),
+        pageApi.read(spaceId, edit.pageId, token, revision, signal).then((result) => result.page),
     })),
-    combine: (results) => ({ bodies: results.map((result) => result.data), failed: results.some((result) => result.isError) }),
+    combine: (results) => ({ bodies: results.map((result) => result.data?.body), failed: results.some((result) => result.isError) }),
   });
   const { failed } = read;
   const glimpses = useMemo<PageEditGlimpse[] | null>(() => {
