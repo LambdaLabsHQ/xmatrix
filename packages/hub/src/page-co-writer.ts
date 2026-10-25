@@ -122,11 +122,13 @@ interface Turn {
   sent: { failed: boolean; reason?: string } | null;
   /** How many characters of a paced turn the session has taken: where the runtime's next write must start. */
   received: number;
+  refusedImages: Set<string>;
 }
 
 function newTurn(id: number): Turn {
   return { id, askedAt: Date.now(), refreshable: true, wroteText: false,
-    parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null, received: 0 };
+    parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null, received: 0,
+    refusedImages: new Set() };
 }
 
 /** Queues what the parser made of the Agent's words, text that follows text as one. */
@@ -144,12 +146,26 @@ function blockMarkdown(node: DocNode): string {
 }
 
 /** The blocks some markdown describes; none for none. */
-function blocksOf(markdown: string): DocNode[] {
+function blocksOf(markdown: string, refuseImage: (src: string) => boolean): DocNode[] {
   if (!markdown.trim()) return [];
   const doc = markdownToPageDoc(markdown);
   const nodes: DocNode[] = [];
-  doc.forEach((node) => nodes.push(node));
+  const filter = (node: DocNode): DocNode | null => {
+    if (node.type.name === "image" && refuseImage(String(node.attrs.src ?? ""))) return null;
+    if (node.isLeaf) return node;
+    const children: DocNode[] = [];
+    node.forEach((child) => { const kept = filter(child); if (kept) children.push(kept); });
+    return node.copy(Fragment.fromArray(children));
+  };
+  doc.forEach((node) => { const kept = filter(node); if (kept) nodes.push(kept); });
   return nodes;
+}
+
+function localImage(src: string): boolean {
+  const value = src.trim();
+  if (!value || value.startsWith("#") || value.startsWith("//")) return false;
+  const scheme = /^([a-z][a-z0-9+.-]+):/iu.exec(value)?.[1];
+  return !scheme || scheme.toLowerCase() === "file";
 }
 
 /** Rendered words only: finishing a streamed action may merely trim its trailing whitespace. */
@@ -201,6 +217,8 @@ export interface PageCoWriterOptions {
    * each turn itself, as it writes, and the session never asks it, on joining or when people pause.
    */
   streams?: boolean;
+  /** An acknowledged transport must apply text before its receipt is saved. */
+  immediate?: boolean;
 }
 
 export class PageCoWriter {
@@ -351,15 +369,15 @@ export class PageCoWriter {
   }
 
   /** The runtime answers a turn: the Agent's words as they come, then the end of its turn. */
-  receive(reply: PageCoWriteReply): void {
+  receive(reply: PageCoWriteReply): boolean {
     if (reply.type === "write") {
       this.own(reply.turn);
-      return;
+      return true;
     }
     const turn = this.active?.id === reply.turn ? this.active : this.waiting.find((item) => item.id === reply.turn);
-    if (this.ended || !this.writable || !turn || turn.stopped || turn.sent) return;
+    if (this.ended || !this.writable || !turn || turn.stopped || turn.sent) return false;
     if (reply.type === "delta") {
-      if (reply.paced && !this.allowed(turn, reply.text, reply.paced.at)) return;
+      if (reply.paced && !this.allowed(turn, reply.text, reply.paced.at)) return false;
       turn.timing?.delta();
       if (turn === this.active) this.awaitTurn(turn);
       enqueue(turn, turn.parser.push(reply.text));
@@ -367,7 +385,7 @@ export class PageCoWriter {
       // A paced turn ends once the session has every character the runtime sent for it.
       if (reply.paced && reply.paced.at !== turn.received) {
         this.host.send({ type: "limited", turn: turn.id, at: turn.received, retryAfterMs: 0 });
-        return;
+        return false;
       }
       enqueue(turn, turn.parser.finish());
       turn.sent = { failed: reply.type === "failed", ...(reply.type === "failed" && reply.reason ? { reason: reply.reason } : {}) };
@@ -378,6 +396,7 @@ export class PageCoWriter {
       }
     }
     if (turn === this.active) this.step(turn);
+    return true;
   }
 
   /**
@@ -661,6 +680,12 @@ export class PageCoWriter {
    * A person takes back what the Agent last wrote: the blocks return to what they were, unless
    * someone changed them since. What it is writing now counts as its last change, and it stops.
    */
+  get undoWrittenAt(): number | null {
+    const action = this.active?.action;
+    return (action && !action.skipped && action.kind !== "note" && action.written.length) || this.last
+      ? this.lastWrite : null;
+  }
+
   undo(by: string): "undone" | "changed" | "nothing" {
     const writing = this.active?.action;
     const target: Written | null = writing && !writing.skipped && writing.kind !== "note" && writing.written.length
@@ -697,6 +722,7 @@ export class PageCoWriter {
    * far enough behind: the words keep coming many times a second, and the page shows them a few times.
    */
   private writeSoon(turn: Turn, action: Action): void {
+    if (this.options.immediate) { this.write(turn, action, false); return; }
     const wait = this.lastWrite + CO_WRITER_WRITE_EVERY_MS - Date.now();
     if (wait <= 0) {
       this.write(turn, action, false);
@@ -724,10 +750,22 @@ export class PageCoWriter {
       return;
     }
     const text = final ? action.text.replace(/\s+$/u, "") : action.text;
+    const existing = new Set<string>();
+    if (action.kind === "replace") markdownToPageDoc(action.original).descendants((node) => {
+      if (node.type.name === "image") existing.add(String(node.attrs.src ?? ""));
+    });
+    const refuseImage = (src: string) => {
+      if (!localImage(src) || existing.has(src)) return false;
+      if (!turn.refusedImages.has(src) && turn.refusedImages.size < 32) {
+        turn.refusedImages.add(src);
+        this.told(`Images of local files do not go into pages; paste the image into the editor: ${src.slice(0, 300)}`, true);
+      }
+      return true;
+    };
     const nodes = action.kind === "after"
       // A new line appears for its caret before its first words do.
-      ? (text.trim() ? blocksOf(text) : final ? [] : [pageSchema.nodes.paragraph!.create()])
-      : blocksOf(action.original.replace(action.quote, () => text.replace(/^\s+/u, "")));
+      ? (text.trim() ? blocksOf(text, refuseImage) : final ? [] : [pageSchema.nodes.paragraph!.create()])
+      : blocksOf(action.original.replace(action.quote, () => text.replace(/^\s+/u, "")), refuseImage);
     const children: DocNode[] = [];
     live.doc.forEach((node, _offset, index) => {
       if (index === region.from) children.push(...nodes);

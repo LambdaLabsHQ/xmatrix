@@ -27,6 +27,9 @@ import { findAppConnection } from "./apps";
 import type { Env } from "./types";
 import { platformAdminSpaceId } from "./admin-platform-access";
 import { relayContentRepository } from "./relay-r2-upload-private-api";
+import { parsePageAssistantOutput, PAGE_ASSISTANT_OUTPUT_PATH } from "./page-assistant-output";
+import { relayRuntimeCellNamed, relayRuntimeOwnerCellName } from "./relay-authority-locator";
+import { RELAY_RUNTIME_CELL_HEADER } from "./runtime-transport/runtime-cell-locator";
 
 /**
  * Pages (docs/design/pages-and-conversations.md): the Space's markdown page
@@ -265,6 +268,31 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   const base = "/api/spaces/:spaceId/pages";
   const run = <T>(c: Context<{ Bindings: Env }>, work: () => Promise<T>) =>
     work().then((result) => c.json(result as Record<string, unknown>, 200, NO_STORE), (error) => failure(c, error));
+
+  app.post("/api/channels/:channelId/page-output", async (c) => {
+    try {
+      const auth = await requireAuth(c.req.raw, c.env);
+      const bound = auth.agentRun;
+      if (!bound?.instanceId || bound.channelId !== c.req.param("channelId")) {
+        return c.json({ error: "Assistant output requires this Channel's exact Run" }, 403, NO_STORE);
+      }
+      // Bound before decoding. A diagnostic trace or transcript is not an input
+      // to this endpoint, and the only accepted event is adapter assistant text.
+      const raw = await c.req.text();
+      if (raw.length > 32_768) return c.json({ error: "Assistant output is too large" }, 413, NO_STORE);
+      let value: unknown;
+      try { value = JSON.parse(raw); }
+      catch { return c.json({ error: "Invalid assistant output JSON" }, 400, NO_STORE); }
+      const input = parsePageAssistantOutput(value);
+      const ownerCell = relayRuntimeOwnerCellName(bound.ownerUserId);
+      if (!input || !ownerCell) return c.json({ error: "Invalid assistant output" }, 400, NO_STORE);
+      const response = await relayRuntimeCellNamed(c.env, ownerCell).fetch(new Request(`https://runtime${PAGE_ASSISTANT_OUTPUT_PATH}`, {
+        method: "POST", headers: { "content-type": "application/json", [RELAY_RUNTIME_CELL_HEADER]: ownerCell },
+        body: JSON.stringify({ spaceId: bound.spaceId, principal: sessionPrincipal(auth), input }),
+      }));
+      return relayResponse(response, NO_STORE);
+    } catch (error) { return failure(c, error); }
+  });
 
   // Page claims and owed updates are gone: coordination is lock-free. A CLI released before that still
   // claims, releases and settles; it is told so, and its Run carries on. Remove once the stable CLI has

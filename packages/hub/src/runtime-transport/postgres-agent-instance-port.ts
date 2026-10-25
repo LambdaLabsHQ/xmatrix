@@ -17,6 +17,7 @@ import {
   AGENT_TURN_FAILURE_LIFECYCLE_REASON,
   AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
   AGENT_USAGE_LIMIT_LIFECYCLE_REASON,
+  PAGE_ASSISTANT_OUTPUT_CAPABILITY,
   agentUsageLimitFromError,
   boundAgentTurnFailureDetail,
   safeAgentFailureDetail,
@@ -104,7 +105,8 @@ type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServer
  * sends one only when its Hub lists it.
  */
 export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry", "agent_turn_retry_channel_message",
-  "harness_question_closed", "agent_parameter_control_result", "agent_parameter_control_pending_v1", "switch_continuation"] as const;
+  "harness_question_closed", "agent_parameter_control_result", "agent_parameter_control_pending_v1", "switch_continuation",
+  PAGE_ASSISTANT_OUTPUT_CAPABILITY] as const;
 
 /** The card a Run posts when its harness asks its own question (runtime_harness_questions.rs). */
 const HARNESS_QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
