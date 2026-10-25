@@ -100,8 +100,14 @@ finishes. Checking it prepares the retained local source without compression;
 unchecking it restores automatic compression. Choices are independent and stay
 with the in-memory Channel draft. Originals retain their bytes, filename and
 MIME type, subject to the existing 64 MiB attachment limit. Images otherwise keep
-the 1 MB compression target. A quality change blocks sending until it finishes,
-preserves attachment order and restores the previous file on failure or cancel.
+the 1 MB compression target. A quality change preserves attachment order and
+restores the previous file on failure or cancel.
+Uploads never block Send. A file still preparing or uploading goes with the
+message: the message shows at once as pending, drawing the file from its local
+copy with its progress, and is appended only once every file has landed, so the
+words never arrive without their files. A failed file fails the message; sending
+it again uploads that file again, and discarding it cancels the uploads. A quality
+change still in flight when sent falls back to the previous file if it fails.
 Local source files remain browser-only and are excluded from send snapshots and
 message bindings. Failed image compression still permits choosing Original on
 that preview.

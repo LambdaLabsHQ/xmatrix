@@ -149,7 +149,7 @@ test("image preview choices are independent, reversible and preserve outgoing or
 });
 
 for (const outcome of ["cancel", "failure"] as const) {
-  test(`a quality change blocks send and retains the prior attachment on ${outcome}`, async ({ page }) => {
+  test(`a quality change retains the prior attachment on ${outcome}`, async ({ page }) => {
     await openComposer(page);
     const buffer = await paddedImage(page);
     await page.locator('input[type="file"]').setInputFiles({ name: "keep.png", mimeType: "image/png", buffer });
@@ -160,7 +160,6 @@ for (const outcome of ["cancel", "failure"] as const) {
       responder: { kind: "deferred", status: outcome === "failure" ? 403 : 200, json: outcome === "failure" ? { error: "Quality upload refused" } : { ok: true } } });
     await choice.check();
     await expect.poll(() => fixtureRequestBodies(page, "quality-hold")).toHaveLength(1);
-    await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
     if (outcome === "cancel") await page.getByRole("button", { name: "Cancel keep.png", exact: true }).click();
     await releaseFixture(page, "quality-hold");
     await expect(choice).toBeEnabled();
@@ -171,6 +170,28 @@ for (const outcome of ["cancel", "failure"] as const) {
     ]);
   });
 }
+
+test("a message sent while its image uploads shows at once and is appended once the image lands", async ({ page }) => {
+  await openComposer(page);
+  await fixtureRule(page, { id: "intent-hold", pattern: "**/relay-v2/private-r2/upload-intents", method: "POST",
+    responder: { kind: "relayV2UploadIntent", held: true } });
+  const buffer = await paddedImage(page);
+  await page.locator('input[type="file"]').setInputFiles({ name: "late.png", mimeType: "image/png", buffer });
+  await expect.poll(() => fixtureRequestBodies(page, "intent-hold")).toHaveLength(1);
+  await expect(page.getByRole("button", { name: /^Cancel late/ })).toHaveCount(1);
+
+  const send = page.getByRole("button", { name: "Send", exact: true });
+  await expect(send).toBeEnabled();
+  await send.click();
+  await expect(page.getByRole("progressbar", { name: /^Uploading late/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Cancel late/ })).toHaveCount(0);
+  expect(await fixtureRequestBodies(page, "media-send")).toEqual([]);
+
+  await releaseFixture(page, "intent-hold");
+  await expect.poll(() => fixtureRequestBodies(page, "media-send")).toEqual([
+    expect.objectContaining({ attachments: [expect.objectContaining({ encodedBytes: expect.any(Number) })] }),
+  ]);
+});
 
 test("a file the browser cannot compress can still be selected as original on its preview", async ({ page }) => {
   await openComposer(page);

@@ -67,7 +67,11 @@ export type FixtureResponder =
   /** Faces read by id (protocol faces.ts): each id asked for, with its picture in `images` (`user:<id>`, `agent:<id>`) or none. */
   | { kind: "faces"; images: Readonly<Record<string, string>> }
   /** Mirror the Hub-selected scoped upload path from an upload-intent body. */
-  | { kind: "relayV2UploadIntent" }
+  | {
+      kind: "relayV2UploadIntent";
+      /** Answer only once the spec calls `releaseFixture(page, id)`, as `deferred` does. */
+      held?: boolean;
+    }
   /**
    * A Channel create, answered as the Hub answers it: the Channel takes the id
    * the Hub derives from the user and the request's create key, which the
@@ -474,6 +478,8 @@ function installInterceptor({
             return sequence(rule);
           }
           if (rule.responder.kind === "relayV2UploadIntent") {
+            const gate = rule.responder.held === true ? store.gateFor(rule.id) : null;
+            if (gate && !gate.released) await gate.promise;
             return relayV2UploadIntent(body);
           }
           if (rule.responder.kind === "channelCreate") {

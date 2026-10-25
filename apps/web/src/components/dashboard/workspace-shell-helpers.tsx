@@ -90,6 +90,7 @@ import type {
 } from "@xmatrix/protocol";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 import type { QuestionnaireAnswer } from "./questionnaire-card";
+import type { SentUpload } from "./sent-upload";
 
 // Split from workspace-shell-helpers.tsx (size guard)
 
@@ -153,6 +154,8 @@ export type OutgoingMessage = {
   invocationSelections?: ComposerSendSnapshot["invocationSelections"];
   summonIntents?: ComposerSendSnapshot["summonIntents"];
   attachments: ChannelAttachment[];
+  /** Files sent still uploading; the message is appended once they land (sent-upload.ts). */
+  uploads?: SentUpload[];
   replyToMessageId?: string;
   replyTo?: TimelineItem["replyTo"];
   appMentions: ReturnType<typeof parseAppMentions>;
