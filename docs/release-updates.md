@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: CLI resource limits compile across supported Rust versions
+
+The acknowledged Page-output queue and live trace-read limit share a checked
+atomic reservation loop. This preserves their capacity limits on both Rust
+1.96 and current stable Rust, where `fetch_update` was renamed. Recover the
+failed beta.6 CLI build through a new CI-validated main revision and Release
+Intent; its immutable tag and already deployed Hub/Web stay unchanged.
+
 ## Unreleased: The Hub writes each message an Agent reads
 
 Each Channel message an Agent receives now comes with the Hub's rendering of

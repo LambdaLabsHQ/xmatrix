@@ -56,13 +56,7 @@ struct Forwarder {
 impl Forwarder {
     fn enqueue(&self, stream: Arc<Stream>, text: Option<String>) -> bool {
         let size = text.as_ref().map_or(0, String::len);
-        if self
-            .bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bytes| {
-                (bytes + size <= QUEUE_BYTES).then_some(bytes + size)
-            })
-            .is_err()
-        {
+        if !xmatrix_cli_core::atomic_limit::try_reserve(&self.bytes, size, QUEUE_BYTES) {
             return false;
         }
         if self.sender.try_send(Piece { stream, text }).is_err() {
