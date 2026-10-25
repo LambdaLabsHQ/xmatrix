@@ -266,7 +266,7 @@ impl<'a> RunLoopEvents<'a> {
             message.channel_id.clone(),
             message.sequence,
         );
-        crate::runtime_page_co_write::follow(self.relay, &message.channel_id, &instruction);
+        crate::runtime_page_co_write::follow(self.relay, &message.channel_id, &instruction, false);
         true
     }
 

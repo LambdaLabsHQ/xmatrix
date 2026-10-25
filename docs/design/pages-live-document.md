@@ -420,8 +420,15 @@ fact is about.
     validated co-writing controls through its context filter, including startup
     replay; the run loop consumes them without a harness turn. A fresh Run's
     startup history read also restores the newest validated co-writing state
-    before its join floor advances beyond those messages. Ordinary notices
-    and caller-authored lookalikes stay context. Each turn the session sends
+    before its join floor advances beyond those messages. For a fresh launch
+    with a message, the runtime joins the page before its first model turn
+    and folds the page's first request (document and writing protocol) into
+    that message. Its first words stream to that request, rather than waiting
+    behind a separate invitation task. Startup waits at most ten seconds for
+    the page; a later request still reaches the ordinary loop. The original
+    message and execution attribution stay intact. This needs the updated CLI;
+    the Hub wire protocol and older runtimes are unchanged. Ordinary notices
+    and caller-authored lookalikes stay context. Each later turn the session sends
     reaches the run loop as a resume of that conversation, so every backend runs
     it as any turn; the harness's text, which every backend reports as
     `assistant_delta` traces (Claude with `--include-partial-messages`, in

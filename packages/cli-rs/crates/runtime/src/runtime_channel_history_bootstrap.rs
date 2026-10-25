@@ -65,7 +65,12 @@ pub(crate) fn follow_bootstrap_co_write(
     channel_id: &str,
 ) {
     if let Some(instruction) = CHANNEL_CO_WRITE.get() {
-        crate::runtime_page_co_write::follow(relay, channel_id, instruction);
+        crate::runtime_page_co_write::follow(
+            relay,
+            channel_id,
+            instruction,
+            crate::non_empty_env("XMATRIX_INITIAL_MESSAGE").is_some(),
+        );
     }
 }
 
