@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: The Hub writes each message an Agent reads
+
+Each Channel message an Agent receives now comes with the Hub's rendering of
+it: the header with its Channel, ids, delivery time and sender, the message it
+replies to, its body and attachments. The runtime uses that text as the turn
+and adds only where it saved attachments on the machine, so the wording of a
+turn changes with a Hub deploy. Older CLIs, and terminal (PTY) harnesses, still
+write the message themselves.
+
 ## Unreleased: The Hub handles streamed page writing
 
 Page-writing markers in conversation replies and answers to “write together”

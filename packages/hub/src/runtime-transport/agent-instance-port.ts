@@ -1,4 +1,5 @@
 import { daemonClientCompatibility as agentInstanceCompatibility } from "../legacy-client-compatibility";
+import { renderAgentTurnMessage } from "../agent-turn-message";
 import { SWITCH_CONTINUATION_FRAME_CAPABILITY } from "../product-agent-model-effort";
 import { plainDeliveryRecord } from "./delivery-record";
 import type {
@@ -419,6 +420,7 @@ export class AgentInstanceRuntimeTransport {
       const outbound: Extract<AgentInstanceServerMessage, { type: "channel_message_received" }> = {
         type: "channel_message_received",
         message,
+        prompt: renderAgentTurnMessage(message, recipient, new Date().toISOString()),
         ackRequired: true,
         ...(deliveryIntent === "context" ? { deliveryIntent } : {}),
         ...(interruptRequested ? { interruptRequested: true as const } : {}),

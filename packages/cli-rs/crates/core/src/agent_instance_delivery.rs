@@ -423,6 +423,7 @@ pub(crate) mod tests {
             interrupt_requested: Some(true),
             steer_allowed: None,
             delivery_intent: None,
+            prompt: None,
         }
     }
 
@@ -436,6 +437,7 @@ pub(crate) mod tests {
             message,
             ack_required: Some(true),
             delivery_intent: delivery_intent.map(str::to_string),
+            prompt: None,
             interrupt_requested: None,
             steer_allowed: None,
         }
@@ -524,6 +526,7 @@ pub(crate) mod tests {
                 interrupt_requested: Some(true),
                 steer_allowed: None,
                 delivery_intent: None,
+                prompt: None,
             };
         assert!(delivery_is_acknowledged_and_dropped(
             &live("chan-1:6", "agent"),
@@ -738,6 +741,7 @@ pub(crate) mod tests {
             interrupt_requested: Some(true),
             steer_allowed: None,
             delivery_intent: Some("context".into()),
+            prompt: None,
         };
         assert!(delivery_is_context_only(&live_notice));
     }
@@ -804,6 +808,7 @@ pub(crate) mod tests {
             interrupt_requested: None,
             steer_allowed: None,
             delivery_intent: Some("context".into()),
+            prompt: None,
         }
     }
 
@@ -966,6 +971,7 @@ pub(crate) mod tests {
                 interrupt_requested: Some(true),
                 steer_allowed: None,
                 delivery_intent: None,
+                prompt: None,
             },
             Some(&registered_author("agent:1", "instance-1")),
             None,

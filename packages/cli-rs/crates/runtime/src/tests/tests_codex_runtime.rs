@@ -1817,6 +1817,7 @@ fn steering_channel_message_event(
         unreachable!("a channel message");
     };
     AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+        prompt: None,
         message,
         client_message_id: None,
         ack_required,
@@ -3157,6 +3158,7 @@ async fn blob_url_attachment_skips_direct_download_and_requires_coordinates() {
 fn inbound_event_backfills_attachment_channel_and_message_id() {
     let event =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+            prompt: None,
             message: ChannelMessage {
                 attachments: Some(vec![test_attachment("att-1", "screen.png")]),
                 ..test_channel_message("msg-42", "chan-7", "screenshot")

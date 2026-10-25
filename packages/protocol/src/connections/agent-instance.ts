@@ -291,6 +291,11 @@ interface AgentChannelDelivery {
    * field can only ever remove spurious turns, never real ones.
    */
   deliveryIntent?: "context";
+  /**
+   * The message as this Instance reads it in a turn, rendered by the Hub for this recipient
+   * (hub/src/agent-turn-message.ts). A runtime that predates it renders `message` itself.
+   */
+  prompt?: string;
 }
 
 type AgentLiveChannelDelivery = AgentChannelDelivery & {

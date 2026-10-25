@@ -227,6 +227,7 @@ mod tests {
     use super::*;
     fn message(sequence: u64) -> crate::InboundChannelMessage {
         crate::InboundChannelMessage {
+            hub_prompt: None,
             message_id: format!("toggle-{sequence}"),
             channel_id: "channel".into(),
             sequence: Some(sequence),
