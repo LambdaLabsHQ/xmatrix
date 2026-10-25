@@ -85,6 +85,40 @@ fn render_context(
     Ok(ChannelReadContext { text, threads })
 }
 
+/// What a newly launched Run reads before its first turn, rendered by the Hub
+/// (`GET /api/channels/:id/launch-context`) so its wording, budget and order
+/// change with a Hub deploy.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchContext {
+    /// Context and transcript for the first prompt; absent when there is
+    /// nothing in front of the message the Run was started for.
+    pub text: Option<String>,
+    /// The newest sequence the text covers.
+    pub through_sequence: Option<u64>,
+    /// The message the Run was started for, as that read returned it.
+    pub started_for: Option<protocol::ChannelMessage>,
+    /// The latest co-writing instruction the read stepped past.
+    pub co_write: Option<protocol::ChannelPageCoWrite>,
+}
+
+pub async fn load_launch_context(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    started_for: Option<&str>,
+) -> error::Result<LaunchContext> {
+    let mut route = format!(
+        "/api/channels/{}/launch-context",
+        urlencoding::encode(channel_id)
+    );
+    if let Some(message_id) = started_for {
+        route.push_str("?startedFor=");
+        route.push_str(&urlencoding::encode(message_id));
+    }
+    http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
