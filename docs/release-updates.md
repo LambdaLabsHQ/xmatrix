@@ -32,6 +32,17 @@ replied.
 - **Retired.** The Runtime route directory and Channel fanout objects stay
   bound as 410 shells, and `XMATRIX_RUNTIME_CELL_MODE` is gone.
 
+## Unreleased: Co-writing starts with the document
+
+A newly launched page co-writer receives the current document and its writing
+protocol in the same first model turn as the invitation. Its words stream
+straight into that page, avoiding a separate ordinary task that could spend
+minutes reading commands or waiting for the person to stop typing while the
+live request queued behind it. The original message and execution attribution
+remain. A ten-second startup deadline preserves late requests through the
+ordinary run loop. This is a CLI update for every harness; the Hub protocol
+and older runtime behavior are unchanged.
+
 ## Unreleased: Pages have no claims and no owed updates
 
 Coordination on pages is lock-free, so nothing on a page is claimed and no
@@ -55,11 +66,13 @@ The GitHub App publishes no `xmatrix/claim` check; a repository that still
 lists it among its required checks should drop it, or its pull requests wait
 on a check that never arrives.
 
-Migration evidence: a follow-up contract migration drops `data.page_claims`,
-`data.page_block_competitions` and `data.space_action_claims` and removes the
-`owed` triggers left in Automations. It is applied once the deployed Hub no
-longer names those tables; until then the Space and Conversation purges no
-longer empty them, and the drop takes their rows.
+Migration evidence: contract migration `0215_contract_drop_page_claims` drops
+`data.page_claims`, `data.page_block_competitions` and
+`data.space_action_claims`, once the deployed Hub no longer names them (the
+contract-readers gate checks it). Between that deploy and the drop the Space
+and Conversation purges leave their rows, and the drop takes them. The one
+Automation with an `owed` trigger was edited before the release, so no stored
+trigger names it.
 
 ## Unreleased: Releases deploy concurrently by component dependency
 

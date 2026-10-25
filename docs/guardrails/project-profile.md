@@ -95,6 +95,13 @@ seconds, once consecutively. A replacement gets to finish, and ongoing text is
 not interrupted by this refresh. Full instructions travel again so queued
 requests can be retired safely.
 
+A fresh live co-writing launch includes the page's first request in its first
+model input, with the human invitation and its execution attribution. The
+first answer streams directly into the document instead of queuing behind an
+ordinary invitation task. The CLI waits at most ten seconds for the request;
+late requests keep their ordinary delivery path. See
+[live documents](../design/pages-live-document.md).
+
 
 Channel presence uses the protocol's read-only Instance-ID map, separate from
 Human devices. One reducer owns identity checks, lifecycle merges and removal;
