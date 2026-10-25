@@ -23,6 +23,12 @@ pub fn channel_turn_policy(channel_id: &str) -> String {
     )
 }
 
+/// The official text `name` with its `{slot}`s filled once, as the Hub
+/// delivered it for this Run (`bootstrap_prompts::official_text`).
+pub fn official_text(name: &str, slots: &[(&str, &str)]) -> String {
+    render_prompt(&crate::bootstrap_prompts::official_text(name), slots)
+}
+
 /// The Space's rules page, set by the daemon from the Hub's launch data.
 pub const SPACE_RULES_PAGE_ENV: &str = "XMATRIX_SPACE_RULES_PAGE_ID";
 
@@ -332,6 +338,34 @@ mod tests {
         );
         assert!(channel_turn_policy("channel-1").contains("xmatrix send channel-1"));
         assert!(channel_turn_policy("channel-1").len() < 400);
+    }
+
+    #[test]
+    fn a_named_text_comes_from_the_hub_and_otherwise_from_the_compiled_copy() {
+        let _lock = LAUNCH_ENV.lock().unwrap();
+        let env = LaunchEnv::clean();
+        assert!(
+            official_text("session-recovery-input", &[("message", "go on")])
+                .ends_with("session:\ngo on")
+        );
+        let mut templates = BootstrapPrompts::default();
+        templates.texts.insert(
+            "session-recovery-input".into(),
+            "Hub says: {message}".into(),
+        );
+        env.set(
+            crate::bootstrap_prompts::ENV,
+            &serde_json::to_string(&templates).unwrap(),
+        );
+        assert_eq!(
+            official_text("session-recovery-input", &[("message", "{message}")]),
+            "Hub says: {message}"
+        );
+        assert!(official_text("session-recovery-quiet", &[]).contains("Reconcile"));
+        templates
+            .texts
+            .insert("session-recovery".into(), " ".into());
+        assert!(templates.validate().is_err());
     }
 
     #[test]

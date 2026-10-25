@@ -1,5 +1,6 @@
 //! Official prompt transport, independent of tasks and registration instructions.
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub const ENV: &str = "XMATRIX_HUB_BOOTSTRAP_PROMPTS";
 const MAX_BYTES: usize = 32 * 1024;
@@ -16,6 +17,48 @@ pub struct BootstrapPrompts {
     pub connected_apps: String,
     pub working_mode_autonomous: String,
     pub working_mode_cautious: String,
+    /// Further official texts the runtime looks up by name (`official_text`).
+    /// The Hub sends them only to a daemon that declared
+    /// `bootstrap_prompt_texts_v1`, so a new text needs no schema change and
+    /// no CLI release; a name the Hub does not send uses the compiled copy.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub texts: BTreeMap<String, String>,
+}
+
+/// The compiled copy of every named official text, in the file the Hub reads
+/// it from (`packages/hub/src/agent-bootstrap.ts`).
+const COMPILED_TEXTS: &[(&str, &str)] = &[
+    (
+        "session-recovery",
+        include_str!("../prompts/session-recovery.md"),
+    ),
+    (
+        "session-recovery-input",
+        include_str!("../prompts/session-recovery-input.md"),
+    ),
+    (
+        "session-recovery-reborn",
+        include_str!("../prompts/session-recovery-reborn.md"),
+    ),
+    (
+        "session-recovery-quiet",
+        include_str!("../prompts/session-recovery-quiet.md"),
+    ),
+];
+
+/// The official text `name`, as the Hub delivered it for this Run, else its
+/// compiled copy. Panics on a name with no compiled copy: that is a CLI bug,
+/// never input.
+pub fn official_text(name: &str) -> String {
+    let prompts = BootstrapPrompts::from_env();
+    if let Some(text) = prompts.texts.get(name) {
+        return text.clone();
+    }
+    COMPILED_TEXTS
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map(|(_, text)| (*text).to_string())
+        .unwrap_or_else(|| panic!("no official text named `{name}`"))
 }
 
 impl Default for BootstrapPrompts {
@@ -30,6 +73,7 @@ impl Default for BootstrapPrompts {
             connected_apps: include_str!("../prompts/connected-apps.md").into(),
             working_mode_autonomous: include_str!("../prompts/working-mode-autonomous.md").into(),
             working_mode_cautious: include_str!("../prompts/working-mode-cautious.md").into(),
+            texts: BTreeMap::new(),
         }
     }
 }
@@ -53,7 +97,8 @@ impl BootstrapPrompts {
             &self.working_mode_cautious,
         ];
         if fields
-            .iter()
+            .into_iter()
+            .chain(self.texts.values())
             .any(|text| text.trim().is_empty() || text.contains('\0'))
         {
             return Err("Hub bootstrap text must be nonempty and contain no NUL".into());

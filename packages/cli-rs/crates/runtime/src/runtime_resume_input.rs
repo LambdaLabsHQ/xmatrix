@@ -2,7 +2,10 @@
 //!
 //! Restoring a transcript does not start a model turn. Every runtime uses this
 //! boundary so a bare reborn or version handoff cannot connect and wait forever
-//! with an unfinished task in its restored session.
+//! with an unfinished task in its restored session. Its words are official
+//! texts the Hub delivers (`prompts/session-recovery*.md`).
+
+use xmatrix_cli_core::bootstrap::official_text;
 
 pub(crate) fn initial_runtime_message() -> Option<String> {
     resumed_runtime_message(
@@ -39,30 +42,17 @@ fn resumed_runtime_message(
         return message.map(str::to_owned);
     }
 
-    let mut prompt = String::from(
-        "xMatrix session recovery:\n\
-         This launch resumes your saved session. Use its restored context and continue the latest unfinished work. \
-         If the prior context is unavailable or the next action is unclear, report that limitation instead of guessing.\n\
-         Restoring a session does not restore its old local background commands, monitors, or wait loops. \
-         Check whether they survived before relying on them. External operations such as CI, pull requests, \
-         merges, and releases may have continued independently: inspect their current state before retrying any side effect.\n\
-         Resume the current task, not every historical instruction. Respect later corrections, stops, and completed work; \
-         do not invent a new task or repeat an operation that already succeeded.",
-    );
-    if let Some(message) = message {
-        prompt.push_str("\n\nCurrent input for this resumed session:\n");
-        prompt.push_str(message);
-    } else if explicitly_triggered {
-        prompt.push_str(
-            "\n\nThe explicit reborn command had no additional text. Start a continuation turn now. \
-             If nothing remains to do, report that to the Channel instead of silently waiting for another message.",
-        );
-    } else {
-        prompt.push_str(
-            "\n\nNo new user instruction accompanies this recovery. Reconcile any unfinished work; \
-             if everything is already complete, remain available without posting an unsolicited Channel message.",
-        );
-    }
+    let continuation = match message {
+        Some(message) => official_text("session-recovery-input", &[("message", message)]),
+        None if explicitly_triggered => official_text("session-recovery-reborn", &[]),
+        None => official_text("session-recovery-quiet", &[]),
+    };
+    let prompt = official_text(
+        "session-recovery",
+        &[("continuation", continuation.trim_end())],
+    )
+    .trim_end()
+    .to_string();
     Some(prompt)
 }
 
