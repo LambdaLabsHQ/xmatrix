@@ -1,4 +1,4 @@
-import { PAGE_CO_WRITE_RATE, parsePageCoWriteReply, type PageCoWriteReply, type PageCoWriteRequest } from "@xmatrix/protocol";
+import { PAGE_CO_WRITE_RATE, parsePageCoWriteReply, sha256Hex, type PageCoWriteReply, type PageCoWriteRequest } from "@xmatrix/protocol";
 
 /** Internal Page-domain transport. The authenticated router supplies the scope and expiry. */
 export interface PageOutputWrite {
@@ -66,8 +66,7 @@ export class PageOutputReceipts {
       this.receipts.delete(id);
       this.live.delete(id);
     }
-    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(write.reply)));
-    const digest = Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const digest = await sha256Hex(JSON.stringify(write.reply));
     const previous = this.receipts.get(key);
     if (previous) {
       if (previous.expiresAt !== write.expiresAt) return { status: "rejected", seq: write.seq };

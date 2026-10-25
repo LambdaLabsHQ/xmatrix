@@ -516,10 +516,12 @@ export class PageSession {
 
   /** A person takes back what the Agent co-writing from `conversationId` last wrote. */
   undoCoWriting(conversationId: string, by: string): "undone" | "changed" | "nothing" {
+    let latest: PageCoWriter | undefined;
     for (const [id, writer] of this.coWriters) {
-      if (this.connections.get(id)?.principal.conversationId === conversationId) return writer.undo(by);
+      if (this.connections.get(id)?.principal.conversationId === conversationId && writer.undoWrittenAt !== null &&
+          writer.undoWrittenAt >= (latest?.undoWrittenAt ?? -1)) latest = writer;
     }
-    return "nothing";
+    return latest?.undo(by) ?? "nothing";
   }
 
   setCanEdit(connectionId: string, canEdit: boolean): void {

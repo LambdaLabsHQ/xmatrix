@@ -680,6 +680,12 @@ export class PageCoWriter {
    * A person takes back what the Agent last wrote: the blocks return to what they were, unless
    * someone changed them since. What it is writing now counts as its last change, and it stops.
    */
+  get undoWrittenAt(): number | null {
+    const action = this.active?.action;
+    return (action && !action.skipped && action.kind !== "note" && action.written.length) || this.last
+      ? this.lastWrite : null;
+  }
+
   undo(by: string): "undone" | "changed" | "nothing" {
     const writing = this.active?.action;
     const target: Written | null = writing && !writing.skipped && writing.kind !== "note" && writing.written.length

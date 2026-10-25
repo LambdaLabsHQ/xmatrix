@@ -3,6 +3,7 @@ import { PAGE_OUTPUT_LIFETIME_MS, type PageOutputReceipt } from "./page-output-r
 import type { PageSessionPrincipal } from "./page-session";
 import { pageSessionId } from "./page-session-id";
 import type { Env } from "./types";
+import { sha256Hex } from "@xmatrix/protocol";
 import { domainFailure, failureResponse, ServiceUnavailable } from "./error-contract";
 
 /** Called only by the authenticated Worker route, in the Run owner's runtime cell. */
@@ -14,10 +15,9 @@ export async function receivePageAssistantOutput(request: Request, env: Env, sto
   if (!input || body.principal.kind !== "agent" || !proof?.instanceId || !proof.executionKey || !body.spaceId) {
     return Response.json({ error: "Invalid assistant output binding" }, { status: 400 });
   }
-  const scopeBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([
+  const scope = await sha256Hex(JSON.stringify([
     body.spaceId, body.principal.id, proof.runId, proof.instanceId, proof.executionKey,
-  ])));
-  const scope = Array.from(new Uint8Array(scopeBytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  ]));
   try {
     const result = await receiver.receive(scope, input, {
       load: (key) => storage.get(key),

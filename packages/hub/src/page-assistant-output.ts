@@ -1,4 +1,4 @@
-import type { PageAssistantOutput, PageAssistantOutputAck } from "@xmatrix/protocol";
+import { sha256Hex, type PageAssistantOutput, type PageAssistantOutputAck } from "@xmatrix/protocol";
 export { parsePageAssistantOutput } from "@xmatrix/protocol";
 import type { PageCoWriteRequest } from "@xmatrix/protocol";
 import { emptyPageOutputParser, finishPageOutput, takePageOutput, type PageOutputParserState } from "./page-output-parser";
@@ -52,8 +52,7 @@ export class PageAssistantOutputReceiver {
     if (input.startedAt > now + 60_000 || input.startedAt + PAGE_OUTPUT_LIFETIME_MS <= now) {
       return ack("rejected", 0, ["The assistant output stream expired; read the page before writing again."]);
     }
-    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([input.type, input.text])));
-    const digest = Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const digest = await sha256Hex(JSON.stringify([input.type, input.text]));
     let state = await ports.load(key);
     // Cancellation fences every later delivery, including an in-flight Page
     // RPC whose acknowledgement was lost. It never retries a model turn.

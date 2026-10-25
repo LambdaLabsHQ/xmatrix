@@ -244,6 +244,31 @@ test("an output receipt persists every applied character without waiting for a d
   assert.match(restored.session.markdown(), /ab\n$/u, "the confirmed text survived before any display timer fired");
 });
 
+test("undo selects the latest acknowledged stream in a conversation", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const h = harness();
+  await annConnected(h);
+  for (const stream of ["first", "second"]) {
+    const base = { stream, expiresAt: now + 60_000 };
+    await h.session.output(agent, { ...base, seq: 0, reply: { type: "write", turn: 1 } });
+    let seq = 1;
+    let at = 0;
+    for (const text of `⟦after "none"⟧\n${stream}`.match(/.{1,5}/gsu)) {
+      now += 500;
+      assert.equal((await h.session.output(agent, { ...base, seq, reply: { type: "delta", turn: 1, text,
+        paced: { at } } })).status, "accepted");
+      seq++;
+      at += [...text].length;
+    }
+    await h.session.output(agent, { ...base, seq, reply: { type: "done", turn: 1, paced: { at } } });
+  }
+  assert.match(h.session.markdown(), /second\n\nfirst/u);
+  assert.equal(h.session.undoCoWriting("conv-1", "ann"), "undone");
+  assert.match(h.session.markdown(), /first/u);
+  assert.doesNotMatch(h.session.markdown(), /second/u);
+});
+
 /** The Agent's edit of the page's head: "none" becomes "some". */
 function editAsAgent(h) {
   return h.session.submitEdit(agent, { baseRevision: 1, body: HEAD.replace("none", "some"), conversationIds: [] });
