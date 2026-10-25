@@ -21,11 +21,12 @@ test("channel prose uses a reading line-height and separates paragraphs and list
   assert.deepEqual(lineHeights, ["1.75", "1.75"]);
 });
 
-test("page prose uses the same reading rhythm as channel messages", () => {
-  assert.match(pageCss, /\.page-document \{\s*font-size: 15px;\s*line-height: 1\.75;/);
-  assert.match(pageCss, /\.page-document > \* \+ \* \{ margin-top: 16px; \}/);
+test("page prose keeps one-line paragraphs close, as a document does", () => {
+  assert.match(pageCss, /\.page-document \{\s*font-size: 15px;\s*line-height: 1\.65;/);
+  assert.match(pageCss, /\.page-document > \* \+ \* \{ margin-top: 8px; \}/);
   assert.match(pageCss, /\.page-document li \+ li \{ margin-top: 4px; \}/);
   assert.match(pageCss, /\.page-document li > :is\(ul, ol\) \{ margin-top: 4px; \}/);
-  assert.match(pageCss, /\.page-document \{ font-size: 16px; line-height: 1\.75; \}/);
-  assert.equal(pageCss.match(/line-height: 1\.65/g), null);
+  assert.match(pageCss, /\.page-document \{ font-size: 16px; line-height: 1\.65; \}/);
+  assert.equal(pageCss.match(/line-height: 1\.75/g), null);
+  assert.equal(pageCss.match(/> \* \+ \* \{ margin-top: 16px; \}/g), null);
 });
