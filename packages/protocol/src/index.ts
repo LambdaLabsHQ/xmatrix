@@ -31,7 +31,7 @@ export {
   TEXT_TASK_INPUT_MAX_BYTES, TEXT_TASK_INSTRUCTION_MAX_BYTES, TEXT_TASK_OUTPUT_MAX_BYTES, TEXT_TASK_STATUSES,
 } from "./text-task.js";
 export type { TextTaskRequest, TextTaskResult, TextTaskStatus } from "./text-task.js";
-export { PAGE_AGENT_INK_MS, PAGE_CO_WRITE_RATE, PAGE_MESSAGE_CO_WRITE, PageCoWriteParser, parsePageCoWriteReply } from "./page-co-writing.js";
+export { PAGE_AGENT_INK_MS, PAGE_CO_WRITE_RATE, PAGE_MESSAGE_CO_WRITE, PAGE_COWRITE_INPUT_CAPABILITY, PageCoWriteParser, parsePageCoWriteReply } from "./page-co-writing.js";
 export { discussionHead, splitDiscussionHead } from "./discussion-head.js";
 export { automaticConversationName } from "./conversation-name.js";
 export type { DiscussionHead, DiscussionSource } from "./discussion-head.js";

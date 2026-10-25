@@ -7,7 +7,7 @@ import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-princi
 import { requireAuth } from "./index-shared";
 import { publishPreReviewVerdict } from "./github-pre-review";
 import { gitHubFileReferenceHref, gitHubFileReferences, immutableContentObjectKey, pageLineDiff, pageMediaFile,
-  pageMediaReferences, parseGitHubFileReference, spaceVisibilityScope, type PageAwareness,
+  pageMediaReferences, parseGitHubFileReference, spaceVisibilityScope, utf8ByteLength, type PageAwareness,
   type PageBlame, type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity,
   type PublicPage } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
@@ -587,6 +587,10 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       const coWriter = request.coWrite === true;
       // A runtime streaming what its Agent writes from a conversation opens its turns itself.
       const streams = coWriter && request.stream === true;
+      if (request.initialInput !== undefined && (!coWriter || streams || request.acknowledged !== true ||
+          typeof request.initialInput !== "string" || !request.initialInput.trim() || utf8ByteLength(request.initialInput) > 262_144)) {
+        throw new PageControlError("page_initial_input_invalid", 400, "Invalid initial co-writing input");
+      }
       if (authUser.agentRun && !coWriter) {
         throw new PageControlError("page_co_writing_required", 403, "An Agent joins only as a page co-writer");
       }
@@ -602,6 +606,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
         ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit, ...(coWriter ? { coWriter: true } : {}),
         ...(streams ? { streams: true } : {}),
         ...(coWriter && !streams && request.acknowledged === true ? { acknowledged: true } : {}),
+        ...(typeof request.initialInput === "string" ? { initialInput: request.initialInput } : {}),
       });
       if (!registered.ok) throw new ServiceUnavailable("page_session_unavailable", "Page session is unavailable");
       return c.json({ protocol: `${PAGE_SESSION_SUBPROTOCOL_PREFIX}${ticket}`,

@@ -24,6 +24,7 @@ pub(crate) const PAGE_MESSAGE_CO_WRITE: u64 = 3;
 /// Answered by the session's host without waking it; a socket that sends it
 /// now and then stays open while the Agent is quiet.
 pub const PAGE_SESSION_HEARTBEAT_PING: &str = "ping";
+pub const INITIAL_INPUT_CAPABILITY: &str = "page_cowrite_input_v1";
 /// The document fragment the session edits; a client naming another is told
 /// it is out of date.
 const PAGE_DOCUMENT_FRAGMENT: &str = "prosemirror";
@@ -134,6 +135,8 @@ pub enum PageCoWriteRequest {
         text: String,
         #[serde(default, rename = "outputSession")]
         output_session: Option<String>,
+        #[serde(default)]
+        initial: bool,
     },
     Interrupt {
         turn: u64,
@@ -553,15 +556,18 @@ impl PageCoWriteConnector {
         page_id: &str,
         streams: bool,
     ) -> Result<ClientWebSocket> {
-        self.connect_inner(space_id, page_id, streams, false).await
+        self.connect_inner(space_id, page_id, streams, false, None)
+            .await
     }
 
     pub async fn connect_acknowledged(
         &self,
         space_id: &str,
         page_id: &str,
+        initial_input: Option<&str>,
     ) -> Result<ClientWebSocket> {
-        self.connect_inner(space_id, page_id, false, true).await
+        self.connect_inner(space_id, page_id, false, true, initial_input)
+            .await
     }
 
     async fn connect_inner(
@@ -570,6 +576,7 @@ impl PageCoWriteConnector {
         page_id: &str,
         streams: bool,
         acknowledged: bool,
+        initial_input: Option<&str>,
     ) -> Result<ClientWebSocket> {
         let (secure, host) = connection_host(&self.relay_url);
         let token = self.token()?;
@@ -585,6 +592,9 @@ impl PageCoWriteConnector {
         }
         if acknowledged {
             body["acknowledged"] = true.into();
+        }
+        if let Some(input) = initial_input {
+            body["initialInput"] = input.into();
         }
         let ticket: LiveTicket = http::request_json(&url, "POST", Some(&token), Some(body)).await?;
         if !ticket.socket_path.starts_with("/ws/pages/") {
@@ -683,6 +693,7 @@ mod tests {
                 turn: 2,
                 text: "页".repeat(100),
                 output_session: None,
+                initial: false,
             }),
             "a body longer than one varint byte"
         );

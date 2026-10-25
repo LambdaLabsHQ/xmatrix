@@ -1150,7 +1150,7 @@ test("summary: a fast completion waits for its pending dispatch to be recorded",
  * An Agent's runtime co-writing the page (page-co-writer.ts): what the session asks it, and its
  * answers, streamed in as the harness writes them.
  */
-function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false, streams = false, acknowledged = false } = {}) {
+function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false, streams = false, acknowledged = false, initialInput } = {}) {
   const asked = [];
   const send = h.ports.send;
   h.ports.send = (to, data) => {
@@ -1161,7 +1161,7 @@ function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false, stre
     assert.equal(type, PAGE_MESSAGE_CO_WRITE);
     asked.push(JSON.parse(decoding.readVarString(decoder)));
   };
-  h.session.connect({ id, principal: agent, canEdit, coWriter: true, streams, acknowledged }, { resumed });
+  h.session.connect({ id, principal: agent, canEdit, coWriter: true, streams, acknowledged, initialInput }, { resumed });
   const reply = (frame) => {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, PAGE_MESSAGE_CO_WRITE);
@@ -1499,6 +1499,25 @@ test("an initial unwritten page answer can be refreshed without losing its start
   assert.equal(writer.turns().length, 2);
   assert.match(writer.turns()[1].text, /First edit In progress/u);
   assert.match(writer.turns()[1].text, /Only what you write inside these markers reaches the page/u);
+});
+
+test("the Hub composes the launch input once, then refreshes from the current page without replaying the invitation", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 2_000_000 });
+  const h = harness();
+  const ann = await annConnected(h);
+  const writer = joinCoWriter(h, "complete-input", { acknowledged: true, initialInput: "Launch envelope and invitation" });
+  const first = writer.turns()[0];
+  assert.equal(first.initial, true);
+  assert.equal(first.outputSession, "complete-input");
+  assert.match(first.text, /^Launch envelope and invitation\n\n/u);
+  assert.match(first.text, /Only what you write inside these markers reaches the page/u);
+  assert.match(first.text, /In progress/u);
+  ann.text.insert(HEAD.indexOf("In progress"), "Current edit ");
+  t.mock.timers.tick(CO_WRITER_KEEP_UP_MS);
+  const next = writer.turns()[1];
+  assert.equal(next.initial, undefined);
+  assert.match(next.text, /Current edit In progress/u);
+  assert.doesNotMatch(next.text, /Launch envelope and invitation/u);
 });
 
 test("an empty replacement deletes old words without reporting newly written text", async (t) => {
