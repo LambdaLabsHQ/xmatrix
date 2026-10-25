@@ -23,8 +23,8 @@ use xmatrix_cli_core::agent_instance_connection::{
 };
 use xmatrix_cli_core::page_assistant_output::{COWRITE_CAPABILITY, OutputTarget};
 use xmatrix_cli_core::page_co_write::{
-    PAGE_SESSION_HEARTBEAT_PING, PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest,
-    PageWriteOutbox, decode_request, send_due,
+    INITIAL_INPUT_CAPABILITY, PAGE_SESSION_HEARTBEAT_PING, PageCoWriteConnector, PageCoWriteEvent,
+    PageCoWriteRequest, PageWriteOutbox, decode_request, send_due,
 };
 use xmatrix_cli_core::page_media::{ToPage, refused_images_note};
 use xmatrix_cli_core::protocol::ChannelPageCoWrite;
@@ -33,6 +33,8 @@ use xmatrix_cli_core::protocol::ChannelPageCoWrite;
 const HEARTBEAT: Duration = Duration::from_secs(25);
 /// A broken page connection must not hold the launch message indefinitely.
 const INITIAL_TURN_WAIT: Duration = Duration::from_secs(10);
+/// Transport startup budget. Expiry must fail before any model submission.
+const COMPLETE_INPUT_WAIT: Duration = Duration::from_secs(120);
 /// Waits before joining again after the socket closed or could not open.
 const REJOIN_DELAYS: [Duration; 5] = [
     Duration::from_secs(1),
@@ -64,6 +66,9 @@ struct Bridge {
     answering: Option<u64>,
     hub_output: bool,
     output_session: Option<String>,
+    hub_initial: bool,
+    initial_input: Option<String>,
+    initial_composed: bool,
     /// The answer's images, each held until it is whole (`page_media`).
     images: ToPage,
     /// Where the Agent hears what of its answer did not reach the page.
@@ -140,6 +145,12 @@ pub(crate) fn follow(
     }
     let (stop, stopped) = watch::channel(false);
     let hub_output = relay.hub_accepts(COWRITE_CAPABILITY);
+    let hub_initial = hub_output && relay.hub_accepts(INITIAL_INPUT_CAPABILITY);
+    let initial_input = if initial && hub_initial {
+        crate::runtime_resume_input::initial_runtime_message()
+    } else {
+        None
+    };
     let (initial_tx, initial_rx) = if initial {
         let (tx, rx) = oneshot::channel();
         (Some(tx), Some(rx))
@@ -156,6 +167,9 @@ pub(crate) fn follow(
             answering: None,
             hub_output,
             output_session: None,
+            hub_initial,
+            initial_input,
+            initial_composed: false,
             images: ToPage::default(),
             events: Some(relay.local_event_sender()),
             initial_tx,
@@ -173,21 +187,60 @@ pub(crate) fn follow(
     ));
 }
 
-/// Fold the page's actual request into the launch input. The same first turn
-/// then has the document, write protocol and streaming destination in every
-/// harness, while retaining the human message and its execution attribution.
-pub(crate) async fn initial_prompt(channel_id: &str) -> Option<String> {
-    let initial = bridges().get_mut(channel_id)?.initial_rx.take()?;
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum InitialPageInput {
+    Legacy(String),
+    Complete(String),
+}
+
+/// A bounded startup wait is not permission to submit an ordinary invitation
+/// ahead of the Page. The negotiated Hub input is delivered once, even late.
+pub(crate) async fn initial_prompt(
+    channel_id: &str,
+) -> crate::error::Result<Option<InitialPageInput>> {
+    let (initial, hub_initial) = {
+        let mut all = bridges();
+        let Some(bridge) = all.get_mut(channel_id) else {
+            return Ok(None);
+        };
+        let Some(initial) = bridge.initial_rx.take() else {
+            return Ok(None);
+        };
+        (initial, bridge.hub_initial)
+    };
+    let wait = if hub_initial {
+        COMPLETE_INPUT_WAIT
+    } else {
+        INITIAL_TURN_WAIT
+    };
     let Ok(Ok(PageCoWriteEvent::Turn {
         channel_id,
         turn,
         prompt,
-    })) = tokio::time::timeout(INITIAL_TURN_WAIT, initial).await
+    })) = tokio::time::timeout(wait, initial).await
     else {
-        return None;
+        return if hub_initial {
+            Err(crate::error::CliError::Launch("The complete Page input did not arrive before the connection closed or startup deadline; no model turn was submitted".into()))
+        } else {
+            Ok(None)
+        };
     };
+    if hub_initial
+        && !bridges()
+            .get(&channel_id)
+            .is_some_and(|bridge| bridge.initial_composed)
+    {
+        return Err(crate::error::CliError::Launch(
+            "The Page did not confirm its complete initial input; no model turn was submitted"
+                .into(),
+        ));
+    }
     turn_queued(&channel_id, turn);
-    Some(prompt)
+    Ok(Some(if hub_initial {
+        InitialPageInput::Complete(prompt)
+    } else {
+        InitialPageInput::Legacy(prompt)
+    }))
 }
 
 /// The reserved first page request goes to startup once; later requests and
@@ -295,8 +348,13 @@ async fn run_bridge(
 ) {
     let mut attempt = 0usize;
     while !*stopped.borrow() {
+        let initial_input = bridges()
+            .get(&channel_id)
+            .and_then(|bridge| bridge.initial_input.clone());
         let connected = if hub_output {
-            connector.connect_acknowledged(&space_id, &page_id).await
+            connector
+                .connect_acknowledged(&space_id, &page_id, initial_input.as_deref())
+                .await
         } else {
             connector.connect(&space_id, &page_id, false).await
         };
@@ -334,7 +392,7 @@ async fn run_bridge(
                             Some(Ok(Message::Binary(data))) => {
                                 if let Some(request) = decode_request(&data) {
                                     let event = match request {
-                                        PageCoWriteRequest::Turn { turn, text, output_session } => {
+                                        PageCoWriteRequest::Turn { turn, text, output_session, initial } => {
                                             if hub_output && output_session.is_none() {
                                                 let _ = events.send(AgentInstanceConnectionEvent::PageCoWrite(PageCoWriteEvent::Outcome {
                                                     channel_id: channel_id.clone(), prompt: "The Page did not provide an acknowledged output binding; this co-writing request was not submitted.".into(),
@@ -342,7 +400,17 @@ async fn run_bridge(
                                                 break;
                                             }
                                             if let Some(bridge) = bridges().get_mut(&channel_id) {
+                                                if bridge.hub_initial && initial != bridge.initial_input.is_some() {
+                                                    let _ = events.send(AgentInstanceConnectionEvent::PageCoWrite(PageCoWriteEvent::Outcome {
+                                                        channel_id: channel_id.clone(), prompt: "The Page did not confirm the complete initial input; this request was not submitted.".into(),
+                                                    }));
+                                                    break;
+                                                }
                                                 bridge.output_session = output_session;
+                                                if initial {
+                                                    bridge.initial_composed = true;
+                                                    bridge.initial_input = None;
+                                                }
                                             }
                                             PageCoWriteEvent::Turn { channel_id: channel_id.clone(), turn, prompt: text }
                                         },
@@ -425,6 +493,9 @@ mod tests {
                 answering: None,
                 hub_output: false,
                 output_session: None,
+                hub_initial: false,
+                initial_input: None,
+                initial_composed: false,
                 images: ToPage::default(),
                 events: None,
                 initial_tx: None,
@@ -497,23 +568,8 @@ mod tests {
         bridges().remove(channel);
     }
 
-    // Existing trace tests start after a page turn was queued. This protects
-    // the missing startup boundary: the invitation's very first prompt must
-    // already carry the page request, and its first words must stream there.
-    #[test]
-    fn a_co_writing_launch_answers_the_page_in_its_first_model_turn() {
+    fn initial_turn_for_test(channel: &str) -> Option<String> {
         let _guard = crate::tests::test_process_env_lock();
-        let channel = "c-co-write-initial";
-        let mut frames = initial_bridge_for_test(channel);
-        let (events, mut pending) = mpsc::unbounded_channel();
-        assert!(deliver_event(
-            &events,
-            PageCoWriteEvent::Turn {
-                channel_id: channel.into(),
-                turn: 1,
-                prompt: "[Live co-writing] You joined this page.\n⟦after \"Plan\"⟧\n# Plan".into(),
-            }
-        ));
         let keys = [
             "XMATRIX_AUTO_JOIN_CHANNEL_ID",
             "XMATRIX_INITIAL_MESSAGE",
@@ -538,6 +594,26 @@ mod tests {
                 }
             }
         }
+        prompt.unwrap()
+    }
+
+    // Existing trace tests start after a page turn was queued. This protects
+    // the missing startup boundary: the invitation's very first prompt must
+    // already carry the page request, and its first words must stream there.
+    #[test]
+    fn a_co_writing_launch_answers_the_page_in_its_first_model_turn() {
+        let channel = "c-co-write-initial";
+        let mut frames = initial_bridge_for_test(channel);
+        let (events, mut pending) = mpsc::unbounded_channel();
+        assert!(deliver_event(
+            &events,
+            PageCoWriteEvent::Turn {
+                channel_id: channel.into(),
+                turn: 1,
+                prompt: "[Live co-writing] You joined this page.\n⟦after \"Plan\"⟧\n# Plan".into(),
+            }
+        ));
+        let prompt = initial_turn_for_test(channel);
         assert_eq!(
             prompt.as_deref(),
             Some(
@@ -582,11 +658,78 @@ mod tests {
         bridges().remove(channel);
     }
 
+    #[test]
+    fn hub_initial_page_input_reaches_the_model_once_without_a_second_local_envelope() {
+        let channel = "c-hub-complete-input";
+        let _frames = initial_bridge_for_test(channel);
+        {
+            let mut all = bridges();
+            let bridge = all.get_mut(channel).unwrap();
+            bridge.hub_initial = true;
+            bridge.initial_composed = true;
+        }
+        let (events, mut pending) = mpsc::unbounded_channel();
+        let input = "Hub launch envelope\n\nCurrent Page request";
+        deliver_event(
+            &events,
+            PageCoWriteEvent::Turn {
+                channel_id: channel.into(),
+                turn: 8,
+                prompt: input.into(),
+            },
+        );
+        assert_eq!(initial_turn_for_test(channel).as_deref(), Some(input));
+        assert!(pending.try_recv().is_err());
+        assert_eq!(bridges().get(channel).unwrap().queued, Some(8));
+        bridges().remove(channel);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_hub_page_input_never_starts_an_ordinary_or_bootstrap_only_turn() {
+        let channel = "c-hub-slow-input";
+        let _frames = initial_bridge_for_test(channel);
+        bridges().get_mut(channel).unwrap().hub_initial = true;
+        let first = tokio::spawn(initial_prompt(channel));
+        tokio::task::yield_now().await;
+        tokio::time::advance(INITIAL_TURN_WAIT + Duration::from_secs(1)).await;
+        assert!(
+            !first.is_finished(),
+            "legacy timeout cannot release an ordinary invitation"
+        );
+        bridges().get_mut(channel).unwrap().initial_composed = true;
+        let (events, mut pending) = mpsc::unbounded_channel();
+        deliver_event(
+            &events,
+            PageCoWriteEvent::Turn {
+                channel_id: channel.into(),
+                turn: 9,
+                prompt: "Whole late input".into(),
+            },
+        );
+        assert_eq!(
+            first.await.unwrap().unwrap(),
+            Some(InitialPageInput::Complete("Whole late input".into()))
+        );
+        assert!(
+            pending.try_recv().is_err(),
+            "the late request is still the first turn"
+        );
+        bridges().remove(channel);
+
+        let _frames = initial_bridge_for_test(channel);
+        bridges().get_mut(channel).unwrap().hub_initial = true;
+        assert!(
+            initial_prompt(channel).await.is_err(),
+            "a dead connection fails before model submission"
+        );
+        bridges().remove(channel);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_late_initial_page_request_survives_the_bounded_startup_wait() {
         let channel = "c-co-write-late-initial";
         let _frames = initial_bridge_for_test(channel);
-        assert!(initial_prompt(channel).await.is_none());
+        assert!(initial_prompt(channel).await.unwrap().is_none());
         let (events, mut pending) = mpsc::unbounded_channel();
         assert!(deliver_event(
             &events,
@@ -602,7 +745,7 @@ mod tests {
                 PageCoWriteEvent::Turn { turn: 3, .. }
             ))
         ));
-        assert!(initial_prompt("ordinary-chat").await.is_none());
+        assert!(initial_prompt("ordinary-chat").await.unwrap().is_none());
         bridges().remove(channel);
     }
 

@@ -1475,7 +1475,7 @@ pub(crate) async fn read_initial_message_launch(
         hub_url,
         supports_self_goal,
     ));
-    let initial_message = crate::runtime_resume_input::initial_runtime_turn().await;
+    let initial_message = crate::runtime_resume_input::initial_runtime_turn().await?;
     let initial_message_attachments = read_initial_message_attachments_from_env()?;
     let initial_message_attachment_files = materialize_initial_message_image_files(
         initial_message_attachments.as_deref(),

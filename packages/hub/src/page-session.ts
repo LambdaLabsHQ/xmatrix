@@ -141,6 +141,8 @@ export interface PageSessionConnection {
   streams?: boolean;
   /** Inputs stay on this socket; assistant output arrives through acknowledged HTTP. */
   acknowledged?: boolean;
+  /** Ordinary launch input, composed with the first Page request by the Hub once. */
+  initialInput?: string;
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -713,8 +715,19 @@ export class PageSession {
           // survive until the next write; the host retains unaccepted text.
           if (output.notices.length < 32) output.notices.push(request);
         }
-        if (!output?.virtual) this.ports.send(connection.id, encodeCoWrite(request.type === "turn" && connection.acknowledged
-          ? { ...request, outputSession: connection.id } : request));
+        if (!output?.virtual) {
+          let input = request;
+          if (request.type === "turn" && connection.acknowledged) {
+            input = { ...request, outputSession: connection.id };
+            if (connection.initialInput !== undefined) {
+              // Both pieces are ordinary model input. This does not promote
+              // channel text or Page content into trusted launch instructions.
+              input = { ...input, initial: true, text: `${connection.initialInput}\n\n${request.text}` };
+              connection.initialInput = undefined;
+            }
+          }
+          this.ports.send(connection.id, encodeCoWrite(input));
+        }
       },
       observe: (event) => this.ports.observeCoWriting?.(principal, event),
     };

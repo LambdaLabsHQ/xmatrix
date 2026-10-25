@@ -98,6 +98,8 @@ pub struct LaunchContext {
     pub through_sequence: Option<u64>,
     /// The message the Run was started for, as that read returned it.
     pub started_for: Option<protocol::ChannelMessage>,
+    /// The first message's ordinary input, prepared by the Hub.
+    pub started_for_prompt: Option<String>,
     /// The latest co-writing instruction the read stepped past.
     pub co_write: Option<protocol::ChannelPageCoWrite>,
 }

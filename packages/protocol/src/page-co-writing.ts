@@ -16,6 +16,7 @@
 
 /** A frame on a page session's WebSocket carrying co-writing JSON (after sync 0, awareness 1, notice 2). */
 export const PAGE_MESSAGE_CO_WRITE = 3;
+export const PAGE_COWRITE_INPUT_CAPABILITY = "page_cowrite_input_v1";
 
 /**
  * What an Agent wrote stays marked in its colour this long, as a highlighter marks it: for whoever is on
@@ -51,7 +52,7 @@ export type PageCoWriteEvent =
  * page and why, so the Agent hears it; nothing when all of it did.
  */
 export type PageCoWriteRequest =
-  | { type: "turn"; turn: number; text: string; outputSession?: string }
+  | { type: "turn"; turn: number; text: string; outputSession?: string; initial?: boolean }
   | { type: "interrupt"; turn: number }
   | { type: "outcome"; turn: number; problems: string[] }
   /**

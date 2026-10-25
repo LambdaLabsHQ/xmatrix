@@ -1,4 +1,5 @@
 import { channelActivityOf, channelActivityLine, type ChannelMessage, type ChannelSummarySource } from "@xmatrix/protocol";
+import { renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-message";
 
 /**
  * What a newly launched Agent reads before its first turn: the conversation it
@@ -24,6 +25,8 @@ interface LaunchContext {
   throughSequence?: number;
   /** The message the Run was started for, which the launch otherwise carries only as a body. */
   startedFor?: ChannelMessage;
+  /** The first message uses the same Hub envelope as subsequent deliveries. */
+  startedForPrompt?: string;
   /** The latest co-writing instruction read here, which the join floor then steps past. */
   coWrite?: LaunchCoWrite;
 }
@@ -110,6 +113,7 @@ export function renderLaunchContext(input: {
   messages: ChannelMessage[];
   complete: boolean;
   startedForId?: string;
+  reader?: AgentTurnReader;
   readAt?: string;
   maxChars?: number;
   about?: { summary?: string; summarySource?: ChannelSummarySource } | null;
@@ -123,7 +127,10 @@ export function renderLaunchContext(input: {
     message.sequence === undefined ? max : Math.max(max ?? 0, message.sequence), undefined);
   if (through !== undefined) result.throughSequence = through;
   const startedFor = input.startedForId ? all.find((message) => message.messageId === input.startedForId) : undefined;
-  if (startedFor) result.startedFor = startedFor;
+  if (startedFor) {
+    result.startedFor = startedFor;
+    result.startedForPrompt = renderAgentTurnMessage(startedFor, input.reader ?? {}, input.readAt ?? startedFor.sentAt);
+  }
   for (const message of all) {
     const coWrite = launchCoWrite(message);
     if (coWrite) result.coWrite = coWrite;
@@ -165,6 +172,7 @@ export function renderLaunchContext(input: {
 export async function readLaunchContext(input: {
   channelId: string;
   startedForId?: string;
+  reader?: AgentTurnReader;
   readAt: string;
   history: (page: { beforeSequence?: number; limit: number }) => Promise<{ messages: ChannelMessage[]; hasMore: boolean }>;
   about: () => Promise<{ summary?: string; summarySource?: ChannelSummarySource } | null>;
@@ -188,7 +196,7 @@ export async function readLaunchContext(input: {
   }
   const render = (about?: { summary?: string; summarySource?: ChannelSummarySource } | null) => {
     const { cut, ...context } = renderLaunchContext({ channelId: input.channelId, messages, complete,
-      startedForId: input.startedForId, readAt: input.readAt, about });
+      startedForId: input.startedForId, reader: input.reader, readAt: input.readAt, about });
     return { cut, context };
   };
   const rendered = render();

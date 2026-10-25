@@ -19,6 +19,7 @@ test("the transcript reads oldest first, states its zone and when it was read, a
   assert.ok(context.text.includes("2026-09-18T20:01:00Z (27m ago) #1 Ann [user] [messageId=m1]:\n  first\n"));
   assert.ok(!context.text.includes("summon text"));
   assert.equal(context.startedFor.messageId, "m3");
+  assert.equal(context.startedForPrompt, `xMatrix channel c1 messageId=m3 deliveredAt=${READ_AT} from Ann [user]:summon text`);
   assert.equal(context.throughSequence, 3);
   assert.ok(context.text.endsWith("End of channel history."));
 });

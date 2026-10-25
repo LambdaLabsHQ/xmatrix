@@ -21,15 +21,23 @@ pub(crate) fn initial_runtime_message() -> Option<String> {
 
 /// A co-writing invitation and the page's first request are one model turn:
 /// otherwise an ordinary task can keep the live document queued for minutes.
-pub(crate) async fn initial_runtime_turn() -> Option<String> {
-    let mut message = initial_runtime_message()?;
+pub(crate) async fn initial_runtime_turn() -> crate::error::Result<Option<String>> {
+    let Some(mut message) = initial_runtime_message() else {
+        return Ok(None);
+    };
     if let Some(channel_id) = crate::non_empty_env("XMATRIX_AUTO_JOIN_CHANNEL_ID")
-        && let Some(page) = crate::runtime_page_co_write::initial_prompt(&channel_id).await
+        && let Some(page) = crate::runtime_page_co_write::initial_prompt(&channel_id).await?
     {
-        message.push_str("\n\n");
-        message.push_str(&page);
+        use crate::runtime_page_co_write::InitialPageInput;
+        match page {
+            InitialPageInput::Complete(input) => return Ok(Some(input)),
+            InitialPageInput::Legacy(input) => {
+                message.push_str("\n\n");
+                message.push_str(&input);
+            }
+        }
     }
-    Some(message)
+    Ok(Some(message))
 }
 
 fn resumed_runtime_message(

@@ -98,8 +98,10 @@ requests can be retired safely.
 A fresh live co-writing launch includes the page's first request in its first
 model input, with the human invitation and its execution attribution. The
 first answer streams directly into the document instead of queuing behind an
-ordinary invitation task. The CLI waits at most ten seconds for the request;
-late requests keep their ordinary delivery path. See
+ordinary invitation task. The negotiated Hub path composes the complete first
+input at the Page; a slow connection waits for it within a bounded transport
+startup budget and fails before model submission if unavailable. Older Hubs
+retain the legacy local combination. See
 [live documents](../design/pages-live-document.md).
 
 

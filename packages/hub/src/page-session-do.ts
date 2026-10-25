@@ -59,7 +59,11 @@ interface Attachment {
   acknowledged?: boolean;
 }
 
-interface Ticket extends Omit<Attachment, "connectionId"> { expiresAt: number }
+interface Ticket extends Omit<Attachment, "connectionId"> {
+  expiresAt: number;
+  /** Consumed on the fresh connect; never serialized into the socket attachment. */
+  initialInput?: string;
+}
 
 export { pageSessionId } from "./page-session-id";
 
@@ -252,6 +256,7 @@ export class RelayPageSession extends DurableObject<Env> {
         this.tickets.set(body.ticket, { spaceId: body.spaceId, pageId: body.pageId, principal: body.principal,
           canEdit: body.canEdit, ...(body.coWriter === true ? { coWriter: true } : {}),
           ...(body.coWriter === true && body.streams === true ? { streams: true } : {}), ...(body.coWriter === true && !body.streams && body.acknowledged === true ? { acknowledged: true } : {}),
+          ...(body.acknowledged === true && typeof body.initialInput === "string" ? { initialInput: body.initialInput } : {}),
           expiresAt: Date.now() + TICKET_TTL_MS });
         return Response.json({ ok: true });
       }
@@ -366,7 +371,7 @@ export class RelayPageSession extends DurableObject<Env> {
     if (isPerson(attachment)) await this.ctx.storage.delete("peopleLeft");
     this.session.connect({ id: attachment.connectionId, principal: attachment.principal, canEdit: attachment.canEdit,
       coWriter: attachment.coWriter === true, streams: attachment.streams === true,
-      acknowledged: attachment.acknowledged === true });
+      acknowledged: attachment.acknowledged === true, initialInput: ticket.initialInput });
     await this.scheduleAlarm(REVALIDATE_MS);
     const protocol = request.headers.get("sec-websocket-protocol")?.split(",")[0]?.trim();
     return new Response(null, { status: 101, webSocket: client,

@@ -421,13 +421,17 @@ fact is about.
     replay; the run loop consumes them without a harness turn. A fresh Run's
     startup history read also restores the newest validated co-writing state
     before its join floor advances beyond those messages. For a fresh launch
-    with a message, the runtime joins the page before its first model turn
-    and folds the page's first request (document and writing protocol) into
-    that message. Its first words stream to that request, rather than waiting
-    behind a separate invitation task. Startup waits at most ten seconds for
-    the page; a later request still reaches the ordinary loop. The original
-    message and execution attribution stay intact. This needs the updated CLI;
-    the Hub wire protocol and older runtimes are unchanged. Ordinary notices
+    with a message, the runtime joins the page before its first model turn.
+    With `page_cowrite_input_v1`, it supplies the ordinary launch input on the
+    live ticket. The Page combines it with its current document and writing
+    protocol once, marking that first request `initial: true`. The Host submits
+    those complete bytes as one input with the original execution attribution;
+    subsequent requests do not replay the invitation. A slow connection cannot
+    start an ordinary invitation or bootstrap-only model turn. The Host's
+    transport startup budget is two minutes; closure or expiry fails explicitly
+    before model submission. The one-use input is not serialized into the
+    socket attachment or replayed after hibernation. Older Hub connections keep
+    the legacy ten-second wait and local combination. Ordinary notices
     and caller-authored lookalikes stay context. Each later turn the session sends
     reaches the run loop as a resume of that conversation, so every backend runs
     it as any turn; the harness's text, which every backend reports as
