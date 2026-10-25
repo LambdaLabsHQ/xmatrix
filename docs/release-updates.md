@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Some xmatrix commands now come from the Hub
+
+`xmatrix automation …` is now defined by the Hub: the CLI passes the command
+line on and prints the answer, so its options, help and output change with a
+Hub deploy. `xmatrix commands` lists every command defined this way, and
+`xmatrix --help` points to it. The commands behave as before. Commands that
+work on the machine itself stay in the CLI. This needs the new CLI once; older
+CLIs keep their built-in `automation` command.
+
 ## Unreleased: Official runtime texts can change with the Hub
 
 The Hub can now send the runtime further official texts by name, beside the

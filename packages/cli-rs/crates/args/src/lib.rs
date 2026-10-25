@@ -7,7 +7,8 @@ pub use harness::{HarnessApplyAction, HarnessAutoUpdateState, HarnessCommand, Ha
 #[derive(Parser)]
 #[command(
     name = "xmatrix",
-    about = "xMatrix CLI — AI cross-ecosystem communication"
+    about = "xMatrix CLI — AI cross-ecosystem communication",
+    after_help = "More commands are defined by the Hub: run `xmatrix commands` to list them."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -357,11 +358,6 @@ pub enum Commands {
         #[command(subcommand)]
         command: PageCommand,
     },
-    /// Create and manage Channel Automations
-    Automation {
-        #[command(subcommand)]
-        command: AutomationCommand,
-    },
     /// Run an external command (passthrough)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -384,73 +380,6 @@ pub enum SpaceBillingCommand {
     Status {
         #[arg(long)]
         space: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum AutomationCommand {
-    /// List Automations visible in a Channel (or a managed Space)
-    List {
-        #[arg(long, conflicts_with = "space")]
-        channel: Option<String>,
-        #[arg(long, conflicts_with = "channel")]
-        space: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Update an Automation without moving its Channel or changing its author
-    Update {
-        automation_id: String,
-        #[arg(long = "version", visible_alias = "expected-version")]
-        expected_version: u64,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long = "expression", alias = "message")]
-        expression: Option<String>,
-        #[arg(long = "every", alias = "interval-minutes")]
-        interval_minutes: Option<u64>,
-        #[arg(long)]
-        reason: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Pause an Automation, or request Human approval when required
-    Pause {
-        automation_id: String,
-        #[arg(long = "version", visible_alias = "expected-version")]
-        expected_version: u64,
-        #[arg(long)]
-        reason: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resume an Automation
-    Resume {
-        automation_id: String,
-        #[arg(long = "version", visible_alias = "expected-version")]
-        expected_version: u64,
-        #[arg(long)]
-        reason: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Cancel one exact execution as its Human owner; keep the Automation schedule
-    CancelExecution {
-        automation_id: String,
-        #[arg(long)]
-        run_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Delete an Automation lineage
-    Delete {
-        automation_id: String,
-        #[arg(long = "version", visible_alias = "expected-version")]
-        expected_version: u64,
-        #[arg(long)]
-        reason: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -612,57 +541,6 @@ mod tests {
             })
         ));
         assert!(Cli::try_parse_from(["xmatrix", "logout", "--all", "--all-profiles"]).is_err());
-    }
-
-    #[test]
-    fn automation_cancel_requires_an_exact_execution() {
-        let cli = Cli::try_parse_from([
-            "xmatrix",
-            "automation",
-            "cancel-execution",
-            "automation-1",
-            "--run-id",
-            "run:scheduled:old",
-            "--json",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command, Some(Commands::Automation {
-            command: AutomationCommand::CancelExecution { automation_id, run_id, json: true }
-        }) if automation_id == "automation-1" && run_id == "run:scheduled:old"));
-        assert!(
-            Cli::try_parse_from(["xmatrix", "automation", "cancel-execution", "automation-1"])
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn automation_pause_parses_cas_and_reason() {
-        let cli = Cli::try_parse_from([
-            "xmatrix",
-            "automation",
-            "pause",
-            "automation-1",
-            "--version",
-            "7",
-            "--reason",
-            "no longer needed",
-        ])
-        .expect("Automation pause should parse");
-        let Some(Commands::Automation {
-            command:
-                AutomationCommand::Pause {
-                    automation_id,
-                    expected_version,
-                    reason,
-                    json: _,
-                },
-        }) = cli.command
-        else {
-            panic!("expected Automation pause");
-        };
-        assert_eq!(automation_id, "automation-1");
-        assert_eq!(expected_version, 7);
-        assert_eq!(reason.as_deref(), Some("no longer needed"));
     }
 
     #[test]

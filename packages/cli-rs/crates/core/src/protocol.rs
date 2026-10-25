@@ -34,7 +34,6 @@ impl HubRoutes {
     pub const DAEMON_COMMAND_ADMIT_AUTHORIZE: &str = "/api/daemon/command-admit-authorize";
     pub const DAEMON_CONTROL_RESULT: &str = "/api/daemon/control-result";
     #[allow(dead_code)]
-    pub const AUTOMATIONS: &str = "/api/automations";
     pub const WORKSPACES: &str = "/api/workspaces";
     pub const STATUS: &str = "/api/status";
     pub const SPACES: &str = "/api/spaces";
@@ -46,22 +45,6 @@ impl HubRoutes {
     pub const SLACK_OAUTH_START: &str = "/api/migrations/slack/oauth/start";
     pub const SLACK_OAUTH_TOKEN: &str = "/api/migrations/slack/oauth/token";
     pub const CROSS_SPACE_READ_REQUESTS: &str = "/api/cross-space-read/requests";
-}
-
-pub fn automation_route(automation_id: &str) -> String {
-    format!("/api/automations/{}", urlencoding::encode(automation_id))
-}
-
-pub fn automation_cancel_execution_route(automation_id: &str) -> String {
-    format!("{}/cancel-execution", automation_route(automation_id))
-}
-
-pub fn automation_pause_route(automation_id: &str) -> String {
-    format!("{}/pause", automation_route(automation_id))
-}
-
-pub fn automation_resume_route(automation_id: &str) -> String {
-    format!("{}/resume", automation_route(automation_id))
 }
 
 /// A Space's Agents: its registration catalog, one registration's details, and
