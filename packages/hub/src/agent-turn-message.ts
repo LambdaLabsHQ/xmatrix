@@ -1,4 +1,4 @@
-import type { ChannelAttachment, ChannelMessage } from "@xmatrix/protocol";
+import { crossChannelReplyRelay, type ChannelAttachment, type ChannelMessage } from "@xmatrix/protocol";
 
 /**
  * A Channel message as an Agent Instance reads it in a turn: the header naming its Channel, id,
@@ -24,21 +24,6 @@ export function attachmentLine(attachment: ChannelAttachment): string {
   return `- ${kind} ${attachment.name}${at} (${attachment.size} bytes, ${attachment.mimeType})\n`;
 }
 
-function crossChannelReply(metadata: Record<string, unknown> | undefined):
-  { channelId: string; messageId?: string; replierKind?: "user" | "agent" } | undefined {
-  if (!metadata || metadata.xmatrixProvenance !== "cross_channel_reply") return undefined;
-  const relayed = metadata.crossChannelReply as Record<string, unknown> | undefined;
-  const text = (key: string) => {
-    const value = relayed?.[key];
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
-  };
-  const channelId = text("sourceChannelId");
-  if (!channelId) return undefined;
-  const kind = text("replierKind");
-  return { channelId, messageId: text("sourceMessageId"),
-    replierKind: kind === "user" || kind === "agent" ? kind : undefined };
-}
-
 export function renderAgentTurnMessage(message: ChannelMessage, reader: AgentTurnReader, deliveredAt: string): string {
   let body = redactDataUrls(message.body.trim());
   if (message.attachments?.length) {
@@ -47,10 +32,11 @@ export function renderAgentTurnMessage(message: ChannelMessage, reader: AgentTur
   }
   const ids = message.replyToMessageId
     ? ` messageId=${message.messageId} replyToMessageId=${message.replyToMessageId}` : ` messageId=${message.messageId}`;
-  const relayed = crossChannelReply(message.metadata);
+  const relayed = crossChannelReplyRelay(message.metadata);
   const where = relayed
-    ? ` replying in Channel ${relayed.channelId} to a cross-Channel request from this Channel` +
-      (relayed.messageId ? ` (answer there with \`xmatrix send ${relayed.channelId} --reply-to ${relayed.messageId}\`)` : "")
+    ? ` replying in Channel ${relayed.sourceChannelId} to a cross-Channel request from this Channel` +
+      (relayed.sourceMessageId
+        ? ` (answer there with \`xmatrix send ${relayed.sourceChannelId} --reply-to ${relayed.sourceMessageId}\`)` : "")
     : message.from.originChannelId?.trim() ? ` via Channel ${message.from.originChannelId.trim()}` : "";
   const reply = message.replyTo;
   const toReader = reply?.from.kind === "agent" && (
