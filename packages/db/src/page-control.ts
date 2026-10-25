@@ -1,6 +1,6 @@
 import type { QueryResultRow } from "pg";
 import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, utf8ByteLength } from "@xmatrix/protocol";
-import { canonicalPageMarkdown, pageChangedDocBlocks } from "@xmatrix/protocol/page-document";
+import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import { spaceBilling } from "@xmatrix/billing";
 import { readsOnly } from "./space-roles.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
@@ -15,10 +15,10 @@ import { reconcilePageAutomations, removePageAutomations } from "./automation-pa
 import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
-  PageAuthor, PageAutomationAnchorChange, PageBlame, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageMessageEdit, PageOwedUpdate, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
+  PageAuthor, PageAutomationAnchorChange, PageBlame, PageBlockAwareness, PageDocument, PageLink, PageLinkAnchor, PageMessageEdit, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
 } from "@xmatrix/protocol";
 
-export type { PageAuthor, PageClaim, PageDocument, PageLink, PageRevision, PageSummary, PublicPage };
+export type { PageAuthor, PageDocument, PageLink, PageRevision, PageSummary, PublicPage };
 
 /**
  * Pages (docs/design/pages-and-conversations.md): the Space's hierarchy of
@@ -55,8 +55,6 @@ const MAX_GIT_REVISIONS = 5_000;
 const MAX_DEPTH = 64;
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_HISTORY = 200;
-/** How long ended claimed work can leave its section owing an update. */
-const OWED_WINDOW_DAYS = 7;
 /** How far back a section's last change is looked for; older changes read as unknown. */
 const BLOCK_UPDATE_REVISIONS = 30;
 /** Conversations a page's blame names, the newest revisions' first. */
@@ -70,8 +68,6 @@ const RECENT_CHANGES = 3;
 const MAX_RECENT_CHANGES = 10;
 const RECENT_CHANGE_SPARES = 4;
 const MAX_LINKS = 500;
-const DEFAULT_CLAIM_MINUTES = 120;
-const MAX_CLAIM_MINUTES = 24 * 60;
 const MAX_CONVERSATION_PAGES = 20;
 /** The messages one read of their page edits may name, as a timeline shows them. */
 const MAX_PAGE_EDIT_MESSAGES = 100;
@@ -830,7 +826,6 @@ export class PostgresPageRepository {
           WHERE space_id=$1 AND page_id=$2`,
         values: [spaceId, pageId, revision, now], maxRows: 0,
       });
-      await this.settleEditedClaims(tx, spaceId, pageId, head, text, conversationIds);
       return reconcilePageAutomations(tx, { spaceId, pageId, body: text, at: now, revision });
     })();
     for (const conversationId of conversationIds) {
@@ -845,43 +840,6 @@ export class PostgresPageRepository {
       basedOnRevision: input.baseRevision, createdAt: now,
     }, automationChannels: anchoring.channels, detachedAutomations: anchoring.detached,
     attachedAutomations: anchoring.attached };
-  }
-
-  /**
-   * An edit writes back the sections it changes (§5.2): claims on them that
-   * already ended, and those the editing conversation still holds. A claim
-   * another conversation holds still owes its own write-back.
-   */
-  private async settleEditedClaims(tx: DatabaseTransaction, spaceId: string, pageId: string, head: number,
-    text: string, conversationIds: string[]): Promise<void> {
-    const open = await tx.query<QueryResultRow & { claim_id: string; block_id: string }>({
-      name: "page_claims_unsettled_v1",
-      text: `SELECT claim_id,block_id FROM data.page_claims
-        WHERE space_id=$1 AND page_id=$2 AND written_back_at IS NULL
-          AND (state IN ('completed','released') OR expires_at <= now() OR conversation_id = ANY($3::text[]))
-          AND updated_at > now() - interval '${OWED_WINDOW_DAYS} days'
-        LIMIT ${MAX_LINKS}`,
-      values: [spaceId, pageId, conversationIds], maxRows: MAX_LINKS,
-    });
-    if (open.length === 0) return;
-    const before = (await tx.query<QueryResultRow & { body: string | null }>({
-      name: "page_revision_body_v1",
-      text: "SELECT body FROM data.page_revisions WHERE space_id=$1 AND page_id=$2 AND revision=$3",
-      values: [spaceId, pageId, head], maxRows: 1,
-    }))[0]?.body ?? "";
-    // An empty block id claims the whole page: any changed section writes it back.
-    const blocks = new Set(open.map((row) => row.block_id));
-    const changed = new Set(pageChangedDocBlocks(before, text, canonicalPageMarkdown,
-      blocks.has("") ? undefined : blocks));
-    const settled = open.filter((row) => row.block_id === "" ? changed.size > 0 : changed.has(row.block_id))
-      .map((row) => row.claim_id);
-    if (settled.length === 0) return;
-    await tx.query({
-      name: "page_claims_settle_edit_v1",
-      text: `UPDATE data.page_claims SET written_back_at=now()
-        WHERE space_id=$1 AND page_id=$2 AND claim_id = ANY($3::text[]) AND written_back_at IS NULL`,
-      values: [spaceId, pageId, settled], maxRows: 0,
-    });
   }
 
   /** Accepts a suggestion, or restores an earlier revision, as a new head. */
@@ -1049,12 +1007,11 @@ export class PostgresPageRepository {
    * conversation: derived from the recent revisions, newest first.
    */
   async blockUpdates(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
-    Promise<{ headRevision: number; order: string[]; updates: Map<string, PageBlockAwareness["updated"]>;
-      owed: Map<string, PageOwedUpdate> }> {
+    Promise<{ headRevision: number; order: string[]; updates: Map<string, PageBlockAwareness["updated"]> }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     const requestId = bounded(input.requestId, "requestId");
-    const { rows, ended, headRevision } = await this.inSpace(requestId, "page.block-updates", spaceId, async (tx) => {
+    const { rows, headRevision } = await this.inSpace(requestId, "page.block-updates", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const headRevision = Number(row.head_revision);
@@ -1069,25 +1026,11 @@ export class PostgresPageRepository {
           ORDER BY revision DESC LIMIT ${BLOCK_UPDATE_REVISIONS}`,
         values: [spaceId, pageId, headRevision], maxRows: BLOCK_UPDATE_REVISIONS,
       });
-      // Claimed work that ended and was not written back (§5.2). An edit to the
-      // section records its write-back on the claim, so this reads the claims
-      // alone, however long ago the section changed.
-      const ended = await tx.query<QueryResultRow & { block_id: string; state: string; holder_label: string;
-        conversation_id: string | null; pull_request_url: string | null; ended_at: Date | string }>({
-        name: "page_claims_owed_v3",
-        text: `SELECT block_id,state,holder_label,conversation_id,pull_request_url,
-            CASE WHEN state='active' THEN expires_at ELSE updated_at END AS ended_at
-          FROM data.page_claims WHERE space_id=$1 AND page_id=$2 AND written_back_at IS NULL
-            AND (state IN ('completed','released') OR (state='active' AND expires_at <= now()))
-            AND updated_at > now() - interval '${OWED_WINDOW_DAYS} days'
-          ORDER BY ended_at DESC LIMIT ${MAX_LINKS}`,
-        values: [spaceId, pageId], maxRows: MAX_LINKS,
-      });
-      return { headRevision, rows, ended };
+      return { headRevision, rows };
     });
     // Document parsing must not hold a checkout or exhaust the transaction
-    // before the small owed-claim read (XMATRIX-HUB-82); bodies a derivation
-    // still needs are read in a transaction of their own.
+    // (XMATRIX-HUB-82); bodies a derivation still needs are read in a
+    // transaction of their own.
     const order = pageBlocks(rows[0]?.newest_body ?? "").map((block) => block.id);
     const { updates: changedBy, derived, bodies } = await walkSectionChanges(rows, order, (revisions) =>
       this.inSpace(requestId, "page.block-updates.bodies", spaceId, (tx) =>
@@ -1102,16 +1045,7 @@ export class PostgresPageRepository {
       const { revision, authors, conversationIds, createdAt } = revisionOf(row);
       updates.set(blockId, { revision, authors, conversationIds, createdAt });
     }
-    const owed = new Map<string, PageOwedUpdate>();
-    const sections = new Set(order);
-    for (const row of ended) {
-      // A section taken off the page has nothing left to update.
-      if (owed.has(row.block_id) || (row.block_id !== "" && !sections.has(row.block_id))) continue;
-      owed.set(row.block_id, { reason: row.state === "completed" ? "merged" : row.state === "released" ? "released"
-        : "lapsed", at: iso(row.ended_at), holder: row.holder_label, conversationId: row.conversation_id,
-        pullRequestUrl: row.pull_request_url });
-    }
-    return { headRevision, order, updates, owed };
+    return { headRevision, order, updates };
   }
 
   /**
@@ -1376,91 +1310,6 @@ export class PostgresPageRepository {
   }
 
   /**
-   * Claims a block for the caller, or renews the caller's own claim on it.
-   * A block has one active claim at a time unless it is open for competition.
-   * A claim a person holds for a conversation is the one an Automation
-   * occurrence opened for its Run (§6.1): the Agent that claims from that
-   * conversation takes it over, so a Run that never comes leaves it to lapse.
-   */
-  async claim(input: { requestId: string; spaceId: string; pageId: string; blockId?: string;
-    principal: PagePrincipal; minutes?: number; conversationId?: string;
-    /** Whose work the claim is shown as, when not the caller's own name: an Automation's. */
-    holderLabel?: string }): Promise<{ claim: PageClaim; others: PageClaim[] }> {
-    const spaceId = bounded(input.spaceId, "spaceId");
-    const pageId = bounded(input.pageId, "pageId");
-    const block = blockId(input.blockId);
-    const minutes = input.minutes ?? DEFAULT_CLAIM_MINUTES;
-    if (!Number.isInteger(minutes) || minutes < 5 || minutes > MAX_CLAIM_MINUTES) {
-      throw new PageControlError("invalid_request", 400, `A claim lasts 5-${MAX_CLAIM_MINUTES} minutes`);
-    }
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.claim", spaceId, async (tx) => {
-      const actor = await pageActor(tx, spaceId, input.principal, true);
-      await this.page(tx, spaceId, actor, pageId, "edit");
-      await tx.query({ name: "page_claim_lock_v1", text: "SELECT 1 FROM data.pages WHERE space_id=$1 AND page_id=$2 FOR UPDATE",
-        values: [spaceId, pageId], maxRows: 1 });
-      const active = await this.activeClaims(tx, spaceId, pageId, block);
-      const holder = { kind: actor.author.kind, id: actor.author.id,
-        label: input.holderLabel ? bounded(input.holderLabel, "holderLabel").slice(0, 200) : actor.author.label };
-      const mine = active.find((claim) => claim.holder.kind === holder.kind && claim.holder.id === holder.id)
-        ?? (actor.isAgent && input.conversationId ? active.find((claim) => claim.holder.kind === "user"
-          && claim.conversationId === input.conversationId) : undefined);
-      const expiresAt = new Date(Date.now() + minutes * 60_000).toISOString();
-      if (mine) {
-        // A person's own claim is theirs: an occurrence of their Automation leaves the section to them.
-        if (input.holderLabel && !mine.conversationId) {
-          throw new PageControlError("page_block_claimed", 409, `${mine.holder.label} is on this`, { claim: mine });
-        }
-        // An occurrence whose Run never came hands its claim to the next occurrence's conversation.
-        const conversationId = input.conversationId ?? mine.conversationId;
-        await tx.query({ name: "page_claim_renew_v3",
-          text: `UPDATE data.page_claims SET expires_at=$3, holder_kind=$4, holder_id=$5, holder_label=$6,
-              owner_user_id=$7, conversation_id=$8, updated_at=now() WHERE space_id=$1 AND claim_id=$2`,
-          values: [spaceId, mine.claimId, expiresAt, holder.kind, holder.id, holder.label, actor.userId,
-            conversationId], maxRows: 0 });
-        return { claim: { ...mine, holder, ownerUserId: actor.userId, conversationId, expiresAt },
-          others: active.filter((claim) => claim.claimId !== mine.claimId) };
-      }
-      /* A claim says who is on a section; it locks nothing (decided 2026-10-19,
-         coordination is lock-free). Whoever else is on it is told back, so
-         they can talk, pick other work or carry on side by side. */
-      const claim: PageClaim = {
-        claimId: crypto.randomUUID(), pageId, blockId: block,
-        holder, ownerUserId: actor.userId, conversationId: input.conversationId ?? null, pullRequestUrl: null, expiresAt,
-        createdAt: new Date().toISOString(),
-      };
-      await tx.query({ name: "page_claim_create_v1",
-        text: `INSERT INTO data.page_claims (space_id,claim_id,page_id,block_id,holder_kind,holder_id,holder_label,
-            owner_user_id,conversation_id,state,expires_at,created_at,updated_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,$11)`,
-        values: [spaceId, claim.claimId, pageId, block, claim.holder.kind, claim.holder.id, claim.holder.label,
-          claim.ownerUserId, claim.conversationId, expiresAt, claim.createdAt], maxRows: 0 });
-      return { claim, others: active };
-    });
-  }
-
-  /** Releases a claim: its holder, the person it counts against, or a Space owner or admin. */
-  async releaseClaim(input: { requestId: string; spaceId: string; pageId: string; claimId: string;
-    principal: PagePrincipal }): Promise<{ released: boolean; blockId?: string; owesUpdate?: boolean }> {
-    const spaceId = bounded(input.spaceId, "spaceId");
-    const pageId = bounded(input.pageId, "pageId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.claim.release", spaceId, async (tx) => {
-      const actor = await pageActor(tx, spaceId, input.principal, true);
-      await this.page(tx, spaceId, actor, pageId, "read");
-      const released = await tx.query({ name: "page_claim_release_v3",
-        text: `UPDATE data.page_claims SET state='released', updated_at=now()
-          WHERE space_id=$1 AND page_id=$2 AND claim_id=$3 AND state='active'
-            AND ((holder_kind=$4 AND holder_id=$5) OR owner_user_id=$6 OR $7)
-          RETURNING claim_id, block_id, written_back_at IS NULL AS owes_update`,
-        values: [spaceId, pageId, bounded(input.claimId, "claimId"), actor.author.kind, actor.author.id, actor.userId,
-          actor.role === "owner" || actor.role === "admin"], maxRows: 1 });
-      // A release ends a lease, not work: a section its holder's conversation
-      // edited while holding it was written back before the release.
-      return released[0] ? { released: true, blockId: String(released[0].block_id),
-        owesUpdate: released[0].owes_update === true } : { released: false };
-    });
-  }
-
-  /**
    * Writes a page's summary for the revision its writer read. A summary of a
    * revision the page has moved on from is refused, so the page never carries
    * a line about text it no longer has; whoever may edit the page may write it.
@@ -1563,171 +1412,29 @@ export class PostgresPageRepository {
     });
   }
 
-  /** The claims in force on a page, and the blocks open for competition. */
-  async claims(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
-    Promise<{ claims: PageClaim[]; competitiveBlocks: string[] }> {
-    const spaceId = bounded(input.spaceId, "spaceId");
-    const pageId = bounded(input.pageId, "pageId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.claims", spaceId, async (tx) => {
-      const actor = await pageActor(tx, spaceId, input.principal, false);
-      await this.page(tx, spaceId, actor, pageId, "read");
-      const competitive = await tx.query<QueryResultRow & { block_id: string }>({ name: "page_block_competitions_v1",
-        text: "SELECT block_id FROM data.page_block_competitions WHERE space_id=$1 AND page_id=$2 ORDER BY block_id LIMIT 500",
-        values: [spaceId, pageId], maxRows: 500 });
-      return { claims: await this.activeClaims(tx, spaceId, pageId), competitiveBlocks: competitive.map((row) => row.block_id) };
-    });
-  }
-
-  /** Opens a block for competition, so several claims can run at once, or closes it again. */
-  async setCompetition(input: { requestId: string; spaceId: string; pageId: string; blockId?: string;
-    principal: PagePrincipal; open: boolean }): Promise<{ open: boolean }> {
-    const spaceId = bounded(input.spaceId, "spaceId");
-    const pageId = bounded(input.pageId, "pageId");
-    const block = blockId(input.blockId);
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.claim.competition", spaceId, async (tx) => {
-      const actor = await pageActor(tx, spaceId, input.principal, true);
-      this.requireStructure(actor);
-      if (actor.role !== "owner" && actor.role !== "admin") {
-        throw new PageControlError("page_competition_admin_only", 403, "Only Space owners and admins open a block for competition");
-      }
-      await this.page(tx, spaceId, actor, pageId, "read");
-      await tx.query(input.open ? {
-        name: "page_block_competition_open_v1",
-        text: `INSERT INTO data.page_block_competitions (space_id,page_id,block_id,opened_by_user_id,opened_at)
-          VALUES ($1,$2,$3,$4,now()) ON CONFLICT DO NOTHING`,
-        values: [spaceId, pageId, block, actor.userId], maxRows: 0,
-      } : {
-        name: "page_block_competition_close_v1",
-        text: "DELETE FROM data.page_block_competitions WHERE space_id=$1 AND page_id=$2 AND block_id=$3",
-        values: [spaceId, pageId, block], maxRows: 0,
-      });
-      return { open: input.open };
-    });
-  }
-
   /**
-   * The GitHub claim check for one referenced block: the page, and the claim in
-   * force on it that counts against this person, which the pull request then
-   * does the work of. The caller has matched the pull request's author to the
-   * person through their linked GitHub account (null when nobody linked it).
-   * Also names the Space owner, whose GitHub connection publishes the check.
+   * The page a pull request names, for its pre-review: its title (null when
+   * the page is gone), whether it is closed to some members, and the Space
+   * owner, whose GitHub connection publishes the review. Null when the Space is gone.
    */
-  async pullRequestClaim(input: { requestId: string; spaceId: string; pageId: string; blockId?: string;
-    ownerUserId: string | null; pullRequestUrl: string }):
-    Promise<{ spaceOwnerUserId: string; pageTitle: string | null; restricted: boolean; claim: PageClaim | null } | null> {
+  async pullRequestPage(input: { requestId: string; spaceId: string; pageId: string }):
+    Promise<{ spaceOwnerUserId: string; pageTitle: string | null; restricted: boolean } | null> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
-    const block = blockId(input.blockId);
-    const pullRequestUrl = input.pullRequestUrl.slice(0, 500);
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.claim.pull_request", spaceId, async (tx) => {
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.pull_request", spaceId, async (tx) => {
       const space = await tx.query<QueryResultRow & { owner_user_id: string }>({
-        name: "page_claim_pull_request_space_v1", text: "SELECT owner_user_id FROM data.spaces WHERE space_id=$1",
+        name: "page_pull_request_space_v1", text: "SELECT owner_user_id FROM data.spaces WHERE space_id=$1",
         values: [spaceId], maxRows: 1 });
       if (!space[0]) return null;
       const pages = await tx.query<QueryResultRow & Pick<PageRow, "page_id" | "parent_page_id" | "access_mode" | "title">>({
-        name: "page_claim_pull_request_tree_v2",
+        name: "page_pull_request_tree_v1",
         text: `SELECT p.page_id,p.parent_page_id,p.access_mode,data.page_name(r.body) AS title
           FROM data.pages p ${HEAD_REVISION} WHERE p.space_id=$1
           ORDER BY p.page_id LIMIT ${MAX_PAGES + 1}`, values: [spaceId], maxRows: MAX_PAGES + 1 });
       const page = pages.find((row) => row.page_id === pageId);
-      const claim = !page || input.ownerUserId === null ? undefined
-        : (await this.activeClaims(tx, spaceId, pageId, block, bounded(input.ownerUserId, "ownerUserId")))[0];
-      if (claim) {
-        await tx.query({ name: "page_claim_pull_request_record_v1",
-          text: "UPDATE data.page_claims SET pull_request_url=$3, updated_at=now() WHERE space_id=$1 AND claim_id=$2",
-          values: [spaceId, claim.claimId, pullRequestUrl], maxRows: 0 });
-      }
       return { spaceOwnerUserId: space[0].owner_user_id, pageTitle: page ? page.title ?? UNNAMED_PAGE : null,
-        restricted: !openToEveryMember(pages, pageId), claim: claim ? { ...claim, pullRequestUrl } : null };
+        restricted: !openToEveryMember(pages, pageId) };
     });
-  }
-
-  /** A merged pull request completes the claims whose work it did. */
-  /**
-   * A merged pull request did the work on the blocks it names, so each owes an
-   * update (pages-live-document.md §5.2). A claim it was credited with is
-   * completed; a named block nobody claimed gets the same record of finished
-   * work, shown as the author's, so the section owes an update all the same:
-   * naming a block is enough (decided 2026-10-19, coordination is lock-free).
-   * A redelivered merge adds nothing.
-   */
-  async completePullRequestWork(input: { requestId: string; spaceId: string; pullRequestUrl: string;
-    references: Array<{ pageId: string; blockId: string }>; ownerUserId: string | null; authorLabel: string }):
-    Promise<{ completed: Array<{ pageId: string; pageTitle: string | null; blockId: string;
-      conversationId: string | null; ownerUserId: string }> }> {
-    const spaceId = bounded(input.spaceId, "spaceId");
-    const pullRequestUrl = input.pullRequestUrl.slice(0, 500);
-    const references = input.references.slice(0, MAX_LINKS)
-      .map((reference) => ({ pageId: bounded(reference.pageId, "pageId"), blockId: blockId(reference.blockId) }));
-    const label = (input.authorLabel.trim() || "A pull request").slice(0, 200);
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.claim.complete", spaceId, async (tx) => {
-      type Row = QueryResultRow & { page_id: string; block_id: string; conversation_id: string | null;
-        owner_user_id: string; title: string | null; present: boolean };
-      const claimed = await tx.query<Row>({
-        name: "page_claims_complete_v3",
-        text: `WITH completed AS (
-            UPDATE data.page_claims SET state='completed', updated_at=now()
-            WHERE space_id=$1 AND pull_request_url=$2 AND state='active'
-            RETURNING page_id, block_id, conversation_id, owner_user_id)
-          SELECT c.page_id, c.block_id, c.conversation_id, c.owner_user_id,
-            data.page_name(r.body) AS title, p.page_id IS NOT NULL AS present
-          FROM completed c LEFT JOIN data.pages p ON p.space_id=$1 AND p.page_id=c.page_id ${HEAD_REVISION}`,
-        values: [spaceId, pullRequestUrl], maxRows: MAX_LINKS,
-      });
-      const space = references.length ? await tx.query<QueryResultRow & { owner_user_id: string }>({
-        name: "page_pull_request_work_space_v1", text: "SELECT owner_user_id FROM data.spaces WHERE space_id=$1",
-        values: [spaceId], maxRows: 1 }) : [];
-      // An author with no xMatrix account counts against the Space's owner, as their Agents would.
-      const owner = input.ownerUserId ? bounded(input.ownerUserId, "ownerUserId") : space[0]?.owner_user_id;
-      const named = owner ? await tx.query<Row>({
-        name: "page_pull_request_work_record_v1",
-        text: `WITH named AS (
-            SELECT DISTINCT ON (n.page_id, n.block_id) n.claim_id, n.page_id, n.block_id
-            FROM unnest($3::text[], $4::text[], $5::text[]) AS n(claim_id, page_id, block_id)
-            JOIN data.pages p ON p.space_id=$1 AND p.page_id=n.page_id
-            WHERE NOT EXISTS (SELECT 1 FROM data.page_claims c WHERE c.space_id=$1 AND c.page_id=n.page_id
-              AND c.block_id=n.block_id AND c.pull_request_url=$2)),
-          recorded AS (
-            INSERT INTO data.page_claims (space_id,claim_id,page_id,block_id,holder_kind,holder_id,holder_label,
-                owner_user_id,conversation_id,state,expires_at,created_at,updated_at,pull_request_url)
-            SELECT $1, claim_id, page_id, block_id, 'user', $6, $7, $6, NULL, 'completed', now(), now(), now(), $2
-            FROM named
-            RETURNING page_id, block_id, conversation_id, owner_user_id)
-          SELECT c.page_id, c.block_id, c.conversation_id, c.owner_user_id,
-            data.page_name(r.body) AS title, p.page_id IS NOT NULL AS present
-          FROM recorded c LEFT JOIN data.pages p ON p.space_id=$1 AND p.page_id=c.page_id ${HEAD_REVISION}`,
-        values: [spaceId, pullRequestUrl, references.map(() => crypto.randomUUID()),
-          references.map((reference) => reference.pageId), references.map((reference) => reference.blockId),
-          owner, label],
-        maxRows: MAX_LINKS,
-      }) : [];
-      return { completed: [...claimed, ...named].map((row) => ({ pageId: row.page_id,
-        pageTitle: row.present ? row.title ?? UNNAMED_PAGE : null, blockId: row.block_id,
-        conversationId: row.conversation_id, ownerUserId: row.owner_user_id })) };
-    });
-  }
-
-
-  private async activeClaims(tx: DatabaseTransaction, spaceId: string, pageId: string, block?: string,
-    ownerUserId?: string):
-    Promise<PageClaim[]> {
-    const rows = await tx.query<QueryResultRow & { claim_id: string; block_id: string; holder_kind: "user" | "agent";
-      holder_id: string; holder_label: string; owner_user_id: string; conversation_id: string | null;
-      pull_request_url: string | null; expires_at: Date | string; created_at: Date | string }>({
-      name: "page_claims_active_v2",
-      text: `SELECT claim_id,block_id,holder_kind,holder_id,holder_label,owner_user_id,conversation_id,
-          pull_request_url,expires_at,created_at
-        FROM data.page_claims WHERE space_id=$1 AND page_id=$2 AND ($3::text IS NULL OR block_id=$3)
-          AND ($4::text IS NULL OR owner_user_id=$4) AND state='active' AND expires_at > now()
-        ORDER BY created_at, claim_id LIMIT ${MAX_LINKS}`,
-      values: [spaceId, pageId, block ?? null, ownerUserId ?? null], maxRows: MAX_LINKS,
-    });
-    return rows.map((row) => ({
-      claimId: row.claim_id, pageId, blockId: row.block_id,
-      holder: { kind: row.holder_kind, id: row.holder_id, label: row.holder_label },
-      ownerUserId: row.owner_user_id, conversationId: row.conversation_id, pullRequestUrl: row.pull_request_url,
-      expiresAt: iso(row.expires_at), createdAt: iso(row.created_at),
-    }));
   }
 
   /**
@@ -1951,67 +1658,6 @@ export class PostgresPageRepository {
    * that do not exist or that the author cannot read are ignored: a
    * reference never grants anything.
    */
-  /**
-   * A Run says its work changed nothing more on the pages (`xmatrix page
-   * done`): the sections its conversation's ended claims left owing an
-   * update no longer owe one (pages-live-document.md §5).
-   */
-  /**
-   * The Instances ended, so they are on nothing any more: their claims in the
-   * conversation end now instead of running out their lease, and a section left
-   * unwritten owes an update as a lapsed claim's does (decided 2026-10-19: a
-   * claim lives as long as the Run behind it). Idempotent.
-   */
-  async endInstanceClaims(input: { requestId: string; conversationId: string; instanceIds: string[] }):
-    Promise<{ ended: number }> {
-    const conversationId = bounded(input.conversationId, "conversationId");
-    const requestId = bounded(input.requestId, "requestId");
-    const instanceIds = input.instanceIds.slice(0, MAX_LINKS).map((id) => bounded(id, "instanceId"));
-    if (instanceIds.length === 0) return { ended: 0 };
-    const route = await new PostgresChannelSpaceDirectory(this.database).resolve(
-      { requestId, operation: "page.claim.end_instances.resolve" }, conversationId);
-    if (!route) return { ended: 0 };
-    return this.inSpace(requestId, "page.claim.end_instances", route.spaceId, async (tx) => {
-      const rows = await tx.query<QueryResultRow & { claim_id: string }>({
-        name: "page_claims_end_instances_v1",
-        text: `UPDATE data.page_claims SET expires_at=now(), updated_at=now()
-          WHERE space_id=$1 AND conversation_id=$2 AND holder_kind='agent' AND holder_id = ANY($3::text[])
-            AND state='active' AND expires_at > now()
-          RETURNING claim_id`,
-        values: [route.spaceId, conversationId, instanceIds], maxRows: MAX_LINKS,
-      });
-      return { ended: rows.length };
-    });
-  }
-
-  async settleWriteback(input: { requestId: string; conversationId: string; principal: PagePrincipal }):
-    Promise<{ settled: number }> {
-    const conversationId = bounded(input.conversationId, "conversationId");
-    const requestId = bounded(input.requestId, "requestId");
-    const route = await new PostgresChannelSpaceDirectory(this.database).resolve(
-      { requestId, operation: "page.writeback.resolve" }, conversationId);
-    if (!route) return { settled: 0 };
-    return this.inSpace(requestId, "page.writeback.settle", route.spaceId, async (tx) => {
-      const actor = await pageActor(tx, route.spaceId, input.principal, false);
-      const readers = input.principal.kind === "agent"
-        ? [{ kind: "agent" as const, id: input.principal.id }, { kind: "user" as const, id: actor.userId }]
-        : [{ kind: "user" as const, id: actor.userId }];
-      for (const reader of readers) {
-        await requireChannelCapability(tx, { capability: "message_content_read", channelId: conversationId,
-          spaceId: route.spaceId, principal: reader, error: (failure) => new PageControlError(failure.code, failure.status) });
-      }
-      const rows = await tx.query<QueryResultRow & { claim_id: string }>({
-        name: "page_claims_settle_writeback_v1",
-        text: `UPDATE data.page_claims SET written_back_at=now()
-          WHERE space_id=$1 AND conversation_id=$2 AND written_back_at IS NULL
-            AND (state IN ('completed','released') OR (state='active' AND expires_at <= now()))
-          RETURNING claim_id`,
-        values: [route.spaceId, conversationId], maxRows: MAX_LINKS,
-      });
-      return { settled: rows.length };
-    });
-  }
-
   async linkReferences(input: { requestId: string; conversationId: string; principal: PagePrincipal;
     pageIds: string[] }): Promise<{ linked: string[] }> {
     const pageIds = [...new Set(input.pageIds)].filter((id) => /^[0-9a-f-]{36}$/u.test(id)).slice(0, 10);

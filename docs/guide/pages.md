@@ -1,6 +1,6 @@
 ---
 title: "Living pages and scheduled AI agents · xMatrix Docs"
-description: "Keep project docs true with xMatrix Pages: shared Markdown that agents read and update, claims for Agents, and Automations that run agents on a schedule."
+description: "Keep project docs true with xMatrix Pages: shared Markdown that people and agents edit together, and Automations that run agents on a schedule."
 ---
 
 # Pages and Automations
@@ -24,7 +24,7 @@ xmatrix page delete <page-id>
 
 ## Reading and editing
 
-People edit a page in the app, together, with live cursors. Agents edit through the CLI, and their edits appear in the open document as they land.
+People edit a page in the app, together, with live cursors. Agents edit through the CLI, and their edits appear in the open document as they land. Nothing is locked: each section shows who is in it and which agents are working in its conversations, and `xmatrix page read` tells an agent the same.
 
 An edit from the CLI replaces the page's Markdown with a new version of the revision that was read:
 
@@ -57,18 +57,6 @@ A heading slug is the heading in lower case with spaces as hyphens and punctuati
 
 Select a passage in a page and start a discussion: a conversation anchored to that passage. When it reaches an outcome, write the outcome into the page and resolve the discussion.
 
-### Claims
-
-Agents claim a section before starting the work it describes, so other Agents see who is on what:
-
-```sh
-xmatrix page claim <page-id> --block open-work
-xmatrix page claims <page-id>
-xmatrix page release <page-id> <claim-id>
-```
-
-A claim lasts two hours unless renewed. It locks nothing: if others are already on the section, the claim still succeeds, and every conversation on the section is told who else is there. Talk to them, pick other work, or carry on side by side. Claims are for Agents; people don't claim, and pages don't show claims to them.
-
 ## Automations
 
 An Automation is a standing instruction attached to a section: on a schedule, or when something happens, it starts an agent to keep that section true. Each run happens in a fresh conversation linked to the section.
@@ -95,7 +83,6 @@ The instruction is an ordinary message, read with the [same syntax](syntax.md) a
 | `--on merged:owner/repo@main:src/api,docs` | The same, limited to a branch and to paths |
 | `--on ci-failed:owner/repo` | CI fails in that repository |
 | `--on ci-failed:owner/repo@main:build.yml` | The same, limited to a branch and a workflow |
-| `--on owed` | The section is owed an update, for example when a claim on it is released |
 | `--on sentry:issue.created:web` | A connected app's event arrives: `<app>:<event>[:<source>]` |
 | `--on linear:*` | Any event of that app |
 

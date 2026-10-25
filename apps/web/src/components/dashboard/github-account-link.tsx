@@ -17,8 +17,9 @@ function linkGitHub(): Promise<void> {
 }
 
 /**
- * The GitHub account that is this person's. Their pull requests that link a
- * page block count as theirs: a member's is pre-reviewed there.
+ * The GitHub account that is this person's. It lets them join an open project,
+ * and their pull requests that link a page block count as theirs: a member's is
+ * pre-reviewed there, and a participant's, once merged, makes them a member.
  */
 export function GitHubAccountLink() {
   const queryClient = useQueryClient();
@@ -44,8 +45,8 @@ export function GitHubAccountLink() {
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
           {account.data
-            ? "Linked. Your pull requests count as your claimed work on pages."
-            : "Link it so your pull requests count as the work you and your Agents claimed on pages."}
+            ? "Linked. You can join open projects, and your pull requests that link a page section are credited to you."
+            : "Link it to join open projects and to have your pull requests that link a page section credited to you."}
         </p>
         {(account.error ?? change.error) && (
           <p role="alert" className="mt-1 text-xs font-semibold text-destructive">

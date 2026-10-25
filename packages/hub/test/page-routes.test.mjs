@@ -16,7 +16,6 @@ test("an Agent Run reads, edits, links and arranges pages as its owner may", () 
   assert.equal(allowed("POST", "/api/spaces/space-1/page-links"), true);
   assert.equal(allowed("PUT", "/api/spaces/space-1/page-links/link-1/resolution"), true);
   assert.equal(allowed("GET", "/api/channels/channel-1/page-space"), true);
-  assert.equal(allowed("POST", "/api/channels/channel-1/page-writeback"), true);
   assert.equal(allowed("GET", "/api/channels/channel-1/pages"), true);
   assert.equal(allowed("GET", "/api/spaces/space-1/pages/page-1/mounts/mount-1/content"), false, "repository mounts are gone");
   for (const [method, path] of [

@@ -3,7 +3,7 @@ import { reportError } from "@xmatrix/protocol/error-reporting";
 
 const LOCK_MODES = new Set(["AccessShareLock", "RowShareLock", "RowExclusiveLock", "ShareUpdateExclusiveLock",
   "ShareLock", "ShareRowExclusiveLock", "ExclusiveLock", "AccessExclusiveLock"]);
-const RELATIONS = new Set(["runs", "instances", "run_agent_registrations", "channels", "page_claims",
+const RELATIONS = new Set(["runs", "instances", "run_agent_registrations", "channels",
   "pages", "page_revisions", "space_agent_registrations", "space_agent_registration_access"]);
 
 /** Only the wait graph and known relation survive; never DETAIL's SQL or tuple values. */

@@ -510,9 +510,9 @@ export {
 export { externalAppSource, messageExternalAppSource } from "./external-app-source.js";
 export type { ExternalAppSource } from "./external-app-source.js";
 export type {
-  PageAuthor, PageAutomationAnchorChange, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageClaim, PageConversation,
+  PageAuthor, PageAutomationAnchorChange, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageConversation,
   PageDocument, PageGitHubFile, PageLink, PageMessageEdit, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
-  PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PageOwedUpdate, PagePresent,
+  PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PagePresent,
   PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
 } from "./pages.js";
 

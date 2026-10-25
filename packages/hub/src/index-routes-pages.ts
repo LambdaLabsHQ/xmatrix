@@ -1,4 +1,3 @@
-import { tellPageClaimOverlap } from "./page-claim-overlap";
 import { describePageConversations, MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, pageTitle,
   renamedPageBody, type DatabaseTransaction, type PagePrincipal } from "@xmatrix/db";
 import { ServiceUnavailable } from "./error-contract";
@@ -23,7 +22,6 @@ import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database
 import { requireMachineDaemonAuth } from "./index-shared";
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { tellPageCoWriter } from "./page-co-write-instruction";
-import { fireOwedAutomationTriggers } from "./automation-triggers";
 import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
 import type { Env } from "./types";
@@ -263,26 +261,20 @@ async function sessionPresent(env: Env, spaceId: string, pageId: string): Promis
     .then((result) => result.present, () => []);
 }
 
-/** Shows everyone on the page the claims now in force. */
-async function announceClaims(c: Context<{ Bindings: Env }>): Promise<void> {
-  if (!c.env.RELAY_PAGE_SESSION) return;
-  const spaceId = c.req.param("spaceId")!;
-  const pageId = c.req.param("pageId")!;
-  const { claims } = await repository(c.env).claims({ requestId: crypto.randomUUID(), spaceId, pageId,
-    principal: await principal(c) });
-  await sessionCall(c.env, spaceId, pageId, "/internal/claims", { claims });
-}
-
 export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   const base = "/api/spaces/:spaceId/pages";
   const run = <T>(c: Context<{ Bindings: Env }>, work: () => Promise<T>) =>
     work().then((result) => c.json(result as Record<string, unknown>, 200, NO_STORE), (error) => failure(c, error));
 
-  // `xmatrix page done`: the Run's work changed nothing more on the pages, so
-  // the sections its conversation's ended claims left owing an update are settled.
-  app.post("/api/channels/:channelId/page-writeback", async (c) => run(c, async () => repository(c.env)
-    .settleWriteback({ requestId: crypto.randomUUID(), conversationId: c.req.param("channelId"),
-      principal: await principal(c) })));
+  // Page claims and owed updates are gone: coordination is lock-free. A CLI released before that still
+  // claims, releases and settles; it is told so, and its Run carries on. Remove once the stable CLI has
+  // no `page claim`, `page release` or `page done`.
+  const claimsRemoved = (c: Context<{ Bindings: Env }>) => c.json({ code: "page_claims_removed",
+    error: "Page claims were removed: nothing is claimed, released or settled any more. Carry on with the work, and update the page when your work changes what it says." },
+  410, NO_STORE);
+  app.on(["GET", "POST"], `${base}/:pageId/claims`, claimsRemoved);
+  app.delete(`${base}/:pageId/claims/:claimId`, claimsRemoved);
+  app.post("/api/channels/:channelId/page-writeback", claimsRemoved);
 
   // A Run knows its conversation, not its Space: resolve the Space it may read pages in.
   app.get("/api/channels/:channelId/page-space", async (c) => run(c, async () => repository(c.env)
@@ -383,45 +375,39 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   }));
 
   // What a reader of each section should know besides its text
-  // (pages-live-document.md §3): when and where it last changed, who has
-  // taken it, who is on it now. People see it on the page; Agents read it
-  // with the page.
+  // (pages-live-document.md §3): when and where it last changed, and who is
+  // on it now. People see it on the page; Agents read it with the page.
   app.get(`${base}/:pageId/awareness`, async (c) => run(c, async (): Promise<PageAwareness> => {
     const spaceId = c.req.param("spaceId");
     const pageId = c.req.param("pageId");
     const caller = await principal(c);
-    // `?scope=sections` is when and where each section last changed and what it owes, alone: a page in the
-    // Web reads its claims, discussions and who is on it on their own, live.
+    // `?scope=sections` is when and where each section last changed, alone: a page in the Web reads its
+    // discussions and who is on it on their own, live.
     if (c.req.query("scope") === "sections") {
-      const { headRevision, order, updates, owed } = await repository(c.env).blockUpdates({
+      const { headRevision, order, updates } = await repository(c.env).blockUpdates({
         requestId: crypto.randomUUID(), spaceId, pageId, principal: caller });
-      return { pageId, headRevision, blocks: [...new Set([...order, ...owed.keys()])].map((blockId) => ({
-        blockId, updated: updates.get(blockId) ?? null, claims: [], present: [], discussions: [],
-        owed: owed.get(blockId) ?? null, working: [] })) };
+      return { pageId, headRevision, blocks: order.map((blockId) => ({
+        blockId, updated: updates.get(blockId) ?? null, present: [], discussions: [], working: [] })) };
     }
     // Each read checks on its own that the caller may read the page, so they run side by side; the page's
     // live session is asked who is on it only once the updates' check has passed.
-    const [[{ headRevision, order, updates, owed }, present], { claims }, [links, conversations]] = await Promise.all([
+    const [[{ headRevision, order, updates }, present], [links, conversations]] = await Promise.all([
       repository(c.env).blockUpdates({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller })
         .then((read) => Promise.all([read, sessionPresent(c.env, spaceId, pageId)] as const)),
-      repository(c.env).claims({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller }),
       repository(c.env).links({ requestId: crypto.randomUUID(), spaceId, pageId, principal: caller,
         describe: linkedConversations(spaceId) }).then(({ links, described }) => [links, described ?? []] as const),
     ]);
     const discussions = links.filter((link) => link.anchor && !link.resolvedAt);
     const working = workingBySection(links, conversations);
-    // In the page's order; a claim or a person on a section that is gone comes last.
-    const blockIds = new Set([...order, ...claims.map((claim) => claim.blockId),
-      ...discussions.map((link) => link.blockId), ...owed.keys(),
+    // In the page's order; a person on a section that is gone comes last.
+    const blockIds = new Set([...order, ...discussions.map((link) => link.blockId),
       ...present.map((person) => person.blockId ?? ""), ...working.keys()]);
     return { pageId, headRevision, blocks: [...blockIds].map((blockId) => ({
       blockId, updated: updates.get(blockId) ?? null,
-      claims: claims.filter((claim) => claim.blockId === blockId),
       present: present.filter((person) => (person.blockId ?? "") === blockId)
         .map(({ name, kind, activity, conversationId }) => ({ name, kind, activity, blockId, conversationId })),
       discussions: discussions.filter((link) => link.blockId === blockId)
         .map((link) => ({ linkId: link.linkId, conversationId: link.conversationId, quote: link.anchor!.quote })),
-      owed: owed.get(blockId) ?? null,
       working: working.get(blockId) ?? [],
     })) };
   }));
@@ -489,47 +475,6 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     return repository(c.env).setSummary({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
       pageId: c.req.param("pageId"), principal: await principal(c), baseRevision: integer(body.baseRevision),
       summary: body.summary as string });
-  }));
-
-  // Claims: who is on a block, so Agents see who is on what. A claim locks
-  // nothing; a second one on a block tells both conversations of each other.
-  app.get(`${base}/:pageId/claims`, async (c) => run(c, async () => repository(c.env).claims({
-    requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
-    principal: await principal(c) })));
-  app.post(`${base}/:pageId/claims`, async (c) => run(c, async () => {
-    const body = await json(c);
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const result = await repository(c.env).claim({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-      pageId: c.req.param("pageId"), principal: runPrincipalOf(authUser),
-      ...(typeof body.blockId === "string" ? { blockId: body.blockId } : {}),
-      ...(body.minutes !== undefined ? { minutes: integer(body.minutes) } : {}),
-      ...(authUser.agentRun ? { conversationId: authUser.agentRun.channelId } : {}) });
-    await announceClaims(c);
-    await tellPageClaimOverlap(c.env, { spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")!, ...result });
-    return result;
-  }));
-  app.delete(`${base}/:pageId/claims/:claimId`, async (c) => run(c, async () => {
-    const result = await repository(c.env).releaseClaim({ requestId: crypto.randomUUID(),
-      spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"), claimId: c.req.param("claimId"),
-      principal: await principal(c) });
-    if (result.released) {
-      await announceClaims(c);
-      // A released claim whose section was not written back owes an update; its `owed` Automations run.
-      const blockId = result.blockId ?? "";
-      if (result.owesUpdate) {
-        await fireOwedAutomationTriggers(c.env, { spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")!,
-          blockIds: [blockId], event: { id: `owed:claim:${c.req.param("claimId")}`.slice(0, 200),
-            kind: "owed", summary: `A claim on #${blockId || "the page"} was released, so it owes an update` } })
-          .catch((error: unknown) => console.error("owed Automation triggers failed", error));
-      }
-    }
-    return { released: result.released };
-  }));
-  app.put(`${base}/:pageId/competition`, async (c) => run(c, async () => {
-    const body = await json(c);
-    return repository(c.env).setCompetition({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-      pageId: c.req.param("pageId"), principal: await principal(c), open: body.open === true,
-      ...(typeof body.blockId === "string" ? { blockId: body.blockId } : {}) });
   }));
 
   // A pull request's review conversation records its pre-review verdict, as

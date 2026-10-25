@@ -186,7 +186,7 @@ async function resolvedTriggers(env: Env, spaceId: string, userId: string,
     refuse(409, "github_connection_required", "Connect GitHub for this Space to trigger on its repositories");
   }
   return Promise.all(triggers.map(async (trigger) => {
-    if (trigger.kind === "owed" || trigger.kind === "event") return trigger;
+    if (trigger.kind === "event") return trigger;
     const [owner, repo] = trigger.repository.split("/") as [string, string];
     const installationId = await githubConnectionInstallationFor(env, github, owner, repo).catch(() =>
       refuse(409, "github_repository_not_connected",

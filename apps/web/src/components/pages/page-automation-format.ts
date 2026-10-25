@@ -19,7 +19,6 @@ export function formatAutomationNext(value: string): string {
 
 /** What else makes it run, in words. */
 export function formatAutomationTrigger(trigger: AutomationTrigger): string {
-  if (trigger.kind === "owed") return "when its section owes an update";
   if (trigger.kind === "event") {
     return `on ${trigger.provider} ${trigger.feature ?? "events"}${trigger.source === "*" ? "" : ` from ${trigger.source}`}`;
   }

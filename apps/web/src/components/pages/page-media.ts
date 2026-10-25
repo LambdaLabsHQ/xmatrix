@@ -5,6 +5,12 @@ import { Fragment, Slice, type Node as DocNode } from "prosemirror-model";
 import { Plugin } from "prosemirror-state";
 import type { EditorView, NodeView } from "prosemirror-view";
 import { sha256Blob } from "@/lib/relay-v2/message-attachment-upload-client";
+import {
+  dropOwnedMedia, pageMediaOwnKey, pageMediaOwnSpec, releasePageMedia, rememberOwnedImages, retainPageMedia,
+  type LocalMedia,
+} from "./page-media-own";
+
+export type { LocalMedia };
 
 /**
  * Images and videos pasted or dropped into a page. The file is uploaded into
@@ -18,9 +24,6 @@ export type PageMediaUrl = (file: string) => string | undefined;
 
 /** Uploads a file into the page and keeps it there; rejects with what went wrong. */
 export type UploadPageMedia = (file: File, onProgress: (percent: number) => void) => Promise<void>;
-
-/** A file pasted or dropped that is still uploading, drawn from the writer's own copy meanwhile. */
-export interface LocalMedia { url: string; progress: number | null; listeners: Set<() => void> }
 
 /** One reading a page's media is drawn from, local files first. */
 export interface PageMediaSource {
@@ -142,40 +145,46 @@ export function pageMediaPaste(input: {
       const contentHash = await sha256Blob(file);
       const src = pageMediaReference(contentHash, file.type)!;
       const name = parsePageMedia(src)!.file;
-      if (!input.local.has(name)) input.local.set(name, { url: URL.createObjectURL(file), progress: 0, listeners: new Set() });
-      return { file, src, local: input.local.get(name)!, name };
+      // One preview per file. A second paste of a file already on the page shares it,
+      // and a failure of that paste must not revoke the preview the first one still shows.
+      const local = retainPageMedia(input.local, name, () => URL.createObjectURL(file));
+      return { id: crypto.randomUUID(), file, src, local, name };
     }));
-    if (!placed.length || view.isDestroyed) return;
+    const releasePlaced = () => {
+      for (const item of placed) releasePageMedia(input.local, item.name, item.local, URL.revokeObjectURL);
+    };
+    if (!placed.length || view.isDestroyed) {
+      releasePlaced();
+      return;
+    }
     const content = Fragment.from(placed.map(({ file, src }) => pageSchema.nodes.image.create({ src, alt: file.name || "" })));
-    const tr = at === null ? view.state.tr.replaceSelection(new Slice(content, 0, 0))
-      : view.state.tr.insert(Math.min(at, view.state.doc.content.size), content);
+    const selection = { from: view.state.selection.from, to: view.state.selection.to };
+    const insertAt = at === null ? null : Math.min(at, view.state.doc.content.size);
+    const tr = insertAt === null ? view.state.tr.replaceSelection(new Slice(content, 0, 0))
+      : view.state.tr.insert(insertAt, content);
+    rememberOwnedImages(tr, insertAt === null ? selection : { from: insertAt, to: insertAt }, placed);
     view.dispatch(tr.scrollIntoView());
-    for (const { file, src, local, name } of placed) {
+    for (const { id, file, local, name } of placed) {
       const report = (progress: number | null) => {
         local.progress = progress;
         for (const listener of local.listeners) listener();
       };
       upload(file, report).then(() => {
+        // The preview stays: the node is still drawn from this copy. Its holder is released with the editor.
         report(null);
         local.listeners.clear();
       }, (error: unknown) => {
-        if (input.local.get(name) === local) input.local.delete(name);
-        URL.revokeObjectURL(local.url);
         input.onFailure(`${file.name || "The file"} could not be uploaded${
           error instanceof Error && error.message ? `: ${error.message}` : "."}`);
-        if (view.isDestroyed) return;
-        const remove = view.state.tr;
-        view.state.doc.descendants((node, pos) => {
-          if (node.type === pageSchema.nodes.image && node.attrs.src === src) {
-            remove.delete(remove.mapping.map(pos), remove.mapping.map(pos + node.nodeSize));
-          }
-        });
-        if (remove.docChanged) view.dispatch(remove);
+        if (!view.isDestroyed) view.dispatch(dropOwnedMedia(view.state, id));
+        releasePageMedia(input.local, name, local, URL.revokeObjectURL);
       });
     }
   };
   const unread = () => input.onFailure("The file could not be read.");
   return new Plugin({
+    key: pageMediaOwnKey,
+    state: pageMediaOwnSpec(),
     props: {
       handlePaste(view, event) {
         const files = mediaFiles(event.clipboardData);

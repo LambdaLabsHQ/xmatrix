@@ -19,7 +19,6 @@ function fixture(claimed, port = {}) {
   const effects = {
     commitLifecycle: async (value) => { events.push(`lifecycle:${value.runId}`); return {}; },
     terminateInstance: async (instanceId) => { events.push(`terminate:${instanceId}`); },
-    endInstanceClaims: async (conversationId, instanceIds) => { events.push(`claims:${conversationId}:${instanceIds}`); },
     ...port,
   };
   return { events, settlements, run: () => finalizeMachineRunTerminalReportsWith(repository, effects, "channel-1") };
@@ -33,8 +32,7 @@ test("a report is finalized only after its lifecycle commits and its ended Insta
     },
   });
   assert.equal(await f.run(), 1);
-  assert.deepEqual(f.events, ["prune", "lifecycle:run-1", "terminate:instance-1", "claims:channel:instance-1"],
-    "the ended Instance's page claims end with it");
+  assert.deepEqual(f.events, ["prune", "lifecycle:run-1", "terminate:instance-1"]);
   assert.deepEqual(f.settlements, [{ runId: "run-1", finalized: true }]);
 });
 

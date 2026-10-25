@@ -94,6 +94,8 @@ export const IdentityAvatar = memo(function IdentityAvatar({
   const imageSrc = avatarImageSrc(imageUrl);
   const tone = avatarTone(label);
   const rest = identityRestStatus(status);
+  // An App's mark is its own artwork: it sits whole on a plain white disc, with no tint, glass edge or ring.
+  const bareMark = kind === "app" && Boolean(imageSrc) && !pending;
   const imageFallback = initials
     ? initials
     : <Icon className={iconSizeClasses[size]} />;
@@ -114,13 +116,13 @@ export const IdentityAvatar = memo(function IdentityAvatar({
     >
       {/* The disc is the composer's glass, small: the same pill primitive, lens included. */}
       <LiquidGlassPill
-        enabled={glass}
+        enabled={glass && !bareMark}
         data-avatar-tone={tone}
         className={cn(
           "identity-avatar-face aspect-square shrink-0 flex items-center justify-center overflow-hidden font-black",
           shape === "circle" ? "rounded-full" : "rounded-lg",
           sizeClasses[size],
-          toneClasses[kind],
+          bareMark ? "identity-avatar-mark" : toneClasses[kind],
           // A resting Instance is still the Channel's, greyed until a message wakes it.
           rest && "opacity-55 grayscale"
         )}
@@ -137,8 +139,8 @@ export const IdentityAvatar = memo(function IdentityAvatar({
             draggable={false}
             className={cn(
               "aspect-square size-full",
-              // Inset full App marks so their corners fit inside a circular disc.
-              kind === "app" ? "object-contain p-[18%]" : "object-cover"
+              // 15% is the least inset that keeps any full App mark, square ones included, inside a circular disc.
+              kind === "app" ? "object-contain p-[15%]" : "object-cover"
             )}
             fallback={imageFallback}
             onContextMenu={(event) => event.preventDefault()}

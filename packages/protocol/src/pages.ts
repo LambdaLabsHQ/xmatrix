@@ -85,15 +85,14 @@ export interface PageEditResult {
 /**
  * What anyone reading a section should know besides its text
  * (docs/design/pages-live-document.md §3): when and where it last changed,
- * who has taken it, and who is on it now. Derived from revisions, claims and
- * the page's live session; never stored.
+ * and who is on it now. Derived from revisions, links and the page's live
+ * session; never stored.
  */
 export interface PageBlockAwareness {
   /** Heading slug, or '' for the text before the first heading. */
   blockId: string;
   /** The latest revision that changed this section, when it is in recent history. */
   updated: Pick<PageRevision, "revision" | "authors" | "conversationIds" | "createdAt"> | null;
-  claims: PageClaim[];
   present: PagePresent[];
   /** Open discussions anchored in this section. */
   discussions: Array<{ linkId: string; conversationId: string; quote: string }>;
@@ -102,21 +101,6 @@ export interface PageBlockAwareness {
    * have the page open (docs/design/pages-live-document.md §3.2).
    */
   working?: PageWorkingAgent[];
-  /**
-   * The section owes an update (docs/design/pages-live-document.md §5): work
-   * claimed on it ended after its last change, and nobody wrote it back or
-   * said nothing there changed.
-   */
-  owed: PageOwedUpdate | null;
-}
-
-export interface PageOwedUpdate {
-  reason: "merged" | "released" | "lapsed";
-  /** When the claimed work ended. */
-  at: string;
-  holder: string;
-  conversationId: string | null;
-  pullRequestUrl: string | null;
 }
 
 /**
@@ -314,26 +298,6 @@ export interface PublicPage {
   children: Array<{ pageId: string; title: string }>;
   /** Whether anyone with a linked GitHub account may join the project (open-project-governance.md §1). */
   openToJoin: boolean;
-}
-
-/**
- * A claim: a lease on a page block,
- * shown next to it as "alice's claude:1 is on this". It lapses at expiresAt
- * unless its holder renews it.
- */
-export interface PageClaim {
-  claimId: string;
-  pageId: string;
-  /** The heading slug of the block; empty for the whole page. */
-  blockId: string;
-  holder: { kind: "user" | "agent"; id: string; label: string };
-  /** The person it counts against: the human, or the Agent's owner. */
-  ownerUserId: string;
-  conversationId: string | null;
-  /** The pull request doing the work, once the GitHub claim check has seen it. */
-  pullRequestUrl: string | null;
-  expiresAt: string;
-  createdAt: string;
 }
 
 export interface PageLink {

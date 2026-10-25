@@ -20,7 +20,7 @@ function githubConfiguration() {
       additions: 3, deletions: 1, patch: "@@ -1 +1,3 @@\n-exact\n+prefix" }],
     "/repos/acme/widgets/commits/head-2/check-runs?per_page=100": { check_runs: [
       { name: "ci", status: "completed", conclusion: "success" },
-      { name: "xmatrix/claim", status: "completed", conclusion: "success" }] },
+      { name: "xmatrix/pre-review", status: "completed", conclusion: "success" }] },
     "/repos/acme/widgets/pulls?state=open&per_page=50": [
       { number: 7, title: "Search by prefix", html_url: "https://github.com/acme/widgets/pull/7" },
       { number: 8, title: "Fuzzy search", html_url: "https://github.com/acme/widgets/pull/8" }],
@@ -30,7 +30,7 @@ function githubConfiguration() {
 }
 
 // Pre-review end to end: a pull request a member of the Space opens on a block
-// (no claim needed) gets a review conversation there, an Agent of the Space
+// gets a review conversation there, an Agent of the Space
 // owner's is launched in it with the change, and its verdict becomes the
 // xmatrix/pre-review check on the head it reviewed.
 test("a member's pull request naming a block is pre-reviewed by an Agent in its own conversation there", async () => {
@@ -57,24 +57,29 @@ test("a member's pull request naming a block is pre-reviewed by an Agent in its 
 
     const spawn = daemon.inbox.waitFor((message) => message.type === "machine_spawn_agent"
       && message.channelId !== home.id, "pre-review spawn");
-    const body = JSON.stringify({ action: "opened", installation: { id: installationId },
-      repository: { full_name: "acme/widgets" },
-      pull_request: { number: 7, html_url: "https://github.com/acme/widgets/pull/7", draft: false,
-        body: `Implements https://xmatrix.sh/app/${spaceId}/pages?page=${page.pageId}#search`,
-        user: { id: 5151, login: "alice" }, head: { sha: "head-1" } } });
-    const delivered = await deliverGitHubWebhook(worker, { body, event: "pull_request", deliveryId: randomUUID(), secret });
-    assert.equal(delivered.status, 200, await delivered.clone().text());
-    assert.equal(github.checkRuns.some((run) => run.name === "xmatrix/claim"), false, "naming a block gates nothing");
+    const reviewLinks = async () => (await json(await worker.fetch(
+      `/api/spaces/${encodeURIComponent(spaceId)}/page-links?pageId=${encodeURIComponent(page.pageId)}`, { headers: auth }))).links;
+    const deliver = async (installation) => {
+      const body = JSON.stringify({ action: "opened", ...installation, repository: { full_name: "acme/widgets" },
+        pull_request: { number: 7, html_url: "https://github.com/acme/widgets/pull/7", draft: false,
+          body: `Implements https://xmatrix.sh/app/${spaceId}/pages?page=${page.pageId}#search`,
+          user: { id: 5151, login: "alice" }, head: { sha: "head-1" } } });
+      const delivered = await deliverGitHubWebhook(worker, { body, event: "pull_request", deliveryId: randomUUID(), secret });
+      assert.equal(delivered.status, 200, await delivered.clone().text());
+    };
+    // Only the Space's own installation speaks for its repositories: from another, or naming none, nothing starts.
+    await deliver({ installation: { id: "foreign-installation" } });
+    await deliver({});
+    assert.deepEqual(await reviewLinks(), []);
+    await deliver({ installation: { id: installationId } });
 
     const command = await spawn;
     assert.match(command.prompt, /Pre-review pull request https:\/\/github\.com\/acme\/widgets\/pull\/7/u);
     assert.match(command.prompt, /Search by prefix/u);
     assert.match(command.prompt, /#8 Fuzzy search/u, "the reviewer sees the other open pull requests");
     assert.match(command.prompt, /- ci: success/u);
-    assert.doesNotMatch(command.prompt, /xmatrix\/claim:/u, "its own checks are not review input");
-    const links = await json(await worker.fetch(
-      `/api/spaces/${encodeURIComponent(spaceId)}/page-links?pageId=${encodeURIComponent(page.pageId)}`, { headers: auth }));
-    assert.ok(links.links.some((link) => link.conversationId === command.channelId && link.blockId === "search"),
+    assert.doesNotMatch(command.prompt, /xmatrix\/pre-review:/u, "its own checks are not review input");
+    assert.ok((await reviewLinks()).some((link) => link.conversationId === command.channelId && link.blockId === "search"),
       "the review conversation is on the block");
 
     const runToken = await admitRegisteredSpawn(worker, daemon, command);

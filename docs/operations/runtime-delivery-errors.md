@@ -161,7 +161,7 @@ most four wait edges using local process aliases, allowlisted lock modes and
 resource kinds, plus an allowlisted relation from PostgreSQL's tuple context.
 SQL, values, backend PIDs, transaction IDs and tuple coordinates stay out of this
 projection. Sentry issue reads show these fields, including `unavailable` when
-PostgreSQL supplied no usable detail. For a repeated Page claim deadlock, compare
-the named query, waiting relation and wait cycle before changing lock order;
+PostgreSQL supplied no usable detail. For a repeated deadlock, compare the
+named query, waiting relation and wait cycle before changing lock order;
 the HTTP response remains a retryable `transaction_conflict` and no transaction
 or unknown commit is automatically replayed.

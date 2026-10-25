@@ -34,9 +34,6 @@ async function stubPages(browser: Page, pages: ReturnType<typeof page>[], channe
   await fixtureJson(browser, "page-live", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/live$/u, {
     protocol: "xmatrix-page-v2.ticket", socketPath: "/ws/pages/space-personal/p-relay", canEdit: true, headRevision: 3,
   });
-  await fixtureJson(browser, "page-claims", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/claims$/u, {
-    claims: [], competitiveBlocks: [],
-  });
   await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
     pageId: "p-relay", headRevision: 3, blocks: [],
   });
@@ -213,18 +210,16 @@ for (const width of [1280, 393]) {
   });
 }
 
-test("a page is co-edited live and shows an Agent working on a section it claimed", async ({ page: browser }) => {
+test("a page is co-edited live and shows an Agent working on a section", async ({ page: browser }) => {
   await stubPages(browser, [page("p-company", null, "Company", "V"), page("p-relay", "p-company", "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
     links: [{ linkId: "l1", conversationId: E2E_CHANNEL.id, pageId: "p-relay", blockId: "status", source: "edit",
       createdAt: NOW, lastSeenAt: NOW }],
   });
   await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
-    pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "notes", claims: [], present: [], updated: {
+    pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "notes", present: [], updated: {
       revision: 2, authors: [{ kind: "agent", id: "a1", label: "claude:1" }], conversationIds: [E2E_CHANNEL.id],
-      createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString() },
-      owed: { reason: "merged", at: new Date(Date.now() - 20 * 60_000).toISOString(), holder: "codex:2",
-        conversationId: E2E_CHANNEL.id, pullRequestUrl: "https://github.com/o/r/pull/7" } }],
+      createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString() } }],
   });
   // An Agent whose live Run read the Notes a while ago is still on the page, though its cursor has lapsed;
   // another works on the Status from a live Run.
@@ -256,13 +251,6 @@ test("a page is co-edited live and shows an Agent working on a section it claime
         encoding.writeVarUint(aware, 1);
         encoding.writeVarUint8Array(aware, encoding.toUint8Array(agent));
         send(encoding.toUint8Array(aware));
-        // It claims the section, which is for the Agents: the page draws nothing of it for people.
-        const claims = encoding.createEncoder();
-        encoding.writeVarUint(claims, 2);
-        encoding.writeVarString(claims, JSON.stringify({ type: "claims", claims: [{ claimId: "c1", pageId: "p-relay",
-          blockId: "status", holder: { kind: "agent", id: "claude:2", label: "claude:2" }, ownerUserId: "someone-else",
-          conversationId: E2E_CHANNEL.id, pullRequestUrl: null, expiresAt: "2026-09-26T14:00:00.000Z", createdAt: NOW }] }));
-        send(encoding.toUint8Array(claims));
         editPageMarkdown(server, (markdown) => markdown.replace("In progress", "Shipped"), "agent");
       }, 500);
     },
@@ -289,12 +277,9 @@ test("a page is co-edited live and shows an Agent working on a section it claime
 
   const editor = browser.getByTestId("page-editor");
   await expect(editor).toContainText("Shipped");
-  // What is said about a section is on its heading, not in a list beside it. Who has taken it is the
-  // Agents' to know: a person is offered no claim and sees no claim's flag.
+  // What is said about a section is on its heading, not in a list beside it.
   const status = editor.locator("h2", { hasText: "Status" });
   await expect(status.getByRole("button", { name: "1 conversation about this section" })).toBeVisible();
-  await expect(status.getByTestId("page-claim")).toHaveCount(0);
-  await expect(editor.getByRole("button", { name: /^(Claim|Release)/u })).toHaveCount(0);
   await expect(browser.getByTestId("page-outline"), "there is no side panel").toHaveCount(0);
 
   // The header names no one: who is where shows in the text, and the headings do not draw them again.
@@ -305,10 +290,6 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await expect(editor).not.toContainText("Updated by");
   await expect(browser.getByTestId("pages-view").getByRole("button", { name: /^Version history/u }))
     .toHaveAttribute("title", "Last edit by claude:1 · 2h ago");
-  // Work claimed on the Notes ended since, and nobody has written it back: its heading says so.
-  const owed = editor.locator("h2", { hasText: "Notes" }).getByTestId("page-owed");
-  await expect(owed).toHaveText("Update owed");
-  await expect(owed).toHaveAttribute("title", `Update owed · o/r/pull/7 merged 20m ago · open ${E2E_CHANNEL.name}`);
 
   // The person's own typing reaches the session.
   await editor.getByText("Shipped").click();
@@ -395,8 +376,8 @@ test("a bookmark says in small type what the last change to its section did", as
   await openChannelTouchingRelay(browser, undefined, async () => {
     // claude's revision 3 turned the section's "Planned" into "In progress".
     await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/awareness(?:\?.*)?$/u, {
-      pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "status", claims: [], present: [], discussions: [],
-        owed: null, updated: { revision: 3, authors: [{ kind: "agent", id: "a1", label: "claude" }],
+      pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "status", present: [], discussions: [],
+        updated: { revision: 3, authors: [{ kind: "agent", id: "a1", label: "claude" }],
           conversationIds: [E2E_CHANNEL.id], createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString() } }],
     });
     await fixtureJson(browser, "page-relay-revision-2", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\?revision=2$/u,
@@ -450,7 +431,10 @@ for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
     await releaseFixture(browser, refused ? "writer-create" : "writer-co-writing");
     await expect(controls.getByRole("status")).toHaveCount(0);
     if (refused) {
-      await expect(browser.getByText(/Couldn't start the Agent/u)).toBeVisible();
+      const failed = editor.getByRole("button", { name: "@codex: Failed. Show invocation details" });
+      await expect(failed).toBeVisible();
+      await failed.click();
+      await expect(browser.getByRole("dialog", { name: "@codex", exact: true })).toContainText("Couldn't start the Agent");
       expect(await fixtureRequestBodies(browser, "write-message")).toEqual([]);
       return;
     }

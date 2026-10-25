@@ -195,10 +195,6 @@ export {
 } from "./automation-control.js";
 export { automationName } from "./automation-commit.js";
 export {
-  PostgresSchedulerControlRepository,
-  SchedulerControlError,
-} from "./scheduler-control.js";
-export {
   PostgresTraceAccessRepository,
   TraceAccessControlError,
   type TraceAccessAuthorityResult,
@@ -251,7 +247,7 @@ export {
   pagePositionBetween, pageTitle, PostgresPageRepository, renamedPageBody, UNNAMED_PAGE,
 } from "./page-control.js";
 export type {
-  PageActor, PageAuthor, PageClaim, PageCommit, PageDocument, PageLink, PagePrincipal, PageRevision,
+  PageActor, PageAuthor, PageCommit, PageDocument, PageLink, PagePrincipal, PageRevision,
   PageSummary, PublicPage,
 } from "./page-control.js";
 export {

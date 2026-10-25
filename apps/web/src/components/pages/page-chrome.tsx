@@ -133,18 +133,17 @@ export function PageChangeMark({ top, away, label, testId, children }: {
 }
 
 /** A place on the page worth finding, drawn along its scrollbar (§3.2). */
-export interface PageScrollMark { key: string; fraction: number; kind: "person" | "discussion" | "owed"; color?: string;
+export interface PageScrollMark { key: string; fraction: number; kind: "person" | "discussion"; color?: string;
   title: string }
 
-/** Where others are, where discussions are and which sections owe an update, along the page's scrollbar. */
+/** Where others are and where discussions are, along the page's scrollbar. */
 export function PageScrollMarks({ marks }: { marks: PageScrollMark[] }) {
   if (marks.length === 0) return null;
   return (
     <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-1.5" aria-hidden="true" data-testid="page-scroll-marks">
       {marks.map((mark) => (
         <span key={mark.key} title={mark.title}
-          className={cn("absolute right-0 h-1 w-1.5 rounded-l-sm", mark.kind === "discussion" && "page-scroll-mark-discussion",
-            mark.kind === "owed" && "page-scroll-mark-owed")}
+          className={cn("absolute right-0 h-1 w-1.5 rounded-l-sm", mark.kind === "discussion" && "page-scroll-mark-discussion")}
           style={{ top: `calc(${Math.min(1, Math.max(0, mark.fraction)) * 100}% - 2px)`,
             ...(mark.kind === "person" && mark.color ? { backgroundColor: mark.color } : {}) }} />
       ))}

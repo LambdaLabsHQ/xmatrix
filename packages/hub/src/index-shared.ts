@@ -481,18 +481,18 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/live$/u.test(path)) return true;
   if (["PUT", "PATCH", "DELETE"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:revisions\/[^/]+\/promote|purge)$/u.test(path)) return true;
-  if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:publication|competition|summary)$/u.test(path)) return true;
+  if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:publication|summary)$/u.test(path)) return true;
   // The Agent reviewing a pull request in its review conversation records the verdict.
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/pre-review$/u.test(path)) return true;
-  // Agents claim the block they work on and release it when done.
+  // A CLI released before page claims were removed is told they are gone (index-routes-pages.ts).
   if (["GET", "POST"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/claims$/u.test(path)) return true;
   if (request.method === "DELETE" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/claims\/[^/]+$/u.test(path)) return true;
+  if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-writeback$/u.test(path)) return true;
   // A page's Automations are the page's: a Run that may edit the page manages them as its owner.
   if (/^\/api\/spaces\/[^/]+\/pages\/[^/]+\/automations(?:\/[^/]+(?:\/(?:pause|resume|run|reference))?)?$/u.test(path)) return true;
   if (["GET", "POST"].includes(request.method) && /^\/api\/spaces\/[^/]+\/page-links$/u.test(path)) return true;
   if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/page-links\/[^/]+\/resolution$/u.test(path)) return true;
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/(?:page-space|pages)$/u.test(path)) return true;
-  if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-writeback$/u.test(path)) return true;
   // An owner's or admin's Run reads, drafts and applies the move to pages.
   if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/page-migration$/u.test(path)) return true;
   if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/page-migration\/draft$/u.test(path)) return true;

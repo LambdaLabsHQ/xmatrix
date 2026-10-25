@@ -1,16 +1,16 @@
-import { PostgresAutomationRepository, PostgresPageRepository } from "@xmatrix/db";
-import { automationReferences, type AutomationTrigger } from "@xmatrix/protocol";
+import { PostgresAutomationRepository } from "@xmatrix/db";
+import type { AutomationTrigger } from "@xmatrix/protocol";
 import { githubPullRequestPaths, githubRepositoryDelegated } from "./app-connectors";
 import { record, text } from "./github-subscription-domain";
 import { tellPageAutomationChannels } from "./page-automation-wake";
-import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet } from "./postgres-authority-fleet";
+import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
 
 /**
  * Events fire a page's Automations (docs/design/pages-live-document.md §6.2):
- * a pull request merged into a branch, a workflow failing on it, a section
- * starting to owe an update. Firing makes the next occurrence due now and
+ * a pull request merged into a branch, a workflow failing on it, a connected
+ * app's event. Firing makes the next occurrence due now and
  * records the event for it; events coalesce. A GitHub event fires only
  * Automations whose trigger recorded the installation it came from and whose
  * Space's GitHub connection still includes that installation.
@@ -150,28 +150,4 @@ export async function fireConnectorAutomationTriggers(env: Env, input: { spaceId
     async (candidate) => (!input.authorizedUserId || candidate.authorityRootUserId === input.authorizedUserId) &&
       (candidate.triggers as AutomationTrigger[]).some((trigger) => connectorTriggerMatches(trigger,
       { provider: input.provider, source, feature: input.event.feature })) ? fired : undefined);
-}
-
-/**
- * Sections of a page started to owe an update (§5.2): fires the page's
- * Automations with an `owed` trigger whose reference is in one of them.
- */
-export async function fireOwedAutomationTriggers(env: Env, input: { spaceId: string; pageId: string;
-  blockIds: readonly string[]; event: FiredEvent }): Promise<number> {
-  const blocks = new Set(input.blockIds);
-  const pages = new PostgresPageRepository(createPostgresAuthorityDatabase(env, {
-    applicationName: "xmatrix-automation-triggers", statementTimeoutMs: 5_000,
-    transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000 }));
-  // Its section is where the page references it, read as its author.
-  const bodies = new Map<string, Promise<string>>();
-  const body = (userId: string) => {
-    if (!bodies.has(userId)) bodies.set(userId, pages.read({ requestId: crypto.randomUUID(), spaceId: input.spaceId,
-      pageId: input.pageId, principal: { kind: "user", id: userId } }).then(({ page }) => page.body, () => ""));
-    return bodies.get(userId)!;
-  };
-  return fireAcrossShards(env, { trigger: { kind: "owed" }, spaceId: input.spaceId, pageId: input.pageId },
-    async (candidate) => {
-      const section = automationReferences(await body(candidate.authorityRootUserId)).get(candidate.automationId);
-      return section !== undefined && blocks.has(section) ? { ...input.event, kind: "owed" } : undefined;
-    });
 }

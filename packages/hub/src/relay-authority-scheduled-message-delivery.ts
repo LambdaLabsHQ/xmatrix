@@ -24,11 +24,12 @@ export function triggerNote(events: unknown): string {
   return lines.length ? `Triggered by:\n${lines.join("\n")}` : "";
 }
 
-/** A cadence with connected-app triggers can read their private context even before an event fires. */
-function containsExternalEvents(value: unknown): boolean {
-  if (value === undefined || value === null) return false;
-  return !Array.isArray(value) || value.some((event) => !event || typeof event !== "object" ||
-    Array.isArray(event) || (event as Record<string, unknown>).kind !== "owed");
+/**
+ * Event triggers, or the events that fired an occurrence: a cadence with triggers can read their private
+ * context even before an event fires.
+ */
+function carriesEvents(value: unknown): boolean {
+  return value !== undefined && value !== null && (!Array.isArray(value) || value.length > 0);
 }
 
 export interface ScheduledMessagePostCommit {
@@ -108,10 +109,7 @@ export async function dispatchScheduledMessageOccurrence(
   // never becomes the next one's context; what carries over is on the page.
   // Opened before the prepared boundary, idempotently, so a retry reopens it.
   const channelId = await port.openConversation({ occurrence, automation, userId: authorityRootUserId,
-    storedName: payload.name, body,
-    // Even an `owed` event can carry a private pull request URL.
-    privateEvents: containsExternalEvents(payload.triggers) ||
-      (Array.isArray(events) ? events.length > 0 : events !== undefined && events !== null) });
+    storedName: payload.name, body, privateEvents: carriesEvents(payload.triggers) || carriesEvents(events) });
   const appMentions = Array.isArray(expression?.appMentions) ? expression.appMentions
     : Array.isArray(message?.appMentions) ? message.appMentions : undefined;
   // Prepared is the durable delivery-acceptance boundary. Automation edits only

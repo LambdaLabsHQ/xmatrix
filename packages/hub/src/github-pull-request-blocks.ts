@@ -6,22 +6,17 @@ import { authUserByGitHubId } from "./auth-authority";
 import { startPreReview } from "./github-pre-review";
 import { appOrigin } from "./deployment-origins";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { dispatchProductMessageAppend } from "./product-message-append";
 import type { Env } from "./types";
-import { fireOwedAutomationTriggers } from "./automation-triggers";
 import { findAppConnection } from "./apps";
 import { changeMembership } from "./spaces";
 
 /**
  * Pull requests that name page blocks (docs/design/pages-and-conversations.md
- * §5.6). Naming a block gates nothing: there is no claim to hold and no check
- * to pass (decided 2026-10-19, coordination is lock-free). When one opens or
- * gets new commits and its author is a member of the Space, the Space owner's
- * Agent pre-reviews it on the block it names; once merged, the sections it
- * names owe an update, and a participant author becomes a contributor.
+ * §5.6). Naming a block gates nothing. When one opens or gets new commits and
+ * its author is a member of the Space, the Space owner's Agent pre-reviews it
+ * on the block it names; once merged, a participant author becomes a
+ * contributor.
  */
-/** What may change the blocks a pull request names. */
-const CREDITED_ACTIONS = new Set(["opened", "reopened", "edited", "synchronize", "ready_for_review"]);
 /** A new change to review; an edited description is not one. */
 const REVIEWED_ACTIONS = new Set(["opened", "reopened", "synchronize", "ready_for_review"]);
 /** Who may have the Space owner's Agent review their pull request: whoever may edit its pages. */
@@ -54,7 +49,7 @@ function record(value: unknown): Record<string, unknown> {
 
 function pages(env: Env): PostgresPageRepository {
   return new PostgresPageRepository(createPostgresAuthorityDatabase(env, {
-    applicationName: "xmatrix-claim-check", statementTimeoutMs: 5_000,
+    applicationName: "xmatrix-pull-request-blocks", statementTimeoutMs: 5_000,
     transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
   }));
 }
@@ -71,7 +66,7 @@ function governance(env: Env): PostgresGovernanceRepository {
  * administrator administers the repository now. GitHub signs which
  * installation, and so which repositories, a delivery speaks for; a pull
  * request from any other installation or repository, or a delivery naming
- * none, cannot touch the Space's claims or fire its owed Automations. Missing
+ * none, starts no pre-review and promotes nobody in the Space. Missing
  * evidence fails closed.
  */
 async function connectedGitHub(env: Env, spaceId: string, installationId: string, owner: string, repo: string):
@@ -95,38 +90,23 @@ export async function onPullRequestNamingBlocks(env: Env, payload: Record<string
   const [owner, repo] = String(record(payload.repository).full_name ?? "").split("/");
   if (!installationId || !owner || !repo) return;
 
+  const authorId = record(pull.user).id;
+  if (typeof authorId !== "number" && typeof authorId !== "string") return;
   if (action === "closed") {
     if (pull.merged !== true) return;
-    const authorId = record(pull.user).id;
-    const author = typeof authorId === "number" || typeof authorId === "string"
-      ? await authUserByGitHubId(env, String(authorId)) : null;
+    const author = await authUserByGitHubId(env, String(authorId));
+    if (!author) return;
     for (const spaceId of spaces) {
       if (!await connectedGitHub(env, spaceId, installationId, owner, repo)) continue;
-      const login = record(pull.user).login;
-      const { completed } = await pages(env).completePullRequestWork({ requestId: crypto.randomUUID(), spaceId,
-        pullRequestUrl: url, ownerUserId: author, authorLabel: typeof login === "string" ? login : "",
-        references: references.filter((reference) => reference.spaceId === spaceId) });
-      await askForWriteback(env, { pullRequestUrl: url, completed });
-      // The sections it named now owe an update; their `owed` Automations run.
-      for (const pageId of new Set(completed.map((claim) => claim.pageId))) {
-        await fireOwedAutomationTriggers(env, { spaceId, pageId,
-          blockIds: completed.filter((claim) => claim.pageId === pageId).map((claim) => claim.blockId),
-          event: { id: `owed:${url}:${pageId}`.slice(0, 200), kind: "owed", url,
-            summary: `Pull request ${url} was merged, so the section it names owes an update` } })
-          .catch((error: unknown) => console.error("owed Automation triggers failed", error));
-      }
-      if (author) await promoteContributor(env, { spaceId, userId: author, installationId, pullRequestUrl: url });
+      await promoteContributor(env, { spaceId, userId: author, installationId, pullRequestUrl: url });
     }
     return;
   }
-  if (!CREDITED_ACTIONS.has(action)) return;
-  const authorId = record(pull.user).id;
-  if (typeof authorId !== "number" && typeof authorId !== "string") return;
+  const number = Number(pull.number);
+  if (!REVIEWED_ACTIONS.has(action) || pull.draft === true || !Number.isInteger(number)) return;
   const userId = await authUserByGitHubId(env, String(authorId));
   if (!userId) return;
   const login = typeof record(pull.user).login === "string" ? String(record(pull.user).login) : "its author";
-  const number = Number(pull.number);
-  const reviewed = REVIEWED_ACTIONS.has(action) && pull.draft !== true && Number.isInteger(number);
 
   for (const spaceId of spaces) {
     // Only a pull request from the Space's own installation counts in it.
@@ -134,49 +114,19 @@ export async function onPullRequestNamingBlocks(env: Env, payload: Record<string
     if (!connection) continue;
     // A pre-review spends the Space owner's Agent, so it is for the Space's own members, not anyone who opens a pull request.
     const role = await governance(env).roleOf({ requestId: crypto.randomUUID(), spaceId, userId }).catch(() => null);
-    let review = reviewed && role !== null && REVIEWED_ROLES.has(role);
+    if (role === null || !REVIEWED_ROLES.has(role)) continue;
+    // One pre-review per Space, on the first block it names on a page that is still there.
     for (const reference of references.filter((item) => item.spaceId === spaceId)) {
-      // A claim the author still holds there is credited with the pull request, so merging it settles that claim.
-      const named = await pages(env).pullRequestClaim({ requestId: crypto.randomUUID(), spaceId,
-        pageId: reference.pageId, blockId: reference.blockId, ownerUserId: userId, pullRequestUrl: url });
-      if (!review || !named?.pageTitle) continue;
-      review = false;
+      const named = await pages(env).pullRequestPage({ requestId: crypto.randomUUID(), spaceId,
+        pageId: reference.pageId });
+      if (!named?.pageTitle) continue;
       const blockLink = `${appOrigin(env)}/app/${encodeURIComponent(spaceId)}/pages?page=${
         encodeURIComponent(reference.pageId)}${reference.blockId ? `#${reference.blockId}` : ""}`;
       await startPreReview(env, { spaceId, spaceOwnerUserId: named.spaceOwnerUserId, connection,
         pull: { url, owner, repo, number }, pageId: reference.pageId, blockId: reference.blockId,
-        restricted: named.restricted, author: named.claim?.holder.label ?? login, blockLink });
+        restricted: named.restricted, author: login, blockLink });
+      break;
     }
-  }
-}
-
-/**
- * The pull request did the work on a section, so the section owes an
- * update (pages-live-document.md §5). The conversation that did the work hears
- * it from GitHub at once: its Run, if still live, writes the section back or
- * says nothing there changed. A section nobody answers for stays marked owed.
- */
-async function askForWriteback(env: Env, input: { pullRequestUrl: string;
-  completed: Array<{ pageId: string; pageTitle: string | null; blockId: string; conversationId: string | null;
-    ownerUserId: string }> }): Promise<void> {
-  const byConversation = new Map<string, typeof input.completed>();
-  for (const claim of input.completed) {
-    if (!claim.conversationId) continue;
-    byConversation.set(claim.conversationId, [...(byConversation.get(claim.conversationId) ?? []), claim]);
-  }
-  for (const [conversationId, claims] of byConversation) {
-    const sections = claims.map((claim) => `- ${claim.pageTitle ?? "a page"}${claim.blockId ? ` › #${claim.blockId}` : ""}` +
-      ` — \`xmatrix page read ${claim.pageId}${claim.blockId ? ` --block ${claim.blockId}` : ""}\``);
-    const body = [`${input.pullRequestUrl} is merged. It did the work on:`, ...sections, "",
-      "Rewrite these sections to what is true now with `xmatrix page edit` (the pull request keeps the evidence), or run `xmatrix page done -m \"<why>\"` " +
-      "if the merge changed nothing there."].join("\n");
-    await dispatchProductMessageAppend(env, conversationId, {
-      commandId: `product:page-writeback:${conversationId}:${input.pullRequestUrl}`.slice(0, 200),
-      // One request per pull request and conversation, however often GitHub redelivers.
-      messageId: `app:github:writeback:${conversationId}:${input.pullRequestUrl}`.slice(0, 200),
-      channelId: conversationId, body, appAuthorId: "github",
-      principal: { kind: "user", id: claims[0]!.ownerUserId },
-    }).catch((error: unknown) => console.warn("page write-back request not delivered", error));
   }
 }
 
