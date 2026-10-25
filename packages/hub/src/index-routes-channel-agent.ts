@@ -518,6 +518,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     const read = (principal: { kind: "user" | "agent"; id: string; agentSpaceId?: string }) =>
       channelMessageResponse(async () => ({ ...await readLaunchContext({
         channelId, startedForId, readAt: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
+        reader: run ? { agentId: run.agentId, instanceId: run.instanceId ?? undefined } : undefined,
         history: async (page) => {
           const result = await channelMessageHistory(c.env, { channelId, principal, ...page });
           return { messages: result.messages as ChannelMessage[], hasMore: result.hasMore === true };

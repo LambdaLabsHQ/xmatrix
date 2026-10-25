@@ -37,6 +37,7 @@ static CHANNEL_HISTORY_BLOCK: OnceLock<String> = OnceLock::new();
 /// The message this run was started for, as the same read returned it: who
 /// wrote it and what it replies to, which the launch passes only as a body.
 static STARTED_FOR: OnceLock<ChannelMessage> = OnceLock::new();
+static STARTED_FOR_PROMPT: OnceLock<String> = OnceLock::new();
 // The prompt read advances the join floor past these controls. Preserve their
 // latest typed state for the runtime instead of leaving them only in prose.
 static CHANNEL_CO_WRITE: OnceLock<crate::protocol::ChannelPageCoWrite> = OnceLock::new();
@@ -130,6 +131,9 @@ pub(crate) async fn prime_channel_history_bootstrap(
     if let Some(started_for) = context.started_for {
         let _ = STARTED_FOR.set(started_for);
     }
+    if let Some(prompt) = context.started_for_prompt {
+        let _ = STARTED_FOR_PROMPT.set(prompt);
+    }
     if let Some(text) = context.text.filter(|text| !text.is_empty()) {
         let _ = CHANNEL_HISTORY_BLOCK.set(text);
     }
@@ -141,13 +145,24 @@ pub(crate) async fn prime_channel_history_bootstrap(
 /// in reply to someone (a first message's summon) otherwise reads as a bare
 /// command with nothing to answer. Unchanged when the read did not find it.
 pub(crate) fn initial_message_turn(body: &str) -> String {
-    render_started_for(STARTED_FOR.get(), body)
+    render_started_for(
+        STARTED_FOR.get(),
+        STARTED_FOR_PROMPT.get().map(String::as_str),
+        body,
+    )
 }
 
-fn render_started_for(started_for: Option<&ChannelMessage>, body: &str) -> String {
+fn render_started_for(
+    started_for: Option<&ChannelMessage>,
+    hub_prompt: Option<&str>,
+    body: &str,
+) -> String {
     let Some(message) = started_for else {
         return body.to_string();
     };
+    if let Some(prompt) = hub_prompt.filter(|_| message.body.trim() == body) {
+        return prompt.to_string();
+    }
     crate::format_incoming_channel_message_with_context(
         &message.channel_id,
         Some(&message.message_id),
@@ -424,7 +439,7 @@ mod tests {
     #[test]
     fn the_message_a_run_was_started_for_reads_like_any_later_turn() {
         let (_, summon) = first_message_and_its_summon();
-        let turn = render_started_for(Some(&summon), "@codex launch:force");
+        let turn = render_started_for(Some(&summon), None, "@codex launch:force");
         assert!(
             turn.starts_with(
                 "xMatrix channel channel-1 messageId=xmatrix-summon:m1 replyToMessageId=m1"
@@ -440,7 +455,15 @@ mod tests {
             "{turn}"
         );
         assert!(turn.ends_with("@codex launch:force"), "{turn}");
-        assert_eq!(render_started_for(None, "hello"), "hello");
+        assert_eq!(render_started_for(None, None, "hello"), "hello");
+        assert_eq!(
+            render_started_for(Some(&summon), Some("Hub envelope"), "@codex launch:force"),
+            "Hub envelope"
+        );
+        assert!(
+            render_started_for(Some(&summon), Some("Old envelope"), "Recovery input")
+                .ends_with("Recovery input")
+        );
     }
 
     // Registration and the history read each take seconds against the
