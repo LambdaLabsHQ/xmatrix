@@ -8,6 +8,16 @@ the first: they are now edited in the repository and reach the next Run with a
 Hub deploy. Moving another fixed runtime text this way needs no protocol
 change. This needs the new CLI once; older CLIs keep their built-in copies.
 
+## Unreleased: The Hub writes what a new Agent reads first
+
+The conversation a newly launched Agent reads before its first turn is now
+chosen and worded by the Hub in one request. Changing that text, its order or
+its size limit no longer needs every Machine to update its CLI. Long
+conversations read only their newest part instead of every message, and the
+conversation's About is fetched only when the transcript had to be cut, which
+removes a directory read from most launches. This needs the new CLI once; older
+CLIs keep reading history as before.
+
 ## Unreleased: Live updates reach each person in their own Runtime cell
 
 Every product socket has lived in its owner's own Runtime cell since 1.0.0, but

@@ -49,8 +49,20 @@ The About text task's reading marks a message answered in its thread the same
 way, so its summary never calls one unclaimed.
 
 CLI reads fetch catalog context separately from cached message history. A failed
-context read is reported without suppressing readable history. Bootstrap uses the
-same reader and retains the existing resume and history-replay exclusions.
+context read is reported without suppressing readable history.
+
+## Launch context is rendered by the Hub
+
+The launch bootstrap is one read, `GET /api/channels/:id/launch-context?startedFor=<messageId>`
+(`packages/hub/src/agent-launch-context.ts`), with the same access and cross-Space
+grant as `/history`. The Hub pages the Channel newest first until the 200k-character
+transcript budget is spent, renders the transcript, adds the Summary only when the
+transcript was cut, and returns the text with the newest sequence it covers, the
+message the Run was started for and the latest co-writing instruction. The runtime
+places that text in front of the first turn and records the sequence as read; it
+renders no launch transcript itself, so changing what a new Run reads first is a
+Hub deploy, not a CLI release. Resume and history-replay launches still skip the read.
+Threads are retired, so the launch transcript carries no thread references.
 
 When Hub returns HTTP 503 with `channel_catalog_timeout`, the CLI includes the
 recognized failed boundary (`directory`, `authority_page`, `revision_probe`,
