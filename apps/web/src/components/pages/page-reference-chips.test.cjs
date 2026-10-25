@@ -34,3 +34,13 @@ test("mentions and references in one line keep their order", () => {
   assert.deepEqual(chips(`@daniel see channel:${CHANNEL}`),
     ["mention:@daniel:Daniel Melody:/face.png", `reference:channel:${CHANNEL}:general`]);
 });
+
+test("an @ that called an Agent is drawn with its call, and only that @", () => {
+  const plugin = referenceChips(() => ({ ...targets,
+    summonAt: (_state, from, to) => from <= 1 && 1 < to ? { key: "summon:one", draw: () => null, destroy: () => {} } : null }));
+  const state = pluginState("@claude plan this with @claude", plugin);
+  const keys = plugin.props.decorations(state).find().map((decoration) => decoration.spec.key).filter(Boolean);
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], "summon:one");
+  assert.match(keys[1], /^mention:@claude:claude:/);
+});

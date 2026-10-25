@@ -26,7 +26,12 @@ export interface PageReferenceTargets {
   openChannel: (channelId: string) => void;
   /** Whom an `@` in the text can name. */
   mentions?: PageMentions;
+  /** An `@` at `from`…`to` this reader called an Agent with: drawn instead with the state of that call. */
+  summonAt?: (state: EditorState, from: number, to: number) => SummonedMention | null;
 }
+
+/** The chip of an `@` that called an Agent, which another part of the page draws into. */
+export interface SummonedMention { key: string; draw: () => HTMLElement; destroy: (element: HTMLElement) => void }
 
 /** Someone an `@` names: the name and picture its chip shows. */
 export interface PageMention { label: string; imageUrl: string | undefined }
@@ -151,7 +156,7 @@ function mentionChip(text: string, mention: PageMention, token: string): HTMLSpa
 }
 
 /** A reference or a mention in a run of text, and the chip it reads as; null where it stays as typed. */
-interface TextChip { start: number; end: number; key: string; draw: () => HTMLElement }
+interface TextChip { start: number; end: number; key: string; draw: () => HTMLElement; mention?: true }
 
 function textChips(value: string, targets: PageReferenceTargets): TextChip[] {
   const chips: TextChip[] = [];
@@ -169,7 +174,7 @@ function textChips(value: string, targets: PageReferenceTargets): TextChip[] {
       if (!mention) continue;
       const text = value.slice(match.start, match.end);
       chips.push({ start: match.start, end: match.end, key: `mention:${text}:${mention.label}:${mention.imageUrl ?? ""}`,
-        draw: () => mentionChip(text, mention, match.token) });
+        draw: () => mentionChip(text, mention, match.token), mention: true });
     }
   }
   return chips.sort((a, b) => a.start - b.start);
@@ -224,13 +229,20 @@ export function referenceChips(targets: () => PageReferenceTargets | undefined):
     const { from, to } = state.selection;
     const shown = references.found.filter((reference) =>
       !(editable() && from <= reference.to && to >= reference.from));
-    const key = `${names}:${shown.map((reference) => reference.from).join(",")}`;
+    const summoned = shown.map(({ chip, from: start, to: end }) =>
+      chip.mention ? current.summonAt?.(state, start, end) ?? null : null);
+    const key = `${names}:${shown.map((reference, index) => `${reference.from}${summoned[index] ? `=${summoned[index].key}` : ""}`)
+      .join(",")}`;
     if (drawn?.doc === state.doc && drawn.key === key) return drawn.set;
     const set: Decoration[] = [];
-    for (const { chip, from: start, to: end } of shown) {
+    shown.forEach(({ chip, from: start, to: end }, index) => {
       set.push(Decoration.inline(start, end, { class: "page-reference-source" }));
-      set.push(Decoration.widget(start, chip.draw, { side: -1, ignoreSelection: true, marks: [], key: chip.key }));
-    }
+      const summon = summoned[index];
+      set.push(summon
+        ? Decoration.widget(start, summon.draw, { side: -1, ignoreSelection: true, marks: [], key: summon.key,
+          destroy: (node) => summon.destroy(node as HTMLElement) })
+        : Decoration.widget(start, chip.draw, { side: -1, ignoreSelection: true, marks: [], key: chip.key }));
+    });
     drawn = { doc: state.doc, key, set: DecorationSet.create(state.doc, set) };
     return drawn.set;
   };

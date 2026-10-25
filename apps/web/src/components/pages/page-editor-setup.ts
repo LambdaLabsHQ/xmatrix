@@ -683,7 +683,8 @@ function yMapping(state: EditorState): Map<unknown, unknown> | null {
   return sync?.binding?.mapping ?? null;
 }
 
-function anchorPosition(state: EditorState, fragment: Y.XmlFragment, position: unknown): number | null {
+/** Where a Yjs relative position (as JSON) is in the editor's document now, or null where it is gone. */
+export function anchorPosition(state: EditorState, fragment: Y.XmlFragment, position: unknown): number | null {
   const mapping = yMapping(state);
   if (!mapping || !fragment.doc) return null;
   try {
@@ -833,6 +834,12 @@ export function caretBlockAnchor(state: EditorState, fragment: Y.XmlFragment): D
   const { $from } = state.selection;
   if (!$from.parent.isTextblock) return null;
   return rangeAnchor(state, fragment, $from.start(), $from.end());
+}
+
+/** `pos` as a Yjs relative position (as JSON), which stays on the same character through everyone's edits. */
+export function sharedPosition(state: EditorState, fragment: Y.XmlFragment, pos: number): unknown {
+  const mapping = yMapping(state);
+  return mapping ? Y.relativePositionToJSON(absolutePositionToRelativePosition(pos, fragment, mapping as never)) : null;
 }
 
 function rangeAnchor(state: EditorState, fragment: Y.XmlFragment, from: number, to: number): DiscussionAnchor | null {

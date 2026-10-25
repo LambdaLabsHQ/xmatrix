@@ -41,9 +41,9 @@ export function pageShellActions(input: {
   jumpToMessage: (conversationId: string, messageId: string, sequence?: number) => void;
   /**
    * Sends a message as the composer does: its row shows in the conversation at once and goes out as soon as the
-   * conversation exists, kept there to send again if it fails.
+   * conversation exists, kept there to send again if it fails. Answers its stored id, or null when it was not confirmed.
    */
-  deliver: (channel: ChannelSnapshot, body: string) => Promise<void>;
+  deliver: (channel: ChannelSnapshot, body: string) => Promise<string | null>;
 }) {
   const pagesPath = (pageId: string | null, conversationId: string | null) =>
     pagesViewPath(appViewPath(null, "pages", input.currentSpaceId, input.spaces), pageId, conversationId);
@@ -130,6 +130,8 @@ export function pageShellActions(input: {
   }, options: {
     open?: boolean; firstMessage?: string; quote?: DiscussionQuote; coWrite?: boolean;
     planned?: (conversationId: string) => void;
+    /** Hears the first message's stored id once it is sent, or null when it was not confirmed. */
+    sent?: (messageId: string | null) => void;
     call?: ConversationCall;
   } = {}): Promise<string | null> {
     const { token, user } = input;
@@ -159,7 +161,7 @@ export function pageShellActions(input: {
     // in the conversation when the Agent joins it.
     if (options.coWrite) await pageApi.startCoWriting(page.spaceId, page.pageId, token, channel.id);
     if (options.firstMessage) {
-      await (delivered ?? input.deliver(channel, options.firstMessage));
+      options.sent?.(await (delivered ?? input.deliver(channel, options.firstMessage)));
       // Its Instance lives in its own conversation, so it is told there, and answers here.
       if (options.call) await input.deliver(options.call.channel, options.call.body(channel.id));
       if (options.open !== false) openPageConversation(channel.id, { focus: false });

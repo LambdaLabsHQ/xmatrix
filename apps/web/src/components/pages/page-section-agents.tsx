@@ -1,11 +1,11 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { FaceOf } from "@xmatrix/protocol";
 import { Face } from "@/components/dashboard/face";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { cn } from "@/lib/utils";
+import { widgetPortals } from "./page-widget-portals";
 
 /** An Agent live in a conversation about a section, whether or not it has the page open. */
 export interface SectionAgent {
@@ -47,45 +47,19 @@ function SectionAgents({ agents, openConversation }: { agents: readonly SectionA
   );
 }
 
-/**
- * The stacks the headings' widgets hold, which are plain DOM. They are drawn by `SectionAgentsInPage` from
- * inside the page's own tree, so their faces read as every other face does (face.tsx), not from a tree of
- * their own that knows neither the reader nor their Space.
- */
-type Stack = { element: HTMLElement; key: string; agents: readonly SectionAgent[];
-  openConversation: (conversationId: string) => void };
-const stacks = new Map<HTMLElement, Stack>();
-const listeners = new Set<() => void>();
-/** What is drawn, as a new list on every change: the page renders from it, so its render is never stale. */
-let drawn: readonly Stack[] = [];
-let nextKey = 0;
-
-function changed(): void {
-  drawn = [...stacks.values()];
-  for (const listener of listeners) listener();
-}
-
-const drawnNow = () => drawn;
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-}
+/** The stacks the headings' widgets hold, drawn by `SectionAgentsInPage` from inside the page's own tree. */
+const stacks = widgetPortals<{ agents: readonly SectionAgent[]; openConversation: (conversationId: string) => void }>(
+  "section-agents");
 
 /** Draws the stack into a heading's widget; the returned function takes it down. */
 export function mountSectionAgents(element: HTMLElement, agents: readonly SectionAgent[],
   openConversation: (conversationId: string) => void): () => void {
-  stacks.set(element, { element, key: `section-agents-${nextKey++}`, agents, openConversation });
-  changed();
-  // The editor drops a widget while React may be rendering; take it down after.
-  return () => queueMicrotask(() => {
-    if (stacks.delete(element)) changed();
-  });
+  return stacks.mount(element, { agents, openConversation });
 }
 
 /** Every heading's stack, drawn into its widget from the page's tree. */
 export function SectionAgentsInPage() {
-  const current = useSyncExternalStore(subscribe, drawnNow, drawnNow);
+  const current = stacks.useDrawn();
   return (
     <>
       {current.map(({ element, key, agents, openConversation }) =>

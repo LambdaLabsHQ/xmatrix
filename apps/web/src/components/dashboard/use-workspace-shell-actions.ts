@@ -2507,8 +2507,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     channel: ChannelSnapshot,
     { body, invocationSelections, summonIntents, attachments, uploads, replyToMessageId, replyTo, appMentions }:
       Pick<OutgoingMessage, "body" | "invocationSelections" | "summonIntents" | "attachments" | "uploads" | "replyToMessageId" | "replyTo" | "appMentions">,
-  ) {
-    if (!s.token) return;
+  ): Promise<string | null> {
+    if (!s.token) return null;
     const channelId = channel.id;
     const clientMessageId =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -2537,11 +2537,14 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       attachments,
     });
     setOutgoingMessages((current) => [...current, outgoing]);
-    await attemptOutgoingSend(s.token, channel, outgoing);
+    return attemptOutgoingSend(s.token, channel, outgoing);
   }
 
-  /** One attempt at appending a pending row. Sending again runs it under the same clientMessageId. */
-  async function attemptOutgoingSend(token: string, channel: ChannelSnapshot, outgoing: OutgoingMessage) {
+  /**
+   * One attempt at appending a pending row. Sending again runs it under the same clientMessageId.
+   * Answers the stored message's id, or null when the row stayed unsent or unconfirmed.
+   */
+  async function attemptOutgoingSend(token: string, channel: ChannelSnapshot, outgoing: OutgoingMessage): Promise<string | null> {
     const { clientMessageId, body, invocationSelections, summonIntents, replyToMessageId, appMentions, sentAt, uploads } = outgoing;
     let { attachments } = outgoing;
     const channelId = channel.id;
@@ -2551,7 +2554,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       if (uploads?.length) {
         // Nobody reads the words without the files they were sent with.
         attachments = await settleSentUploads(attachments, uploads);
-        if (!s.outgoingMessagesRef.current.some((item) => item.clientMessageId === clientMessageId)) return;
+        if (!s.outgoingMessagesRef.current.some((item) => item.clientMessageId === clientMessageId)) return null;
         // The row now holds the files as the message will, and a resend reuses them.
         for (const upload of uploads) upload.release();
         s.outboundPreviewByClientIdRef.current.set(clientMessageId, { sentAt, attachments });
@@ -2627,9 +2630,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           setBrowserPath(nextPath);
         }
       }
+      return isValidChannelMessage(payload.message) ? payload.message.messageId : null;
     } catch (err) {
       // Discarded while its files were still uploading: nothing is left to mark.
-      if (!s.outgoingMessagesRef.current.some((item) => item.clientMessageId === clientMessageId)) return;
+      if (!s.outgoingMessagesRef.current.some((item) => item.clientMessageId === clientMessageId)) return null;
       // A deadline says the result is unknown, not that the write failed: the
       // POST may have committed. Only a determinate error is a failure, and an
       // unknown result is carried by the row rather than the channel banner.
@@ -2650,6 +2654,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       } else {
         setHistoryError(message ?? null);
       }
+      return null;
     }
   }
 
