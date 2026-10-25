@@ -2149,15 +2149,14 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
   box-shadow: none !important;
 }
 
-/* An App's mark is its own artwork: it stands bare, edge to edge, with no
-   disc, edge or ring around it, wherever its avatar appears. */
+/* An App's mark is its own artwork: it sits whole on a plain white disc, as
+   large as the disc allows, with no tint, glass edge or ring over it,
+   wherever its avatar appears. */
 .xmatrix-app .identity-avatar-face.identity-avatar-mark.identity-avatar-mark.identity-avatar-mark {
-  background: transparent !important;
+  background: #fff !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   box-shadow: none !important;
-  border-radius: 0 !important;
-  overflow: visible !important;
 }
 
 @media (max-width: 767px) {
@@ -7104,14 +7103,12 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   color: var(--primary-foreground);
 }
 
-/* An App's mark is its own artwork: it stands bare, edge to edge, with no
-   disc or ring behind it, as on the App's message avatar. */
+/* An App's mark is its own artwork: it sits whole on a plain white disc with
+   no ring over it, as on the App's message avatar. */
 .xmatrix-app .app-mention-chip-avatar-face:has(.app-mention-chip-mark) {
-  background: transparent;
+  background: #fff;
   box-shadow: none;
   outline: none;
-  border-radius: 0;
-  overflow: visible;
 }
 
 .xmatrix-app .app-mention-chip-avatar-face img.app-mention-chip-mark {
