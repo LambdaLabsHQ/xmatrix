@@ -5,7 +5,8 @@ export interface PageOutputWrite {
   stream: string;
   expiresAt: number;
   seq: number;
-  reply: PageCoWriteReply;
+  session?: string;
+  reply: PageCoWriteReply | { type: "answer"; turn: number } | { type: "cancel"; turn: number };
 }
 
 export type PageOutputReceipt =
@@ -19,6 +20,8 @@ export interface StoredPageOutputReceipt {
   seq: number;
   digest: string;
   receipt: PageOutputReceipt;
+  binding?: string;
+  cancelled?: boolean;
 }
 
 export const PAGE_OUTPUT_LIFETIME_MS = 30 * 60_000;
@@ -30,11 +33,21 @@ export function parsePageOutputWrite(value: unknown): PageOutputWrite | null {
   if (typeof input.stream !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/u.test(input.stream) ||
       typeof input.seq !== "number" || !Number.isSafeInteger(input.seq) || input.seq < 0 ||
       typeof input.expiresAt !== "number" || !Number.isSafeInteger(input.expiresAt)) return null;
-  const reply = parsePageCoWriteReply(input.reply);
-  if (!reply || reply.turn < 0 || (reply.type !== "write" && !reply.paced) ||
+  const raw = input.reply as Record<string, unknown> | null;
+  const session = input.session;
+  if (session !== undefined && (typeof session !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/u.test(session))) return null;
+  const base = { stream: input.stream, expiresAt: input.expiresAt, seq: input.seq,
+    ...(typeof session === "string" ? { session } : {}) };
+  if (raw && (raw.type === "answer" || raw.type === "cancel")) {
+    if (typeof raw.turn !== "number" || !Number.isSafeInteger(raw.turn) || raw.turn < 0 ||
+        (raw.type === "answer" && !session)) return null;
+    return { ...base, reply: { type: raw.type, turn: raw.turn } };
+  }
+  const reply = parsePageCoWriteReply(raw);
+  if (!reply || reply.turn < 0 || (session && reply.type === "write") || (reply.type !== "write" && !reply.paced) ||
       (reply.type === "write" && reply.atOnce) ||
       (reply.type === "delta" && [...reply.text].length > PAGE_CO_WRITE_RATE.chunkChars)) return null;
-  return { stream: input.stream, expiresAt: input.expiresAt, seq: input.seq, reply };
+  return { ...base, reply };
 }
 
 /**
@@ -66,21 +79,32 @@ export class PageOutputReceipts {
       this.receipts.delete(id);
       this.live.delete(id);
     }
+    const binding = JSON.stringify([write.session ?? null, write.reply.turn]);
     const digest = await sha256Hex(JSON.stringify(write.reply));
     const previous = this.receipts.get(key);
+    // Cancellation is a durable fence even if the preceding RPC is still in
+    // flight. The Page stops only the bound writer, never a replacement turn.
+    const cancelling = write.reply.type === "cancel";
     if (previous) {
-      if (previous.expiresAt !== write.expiresAt) return { status: "rejected", seq: write.seq };
-      if (previous.seq === write.seq) {
-        if (previous.digest !== digest) return { status: "rejected", seq: write.seq };
-        if (previous.receipt.status !== "limited") return previous.receipt;
-      } else if (previous.seq + 1 !== write.seq || previous.receipt.status !== "accepted") {
-        return { status: "out_of_order", seq: previous.seq };
+      if (previous.expiresAt !== write.expiresAt || (previous.binding && previous.binding !== binding)) {
+        return { status: "rejected", seq: write.seq };
       }
-      if (!this.live.has(key)) return { status: "unknown", seq: write.seq };
-    } else if (write.seq !== 0 || this.receipts.size >= MAX_STREAMS || write.reply.type !== "write") {
+      if (previous.cancelled && !cancelling) return { status: "rejected", seq: write.seq };
+      if (!cancelling) {
+        if (previous.seq === write.seq) {
+          if (previous.digest !== digest) return { status: "rejected", seq: write.seq };
+          if (previous.receipt.status !== "limited") return previous.receipt;
+        } else if (previous.seq + 1 !== write.seq || previous.receipt.status !== "accepted") {
+          return { status: "out_of_order", seq: previous.seq };
+        }
+        if (!this.live.has(key)) return { status: "unknown", seq: write.seq };
+      }
+    } else if (this.receipts.size >= MAX_STREAMS || (!cancelling &&
+        (write.seq !== 0 || (write.reply.type !== "write" && write.reply.type !== "answer")))) {
       return { status: "rejected", seq: write.seq };
     }
-    const intent: StoredPageOutputReceipt = { key, expiresAt: write.expiresAt, seq: write.seq, digest,
+    const intent: StoredPageOutputReceipt = { key, expiresAt: write.expiresAt, seq: write.seq, digest, binding,
+      ...(cancelling ? { cancelled: true } : {}),
       receipt: { status: "unknown", seq: write.seq } };
     this.receipts.set(key, intent);
     // If either persistence fails, the intent remains unknown even in this process.

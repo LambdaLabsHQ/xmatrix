@@ -81,6 +81,11 @@ fn codex_raw_response_message_text(item: &Value) -> Option<(String, Option<Strin
     if item.get("role").and_then(Value::as_str) != Some("assistant") {
         return None;
     }
+    if ["channel", "phase"].iter().any(|key| {
+        item.get(*key).and_then(Value::as_str).is_some_and(|value| matches!(value, "analysis" | "reasoning"))
+    }) {
+        return None;
+    }
 
     let mut text = String::new();
     for content in item.get("content").and_then(Value::as_array)? {

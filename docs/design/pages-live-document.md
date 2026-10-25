@@ -467,7 +467,8 @@ fact is about.
     An ambiguous Page RPC is retried with its original operation id. If the
     Page's live parser and anchors have been lost, the result is `unknown` and
     the Host stops that output; it never recreates the action or reruns the
-    model. Cancellation fences subsequent delivery. Streams expire after
+    model. Cancellation durably fences subsequent delivery at both the router
+    and the Page, and stops the bound live writer without flushing pending text. Streams expire after
     thirty minutes, with bounded receipts and a bounded Host queue; losing a
     Host process does not promise exactly-once execution or replay its transcript.
 
@@ -476,8 +477,18 @@ fact is about.
     not reach the page and why (a quote that is not there, someone editing what
     it wrote), which the conversation hears as its next turn; nothing when all
     of it did. Its live writer retains the last change for undo while it lives.
-    Session-initiated co-writing continues through its existing input bridge;
-    this transport replaces conversation-initiated outer-marker interpretation.
+    With `page_cowrite_output_v1`, session-initiated co-writing uses this same
+    output transport. Its input/control socket requests `acknowledged: true`;
+    the Page attaches its opaque connection id as `outputSession` to each
+    turn. The Host carries that exact page/session/turn binding on every frame,
+    including an empty answer's end. The Page adopts its existing writer,
+    preserving anchors, human-edit interrupts and undo; it does not create a
+    second writer or accept output on the input socket. The first internal
+    operation is an explicit `answer`, so a Page running an older protocol
+    rejects it instead of opening a conversation writer. A reconnect, lost
+    live writer or changed Run cannot adopt an old answer even if a turn
+    number repeats. Older Hubs keep the legacy socket output path; a negotiated
+    Run never silently falls back after a transport failure.
     `page edit` remains for restructuring and for suggest-only pages; its
     committed edit reaches the page whole, as described in §2.
   - **What reaches the page** is only what the Agent writes inside markers

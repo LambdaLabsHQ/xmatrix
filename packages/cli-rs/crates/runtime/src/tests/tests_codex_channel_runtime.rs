@@ -916,6 +916,13 @@ fn codex_raw_response_message_extracts_output_text() {
         phase.as_deref(),
         Some(codex_primary_output_phase().as_str())
     );
+    for (field, value) in [("type", "reasoning"), ("type", "function_call_output"),
+        ("role", "tool"), ("channel", "analysis"), ("phase", "reasoning")] {
+        let mut hidden = item.clone();
+        hidden[field] = serde_json::json!(value);
+        assert!(codex_raw_response_message_text(&hidden).is_none(), "{field}={value} is not assistant output");
+    }
+    assert!(codex_raw_response_message_text(&serde_json::json!({ "delta": "unclassified" })).is_none());
 }
 
 #[test]
