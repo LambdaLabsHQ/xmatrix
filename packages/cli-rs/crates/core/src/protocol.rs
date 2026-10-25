@@ -1711,6 +1711,10 @@ pub enum AgentInstanceServerMessage {
         /// field must never have its deliveries silently dropped.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         delivery_intent: Option<String>,
+        /// The message as this Instance reads it in a turn, rendered by the
+        /// Hub. Absent from an older Hub; the runtime then renders it itself.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        prompt: Option<String>,
     },
     ChannelHistoryReplay {
         message: ChannelMessage,
@@ -1718,6 +1722,9 @@ pub enum AgentInstanceServerMessage {
         ack_required: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         delivery_intent: Option<String>,
+        /// As for live delivery: the Hub's rendering of the message for a turn.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        prompt: Option<String>,
         /// Hub's verdict on whether this catch-up cancels the running turn,
         /// decided exactly as for live delivery. Absent from an older Hub.
         #[serde(skip_serializing_if = "Option::is_none", default)]

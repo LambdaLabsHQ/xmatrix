@@ -42,6 +42,7 @@ fn channel_message_event(
     body: &str,
 ) -> AgentInstanceConnectionEvent {
     AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+        prompt: None,
         message: test_channel_message(message_id, channel_id, body),
         client_message_id: None,
         ack_required: Some(true),
@@ -65,6 +66,7 @@ fn interrupting_channel_message_event(
         unreachable!("channel_message_event returns a channel message");
     };
     AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+        prompt: None,
         message,
         client_message_id: None,
         ack_required,
@@ -130,6 +132,7 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
     let ordinary = channel_message_event("m2", "chan-a", "context only");
     let replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
+            prompt: None,
             message: test_channel_message("m3", "chan-a", "replay"),
             ack_required: Some(true),
             delivery_intent: None,
@@ -138,6 +141,7 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
         });
     let foreign_replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
+            prompt: None,
             message: test_channel_message("m5", "chan-b", "replay"),
             ack_required: Some(true),
             delivery_intent: None,
@@ -146,6 +150,7 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
         });
     let own_replay =
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
+            prompt: None,
             message: agent_channel_message("m6", "chan-a", "agent:self", "my own send"),
             ack_required: Some(true),
             delivery_intent: None,
@@ -225,6 +230,7 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
 fn hub_verdict_decides_whether_catch_up_interrupts() {
     let replay = |message, interrupt_requested| {
         AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
+            prompt: None,
             message,
             ack_required: Some(true),
             delivery_intent: None,
@@ -1267,6 +1273,7 @@ fn slash_command_passthrough_accepts_only_instance_targeted_commands() {
 #[test]
 fn single_message_slash_passthrough_only_for_lone_attachment_free_command() {
     let command_message = |body: &str| InboundChannelMessage {
+        hub_prompt: None,
         entity_version: None,
         body_hash: None,
         message_id: "m1".to_string(),
@@ -2281,6 +2288,7 @@ async fn claude_init_slash_commands_stay_in_the_session_presentation() {
 fn parameter_controls_require_one_explicit_instance_and_never_consume_attachments() {
     let agent = test_serialized_agent("codex");
     let message = |body: &str| InboundChannelMessage {
+        hub_prompt: None,
         message_id: "parameter-message".into(),
         sequence: Some(1),
         channel_id: "channel".into(),

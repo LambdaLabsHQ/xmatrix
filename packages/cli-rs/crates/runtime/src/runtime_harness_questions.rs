@@ -661,6 +661,7 @@ mod tests {
         let event = |metadata: Value| {
             agent_instance_connection::AgentInstanceConnectionEvent::Server(
                 protocol::AgentInstanceServerMessage::ChannelMessageReceived {
+                    prompt: None,
                     message: serde_json::from_value(json!({
                         "messageId": "m1",
                         "channelId": "c1",

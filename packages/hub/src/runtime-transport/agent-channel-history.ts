@@ -2,6 +2,7 @@ import type {
   AgentInstanceClientMessage,
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
+import { renderAgentTurnMessage } from "../agent-turn-message";
 import { crossChannelReplyRelay, type ChannelMessage, type SerializedAgent, utf8ByteLength } from "@xmatrix/protocol";
 import {
   agentChannelMessageDeliveryIntent,
@@ -328,6 +329,8 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
       return [{
         type: "channel_history_replay" as const,
         message,
+        prompt: renderAgentTurnMessage(message,
+          { agentId: session.principal.agentId, instanceId: session.run.instanceId }, new Date().toISOString()),
         ackRequired: true,
         ...(deliveryIntent === "context" ? { deliveryIntent } : {}),
         ...(metric.mode === "join_birth" ? {} : {

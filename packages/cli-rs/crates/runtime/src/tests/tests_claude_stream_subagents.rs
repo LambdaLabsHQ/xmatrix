@@ -243,6 +243,7 @@ async fn claude_steered_message_joins_the_running_turn_instead_of_cancelling_it(
     };
     let steering = AgentInstanceConnectionEvent::Server(
         AgentInstanceServerMessage::ChannelMessageReceived {
+            prompt: None,
             message,
             client_message_id: None,
             ack_required,

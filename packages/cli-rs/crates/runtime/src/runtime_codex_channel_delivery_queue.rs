@@ -84,6 +84,8 @@ struct InboundChannelMessage {
     reply_to: Option<protocol::ChannelReplyContext>,
     attachments: Option<Vec<protocol::ChannelAttachment>>,
     metadata: Option<serde_json::Value>,
+    /// The Hub's rendering of this message for a turn (`prompt` on its frame).
+    hub_prompt: Option<String>,
 }
 
 impl InboundChannelMessage {
@@ -96,18 +98,25 @@ impl InboundChannelMessage {
         agent: &protocol::SerializedAgent,
         local_files: Option<&LocalImageFiles>,
     ) -> String {
-        let text = format_incoming_channel_message_with_context(
-            &self.channel_id,
-            Some(&self.message_id),
-            self.reply_to_message_id.as_deref(),
-            self.reply_to.as_ref(),
-            reply_to_current_agent(self.reply_to.as_ref(), agent),
-            &self.from,
-            self.metadata.as_ref(),
-            &self.body,
-            self.attachments.as_deref(),
-            local_files,
-        );
+        let text = match &self.hub_prompt {
+            // The Hub wrote the message; this machine adds only where it put its files.
+            Some(prompt) => format!(
+                "{prompt}{}",
+                local_copies_block(self.attachments.as_deref(), local_files)
+            ),
+            None => format_incoming_channel_message_with_context(
+                &self.channel_id,
+                Some(&self.message_id),
+                self.reply_to_message_id.as_deref(),
+                self.reply_to.as_ref(),
+                reply_to_current_agent(self.reply_to.as_ref(), agent),
+                &self.from,
+                self.metadata.as_ref(),
+                &self.body,
+                self.attachments.as_deref(),
+                local_files,
+            ),
+        };
         let context = agent_instance_connection::take_context_for_next_turn(&self.channel_id);
         if let Some(through) = context
             .iter()
@@ -167,8 +176,12 @@ fn inbound_channel_message_from_event(
 ) -> Result<InboundChannelMessage, agent_instance_connection::AgentInstanceConnectionEvent> {
     match event {
         agent_instance_connection::AgentInstanceConnectionEvent::Server(
-            protocol::AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
-            | protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
+            protocol::AgentInstanceServerMessage::ChannelMessageReceived {
+                message, prompt, ..
+            }
+            | protocol::AgentInstanceServerMessage::ChannelHistoryReplay {
+                message, prompt, ..
+            },
         ) => {
             // The frame carries the message nested; unpack it once here so the
             // delivery this runtime acts on is the message itself.
@@ -208,6 +221,7 @@ fn inbound_channel_message_from_event(
                 reply_to,
                 attachments,
                 metadata,
+                hub_prompt: prompt.filter(|prompt| !prompt.trim().is_empty()),
             })
         }
         other => Err(other),
@@ -459,6 +473,31 @@ fn combined_inbound_channel_prompt(parts: Vec<String>) -> String {
             "Multiple xMatrix messages delivered together:\n\n{}",
             parts.join("\n---\n")
         )
+    }
+}
+
+/// The attachments this machine read onto disk, after the Hub's rendering of
+/// their message, which names them only by their links.
+fn local_copies_block(
+    attachments: Option<&[protocol::ChannelAttachment]>,
+    local_files: Option<&LocalImageFiles>,
+) -> String {
+    let Some(files) = local_files else {
+        return String::new();
+    };
+    let lines: String = attachments
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|attachment| {
+            files
+                .path_for(&attachment.id)
+                .map(|path| format_attachment_prompt_line(attachment, Some(path)))
+        })
+        .collect();
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nLocal copies:\n{}", lines.trim_end())
     }
 }
 
