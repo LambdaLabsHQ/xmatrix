@@ -23,7 +23,7 @@ test("deadlock reports retain the query and safe wait graph without changing ret
       return { rows: [] };
     } }) });
   let failure;
-  try { await database.transaction({ requestId: "private-request-id", operation: "page.claim.release" },
+  try { await database.transaction({ requestId: "private-request-id", operation: "page.edit" },
     tx => tx.query({ name: "agent_channel_registered_run_access_v2", text: "SELECT private_canary", maxRows: 1 })); }
   catch (error) { failure = error; }
   assert.equal(failure, conflict);
@@ -37,7 +37,7 @@ test("deadlock reports retain the query and safe wait graph without changing ret
   assert.equal(events.length, 1);
   const event = events[0];
   const attempts = JSON.parse(event.extra.database_failure_attempts);
-  assert.equal(attempts[0].operation, "page.claim.release");
+  assert.equal(attempts[0].operation, "page.edit");
   assert.equal(attempts[0].queryName, "agent_channel_registered_run_access_v2");
   assert.equal(attempts[0].code, "40P01");
   const metadata = sentryEventMetadata({ context: event.extra });
