@@ -61,36 +61,31 @@ designed for both.
    git and Agent edits remain markdown; the editor is a view over it.
 
 A whole-document Agent edit is authorized and committed before it is shown.
-It is then typed into the live document as a person types it
-(`page-typing.ts`):
+It then reaches the live document whole, in one CRDT transaction under the
+Agent's awareness id: readers see exactly what was committed, at the moment it
+was committed (decided by Daniel 2026-10-25). It is never replayed word by word
+or animated as if it were being typed: a page that shows part of an edit the
+head already holds misstates what the Agent did. An Agent that wants to be
+seen writing writes into the page as it writes (§4.2, `⟦write⟧`), and only
+those words, as its model produces them, appear progressively.
 
-- **Structure first.** The edit's structure goes in at once, in one small
-  update: what it removes, restructures or re-marks. A new block stands with
-  its first word.
-- **Then the words.** Its words are typed into the document's text, a few at a
-  time over about two seconds, or, while a person has the page open, a word at
-  a time at a reader's pace (§4.2), which its author does not wait on. Each
-  step is a CRDT insertion anchored to the
-  word before it, so people typing anywhere meanwhile, even in the same line,
-  and other Agents typing their own edits merge with it as keystrokes do. No
-  step parses or rewrites the page.
-- **Every moment reads back as itself.** The page at each moment of the typing
-  reads back from Markdown as itself: no block stands empty, no line ends in a
-  space, and no structure is ever half there. This matters because another
-  Agent's edit merges through the Markdown.
+- **Smallest update.** The transaction is the smallest structural update from
+  the live document to the edit, so people typing anywhere meanwhile, even in
+  the same line, keep their words around it.
+- **Marked as its own.** The Agent's caret rests where its change ends, and the
+  lines it changed stay highlighted in its colour while fresh (§4.2), so a
+  reader sees what it changed without watching it arrive.
 
 Agents that read one revision and change neighbouring lines both get their
 edit: whole lines merge first, then the words of lines that touch. Commits are
-announced in commit order, before their typing.
+announced in commit order, after their text is in the live document.
 
-Session storage keeps the words still to type beside the committed base and
-the CRDT. A person's save and a restart finish the typing first: the save
-commits the head with the person's edits, and the restart types the rest in at
-once. Neither repeats the commit or attributes an unfinished typing to the next
-person who edits. When the last Agent finishes and nobody has edits pending,
-the page is the head exactly, whatever overlapping edits left. Text that differs
-from the committed page while no person's edit is pending is no person's, so a
-restored session reads as its committed page.
+Text that differs from the committed page while no person's edit is pending
+is no person's, so a restored session reads as its committed page. A session
+kept by an earlier version, which typed committed edits in, may still hold the
+words it had left to type; restoring it puts them in at once
+(`page-stored-typing.ts`), around people's pending edits, without another
+commit.
 
 ## 3. Awareness
 
@@ -469,7 +464,7 @@ fact is about.
     while after, so the next write goes straight in and a person can still take
     the last one back.
     `page edit` remains for restructuring and for suggest-only pages; its
-    committed edit is typed in as described in §2.
+    committed edit reaches the page whole, as described in §2.
   - **What reaches the page** is only what the Agent writes inside markers
     (`page-co-writing.ts`): `⟦after "words on the page"⟧` then markdown added
     after the block holding them, `⟦replace "words"⟧` then their new wording
@@ -481,7 +476,8 @@ fact is about.
     transaction under its own client id at most every 80 ms (each write rebuilds
     those blocks; a harness sends its words many times a second, and Claude's
     are sent on that cadence while a reply writes into a page), so its text is
-    marked as its own, and its caret follows. Its words fade in as they arrive.
+    marked as its own, and its caret follows. Its words appear as they arrive,
+    with no fade or other entrance.
     The paragraph it writes is highlighted whole in its colour: steady while it
     writes there, then held for five minutes after its last word
     (`PAGE_AGENT_INK_MS`) before it fades. Its presence names what it wrote
@@ -491,17 +487,14 @@ fact is about.
     after a streaming co-writer leaves, whose caret then rests at its last
     change as any Agent's does. Its edits commit with the
     session's idle commit, as its own, from its conversation.
-  - **At a reader's pace** (decided 2026-10-16). A harness writes far faster
-    than anyone reads, so while a person has the page open an Agent's words
-    reach it as fast as they read along (`page-reader-pace.ts`): a word at a
-    time (a Han character is one), each after the last had its reading time at
-    12 characters a second (a Han character reads as two), with a breath of
-    0.7 s after each sentence and line. This holds for what a co-writer streams
-    and for a committed edit typed in (§2). With nobody on the page, words land
-    as they come. A turn ends, with its `outcome`, once all of it is on the
-    page; a turn the runtime opens meanwhile follows it. A `⟦write⟧` in a
-    message (`xmatrix send`), whose sender waits on its outcome, goes in at
-    once (`atOnce`).
+  - **As it is sent, nothing held back** (decided by Daniel 2026-10-25,
+    replacing the reader's pace of 2026-10-16). The page holds exactly what the
+    Agent has sent: the Hub keeps no buffer of words already written to show
+    them later at a reading pace, and draws no entrance animation over them.
+    What the session has taken is what everyone sees. A turn ends, with its
+    `outcome`, as soon as all of it is sent and on the page; a turn the runtime
+    opens meanwhile follows it. A pace, where there is one, belongs to what the
+    Agent may send, never to what the page shows of what it sent.
   - **Taking it back.** A person who may edit the page takes back the Agent's
     last change from its card (Undo; `POST …/co-writing/:conversationId/undo`):
     its blocks return to what they were, and what it is still writing counts as
