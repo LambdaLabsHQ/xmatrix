@@ -265,6 +265,34 @@ test("leaving a channel aborts everything in flight", () => {
   assert.deepEqual(aborts.sort(), ["a", "b"]);
 });
 
+test("a task sent with its message outlives leaving the channel until it is cancelled", () => {
+  const registry = createAttachmentUploadRegistry();
+  const generation = registry.generation();
+  const aborts = [];
+  registry.begin("sent");
+  registry.begin("draft");
+  registry.trackRequest("sent", { abort: () => aborts.push("sent") });
+  registry.trackRequest("draft", { abort: () => aborts.push("draft") });
+  assert.equal(registry.detach("sent"), true);
+
+  registry.cancelAll();
+  assert.deepEqual(aborts, ["draft"]);
+  assert.equal(registry.isLive("sent", generation), true, "the message still waits for it");
+  assert.equal(registry.isLive("draft", generation), false);
+
+  registry.cancel("sent");
+  assert.deepEqual(aborts, ["draft", "sent"]);
+  assert.equal(registry.isLive("sent", generation), false);
+});
+
+test("only a live task can be handed to a message", () => {
+  const registry = createAttachmentUploadRegistry();
+  registry.begin("a");
+  registry.cancel("a");
+  assert.equal(registry.detach("a"), false);
+  assert.equal(registry.detach("never-started"), false);
+});
+
 test("a settled task is no longer live", () => {
   const registry = createAttachmentUploadRegistry();
   const generation = registry.generation();

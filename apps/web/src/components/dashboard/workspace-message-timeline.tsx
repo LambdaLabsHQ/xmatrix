@@ -283,6 +283,7 @@ import { useAndroidBackHandler } from "./use-android-back";
 
 
 import { cn } from "@/lib/utils";
+import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
@@ -2692,6 +2693,7 @@ export const MessageRow = memo(function MessageRow({
               const mediaProgress = mediaIdentity ? mediaStore.progress.get(mediaIdentity) : undefined;
               const attachmentCopied = copiedAttachmentId === attachment.id;
               const attachmentCopyFailed = failedAttachmentCopyId === attachment.id;
+              const upload = message.uploads?.find((item) => item.id === attachment.id);
               return (
                 <div
                   key={attachment.id}
@@ -2730,6 +2732,7 @@ export const MessageRow = memo(function MessageRow({
                       ) : (
                         <MediaDownloadProgress label="Downloading video" progress={mediaProgress} />
                       )}
+                      {upload && <SentUploadProgress upload={upload} media />}
                       <button
                         type="button"
                         title={`Open ${displayAttachment.name}`}
@@ -2766,9 +2769,10 @@ export const MessageRow = memo(function MessageRow({
                         <span className="block truncate text-sm font-bold text-foreground">{displayAttachment.name}</span>
                         <span className="block text-xs text-muted-foreground">{displayAttachment.kind === "markdown" ? "Markdown" : displayAttachment.mimeType || "File"} - {formatFileSize(displayAttachment.size)}</span>
                       </span>
-                      {displayAttachment.kind === "markdown"
-                        ? <Maximize2 className="size-4 shrink-0 text-muted-foreground" />
-                        : <Download className="size-4 shrink-0 text-muted-foreground" />}
+                      {upload ? <SentUploadProgress upload={upload} media={false} />
+                        : displayAttachment.kind === "markdown"
+                          ? <Maximize2 className="size-4 shrink-0 text-muted-foreground" />
+                          : <Download className="size-4 shrink-0 text-muted-foreground" />}
                     </button>
                   ) : (
                     <button
@@ -2777,8 +2781,9 @@ export const MessageRow = memo(function MessageRow({
                       aria-label={`Open ${displayAttachment.name}`}
                       onClick={() => void openMessageAttachment(displayAttachment)}
                       data-lightbox-origin={displayAttachment.id}
-                      className="message-image-attachment block max-w-[18rem] overflow-hidden rounded-[0.75rem] border border-border bg-transparent text-left"
+                      className="message-image-attachment relative block max-w-[18rem] overflow-hidden rounded-[0.75rem] border border-border bg-transparent text-left"
                     >
+                      {upload && <SentUploadProgress upload={upload} media />}
                       {source ? (
                         <LoadingImage
                           src={source}
@@ -2792,7 +2797,7 @@ export const MessageRow = memo(function MessageRow({
                       )}
                     </button>
                   )}
-                  {source && displayAttachment.kind === "image" && (
+                  {source && !upload && displayAttachment.kind === "image" && (
                     <div className="absolute right-1.5 top-1.5 z-10 flex gap-1 opacity-100 transition md:opacity-0 md:group-hover/attachment:opacity-100">
                       {displayAttachment.kind === "image" && (
                         <button

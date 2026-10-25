@@ -30,6 +30,7 @@ import type {
 } from "react";
 import { UserFacingProblem } from "../../lib/user-facing-error";
 import type { CommandNotice } from "./command-notices";
+import type { SentUpload } from "./sent-upload";
 
 export type ComposerSendSnapshot = {
   body: string;
@@ -37,6 +38,8 @@ export type ComposerSendSnapshot = {
   /** Jev's reading of each summon while the author typed this exact body. */
   summonIntents?: DraftSummonIntent[];
   attachments: ChannelAttachment[];
+  /** Files still uploading when Send was pressed; the message is appended once they land. */
+  uploads?: SentUpload[];
 };
 
 /** Channel attachment with optional in-flight Relay V2 upload binding. */
@@ -269,6 +272,8 @@ export type TimelineItem = {
   /** Client-only outbound status while the POST is in flight or failed. */
   sendStatus?: "pending" | "unconfirmed" | "failed";
   sendError?: string;
+  /** Files of a pending row still uploading, drawn with their progress. */
+  uploads?: SentUpload[];
   clientMessageId?: string;
 };
 

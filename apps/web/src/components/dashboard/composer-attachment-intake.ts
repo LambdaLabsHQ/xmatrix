@@ -170,9 +170,13 @@ export type AbortableRequest = { abort: () => void };
  * therefore a property of the task, checked at every stage boundary. Leaving a
  * channel bumps the generation, so returning to it cannot revive work that
  * belonged to the previous visit.
+ *
+ * A task sent with its message before it finished is detached: it belongs to
+ * that message now, so leaving the channel or closing the composer no longer
+ * ends it. Only cancelling it by id does.
  */
 export function createAttachmentUploadRegistry() {
-  const tasks = new Map<string, { cancelled: boolean; request: AbortableRequest | null }>();
+  const tasks = new Map<string, { cancelled: boolean; detached: boolean; request: AbortableRequest | null }>();
   let generation = 0;
 
   return {
@@ -180,7 +184,7 @@ export function createAttachmentUploadRegistry() {
       return generation;
     },
     begin(id: string) {
-      tasks.set(id, { cancelled: false, request: null });
+      tasks.set(id, { cancelled: false, detached: false, request: null });
     },
     /**
      * Returns false when the task is already dead, so the caller can skip the
@@ -197,9 +201,21 @@ export function createAttachmentUploadRegistry() {
       return true;
     },
     isLive(id: string, taskGeneration: number): boolean {
-      if (taskGeneration !== generation) return false;
       const task = tasks.get(id);
-      return task ? !task.cancelled : false;
+      if (!task || task.cancelled) return false;
+      return task.detached || taskGeneration === generation;
+    },
+    /** Returns false when there is no live task to hand over. */
+    detach(id: string): boolean {
+      const task = tasks.get(id);
+      if (!task || task.cancelled) return false;
+      task.detached = true;
+      return true;
+    },
+    /** The send it was handed to did not happen; the composer owns it again. */
+    reattach(id: string) {
+      const task = tasks.get(id);
+      if (task) task.detached = false;
     },
     cancel(id: string) {
       const task = tasks.get(id);
@@ -214,11 +230,12 @@ export function createAttachmentUploadRegistry() {
     },
     cancelAll() {
       generation += 1;
-      for (const task of tasks.values()) {
+      for (const [id, task] of tasks) {
+        if (task.detached) continue;
         task.cancelled = true;
         task.request?.abort();
+        tasks.delete(id);
       }
-      tasks.clear();
     },
   };
 }
