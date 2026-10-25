@@ -94,7 +94,7 @@ export const IdentityAvatar = memo(function IdentityAvatar({
   const imageSrc = avatarImageSrc(imageUrl);
   const tone = avatarTone(label);
   const rest = identityRestStatus(status);
-  // An App's mark is its own artwork: it stands bare, edge to edge, with no disc or ring around it.
+  // An App's mark is its own artwork: it sits whole on a plain white disc, with no tint, glass edge or ring.
   const bareMark = kind === "app" && Boolean(imageSrc) && !pending;
   const imageFallback = initials
     ? initials
@@ -137,7 +137,11 @@ export const IdentityAvatar = memo(function IdentityAvatar({
             retain
             referrerPolicy="no-referrer"
             draggable={false}
-            className={cn("aspect-square size-full", kind === "app" ? "object-contain" : "object-cover")}
+            className={cn(
+              "aspect-square size-full",
+              // 15% is the least inset that keeps any full App mark, square ones included, inside a circular disc.
+              kind === "app" ? "object-contain p-[15%]" : "object-cover"
+            )}
             fallback={imageFallback}
             onContextMenu={(event) => event.preventDefault()}
           />
