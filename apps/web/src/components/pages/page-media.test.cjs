@@ -89,8 +89,10 @@ test("a failed upload beside an earlier copy of the same file does not take that
   ]));
   const after = positionOf(state.doc, "kept") + 1;
   state = insertOwned(state, after, [{ id: "paste", src: SRC, alt: "new" }]);
-  state = state.apply(dropOwnedMedia(state, "paste"));
-  assert.deepEqual(images(state.doc), [{ src: SRC, alt: "kept" }]);
+  const left = images(state.apply(dropOwnedMedia(state, "paste")).doc);
+  assert.equal(left.length, 1);
+  assert.equal(left[0].alt, "kept");
+  assert.equal(left[0].src, SRC);
 });
 
 test("one failed file in a paste leaves the other file that paste inserted", () => {
