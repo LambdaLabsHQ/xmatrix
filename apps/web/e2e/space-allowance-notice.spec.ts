@@ -65,10 +65,23 @@ test("the last fifth of Free is counted down; a member is sent to the owner", as
   await expect(notice).toHaveAttribute("data-allowance", "free-low");
   await expect(notice).toContainText("42 of 500 free writes left");
   await expect(notice).toContainText("Ask the Space owner to upgrade.");
-  await expect(notice.getByRole("button")).toHaveCount(0);
+  await expect(notice.getByRole("button", { name: "Upgrade to Pro" })).toHaveCount(0);
 });
 
 test("a Space with room left shows nothing", async ({ page }) => {
   await openConversation(page, freeBilling(300));
   await expect(page.getByTestId("space-allowance-notice")).toHaveCount(0);
+});
+
+test("hiding folds the card to one line that stays folded for the Space until shown again", async ({ page }) => {
+  await openConversation(page, freeBilling(0));
+  const notice = page.getByTestId("space-allowance-notice");
+  await notice.getByRole("button", { name: "Hide" }).click();
+  await expect(notice.getByRole("button", { name: "Upgrade to Pro" })).toHaveCount(0);
+  await expect(notice).toContainText("This Space's free allowance is used up");
+  await expect(notice).toContainText("Writes stopped");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("space-allowance-notice").getByRole("button", { name: "Show" })).toBeVisible();
+  await page.getByTestId("space-allowance-notice").getByRole("button", { name: "Show" }).click();
+  await expect(page.getByTestId("space-allowance-notice").getByRole("button", { name: "Upgrade to Pro" })).toBeVisible();
 });
