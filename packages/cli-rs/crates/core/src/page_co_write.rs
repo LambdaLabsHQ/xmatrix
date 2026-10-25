@@ -507,6 +507,28 @@ impl PageCoWriteConnector {
             .clone())
     }
 
+    /// Independent from the control socket; only normalized assistant output
+    /// is delivered here. The caller retains the exact frame until acknowledged.
+    pub async fn assistant_output(
+        &self,
+        channel_id: &str,
+        output: &crate::page_assistant_output::AssistantOutput,
+    ) -> Result<crate::page_assistant_output::AssistantOutputAck> {
+        let (secure, host) = connection_host(&self.relay_url);
+        let url = format!(
+            "{}://{host}/api/channels/{}/page-output",
+            if secure { "https" } else { "http" },
+            urlencoding::encode(channel_id)
+        );
+        http::request_json(
+            &url,
+            "POST",
+            Some(&self.token()?),
+            Some(serde_json::to_value(output)?),
+        )
+        .await
+    }
+
     /// The Space whose pages a conversation writes in.
     pub async fn page_space(&self, channel_id: &str) -> Result<String> {
         let (secure, host) = connection_host(&self.relay_url);
