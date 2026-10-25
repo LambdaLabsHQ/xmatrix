@@ -75,8 +75,8 @@ export const HUB_ENVIRONMENT = {
   RELAY_SPACE_CAPACITY_AUTHORITY: retired,
   RELAY_SPACE_ROOT_AUTHORITY: test("binding", "Pre-PostgreSQL Space root authority; bound only by test configs."),
   RELAY_RUNTIME: product("binding", "Runtime cells holding live Agent and client connections."),
-  RELAY_RUNTIME_ROUTE_DIRECTORY: product("binding", "Runtime delivery-scope to cell directory."),
-  RELAY_RUNTIME_CHANNEL_FANOUT: product("binding", "Per-channel runtime fanout once a channel outgrows the direct cell list."),
+  RELAY_RUNTIME_ROUTE_DIRECTORY: retired,
+  RELAY_RUNTIME_CHANNEL_FANOUT: retired,
   DEVICE_AUTH: product("binding", "Device-code login broker for the CLI and apps."),
 
   // PostgreSQL.
@@ -102,7 +102,6 @@ export const HUB_ENVIRONMENT = {
   RELAY_AUTOMATION_RUN_TIMEOUT_MS: product("var", "Default deadline for Automation runs without their own timeout."),
   CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED: product("var", "Admits the last client generation that sends no compatibility identity."),
   GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED: product("var", "Mints repository tokens for daemons that name no Run (pre-binding CLI); refused unless \"true\"."),
-  XMATRIX_RUNTIME_CELL_MODE: product("var", "Runtime cell routing; \"dual\" activates candidate cells."),
 
   // Storage, queues and platform bindings.
   RELAY_R2_CAPABILITY_HMAC_SECRET: { kind: "secret", scope: "required", summary: "Signs short-lived R2 capability URLs for attachments and history (at least 32 bytes). Unset or shorter: those routes answer 503 `capability_security_unavailable`." },

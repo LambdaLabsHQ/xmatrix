@@ -1,79 +1,15 @@
 import { SpaceControlError } from "@xmatrix/db";
-import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
 import type { SerializedChannel } from "@xmatrix/protocol";
 import { getChannel, type SpacesEnv } from "../spaces";
 import {
-  channelForSharedPresenceFanout,
-  channelIdsNeedingHumanPresenceFanout,
   humanMemberIdsForChannel,
   overlayHumanPresenceOnChannel,
-  visibleHumanUserIds,
   type OpenChannelHumanMemberIdsBySpace,
   type LiveHumanSessionSnapshot,
 } from "./human-live-presence";
-import type { HumanPresenceChangeHandler } from "./human-port";
-import { overlayChannelsWithLiveAgentPresence } from "./agent-presence-snapshot";
 import { loadRuntimePresenceSnapshotEntries, tryLoadRuntimePresenceSnapshotEntries } from "./runtime-presence-snapshot";
 
 export const RELAY_RUNTIME_HUMAN_PRESENCE_PATH = "/internal/human-presence";
-
-/**
- * Build a Human presence change handler that rehydrates Authority channel snapshots
- * with live Runtime Human and Agent sessions and fans out channel_updated messages.
- */
-export function createHumanPresenceFanout(input: {
-  readChannel: HumanFanoutChannelReader;
-}): HumanPresenceChangeHandler {
-  return async ({
-    reason,
-    previousFocusedChannelId,
-    nextFocusedChannelId,
-    session,
-    liveSessions,
-    liveAgentSessions,
-    deliver,
-  }) => {
-    const channelIds = channelIdsNeedingHumanPresenceFanout(
-      reason,
-      previousFocusedChannelId,
-      nextFocusedChannelId,
-      liveSessions.map((candidate) => candidate.focusedChannelId),
-    );
-    if (channelIds.length === 0) return;
-
-    await Promise.all(channelIds.map(async (channelId) => {
-      const principalUserId = presencePrincipalForChannel(
-        channelId,
-        session.user.id,
-        liveSessions,
-      );
-      const snapshot = await input.readChannel(channelId, principalUserId, "human-presence");
-      if (!snapshot) return;
-      const humanMemberIds = humanMemberIdsForChannel(
-        snapshot.channel,
-        snapshot.openChannelHumanMemberIdsBySpace,
-      );
-      const [agentOverlaid] = overlayChannelsWithLiveAgentPresence(
-        [snapshot.channel],
-        liveAgentSessions,
-      );
-      const overlaid = overlayHumanPresenceOnChannel(
-        agentOverlaid as SerializedChannel,
-        liveSessions,
-        humanMemberIds,
-      );
-      const message: HumanServerMessage = {
-        type: "channel_updated",
-        channel: channelForSharedPresenceFanout(overlaid),
-      };
-      for (const userId of visibleHumanUserIds(humanMemberIds)) {
-        if (liveSessions.some((candidate) => candidate.userId === userId)) {
-          deliver(userId, message);
-        }
-      }
-    }));
-  };
-}
 
 export async function loadLiveHumanPresenceFromRuntime(
   runtime: { fetch(request: Request): Promise<Response> },
@@ -133,17 +69,8 @@ export function overlayChannelsWithLiveHumanPresence(
   });
 }
 
-function presencePrincipalForChannel(
-  channelId: string,
-  actorUserId: string,
-  liveSessions: readonly LiveHumanSessionSnapshot[],
-): string {
-  const focused = liveSessions.find((session) => session.focusedChannelId === channelId);
-  return focused?.userId || actorUserId;
-}
-
 /** Which live fanout reads a Channel; it names the read in database observation. */
-export type HumanFanoutPurpose = "human-presence" | "agent-presence" | "member-read";
+export type HumanFanoutPurpose = "agent-presence";
 
 /**
  * A Channel as one Human reads it, with the hint naming an open Channel's

@@ -193,7 +193,7 @@ export function registerCrossSpaceReadRoutes(app: Hono<{ Bindings: Env }>): void
       ...(body.scope ? { scope: body.scope as "channel" | "space" } : {}) });
     if (!(grant instanceof Response)) {
       await notifyCrossSpaceRead(c.env, grant);
-      await markCardAnswered(c.env, (task) => c.executionCtx.waitUntil(task), grant.sourceChannelId,
+      await markCardAnswered(c.env, grant.sourceChannelId,
         grant.noticeMessageId ?? `cross-space-read:${grant.id}`.slice(0, 200), authUser.id);
     }
     return grant;

@@ -1,16 +1,9 @@
 
 import { relayRuntimeOwnerCellName } from "./runtime-transport/runtime-cell-locator";
-import {
-  isRuntimeRouteDirectoryScopeId,
-  runtimeRouteDirectoryShardName,
-} from "./runtime-transport/runtime-route-directory-locator";
 
 /**
- * Runtime socket cells are selected by owner-principal hash under the
- * partitioning ADR, and channel fanout becomes multi-cell — a single-stub
- * resolver cannot express that shape, so Runtime call sites reference this
- * greppable single-cell name instead of declaring scopes that the cell
- * migration would immediately invalidate.
+ * The one cell that holds no product socket: work that must run beside
+ * PostgreSQL runs there. Every socket lives in its owner's own cell.
  */
 export const RELAY_RUNTIME_SINGLE_CELL_NAME = "cell-0";
 
@@ -66,15 +59,12 @@ export function relayRuntimeSingleCell<Id, Stub>(env: RelayRuntimeCellEnv<Id, St
 
 export { relayRuntimeOwnerCellName } from "./runtime-transport/runtime-cell-locator";
 
-/**
- * The cells that may hold a socket owned by these users: each owner's own
- * cell, plus the single cell that clients predating owner routing still use.
- */
+/** The cells holding these users' sockets: each owner's own cell. */
 export function relayRuntimeCellsForOwners<Id, Stub>(
   env: RelayRuntimeCellEnv<Id, Stub>,
   ownerUserIds: Iterable<string>,
 ): Stub[] {
-  const names = new Set<string>([RELAY_RUNTIME_SINGLE_CELL_NAME]);
+  const names = new Set<string>();
   for (const ownerUserId of ownerUserIds) {
     const name = relayRuntimeOwnerCellName(ownerUserId);
     if (name) names.add(name);
@@ -83,39 +73,8 @@ export function relayRuntimeCellsForOwners<Id, Stub>(
 }
 
 /**
- * Resolves the bounded route-directory shard for a typed product scope. An
- * invalid scope never reaches `idFromName`, so it cannot mint a caller-chosen
- * Durable Object name.
- */
-export function relayRuntimeRouteDirectory<Id, Stub>(
-  namespace: DurableNamespaceLike<Id, Stub>,
-  scopeId: string,
-): Stub | undefined {
-  const shardName = runtimeRouteDirectoryShardName(scopeId);
-  return shardName ? namespace.get(namespace.idFromName(shardName)) : undefined;
-}
-
-/**
- * One fanout object per channel. The scope id is checked before it becomes an
- * object name, and the location hint is part of that name so a move creates a
- * new object beside the database instead of reusing one pinned elsewhere.
- */
-export function relayRuntimeChannelFanout<Id, Stub>(
-  namespace: DurableNamespaceLike<Id, Stub>,
-  scopeId: string,
-  env: { XMATRIX_RUNTIME_LOCATION_HINT?: string },
-): Stub | undefined {
-  if (!isRuntimeRouteDirectoryScopeId(scopeId)) return undefined;
-  const locationHint = relayRuntimeLocationHint(env.XMATRIX_RUNTIME_LOCATION_HINT);
-  const name = locationHint ? `fanout:${scopeId}@${locationHint}` : `fanout:${scopeId}`;
-  const id = namespace.idFromName(name);
-  return locationHint ? namespace.get(id, { locationHint }) : namespace.get(id);
-}
-
-/**
- * Resolves a Runtime cell by name for the dual-accept phase. The name MUST
- * come from the runtime cell locator's closed set (ticket or claim parsers),
- * never from raw request data — the parsers enumerate every legal cell.
+ * Resolves a Runtime cell by name. The name MUST come from the runtime cell
+ * locator (`relayRuntimeOwnerCellName`), never from raw request data.
  */
 export function relayRuntimeCellNamed<Id, Stub>(
   env: RelayRuntimeCellEnv<Id, Stub>,

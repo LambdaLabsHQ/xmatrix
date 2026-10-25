@@ -20,6 +20,7 @@ import {
   type AgentInstanceConnectionPort,
 } from "../connections/agent-instance/controller";
 import { RuntimeClientOperationError, type RuntimeFailureStage } from "./runtime-operation-failure";
+import { admissionGate, closedIfRefused, refuseConnect, RuntimeSocketRefused, type RuntimeSocketAdmit } from "./runtime-socket-admission";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
 import {
   parseAgentInstanceHibernationAttachment,
@@ -162,7 +163,11 @@ export interface AgentInstanceSocketBackend {
     binding: AgentInstanceControlSwitchBinding,
     timeoutMs: number,
   ): Promise<AgentInstanceControlSwitchResult>;
-  authenticate(message: AgentInstanceConnectMessage): Promise<AgentInstanceAuthorityAuthentication>;
+  /**
+   * `admit` is called once the credential names its Run's owner, before the
+   * connect claims the Instance, and throws when this cell may not hold it.
+   */
+  authenticate(message: AgentInstanceConnectMessage, admit?: (ownerUserId: string) => void): Promise<AgentInstanceAuthorityAuthentication>;
   refresh(token: string, session: Readonly<AgentInstanceRuntimeSession>): Promise<AgentInstanceRunPrincipal>;
   execute(
     session: Readonly<AgentInstanceRuntimeSession>,
@@ -221,6 +226,8 @@ export class AgentInstanceRuntimeTransport {
     private readonly onPresenceChange?: AgentInstancePresenceChangeHandler,
     private readonly onClientNetworkSample?: AgentInstanceClientNetworkSampleHandler,
     private readonly allowLegacyProtocol = false,
+    /** Whether this cell may hold a socket of the owner an Instance authenticated under. */
+    private readonly admit?: RuntimeSocketAdmit,
   ) {
     this.backend = backend;
     const missing = AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES.filter(
@@ -307,6 +314,8 @@ export class AgentInstanceRuntimeTransport {
       ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
       return true;
     }
+    // A socket this cell may not hold is closed before it replaces anything.
+    if (closedIfRefused(ws, this.admit, attachment.session.principal.ownerUserId)) return true;
     if (this.hasNewerConnection(attachment.session.run)) {
       ws.close(1000, "Replaced by newer authenticated connection");
       return true;
@@ -335,6 +344,7 @@ export class AgentInstanceRuntimeTransport {
   liveSessions(): readonly Readonly<AgentInstanceRuntimeSession>[] {
     return Array.from(this.sockets.entries(), ([, session]) => session);
   }
+
 
   /**
    * Push one committed channel message to every live Agent Instance bound to
@@ -683,7 +693,17 @@ export class AgentInstanceRuntimeTransport {
     let setupComplete = false;
     try {
       await this.sockets.answerOperation(ws, message.requestId, "Agent session request could not be completed", async () => {
-        const authentication = await this.backend.authenticate(message);
+        const admit = admissionGate(this.admit);
+        let authentication: AgentInstanceAuthorityAuthentication;
+        try {
+          authentication = await this.backend.authenticate(message, admit);
+          admit(authentication.principal.ownerUserId);
+        } catch (error) {
+          if (!(error instanceof RuntimeSocketRefused)) throw error;
+          setupComplete = true;
+          refuseConnect(this.sockets, ws, message.requestId, error.admission, "Agent session request could not be completed");
+          return;
+        }
         failureStage = "relay.validate_binding";
         assertRunBinding(message, authentication);
         if (this.hasNewerConnection(authentication.run)) {

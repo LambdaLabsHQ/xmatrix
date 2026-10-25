@@ -1,7 +1,10 @@
 # Runtime delivery errors
 
-Agent presence reaches local sockets first, then the other Runtime cells for
-the Channel. Cross-cell failures retain every original error in the standard
+Every product socket lives in its owner's own Runtime cell, and a live
+delivery reaches each recipient there: the authority names the people it is
+for (and, for a message, the owners of the Channel's active Runs), and the
+publisher sends one request per cell. Agent presence reaches local sockets
+first, then each other viewer's cell. Cross-cell failures retain every original error in the standard
 `cause` / `AggregateError` chain. The sending side reports terminal failures;
 `RelayRuntime.fetch` also reports exceptions at the receiving boundary, before
 Cloudflare transports them to the caller. The receiving report preserves the
@@ -38,14 +41,15 @@ HUB-9Y exhausted the platform's subrequest depth while sending Agent presence;
 the receiving presence handler only writes local Human sockets and does not
 republish. The original event does not establish where the depth accumulated.
 Routed failures now retain fixed hop diagnostics in their exception messages:
-invocation ingress, delivery kind, direct-directory/fanout/legacy route, source
-and target roles, presence reason, fetch/response phase, and attempt count.
+invocation ingress, delivery kind, route (always `principal` since the route
+directory retired), source and target roles, presence reason, fetch/response
+phase, and attempt count.
 Invocation-local context keeps concurrent socket and RPC provenance separate.
 No cell names, principals, payloads, request URLs or headers enter those fields.
 The first failed hop appears on the outer error and up to four failed hops on
 its aggregate cause; all original exceptions remain in the cause chain.
 The next depth-limit event should distinguish a socket-originated direct hop
-from an internally received delivery or fanout hop before choosing recovery.
+from an internally received delivery before choosing recovery.
 Sentry's existing duplicate suppression remains in force. Delivery and its
 overload-only retry policy are unchanged; do not replay a partial broadcast.
 
@@ -57,15 +61,14 @@ the console/reporting call, not the original storage operation. Original stacks
 are preserved when available. For HUB-9C and HUB-88, use the next event's capture
 caller to identify the responsible DO path, then establish whether delivery or
 commit already occurred before choosing recovery. The route-directory
-register/unregister path (HUB-9E) is that caller: a storage reset aborts the
-directory write, and the idempotent mutation is replayed once. A second failure
-returns the scope to the unsynced set so the next socket refresh tries again.
-Message delivery still does not replay an unknown commit.
+register/unregister path (HUB-9E) that was once that caller is gone: no cell
+registers anywhere, and the directory's namespace answers 410. Message delivery
+still does not replay an unknown commit.
 
 Machine text-task answers that update a conversation's About carry the current
 Runtime's local delivery capability through the catalog mutation and its
 after-commit notification. Deliver the catalog change directly to that cell;
-other occupied cells keep their routed delivery. An RPC back into the Runtime
+every other recipient is reached in their own cell. An RPC back into the Runtime
 handling the daemon's completion waits behind that same socket event: the
 About is already committed, but the completion ACK stalls until the ordered
 queue's 30-second escape. Do not increase that budget or detach the notification

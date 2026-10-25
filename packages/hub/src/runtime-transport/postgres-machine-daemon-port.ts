@@ -148,11 +148,14 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
 
   constructor(private readonly dependencies: PostgresMachineDaemonPortDependencies) {}
 
-  async authenticate(message: MachineDaemonConnectMessage) {
+  async authenticate(message: MachineDaemonConnectMessage, admit?: (ownerUserId: string) => void) {
     const authenticated = await this.dependencies.authenticate(message.token);
     if (message.machineId !== authenticated.machineId) {
       throw new Error("Machine Daemon credential does not match the Machine");
     }
+    // A socket in a cell not its owner's is refused before the connect advances
+    // the epoch or wakes what waited on the machine.
+    admit?.(authenticated.ownerUserId);
     // A signed credential establishes identity. Connect reports the current,
     // mutable hostname, which may have changed since that credential was minted.
     const principal = { ...authenticated, ...machineHostnameObservation(message) };

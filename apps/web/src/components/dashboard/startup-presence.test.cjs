@@ -27,6 +27,22 @@ test("missing Human presence is unknown, while a complete empty map is offline",
   assert.equal(exportsForTest.memberPresence(decodeChannelSnapshot({ id: "channel", memberPresence: {} }), "user:viewer").status, "offline");
 });
 
+test("a snapshot that speaks only for Agents keeps the people a full one gave, and says nothing of anyone else", () => {
+  const merge = exportsForTest.mergeChannelPresence;
+  const full = decodeChannelSnapshot({ id: "channel", memberPresence: { "user:viewer": { kind: "user", status: "online" } } });
+  const agentsOnly = decodeChannelSnapshot({ id: "channel", presenceCoverage: "agents",
+    memberPresence: { "user:viewer": { kind: "user", status: "offline" } } });
+  // Its own people entries are not read: the cell that sent it cannot know them.
+  assert.equal(agentsOnly.presence.humans.size, 0);
+  assert.equal(exportsForTest.memberPresence(agentsOnly, "user:viewer").activity, "Status unknown");
+  const merged = merge(full.presence, agentsOnly.presence);
+  assert.equal(merged.humansCovered, undefined);
+  assert.equal(exportsForTest.memberPresence({ presence: merged }, "user:viewer").status, "online");
+  // A full snapshot after it is the whole truth again.
+  const after = merge(merged, decodeChannelSnapshot({ id: "channel", memberPresence: {} }).presence);
+  assert.equal(exportsForTest.memberPresence({ presence: after }, "user:viewer").status, "offline");
+});
+
 test("unavailable catalog presence preserves hydrated state and later full snapshots replace it", () => {
   const channel = decodeChannelSnapshot({ id: "channel", memberPresence: { "user:viewer": { kind: "user", status: "online" } } });
   const online = channel.presence;

@@ -1,15 +1,18 @@
 import type { ChannelCatalogChangeAudience } from "@xmatrix/db";
 import type { HumanChannelCatalogChangedMessage } from "@xmatrix/protocol/connections/human";
-import { publishRuntimeCommittedEvent, type RuntimeLiveDeliverySelf } from "./runtime-transport/runtime-route-directory-delivery";
+import {
+  deliverToAudience,
+  RUNTIME_COMMITTED_EVENT_URL,
+  runtimeJsonRequest,
+  type RuntimeLiveDeliverySelf,
+} from "./runtime-transport/runtime-principal-delivery";
 import type { Env } from "./types";
 
 const CHANNEL_CATALOG_COMMITTED_EVENT_CHANNEL = "space-channel-catalog";
-const CHANNEL_CATALOG_RECIPIENT_BATCH = 200;
-const CHANNEL_CATALOG_DELIVERY_CONCURRENCY = 16;
 
+/** Tells each member of the changed Spaces, in their own cell, that its Channel catalog moved. */
 export async function relayChannelCatalogPublishCommittedChanges(input: {
-  env: Pick<Env, "RELAY_RUNTIME" | "RELAY_RUNTIME_ROUTE_DIRECTORY" |
-    "XMATRIX_RUNTIME_CELL_MODE">;
+  env: Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT">;
   changes: readonly ChannelCatalogChangeAudience[];
   self?: RuntimeLiveDeliverySelf;
 }): Promise<void> {
@@ -19,41 +22,21 @@ export async function relayChannelCatalogPublishCommittedChanges(input: {
       spaceId: change.spaceId,
       revision: change.revision,
     };
-    const batches: string[][] = [];
-    for (let offset = 0; offset < change.recipientUserIds.length;
-      offset += CHANNEL_CATALOG_RECIPIENT_BATCH) {
-      batches.push(change.recipientUserIds.slice(
-        offset, offset + CHANNEL_CATALOG_RECIPIENT_BATCH,
-      ));
-    }
-    const publishBatch = async (recipientPrincipalIds: string[]) => {
-      try {
-        const response = await publishRuntimeCommittedEvent({
-          env: input.env,
-          waitUntil: () => undefined,
-          scopeId: change.spaceId,
-          self: input.self,
-          payload: {
-            channelId: CHANNEL_CATALOG_COMMITTED_EVENT_CHANNEL,
-            changeSeq: change.revision,
-            event,
-            recipientPrincipalIds,
-          },
-        });
-        if (!response.ok) {
-          throw new Error(`RelayRuntime rejected Channel catalog change (${response.status})`);
-        }
-      } catch (error) {
-        // The mutation is already authoritative and durable. This frame is only
-        // realtime acceleration; reconnect/page revision observation repairs it.
-        console.error("Channel catalog realtime acceleration failed", error);
-      }
-    };
-    for (let offset = 0; offset < batches.length;
-      offset += CHANNEL_CATALOG_DELIVERY_CONCURRENCY) {
-      await Promise.all(
-        batches.slice(offset, offset + CHANNEL_CATALOG_DELIVERY_CONCURRENCY).map(publishBatch),
-      );
+    try {
+      await deliverToAudience({
+        env: input.env, label: "Channel catalog", audience: { humans: change.recipientUserIds },
+        ...(input.self ? { self: input.self } : {}),
+        request: (share) => runtimeJsonRequest(RUNTIME_COMMITTED_EVENT_URL, {
+          channelId: CHANNEL_CATALOG_COMMITTED_EVENT_CHANNEL,
+          changeSeq: change.revision,
+          event,
+          recipientPrincipalIds: [share.owner],
+        }),
+      });
+    } catch (error) {
+      // The mutation is already authoritative and durable. This frame is only
+      // realtime acceleration; reconnect/page revision observation repairs it.
+      console.error("Channel catalog realtime acceleration failed", error);
     }
   }
 }

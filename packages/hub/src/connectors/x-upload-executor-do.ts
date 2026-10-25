@@ -4,6 +4,7 @@ import type { Env } from "../types";
 import { connectorActionRequestRepository } from "./credentials";
 import { executeDurableXUpload, publishDurableXUploadReceipt } from "./connector-commands";
 import { XUploadExecutor } from "./x-upload-executor";
+import { runAsDeliveryInvocation } from "../runtime-transport/runtime-principal-delivery";
 
 export class RelayXUploadExecutor extends DurableObject<Env> {
   private readonly executor: XUploadExecutor;
@@ -19,8 +20,9 @@ export class RelayXUploadExecutor extends DurableObject<Env> {
       publish: outcome => publishDurableXUploadReceipt(env, outcome),
     });
   }
-  async enqueue(ref: XUploadReference): Promise<void> { await this.executor.enqueue(ref); }
-  async alarm(): Promise<void> { await this.executor.alarm(); }
+  // Each call and alarm is one delivery invocation: the receipts it publishes share one budget.
+  async enqueue(ref: XUploadReference): Promise<void> { await runAsDeliveryInvocation(() => this.executor.enqueue(ref)); }
+  async alarm(): Promise<void> { await runAsDeliveryInvocation(() => this.executor.alarm()); }
 }
 
 /** Await this durable handoff before acknowledging an admitted video upload. */

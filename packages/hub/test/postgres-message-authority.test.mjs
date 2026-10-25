@@ -148,6 +148,7 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
           }];
           // Who the message reaches, read in the append's own transaction.
           if (query.name === "message_live_routing_recipients_v4") return [{ user_id: "owner-1", recipient_count: 1 }];
+          if (query.name === "message_live_routing_instance_owners_v1") return [{ owner_user_id: "owner-1" }];
           if (query.name === "message_live_routing_attention_summary_v3") return [];
           if (query.name === "run_registration_authority_mode_v3" ||
               query.name === "run_registration_access_binding_v3") return [];

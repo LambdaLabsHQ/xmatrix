@@ -150,6 +150,11 @@ export function overlayHumanPresenceOnChannel(
  * reach a client before the message did, and its list showed a message its
  * conversation had not received yet (as Telegram does, a chat's last message
  * is only ever the newest message the client holds).
+ *
+ * Nor does it say where the Channel's people are. Each person's live state
+ * belongs to their own Runtime cell; the cell publishing this knows its
+ * Agents, so the update speaks for them alone (`presenceCoverage`), and a
+ * reader keeps the people it knows.
  */
 export function channelForSharedPresenceFanout(
   channel: SerializedChannel,
@@ -160,28 +165,10 @@ export function channelForSharedPresenceFanout(
     lastMessage: _lastMessage,
     messageCount: _messageCount,
     historyHeadSequence: _historyHeadSequence,
+    memberPresence,
     ...shared
   } = channel;
-  return shared;
-}
-
-/**
- * The Channels whose Human Presence a change alters. A focus change moves one
- * Human's `focused` mark from the Channel they left to the one they opened, so
- * only those two change. A connect or disconnect changes that Human's online
- * state wherever they are a member, so every Channel a live Human is looking
- * at is refreshed as well.
- */
-export function channelIdsNeedingHumanPresenceFanout(
-  reason: "connect" | "focus" | "disconnect",
-  previousFocusedChannelId: string | null | undefined,
-  nextFocusedChannelId: string | null | undefined,
-  liveFocusedChannelIds: readonly (string | null | undefined)[],
-): string[] {
-  const ids = new Set<string>();
-  const watched = reason === "focus" ? [] : liveFocusedChannelIds;
-  for (const channelId of [previousFocusedChannelId, nextFocusedChannelId, ...watched]) {
-    if (typeof channelId === "string" && channelId.trim()) ids.add(channelId.trim());
-  }
-  return Array.from(ids);
+  if (!memberPresence) return shared;
+  const agents = Object.fromEntries(Object.entries(memberPresence).filter(([, value]) => value.kind !== "user"));
+  return { ...shared, memberPresence: agents, presenceCoverage: "agents" };
 }

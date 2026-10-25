@@ -15,6 +15,7 @@ import { platformAdminSpaceId } from "./admin-platform-access";
 import { base64UrlDecodeBytes } from "./relay-v2-primitives";
 import { pageCoWriteDataPoint } from "./page-co-write-diagnostics";
 import { tellPageCoWriter } from "./page-co-write-instruction";
+import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -207,7 +208,16 @@ export class RelayPageSession extends DurableObject<Env> {
     if (current === null || current > at) await this.ctx.storage.setAlarm(at);
   }
 
-  override async fetch(request: Request): Promise<Response> {
+  // Each event is one delivery invocation: what it publishes shares one budget.
+  override fetch(request: Request): Promise<Response> { return runAsDeliveryInvocation(() => this.onRequest(request)); }
+  override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    return runAsDeliveryInvocation(() => this.onSocketMessage(socket, message));
+  }
+  override webSocketClose(socket: WebSocket): Promise<void> { return runAsDeliveryInvocation(() => this.onSocketClose(socket)); }
+  override webSocketError(socket: WebSocket): Promise<void> { return runAsDeliveryInvocation(() => this.onSocketClose(socket)); }
+  override alarm(): Promise<void> { return runAsDeliveryInvocation(() => this.onAlarm()); }
+
+  private async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     try {
       if (request.method === "POST" && url.pathname === "/internal/ticket") {
@@ -336,7 +346,7 @@ export class RelayPageSession extends DurableObject<Env> {
       ...(protocol ? { headers: { "sec-websocket-protocol": protocol } } : {}) });
   }
 
-  override async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+  private async onSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const attachment = socket.deserializeAttachment() as Attachment | null;
     if (!attachment || typeof message === "string") return;
     await this.ready();
@@ -349,7 +359,7 @@ export class RelayPageSession extends DurableObject<Env> {
     if (this.session.hasPendingEdits) await this.scheduleAlarm(COMMIT_IDLE_MS);
   }
 
-  override async webSocketClose(socket: WebSocket): Promise<void> {
+  private async onSocketClose(socket: WebSocket): Promise<void> {
     const attachment = socket.deserializeAttachment() as Attachment | null;
     await this.ready();
     if (attachment) this.session.disconnect(attachment.connectionId);
@@ -433,9 +443,6 @@ export class RelayPageSession extends DurableObject<Env> {
     }
   }
 
-  override async webSocketError(socket: WebSocket): Promise<void> {
-    await this.webSocketClose(socket);
-  }
 
   /**
    * With nobody connected, commit. The document keeps its CRDT identity in
@@ -493,7 +500,7 @@ export class RelayPageSession extends DurableObject<Env> {
     });
   }
 
-  override async alarm(): Promise<void> {
+  private async onAlarm(): Promise<void> {
     const removing = await this.ctx.storage.get<{ principal: PageSessionPrincipal }>("removing");
     if (removing) {
       const identity = await this.ctx.storage.get<{ spaceId: string; pageId: string }>("identity");

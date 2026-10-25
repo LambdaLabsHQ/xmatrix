@@ -5,7 +5,6 @@ import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting
 import { HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG } from "@xmatrix/protocol";
 import { parseAgentChannelLiveDelivery, parseHumanChannelLiveDelivery } from "./runtime-transport/channel-live-delivery";
 import { DurableObject } from "cloudflare:workers";
-import { relayRuntimeRouteDirectory } from "./relay-authority-locator";
 import {
   parseHumanChannelCatalogChangedMessage,
   parseHumanTraceAccessServerMessage,
@@ -32,13 +31,11 @@ import {
   isRelayRuntimeOwnerCell,
   RELAY_RUNTIME_CELL_HEADER,
   RELAY_RUNTIME_SELECTED_CELL,
+  relayRuntimeOwnerCellName,
   type RelayRuntimeOwnerCell,
 } from "./runtime-transport/runtime-cell-locator";
-import {
-  RUNTIME_ROUTE_DIRECTORY_MAX_SCOPE_IDS_PER_REQUEST,
-  runtimeRouteDirectoryShardName,
-  type RuntimeRouteDirectoryCell,
-} from "./runtime-transport/runtime-route-directory-locator";
+import type { RuntimeSocketAdmission } from "./runtime-transport/runtime-socket-admission";
+import { runAsRuntimeCell, type RuntimeLiveDeliverySelf } from "./runtime-transport/runtime-principal-delivery";
 import { legacyClientCompatibilityAdmissionEnabled } from "./client-compatibility-gate";
 import { RELAY_RUNTIME_HUMAN_PRESENCE_PATH } from "./runtime-transport/human-presence-fanout";
 import { RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH, RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH } from "./product-agent-model-effort";
@@ -150,24 +147,19 @@ function relayRuntimeProductFactoryFromEnv(
   }
 }
 
-/** The sole live relay runtime Durable Object implementation. */
-
 const RELAY_RUNTIME_OWNER_CELL_KEY = "runtime-owner-cell";
-const DURABLE_OBJECT_STORAGE_RESET = "Internal error in Durable Object storage caused object to be reset";
 
-function durableObjectStorageReset(error: unknown): boolean {
-  if (error instanceof Error) return error.message.includes(DURABLE_OBJECT_STORAGE_RESET);
-  if (!error || typeof error !== "object" || !("message" in error)) return false;
-  const message = (error as { message: unknown }).message;
-  return typeof message === "string" && message.includes(DURABLE_OBJECT_STORAGE_RESET);
-}
-
+/** The sole live relay runtime Durable Object implementation. */
 export class RelayRuntimeLive extends DurableObject<Env> {
-  private readonly productAdapter: RelayRuntimeProductCallbackAdapter | undefined;
-  /** Set when this object is a user's own cell; only those register occupancy. */
+  /** Built once the cell knows whose it is; every event waits for that. */
+  private productAdapter: RelayRuntimeProductCallbackAdapter | undefined;
+  /** Set when this object is a user's own cell: the only cells that hold product sockets. */
   private ownerCell: RelayRuntimeOwnerCell | undefined;
-  /** Channel scopes this owner cell has registered for its product sockets. */
-  private readonly productOccupiedScopes = new Set<string>();
+  /** This cell as a publisher; it takes the owner's name once the cell learns whose it is. */
+  private readonly deliverySelf: RuntimeLiveDeliverySelf = {
+    cellName: RELAY_RUNTIME_SELECTED_CELL,
+    fetch: (request: Request) => this.fetch(request),
+  };
   private readonly machineDaemonWakeSignals = new MachineDaemonWakeSignals();
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -176,39 +168,39 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     // this object (and without ending its hibernation), so a dead socket is
     // found in seconds and an idle one costs nothing.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG));
-    const productFactory = relayRuntimeProductFactoryFromEnv(
-      env,
-      (task) => ctx.waitUntil(task),
-      {
-        cellName: () => this.ownerCell ?? RELAY_RUNTIME_SELECTED_CELL,
-        fetch: request => this.fetch(request),
-      },
-      ctx.storage,
-    );
-    this.productAdapter = productFactory
-      ? createRelayRuntimeProductAdapter(ctx, productFactory, {
-          allowLegacyProtocol: legacyClientCompatibilityAdmissionEnabled(env),
-        })
-      : undefined;
-    for (const socket of this.ctx.getWebSockets()) {
-      if (this.productAdapter?.owns(socket)) continue;
-      // Product-domain sockets are restored (or closed) by the product adapter.
-      // Do not treat an expired-but-live Machine Daemon attachment as a generic
-      // Runtime route failure; that immediately drops hub control after wake.
-      if (isProductHibernationAttachment(socket.deserializeAttachment())) continue;
-      socket.close(1008, "Invalid hibernation attachment");
-    }
     ctx.blockConcurrencyWhile(async () => {
       const stored = await ctx.storage.get(RELAY_RUNTIME_OWNER_CELL_KEY);
-      if (isRelayRuntimeOwnerCell(stored)) this.ownerCell = stored;
-      // Hibernation keeps sockets but not this set: register them again,
-      // which also renews their leases.
-      this.refreshProductOccupancy();
+      if (isRelayRuntimeOwnerCell(stored)) this.ownerCell = this.deliverySelf.cellName = stored;
+      // Sockets come back from hibernation only once the cell knows whose it
+      // is: each is admitted as it is restored, or closed before it is served.
+      const productFactory = relayRuntimeProductFactoryFromEnv(
+        env,
+        (task) => ctx.waitUntil(task),
+        {
+          cellName: () => this.ownerCell ?? RELAY_RUNTIME_SELECTED_CELL,
+          fetch: request => this.fetch(request),
+        },
+        ctx.storage,
+      );
+      this.productAdapter = productFactory
+        ? createRelayRuntimeProductAdapter(ctx, productFactory, {
+            allowLegacyProtocol: legacyClientCompatibilityAdmissionEnabled(env),
+            admit: (ownerUserId) => this.admit(ownerUserId),
+          })
+        : undefined;
+      for (const socket of this.ctx.getWebSockets()) {
+        if (this.productAdapter?.owns(socket)) continue;
+        // Product-domain sockets are restored (or closed) by the product adapter.
+        // Do not treat an expired-but-live Machine Daemon attachment as a generic
+        // Runtime route failure; that immediately drops hub control after wake.
+        if (isProductHibernationAttachment(socket.deserializeAttachment())) continue;
+        socket.close(1008, "Invalid hibernation attachment");
+      }
     });
   }
 
   async fetch(request: Request): Promise<Response> {
-    return withRuntimeDeliveryIngress(runtimeDeliveryFetchIngress(request), async () => {
+    return this.asCell(runtimeDeliveryFetchIngress(request), async () => {
       try {
         return await this.routeFetch(request);
       } catch (error) {
@@ -240,15 +232,17 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       });
     }
     if (request.method === "GET" && url.pathname === RELAY_RUNTIME_AGENT_PRESENCE_PATH) {
-      const filterNames = ["agentId", "runId", "instanceId", "channelId"] as const;
+      // One Agent message's exact Instance, or every Instance of one Channel.
+      const bindingNames = ["agentId", "runId", "instanceId"] as const;
       const filters = {
         agentId: boundedId(url.searchParams.get("agentId"), 200),
         runId: boundedId(url.searchParams.get("runId"), 200),
         instanceId: boundedId(url.searchParams.get("instanceId"), 200),
         channelId: boundedId(url.searchParams.get("channelId"), 180),
       };
-      const filterRequested = filterNames.some((name) => url.searchParams.has(name));
-      if (filterRequested && filterNames.some((name) => !filters[name])) {
+      const bindingRequested = bindingNames.some((name) => url.searchParams.has(name));
+      if ((bindingRequested || url.searchParams.has("channelId")) &&
+          (!filters.channelId || (bindingRequested && bindingNames.some((name) => !filters[name])))) {
         return Response.json({ error: "Incomplete Agent presence binding" }, {
           status: 400,
           headers: { "cache-control": "no-store" },
@@ -258,14 +252,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
          Agent message's send path, and materializing every other live session
          first is work this single cell does for nobody. */
       const sessions = this.productAdapter?.liveAgentSessions(
-        filterRequested
-          ? {
-              agentId: filters.agentId!,
-              runId: filters.runId!,
-              instanceId: filters.instanceId!,
-              channelId: filters.channelId!,
-            }
-          : undefined,
+        bindingRequested
+          ? { agentId: filters.agentId!, runId: filters.runId!, instanceId: filters.instanceId!, channelId: filters.channelId! }
+          : filters.channelId ? { channelId: filters.channelId } : undefined,
       ) ?? [];
       return Response.json({ sessions }, {
         headers: { "cache-control": "private, no-store" },
@@ -376,9 +365,10 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_CHANNEL_MESSAGE_PATH) {
       // One committed message arrives once and fans out to both audiences
-      // here: Agent host sockets unconditionally, Human product subscribers
-      // when the payload names recipients. Splitting these into two Runtime
-      // invocations doubled this object's input queue for every message.
+      // here: the Channel's Agent Instances when this cell holds them, Human
+      // product subscribers when the payload names recipients. Splitting these
+      // into two Runtime invocations doubled this object's input queue for
+      // every message.
       if (!this.productAdapter) return runtimeTransportUnavailable("product");
       const body = await request.json<Record<string, unknown>>().catch(() => null);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -402,7 +392,11 @@ export class RelayRuntimeLive extends DurableObject<Env> {
           headers: { "cache-control": "no-store" },
         });
       }
-      const agent = this.productAdapter.deliverAgentChannelMessage(agentDelivery);
+      // Only a cell holding the Channel's Instances serves them; a publisher
+      // that predates the plan names no share and is served as before.
+      const agent = body.instances === false
+        ? { matched: 0, delivered: 0, interrupted: 0 }
+        : this.productAdapter.deliverAgentChannelMessage(agentDelivery);
       const human = humanDelivery
         ? this.productAdapter.deliverHumanChannelMessage(humanDelivery)
         : undefined;
@@ -507,26 +501,24 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    return withRuntimeDeliveryIngress("socket_message", async () => {
+    return this.asCell("socket_message", async () => {
       if (!this.productAdapter?.owns(socket)) {
         socket.close(1008, "Runtime accepts only product sockets");
         return;
       }
       await this.productAdapter.webSocketMessage(socket, message);
-      this.refreshProductOccupancy();
     });
   }
 
   async webSocketClose(socket: WebSocket, code?: number, reason?: string, wasClean?: boolean): Promise<void> {
-    return withRuntimeDeliveryIngress("socket_close", async () => {
+    return this.asCell("socket_close", async () => {
       if (!this.productAdapter?.owns(socket)) return;
       await this.productAdapter.webSocketClose(socket, code, reason, wasClean);
-      this.refreshProductOccupancy();
     });
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
-    return withRuntimeDeliveryIngress("socket_error", async () => {
+    return this.asCell("socket_error", async () => {
       if (this.productAdapter?.owns(socket)) {
         await this.productAdapter.webSocketError(socket);
         return;
@@ -535,120 +527,32 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Handles one event as this cell's work: what it publishes, however deep in
+   * the code that commits it, serves this cell's own sockets locally instead
+   * of calling back into the cell, where it would wait behind this event.
+   */
+  private asCell<T>(ingress: Parameters<typeof withRuntimeDeliveryIngress>[0], operation: () => Promise<T>): Promise<T> {
+    return withRuntimeDeliveryIngress(ingress, () => runAsRuntimeCell(this.deliverySelf, operation));
+  }
+
   /** The Worker names the owner cell it routed a socket to; remember it. */
   private async learnOwnerCell(header: string | null): Promise<void> {
     if (!isRelayRuntimeOwnerCell(header) || this.ownerCell === header) return;
-    this.ownerCell = header;
+    this.ownerCell = this.deliverySelf.cellName = header;
     await this.ctx.storage.put(RELAY_RUNTIME_OWNER_CELL_KEY, header);
   }
 
   /**
-   * Keep the route directory listing this owner cell for exactly the channels
-   * its product sockets are in, so channel deliveries and presence reads find
-   * it. Only the difference is written. The single cell needs no entry: every
-   * channel delivery already reaches it.
+   * Whether this cell may hold a socket of `ownerUserId`. Only a user's own
+   * cell holds product sockets, and only theirs: a delivery for a person then
+   * reaches every socket of theirs by reaching their cell. A socket that named
+   * no owner reached the single cell, as only clients older than owner
+   * routing (1.0.0) do.
    */
-  private refreshProductOccupancy(): void {
-    if (!this.ownerCell || !this.productAdapter) return;
-    const occupied = new Set(this.productAdapter.occupiedChannelIds());
-    const added = [...occupied].filter((scopeId) => !this.productOccupiedScopes.has(scopeId));
-    const vacated = [...this.productOccupiedScopes].filter((scopeId) => !occupied.has(scopeId));
-    for (const scopeId of added) this.productOccupiedScopes.add(scopeId);
-    for (const scopeId of vacated) this.productOccupiedScopes.delete(scopeId);
-    if (added.length > 0) this.scheduleRouteDirectoryMutation("register", this.ownerCell, added);
-    if (vacated.length > 0) this.scheduleRouteDirectoryMutation("unregister", this.ownerCell, vacated);
-  }
-
-  private scheduleRouteDirectoryMutation(
-    action: "register" | "unregister",
-    cellName: RuntimeRouteDirectoryCell,
-    scopeIds: readonly string[],
-  ): void {
-    if (scopeIds.length === 0 || !this.env.RELAY_RUNTIME_ROUTE_DIRECTORY) return;
-    const task = this.applyRouteDirectoryMutation(action, cellName, scopeIds);
-    try {
-      this.ctx.waitUntil(task);
-    } catch (error) {
-      // A test or platform shim may refuse task registration. The socket path
-      // remains independent of this replaceable delivery projection.
-      console.error(`Runtime route-directory ${action} scheduling failed`, error);
-    }
-  }
-
-  /**
-   * A directory storage reset aborts that object's in-flight write. Register
-   * and unregister are idempotent, so the lost write is replayed once on the
-   * reset object. An answered rejection is not replayed. A failure that
-   * remains leaves local occupancy ahead of the directory; putting those
-   * scopes back makes the next socket refresh try again.
-   */
-  private applyRouteDirectoryMutation(
-    action: "register" | "unregister",
-    cellName: RuntimeRouteDirectoryCell,
-    scopeIds: readonly string[],
-  ): Promise<void> {
-    return this.mutateRouteDirectory(action, cellName, scopeIds).catch(async (error: unknown) => {
-      if (durableObjectStorageReset(error)) {
-        try {
-          await this.mutateRouteDirectory(action, cellName, scopeIds);
-          return;
-        } catch (retryError) {
-          this.revertRouteDirectoryBookkeeping(action, scopeIds);
-          console.error(`Runtime route-directory ${action} failed`, retryError);
-          return;
-        }
-      }
-      this.revertRouteDirectoryBookkeeping(action, scopeIds);
-      console.error(`Runtime route-directory ${action} failed`, error);
-    });
-  }
-
-  private revertRouteDirectoryBookkeeping(
-    action: "register" | "unregister",
-    scopeIds: readonly string[],
-  ): void {
-    const occupied = this.productAdapter ? new Set(this.productAdapter.occupiedChannelIds()) : null;
-    for (const scopeId of scopeIds) {
-      if (action === "register") {
-        if (!occupied || occupied.has(scopeId)) this.productOccupiedScopes.delete(scopeId);
-      } else if (!occupied || !occupied.has(scopeId)) {
-        this.productOccupiedScopes.add(scopeId);
-      }
-    }
-  }
-
-  private async mutateRouteDirectory(
-    action: "register" | "unregister",
-    cellName: RuntimeRouteDirectoryCell,
-    scopeIds: readonly string[],
-  ): Promise<void> {
-    const directories = new Map<string, { directory: DurableObjectStub; scopeIds: string[] }>();
-    for (const scopeId of scopeIds) {
-      const shardName = runtimeRouteDirectoryShardName(scopeId);
-      const directory = relayRuntimeRouteDirectory(this.env.RELAY_RUNTIME_ROUTE_DIRECTORY, scopeId);
-      if (!shardName || !directory) continue;
-      const grouped = directories.get(shardName);
-      if (grouped) {
-        grouped.scopeIds.push(scopeId);
-      } else {
-        directories.set(shardName, { directory, scopeIds: [scopeId] });
-      }
-    }
-    await Promise.all(Array.from(directories.values(), async ({ directory, scopeIds: scoped }) => {
-      for (let offset = 0; offset < scoped.length; offset += RUNTIME_ROUTE_DIRECTORY_MAX_SCOPE_IDS_PER_REQUEST) {
-        const response = await directory.fetch(`https://runtime-route-directory/internal/runtime-route-directory/${action}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            cellName,
-            scopeIds: scoped.slice(offset, offset + RUNTIME_ROUTE_DIRECTORY_MAX_SCOPE_IDS_PER_REQUEST),
-          }),
-        });
-        if (!response.ok) {
-          throw new Error(`Route directory ${action} rejected with ${response.status}`);
-        }
-      }
-    }));
+  private admit(ownerUserId: string): RuntimeSocketAdmission {
+    if (!this.ownerCell) return "upgrade_required";
+    return relayRuntimeOwnerCellName(ownerUserId) === this.ownerCell ? "admitted" : "foreign_cell";
   }
 
   private async deliverCommittedEvent(request: Request): Promise<Response> {

@@ -6,7 +6,7 @@ import type {
   HumanTraceAccessServerMessage,
   HumanWorkspaceResourceChangedMessage,
 } from "@xmatrix/protocol/connections/human";
-import { HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
+import { HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
 import {
   CLIENT_UPGRADE_REQUIRED_CLOSE_CODE,
   HUMAN_AUTH_INVALID_FAILURE_CODE,
@@ -37,8 +37,8 @@ import {
   liveHumanSessionSnapshots,
   type LiveHumanSessionSnapshot,
 } from "./human-live-presence";
-import type { LiveAgentSessionSnapshot } from "./agent-presence-snapshot";
 import { admittedLegacyProtocolVersion } from "../legacy-client-compatibility";
+import { admissionGate, closedIfRefused, refuseConnect, RuntimeSocketRefused, type RuntimeSocketAdmit } from "./runtime-socket-admission";
 
 type Message<Type extends HumanClientMessage["type"]> = Extract<
   HumanClientMessage,
@@ -76,22 +76,9 @@ export interface HumanRuntimeSession {
   clientProtocolVersion?: number;
   /** The client takes Agent presence for conversations it is not showing as a once-a-second digest. */
   presenceDigest?: true;
+  /** The client reads `presenceCoverage`, so it may be sent Channel snapshots that speak only for Agents. */
+  presenceCoverage?: true;
 }
-
-/**
- * Live Human presence fanout hook. Implementations may publish channel_updated
- * snapshots; failures must never fail the Human socket frame itself.
- */
-export type HumanPresenceChangeHandler = (input: {
-  reason: "connect" | "focus" | "disconnect";
-  previousFocusedChannelId: string | null;
-  nextFocusedChannelId: string | null;
-  session: Readonly<HumanRuntimeSession>;
-  liveSessions: readonly LiveHumanSessionSnapshot[];
-  /** Authenticated live Agent presentations available for the focused channel. */
-  liveAgentSessions: readonly LiveAgentSessionSnapshot[];
-  deliver: (userId: string, message: HumanServerMessage) => void;
-}) => void | Promise<void>;
 
 /**
  * Abstract typed Authority boundary. Concrete HTTP/DO dispatch belongs to the
@@ -100,7 +87,11 @@ export type HumanPresenceChangeHandler = (input: {
  */
 export interface HumanSocketBackend {
   readonly capabilities: ReadonlySet<HumanAuthorityCapability>;
-  authenticate(message: HumanConnectMessage): Promise<HumanAuthorityAuthentication>;
+  /**
+   * `admit` is called once the credential names its account, before anything
+   * is counted or written, and throws when this cell may not hold the socket.
+   */
+  authenticate(message: HumanConnectMessage, admit?: (ownerUserId: string) => void): Promise<HumanAuthorityAuthentication>;
   focusChannel(
     session: Readonly<HumanRuntimeSession>,
     message: Message<"user_focus_channel">,
@@ -121,15 +112,28 @@ export class HumanAuthorityCapabilityError extends Error {
   }
 }
 
+/**
+ * A person opened a Channel on one socket: `send` reaches that socket, which
+ * a newly opened app shows the Channel's Agents from at once, not at their
+ * next report. It runs beside the socket's frames, never ahead of the next.
+ */
+export type HumanChannelFocusHandler = (input: {
+  userId: string;
+  channelId: string;
+  send: (message: HumanServerMessage) => void;
+}) => Promise<void>;
+
 /** Pure-Authority transport adapter for `/ws/humans`. */
 export class HumanRuntimeTransport {
   readonly controller: HumanConnectionController;
   private readonly backend: HumanSocketBackend;
   private readonly sockets: RuntimeSocketState<HumanRuntimeSession, HumanServerMessage>;
-  private readonly onPresenceChange?: HumanPresenceChangeHandler;
   private readonly refusedSignInCloseDelayMs: number;
-  private readonly liveAgentSessions?: () => readonly LiveAgentSessionSnapshot[];
   private readonly allowLegacyProtocol: boolean;
+  private readonly admit?: RuntimeSocketAdmit;
+  private readonly onChannelFocus?: HumanChannelFocusHandler;
+  /** Each socket's latest focus: what a focus started is shown only while it is still the latest. */
+  private readonly focuses = new WeakMap<WebSocket, object>();
   private readonly presenceDigests = new HumanPresenceDigests((socket, message) => {
     if (this.sockets.get(socket)) this.sockets.send(socket, message);
   });
@@ -139,16 +143,17 @@ export class HumanRuntimeTransport {
   };
 
   constructor(backend: HumanSocketBackend, options?: {
-    onPresenceChange?: HumanPresenceChangeHandler;
-    liveAgentSessions?: () => readonly LiveAgentSessionSnapshot[];
     allowLegacyProtocol?: boolean;
     refusedSignInCloseDelayMs?: number;
+    /** Whether this cell may hold a socket of the account it authenticated as. */
+    admit?: RuntimeSocketAdmit;
+    onChannelFocus?: HumanChannelFocusHandler;
   }) {
     this.backend = backend;
     this.refusedSignInCloseDelayMs = options?.refusedSignInCloseDelayMs ?? REFUSED_SIGN_IN_CLOSE_DELAY_MS;
-    this.onPresenceChange = options?.onPresenceChange;
-    this.liveAgentSessions = options?.liveAgentSessions;
     this.allowLegacyProtocol = options?.allowLegacyProtocol === true;
+    this.admit = options?.admit;
+    this.onChannelFocus = options?.onChannelFocus;
     const missing = HUMAN_AUTHORITY_REQUIRED_CAPABILITIES.filter(
       (capability) => !backend.capabilities.has(capability),
     );
@@ -195,6 +200,7 @@ export class HumanRuntimeTransport {
       ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
       return true;
     }
+    if (closedIfRefused(ws, this.admit, attachment.session.user.id)) return true;
     this.sockets.restore(ws, attachment.session);
     return true;
   }
@@ -246,10 +252,26 @@ export class HumanRuntimeTransport {
       delivered = true;
       if (!session.presenceDigest || session.focusedChannelId === channelId) {
         if (card) this.sockets.send(socket, card);
-        if (channel) this.sockets.send(socket, channel);
+        if (channel && session.presenceCoverage) this.sockets.send(socket, channel);
       } else if (card) {
         this.presenceDigests.add(socket, card.agent);
       }
+    }
+    return delivered;
+  }
+
+  /**
+   * A Channel snapshot from an Agent presence change. It speaks only for the
+   * Channel's Agents, so only a socket that reads `presenceCoverage` takes it;
+   * any other would read it as the people having left, and learns the change
+   * from the Agent's card instead.
+   */
+  deliverPresenceChannel(userId: string, channel: Extract<HumanServerMessage, { type: "channel_updated" }>): boolean {
+    let delivered = false;
+    for (const [socket, session] of this.sockets.entries()) {
+      if (session.user.id !== userId || !session.presenceCoverage) continue;
+      this.sockets.send(socket, channel);
+      delivered = true;
     }
     return delivered;
   }
@@ -301,8 +323,10 @@ export class HumanRuntimeTransport {
       return;
     }
     try {
-      const authentication = await this.backend.authenticate(message);
+      const admit = admissionGate(this.admit);
+      const authentication = await this.backend.authenticate(message, admit);
       assertAuthentication(message, authentication);
+      admit(authentication.user.id);
       const now = new Date().toISOString();
       const device = message.device && typeof message.device === "object" && !Array.isArray(message.device)
         ? message.device as Record<string, unknown>
@@ -314,6 +338,8 @@ export class HumanRuntimeTransport {
       const clientProtocolVersion = Number(device.protocolVersion);
       const presenceDigest = Array.isArray(device.capabilities) &&
         device.capabilities.includes(HUMAN_CLIENT_PRESENCE_DIGEST);
+      const presenceCoverage = Array.isArray(device.capabilities) &&
+        device.capabilities.includes(HUMAN_CLIENT_PRESENCE_COVERAGE);
       const session: HumanRuntimeSession = {
         user: authentication.user,
         connectedAt: now,
@@ -325,6 +351,7 @@ export class HumanRuntimeTransport {
         ...(clientVersion ? { clientVersion } : {}),
         ...(Number.isSafeInteger(clientProtocolVersion) ? { clientProtocolVersion } : {}),
         ...(presenceDigest ? { presenceDigest: true as const } : {}),
+        ...(presenceCoverage ? { presenceCoverage: true as const } : {}),
       };
       this.sockets.establish(ws, session, authentication.connected);
       // Pure-Authority does not host live agent_list inventory (that is REST/profile
@@ -335,13 +362,10 @@ export class HumanRuntimeTransport {
         requestId: message.requestId,
         agents: [],
       });
-      await this.emitPresenceChange({
-        reason: "connect",
-        previousFocusedChannelId: null,
-        nextFocusedChannelId: null,
-        session,
-      });
     } catch (error) {
+      if (error instanceof RuntimeSocketRefused) {
+        return refuseConnect(this.sockets, ws, message.requestId, error.admission, "Could not connect this session");
+      }
       this.sockets.sendFailure(ws, message.requestId, error, "Could not connect this session");
       const code = error instanceof RuntimeClientOperationError ? error.failure.code : undefined;
       if (code === HUMAN_AUTH_INVALID_FAILURE_CODE) {
@@ -385,64 +409,44 @@ export class HumanRuntimeTransport {
       });
     }
     try {
-      const previousFocusedChannelId = session.focusedChannelId;
       const nextFocusedChannelId = message.channelId;
-      if (previousFocusedChannelId === nextFocusedChannelId) {
+      if (session.focusedChannelId === nextFocusedChannelId) {
         this.sockets.sendOutput(ws, await this.backend.focusChannel(session, message));
         return;
       }
       const output = await this.backend.focusChannel(session, message);
       session.focusedChannelId = nextFocusedChannelId;
       this.sockets.sendOutput(ws, output);
-      await this.emitPresenceChange({
-        reason: "focus",
-        previousFocusedChannelId,
-        nextFocusedChannelId,
-        session,
-      });
+      const focus = {};
+      this.focuses.set(ws, focus);
+      if (nextFocusedChannelId !== null) this.showChannelAgents(ws, focus, session.user.id, nextFocusedChannelId);
     } catch (error) {
       this.sockets.sendFailure(ws, message.requestId, error, "Could not open this Channel");
     }
+  }
+
+  /**
+   * The Channel just opened on `ws`, its Agents as they are now. A card that
+   * arrives once the socket has moved on (another focus, or closed) is dropped.
+   */
+  private showChannelAgents(ws: WebSocket, focus: object, userId: string, channelId: string): void {
+    if (!this.onChannelFocus) return;
+    const current = () => this.focuses.get(ws) === focus && this.sockets.get(ws) !== undefined;
+    void this.onChannelFocus({ userId, channelId, send: (message) => { if (current()) this.sockets.send(ws, message); } })
+      .catch((error: unknown) => {
+        console.warn("Agents of a focused Channel could not be shown", {
+          errorCode: error instanceof Error ? error.name : "unknown",
+        });
+      });
   }
 
   private async handleDisconnected(
     session: Readonly<HumanRuntimeSession>,
     details: { code?: number; reason?: string; wasClean?: boolean },
   ): Promise<void> {
-    try {
-      await this.backend.disconnected(session, details);
-    } finally {
-      await this.emitPresenceChange({
-        reason: "disconnect",
-        previousFocusedChannelId: session.focusedChannelId,
-        nextFocusedChannelId: null,
-        session,
-      });
-    }
+    await this.backend.disconnected(session, details);
   }
 
-  private async emitPresenceChange(input: {
-    reason: "connect" | "focus" | "disconnect";
-    previousFocusedChannelId: string | null;
-    nextFocusedChannelId: string | null;
-    session: Readonly<HumanRuntimeSession>;
-  }): Promise<void> {
-    if (!this.onPresenceChange) return;
-    try {
-      await this.onPresenceChange({
-        ...input,
-        liveSessions: this.liveSessions(),
-        liveAgentSessions: this.liveAgentSessions?.() ?? [],
-        deliver: (userId, message) => {
-          for (const [socket, candidate] of this.sockets.entries()) {
-            if (candidate.user.id === userId) this.sockets.send(socket, message);
-          }
-        },
-      });
-    } catch {
-      // Live presence is best-effort process memory; never fail the Human frame.
-    }
-  }
 }
 
 export function humanMessageCompatibility(

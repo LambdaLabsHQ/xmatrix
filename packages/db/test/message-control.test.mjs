@@ -157,7 +157,8 @@ test("append commits structured invocation intent with its source and excludes o
   assert.deepEqual(appended.liveRouting, { recipientUserIds: ["alice", "bob"], recipientNotifications: [{
     userId: "alice", notification: { reason: "mention", attention: { channelId: "channel-1", unreadAttentionCount: 1,
       lastAttentionAt: "2026-09-20T00:00:00.000Z", lastMessageId: "message-1", lastMessageSequence: 7,
-      primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: "2026-09-20T00:00:00.000Z" } } }] });
+      primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: "2026-09-20T00:00:00.000Z" } } }],
+    instanceOwnerUserIds: [] });
   const receipt = JSON.parse(db.calls.find(call => call.name === "message_append_publish_unmetered_v3").values[4]);
   assert.equal("liveRouting" in receipt, false);
   const stored = JSON.parse(db.calls.find(call => call.name === "message_agent_targets_commit_v1").values[3]);
@@ -633,6 +634,23 @@ test("Message live delivery carries the mentioned Human's unread attention summa
   const summary = db.calls.find((call) => call.name === "message_live_routing_attention_summary_v3");
   assert.deepEqual(summary.values[2], ["user:user-2"]);
   assert.match(summary.text, /delivery_cursors/u);
+});
+
+test("Message live routing and audience name the owners of the Channel's active Runs, whose cells hold its Instances", async () => {
+  const rows = {
+    message_live_routing_source_v1: [{ author_kind: "user", author_id: "user-1", metadata_json: {} }],
+    message_live_routing_recipients_v4: [{ user_id: "user-1", recipient_count: "1" }],
+    message_live_routing_instance_owners_v1: [{ owner_user_id: "owner-a" }, { owner_user_id: "owner-b" }],
+  };
+  const db = database((query) => placement(query) ?? rows[query.name] ?? []);
+  const repository = new PostgresMessageRepository(db);
+  const routing = await repository.liveDeliveryRouting({
+    requestId: "live-routing-3", spaceId: "space-1", channelId: "channel-1", messageId: "message-1",
+  });
+  assert.deepEqual(routing.instanceOwnerUserIds, ["owner-a", "owner-b"]);
+  assert.deepEqual(db.calls.find((call) => call.name === "message_live_routing_instance_owners_v1").values, ["channel-1"]);
+  assert.deepEqual(await repository.liveAudience({ requestId: "live-audience-1", spaceId: "space-1", channelId: "channel-1" }),
+    { recipientUserIds: ["user-1"], instanceOwnerUserIds: ["owner-a", "owner-b"] });
 });
 
 test("Message acknowledge serializes an exact command before its idempotency read", async () => {

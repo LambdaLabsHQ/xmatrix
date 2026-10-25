@@ -566,11 +566,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
         actorUserId: authUser.id,
         ...(attention ? { attention } : {}),
       };
-      c.executionCtx.waitUntil(publishChannelMemberRead(
-        c.env,
-        (task) => c.executionCtx.waitUntil(task),
-        memberRead,
-      ).catch((error: unknown) => {
+      c.executionCtx.waitUntil(publishChannelMemberRead(c.env, memberRead).catch((error: unknown) => {
         console.error("Channel family member-read delivery failed", {
           channelId,
           error: error instanceof Error ? error.message : String(error),
@@ -659,7 +655,10 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       }
       // A client names its owner so its socket lands in that user's cell.
       // The name is only a routing hint: the socket still authenticates on
-      // its first frame, and every delivery is addressed by principal.
+      // its first frame, and the cell admits it only if the account it
+      // authenticates as is the cell's owner, so a delivery addressed to that
+      // person reaches every socket of theirs. A socket naming no owner
+      // reaches the single cell, which admits none.
       const ownerCell = relayRuntimeOwnerCellName(new URL(c.req.url).searchParams.get("owner") ?? "");
       // Only this Worker names the cell; a client cannot claim one.
       const upgrade = new Request(c.req.raw);

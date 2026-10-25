@@ -474,6 +474,65 @@ test("an authorization reads for itself: no read under way and no fresh answer o
   } finally { client.clear(); }
 });
 
+test("an answer that lacks a Channel asked for is not reused, so a conversation made meanwhile is found", async () => {
+  const { QueryClient } = require("@tanstack/react-query");
+  const refresh = require("./channel-catalog-refresh.ts");
+  const { readAskedNow } = require("./channel-message-summary.ts");
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+  const queryKey = ["xmatrix", "hub", "user", "channels", "space", "resolve", ["new"], null, true];
+  // The conversation opens at once; the Hub makes it a moment later.
+  let created = false;
+  let asked = 0;
+  const read = () => client.fetchQuery(refresh.leasedResolveQuery({
+    queryKey, lease: { id: 1 }, channelIds: ["new"], asked: readAskedNow,
+    read: async () => {
+      asked += 1;
+      return { protocolVersion: 1, pathsByChannelId: {}, channels: created ? [{ id: "new", spaceId: "space" }] : [] };
+    },
+  }));
+  try {
+    // Opening it asks before the Hub has it: nobody is found.
+    assert.deepEqual((await read()).channels, []);
+    created = true;
+    // Its first message asks again within the cache's lifetime, and the Hub answers.
+    assert.deepEqual((await read()).channels.map((channel) => channel.id), ["new"]);
+    assert.equal(asked, 2);
+    // An answer that holds every Channel asked for is reused as before.
+    await read();
+    assert.equal(asked, 2);
+  } finally { client.clear(); }
+});
+
+test("the shared resolve answer is always the latest-asked read's, whichever finishes last", async () => {
+  const { QueryClient } = require("@tanstack/react-query");
+  const refresh = require("./channel-catalog-refresh.ts");
+  const answer = (name) => ({ protocolVersion: 1, pathsByChannelId: { channel: ["channel"] },
+    channels: [{ id: "channel", spaceId: "space", name }] });
+  const common = { queryKey: ["xmatrix", "hub", "user", "channels", "space", "resolve", ["channel"], null, true],
+    lease: { id: 1 }, channelIds: ["channel"], asked: () => () => {} };
+  const read = (client, fresh, result) => client.fetchQuery(refresh.leasedResolveQuery({ ...common, fresh, read: () => result }));
+  // A read asked before an event finishes after the fresh one asked after it.
+  let client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  try {
+    let finishOld;
+    const old = read(client, false, new Promise((resolve) => { finishOld = resolve; }));
+    assert.equal((await read(client, true, Promise.resolve(answer("after the event")))).channels[0].name, "after the event");
+    finishOld(answer("before the event"));
+    await old;
+    assert.equal((await read(client, false, Promise.resolve(answer("not asked")))).channels[0].name, "after the event");
+  } finally { client.clear(); }
+  // A fresh read asked first finishes after an ordinary one asked later.
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  try {
+    let finishFresh;
+    const fresh = read(client, true, new Promise((resolve) => { finishFresh = resolve; }));
+    await read(client, false, Promise.resolve(answer("asked later")));
+    finishFresh(answer("asked first"));
+    assert.equal((await fresh).channels[0].name, "asked first", "a fresh read's caller still gets its own answer");
+    assert.equal((await read(client, false, Promise.resolve(answer("not asked")))).channels[0].name, "asked later");
+  } finally { client.clear(); }
+});
+
 test("a read that fails while its authorization stands leaves the list to be read again", async () => {
   const t = await openResolveOwner();
   try {

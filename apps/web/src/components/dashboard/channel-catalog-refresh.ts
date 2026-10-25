@@ -96,22 +96,70 @@ export function leasedResolveQuery(input: {
   /** Who asks, in which Space, for which Channels. */
   queryKey: QueryKey;
   lease: CatalogLease | undefined;
+  /** The Channels asked for. */
+  channelIds?: readonly string[];
+  /** Asked after something the Hub may not have answered before: never served an answer asked earlier. */
   fresh?: boolean;
   read: (signal: AbortSignal) => Promise<ChannelSnapshotCatalogResolveResult>;
   /** Takes the order of a read asked now and gives back the mark for its Channels (`readAskedNow`). */
   asked: () => (channel: ChannelSnapshot) => void;
 }) {
+  const sharedKey = [...input.queryKey, input.lease?.id ?? 0] as QueryKey;
+  /* Every read takes its place in the order it was asked, and the shared
+     answer is only ever the answer of the latest read that has finished: a
+     read asked earlier that finishes later hands the cache the answer it
+     finds there, never its own older one. */
+  const askAndCommit = async (signal: AbortSignal, client: QueryClient, fresh: boolean) => {
+    const generation = (resolveReadSerial += 1);
+    const mark = input.asked();
+    const result = await input.read(signal);
+    result.channels.forEach(mark);
+    const committed = committedResolves(client);
+    const hash = JSON.stringify(sharedKey);
+    const held = committed.get(hash);
+    if (held && held.generation > generation) return fresh ? result : held.result;
+    committed.delete(hash);
+    if (committed.size >= 512) committed.delete(committed.keys().next().value!);
+    committed.set(hash, { generation, result });
+    if (fresh) client.setQueryData(sharedKey, result);
+    return result;
+  };
+  if (input.fresh) {
+    // A read asked after an event (a message naming a Channel nobody here
+    // knew, a conversation the Hub just made) must not join one asked before
+    // it and still under way: that one can answer from before the event. It
+    // is a query of its own; its caller gets its own answer.
+    return {
+      queryKey: [...sharedKey, "fresh", (freshResolveSerial += 1)] as QueryKey,
+      queryFn: ({ signal, client }: { signal: AbortSignal; client: QueryClient }) => askAndCommit(signal, client, true),
+      staleTime: 0,
+      gcTime: 0,
+      structuralSharing: false as const,
+    };
+  }
+  // An answer that lacks a Channel asked for is never served again: the
+  // Channel may be one being created as it was asked (a new conversation opens
+  // before the Hub has made it), and a later ask has heard that it exists.
+  const answersAll = (result: ChannelSnapshotCatalogResolveResult | undefined) =>
+    Boolean(result) && (input.channelIds ?? []).every((id) => result!.channels.some((channel) => channel.id === id));
   return {
-    queryKey: [...input.queryKey, input.lease?.id ?? 0] as QueryKey,
-    queryFn: async ({ signal }: { signal: AbortSignal }) => {
-      const mark = input.asked();
-      const result = await input.read(signal);
-      result.channels.forEach(mark);
-      return result;
-    },
-    staleTime: input.fresh ? 0 : 30_000,
+    queryKey: sharedKey,
+    queryFn: ({ signal, client }: { signal: AbortSignal; client: QueryClient }) => askAndCommit(signal, client, false),
+    staleTime: (query: { state: { data?: ChannelSnapshotCatalogResolveResult } }) =>
+      answersAll(query.state.data) ? 30_000 : 0,
     structuralSharing: false as const,
   };
+}
+
+let resolveReadSerial = 0;
+let freshResolveSerial = 0;
+const committedResolveAnswers = new WeakMap<QueryClient, Map<string, { generation: number; result: ChannelSnapshotCatalogResolveResult }>>();
+
+/** The latest-asked finished answer of each shared resolve query. */
+function committedResolves(client: QueryClient) {
+  let committed = committedResolveAnswers.get(client);
+  if (!committed) committedResolveAnswers.set(client, committed = new Map());
+  return committed;
 }
 
 export interface ChannelCatalogChangeDetail {

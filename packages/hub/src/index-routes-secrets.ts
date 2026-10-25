@@ -129,7 +129,7 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     if (access) {
       const changed = await repository(c.env).makeAutomatic({ userId: user.id, ...access });
       if (typeof input.messageId === "string" && input.messageId.startsWith("secret-access-request:")) {
-        await markCardAnswered(c.env, (task) => c.executionCtx.waitUntil(task), access.channelId, input.messageId, user.id);
+        await markCardAnswered(c.env, access.channelId, input.messageId, user.id);
       }
       return changed;
     }
@@ -139,7 +139,7 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
       secretRef: card.secretRef, ...change({ ...input, envName: input.envName ?? card.envName }) });
     // The card names its own message; an approval from elsewhere leaves the wait to Done.
     if (typeof input.messageId === "string" && input.messageId.startsWith("secret-request:")) {
-      await markCardAnswered(c.env, (task) => c.executionCtx.waitUntil(task), card.channelId, input.messageId, user.id);
+      await markCardAnswered(c.env, card.channelId, input.messageId, user.id);
     }
     return approved;
   }));

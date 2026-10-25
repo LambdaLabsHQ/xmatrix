@@ -8,12 +8,12 @@ import {
 } from "./agent-instance-port";
 import {
   HumanRuntimeTransport,
+  type HumanChannelFocusHandler,
   type HumanChannelLiveDeliveryInput,
   type HumanChannelLiveDeliveryResult,
-  type HumanPresenceChangeHandler,
   type HumanSocketBackend,
 } from "./human-port";
-import type { LiveHumanSessionSnapshot } from "./human-live-presence";
+import type { RuntimeSocketAdmit } from "./runtime-socket-admission";
 import type { AgentStatus } from "@xmatrix/protocol";
 import type { ChannelAgentPresenceDelivery } from "./channel-agent-presence-delivery";
 import { MachineDaemonRuntimeTransport, sameRouteIdentity, type MachineDaemonSocketBackend,
@@ -29,7 +29,7 @@ import {
   liveAgentMachineRoute,
   liveAgentSessionSnapshots,
   type LiveAgentMachineRoute,
-  type LiveAgentPresentationBinding,
+  type LiveAgentSessionSelection,
 } from "./agent-presence-snapshot";
 
 export const RELAY_RUNTIME_HUMAN_CONNECT_PATH = "/internal/product-connect/human";
@@ -49,18 +49,17 @@ export interface RelayRuntimeProductPortFactory {
     quotaChanged?: (route: { ownerUserId: string; machineId: string }) => Promise<void>): MachineDaemonSocketBackend;
   /** Who may see a Channel of this Space may have changed. */
   onChannelCatalogChanged?: (spaceId: string) => void;
+  /** A person opened a Channel on one socket (human-port.ts). */
+  onChannelFocus?: HumanChannelFocusHandler;
   /** A daemon read its machine's quota again: the owner's Agents show the new reading. */
   onRegistrationQuotaChange?: (input: { ownerUserId: string;
     deliver: (userId: string, message: import("@xmatrix/protocol/connections/human").HumanServerMessage) => boolean;
   }) => Promise<void>;
-  /** Optional process-memory Human presence fanout for product sockets. */
-  onHumanPresenceChange?: HumanPresenceChangeHandler;
   onAgentPresenceChange?: (input: {
     reason: "connect" | "update" | "disconnect";
     session: Readonly<AgentInstanceRuntimeSession>;
     status?: AgentStatus;
     activity?: string;
-    liveHumanSessions: readonly LiveHumanSessionSnapshot[];
     deliver: (userId: string, message: import("@xmatrix/protocol/connections/human").HumanServerMessage) => boolean;
     /**
      * A status report for one conversation: the card and the whole Channel at
@@ -72,6 +71,11 @@ export interface RelayRuntimeProductPortFactory {
       channelId: string,
       card: Extract<import("@xmatrix/protocol/connections/human").HumanServerMessage, { type: "enhanced_presence" }> | undefined,
       channel: Extract<import("@xmatrix/protocol/connections/human").HumanServerMessage, { type: "channel_updated" }> | undefined,
+    ) => boolean;
+    /** A Channel snapshot that speaks only for its Agents, to the user's sockets that read that (human-port.ts). */
+    deliverPresenceChannel: (
+      userId: string,
+      channel: Extract<import("@xmatrix/protocol/connections/human").HumanServerMessage, { type: "channel_updated" }>,
     ) => boolean;
     /**
      * Whether the Machine Daemon hosting a live Instance's Run is reachable.
@@ -90,7 +94,11 @@ export interface RelayRuntimeProductDurableObjectContext {
 export function createRelayRuntimeProductAdapter(
   context: RelayRuntimeProductDurableObjectContext,
   factory: RelayRuntimeProductPortFactory,
-  options: { allowLegacyProtocol?: boolean } = {},
+  options: {
+    allowLegacyProtocol?: boolean;
+    /** Whether this cell may hold a socket of an owner (runtime-socket-admission.ts). */
+    admit?: RuntimeSocketAdmit;
+  } = {},
 ): RelayRuntimeProductCallbackAdapter {
   let agentInstance!: AgentInstanceRuntimeTransport;
   let machineDaemon!: MachineDaemonRuntimeTransport;
@@ -101,17 +109,17 @@ export function createRelayRuntimeProductAdapter(
   const machineReachable = (route: LiveAgentMachineRoute) =>
     restore.pending || machineDaemon.isRouteReachable(route);
   const human = new HumanRuntimeTransport(factory.human(), {
-    onPresenceChange: factory.onHumanPresenceChange,
-    liveAgentSessions: () => liveAgentSessionSnapshots(agentInstance.liveSessions(), undefined, machineReachable),
     allowLegacyProtocol: options.allowLegacyProtocol === true,
+    ...(options.admit ? { admit: options.admit } : {}),
+    ...(factory.onChannelFocus ? { onChannelFocus: factory.onChannelFocus } : {}),
   });
   const agentPresenceChange: AgentInstancePresenceChangeHandler | undefined = factory.onAgentPresenceChange
     ? (input) => factory.onAgentPresenceChange!({
         ...input,
-        liveHumanSessions: human.liveSessions(),
         deliver: (userId, message) => human.deliverToUser(userId, message),
         deliverAgentPresence: (userId, channelId, card, channel) =>
           human.deliverAgentPresence(userId, channelId, card, channel),
+        deliverPresenceChannel: (userId, channel) => human.deliverPresenceChannel(userId, channel),
         machineReachable: (session) => machineReachable(liveAgentMachineRoute(session)),
       })
     : undefined;
@@ -146,6 +154,7 @@ export function createRelayRuntimeProductAdapter(
       });
     },
     options.allowLegacyProtocol === true,
+    options.admit,
   );
   machineDaemon = new MachineDaemonRuntimeTransport(
     factory.machineDaemon(instanceId => {
@@ -168,6 +177,7 @@ export function createRelayRuntimeProductAdapter(
         });
       }
     },
+    options.admit,
   );
   const adapter = new RelayRuntimeProductCallbackAdapter(
     context,
@@ -238,25 +248,9 @@ export class RelayRuntimeProductCallbackAdapter {
     return this.human.liveSessions();
   }
 
-  /**
-   * Channels this cell must be listed for. Agent sockets name the channels
-   * they are in. A Human names only the channel they are viewing, so a
-   * presence push can find their cell without registering every membership.
-   */
-  occupiedChannelIds(): string[] {
-    const ids = this.agentInstance.liveSessions().map((session) => session.run.channelId);
-    for (const session of this.human.liveSessions()) {
-      if (session.focusedChannelId) ids.push(session.focusedChannelId);
-    }
-    return [...new Set(ids)];
-  }
-
-  liveAgentSessions(binding?: LiveAgentPresentationBinding) {
-    return liveAgentSessionSnapshots(
-      this.agentInstance.liveSessions(),
-      binding,
-      (route) => this.machineDaemon.isRouteReachable(route),
-    );
+  liveAgentSessions(selection?: LiveAgentSessionSelection) {
+    return liveAgentSessionSnapshots(this.agentInstance.liveSessions(), selection,
+      (route) => this.machineDaemon.isRouteReachable(route));
   }
 
   publishHumanTraceAccess(
@@ -325,7 +319,7 @@ export class RelayRuntimeProductCallbackAdapter {
         }
       } else {
         if (card && this.human.deliverToUser(recipient.userId, card)) hit = true;
-        if (channel && this.human.deliverToUser(recipient.userId, channel)) hit = true;
+        if (channel && this.human.deliverPresenceChannel(recipient.userId, channel)) hit = true;
       }
       if (recipient.immediate.includes("lifecycle") && delivery.lifecycle &&
           this.human.deliverToUser(recipient.userId, delivery.lifecycle)) hit = true;

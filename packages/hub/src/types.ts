@@ -69,9 +69,9 @@ export interface Env {
   /** Dormant opaque-directory target for one Space's root/config facts. */
   RELAY_SPACE_ROOT_AUTHORITY: DurableObjectNamespace;
   RELAY_RUNTIME: DurableObjectNamespace;
-  /** Bounded, expiring Runtime delivery-scope to occupied-cell projection. */
+  /** Retired; a 410 shell kept bound over its expired routing leases. */
   RELAY_RUNTIME_ROUTE_DIRECTORY: DurableObjectNamespace;
-  /** Per-channel fanout once a channel outgrows the direct cell list. */
+  /** Retired; a 410 shell kept bound over its expired routing leases. */
   RELAY_RUNTIME_CHANNEL_FANOUT?: DurableObjectNamespace;
   DEVICE_AUTH: DurableObjectNamespace;
   /** Optional until a reviewed Hyperdrive resource is provisioned; never enables routing by presence alone. */
@@ -203,8 +203,6 @@ export interface Env {
    * The deployment pins the id; clients and Spaces cannot widen this grant.
    */
   XMATRIX_MOCK_AUTH_TOKEN?: string;
-  /** Runtime cell routing: exactly "dual" activates candidate cells; default shadow. */
-  XMATRIX_RUNTIME_CELL_MODE?: string;
   XMATRIX_RUNTIME_LOCATION_HINT?: string;
   /** Test-only cadence seed; never honored without mock auth. */
   XMATRIX_MOCK_SCHEDULE_DELAY_MS?: string;

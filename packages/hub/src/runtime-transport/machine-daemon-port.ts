@@ -16,6 +16,7 @@ import {
 } from "../connections/machine-daemon/controller";
 import { RuntimeClientOperationError, supersededMachineDaemonConnection } from "./runtime-operation-failure";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
+import { admissionGate, closedIfRefused, refuseConnect, RuntimeSocketRefused, type RuntimeSocketAdmit } from "./runtime-socket-admission";
 import {
   MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS,
   parseMachineDaemonHibernationAttachment,
@@ -133,7 +134,12 @@ export interface MachineDaemonClaimWakeResult {
 
 export interface MachineDaemonSocketBackend {
   readonly capabilities: ReadonlySet<MachineDaemonAuthorityCapability>;
-  authenticate(message: MachineDaemonConnectMessage): Promise<MachineDaemonAuthorityAuthentication>;
+  /**
+   * `admit` is called once the credential names the machine's owner, before
+   * the connect advances the epoch or wakes anything, and throws when this
+   * cell may not hold the socket.
+   */
+  authenticate(message: MachineDaemonConnectMessage, admit?: (ownerUserId: string) => void): Promise<MachineDaemonAuthorityAuthentication>;
   refresh(
     token: string,
     session: Readonly<MachineDaemonRuntimeSession>,
@@ -207,6 +213,8 @@ export class MachineDaemonRuntimeTransport {
      * only: callers re-read {@link isRouteReachable}; nothing here is authority.
      */
     private readonly onRouteReachabilityChange?: (identity: MachineDaemonRouteIdentity) => void,
+    /** Whether this cell may hold a socket of the machine owner a daemon authenticated as. */
+    private readonly admit?: RuntimeSocketAdmit,
   ) {
     this.backend = backend;
     const missing = MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES.filter(
@@ -337,6 +345,7 @@ export class MachineDaemonRuntimeTransport {
   session(ws: WebSocket): Readonly<MachineDaemonRuntimeSession> | undefined {
     return this.sockets.get(ws);
   }
+
   hibernationAttachment(ws: WebSocket): MachineDaemonHibernationAttachment | undefined {
     const session = this.sockets.get(ws);
     return session && !session.activationPhase
@@ -363,6 +372,8 @@ export class MachineDaemonRuntimeTransport {
       ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
       return true;
     }
+    // A socket this cell may not hold is closed before it takes a route.
+    if (closedIfRefused(ws, this.admit, attachment.session.principal.ownerUserId)) return true;
     const peers = [...this.sockets.entries()].filter(([socket, session]) =>
       socket !== ws && sameRouteIdentity(session.principal, attachment.session.principal)
     );
@@ -495,7 +506,16 @@ export class MachineDaemonRuntimeTransport {
       return;
     }
     await this.sockets.answerOperation(ws, message.requestId, MACHINE_DAEMON_FAILURE_COPY.connect, async () => {
-      const authentication = await this.backend.authenticate(message);
+      const admit = admissionGate(this.admit);
+      let authentication: MachineDaemonAuthorityAuthentication;
+      try {
+        authentication = await this.backend.authenticate(message, admit);
+        admit(authentication.principal.ownerUserId);
+      } catch (error) {
+        if (!(error instanceof RuntimeSocketRefused)) throw error;
+        refuseConnect(this.sockets, ws, message.requestId, error.admission, MACHINE_DAEMON_FAILURE_COPY.connect);
+        return;
+      }
       assertMachineBinding(message, authentication);
       const now = new Date().toISOString();
       const session: MachineDaemonRuntimeSession = {

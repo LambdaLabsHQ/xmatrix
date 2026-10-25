@@ -79,10 +79,8 @@ import {
   overlayAgentPresenceOnChannel,
   serializeAgentFromSession,
 } from "../src/runtime-transport/agent-instance-live-presentation.ts";
-import { agentMessagePresentationForLiveSnapshot, overlayChannelsWithLiveAgentPresence } from "../src/runtime-transport/agent-presence-snapshot.ts";
-import {
-  createHumanPresenceFanout,
-} from "../src/runtime-transport/human-presence-fanout.ts";
+import { agentMessagePresentationForLiveSnapshot } from "../src/runtime-transport/agent-presence-snapshot.ts";
+import { overlayLiveInstances } from "./support/live-agent-overlay.mjs";
 import {
   channelForSharedPresenceFanout,
 } from "../src/runtime-transport/human-live-presence.ts";
@@ -325,120 +323,6 @@ test("Human channel presence and Agent peer cards receive the full live presenta
   assert.equal(peer.instances[0].repository, "LambdaLabsHQ/xmatrix");
 });
 
-/** user-1 focuses channel-1, which reads as `channel`; returns what the fanout delivered. */
-async function focusChannelOne(channel, live) {
-  const handler = createHumanPresenceFanout({
-    readChannel: async () => ({ channel, openChannelHumanMemberIdsBySpace: {} }),
-  });
-  const delivered = [];
-  await handler({
-    reason: "focus",
-    previousFocusedChannelId: null,
-    nextFocusedChannelId: "channel-1",
-    session: { user: { id: "user-1" } },
-    ...live,
-    deliver(userId, message) {
-      delivered.push({ userId, message });
-    },
-  });
-  return delivered;
-}
-
-test("initial focused-channel fanout includes each live Agent presentation", async () => {
-  const channel = {
-    id: "channel-1",
-    spaceId: "space-1",
-    name: "migration",
-    mode: "closed",
-    visibleHumanMemberIds: ["user:user-1"],
-    memberPresence: {
-      "agent-1": { registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" },
-        kind: "agent",
-        label: "Codex",
-        usage: fullPresentation().usage,
-        instances: [{
-          id: "instance-1",
-          channelInstanceId: "7",
-          connectedAt: "2026-07-30T08:00:00.000Z",
-          lastSeenAt: "2026-07-30T08:00:00.000Z",
-          status: "online",
-        }],
-      },
-    },
-    createdBy: "user-1",
-    createdAt: "2026-07-30T07:00:00.000Z",
-    updatedAt: "2026-07-30T07:00:00.000Z",
-  };
-  const delivered = await focusChannelOne(channel, {
-    liveSessions: [{
-      userId: "user-1",
-      lastSeenAt: "2026-07-30T08:01:00.000Z",
-      focusedChannelId: "channel-1",
-    }],
-    liveAgentSessions: [{
-      ownerUserId: "user-1",
-      agentId: "agent-1",
-      agentName: "Codex",
-      runId: "run-1",
-      instanceId: "instance-1",
-      channelId: "channel-1",
-      channelInstanceId: "7",
-      machineId: "machine-1",
-      hostId: "host-1",
-      status: "busy",
-      connectedAt: "2026-07-30T08:00:00.000Z",
-      lastSeenAt: "2026-07-30T08:01:00.000Z",
-      presentation: fullPresentation(),
-    }],
-  });
-
-  assert.equal(delivered.length, 1);
-  assert.equal(delivered[0].userId, "user-1");
-  const instance = delivered[0].message.channel.memberPresence["instance-1"].instances[0];
-  assert.equal(instance.statusChips[1].value, "high");
-  assert.equal(instance.usage.quotaUsages[0].label, "5h");
-});
-
-test("shared Human presence fanout cannot publish one viewer's private Channel state", async () => {
-  const attention = {
-    channelId: "channel-1",
-    unreadAttentionCount: 1,
-    updatedAt: "2026-08-21T06:00:00.000Z",
-  };
-  const channel = {
-    id: "channel-1",
-    spaceId: "space-1",
-    name: "mentions",
-    mode: "closed",
-    visibleHumanMemberIds: ["user:user-1", "user:user-2"],
-    attention,
-    readSequence: 8,
-    createdBy: "user-1",
-    createdAt: "2026-08-21T05:00:00.000Z",
-    updatedAt: "2026-08-21T06:00:00.000Z",
-  };
-  const delivered = await focusChannelOne(channel, {
-    liveSessions: [{
-      userId: "user-1",
-      lastSeenAt: "2026-08-21T06:00:00.000Z",
-      focusedChannelId: "channel-1",
-    }, {
-      userId: "user-2",
-      lastSeenAt: "2026-08-21T06:00:01.000Z",
-      focusedChannelId: null,
-    }],
-    liveAgentSessions: [],
-  });
-
-  assert.deepEqual(delivered.map(({ userId }) => userId).sort(), ["user-1", "user-2"]);
-  for (const { message } of delivered) {
-    assert.equal(message.type, "channel_updated");
-    assert.equal("attention" in message.channel, false);
-    assert.equal("readSequence" in message.channel, false);
-  }
-  assert.equal(channel.attention, attention, "the personalized Authority snapshot stays immutable");
-});
-
 test("the shared presence serializer drops viewer-scoped fields and what messages say", () => {
   const attention = {
     channelId: "channel-1",
@@ -456,10 +340,12 @@ test("the shared presence serializer drops viewer-scoped fields and what message
     memberPresence: { "user:user-1": { kind: "user", status: "online" } },
   };
 
+  // Nor where the people are: the publishing cell knows its Agents alone, and says so.
   assert.deepEqual(channelForSharedPresenceFanout(channel), {
     id: "channel-1",
     memberReadSequences: { "user:user-1": 4 },
-    memberPresence: { "user:user-1": { kind: "user", status: "online" } },
+    memberPresence: {},
+    presenceCoverage: "agents",
   });
 });
 
@@ -767,7 +653,7 @@ test("live overlay does not resurrect Instances Authority already dropped", () =
     updatedAt: "2026-07-30T07:00:00.000Z",
     memberPresence: {},
   };
-  const [overlaid] = overlayChannelsWithLiveAgentPresence([channel], [{
+  const [overlaid] = overlayLiveInstances([channel], [{
     ownerUserId: "user-1",
     agentId: "agent-1",
     agentName: "Codex",
@@ -842,7 +728,7 @@ test("registration catalog and live presence retain one card per Instance throug
     presentation: { model: "claude", gitBranch: "fix-presence" },
   }));
   for (let refresh = 0; refresh < 2; refresh++) {
-    [channel] = overlayChannelsWithLiveAgentPresence([channel], sessions);
+    [channel] = overlayLiveInstances([channel], sessions);
     const instances = Object.values(channel.memberPresence).flatMap(p => p.instances);
     assert.equal(instances.length, 2);
     assert.deepEqual(instances.map(i => i.id).sort(), ["instance-3", "instance-4"]);
@@ -960,32 +846,6 @@ function presentationChannel(name, memberPresence) {
   return { id: "channel-1", spaceId: "space-1", name, mode: "open", memberPresence,
     createdBy: "user-1", createdAt: "2026-07-30T07:00:00.000Z", updatedAt: "2026-07-30T07:00:00.000Z" };
 }
-
-test("a focus change refreshes only the Channels it left and opened; a connect refreshes every watched one", async () => {
-  const live = {
-    liveAgentSessions: [],
-    liveSessions: [
-      { userId: "user-1", lastSeenAt: "2026-10-05T00:00:00.000Z", focusedChannelId: "channel-2" },
-      { userId: "user-2", lastSeenAt: "2026-10-05T00:00:00.000Z", focusedChannelId: "watched-by-2" },
-      { userId: "user-3", lastSeenAt: "2026-10-05T00:00:00.000Z", focusedChannelId: "watched-by-3" },
-    ],
-  };
-  const fanout = async (reason, previousFocusedChannelId, nextFocusedChannelId) => {
-    const read = [];
-    await createHumanPresenceFanout({
-      readChannel: async (channelId, _userId, purpose) => {
-        read.push([channelId, purpose]);
-        return undefined;
-      },
-    })({ reason, previousFocusedChannelId, nextFocusedChannelId, session: { user: { id: "user-1" } },
-      ...live, deliver() {} });
-    return read.sort();
-  };
-  assert.deepEqual(await fanout("focus", "channel-1", "channel-2"),
-    [["channel-1", "human-presence"], ["channel-2", "human-presence"]]);
-  assert.deepEqual((await fanout("connect", null, null)).map(([channelId]) => channelId),
-    ["channel-2", "watched-by-2", "watched-by-3"]);
-});
 
 function catalogInstance(session) {
   return { id: session.run.instanceId, channelId: session.run.channelId,

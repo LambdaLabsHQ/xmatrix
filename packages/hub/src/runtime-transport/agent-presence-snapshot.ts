@@ -1,10 +1,5 @@
-import { decodeChannelSnapshot, encodeChannelSnapshot, plainRecord, repoSummonReference } from "@xmatrix/protocol";
-import type {
-  AgentInstanceOfflineReason,
-  AgentStatus,
-  LiveAgentStatus,
-  SerializedChannel,
-} from "@xmatrix/protocol";
+import { plainRecord, repoSummonReference } from "@xmatrix/protocol";
+import type { AgentInstanceOfflineReason, AgentStatus, LiveAgentStatus, LlmUsage } from "@xmatrix/protocol";
 import { isLiveAgentStatus } from "@xmatrix/protocol";
 import type { AgentInstanceRuntimeSession } from "./agent-instance-port";
 import {
@@ -12,11 +7,8 @@ import {
   sanitizeAgentInstancePresentation,
   type AgentInstancePresentation,
 } from "./agent-instance-presentation";
-import {
-  overlayAgentPresenceSnapshot,
-  type AgentInstanceLivePresenceSession,
-} from "./agent-instance-live-presentation";
-import { loadRuntimePresenceSnapshotEntries } from "./runtime-presence-snapshot";
+import { agentPresenceCard } from "./agent-instance-live-presentation";
+import { tryLoadRuntimePresenceSnapshotEntries } from "./runtime-presence-snapshot";
 
 export const RELAY_RUNTIME_AGENT_PRESENCE_PATH = "/internal/agent-presence";
 
@@ -80,12 +72,15 @@ export interface LiveAgentPresentationBinding {
   channelId: string;
 }
 
+/** What one read asks for: one Agent message's exact Instance, or every Instance of one Channel. */
+export type LiveAgentSessionSelection = LiveAgentPresentationBinding | { channelId: string };
+
 export function liveAgentSessionSnapshots(
   sessions: Iterable<Readonly<AgentInstanceRuntimeSession>>,
   /* Every Agent message send reads exactly one binding. Rejecting the other
      sessions here — before each is sanitized into a snapshot — is what keeps
      that read proportional to the answer instead of to everything live. */
-  binding?: LiveAgentPresentationBinding,
+  selection?: LiveAgentSessionSelection,
   /* Absent where no Machine Daemon transport is composed: every Instance then
      keeps the status it reports. */
   machineReachable?: (route: LiveAgentMachineRoute) => boolean,
@@ -93,7 +88,7 @@ export function liveAgentSessionSnapshots(
   const snapshots: LiveAgentSessionSnapshot[] = [];
   for (const session of sessions) {
     if (snapshots.length >= MAX_LIVE_AGENT_SESSIONS) break;
-    if (binding && !sessionMatchesBinding(session, binding)) continue;
+    if (selection && !sessionSelected(session, selection)) continue;
     const machineOffline = machineReachable !== undefined &&
       !machineReachable(liveAgentMachineRoute(session));
     snapshots.push({
@@ -122,51 +117,60 @@ export function liveAgentSessionSnapshots(
   return snapshots;
 }
 
-function sessionMatchesBinding(
+function sessionSelected(
   session: Readonly<AgentInstanceRuntimeSession>,
-  binding: LiveAgentPresentationBinding,
+  selection: LiveAgentSessionSelection,
 ): boolean {
-  return session.principal.agentId === binding.agentId &&
-    session.principal.runId === binding.runId &&
-    session.run.instanceId === binding.instanceId &&
-    session.run.channelId === binding.channelId;
+  if (session.run.channelId !== selection.channelId) return false;
+  return !("agentId" in selection) || (session.principal.agentId === selection.agentId &&
+    session.principal.runId === selection.runId &&
+    session.run.instanceId === selection.instanceId);
 }
 
+/** A cell's live sessions; none when it does not answer, or not within `timeoutMs`, body included. */
 export async function loadLiveAgentPresenceFromRuntime(
   runtime: { fetch(request: Request): Promise<Response> },
   requestUrl: string,
-  binding?: LiveAgentPresentationBinding,
+  selection?: LiveAgentSessionSelection,
+  timeoutMs?: number,
 ): Promise<LiveAgentSessionSnapshot[]> {
   const url = new URL(RELAY_RUNTIME_AGENT_PRESENCE_PATH, requestUrl);
-  if (binding) {
-    url.searchParams.set("agentId", binding.agentId);
-    url.searchParams.set("runId", binding.runId);
-    url.searchParams.set("instanceId", binding.instanceId);
-    url.searchParams.set("channelId", binding.channelId);
+  if (selection && "agentId" in selection) {
+    url.searchParams.set("agentId", selection.agentId);
+    url.searchParams.set("runId", selection.runId);
+    url.searchParams.set("instanceId", selection.instanceId);
   }
-  return (await loadRuntimePresenceSnapshotEntries(runtime, url))
+  if (selection) url.searchParams.set("channelId", selection.channelId);
+  return ((await tryLoadRuntimePresenceSnapshotEntries(runtime, url, timeoutMs)) ?? [])
     .slice(0, MAX_LIVE_AGENT_SESSIONS)
     .flatMap(parseLiveAgentSessionSnapshot);
 }
 
-export function overlayChannelsWithLiveAgentPresence(
-  channels: readonly unknown[],
-  sessions: readonly LiveAgentSessionSnapshot[],
-): unknown[] {
-  return channels.map((channel) => {
-    if (!channel || typeof channel !== "object" || Array.isArray(channel)) return channel;
-    let overlaid = decodeChannelSnapshot(channel as SerializedChannel);
-    for (const session of sessions) {
-      if (session.channelId !== overlaid.id) continue;
-      // Runtime may only overlay rows already supplied by the DB directory.
-      overlaid = overlayAgentPresenceSnapshot(overlaid, {
-        reason: "update",
-        session: livePresenceSession(session),
-        ...projectedLiveAgentStatus(session),
-      });
-    }
-    return encodeChannelSnapshot(overlaid);
-  });
+/**
+ * The card a person is shown for a live Instance another cell holds, as a
+ * status report from it shows it: offline while its machine is, with its
+ * registration's quota reading.
+ */
+export function liveAgentSnapshotCard(
+  snapshot: Readonly<LiveAgentSessionSnapshot>,
+  registrationQuota: LlmUsage | undefined,
+): ReturnType<typeof agentPresenceCard> {
+  const { status, offlineReason } = projectedLiveAgentStatus(snapshot);
+  return agentPresenceCard({
+    principal: { ownerUserId: snapshot.ownerUserId, agentId: snapshot.agentId, agentName: snapshot.agentName,
+      runId: snapshot.runId, channelId: snapshot.channelId },
+    run: {
+      runId: snapshot.runId, agentId: snapshot.agentId, instanceId: snapshot.instanceId, channelId: snapshot.channelId,
+      ...(snapshot.channelInstanceId ? { channelInstanceId: snapshot.channelInstanceId } : {}),
+      machineId: snapshot.machineId, hostId: snapshot.hostId,
+      ...(snapshot.cwd ? { cwd: snapshot.cwd } : {}),
+      ...(snapshot.repository ? { repository: snapshot.repository } : {}),
+      status: "running", instanceStatus: snapshot.status,
+    },
+    connectedAt: snapshot.connectedAt,
+    lastSeenAt: snapshot.lastSeenAt,
+    ...(snapshot.presentation ? { presentation: snapshot.presentation } : {}),
+  }, { status, ...(offlineReason ? { offlineReason } : {}), ...(registrationQuota ? { registrationQuota } : {}) });
 }
 
 export function agentMessagePresentationForLiveBinding(
@@ -221,38 +225,6 @@ function liveAgentSessionForBinding(
   );
   if (matches.length !== 1) return undefined;
   return matches[0];
-}
-
-function livePresenceSession(
-  snapshot: LiveAgentSessionSnapshot,
-): AgentInstanceLivePresenceSession {
-  return {
-    principal: {
-      ownerUserId: snapshot.ownerUserId,
-      agentId: snapshot.agentId,
-      agentName: snapshot.agentName,
-      runId: snapshot.runId,
-      channelId: snapshot.channelId,
-    },
-    run: {
-      runId: snapshot.runId,
-      agentId: snapshot.agentId,
-      instanceId: snapshot.instanceId,
-      channelId: snapshot.channelId,
-      ...(snapshot.channelInstanceId
-        ? { channelInstanceId: snapshot.channelInstanceId }
-        : {}),
-      machineId: snapshot.machineId,
-      hostId: snapshot.hostId,
-      ...(snapshot.cwd ? { cwd: snapshot.cwd } : {}),
-      ...(snapshot.repository ? { repository: snapshot.repository } : {}),
-      status: "running",
-      instanceStatus: snapshot.status,
-    },
-    connectedAt: snapshot.connectedAt,
-    lastSeenAt: snapshot.lastSeenAt,
-    ...(snapshot.presentation ? { presentation: snapshot.presentation } : {}),
-  };
 }
 
 function parseLiveAgentSessionSnapshot(value: unknown): LiveAgentSessionSnapshot[] {

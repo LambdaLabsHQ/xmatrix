@@ -31,19 +31,19 @@ import {
   mergeAgentInstancePresentation,
 } from "./agent-instance-presentation";
 import {
-  overlayAgentPresenceOnChannel, overlayAgentPresenceSnapshot,
+  agentPresenceCard, overlayAgentPresenceOnChannel, overlayAgentPresenceSnapshot,
   serializeAgentFromSession,
 } from "./agent-instance-live-presentation";
 import { AgentChannelHistory, type ReadAgentChannelHistory } from "./agent-channel-history";
 import { PostgresHumanPort } from "./postgres-human-port";
 import type { AgentInstanceRuntime } from "./agent-instance-run-query";
-import { createHumanPresenceFanout, humanFanoutChannelReader, type HumanFanoutChannelReader } from "./human-presence-fanout";
+import { humanFanoutChannelReader, type HumanFanoutChannelReader } from "./human-presence-fanout";
 import {
   channelForSharedPresenceFanout,
   humanMemberIdsForChannel,
-  overlayHumanPresenceOnChannel,
   visibleHumanUserIds,
 } from "./human-live-presence";
+import { postgresMessageLiveRecipientUserIds, withPostgresMessageRequestScope } from "../postgres-message-authority";
 import { PostgresMachineDaemonPort } from "./postgres-machine-daemon-port";
 import type { RelayRuntimeProductPortFactory } from "./relay-runtime-product-adapter";
 import { channelHistoryAs } from "./runtime-messages";
@@ -51,12 +51,23 @@ import {
   channelAgentPresenceDeliveryBody,
   type ChannelAgentPresenceRecipient,
 } from "./channel-agent-presence-delivery";
-import { publishRuntimeChannelAgentPresence } from "./runtime-route-directory-delivery";
+import {
+  deliverToAudience,
+  runAsRuntimeCell,
+  RUNTIME_CHANNEL_AGENT_PRESENCE_URL,
+  runtimeJsonRequest,
+} from "./runtime-principal-delivery";
 import { RuntimeClientOperationError, runtimeFailureOrigin } from "./runtime-operation-failure";
+import {
+  liveAgentSnapshotCard,
+  loadLiveAgentPresenceFromRuntime,
+  type LiveAgentSessionSnapshot,
+} from "./agent-presence-snapshot";
+import { relayRuntimeOwnerCellName } from "./runtime-cell-locator";
+import { relayRuntimeCellNamed } from "../relay-authority-locator";
 import {
   PRESENCE_AUDIENCE_TTL_MS, PresenceAudiences, type PresenceAudience, type PresenceStorage,
 } from "./presence-audiences";
-import { RELAY_RUNTIME_SELECTED_CELL } from "./runtime-cell-locator";
 
 const RUNTIME_SIGNAL_TYPES = new Set<string>([
   "client_network_sample",
@@ -76,6 +87,12 @@ export function createProductionRelayRuntimeProductPortFactory(
   options: {
     /** How presence fanout reads a Channel as a Human; PostgreSQL by default. */
     readChannel?: HumanFanoutChannelReader;
+    /**
+     * Who may read a Channel now, as the authority answers it; PostgreSQL by
+     * default. Every status report asks: who may see an Agent's work is never
+     * taken from a remembered read.
+     */
+    readViewers?: (channelId: string) => Promise<readonly string[]>;
     /** Every registration of one owner with its quota reading; PostgreSQL by default. */
     readOwnerQuota?: (ownerUserId: string) => Promise<readonly RegistrationQuotaReading[]>;
     /** One registration's quota reading; PostgreSQL by default. */
@@ -95,6 +112,8 @@ export function createProductionRelayRuntimeProductPortFactory(
 ): RelayRuntimeProductPortFactory {
   const analytics = options.analytics ?? analyticsSinkFromEnv(env);
   const readChannel = options.readChannel ?? humanFanoutChannelReader(env);
+  const readViewers = options.readViewers ?? ((channelId: string) => withPostgresMessageRequestScope(env,
+    (scope) => postgresMessageLiveRecipientUserIds(env, channelId, scope)));
   const readHistory = options.readHistory ?? postgresAgentChannelHistory(env);
   const controlWaiters = new AgentInstanceControlResultWaiterRegistry();
   const liveAgentFanout = new LiveAgentInstanceFanout();
@@ -125,11 +144,12 @@ export function createProductionRelayRuntimeProductPortFactory(
   const readQuota = options.readQuota ?? (async (registration: AgentRegistrationKey) =>
     (await readRegistrationQuotaState(runtimeDirectory(env), [registration], crypto.randomUUID()))
       .get(registrationQuotaKey(registration)));
-  /* A status report from a working Agent is the frequent case. It reuses what
-     the Instance's last Channel read said about who may see it and its quota,
-     and reads nothing: joining and leaving read the Channel again, a catalog
-     change in its Space forgets the audience, and the quota is read again
-     when the Instance reports a newer provider reading or a minute passes. */
+  /* A status report from a working Agent is the frequent case. It reuses the
+     registration and quota the Instance's last Channel read gave, and reads
+     only who may see the Channel now: joining and leaving read the whole
+     Channel again, a catalog change in its Space forgets what was remembered,
+     and the quota is read again when the Instance reports a newer provider
+     reading or a minute passes. */
   const audiences = new PresenceAudiences(options.storage);
   /** The registration's reading for a status report, and whether this report read it. */
   const audienceQuota = async (instanceId: string, audience: PresenceAudience,
@@ -154,15 +174,47 @@ export function createProductionRelayRuntimeProductPortFactory(
     return { quota, read: true };
   };
 
+  /* Each call of a port runs as this cell's work, so what it publishes, however
+     deep in the code that commits it, serves this cell's own sockets locally. */
+  const runtimeSelf = options.runtimeSelf;
+  /**
+   * One Channel's live Instances as their owner's cell holds them; none when it
+   * cannot say within the deadline. The card is a head start: the Instance's
+   * next report brings the same.
+   */
+  const liveChannelAgents = async (ownerUserId: string, channelId: string): Promise<LiveAgentSessionSnapshot[]> => {
+    const cell = relayRuntimeOwnerCellName(ownerUserId);
+    const runtime = !cell ? undefined
+      : runtimeSelf?.cellName() === cell ? runtimeSelf
+        : env.RELAY_RUNTIME ? relayRuntimeCellNamed(env, cell) : undefined;
+    if (!runtime) return [];
+    return loadLiveAgentPresenceFromRuntime(runtime, "https://relay-runtime/", { channelId },
+      FOCUSED_CHANNEL_AGENTS_READ_TIMEOUT_MS).catch((error: unknown) => {
+      console.warn("Live Agent presence of a focused Channel could not be read", {
+        errorCode: error instanceof Error ? error.name : "unknown",
+      });
+      return [];
+    });
+  };
+  const inCell = <Port extends object>(port: Port): Port => runtimeSelf ? new Proxy(port, {
+    get(target, property, receiver) {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => runAsRuntimeCell(
+        { cellName: runtimeSelf.cellName(), fetch: (request) => runtimeSelf.fetch(request) },
+        () => (value as (...values: unknown[]) => unknown).apply(target, args));
+    },
+  }) : port;
+
   return {
-    human: () => PostgresHumanPort.fromEnv({ env }),
-    machineDaemon: (terminateInstance, quotaChanged) => PostgresMachineDaemonPort.fromEnv({
+    human: () => inCell(PostgresHumanPort.fromEnv({ env })),
+    machineDaemon: (terminateInstance, quotaChanged) => inCell(PostgresMachineDaemonPort.fromEnv({
       env, terminateInstance,
       ...(options.runtimeSelf ? { runtimeSelf: options.runtimeSelf } : {}),
       ...(quotaChanged ? { quotaChanged } : {}),
       ...(options.scheduleBackground ? { keepAlive: options.scheduleBackground } : {}),
-    }),
-    agentInstance: () => PostgresAgentInstancePort.fromEnv({
+    })),
+    agentInstance: () => inCell(PostgresAgentInstancePort.fromEnv({
       env,
       history: new AgentChannelHistory({ read: readHistory, serializeAgent: serializeAgentFromSession }),
       signals,
@@ -171,8 +223,7 @@ export function createProductionRelayRuntimeProductPortFactory(
         : {}),
       ...(options.runtimeSelf ? { runtimeSelf: options.runtimeSelf } : {}),
       ...(options.runtime ? { runtime: options.runtime } : {}),
-    }),
-    onHumanPresenceChange: createHumanPresenceFanout({ readChannel }),
+    })),
     onRegistrationQuotaChange: async ({ ownerUserId, deliver }) => {
       // A probe of one machine can move a pool the owner's other machines share.
       const readings = await readOwnerQuota(ownerUserId).catch((error: unknown) => {
@@ -186,6 +237,21 @@ export function createProductionRelayRuntimeProductPortFactory(
         publishQuota(ownerUserId, registration, usage, deliver);
       }
     },
+    onChannelFocus: async ({ userId, channelId, send }) => {
+      // The read is this person's authorization, and it names the Channel's Instances.
+      const payload = await readChannel(channelId, userId, "agent-presence");
+      const instances = payload ? decodeChannelSnapshot(payload.channel).presence?.instances : undefined;
+      if (!payload || !instances?.size) return;
+      const owners = new Set([...instances.values()].map((instance) => instance.registration.ownerUserId));
+      // Each owner's cell is shown as it answers: one that is slow holds back no other's Agents.
+      await Promise.all([...owners].map(async (owner) => {
+        for (const snapshot of await liveChannelAgents(owner, channelId)) {
+          // Only an Instance the Channel's read names is shown, as a live overlay shows only those.
+          if (!instances.has(presenceInstanceId(snapshot.instanceId))) continue;
+          send(liveAgentSnapshotCard(snapshot, channelInstanceQuota(payload.channel, snapshot.instanceId)));
+        }
+      }));
+    },
     onChannelCatalogChanged: (spaceId) => {
       // Who may see a Channel of this Space may have changed: read it again.
       const forgotten = audiences.forgetSpace(spaceId).catch((error: unknown) => {
@@ -196,7 +262,7 @@ export function createProductionRelayRuntimeProductPortFactory(
       options.scheduleBackground?.(forgotten);
     },
     onAgentPresenceChange: async ({
-      reason, session, status: reportedStatus, liveHumanSessions, deliver, deliverAgentPresence, machineReachable,
+      reason, session, status: reportedStatus, deliver, deliverAgentPresence, deliverPresenceChannel, machineReachable,
     }) => {
       // An open Instance socket on an unreachable machine is shown offline,
       // whatever it last reported; nothing sent to it would be acted on.
@@ -215,13 +281,18 @@ export function createProductionRelayRuntimeProductPortFactory(
       if (reason === "disconnect") await audiences.forget(session.run.instanceId);
       if (known && known.channelId === session.run.channelId && Date.now() - known.readAt < PRESENCE_AUDIENCE_TTL_MS) {
         // A status report: the card alone carries it, and every viewer's
-        // client patches its Channel from the card.
+        // client patches its Channel from the card. Who views is read now;
+        // a read that fails reaches only the owner.
+        const viewers = await readViewers(session.run.channelId).catch((error: unknown) => {
+          console.warn("Agent presence viewers could not be read", { errorCode: error instanceof Error ? error.name : "unknown" });
+          return [] as readonly string[];
+        });
         const { quota: accountQuota, read } = await audienceQuota(session.run.instanceId, known, session);
         // A held reading went out when it was read; only a new read is news.
         if (read && known.registration) publishQuota(ownerUserId, known.registration, accountQuota, deliver);
         const card = humanEnhancedPresenceFrame(session, status, offlineReason, accountQuota);
         const recipients: ChannelAgentPresenceRecipient[] = [];
-        for (const userId of [ownerUserId, ...known.viewers]) {
+        for (const userId of new Set([ownerUserId, ...viewers])) {
           deliverAgentPresence(userId, session.run.channelId, card, undefined);
           recipients.push({ userId, digest: true, card: true, channel: false, immediate: [] });
         }
@@ -325,17 +396,12 @@ export function createProductionRelayRuntimeProductPortFactory(
       if (reason !== "disconnect") {
         await audiences.remember(session.run.instanceId, {
           channelId: session.run.channelId, spaceId: payload.channel.spaceId, readAt: Date.now(),
-          viewers: visibleHumanUserIds(humanMemberIds).filter(userId => userId !== ownerUserId),
           ...(registration ? { registration } : {}), quotaCheckedThrough: reportedQuotaAt(session),
         });
       }
-      const channel = channelForSharedPresenceFanout(
-        overlayHumanPresenceOnChannel(
-          payload.channel,
-          liveHumanSessions,
-          humanMemberIds,
-        ),
-      );
+      // This cell knows the Channel's Agents, not where its people are: the
+      // snapshot says it speaks for the Agents alone.
+      const channel = channelForSharedPresenceFanout(payload.channel);
       for (const userId of visibleHumanUserIds(humanMemberIds)) {
         // Owner already received enhanced_presence above; still send to other
         // channel human members so Agents chips stay live for everyone present.
@@ -345,7 +411,7 @@ export function createProductionRelayRuntimeProductPortFactory(
           remember({ userId, digest: true, card: Boolean(card), channel: true, immediate: [] });
         } else {
           if (card) deliver(userId, card);
-          deliver(userId, { type: "channel_updated", channel });
+          deliverPresenceChannel(userId, { type: "channel_updated", channel });
           const immediate: Array<"lifecycle" | "observable"> = [];
           if (reason === "disconnect" && userId !== ownerUserId && lifecycle) {
             // Owner already notified above; fan out to other channel members.
@@ -362,6 +428,9 @@ export function createProductionRelayRuntimeProductPortFactory(
 
 const PRESENCE_QUOTA_TTL_MS = 60_000;
 
+/** How long a focused Channel waits on one owner's cell, response body included. */
+const FOCUSED_CHANNEL_AGENTS_READ_TIMEOUT_MS = 1_000;
+
 /** When the Instance's own provider reading was taken, if it reported one. */
 function reportedQuotaAt(session: Readonly<AgentInstanceRuntimeSession>): number {
   const at = Date.parse(session.presentation?.usage?.quotaObservedAt ?? "");
@@ -369,15 +438,15 @@ function reportedQuotaAt(session: Readonly<AgentInstanceRuntimeSession>): number
 }
 
 /**
- * Humans watching this Channel may sit in another user's Runtime cell. The
- * local sockets were already told; this reaches the other cells, and never
- * this one. A missing runtime binding (tests, shadow with no directory) does
+ * The other viewers' sockets live in their own cells. The local sockets were
+ * already told; this reaches each other viewer's cell with only what that
+ * viewer is owed, and never this one. A missing runtime binding (tests) does
  * nothing. Failure here must not fail the Agent's own presence report.
  */
 function scheduleAgentPresenceAcrossCells(input: {
   env: Env;
   scheduleBackground?: (task: Promise<unknown>) => void;
-  runtimeSelf?: { cellName: () => string };
+  runtimeSelf?: { cellName: () => string; fetch(request: Request): Promise<Response> };
   channelId: string;
   reason: "connect" | "update" | "disconnect";
   card?: SerializedAgent;
@@ -387,22 +456,27 @@ function scheduleAgentPresenceAcrossCells(input: {
   recipients: ChannelAgentPresenceRecipient[];
 }): void {
   if (!input.env.RELAY_RUNTIME || input.recipients.length === 0) return;
-  const body = channelAgentPresenceDeliveryBody({
-    channelId: input.channelId,
-    reason: input.reason,
-    ...(input.card ? { card: input.card } : {}),
-    ...(input.channel ? { channel: input.channel } : {}),
-    ...(input.lifecycle ? { lifecycle: input.lifecycle } : {}),
-    ...(input.observable ? { observable: input.observable } : {}),
-    recipients: input.recipients,
-  });
-  if (!body) return;
-  const task = publishRuntimeChannelAgentPresence({
-    env: input.env,
-    channelId: input.channelId,
-    body,
-    exceptCell: input.runtimeSelf?.cellName() ?? RELAY_RUNTIME_SELECTED_CELL,
-    reason: input.reason,
+  // Each viewer's cell is told only what that viewer is owed.
+  const bodies = new Map<string, string>();
+  for (const recipient of input.recipients) {
+    const body = channelAgentPresenceDeliveryBody({
+      channelId: input.channelId,
+      reason: input.reason,
+      ...(input.card ? { card: input.card } : {}),
+      ...(input.channel ? { channel: input.channel } : {}),
+      ...(input.lifecycle ? { lifecycle: input.lifecycle } : {}),
+      ...(input.observable ? { observable: input.observable } : {}),
+      recipients: [recipient],
+    });
+    if (body) bodies.set(recipient.userId, body);
+  }
+  const self = input.runtimeSelf
+    ? { cellName: input.runtimeSelf.cellName(), fetch: (request: Request) => input.runtimeSelf!.fetch(request) }
+    : undefined;
+  const task = deliverToAudience({
+    env: input.env, label: "Agent presence", reason: input.reason, audience: { humans: [...bodies.keys()] },
+    ...(self ? { self, skipSelf: true } : {}),
+    request: (share) => runtimeJsonRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_URL, bodies.get(share.owner)!),
   }).catch((error: unknown) => {
     console.error("Agent presence cross-cell delivery failed", error);
   });
@@ -505,19 +579,10 @@ function humanEnhancedPresenceFrame(
   offlineReason: AgentInstanceOfflineReason | undefined,
   accountQuota: LlmUsage | undefined,
 ): Extract<HumanServerMessage, { type: "enhanced_presence" }> {
-  const agentStatus = status ?? session.run.instanceStatus;
-  // Carry the Agent's account windows, not just this Instance's last read, so
-  // the Human UI patches every Channel showing the Agent with the same meters.
-  const usage = withRegistrationQuota(session.presentation?.usage, accountQuota);
-  const { usage: _instanceUsage, ...presentation } = session.presentation ?? {};
-  return {
-    type: "enhanced_presence",
-    agent: {
-      ...serializeAgentFromSession(session, { ...presentation, ...(usage ? { usage } : {}) },
-        agentStatus, offlineReason),
-      status: agentStatus,
-    },
-  };
+  return agentPresenceCard(session, {
+    ...(status ? { status } : {}), ...(offlineReason ? { offlineReason } : {}),
+    ...(accountQuota ? { registrationQuota: accountQuota } : {}), executionKey: session.principal.executionKey,
+  });
 }
 
 function liveAgentSignalMessage(

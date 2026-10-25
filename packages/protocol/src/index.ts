@@ -335,6 +335,7 @@ export type {
   HumanServerMessage,
 } from "./connections/human.js";
 export {
+  HUMAN_CLIENT_PRESENCE_COVERAGE,
   HUMAN_CLIENT_PRESENCE_DIGEST,
   HUMAN_HEARTBEAT_PING,
   HUMAN_HEARTBEAT_PONG,

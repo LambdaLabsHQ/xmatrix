@@ -167,8 +167,8 @@ integration("scheduled timeout immediately cancels execution; cleanup remains bo
         runId: "routed-stop", executionKey: "key-routed-stop", agentId: "routed-stop", instanceId: "routed-stop",
         reason: "scheduled_execution_timeout", worktreeDisposition: "retain" },
     });
-    // One wake reaches every cell that may hold the owner's daemon socket.
-    assert.deepEqual(wakes.map(wake => wake.cell).sort(), ["cell-0", "user-owner"]);
+    // One wake reaches the owner's own cell, the only one that may hold their daemon's socket.
+    assert.deepEqual(wakes.map(wake => wake.cell), ["user-owner"]);
     assert.ok(wakes.every(wake => wake.ownerUserId === "owner" && wake.machineId === "machine" &&
       wake.hostId === "host"));
     const replay = (await client.query(`SELECT result_json FROM control.scoped_control_command_replays
@@ -179,7 +179,7 @@ integration("scheduled timeout immediately cancels execution; cleanup remains bo
     assert.equal(pendingStop.error_code, "scheduled_run_timed_out");
     assert.ok(pendingStop.finished_at, "execution cancellation is separate from process termination");
     await reapSpaceAutomationRuns(env, new Date("2026-09-12T21:27:01Z"), lifecycle);
-    assert.equal(wakes.length, 2, "the occurrence retry fence suppresses an immediate second dispatch");
+    assert.equal(wakes.length, 1, "the occurrence retry fence suppresses an immediate second dispatch");
     await client.query(`UPDATE data.runs SET metadata_json=jsonb_set(metadata_json,
       '{executionCancellation,processCleanup,status}','"confirmed"') WHERE run_id='routed-stop'`);
 

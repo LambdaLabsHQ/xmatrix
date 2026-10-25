@@ -366,8 +366,8 @@ test("a historical instance reborn mention reuses its durable session key after 
     const liveInstance = presenceCards(liveUpdate).flatMap((card) => card.instances ?? []).find(reported);
     assert.equal(liveInstance.usage.quotaUsages[0].percent, 30);
 
-    // A newly opened app must receive the already-live Agent presentation on
-    // its first verified focus, without waiting for another Agent heartbeat.
+    // A newly opened app is shown the already-live Agent presentation, as the
+    // Agent's card, on its first verified focus: not at the next heartbeat.
     human.ws.close();
     human = await connectUser(worker);
     human.ws.send(JSON.stringify({
@@ -376,19 +376,13 @@ test("a historical instance reborn mention reuses its durable session key after 
       channelId,
       historyLimit: 1,
     }));
+    const focused = (instance) => instance.id === resumed.resumeInstanceId && instance.channelId === channelId &&
+      instance.usage?.quotaUsages?.[0]?.percent === 30 && instance.model === "gpt-5.6-sol";
     const initialFocusPresence = await human.inbox.waitFor(
-      (message) => message.type === "channel_updated" &&
-        message.channel?.id === channelId &&
-        registrationPresence(message.channel, registration).instances.some(
-          (instance) => instance.id === resumed.resumeInstanceId &&
-            instance.usage?.quotaUsages?.[0]?.percent === 30 &&
-            instance.model === "gpt-5.6-sol",
-        ),
+      (message) => presenceCards(message).some((card) => card.instances?.some(focused)),
       "initial focused-channel Agent presentation",
     );
-    const initialInstance = registrationPresence(initialFocusPresence.channel, registration).instances.find(
-      (instance) => instance.id === resumed.resumeInstanceId,
-    );
+    const initialInstance = presenceCards(initialFocusPresence).flatMap((card) => card.instances ?? []).find(focused);
     assert.equal(initialInstance.usage.quotaUsages[0].percent, 30);
     assert.equal(initialInstance.model, "gpt-5.6-sol");
     assert.equal(initialInstance.effort, "xhigh");

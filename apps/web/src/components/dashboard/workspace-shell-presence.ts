@@ -82,7 +82,8 @@ export function memberPresence(
 ): PresentedChannelMemberPresence {
   const presence = channelPresenceMember(channel, member);
   if (presence) return presence;
-  if (member.startsWith("user:") && channel.presence === undefined) {
+  // No presence at all, or one that speaks only for Agents, says nothing of a person.
+  if (member.startsWith("user:") && (channel.presence === undefined || channel.presence.humansCovered === false)) {
     return { kind: "user", activity: "Status unknown" };
   }
   const agent = agentsById?.get(member);
