@@ -2178,12 +2178,6 @@ pub enum PageCommand {
         #[arg(long)]
         space: Option<String>,
     },
-    /// Say that this Run's work changed nothing on the pages it works on
-    Done {
-        /// One line on why no page needed an update
-        #[arg(long = "reason", short = 'm')]
-        reason: Option<String>,
-    },
     /// Link a page (or one of its sections) to a conversation
     Link {
         /// Page ID
@@ -2198,30 +2192,6 @@ pub enum PageCommand {
         #[arg(long)]
         conversation: Option<String>,
     },
-    /// Say you are on a section, so other Agents see who is on what (it locks nothing); claiming again renews it
-    Claim {
-        /// Page ID
-        page: String,
-        /// Heading slug (the whole page when omitted)
-        #[arg(long)]
-        block: Option<String>,
-        /// How long the claim lasts before it lapses, in minutes (5-1440)
-        #[arg(long, default_value_t = 120)]
-        minutes: u32,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// Release a claim when the work is done
-    Release {
-        /// Page ID
-        page: String,
-        /// Claim ID (from `xmatrix page claim` or `xmatrix page claims`)
-        claim: String,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
     /// Resolve a discussion once its outcome is written into the page (or reopen it)
     Resolve {
         /// Page ID
@@ -2231,14 +2201,6 @@ pub enum PageCommand {
         /// Reopen the discussion instead
         #[arg(long)]
         reopen: bool,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// List the claims in force on a page
-    Claims {
-        /// Page ID
-        page: String,
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,
@@ -2297,7 +2259,7 @@ pub enum PageAutomationCommand {
         #[arg(long)]
         every: String,
         /// Also run on an event (repeatable): merged:owner/repo[@branch][:path,…],
-        /// ci-failed:owner/repo[@branch][:workflow], owed, or a connector event
+        /// ci-failed:owner/repo[@branch][:workflow], or a connector event
         /// <connector>:<event|*>[:<source>] (e.g. sentry:issue.created:web)
         #[arg(long = "on")]
         triggers: Vec<String>,

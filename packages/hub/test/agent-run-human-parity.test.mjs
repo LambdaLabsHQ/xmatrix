@@ -32,7 +32,6 @@ test("an Agent Run arranges pages as its owner may", () => {
   assert.equal(allowed("DELETE", "/api/spaces/space-1/pages/page-1"), true, "delete it");
   assert.equal(allowed("POST", "/api/spaces/space-1/pages/page-1/revisions/3/promote"), true, "restore a revision");
   assert.equal(allowed("PUT", "/api/spaces/space-1/pages/page-1/publication"), true, "publish it");
-  assert.equal(allowed("PUT", "/api/spaces/space-1/pages/page-1/competition"), true, "open a block for competition");
   assert.equal(allowed("POST", "/api/spaces/space-1/page-migration/apply"), true, "apply the move to pages");
 });
 

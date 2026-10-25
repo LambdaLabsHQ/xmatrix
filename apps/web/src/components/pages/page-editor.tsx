@@ -288,7 +288,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   discussions?: Discussion[];
   /** The page's Automations, drawn as chips where the text references them. */
   automations?: Map<string, SerializedAutomation>;
-  /** What a heading offers: Discuss, Copy link, Claim, Attach. */
+  /** What a heading offers: its conversations, and on a phone a menu to write it with an Agent. */
   headingActions?: HeadingActions;
   /** The conversation whose passage is marked, because its card is being read. */
   focusedConversationId?: string | null;

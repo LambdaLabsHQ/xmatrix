@@ -725,7 +725,7 @@ export class PostgresAutomationRepository {
         // Only a page's Automation has triggers; the page routes resolve them.
         if (payload.triggers !== undefined && (!pageId || !Array.isArray(payload.triggers) ||
             payload.triggers.length > 8 || payload.triggers.some((trigger) =>
-              !["merged", "ci-failed", "owed", "event"].includes(String(json(trigger).kind))))) {
+              !["merged", "ci-failed", "event"].includes(String(json(trigger).kind))))) {
           throw new AutomationControlError("invalid_automation_request", 400, "triggers are invalid");
         }
         // Created detached, it starts running once the page references it.
@@ -1621,17 +1621,17 @@ export class PostgresAutomationRepository {
    * §6.2). The caller decides which of them the event really fires.
    */
   async triggeredBy(input: { requestId: string; trigger: Record<string, unknown>; spaceId?: string;
-    pageId?: string; appUse?: boolean }): Promise<Array<{ automationId: string; channelId: string; spaceId: string; pageId: string;
+    appUse?: boolean }): Promise<Array<{ automationId: string; channelId: string; spaceId: string; pageId: string;
       authorityRootUserId: string; triggers: unknown[] }>> {
     const requestId = text(input.requestId, "requestId", 200);
     return this.database.transaction({ requestId, operation: "automation.triggered-by" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "automation_triggered_by_v1", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "automation_triggered_by_v2", text: `SELECT
           a.automation_id,a.channel_id,a.page_id,a.owner_user_id,a.payload_json,c.space_id
         FROM data.automations a JOIN data.channels c ON c.channel_id=a.channel_id AND c.mode IN ('open','closed')
         WHERE a.page_id IS NOT NULL AND a.enabled=true AND (a.payload_json->'triggers') @> $1::jsonb
-          AND ($2::text IS NULL OR c.space_id=$2) AND ($3::text IS NULL OR a.page_id=$3)
+          AND ($2::text IS NULL OR c.space_id=$2)
         ORDER BY a.automation_id LIMIT 200`,
-      values: [JSON.stringify([input.trigger]), input.spaceId ?? null, input.pageId ?? null], maxRows: 200 });
+      values: [JSON.stringify([input.trigger]), input.spaceId ?? null], maxRows: 200 });
       // An event from the Space's connected apps concerns only Automations whose authority may use them now.
       const users = input.appUse ? await appUsers(tx, rows.map((row) => ({ spaceId: String(row.space_id),
         userId: authorityRoot(row) }))) : undefined;

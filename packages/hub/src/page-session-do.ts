@@ -294,14 +294,6 @@ export class RelayPageSession extends DurableObject<Env> {
         await this.ready();
         return Response.json({ present: this.session.loaded ? this.session.present() : [] });
       }
-      if (request.method === "POST" && url.pathname === "/internal/claims") {
-        const body = await request.json() as { claims: unknown[] };
-        const notice = encodeNotice({ type: "claims", claims: body.claims });
-        for (const socket of this.ctx.getWebSockets()) {
-          try { socket.send(notice); } catch { /* closed */ }
-        }
-        return Response.json({ ok: true });
-      }
       if (request.method === "POST" && url.pathname === "/internal/remove") {
         const body = await request.json() as { spaceId: string; pageId: string; principal: PageSessionPrincipal };
         this.bind(body.spaceId, body.pageId);

@@ -107,7 +107,6 @@ A message sent from the CLI is read with the same [syntax](syntax.md) as one typ
 | `xmatrix page rename` · `move` · `delete` | Arrange the tree |
 | `xmatrix page history <page-id>` | List revisions |
 | `xmatrix page linked` · `link` | Pages linked to a conversation |
-| `xmatrix page claim` · `claims` · `release` | Section claims |
 | `xmatrix page resolve <page-id> <link-id>` | Resolve a discussion |
 | `xmatrix page automation …` | Automations. See [Pages and Automations](pages.md#automations). |
 

@@ -120,9 +120,6 @@ pub(crate) fn render_trigger(trigger: &Value) -> String {
             .unwrap_or_default()
     };
     let kind = field("kind");
-    if kind == "owed" {
-        return "owed".into();
-    }
     if kind == "event" {
         let feature = match field("feature") {
             "" => "*",
@@ -161,16 +158,13 @@ pub(crate) fn render_trigger(trigger: &Value) -> String {
 }
 
 /// `--on` as the trigger the Hub takes: merged:owner/repo[@branch][:path,…],
-/// ci-failed:owner/repo[@branch][:workflow], owed, or a connector event
+/// ci-failed:owner/repo[@branch][:workflow], or a connector event
 /// <provider>:<feature|*>[:<source>]. The Hub validates the connector's names.
 pub fn parse_trigger(value: &str) -> error::Result<Value> {
     let value = value.trim();
-    if value == "owed" {
-        return Ok(json!({ "kind": "owed" }));
-    }
     let invalid = || {
         CliError::Launch(format!(
-            "--on takes merged:owner/repo[@branch][:path,…], ci-failed:owner/repo[@branch][:workflow], owed or <connector>:<event|*>[:<source>], not {value:?}"
+            "--on takes merged:owner/repo[@branch][:path,…], ci-failed:owner/repo[@branch][:workflow] or <connector>:<event|*>[:<source>], not {value:?}"
         ))
     };
     let (kind, rest) = value.split_once(':').ok_or_else(invalid)?;
@@ -539,7 +533,6 @@ mod tests {
     #[test]
     fn a_trigger_is_spelled_the_same_way_in_and_out() {
         for spelled in [
-            "owed",
             "merged:acme/widgets",
             "merged:acme/widgets@dev:packages/hub,docs",
             "ci-failed:acme/widgets:CI",

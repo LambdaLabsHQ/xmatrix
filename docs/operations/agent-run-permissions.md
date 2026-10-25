@@ -14,7 +14,6 @@ permission setting:
 | Start a conversation | `xmatrix channel create` | `POST /api/channels` | owner, attributed to the Agent |
 | Rename or change visibility | `channel rename` / `channel visibility` | `PATCH /api/channels/:channelId` | owner |
 | Read, edit and arrange pages | `xmatrix page tree` / `page read` / `page edit` / `page create` / `page move` / `page rename` / `page delete` | `/api/spaces/:spaceId/pages` | the Agent, within the owner's page access; on a page that takes Agent edits as suggestions, a person accepts them |
-| Claim the block it works on, and release it | `xmatrix page claim` / `page claims` / `page release` | `GET`/`POST /api/spaces/:spaceId/pages/:pageId/claims`, `DELETE .../claims/:claimId` | the Agent's Instance, counted against its owner; opening a block for competition takes the owner being a Space owner or admin |
 | Record a pull request's pre-review verdict | `xmatrix page pre-review --verdict pass\|changes -m` | `POST /api/channels/:channelId/pre-review` | the Agent reviewing in that pull request's review conversation, published with the Space's GitHub installation |
 | Draft and apply the Space's move to pages | `xmatrix page migration show` / `submit` / `apply` | `GET /api/spaces/:spaceId/page-migration`, `PUT .../page-migration/draft`, `POST .../page-migration/apply` | the Agent, only when its owner is a Space owner or admin |
 | Edit or recall its own message | `channel edit-message` / `channel delete-message` | `PATCH`/`DELETE /api/channels/:channelId/messages/:messageId` | the Agent |

@@ -91,8 +91,7 @@ async function addSleepingInstance(client, ids) {
 }
 
 async function cleanup(client, ids) {
-  for (const table of ["page_reads", "page_claims", "page_block_competitions", "page_co_writing", "page_links", "page_access",
-    "page_revisions", "pages"]) {
+  for (const table of ["page_reads", "page_co_writing", "page_links", "page_access", "page_revisions", "pages"]) {
     await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]).catch(() => {});
   }
   await client.query("DELETE FROM control.entity_space_routes WHERE entity_id=$1", [ids.run]).catch(() => {});
@@ -525,77 +524,6 @@ integration("public pages: an owner publishes a page every member reads, and any
   }
 });
 
-/** A Roadmap page with a Search section, and what every call on it shares. */
-async function searchRoadmap(pages, ids, owner) {
-  const r = () => crypto.randomUUID();
-  const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
-    title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" });
-  return { r, base: { spaceId: ids.space, pageId: page.pageId } };
-}
-
-integration("claims: they lock nothing, each told of the others, renewed by their holder", async () => {
-  const { client, ids, pages, owner, member, viewer, agent } = await pageTest("claims");
-  try {
-    const { r, base } = await searchRoadmap(pages, ids, owner);
-    const claim = (principal, extra = {}) => pages.claim({ requestId: r(), ...base, principal, blockId: "search", ...extra });
-    const list = () => pages.claims({ requestId: r(), ...base, principal: member });
-
-    const first = (await claim(agent, { minutes: 30 })).claim;
-    assert.deepEqual(first.holder, { kind: "agent", id: ids.instance, label: "claude:1" });
-    assert.equal(first.ownerUserId, ids.member, "an Agent's claim counts against its owner");
-    const beside = await claim(owner);
-    assert.deepEqual(beside.others.map((c) => c.claimId), [first.claimId], "a second claim is taken, told who is there");
-    await assert.rejects(claim(viewer), code("page_edit_forbidden"));
-    await assert.rejects(claim(agent, { minutes: 1 }), code("invalid_request"));
-    assert.equal((await claim(owner, { blockId: "" })).claim.blockId, "", "the whole page is its own block");
-
-    const renewed = (await claim(agent, { minutes: 60 })).claim;
-    assert.equal(renewed.claimId, first.claimId, "its holder renews the claim instead of taking another");
-    assert.ok(renewed.expiresAt > first.expiresAt);
-
-    await assert.rejects(pages.setCompetition({ requestId: r(), ...base, principal: member, blockId: "search", open: true }),
-      code("page_competition_admin_only"));
-    await pages.setCompetition({ requestId: r(), ...base, principal: owner, blockId: "search", open: true });
-    const rival = (await claim(owner)).claim;
-    assert.equal(rival.claimId, beside.claim.claimId, "its holder renews it");
-    assert.deepEqual((await list()).competitiveBlocks, ["search"]);
-    assert.deepEqual((await list()).claims.map((c) => c.claimId).sort(),
-      [first.claimId, rival.claimId, (await list()).claims.find((c) => c.blockId === "").claimId].sort());
-
-    assert.deepEqual(await pages.releaseClaim({ requestId: r(), ...base, principal: viewer, claimId: first.claimId }),
-      { released: false }, "only its holder, its owner or an admin releases a claim");
-    assert.deepEqual(await pages.releaseClaim({ requestId: r(), ...base, principal: member, claimId: first.claimId }),
-      { released: true, blockId: "search", owesUpdate: true }, "the owner of the Agent releases its claim");
-    await client.query("UPDATE data.page_claims SET expires_at=now() - interval '1 second' WHERE claim_id=$1",
-      [rival.claimId]);
-    assert.deepEqual((await list()).claims.map((c) => c.blockId), [""], "an expired claim is no longer in force");
-    await pages.setCompetition({ requestId: r(), ...base, principal: owner, blockId: "search", open: false });
-    assert.equal((await claim(agent)).claim.holder.id, ids.instance, "a lapsed claim frees the block");
-  } finally {
-    await cleanup(client, ids);
-    await client.end();
-  }
-});
-
-integration("claims: an ended Instance's claims in its conversation end with it, and leave the unwritten section owed", async () => {
-  const { client, ids, pages, owner, agent } = await pageTest("claims-end");
-  try {
-    const { r, base } = await searchRoadmap(pages, ids, owner);
-    await pages.claim({ requestId: r(), ...base, principal: agent, blockId: "search", conversationId: ids.open });
-    const end = () => pages.endInstanceClaims({ requestId: r(), conversationId: ids.open, instanceIds: [ids.instance] });
-    assert.deepEqual(await pages.endInstanceClaims({ requestId: r(), conversationId: ids.closed,
-      instanceIds: [ids.instance] }), { ended: 0 }, "only the claims it held in its own conversation");
-    assert.deepEqual(await end(), { ended: 1 });
-    assert.deepEqual(await end(), { ended: 0 }, "ending them again changes nothing");
-    assert.deepEqual((await pages.claims({ requestId: r(), ...base, principal: owner })).claims, []);
-    const owed = (await pages.blockUpdates({ requestId: r(), ...base, principal: owner })).owed.get("search");
-    assert.equal(owed?.reason, "lapsed", "the section it left unwritten owes an update");
-  } finally {
-    await cleanup(client, ids);
-    await client.end();
-  }
-});
-
 integration("pages: a page's name is the top-level heading its document opens with, read alike in SQL", async () => {
   const { client, ids, pages, owner } = await pageTest("page-name");
   try {
@@ -635,8 +563,8 @@ integration("pages: a page's name is the top-level heading its document opens wi
 });
 
 // A large history used to parse synchronously while holding the transaction,
-// expiring it before the small owed-claim read. Existing awareness checks use
-// small documents and cannot catch that production failure (XMATRIX-HUB-82).
+// expiring it before the read finished. Existing awareness checks use small
+// documents and cannot catch that production failure (XMATRIX-HUB-82).
 integration("page awareness finishes its database snapshot before comparing a large document", async () => {
   const { client, ids, pages, owner } = await pageTest("awareness-deadline");
   const database = createAuthorityDatabase({ connectionString, shardId: "shard-0",
@@ -654,7 +582,6 @@ integration("page awareness finishes its database snapshot before comparing a la
     assert.deepEqual(result.order, ["status", "inventory"]);
     assert.equal(result.updates.get("inventory").revision, 2);
     assert.equal(result.updates.get("status").revision, 1);
-    assert.deepEqual([...result.owed], []);
   } finally {
     await cleanup(client, ids);
     await client.end();
@@ -889,108 +816,6 @@ integration("an Agent message shows the page revisions its Instance committed th
   } finally {
     await cleanup(client, ids);
     await client.end();
-  }
-});
-
-integration("a released claim owes an update unless its conversation wrote the section while holding it", async () => {
-  const { client, ids, pages, owner, agent } = await pageTest("claims-owed");
-  try {
-    const r = () => crypto.randomUUID();
-    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
-      title: "Goals", body: "# Goals\n\n## Search\n\nNext.\n\n## Billing\n\nLater.\n" });
-    const base = { spaceId: ids.space, pageId: page.pageId };
-    const owed = async () => [...(await pages.blockUpdates({ requestId: r(), ...base, principal: owner })).owed.keys()];
-    const claim = async (blockId) => (await pages.claim({ requestId: r(), ...base, principal: agent, blockId,
-      conversationId: ids.open })).claim;
-
-    const written = await claim("search");
-    await pages.edit({ requestId: r(), ...base, principal: agent, baseRevision: 1, conversationIds: [ids.open],
-      body: "# Goals\n\n## Search\n\nShipped.\n\n## Billing\n\nLater.\n" });
-    await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: written.claimId });
-    assert.deepEqual(await owed(), [], "written back, then released: nothing is owed");
-
-    const silent = await claim("billing");
-    await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: silent.claimId });
-    assert.deepEqual(await owed(), ["billing"], "released without a write-back: the section owes an update");
-
-    const elsewhere = await claim("billing");
-    await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: 2,
-      body: "# Goals\n\n## Search\n\nShipped.\n\n## Billing\n\nPriced.\n" });
-    assert.equal((await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: elsewhere.claimId }))
-      .owesUpdate, true, "another conversation's edit does not write back a claim it does not hold");
-    await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: 3,
-      body: "# Goals\n\n## Search\n\nShipped.\n\n## Billing\n\nPriced monthly.\n" });
-    assert.deepEqual(await owed(), [], "an edit after the release writes the section back");
-
-    // The write-back is recorded on the claim, so it holds after the section's
-    // last change is older than the revisions blockUpdates reads.
-    let head = 4;
-    for (let index = 0; index < 35; index++) {
-      await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: head++,
-        body: `# Goals\n\n## Search\n\nShipped ${index}.\n\n## Billing\n\nPriced monthly.\n` });
-    }
-    assert.deepEqual(await owed(), [], "a section written back long ago still owes nothing");
-
-    // Removed while another conversation held it, so the removal settles nothing.
-    const dropped = await claim("billing");
-    await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: head,
-      body: "# Goals\n\n## Search\n\nShipped.\n" });
-    assert.equal((await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: dropped.claimId }))
-      .owesUpdate, true, "the claim was never written back");
-    assert.deepEqual(await owed(), [], "a section taken off the page owes nothing");
-  } finally {
-    await cleanup(client, ids);
-    await client.end();
-  }
-});
-
-integration("an Automation occurrence's claim passes to the Run in its conversation, and lapses into an owed update without one", async () => {
-  const t = await pageTest("claims-occurrence");
-  const { ids, pages } = t;
-  try {
-    const at = { spaceId: ids.space, pageId: (await pages.create({ requestId: crypto.randomUUID(), spaceId: ids.space,
-      principal: t.owner, title: "Goals", body: "# Goals\n\n## Search\n\nNext.\n\n## Billing\n\nLater.\n" })).page.pageId };
-    const call = (extra) => ({ requestId: crypto.randomUUID(), ...at, ...extra });
-    const owed = async () => (await pages.blockUpdates(call({ principal: t.owner }))).owed;
-    const opened = (blockId) => pages.claim(call({ principal: t.owner, blockId, conversationId: ids.open,
-      holderLabel: "Daily audit" }));
-
-    const held = (await opened("search")).claim;
-    assert.deepEqual(held.holder, { kind: "user", id: ids.owner, label: "Daily audit" });
-    const elsewhere = await pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.closed }));
-    assert.deepEqual(elsewhere.others.map((c) => c.holder.label), ["Daily audit"],
-      "a Run elsewhere is not refused, and is told the occurrence is there");
-    await pages.releaseClaim(call({ principal: t.agent, claimId: elsewhere.claim.claimId }));
-    const taken = (await pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.open }))).claim;
-    assert.equal(taken.claimId, held.claimId, "the Run in its conversation takes the same claim over");
-    assert.deepEqual(taken.holder, { kind: "agent", id: ids.instance, label: "claude:1" });
-    assert.equal(taken.ownerUserId, ids.member);
-    assert.deepEqual((await pages.claims(call({ principal: t.owner }))).claims.map((c) => c.holder.label), ["claude:1"]);
-    await pages.edit(call({ principal: t.agent, baseRevision: 1, conversationIds: [ids.open],
-      body: "# Goals\n\n## Search\n\nShipped.\n\n## Billing\n\nLater.\n" }));
-    await pages.releaseClaim(call({ principal: t.agent, claimId: taken.claimId }));
-    assert.deepEqual([...(await owed()).keys()], [], "the Run wrote its section: nothing is owed");
-
-    // No Run ever comes: the occurrence's claim runs out and its section owes an update.
-    const abandoned = (await opened("billing")).claim;
-    assert.deepEqual([...(await owed()).keys()], [], "nothing is owed while the occurrence holds it");
-    await t.client.query("UPDATE data.page_claims SET expires_at=now() - interval '1 minute' WHERE claim_id=$1",
-      [abandoned.claimId]);
-    // The next occurrence, in another conversation, inherits a claim no Run took; a person's own claim it leaves alone.
-    const first = (await opened("search")).claim;
-    const next = (await pages.claim(call({ principal: t.owner, blockId: "search", conversationId: ids.closed,
-      holderLabel: "Daily audit" }))).claim;
-    assert.deepEqual([next.claimId, next.conversationId], [first.claimId, ids.closed]);
-    await pages.claim(call({ principal: t.owner, blockId: "" }));
-    await assert.rejects(pages.claim(call({ principal: t.owner, blockId: "", conversationId: ids.open,
-      holderLabel: "Daily audit" })), (error) => error.code === "page_block_claimed");
-    const lapsed = (await owed()).get("billing");
-    assert.equal(lapsed?.reason, "lapsed");
-    assert.equal(lapsed?.holder, "Daily audit");
-    assert.equal(lapsed?.conversationId, ids.open, "it names the occurrence's conversation");
-  } finally {
-    await cleanup(t.client, ids);
-    await t.client.end();
   }
 });
 
