@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { pageBlocks } from "../dist/index.js";
-import { Fragment, Slice } from "prosemirror-model";
-import { canonicalPageMarkdown, markdownToPageDoc, pageDocToMarkdown, pageSchema, pageWritingPlan } from "../dist/page-document.js";
+import { canonicalPageMarkdown, markdownToPageDoc, pageDocToMarkdown } from "../dist/page-document.js";
 
 const CANONICAL = `# Relay
 
@@ -156,111 +155,4 @@ test("changed document blocks parse only the sections whose text differs", async
   assert.deepEqual(pageChangedDocBlocks(before, after.replace("## Part 7\n", "## Part 7\nmore\n"), canonical,
     new Set(["part-7"])), ["part-7"]);
   assert.equal(parsed.length, 2);
-});
-
-/**
- * Types a writing plan's runs into its start document, in order, as the session does: `upTo` words, and
- * never stopping right after a space while its run goes on, so no line is left ending in one.
- */
-function typed(plan, upTo = Infinity) {
-  let doc = plan.start;
-  let shift = 0;
-  let count = 0;
-  for (const run of plan.runs) {
-    for (const [index, word] of run.words.entries()) {
-      const previous = run.words[index - 1];
-      if (count >= upTo && !(previous && !previous.text.trim())) return doc;
-      count++;
-      doc = doc.replace(run.pos + shift, run.pos + shift, new Slice(Fragment.from(pageSchema.text(word.text, word.marks)), 0, 0));
-      shift += word.text.length;
-    }
-  }
-  return doc;
-}
-
-test("a writing plan starts from the change with its new words left out and types them in reading order", () => {
-  const before = "# Launch\n\n- Web · Claude · in progress\n- Mobile · Codex · in progress\n";
-  const after = "# Launch\n\n- Web · Claude · merged, live in v1.0.464\n- Mobile · Codex · in review, PR #566\n";
-  const plan = pageWritingPlan(markdownToPageDoc(before), markdownToPageDoc(after));
-  assert.doesNotMatch(pageDocToMarkdown(plan.start), /progress/u, "what it replaces goes at once");
-  assert.match(pageDocToMarkdown(plan.start), /^# Launch\n\n- Web · Claude ·[^\n]*\n- Mobile · Codex ·[^\n]*\n$/u);
-  assert.equal(plan.runs[0].words.find((word) => word.text.trim()).text, "merged", "it types from the first change on");
-  assert.doesNotMatch(pageDocToMarkdown(plan.start), / \n| {2}/u, "no line ends in a space, nor holds two, before the words come");
-  const partly = pageDocToMarkdown(typed(plan, 3));
-  assert.match(partly, /Claude · merged,/u);
-  assert.doesNotMatch(partly, /review/u, "the first change is typed first");
-  assert.equal(pageDocToMarkdown(typed(plan)), after);
-  const same = pageWritingPlan(markdownToPageDoc(after), markdownToPageDoc(after));
-  assert.deepEqual(same.runs, []);
-  const removal = pageWritingPlan(markdownToPageDoc(after), markdownToPageDoc("# Launch\n"));
-  assert.equal(pageDocToMarkdown(removal.start), "# Launch\n");
-  assert.deepEqual(removal.runs, [], "a pure removal types nothing");
-});
-
-// Markdown syntax must never be typed character by character: a half-written fence or table swallows the
-// blocks after it. The plan types words into a structure that is already whole.
-test("a writing plan keeps every structure whole and types only words, with their marks", () => {
-  for (const body of [CANONICAL,
-    "# T\n\n| Name | Status |\n| --- | --- |\n| Web | shipped today |\n\nAfter the table.\n",
-    "# T\n\n```ts\nconst shipped = true;\nconst more = 2;\n```\n\nAfter the code.\n",
-    "# T\n\nShipped **behind one switch** with [the launch docs](https://xmatrix.sh/docs) and `page edit` *today*.\n",
-    "# T\n\n## Plan\n\nA new paragraph of words.\n\n- one\n- two with more\n  - nested item\n\n> quoted words\n",
-    "# T\n\n会议马上开始，请大家准备好材料。\n\n- 第一项：Web 已上线\n"]) {
-    const plan = pageWritingPlan(markdownToPageDoc("# T\n"), markdownToPageDoc(body));
-    assert.equal(pageDocToMarkdown(typed(plan)), canonicalPageMarkdown(body), body);
-    const total = plan.runs.reduce((n, run) => n + run.words.length, 0);
-    assert.ok(total > 0, body);
-    for (let upTo = 0; upTo <= total; upTo++) {
-      // Every moment of the writing is a well-formed document that reads back from Markdown as itself: a
-      // block is never half there or empty, only its words are. Another Agent's edit merges through it.
-      const doc = typed(plan, upTo);
-      doc.check();
-      assert.equal(doc.childCount, plan.start.childCount, `${body} @${upTo}: the structure stands from the start`);
-      assert.ok(markdownToPageDoc(pageDocToMarkdown(doc)).eq(doc), `${body} @${upTo}: ${JSON.stringify(pageDocToMarkdown(doc))}`);
-    }
-  }
-  const marked = pageWritingPlan(markdownToPageDoc("# T\n"), markdownToPageDoc("# T\n\nShip **behind one switch** now\n"));
-  const strong = marked.runs.flatMap((run) => run.words).filter((word) => word.marks.some((mark) => mark.type.name === "strong"));
-  assert.equal(strong.map((word) => word.text).join(""), "behind one switch", "words carry their marks");
-});
-
-// Hand-picked documents cannot cover how two arbitrary versions align: many random edits of a rich page,
-// each typed in from the other version, must end on it and read back as themselves all the way.
-test("random edits of a rich page are typed in exactly, reading back as themselves at every moment", () => {
-  let seed = 20261016;
-  const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
-  const pick = (list) => list[Math.floor(random() * list.length)];
-  const insertions = ["shipped", "**now**", "with [docs](https://xmatrix.sh/d)", "`code`", "会议", "and more words here",
-    "\n\n- new item\n- another item", "\n\n## New section\n\nWith a paragraph.", "\n\n| x | y |\n| --- | --- |\n| 1 | 2 |",
-    "\n\n```js\nlet a = 1;\n```", "*soon*", "PR #566"];
-  const edit = (text) => {
-    const lines = text.split("\n");
-    for (let n = 0; n < 1 + Math.floor(random() * 4); n++) {
-      const at = Math.floor(random() * lines.length);
-      const line = lines[at];
-      const words = line.split(" ");
-      const r = random();
-      if (r < 0.35 && words.length > 1) words.splice(Math.floor(random() * words.length), 1);
-      else if (r < 0.75) words.splice(Math.floor(random() * (words.length + 1)), 0, pick(insertions));
-      else lines.splice(at + 1, 0, pick(insertions));
-      if (r < 0.75) lines[at] = words.join(" ");
-    }
-    return canonicalPageMarkdown(lines.join("\n"));
-  };
-  let checked = 0;
-  for (let round = 0; round < 120; round++) {
-    const before = round % 3 === 0 ? CANONICAL : edit(CANONICAL);
-    const after = edit(before);
-    const target = markdownToPageDoc(after);
-    const plan = pageWritingPlan(markdownToPageDoc(before), target);
-    const total = plan.runs.reduce((n, run) => n + run.words.length, 0);
-    for (let upTo = 0; upTo <= total; upTo += 1 + Math.floor(random() * 3)) {
-      const doc = typed(plan, upTo);
-      doc.check();
-      assert.ok(markdownToPageDoc(pageDocToMarkdown(doc)).eq(doc), `round ${round} @${upTo}: ${JSON.stringify(pageDocToMarkdown(doc))}`);
-      checked++;
-    }
-    assert.ok(typed(plan).eq(target), `round ${round}: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
-  }
-  assert.ok(checked > 300);
 });
