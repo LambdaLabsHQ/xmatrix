@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: Official runtime texts can change with the Hub
+
+The Hub can now send the runtime further official texts by name, beside the
+launch prompts it already sends. The words a resumed session starts with are
+the first: they are now edited in the repository and reach the next Run with a
+Hub deploy. Moving another fixed runtime text this way needs no protocol
+change. This needs the new CLI once; older CLIs keep their built-in copies.
+
 ## Unreleased: Live updates reach each person in their own Runtime cell
 
 Every product socket has lived in its owner's own Runtime cell since 1.0.0, but
