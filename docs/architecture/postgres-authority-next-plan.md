@@ -219,9 +219,9 @@ Status: complete for the Next integration cutover. All configured fact selectors
 use PostgreSQL, operation closure is complete, and the first measured physical
 retirement and compaction pass has completed. Runtime, Machine, Automation occurrence,
 timeout, and Automation management paths are included. Control intents, Space
-action claims, and management-action reads now share a transactional
-PostgreSQL scheduler repository with bounded authorization, CAS, replay,
-outbox, and canonical-intent backfill. Trace request, decision, listing,
+action claims, and management-action reads moved to a transactional
+PostgreSQL scheduler repository; all three have since been retired, the action
+claims last (#996, #998). Trace request, decision, listing,
 single-event authorization, batch authorization, expiry, and Run-lifecycle
 invalidation now share one PostgreSQL authority. User Secret catalog metadata,
 encrypted values, machine requests, one-shot grants, grant audit, dangerous-action
