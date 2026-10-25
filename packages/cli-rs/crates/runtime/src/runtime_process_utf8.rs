@@ -875,7 +875,7 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         }
         Some(Commands::Secret { command }) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
-            cmd_secret(&hub_url, &token, command).await
+            cmd_secret(&hub_url, &token, cli.token.as_deref(), command).await
         }
         Some(Commands::Goal { command }) => cmd_goal(command),
         Some(Commands::Connector {

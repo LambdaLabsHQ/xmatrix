@@ -10,6 +10,7 @@ use crate::process_tree;
 include!("../../../core/tests/support/process_env.rs");
 
 include!("tests_daemon_session.rs");
+include!("tests_secret_request_wait.rs");
 include!("tests_daemon_request.rs");
 include!("tests_run_loop_resume.rs");
 include!("tests_channel_history_cache.rs");
