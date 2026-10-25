@@ -65,7 +65,7 @@ pub(crate) struct PageDocument {
 }
 
 /// What a reader of each section should know besides its text: when and
-/// where it last changed, who has claimed it, who is on it now.
+/// where it last changed, and who is on it now.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PageAwareness {
@@ -80,13 +80,9 @@ pub(crate) struct PageBlockAwareness {
     #[serde(default)]
     pub updated: Option<PageRevision>,
     #[serde(default)]
-    pub claims: Vec<PageClaim>,
-    #[serde(default)]
     pub present: Vec<PagePresent>,
     #[serde(default)]
     pub discussions: Vec<PageDiscussion>,
-    #[serde(default)]
-    pub owed: Option<PageOwedUpdate>,
     #[serde(default)]
     pub working: Vec<PageWorkingAgent>,
 }
@@ -99,19 +95,6 @@ pub(crate) struct PageWorkingAgent {
     pub name: String,
     pub status: String,
     pub conversation_id: String,
-}
-
-/// Claimed work on a section ended after its last change and was not written back.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct PageOwedUpdate {
-    pub reason: String,
-    pub at: String,
-    pub holder: String,
-    #[serde(default)]
-    pub conversation_id: Option<String>,
-    #[serde(default)]
-    pub pull_request_url: Option<String>,
 }
 
 /// An open discussion anchored in a section's text.
@@ -204,51 +187,10 @@ fn render_edit_effects(page: &str, base: u64, edited: &EditResponse) -> String {
     out
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct PageClaim {
-    pub claim_id: String,
-    pub block_id: String,
-    pub holder: PageAuthor,
-    pub expires_at: String,
-    #[serde(default)]
-    pub conversation_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ClaimResponse {
-    claim: PageClaim,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ClaimsResponse {
-    claims: Vec<PageClaim>,
-    competitive_blocks: Vec<String>,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PreReviewResponse {
     head_sha: String,
-}
-
-#[derive(Deserialize)]
-struct ReleaseResponse {
-    released: bool,
-}
-
-/// One line per claim: where, who, until when, and its id to release it.
-pub(crate) fn render_page_claim(claim: &PageClaim) -> String {
-    let block = if claim.block_id.is_empty() {
-        "(whole page)".to_string()
-    } else {
-        format!("#{}", claim.block_id)
-    };
-    format!(
-        "{block} {} until {} · {}",
-        claim.holder.label, claim.expires_at, claim.claim_id
-    )
 }
 
 #[derive(Deserialize)]
@@ -264,26 +206,6 @@ struct SpaceResponse {
 
 pub(crate) fn enc(value: &str) -> String {
     urlencoding::encode(value).into_owned()
-}
-
-/// Where this Run records that it has written back to its pages (or found
-/// nothing to write back), beside its status file.
-fn writeback_marker() -> Option<PathBuf> {
-    std::env::var_os("XMATRIX_RUN_STATUS_FILE").map(writeback_marker_for)
-}
-
-/// Each Run has its own status file; the marker extends that name, so one
-/// Run's write-back never speaks for another's.
-fn writeback_marker_for(status: std::ffi::OsString) -> PathBuf {
-    let mut marker = status;
-    marker.push(".page-writeback");
-    PathBuf::from(marker)
-}
-
-fn record_writeback(note: &str) {
-    if let Some(path) = writeback_marker() {
-        let _ = std::fs::write(path, note);
-    }
 }
 
 /// The conversation this Run works in, if it is a Run.
@@ -468,13 +390,8 @@ pub(crate) fn render_page_changes(changes: &PageChanges) -> String {
     out
 }
 
-/// The `blocks:` front matter: per section, its last change, claims and who is on it.
-/// A claim held for `own_conversation` is marked as the reader's, so a Run whose
-/// Automation claimed the section on its behalf does not mistake it for another Run's.
-pub(crate) fn render_page_awareness(
-    awareness: &PageAwareness,
-    own_conversation: Option<&str>,
-) -> String {
+/// The `blocks:` front matter: per section, its last change and who is on it.
+pub(crate) fn render_page_awareness(awareness: &PageAwareness) -> String {
     let mut out = String::new();
     for block in &awareness.blocks {
         let mut lines = Vec::new();
@@ -491,19 +408,6 @@ pub(crate) fn render_page_awareness(
             );
             if let Some(conversation) = updated.conversation_ids.first() {
                 line.push_str(&format!(" in conversation {conversation}"));
-            }
-            lines.push(line);
-        }
-        for claim in &block.claims {
-            let mut line = format!(
-                "claimed: {} until {} (claim {})",
-                claim.holder.label, claim.expires_at, claim.claim_id
-            );
-            if let Some(conversation) = &claim.conversation_id {
-                line.push_str(&format!(" in conversation {conversation}"));
-                if own_conversation == Some(conversation.as_str()) {
-                    line.push_str(" (this Run's conversation: the claim is yours)");
-                }
             }
             lines.push(line);
         }
@@ -531,19 +435,6 @@ pub(crate) fn render_page_awareness(
                 "{state}: {} (Agent) in conversation {}",
                 agent.name, agent.conversation_id
             ));
-        }
-        if let Some(owed) = &block.owed {
-            let what = match (owed.reason.as_str(), &owed.pull_request_url) {
-                ("merged", Some(url)) => format!("{url} merged"),
-                ("released", _) => "claim released".to_string(),
-                ("lapsed", _) => "claim lapsed".to_string(),
-                _ => "claimed work ended".to_string(),
-            };
-            let mut line = format!("owed: an update — {what} at {} ({})", owed.at, owed.holder);
-            if let Some(conversation) = &owed.conversation_id {
-                line.push_str(&format!(" in conversation {conversation}"));
-            }
-            lines.push(line);
         }
         for discussion in &block.discussions {
             let quote: String = discussion.quote.chars().take(80).collect();
@@ -603,10 +494,7 @@ pub(crate) fn render_page_document_with(
         header.push_str("agentEdits: suggestions for a human to accept\n");
     }
     if let Some(awareness) = awareness {
-        header.push_str(&render_page_awareness(
-            awareness,
-            run_conversation().as_deref(),
-        ));
+        header.push_str(&render_page_awareness(awareness));
     }
     header.push_str("---\n");
     format!("{header}{}", page.body)
@@ -865,7 +753,6 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             .await;
             match result {
                 Ok(edited) => {
-                    record_writeback(&format!("edited {page} r{}", edited.revision));
                     let verb = if edited.kind == "suggestion" {
                         "Suggested"
                     } else {
@@ -1031,20 +918,6 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             }
             Ok(())
         }
-        PageCommand::Done { reason } => {
-            record_writeback(&format!("no change: {}", reason.as_deref().unwrap_or("")));
-            // Sections this conversation's ended claims left owing an update no longer owe one.
-            if let Some(conversation) = run_conversation() {
-                let url = with_route(
-                    hub_url,
-                    &format!("/api/channels/{}/page-writeback", enc(&conversation)),
-                );
-                let _: serde_json::Value =
-                    http::request_json(&url, "POST", Some(token), Some(json!({}))).await?;
-            }
-            println!("{} Noted: no page needed an update", "✓".green().bold());
-            Ok(())
-        }
         PageCommand::Link {
             page,
             block,
@@ -1075,28 +948,6 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             );
             Ok(())
         }
-        PageCommand::Claim {
-            page,
-            block,
-            minutes,
-            space,
-        } => {
-            let space = resolve_space(hub_url, token, space).await?;
-            let url = with_route(hub_url, &format!("{}/claims", page_route(&space, &page)));
-            let response: ClaimResponse = http::request_json(
-                &url,
-                "POST",
-                Some(token),
-                Some(json!({ "blockId": block.unwrap_or_default(), "minutes": minutes })),
-            )
-            .await?;
-            println!(
-                "{} Claimed {}",
-                "✓".green().bold(),
-                render_page_claim(&response.claim)
-            );
-            Ok(())
-        }
         PageCommand::Summary {
             page,
             base,
@@ -1122,26 +973,6 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                 response["summary"]["text"].as_str().unwrap_or_default()
             );
             Ok(())
-        }
-        PageCommand::Release { page, claim, space } => {
-            let space = resolve_space(hub_url, token, space).await?;
-            let url = with_route(
-                hub_url,
-                &format!("{}/claims/{}", page_route(&space, &page), enc(&claim)),
-            );
-            let response: ReleaseResponse =
-                http::request_json(&url, "DELETE", Some(token), None).await?;
-            if response.released {
-                println!("{} Released {claim}", "✓".green().bold());
-                println!(
-                    "If the work changed what the section says, update it with `xmatrix page edit`; otherwise run `xmatrix page done`."
-                );
-                Ok(())
-            } else {
-                Err(CliError::Http(format!(
-                    "{claim} is not a claim you can release"
-                )))
-            }
         }
         PageCommand::Resolve {
             page: _,
@@ -1170,22 +1001,6 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                 "✓".green().bold(),
                 if reopen { "Reopened" } else { "Resolved" }
             );
-            Ok(())
-        }
-        PageCommand::Claims { page, space } => {
-            let space = resolve_space(hub_url, token, space).await?;
-            let url = with_route(hub_url, &format!("{}/claims", page_route(&space, &page)));
-            let response: ClaimsResponse =
-                http::request_json(&url, "GET", Some(token), None).await?;
-            if response.claims.is_empty() {
-                println!("(no claims)");
-            }
-            for claim in &response.claims {
-                println!("{}", render_page_claim(claim));
-            }
-            for block in &response.competitive_blocks {
-                println!("#{block} is open for competition");
-            }
             Ok(())
         }
         PageCommand::PreReview { verdict, summary } => {
@@ -1483,76 +1298,24 @@ mod page_tests {
     }
 
     #[test]
-    fn each_run_has_its_own_writeback_marker() {
-        let a = writeback_marker_for("/runs/a.status.json".into());
-        let b = writeback_marker_for("/runs/b.status.json".into());
-        assert_ne!(a, b);
-        assert_eq!(a, PathBuf::from("/runs/a.status.json.page-writeback"));
-    }
-
-    #[test]
-    fn a_claim_renders_where_who_until_and_its_id() {
-        let claim = |block: &str| PageClaim {
-            claim_id: "c1".into(),
-            block_id: block.into(),
-            holder: PageAuthor {
-                kind: "agent".into(),
-                label: "claude:1".into(),
-            },
-            expires_at: "2026-09-27T10:00:00Z".into(),
-            conversation_id: None,
-        };
-        assert_eq!(
-            render_page_claim(&claim("search")),
-            "#search claude:1 until 2026-09-27T10:00:00Z · c1"
-        );
-        assert!(render_page_claim(&claim("")).starts_with("(whole page) "));
-    }
-
-    #[test]
     fn a_page_read_says_who_is_on_each_section_and_when_it_last_changed() {
         let awareness: PageAwareness = serde_json::from_value(json!({
             "pageId": "p", "headRevision": 12,
             "blocks": [
                 { "blockId": "status", "updated": { "revision": 12, "authors": [{ "kind": "agent", "id": "a", "label": "claude:1" }],
                     "conversationIds": ["conv-1"], "createdAt": "2026-09-27T13:00:00.000Z" },
-                  "claims": [{ "claimId": "c1", "blockId": "status", "holder": { "kind": "agent", "id": "b", "label": "codex:2" },
-                    "expiresAt": "2026-09-27T16:00:00.000Z", "conversationId": "conv-2" }],
                   "present": [{ "name": "claude:3", "kind": "agent", "activity": "editing", "blockId": "status", "conversationId": "conv-3" },
                     { "name": "Yiming", "kind": "user", "activity": "viewing", "blockId": "status", "conversationId": null }],
-                  "discussions": [{ "linkId": "l1", "conversationId": "conv-4", "quote": "Shipped \"today\"" }],
-                  "owed": { "reason": "merged", "at": "2026-09-27T15:00:00.000Z", "holder": "codex:2", "conversationId": "conv-2",
-                    "pullRequestUrl": "https://github.com/o/r/pull/7" } },
-                { "blockId": "notes", "updated": null, "claims": [], "present": [] }
+                  "discussions": [{ "linkId": "l1", "conversationId": "conv-4", "quote": "Shipped \"today\"" }] },
+                { "blockId": "notes", "updated": null, "present": [] }
             ]
         }))
         .unwrap();
         assert_eq!(
-            render_page_awareness(&awareness, None),
-            "blocks:\n  status:\n    updated: r12 2026-09-27T13:00:00.000Z by claude:1 in conversation conv-1\n    claimed: codex:2 until 2026-09-27T16:00:00.000Z (claim c1) in conversation conv-2\n    editing: claude:3 (Agent) in conversation conv-3\n    viewing: Yiming\n    owed: an update — https://github.com/o/r/pull/7 merged at 2026-09-27T15:00:00.000Z (codex:2) in conversation conv-2\n    discussion: \"Shipped 'today'\" in conversation conv-4 (link l1; `xmatrix page resolve` once its outcome is in the page)\n"
+            render_page_awareness(&awareness),
+            "blocks:\n  status:\n    updated: r12 2026-09-27T13:00:00.000Z by claude:1 in conversation conv-1\n    editing: claude:3 (Agent) in conversation conv-3\n    viewing: Yiming\n    discussion: \"Shipped 'today'\" in conversation conv-4 (link l1; `xmatrix page resolve` once its outcome is in the page)\n"
         );
-        assert_eq!(
-            render_page_awareness(&PageAwareness { blocks: vec![] }, None),
-            ""
-        );
-    }
-
-    #[test]
-    fn a_page_read_marks_a_claim_held_for_the_readers_own_conversation() {
-        let awareness: PageAwareness = serde_json::from_value(json!({
-            "pageId": "p", "headRevision": 4,
-            "blocks": [
-                { "blockId": "status", "updated": null, "present": [],
-                  "claims": [{ "claimId": "c1", "blockId": "status", "holder": { "kind": "agent", "id": "auto", "label": "status" },
-                    "expiresAt": "2026-09-27T16:00:00.000Z", "conversationId": "conv-run" }] }
-            ]
-        }))
-        .unwrap();
-        assert_eq!(
-            render_page_awareness(&awareness, Some("conv-run")),
-            "blocks:\n  status:\n    claimed: status until 2026-09-27T16:00:00.000Z (claim c1) in conversation conv-run (this Run's conversation: the claim is yours)\n"
-        );
-        assert!(!render_page_awareness(&awareness, Some("conv-other")).contains("yours"));
+        assert_eq!(render_page_awareness(&PageAwareness { blocks: vec![] }), "");
     }
 
     #[test]
@@ -1560,15 +1323,15 @@ mod page_tests {
         let awareness: PageAwareness = serde_json::from_value(json!({
             "pageId": "p", "headRevision": 3,
             "blocks": [
-                { "blockId": "", "updated": null, "claims": [], "present": [],
+                { "blockId": "", "updated": null, "present": [],
                   "working": [{ "name": "codex:1", "status": "idle", "conversationId": "conv-9" }] },
-                { "blockId": "release", "updated": null, "claims": [], "present": [],
+                { "blockId": "release", "updated": null, "present": [],
                   "working": [{ "name": "claude:2", "status": "busy", "conversationId": "conv-5" }] }
             ]
         }))
         .unwrap();
         assert_eq!(
-            render_page_awareness(&awareness, None),
+            render_page_awareness(&awareness),
             "blocks:\n  (top):\n    idle: codex:1 (Agent) in conversation conv-9\n  release:\n    working: claude:2 (Agent) in conversation conv-5\n"
         );
     }

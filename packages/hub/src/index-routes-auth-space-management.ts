@@ -5,7 +5,6 @@ import type { Env } from "./types";
 import { deploymentPinnedSpace, finishScheduledSpaceDeletion } from "./space-deletion-effects";
 import { checkAppConnection } from "./app-connection-check";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, connectionUseRefused, findAppConnection, listAppConnections, listAppExecutions, recordGitHubInstallationLinks, upsertAppConnection } from "./apps";
-import { schedulerRepository } from "./automations";
 import { changeMembership, createSpaceInvite, deleteSpace, getChannel, listSpaceDeletions, restoreSpace } from "./spaces";
 import { SpaceControlError } from "@xmatrix/db";
 import { buildGitHubAppInstallUrl, describeGitHubInstallation, githubConnectionInstallationIds, resolveAppConnectorCompletionOptions, type AppConnectorConnectionView } from "./app-connectors";
@@ -87,28 +86,6 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     const result = await startChannelAbout(c.env, { channelId, spaceId });
     if (!result.started) return c.json({ error: ABOUT_NOT_STARTED[result.reason], code: "channel_about_not_started" }, 409);
     return c.json({ accepted: true });
-  }));
-  app.post("/api/spaces/:spaceId/claims", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const spaceId = c.req.param("spaceId");
-    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-    const result = await schedulerRepository(c.env).acquireClaim({
-      commandId: productCommandId(c.req.raw, "acquire-space-action-claim"),
-      spaceId, actorUserId: authUser.id, ...body,
-    });
-    return c.json(result, result.reused ? 200 : 201);
-  }));
-  // DELETE releases a claim and PATCH renews it; both name the claim the same way.
-  app.on(["DELETE", "PATCH"], "/api/spaces/:spaceId/claims/:claimId", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const renew = c.req.method === "PATCH";
-    const spaceId = c.req.param("spaceId");
-    const claimId = c.req.param("claimId");
-    const body = renew ? await c.req.json().catch(() => ({})) as Record<string, unknown> : {};
-    return c.json(await schedulerRepository(c.env).mutateClaim({
-      commandId: productCommandId(c.req.raw, renew ? "renew-space-action-claim" : "release-space-action-claim"),
-      spaceId, claimId, actorUserId: authUser.id, ...body,
-    }, renew ? "renew" : "release"));
   }));
   app.delete("/api/spaces/:spaceId", (c) => jsonErrors(c, async () => {
     const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
@@ -311,7 +288,7 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       return c.json({ error: "Invalid GitHub webhook payload" }, 400);
     }
     if (event === "pull_request") {
-      // What a pull request naming page blocks starts (pre-review, owed updates); a
+      // What a pull request naming page blocks starts (pre-review, contributor promotion); a
       // failure here must not lose the delivery to subscribed conversations.
       await onPullRequestNamingBlocks(c.env, payload as Record<string, unknown>)
         .catch((error: unknown) => console.error("pull request block handling failed", error));

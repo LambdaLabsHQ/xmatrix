@@ -1,4 +1,4 @@
-import { ControlError, PostgresAutomationRepository, PostgresSchedulerControlRepository } from "@xmatrix/db";
+import { ControlError, PostgresAutomationRepository } from "@xmatrix/db";
 
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { createPostgresAuthorityFleet, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
@@ -13,11 +13,6 @@ function automationDatabase(env: PostgresAuthorityFleetEnv) {
 /** Automations live with their Channel on its Space shard, located by id. */
 export function automationRepository(env: PostgresAuthorityFleetEnv): PostgresAutomationRepository {
   return new PostgresAutomationRepository(automationDatabase(env));
-}
-
-/** Intents and the Space's action claims, on the same shards. */
-export function schedulerRepository(env: PostgresAuthorityFleetEnv): PostgresSchedulerControlRepository {
-  return new PostgresSchedulerControlRepository(automationDatabase(env));
 }
 
 /** One Automation as its reader may see it, with what they may do to it. */

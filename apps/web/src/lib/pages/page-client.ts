@@ -1,14 +1,14 @@
 import {
   DEFAULT_HUB_URL, HUB_ROUTES, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
   spaceVisibilityScope,
-  type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageClaim, type PageConversation, type PageDocument,
+  type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
 
 export type {
-  PageAwareness, PageBlame, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
+  PageAwareness, PageBlame, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
   PageRevisionMoment, PageSummary, PageTreeActivity, PageTreeAgent,
 };
 import * as decoding from "lib0/decoding";
@@ -86,8 +86,8 @@ export const pageApi = {
     xmatrixApiRequest<PageGitHubFile>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/github-file?href=${encodeURIComponent(href)}`, token, signal }),
   /**
-   * When and where each section last changed and what it owes. The page reads its claims, discussions and who
-   * is on it on their own, live, so this asks the Hub for the sections alone.
+   * When and where each section last changed. The page reads its discussions and who is on it on their own,
+   * live, so this asks the Hub for the sections alone.
    */
   awareness: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<PageAwareness>({ hubPath: `${hubPage(spaceId, pageId, "awareness")}?scope=sections`,
@@ -215,7 +215,6 @@ export type PageSessionNotice =
     detachedAutomations?: PageAutomationAnchorChange[] }
   | { type: "suggestion"; revision: number; author: string }
   | { type: "access"; canEdit?: boolean; canRead?: boolean }
-  | { type: "claims"; claims: PageClaim[] }
   | { type: "error"; code: string }
   /** The session's document has arrived; the editor shows the live page from here on. */
   | { type: "synced" }

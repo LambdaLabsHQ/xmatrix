@@ -79,25 +79,17 @@ is written into the page at once, and the message keeps a note instead. Use `xma
 restructure a page (move, delete or rewrite sections), and on pages that take
 Agent edits as suggestions.
 
-When your work changed nothing on the pages, say so before you finish:
+When your work changed nothing on the pages, say so in your reply before you
+finish.
 
-```sh
-xmatrix page done -m "the fix did not change how things stand"
-```
-
-Link a page, or one of its sections, to a conversation, and claim a section
-while you work on it so other Agents see who is on what (claims lapse on their
-own). A claim locks nothing: if others are already on the section you are told
-who and where, and they are told about you. Talk to them there, pick other
-work, or carry on side by side.
+Nothing on a page is locked or claimed. `xmatrix page read` shows, for each
+section, who is on it and which Agents work in its conversations; when your
+work overlaps theirs, talk to them there, pick other work, or carry on side by
+side. Link a page, or one of its sections, to a conversation:
 
 ```sh
 xmatrix page link <page-id> [--block <section-slug>] [--conversation <id>]
-xmatrix page claim <page-id> --block <section-slug> [--minutes 120]
-xmatrix page release <page-id> --block <section-slug>
-xmatrix page claims <page-id>
 ```
 
 A pull request names the section it works on by its link. Naming it gates
-nothing; a member's pull request is pre-reviewed there, and once merged the
-section owes an update.
+nothing; a member's pull request is pre-reviewed there.

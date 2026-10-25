@@ -273,10 +273,6 @@ export const HUB_ROUTES = {
     `/api/spaces/${encodeURIComponent(spaceId)}/locale-preference`,
   space_channel_view_preference: (spaceId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/channel-view-preference`,
-  space_claims: (spaceId: string) =>
-    `/api/spaces/${encodeURIComponent(spaceId)}/claims`,
-  space_claim: (spaceId: string, claimId: string) =>
-    `/api/spaces/${encodeURIComponent(spaceId)}/claims/${encodeURIComponent(claimId)}`,
   space_members: (spaceId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/members`,
   space_member: (spaceId: string, userId: string) =>
@@ -509,10 +505,6 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/locale-preference`,
   space_channel_view_preference: (spaceId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/channel-view-preference`,
-  space_claims: (spaceId: string) =>
-    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/claims`,
-  space_claim: (spaceId: string, claimId: string) =>
-    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/claims/${encodeURIComponent(claimId)}`,
   space_members: (spaceId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/members`,
   space_member: (spaceId: string, userId: string) =>
@@ -1036,7 +1028,6 @@ export interface SerializedAutomation {
 export type AutomationTrigger =
   | { kind: "merged"; repository: string; branch?: string; paths?: string[]; installationId?: string }
   | { kind: "ci-failed"; repository: string; branch?: string; workflow?: string; installationId?: string }
-  | { kind: "owed" }
   /** A connector event (docs/design/connector-platform.md §3.4): a provider's source, `*` for any, and feature. */
   | { kind: "event"; provider: string; source: string; feature?: string };
 
@@ -1087,8 +1078,7 @@ export function automationTriggersFrom(value: unknown): AutomationTrigger[] {
   return value.map((entry) => {
     const trigger = entry && typeof entry === "object" && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
     let result: AutomationTrigger;
-    if (trigger.kind === "owed") result = { kind: "owed" };
-    else if (trigger.kind === "merged" || trigger.kind === "ci-failed") {
+    if (trigger.kind === "merged" || trigger.kind === "ci-failed") {
       const repository = typeof trigger.repository === "string" ? trigger.repository.trim() : "";
       if (!REPOSITORY_NAME.test(repository)) throw new Error("a GitHub trigger names its repository as owner/repo");
       const branch = text(trigger.branch, "branch");
@@ -1103,7 +1093,7 @@ export function automationTriggersFrom(value: unknown): AutomationTrigger[] {
       }
     } else if (trigger.kind === "event") {
       result = connectorEventTrigger(trigger);
-    } else throw new Error("a trigger is merged, ci-failed, owed or a connector event");
+    } else throw new Error("a trigger is merged, ci-failed or a connector event");
     const key = JSON.stringify(result);
     if (seen.has(key)) throw new Error("a trigger is listed twice");
     seen.add(key);

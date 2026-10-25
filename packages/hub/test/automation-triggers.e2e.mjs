@@ -19,9 +19,9 @@ function githubConfiguration() {
 }
 
 // Events fire a page's Automations (docs/design/pages-live-document.md §6.2):
-// a merged pull request touching its paths, a failed workflow, a section
-// starting to owe an update. Each makes it due now and is recorded once.
-test("merges, failed workflows and owed sections fire a page's Automation, each once", async () => {
+// a merged pull request touching its paths, a failed workflow. Each makes it
+// due now and is recorded once.
+test("merges and failed workflows fire a page's Automation, each once", async () => {
   const userId = `trigger-${randomUUID()}`;
   await withGitHubUserScenario({ id: userId, email: "trigger@example.com", name: "Trigger Owner" }, githubConfiguration(), secret,
     async ({ worker, auth }) => {
@@ -49,12 +49,10 @@ test("merges, failed workflows and owed sections fire a page's Automation, each 
     const { automation } = await create([
       { kind: "merged", repository: "acme/widgets", paths: ["packages/hub"] },
       { kind: "ci-failed", repository: "acme/widgets", workflow: "CI" },
-      { kind: "owed" },
     ]);
     assert.deepEqual(automation.triggers, [
       { kind: "merged", repository: "acme/widgets", paths: ["packages/hub"], installationId },
       { kind: "ci-failed", repository: "acme/widgets", workflow: "CI", installationId },
-      { kind: "owed" },
     ]);
     const events = async () => ((await call(automations)).automations.find((item) => item.id === automation.id)
       .triggerEvents ?? []).map((event) => event.summary);
@@ -98,14 +96,5 @@ test("merges, failed workflows and owed sections fire a page's Automation, each 
     assert.equal((await events()).length, 2);
     await deliver("workflow_run", run("CI", "failure"));
     assert.equal((await events()).at(-1), "Workflow “CI” failed on main");
-
-    // A claim released on its section leaves the section owing an update.
-    const claims = `${pages}/${encodeURIComponent(page.pageId)}/claims`;
-    const { claim } = await call(claims, "POST", { blockId: "architecture" });
-    await call(`${claims}/${encodeURIComponent(claim.claimId)}`, "DELETE");
-    assert.equal((await events()).at(-1), "A claim on #architecture was released, so it owes an update");
-    const { claim: other } = await call(claims, "POST", { blockId: "ui" });
-    await call(`${claims}/${encodeURIComponent(other.claimId)}`, "DELETE");
-    assert.equal((await events()).length, 4, "a section it is not in fires nothing");
   });
 });

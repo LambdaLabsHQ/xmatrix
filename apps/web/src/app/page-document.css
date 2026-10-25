@@ -166,7 +166,7 @@
 }
 .ProseMirror-yjs-selection { opacity: 0.35; }
 
-/* Beside each section's heading (pages-live-document.md §3.2): who is on it, who has taken it, what it owes. */
+/* Beside each section's heading (pages-live-document.md §3.2): who is on it and its conversations. */
 .page-document h1, .page-document h2, .page-document h3,
 .page-document h4, .page-document h5, .page-document h6 { position: relative; }
 .page-section-present {
@@ -239,7 +239,6 @@
 .page-section-focus { background: color-mix(in oklab, #f2b632 26%, transparent); border-radius: 2px; }
 /* Marks along the page's scrollbar (§3.2), in the colors the page uses for them. */
 .page-scroll-mark-discussion { background: color-mix(in oklab, #f2b632 85%, transparent); }
-.page-scroll-mark-owed { background: #b45309; }
 .page-discussion-bubble {
   display: inline-flex;
   margin-left: 3px;
@@ -473,17 +472,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   width: 1rem;
   height: 1rem;
 }
-.page-section-owed {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 6px;
-  border-radius: 9999px;
-  background: color-mix(in oklab, #f59e0b 16%, transparent);
-  color: #b45309;
-}
-.page-section-owed:hover { background: color-mix(in oklab, #f59e0b 28%, transparent); }
-
 /* A caret's name shows while its person moves or types and goes about five seconds later, as in
    Google Docs, leaving the caret with a square at its top; hovering brings the name back. */
 @keyframes page-cursor-name {

@@ -1,5 +1,34 @@
 # Release Updates
 
+## Unreleased: Pages have no claims and no owed updates
+
+Coordination on pages is lock-free, so nothing on a page is claimed and no
+section owes an update. `xmatrix page claim`, `claims`, `release` and `done`
+are gone, with the Hub routes behind them, the competition setting, the notice
+that names others on the same section, the GitHub write-back request on a
+merge and the `owed` Automation trigger. `xmatrix page read` shows who is on
+each section and which Agents work in its conversations, and the Run whose
+work changes a page writes it back. A member's pull request that names a
+section is still pre-reviewed there, and a merged one still makes its
+participant author a contributor. The unused Space action claims API
+(`/api/spaces/:spaceId/claims`) is removed as well.
+
+Compatibility: the stable Web reads a section's `owed` only when it is present
+and never reads `claims`, so it keeps working against this Hub. A CLI released
+before this change reads page awareness without `claims` and `owed`, which
+default when missing. Its `page claim`, `claims`, `release` and `done` reach
+routes that answer 410 `page_claims_removed`, saying there is nothing to claim,
+release or settle. Those routes stay until the stable CLI carries this change.
+The GitHub App publishes no `xmatrix/claim` check; a repository that still
+lists it among its required checks should drop it, or its pull requests wait
+on a check that never arrives.
+
+Migration evidence: a follow-up contract migration drops `data.page_claims`,
+`data.page_block_competitions` and `data.space_action_claims` and removes the
+`owed` triggers left in Automations. It is applied once the deployed Hub no
+longer names those tables; until then the Space and Conversation purges no
+longer empty them, and the drop takes their rows.
+
 ## Unreleased: Releases deploy concurrently by component dependency
 
 Production Releases deploy side by side unless one has to wait for another
@@ -309,23 +338,6 @@ Migration evidence: before consolidation, the effective YAML definitions were sa
 Recovery remains the established Production Release Recovery workflow: it may cancel only the exact preflight-success/PostgreSQL-readiness-waiting shape before any build or deploy job materializes, then resume the same authorized replacement run. The parent graph and that proof are unchanged. A consolidation failure must be fixed through a new CI-validated main revision and Release Intent; do not modify immutable tags, publish unverified assets, or bypass train authorization. The existing CLI manifest/envelope `workflow: "cli-release.yml"` value remains the compatibility label expected by installed Rust update and Windows continuity consumers; relocating the reusable publisher does not rewrite that wire field. Signing helpers retain the original Developer ID leaf/team checks, pinned Apple intermediate, private keychain isolation, and cleanup; no signing identity or artifact format changed.
 
 
-## Unreleased: An Agent's claims end with its Run
-
-When an Agent's Instance ends, the page claims it held in its conversation end
-at once rather than running out their lease. A section it left unwritten owes
-an update immediately.
-
-## Unreleased: A claim locks nothing
-
-`xmatrix page claim` on a section that someone else is already on now succeeds,
-where it used to fail with `page_block_claimed`. The answer lists the others
-(`others`), and each conversation on the section gets a notice naming who else
-is there, so the Agents can talk, pick other work, or carry on side by side.
-An Automation occurrence claims its section beside whoever is on it, and the Run
-it starts is told who that is. Opening a block for competition is no longer
-needed.
-
-
 ## Unreleased: Web per release channel
 
 Every beta deploys the beta Web (`xmatrix-web-beta`, `https://beta.xmatrix.sh`,
@@ -369,17 +381,6 @@ builds load nothing while the beta Web is down, so that re-run restores them
 too. Undoing the split is a revert of this change and of the shells choosing
 by channel: betas then deploy `xmatrix.sh` again, later native betas load it,
 and the idle beta Worker can be deleted.
-
-## Unreleased: Pull requests that name a page block are not gated
-
-The GitHub App no longer publishes an `xmatrix/claim` check. A pull request that
-links a page block needs no claim. A repository that made the check required
-should drop it from its required checks, or its pull requests wait on a check
-that never arrives. A member's pull request (owner, admin or member) that names
-a block is pre-reviewed there, as claimed ones were. A participant's or an
-unlinked author's pull request is left to the maintainers. Merging a pull
-request leaves every section it names owing an update, whether or not anyone
-claimed it.
 
 ## Unreleased: Repository tokens are bound to the Run
 

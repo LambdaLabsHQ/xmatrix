@@ -13,24 +13,23 @@ designed for both.
 ## 1. What is missing today
 
 - **Agents are half blind.** `xmatrix page read` returns the body, the
-  revision and the last editor. It does not say who is on which block, what
-  is claimed (that is a separate `page claims`), which Agent is working on
-  which block in which conversation, how old or verified a statement is, or
-  that a block changed after the Agent read it; it finds out only when its
-  edit conflicts.
+  revision and the last editor. It does not say who is on which block, which
+  Agent is working on which block in which conversation, how old a statement
+  is, or that a block changed after the Agent read it; it finds out only when
+  its edit conflicts.
 - **People are half blind too.** They see cursors and header avatars, but not
   what an Agent intends, how fresh a statement is, or what changed since they
   last looked.
 - **The editor is a markdown code editor.** CodeMirror with live preview shows
   `#` and `**` on the lines being edited, and has no toolbar, no selection
   menu and no `/` insert.
-- **The page's surroundings are a flat list.** Presence, claims, links,
-  mounts, publishing and governance share one column; creating a page or a
-  mount uses `window.prompt`; history is raw text without a diff.
+- **The page's surroundings are a flat list.** Presence, links, mounts,
+  publishing and governance share one column; creating a page or a mount uses
+  `window.prompt`; history is raw text without a diff.
 - **Pages are kept current late, or not at all.** The write-back contract
-  (parent §6.1) must apply during work as well as before the Agent stops. A merged pull request, a release, a lapsed claim or
-  a finished Automation changes how things stand without anyone being asked
-  to update the page, and Focus notices only on its next sweep.
+  (parent §6.1) must apply during work as well as before the Agent stops. A
+  merged pull request, a release or a finished Automation changes how things
+  stand without anyone being asked to update the page.
 - **Automations and connectors are bound to conversations.** After the move
   to pages a conversation is linear and sinks when idle, so a repository
   subscription or a schedule bound to one recreates the `bugs` Channel.
@@ -54,7 +53,7 @@ designed for both.
    intent are visible to people. It is derived from live sources and never
    stored (parent §2.7).
 4. **Facts with an authority are referenced, not restated.** A pull request,
-   release, CI run, schedule, claim or repository file is embedded as a live
+   release, CI run, schedule or repository file is embedded as a live
    reference that renders its current state. Prose holds what has no other
    authority.
 5. **Markdown stays the Agent's medium and the durable format.** Revisions,
@@ -89,28 +88,27 @@ commit.
 
 ## 3. Awareness
 
-Each block's awareness has four layers.
+Each block's awareness has three layers.
 
 | Layer | Question | Sources |
 |---|---|---|
-| Facts | Is this still true? | Revision attribution (who, which conversation, when); the last Focus verification; resolved live references |
+| Facts | Is this still true? | Revision attribution (who, which conversation, when); resolved live references |
 | Presence | Who is here, doing what? | Editor awareness of people and Agents; live Runs in linked conversations with their invocation state; each Agent's intent line |
 | Change | What changed since I looked? | Revisions after the reader's last read (people: last visit; Agents: last `page read` in this Run) |
-| Intent | Who has taken this? | Claims, with their conversation and pull request |
 
-Revision attribution reads the authorized head, bounded revision history and
-owed claims before releasing its database transaction. What each revision
-changed against the one before it is derived from the two immutable documents
-once and kept on the revision (`page_revisions.changed_blocks`), so a read
-compares only revisions not derived yet. A derivation reads its bodies outside
+Revision attribution reads the authorized head and bounded revision history
+before releasing its database transaction. What each revision changed against
+the one before it is derived from the two immutable documents once and kept on
+the revision (`page_revisions.changed_blocks`), so a read compares only
+revisions not derived yet. A derivation reads its bodies outside
 the attribution transaction and yields between uncached section parses, so
 large pages do not hold a PostgreSQL connection or block other requests for the
 whole comparison; it is kept only while both bodies are still the ones
 compared. A purge rewrites bodies and so forgets every derivation on the page,
 which could name the removed text's headings. Markdown style alone remains no
 document change. The Web reads a page's sections alone
-(`GET …/awareness?scope=sections`): claims, discussions and presence reach it
-live on their own.
+(`GET …/awareness?scope=sections`): discussions and presence reach it live on
+their own.
 
 Who wrote each passage is the same attribution read finer: every character of
 a revision is owed to the first revision in the page's line that put it there,
@@ -128,14 +126,10 @@ hidden so it does not obscure the passage or compete with its discussion
 controls. Revision history retains the conversations each revision came from.
 
 - **Intent line.** An Agent on a block publishes one line of what it is
-  doing: the note on its claim, or else the title of the conversation its Run
-  is in plus its invocation state. For example `claude:3 · Working · adding
-  Phase 5 to Next steps`.
+  doing: the title of the conversation its Run is in plus its invocation
+  state. For example `claude:3 · Working · adding Phase 5 to Next steps`.
 - **Permissions.** Presence in a conversation the reader cannot read shows
   "an Agent is working here" with no title (parent §7).
-- **Freshness.** A block is *verified* (Focus checked it against its sources
-  after its last edit), *aging* (no update within the page's stated cadence),
-  or *contradicted* (a live reference or Focus disagrees with the text).
 
 ### 3.1 How an Agent perceives it
 
@@ -147,9 +141,8 @@ so an Agent's edit cannot write it back:
 pageId: 227ecdfb-…
 revision: 12
 blocks:
-  status: {updated: "3h ago by claude:1 in \"Phase 4 release\"", freshness: verified}
+  status: {updated: "3h ago by claude:1 in \"Phase 4 release\""}
   next-steps:
-    claimed: codex:2 "Phase 5 contract migration" until 2026-09-27T16:00Z
     working: claude:3 Working in "Migrate Lambda Labs"
     viewing: Yiming Hu
 live:
@@ -159,12 +152,13 @@ live:
 
 - `page read --since <revision>` returns only what changed, as a diff per
   block with its authors and conversations.
-- **Change events.** A Run that read, claimed, linked or edited a block
-  receives an event at its next turn boundary when someone else changes that
-  block: who, in which conversation, and the diff. It learns of overlap
-  before its edit conflicts, not after.
-- `page claims` stays, but `page read` already shows claims per block, so an
-  Agent sees that work is taken before it starts.
+- **Change events.** A Run that read, linked or edited a block receives an
+  event at its next turn boundary when someone else changes that block: who,
+  in which conversation, and the diff. It learns of overlap before its edit
+  conflicts, not after.
+- **Nothing is locked.** `page read` shows who is on each block and which
+  Agents work in its conversations, so an Agent sees overlapping work before
+  it starts and talks to them there.
 
 ### 3.2 How a person perceives it
 
@@ -250,13 +244,11 @@ fact is about.
   right holds the face of the Agent this person co-writes with (§4.2).
 - **Headings** carry who is on the section: the people and Agents in it, and
   the Agents working in a conversation linked to it even when they do not
-  have the page open, each with its state; *Update owed* where work ended
-  and nobody wrote it back (§5.3); its conversation count (§4.4); and the
-  freshness mark (§5.4). Who has taken a section is the Agents' to know
-  (`page read`) and is not drawn for people, and a person neither claims nor
-  releases (decided 2026-10-19: coordination is lock-free, and what an Agent
-  intends is felt only through what it writes). A heading carries no row of
-  tools (removed 2026-10-23 at Daniel's request): discussion starts from a
+  have the page open, each with its state, and its conversation count
+  (§4.4). Nobody holds a section (decided 2026-10-19: coordination is
+  lock-free, and what an Agent intends is felt only through what it writes;
+  decided by Daniel 2026-10-25: nothing is claimed). A heading carries no row
+  of tools (removed 2026-10-23 at Daniel's request): discussion starts from a
   selection (§4.2), and Automations are written into the section (§6.1). On
   a phone the heading of the section the reader is in carries one ⋯ whose
   menu offers *Co-write with ‹Agent›*.
@@ -265,8 +257,7 @@ fact is about.
   when and in which conversation (parent §4.2).
 - **Margin**: the conversations about the page, each beside what it is about
   (§4.4).
-- **The scrollbar** marks where others are, where discussions are and which
-  sections owe an update.
+- **The scrollbar** marks where others are and where discussions are.
 - **What changed since this person last read the page** is offered to them,
   not shown: the page always opens as it is now, and the first card in the
   margin, a card of paper, (above the page where there is no margin) says how many changes there
@@ -383,8 +374,7 @@ fact is about.
     at work (one pill, in the card, not a second one above it).
   - People and Agents meet in a discussion alike, so there is no separate
     *Ask AI*. What acts on the whole section (copying its link) is the
-    heading's, not a passage's; *Show editors* gave way to History, and
-    *Claim* is not a person's to make.
+    heading's, not a passage's; *Show editors* gave way to History.
 - **`/` insert**: heading, list, task list, table, divider, GitHub file.
 - **`[[`, `#` and `@` complete as in the composer** (and `【【`, `＃`, `＠`
   from a Chinese input method). `[[` picks a page, `[[page#` one of its
@@ -664,81 +654,29 @@ answered SQL failures propagate. These reads need no enclosing BEGIN/COMMIT.
 ## 5. Keeping pages current in time
 
 A page is only worth reading if it is current within minutes of the change it
-describes. Maintenance is therefore driven by the events that change state,
-not by the end of a Run or a periodic sweep, and every change has exactly one
-party responsible for writing it back.
+describes. The Run whose work changes what a page says writes it back as part
+of that work, when the state changes, not at the end of its Run or in a
+periodic sweep. Nothing keeps a ledger of what is left to write: no section
+is claimed and none owes an update (decided by Daniel 2026-10-25).
 
 ### 5.1 Less to maintain
 
 - **Live references keep themselves current** (§2.4): a pull request's state,
-  a release version, a CI result, a schedule's next run or who holds a claim
-  is never restated in prose, so it cannot go stale.
-- **Presence and claims are not page text.** Who is on what is drawn from
-  claims and live Runs (§3); nobody edits a page to say they started or
-  stopped.
+  a release version, a CI result or a schedule's next run is never restated
+  in prose, so it cannot go stale.
+- **Presence is not page text.** Who is on what is drawn from presence and
+  live Runs (§3); nobody edits a page to say they started or stopped.
 - **Pages stay short** (parent §6.2), so updating one is a small edit.
 
-### 5.2 Events that ask for an update
+### 5.2 Who writes it back
 
-A section **owes an update** when something that changes what it says
-happened after its last change and nobody has written it back. The debt is
-never stored as a queue: it is read from the event's own record, which notes
-when it was written back.
-
-| Event | Section | Derived from |
-|---|---|---|
-| A pull request that names the section is merged | The section it names | The record of its work, made at the merge whether or not anyone claimed the section |
-| A claim is released or lapses | The claimed section | The claim |
-| An Automation occurrence that starts an Agent ends, or never starts, without the section written | Its section | The claim the occurrence opened (§6.1) |
-| A live reference in the section changes state (§5.4) | That section | The reference |
-
-An owed update is settled by the next edit to its section, or by the Run
-saying nothing there changed (`xmatrix page done`, which records it on that
-conversation's ended claims). The edit records the write-back on the claims of
-the sections it changes, so a debt never returns once the section's last change
-is old. A release ends a lease, not work: a section its holder's conversation
-edited while holding the claim was written back before the release and owes
-nothing; an edit from another conversation does not settle a claim still held.
-Only a release that leaves a debt runs the section's `owed` Automations. A
-section taken off the page owes nothing. Anything older than a week stops
-counting.
-
-### 5.3 Who writes it back
-
-1. **The Run that did the work**, at the moment the state changes. A merged
-   pull request is announced by GitHub in the conversation that held the
-   claim, so its Run, if still live, hears it on its next turn and answers
-   with `xmatrix page edit` or `xmatrix page done`. A Run that releases a
-   claim is told the same by `xmatrix page release`. Every Run is asked when
-   the state changes, not only when it exits.
-2. **Focus** takes what is still owed: `page read` marks each such section
-   `owed:`, and the Focus scan treats those first.
-3. **People see what is still owed.** The section's heading says *Update
-   owed*; hovering says the event that caused it, and clicking opens the
-   conversation.
-
-### 5.4 Freshness
-
-The freshness mark (§3) is computed from the same sources:
-
-- **Verified**: edited or checked after the last event on the block.
-- **Update owed**: a write-back request is open.
-- **Aging**: no edit and no event within the page's stated cadence, for goals
-  and in-progress blocks that name one.
-- **Contradicted**: the prose disagrees with a live reference in the block or
-  with what Focus found (a Status says "in review" for a merged pull request).
-  A contradiction opens a write-back request at once.
-
-Agents read the mark in `page read` (§3.1) and people see it on the section's
-heading (§3.2), so nobody acts on a stale block without being told it is
-stale.
-
-### 5.5 Measures
-
-- Time from an event to the write-back on its block: minutes, p90 under 15.
-- Blocks that owed an update for more than an hour: zero.
-- Contradicted blocks found by Focus rather than by an event: trending to
-  zero, because events should catch them first.
+1. **The Run that did the work**, at the moment the state changes. Its Run
+   prompt asks it to update the page whenever its work changes what the page
+   says, and otherwise to say the page is unchanged. A pull request a Run
+   opens reports back to its conversation, so the Run hears of the merge
+   while it is live and writes the section with `xmatrix page edit`.
+2. **The section's Automation**, where it has one: it keeps the section true
+   on its cadence and on the events it triggers on (§6).
 
 ## 6. What is attached to a page
 
@@ -752,7 +690,7 @@ records, never a second place they live.
 - **Connectors.** "Issues and pull requests of `LambdaLabsHQ/xmatrix`" is a
   repository subscription in a conversation linked to the section, so they
   arrive where the page points, and their outcomes reach the page through
-  write-back (§5) and Focus.
+  write-back (§5).
 - **Launch targets** (parent §3.1).
 
 ### 6.1 An Automation is a live reference in its section
@@ -789,20 +727,14 @@ section it keeps true, and it is written there:
   is posted there. Each occurrence opens a new conversation as the
   Automation's author, linked to its section and named for the Automation and
   the occurrence's time, posts its message there and writes back to the
-  section (§5.2). An occurrence never inherits an earlier one's chatter: what
+  section (§5). An occurrence never inherits an earlier one's chatter: what
   carries over lives on the page. The chip and Schedules open the last
   occurrence's conversation. An Automation with connector or GitHub event
   triggers uses closed occurrence conversations even when its Page is readable
   to the whole Space. Any captured trigger event also requires a closed
-  conversation, including an `owed` event that can name a private pull request,
-  even if its trigger configuration has since changed. A retry that
-  finds an older open conversation refuses to append those private details.
-- **An occurrence that starts an Agent holds its section.** It claims the
-  section for its conversation, shown under the Automation's name. The Run
-  takes that claim over when it claims the section, and writing the section
-  settles it. A Run that never starts, or ends without writing, leaves the
-  claim to lapse, and the section owes an update (§5.2) that names the
-  occurrence's conversation. A section someone else is on is left to them.
+  conversation, even if its trigger configuration has since changed. A retry
+  that finds an older open conversation refuses to append those private
+  details.
 - **An edit can set the next run.** The cadence counts from it, so
   Automations on the same cadence need not run in the same minute
   (`xmatrix page automation edit --next <UTC time>`).
@@ -828,7 +760,7 @@ while the Space is still connected to it.
 | `every <interval>` | The interval has passed since the last occurrence (the existing cadence bounds) |
 | `merged <owner/repo>[@branch] [paths…]` | A pull request is merged into the branch (default: the default branch), touching one of the paths if any are given |
 | `ci-failed <owner/repo>[@branch] [workflow]` | A workflow run on the branch concludes with failure |
-| `owed` | A claim on its section is completed by a merged pull request or released (§5.2); a lapsed claim is left to Focus |
+| `<app>:<event>[:<source>]` | A connected app delivers that event (`connector-platform.md` §3.4) |
 
 Events coalesce: an occurrence takes every event recorded before it (the last
 ten), and events that arrive while one is pending or running wait for a
@@ -883,7 +815,7 @@ change.
   `detached`, one that reappeared resumes it, and a reference to an unknown
   or foreign id renders as a broken reference.
 - Event triggers are matched by the Hub where the event arrives (the GitHub
-  webhook, the owed-update derivation) against an index of enabled
+  webhook, a connector's event ingress) against an index of enabled
   Automations by trigger key, and delivered to the Automation's authority as
   "due now".
 - There is no Channel-scoped Automation: the page creates one on one of its
@@ -980,7 +912,7 @@ There is no side panel. What its tabs held is shown where it acts:
 
 | Was | Now |
 |---|---|
-| Now: presence, claims, running Agents | Cursors, the margin's Agents and each heading's avatars (§3.2) |
+| Now: presence, running Agents | Cursors, the margin's Agents and each heading's avatars (§3.2) |
 | Discussions | Cards beside their passages and the conversation list (§4.4) |
 | Attached: Automations | Chips in the section they keep true (§6.1), written there by an Agent; the Space's Schedules list them all |
 | Attached: connectors | A conversation linked to its section, a card like any other |
@@ -1024,19 +956,16 @@ Shipped:
    (v0.16.470).
 3. Anchored discussions with resolve (v0.16.470; Ask AI on a selection
    was folded into Discuss on 2026-10-19).
-4. Owed updates derived from ended claims, GitHub's write-back request on a
-   merged pull request, the Focus scan treating owed sections first
-   (v0.16.470).
-5. The Attached tab, with Automations and GitHub subscriptions in
+4. The Attached tab, with Automations and GitHub subscriptions in
    conversations linked to a section (v0.16.470).
-6. Side-panel tabs and history diffs (v0.16.470); save state, named fading
+5. Side-panel tabs and history diffs (v0.16.470); save state, named fading
    cursors, title rename, table controls and links from URLs (v0.16.471).
-7. Conversations beside the page (§4.4): the page's links carry each
+6. Conversations beside the page (§4.4): the page's links carry each
    conversation's summary for the reader and each section's working Agents;
-   margin cards, the conversation docked beside the page, presence and claims
-   on headings, the header's avatars, Share, History as a mode and the ⋯
+   margin cards, the conversation docked beside the page, presence on
+   headings, the header's avatars, Share, History as a mode and the ⋯
    menu, with no side panel (§7).
-8. Live co-writing (§4.2) with any Agent: the session's engine (#529), the
+7. Live co-writing (§4.2) with any Agent: the session's engine (#529), the
    runtime's bridge with start and stop and the caret's status and note
    (#531, v1.0.427), then its words fading in and Undo; an Agent's edit while
    it co-writes goes straight in, and suggestions are a suggest-only page's.
@@ -1045,7 +974,7 @@ Open:
 
 - Automations as live references in their section, with page access, event
   triggers and the removal of Channel-scoped Automations (§6).
-- Change events pushed to a Run when a block it read or claimed changes
+- Change events pushed to a Run when a block it read or edited changes
   (§3.1), and "changes since your last visit" for people.
-- Live references and freshness for GitHub issues and pull requests (§5.4).
+- Live references for GitHub issues and pull requests (§2.4).
 - Images.
