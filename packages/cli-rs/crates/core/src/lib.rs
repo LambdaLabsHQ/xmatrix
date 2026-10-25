@@ -15,6 +15,7 @@ mod agent_runtime_issue;
 pub mod agent_trace_read;
 pub mod agent_trace_store;
 pub mod attachment_cache;
+pub mod atomic_limit;
 pub mod auth;
 pub mod backoff;
 pub mod bootstrap;

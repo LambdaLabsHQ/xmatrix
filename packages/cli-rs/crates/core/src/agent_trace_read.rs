@@ -61,13 +61,7 @@ pub(crate) fn read_trace_history(
 }
 
 pub(crate) fn try_start_trace_wait(waits: &std::sync::atomic::AtomicUsize) -> bool {
-    waits
-        .fetch_update(
-            std::sync::atomic::Ordering::AcqRel,
-            std::sync::atomic::Ordering::Acquire,
-            |current| (current < TRACE_HISTORY_MAX_WAITS).then_some(current + 1),
-        )
-        .is_ok()
+    crate::atomic_limit::try_reserve(waits, 1, TRACE_HISTORY_MAX_WAITS)
 }
 
 /// Answer a `since` delta once it holds more than it did when asked, the
