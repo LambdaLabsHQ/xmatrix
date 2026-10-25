@@ -24,6 +24,16 @@ export const PAGE_MESSAGE_CO_WRITE = 3;
  */
 export const PAGE_AGENT_INK_MS = 5 * 60_000;
 
+/**
+ * How fast a page's session takes the words an Agent writes into it live (pages-live-document.md §4.2),
+ * counted in characters (code points) of what the runtime sends. A runtime sends at most `chunkChars` at a
+ * time, `charsPerSecond` on average; the session refuses a write past its own allowance (`limited`) and
+ * takes nothing of it, so the page only ever holds what the Agent was allowed to send. The session's
+ * allowance holds `burstChars`, more than one chunk, so the network's jitter between two chunks sent in
+ * time is never refused.
+ */
+export const PAGE_CO_WRITE_RATE = { chunkChars: 10, charsPerSecond: 20, burstChars: 20 } as const;
+
 const PAGE_CO_WRITE_OPEN = "⟦";
 const PAGE_CO_WRITE_CLOSE = "⟧";
 
@@ -43,7 +53,13 @@ export type PageCoWriteEvent =
 export type PageCoWriteRequest =
   | { type: "turn"; turn: number; text: string }
   | { type: "interrupt"; turn: number }
-  | { type: "outcome"; turn: number; problems: string[] };
+  | { type: "outcome"; turn: number; problems: string[] }
+  /**
+   * A paced write the session refused, as an HTTP 429 refuses: nothing of it was taken. The runtime sends
+   * the turn's words again from character `at` (what the session has taken of the turn) once
+   * `retryAfterMs` has passed.
+   */
+  | { type: "limited"; turn: number; at: number; retryAfterMs: number };
 
 /**
  * The runtime answers with the harness's text as it comes, and when the harness's turn ends. A runtime
@@ -53,9 +69,14 @@ export type PageCoWriteRequest =
 export type PageCoWriteReply =
   /** `atOnce`: written as it comes, whoever reads the page (a message's write, which its sender waits on). */
   | { type: "write"; turn: number; atOnce?: boolean }
-  | { type: "delta"; turn: number; text: string }
-  | { type: "done"; turn: number }
-  | { type: "failed"; turn: number; reason?: string };
+  /**
+   * `paced`: the runtime keeps to `PAGE_CO_WRITE_RATE`, `at` is where `text` starts among the characters
+   * it sent for the turn, and the session refuses what goes past its allowance or does not follow on.
+   */
+  | { type: "delta"; turn: number; text: string; paced?: { at: number } }
+  /** `paced`: how many characters the runtime sent for the turn; the session takes the end only once it has them all. */
+  | { type: "done"; turn: number; paced?: { at: number } }
+  | { type: "failed"; turn: number; reason?: string; paced?: { at: number } };
 
 /** A marker longer than this is text that happens to hold the opening bracket. */
 const HEADER_MAX = 1_000;
@@ -161,11 +182,13 @@ export function parsePageCoWriteReply(value: unknown): PageCoWriteReply | null {
   const reply = value as Record<string, unknown>;
   if (typeof reply.turn !== "number" || !Number.isSafeInteger(reply.turn)) return null;
   if (reply.type === "write") return { type: "write", turn: reply.turn, ...(reply.atOnce === true ? { atOnce: true } : {}) };
-  if (reply.type === "delta" && typeof reply.text === "string") return { type: "delta", turn: reply.turn, text: reply.text };
-  if (reply.type === "done") return { type: "done", turn: reply.turn };
+  const at = (reply.paced as { at?: unknown } | undefined)?.at;
+  const paced = typeof at === "number" && Number.isSafeInteger(at) && at >= 0 ? { paced: { at } } : {};
+  if (reply.type === "delta" && typeof reply.text === "string") return { type: "delta", turn: reply.turn, text: reply.text, ...paced };
+  if (reply.type === "done") return { type: "done", turn: reply.turn, ...paced };
   if (reply.type === "failed") {
     return { type: "failed", turn: reply.turn,
-      ...(typeof reply.reason === "string" ? { reason: reply.reason.slice(0, 300) } : {}) };
+      ...(typeof reply.reason === "string" ? { reason: reply.reason.slice(0, 300) } : {}), ...paced };
   }
   return null;
 }

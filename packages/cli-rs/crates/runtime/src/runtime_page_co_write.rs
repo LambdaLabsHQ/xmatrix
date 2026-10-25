@@ -23,7 +23,7 @@ use xmatrix_cli_core::agent_instance_connection::{
 };
 use xmatrix_cli_core::page_co_write::{
     PAGE_SESSION_HEARTBEAT_PING, PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest,
-    decode_request, delta_frame, done_frame,
+    PageWriteOutbox, decode_request, send_due,
 };
 use xmatrix_cli_core::page_media::{ToPage, refused_images_note};
 use xmatrix_cli_core::protocol::ChannelPageCoWrite;
@@ -39,12 +39,21 @@ const REJOIN_DELAYS: [Duration; 5] = [
     Duration::from_secs(30),
 ];
 
+/// What the bridge sends the session: the harness's words for a turn, and its
+/// end. They go at the rate the session takes an Agent's words
+/// (`PageWriteOutbox`).
+#[derive(Debug, PartialEq, Eq)]
+enum Out {
+    Text { turn: u64, text: String },
+    Done { turn: u64, failed: bool },
+}
+
 /// One conversation co-writing one page.
 struct Bridge {
     channel_id: String,
     page: (String, String),
-    /// Frames for the session, while a socket is open.
-    outgoing: Option<mpsc::UnboundedSender<Vec<u8>>>,
+    /// What goes to the session, while a socket is open.
+    outgoing: Option<mpsc::UnboundedSender<Out>>,
     /// The session's turn the run loop took as its next input; the harness's
     /// next turn in this conversation answers it.
     queued: Option<u64>,
@@ -58,9 +67,9 @@ struct Bridge {
 }
 
 impl Bridge {
-    fn send(&self, frame: Vec<u8>) {
+    fn send(&self, out: Out) {
         if let Some(outgoing) = &self.outgoing {
-            let _ = outgoing.send(frame);
+            let _ = outgoing.send(out);
         }
     }
 
@@ -69,9 +78,9 @@ impl Bridge {
     fn end(&mut self, turn: u64, failed: bool) {
         let rest = self.images.finish();
         if !rest.is_empty() {
-            self.send(delta_frame(turn, &rest));
+            self.send(Out::Text { turn, text: rest });
         }
-        self.send(done_frame(turn, failed));
+        self.send(Out::Done { turn, failed });
         let written = std::mem::take(&mut self.images);
         if let Some(events) = &self.events
             && !written.refused().is_empty()
@@ -180,7 +189,7 @@ pub(crate) fn observe_trace(channel_id: &str, phase: &str, payload: &serde_json:
             {
                 let text = bridge.images.push(text);
                 if !text.is_empty() {
-                    bridge.send(delta_frame(turn, &text));
+                    bridge.send(Out::Text { turn, text });
                 }
             }
         }
@@ -208,21 +217,27 @@ async fn run_bridge(
             Ok(socket) => {
                 attempt = 0;
                 let (mut sink, mut stream) = socket.split();
-                let (outgoing, mut frames) = mpsc::unbounded_channel::<Vec<u8>>();
+                let (outgoing, mut frames) = mpsc::unbounded_channel::<Out>();
                 set_outgoing(&channel_id, Some(outgoing));
                 let mut heartbeat = tokio::time::interval(HEARTBEAT);
                 heartbeat.tick().await;
+                let mut outbox = PageWriteOutbox::default();
                 loop {
+                    // Everything the rate lets go now goes, and the loop wakes when more may.
+                    let Ok(due) = send_due(&mut outbox, &mut sink).await else {
+                        break;
+                    };
+                    let due = due.map(tokio::time::Instant::from_std);
                     tokio::select! {
                         _ = stopped.changed() => {
                             let _ = sink.close().await;
                             break;
                         }
-                        Some(frame) = frames.recv() => {
-                            if sink.send(Message::Binary(frame.into())).await.is_err() {
-                                break;
-                            }
-                        }
+                        () = tokio::time::sleep_until(due.unwrap_or_else(tokio::time::Instant::now)), if due.is_some() => {}
+                        Some(out) = frames.recv() => match out {
+                            Out::Text { turn, text } => outbox.text(turn, &text),
+                            Out::Done { turn, failed } => outbox.done(turn, failed),
+                        },
                         _ = heartbeat.tick() => {
                             if sink.send(Message::Text(PAGE_SESSION_HEARTBEAT_PING.into())).await.is_err() {
                                 break;
@@ -235,9 +250,14 @@ async fn run_bridge(
                                         PageCoWriteRequest::Turn { turn, text } => PageCoWriteEvent::Turn {
                                             channel_id: channel_id.clone(), turn, prompt: text,
                                         },
-                                        PageCoWriteRequest::Interrupt { turn } => PageCoWriteEvent::Interrupt {
-                                            channel_id: channel_id.clone(), turn,
-                                        },
+                                        PageCoWriteRequest::Interrupt { turn } => {
+                                            outbox.stop(turn);
+                                            PageCoWriteEvent::Interrupt { channel_id: channel_id.clone(), turn }
+                                        }
+                                        PageCoWriteRequest::Limited { turn, at, retry_after_ms } => {
+                                            outbox.limited(turn, at, Duration::from_millis(retry_after_ms), std::time::Instant::now());
+                                            continue;
+                                        }
                                         // Only a turn this side opened has an outcome, and the bridge opens none.
                                         PageCoWriteRequest::Outcome { .. } => continue,
                                     };
@@ -281,7 +301,7 @@ async fn run_bridge(
     }
 }
 
-fn set_outgoing(channel_id: &str, outgoing: Option<mpsc::UnboundedSender<Vec<u8>>>) {
+fn set_outgoing(channel_id: &str, outgoing: Option<mpsc::UnboundedSender<Out>>) {
     if let Some(bridge) = bridges().get_mut(channel_id) {
         if outgoing.is_none() {
             bridge.queued = None;
@@ -295,7 +315,7 @@ fn set_outgoing(channel_id: &str, outgoing: Option<mpsc::UnboundedSender<Vec<u8>
 mod tests {
     use super::*;
 
-    fn bridge_for_test(channel_id: &str) -> mpsc::UnboundedReceiver<Vec<u8>> {
+    fn bridge_for_test(channel_id: &str) -> mpsc::UnboundedReceiver<Out> {
         let (outgoing, frames) = mpsc::unbounded_channel();
         let (stop, _) = watch::channel(false);
         bridges().insert(
@@ -314,8 +334,15 @@ mod tests {
         frames
     }
 
-    fn body(frame: Vec<u8>) -> serde_json::Value {
-        serde_json::from_slice(&frame[2..]).unwrap()
+    fn body(out: Out) -> serde_json::Value {
+        match out {
+            Out::Text { turn, text } => {
+                serde_json::json!({ "type": "delta", "turn": turn, "text": text })
+            }
+            Out::Done { turn, failed } => {
+                serde_json::json!({ "type": if failed { "failed" } else { "done" }, "turn": turn })
+            }
+        }
     }
 
     #[test]

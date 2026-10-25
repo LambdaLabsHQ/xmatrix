@@ -1,5 +1,5 @@
 import {
-  PAGE_AGENT_INK_MS, PageCoWriteParser, pageBlocks, pageChangedBlocks, type PageCoWriteAction, type PageCoWriteEvent,
+  PAGE_AGENT_INK_MS, PAGE_CO_WRITE_RATE, PageCoWriteParser, pageBlocks, pageChangedBlocks, type PageCoWriteAction, type PageCoWriteEvent,
   type PageCoWriteReply, type PageCoWriteRequest,
 } from "@xmatrix/protocol";
 import { markdownToPageDoc, pageDocToMarkdown, pageSchema } from "@xmatrix/protocol/page-document";
@@ -120,11 +120,13 @@ interface Turn {
   queue: PageCoWriteEvent[];
   /** The runtime has sent all of the turn, and how it ended. */
   sent: { failed: boolean; reason?: string } | null;
+  /** How many characters of a paced turn the session has taken: where the runtime's next write must start. */
+  received: number;
 }
 
 function newTurn(id: number): Turn {
   return { id, askedAt: Date.now(), refreshable: true, wroteText: false,
-    parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null };
+    parser: new PageCoWriteParser(), action: null, stopped: false, queue: [], sent: null, received: 0 };
 }
 
 /** Queues what the parser made of the Agent's words, text that follows text as one. */
@@ -238,6 +240,9 @@ export class PageCoWriter {
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   /** Turns the runtime opened while the last was still reaching the page, in order. */
   private waiting: Turn[] = [];
+  /** How many characters the Agent may send now (PAGE_CO_WRITE_RATE), and when that was reckoned. */
+  private allowance: number = PAGE_CO_WRITE_RATE.burstChars;
+  private allowanceAt = Date.now();
 
   constructor(private readonly host: PageCoWriterHost, private readonly options: PageCoWriterOptions = {}) {}
 
@@ -354,10 +359,16 @@ export class PageCoWriter {
     const turn = this.active?.id === reply.turn ? this.active : this.waiting.find((item) => item.id === reply.turn);
     if (this.ended || !this.writable || !turn || turn.stopped || turn.sent) return;
     if (reply.type === "delta") {
+      if (reply.paced && !this.allowed(turn, reply.text, reply.paced.at)) return;
       turn.timing?.delta();
       if (turn === this.active) this.awaitTurn(turn);
       enqueue(turn, turn.parser.push(reply.text));
     } else {
+      // A paced turn ends once the session has every character the runtime sent for it.
+      if (reply.paced && reply.paced.at !== turn.received) {
+        this.host.send({ type: "limited", turn: turn.id, at: turn.received, retryAfterMs: 0 });
+        return;
+      }
       enqueue(turn, turn.parser.finish());
       turn.sent = { failed: reply.type === "failed", ...(reply.type === "failed" && reply.reason ? { reason: reply.reason } : {}) };
       // Nothing more of it is waited on; what it sent goes on reaching the page.
@@ -367,6 +378,30 @@ export class PageCoWriter {
       }
     }
     if (turn === this.active) this.step(turn);
+  }
+
+  /**
+   * Whether the session takes a paced write (PAGE_CO_WRITE_RATE): it follows on from what the turn has
+   * taken, and the Agent's allowance holds it. Otherwise nothing of it is taken, as an HTTP 429 takes
+   * nothing, and the runtime hears where to go on from and when; so the page only ever holds what the
+   * Agent was allowed to send, and holds it the moment it is sent.
+   */
+  private allowed(turn: Turn, text: string, at: number): boolean {
+    const { burstChars, charsPerSecond } = PAGE_CO_WRITE_RATE;
+    const now = Date.now();
+    this.allowance = Math.min(burstChars, this.allowance + (now - this.allowanceAt) * charsPerSecond / 1000);
+    this.allowanceAt = now;
+    const size = [...text].length;
+    // A write larger than the allowance can ever hold waits for a full one.
+    const cost = Math.min(size, burstChars);
+    if (at === turn.received && cost <= this.allowance) {
+      this.allowance -= cost;
+      turn.received += size;
+      return true;
+    }
+    this.host.send({ type: "limited", turn: turn.id, at: turn.received,
+      retryAfterMs: Math.max(0, Math.ceil((cost - this.allowance) * 1000 / charsPerSecond)) });
+    return false;
   }
 
   /**

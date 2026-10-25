@@ -1029,6 +1029,10 @@ function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false, stre
     turns,
     turnId,
     write: (n, text) => reply({ type: "delta", turn: turnId(n), text }),
+    /** A runtime keeping to the write rate: `at` is where `text` starts among what it sent for the turn. */
+    writePaced: (n, text, at) => reply({ type: "delta", turn: turnId(n), text, paced: { at } }),
+    donePaced: (n, at) => reply({ type: "done", turn: turnId(n), paced: { at } }),
+    limited: () => asked.filter((frame) => frame.type === "limited"),
     done: (n) => reply({ type: "done", turn: turnId(n) }),
     /** A runtime streaming from a conversation opens turn `n` itself; `atOnce` for a message's write. */
     open: (n, atOnce = false) => reply({ type: "write", turn: n, ...(atOnce ? { atOnce } : {}) }),
@@ -1623,6 +1627,52 @@ test("taking back what an Agent is still writing leaves the page as it was, and 
   writer.done(2);
   assert.equal(ann.text.toString(), HEAD.replace("In progress\n", "In progress\n\nNext.\n"), "only its next write stands");
   assert.deepEqual(writer.outcomes().at(-1), { type: "outcome", turn: 2, problems: [] });
+});
+
+// The session takes an Agent's live words at a rate (PAGE_CO_WRITE_RATE), as an API limits its callers: a
+// write past the allowance is refused whole and the runtime told when to go on, so nothing is held to be
+// shown later and the page is always exactly what the Agent was allowed to send.
+test("a paced write past the Agent's allowance is refused whole, and the runtime hears where and when to go on", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const { ann, writer } = await annWithStreamingWriter();
+  const marker = "⟦after \"none\"⟧\n";
+  assert.equal([...marker].length, 15);
+  writer.writePaced(1, marker, 0);
+  t.mock.timers.tick(500);
+  writer.writePaced(1, "One two th", 15);
+  assert.equal(afterNone(ann), "One two th", "within the allowance: on the page as it is sent");
+  writer.writePaced(1, "ree four f", 25);
+  assert.equal(afterNone(ann), "One two th", "past it: nothing of it is taken");
+  assert.deepEqual(writer.limited(), [{ type: "limited", turn: 1, at: 25, retryAfterMs: 250 }]);
+  writer.writePaced(1, "ive", 35);
+  assert.equal(writer.limited().at(-1).at, 25, "a write that does not follow on is refused too");
+  t.mock.timers.tick(250);
+  writer.donePaced(1, 35);
+  assert.deepEqual(writer.outcomes(), [], "its end waits on every character it sent");
+  assert.deepEqual(writer.limited().at(-1), { type: "limited", turn: 1, at: 25, retryAfterMs: 0 });
+  writer.writePaced(1, "ree four f", 25);
+  writer.donePaced(1, 35);
+  assert.equal(afterNone(ann), "One two three four f");
+  assert.deepEqual(writer.outcomes(), [{ type: "outcome", turn: 1, problems: [] }]);
+});
+
+test("a runtime that keeps to the rate is never refused, and an unpaced one is taken as before", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const { ann, writer } = await annWithStreamingWriter();
+  const text = "⟦after \"none\"⟧\nWords sent ten at a time, every half second, as the runtime paces them.";
+  const chars = [...text];
+  for (let at = 0; at < chars.length; at += 10) {
+    writer.writePaced(1, chars.slice(at, at + 10).join(""), at);
+    t.mock.timers.tick(500);
+  }
+  writer.done(1);
+  assert.deepEqual(writer.limited(), []);
+  assert.equal(afterNone(ann), "Words sent ten at a time, every half second, as the runtime paces them.");
+  writer.open(2);
+  writer.write(2, "⟦after \"In progress\"⟧\nAn older runtime sends what it has, and it is taken.");
+  writer.done(2);
+  assert.deepEqual(writer.limited(), []);
+  assert.match(ann.text.toString(), /An older runtime sends what it has, and it is taken\./u);
 });
 
 test("an Agent's committed edit reaches someone reading the page whole, as soon as it is committed", async () => {

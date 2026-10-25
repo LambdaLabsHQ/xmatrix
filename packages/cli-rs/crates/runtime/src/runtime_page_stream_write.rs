@@ -23,8 +23,8 @@ use xmatrix_cli_core::agent_instance_connection::{
 };
 use xmatrix_cli_core::page_co_write::{
     PAGE_SESSION_HEARTBEAT_PING, PAGE_WRITE_CLOSE as CLOSE, PAGE_WRITE_OPEN as OPEN,
-    PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest, decode_request, delta_frame,
-    done_frame, page_write_target, write_frame,
+    PageCoWriteConnector, PageCoWriteEvent, PageCoWriteRequest, PageWriteOutbox, decode_request,
+    page_write_target, send_due, write_frame,
 };
 use xmatrix_cli_core::page_media::{ToPage, refused_images_note};
 
@@ -40,10 +40,10 @@ const HEARTBEAT: Duration = Duration::from_secs(25);
 const IDLE: Duration = Duration::from_secs(90);
 #[cfg(test)]
 const IDLE: Duration = Duration::from_millis(300);
-/// Its words reach a page someone reads at the reader's pace, long after the
-/// model wrote them, and the session says when a turn has all reached it (its
-/// outcome). The session stays joined until then, though not longer than this
-/// after the Agent last wrote.
+/// Its words go to the page at the rate the session takes them
+/// (`PageWriteOutbox`), and the session says when a turn has all reached it
+/// (its outcome). The session stays joined until then, though not longer than
+/// this after the Agent last wrote.
 const WRITTEN_WITHIN: Duration = Duration::from_secs(30 * 60);
 
 /// What a reply says to a page, as the reply comes.
@@ -363,13 +363,21 @@ async fn write_into(
     let mut open: Option<(u64, bool)> = None;
     // Turns the page has not said the outcome of: it is still taking their words.
     let mut unanswered = BTreeSet::new();
+    // What goes to the session, at the rate it takes an Agent's words.
+    let mut outbox = PageWriteOutbox::default();
     let mut wrote = tokio::time::Instant::now();
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
     heartbeat.tick().await;
     let idle = tokio::time::sleep(IDLE);
     tokio::pin!(idle);
     loop {
-        let frame = tokio::select! {
+        // Everything the rate lets go now goes, and the loop wakes when more may.
+        let Ok(due) = send_due(&mut outbox, &mut sink).await else {
+            break;
+        };
+        let due = due.map(tokio::time::Instant::from_std);
+        let frame: Option<Vec<u8>> = tokio::select! {
+            () = tokio::time::sleep_until(due.unwrap_or_else(tokio::time::Instant::now)), if due.is_some() => None,
             piece = pieces.recv() => {
                 wrote = tokio::time::Instant::now();
                 idle.as_mut().reset(wrote + IDLE);
@@ -378,36 +386,30 @@ async fn write_into(
                         if let Some((previous, stopped)) = open.take()
                             && !stopped
                         {
-                            let rest = images.finish();
-                            if !rest.is_empty() {
-                                let _ = sink.send(Message::Binary(delta_frame(previous, &rest).into())).await;
-                            }
-                            let _ = sink.send(Message::Binary(done_frame(previous, false).into())).await;
+                            outbox.text(previous, &images.finish());
+                            outbox.done(previous, false);
                         }
                         refused_images(&events, &channel_id, &page, &mut images);
                         turn += 1;
                         open = Some((turn, false));
                         unanswered.insert(turn);
-                        Some(write_frame(turn, false))
+                        outbox.frame(write_frame(turn, false));
+                        None
                     }
-                    Some(Piece::Text(text)) => match open {
-                        Some((id, false)) => {
-                            let text = images.push(&text);
-                            (!text.is_empty()).then(|| delta_frame(id, &text))
+                    Some(Piece::Text(text)) => {
+                        if let Some((id, false)) = open {
+                            outbox.text(id, &images.push(&text));
                         }
-                        _ => None,
-                    },
-                    Some(Piece::End { failed }) => match open.take() {
-                        Some((id, false)) => {
-                            let rest = images.finish();
-                            if !rest.is_empty() {
-                                let _ = sink.send(Message::Binary(delta_frame(id, &rest).into())).await;
-                            }
+                        None
+                    }
+                    Some(Piece::End { failed }) => {
+                        if let Some((id, false)) = open.take() {
+                            outbox.text(id, &images.finish());
                             refused_images(&events, &channel_id, &page, &mut images);
-                            Some(done_frame(id, failed))
+                            outbox.done(id, failed);
                         }
-                        _ => None,
-                    },
+                        None
+                    }
                     None => break,
                 }
             }
@@ -420,6 +422,10 @@ async fn write_into(
                             {
                                 *halted = true;
                             }
+                            outbox.stop(stopped);
+                        }
+                        Some(PageCoWriteRequest::Limited { turn: refused, at, retry_after_ms }) => {
+                            outbox.limited(refused, at, Duration::from_millis(retry_after_ms), std::time::Instant::now());
                         }
                         Some(PageCoWriteRequest::Outcome { turn: answered, problems }) => {
                             unanswered.remove(&answered);
@@ -431,7 +437,7 @@ async fn write_into(
                         _ => {}
                     },
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
-                        if open.is_some_and(|(_, stopped)| !stopped) {
+                        if open.is_some_and(|(_, stopped)| !stopped) || !outbox.is_empty() {
                             tell(
                                 &events,
                                 &channel_id,
@@ -452,7 +458,7 @@ async fn write_into(
                 }
                 None
             }
-            () = &mut idle, if open.is_none() => {
+            () = &mut idle, if open.is_none() && outbox.is_empty() => {
                 let taking = !unanswered.is_empty() && wrote.elapsed() < WRITTEN_WITHIN;
                 if !taking && leave(&mut pieces) {
                     break;
@@ -766,15 +772,16 @@ mod tests {
         to.send(Piece::Text("⟦after \"x\"⟧ one".into())).unwrap();
         to.send(Piece::Text(" two".into())).unwrap();
         to.send(Piece::End { failed: false }).unwrap();
+        // Ten characters at a time, at the session's rate, each saying where it starts.
         hub.expect(&[
             serde_json::json!({ "type": "write", "turn": 1 }),
-            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"⟧ one" }),
-            serde_json::json!({ "type": "delta", "turn": 1, "text": " two" }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"", "paced": { "at": 0 } }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟧ one two", "paced": { "at": 10 } }),
         ])
         .await;
         assert_eq!(
             hub.next().await,
-            serde_json::json!({ "type": "done", "turn": 1 })
+            serde_json::json!({ "type": "done", "turn": 1, "paced": { "at": 19 } })
         );
         let ticket = (&mut hub.ticket).await.unwrap();
         assert_eq!(
@@ -848,10 +855,10 @@ mod tests {
         to.send(Piece::Text("⟦after \"x\"⟧ read slowly".into()))
             .unwrap();
         to.send(Piece::End { failed: false }).unwrap();
-        for kind in ["write", "delta", "done"] {
+        for kind in ["write", "delta", "delta", "delta", "done"] {
             assert_eq!(hub.next().await["type"], kind);
         }
-        // A reader is on the page: its words are still reaching it, well after it stopped writing.
+        // The page has not said it took them all: the session stays, well after it stopped writing.
         tokio::time::sleep(IDLE * 3).await;
         assert!(
             hub.received.try_recv().is_err(),
@@ -865,6 +872,27 @@ mod tests {
             serde_json::json!({ "closed": true }),
             "and leaves once the page has them all, after a while"
         );
+    }
+
+    #[tokio::test]
+    async fn a_write_the_session_refused_goes_again_from_where_it_says() {
+        let mut hub = FakePageHub::start().await;
+        let (to, _heard) = start_writing(&hub, "c-stream-write-limited");
+        to.send(Piece::Open).unwrap();
+        to.send(Piece::Text("⟦after \"x\"⟧ one two".into()))
+            .unwrap();
+        to.send(Piece::End { failed: false }).unwrap();
+        assert_eq!(hub.next().await["type"], "write");
+        assert_eq!(hub.next().await["paced"]["at"], 0);
+        hub.send
+            .send(serde_json::json!({ "type": "limited", "turn": 1, "at": 0, "retryAfterMs": 100 }))
+            .unwrap();
+        hub.expect(&[
+            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟦after \"x\"", "paced": { "at": 0 } }),
+            serde_json::json!({ "type": "delta", "turn": 1, "text": "⟧ one two", "paced": { "at": 10 } }),
+            serde_json::json!({ "type": "done", "turn": 1, "paced": { "at": 19 } }),
+        ])
+        .await;
     }
 
     #[tokio::test]
