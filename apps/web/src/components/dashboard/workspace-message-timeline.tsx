@@ -222,7 +222,8 @@ import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInv
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { InvocationAccessError, invocationSourceMessages, isInvocationSource, loadInvocationPages } from "./mention-invocation-query";
+import { InvocationAccessError, invocationSourceMessages, isInvocationSource } from "./mention-invocation-query";
+import { readChannelInvocations } from "./channel-invocations";
 import {
   buildMentionReadIndex, machineOfflineMentionSubjects, withInvocationMentionTargets,
   type MentionReadIndex,
@@ -397,18 +398,7 @@ function useChannelAgentLaunches(channel: ChannelSnapshot | null, token: string 
         executions: previous.executions?.filter(record => selected.has(record.sourceMessageId)),
         stops: previous.stops?.filter(stop => selected.has(stop.sourceMessageId)), nextCursor: null };
     },
-    queryFn: ({ signal }) => loadInvocationPages({ channelId: channel!.id, sourceMessageIds, signal,
-      fetchPage: async (request, pageSignal) => {
-        const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_agent_launches(channel!.id), {
-          method: "POST", signal: pageSignal, cache: "no-store",
-          headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-          body: JSON.stringify(request),
-        });
-        if ([401, 403, 404].includes(response.status)) throw new InvocationAccessError(response.status);
-        if (!response.ok) throw await errorFromResponse(response);
-        return response.json();
-      },
-    }),
+    queryFn: ({ signal }) => readChannelInvocations(channel!.id, token!, sourceMessageIds, signal),
     // Nothing polls: the Hub pushes `channel_invocations_changed` when any of these records moves.
   });
 }

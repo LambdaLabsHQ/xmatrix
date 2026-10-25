@@ -379,6 +379,16 @@ export function MentionSummonPending({ labelContent, reading, fillKey }: { label
   </span>;
 }
 
+/** A summon written outside a message (a page's `@`) whose message holds no launch yet: on its way, or never sent. */
+export function MentionSummonSent({ name, failure }: { name: string; failure: string | null }) {
+  const view: InvocationView = failure
+    ? { ...invocationChipStatus("Failed", failure), terminal: true, steps: [] }
+    : { ...invocationChipStatus("Starting", "Asking xMatrix to start the Agent.", true), terminal: false,
+      steps: [{ label: "Request sent", status: "Dispatching", state: "current" }] };
+  return <InvocationChip label={name} name={name} face={{ kind: "agent", name, harness: name }} sourceAddress={`@${name}`}
+    subtitle={failure ? "No new process was started" : "Selected machine"} view={view} />;
+}
+
 function InvocationChip({ label, labelContent, announcement, name, instanceOrdinal, destinationName, face, sourceAddress, subtitle, invocationId, errorCode,
   diagnosticId, view, lead, context, details, onRetry, variant, jev }: {
   /** A handoff draws both Agents in its label, so it has no leading avatar. */

@@ -66,6 +66,8 @@ import type { ConversationCall } from "@/components/dashboard/page-shell-actions
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
 import { pageMentions, type PageReferenceTargets } from "./page-reference-chips";
+import type { PageSummons } from "./page-mention-summons";
+import { usePageSummons, type PageSummon } from "./page-summon-store";
 import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
@@ -571,6 +573,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
     planned?: (conversationId: string) => void;
+    /** Hears the first message's stored id once it is sent, or null when it was not confirmed. */
+    sent?: (messageId: string | null) => void;
     call?: ConversationCall }) => Promise<unknown>;
   /** A Space owner or admin may move the Space's Channels to pages. */
   canMigrate: boolean;
@@ -1197,14 +1201,24 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       .find((harness) => harness !== quiet && writers.agents.some((agent) => agent.harness === harness));
   };
   // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
-  const coWriteRef = useRef<((harness: string, blockId: string | null, mentioned?: boolean) => Promise<void>) | null>(null);
+  const coWriteRef = useRef<((harness: string, blockId: string | null, summon?: PageSummon) => Promise<void>) | null>(null);
+  // The `@`s this reader called Agents with on the page, each showing how its call goes.
+  const { summons, add: addSummon, update: updateSummon } = usePageSummons();
+  const pageSummons = useMemo<PageSummons>(() => ({ list: summons.filter((summon) => summon.pageId === page?.pageId), token }),
+    [page?.pageId, summons, token]);
   // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` calls the Agent to the page.
   const referenceCatalog = useMessageReferenceCatalog();
   const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
     spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents,
     readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
-    summonAgent: (harness, blockId) => void coWriteRef.current?.(harness, blockId || null, true),
-  } : undefined, [queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId, writers.agents]);
+    summonAgent: (harness, blockId, at) => {
+      if (!page) return;
+      const summon: PageSummon = { id: crypto.randomUUID(), pageId: page.pageId, harness, at, conversationId: null,
+        messageId: null, failure: null };
+      addSummon(summon);
+      void coWriteRef.current?.(harness, blockId || null, summon);
+    },
+  } : undefined, [addSummon, page, queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId, writers.agents]);
   useEffect(() => {
     if (!page || !canEdit || !coWriteRef.current) return;
     const harness = takeCoWriteRequest(page.pageId);
@@ -1286,8 +1300,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // and the Agent shows at the right edge beside the line it writes.
   // An `@` in the page's text calls the Agent the same way, but its message is only the mention and where it
   // was made: the page tells it nothing of what to write.
-  const coWrite = async (harness: string, blockId: string | null, mentioned = false) => {
-    if (!page || startingWriter.current) return;
+  const coWrite = async (harness: string, blockId: string | null, summon?: PageSummon) => {
+    const mentioned = Boolean(summon);
+    if (!page || startingWriter.current) {
+      if (summon) updateSummon(summon.id, { failure: "Another Agent was still being called. Mention it again." });
+      return;
+    }
     coWriting();
     startingWriter.current = true;
     setNotice(null);
@@ -1296,6 +1314,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       writers.choose(harness);
       // Calling an Agent to write a new page is writing on it: it makes the page.
       const writing = pending && session ? await session.make() : page.pageId;
+      // A new page's `@` is on the page it made.
+      if (summon && writing !== summon.pageId) updateSummon(summon.id, { pageId: writing });
       const where = `page:${writing}${blockId ? ` (section #${blockId})` : ""}`;
       // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
       const firstMessage = mentioned ? `@${harness} launch:force ${pageReferenceToken(writing, blockId)}`
@@ -1303,13 +1323,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
       const conversationId = await onDiscuss({ spaceId, pageId: writing, blockId: blockId ?? "", restricted,
         name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false,
-        coWrite: true });
+        coWrite: true,
+        ...(summon ? {
+          planned: (id: string) => updateSummon(summon.id, { conversationId: id }),
+          sent: (messageId: string | null) => updateSummon(summon.id, messageId ? { messageId }
+            : { failure: "The call was not sent. Its conversation can send it again." }),
+        } : {}) });
       if (typeof conversationId === "string") {
         setCalled({ pageId: writing, harness, conversationId, blockId, at: Date.now() });
       }
       void links.refetch();
     } catch (cause) {
-      setNotice(userErrorMessage(cause, "Couldn't start the Agent"));
+      const message = userErrorMessage(cause, "Couldn't start the Agent");
+      // A call from an `@` says so on the `@`.
+      if (summon) updateSummon(summon.id, { failure: message ?? "Couldn't start the Agent" });
+      else setNotice(message);
     } finally {
       startingWriter.current = false;
     }
@@ -1708,6 +1736,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
                         follow={follow} onOpenConversation={openConversation} discussions={discussions}
                         automations={automationsById} references={references} completion={completion}
+                        summons={pageSummons}
                         focusedConversationId={activeConversationId ?? focused} readCard={readCard}
                         onFocusConversation={setFocused}
                         onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}

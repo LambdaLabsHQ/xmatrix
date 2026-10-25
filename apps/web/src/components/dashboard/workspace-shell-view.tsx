@@ -1310,10 +1310,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId, at) => openPageConversation(conversationId, at ? { at } : {})}
       onConversationIntent={resolvePageConversation}
-      onDiscuss={({ firstMessage, quote, open, coWrite, planned, call, ...input }) => startPageConversation(input,
+      onDiscuss={({ firstMessage, quote, open, coWrite, planned, sent, call, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
           ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}),
-          ...(call ? { call } : {}) })}
+          ...(sent ? { sent } : {}), ...(call ? { call } : {}) })}
       canMigrate={canMovePages}
       layout={isMobileViewport ? "phone" : "desktop"} />
   );

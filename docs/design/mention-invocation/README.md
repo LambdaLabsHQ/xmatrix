@@ -2,6 +2,14 @@
 
 The invoking `@` owns its status. Each Agent in a message updates independently, with a compact status and a hover/click progress view. While startup is in progress the chip names that stage with one -ing word — Dispatching (Queuing when the machine is offline), Spawning, Connecting (Joining after relay registration), Initializing, Stopping, Creating, and Handing off when one word cannot say it — instead of the step's done label or a second "Starting" beside it. A settled chip says Started, Failed, or Stopped — whether the Agent started reasoning, not what the Run did afterwards. The popover keeps that overall answer, and its step ladder keeps the past-tense labels. The chip shows the whole `@` expression as the author wrote it, lifecycle and workspace included, wrapping rather than truncating; the address is repeated in details and message copy/export retains its original source.
 
+An `@` that calls an Agent from a page's text carries the same status. The call is the first message of the
+co-writing conversation it opens, so the page's `@` reads that message's invocation records with the same chip
+and popover, refreshed by the same `channel_invocations_changed` push. It shows Dispatching from the moment the
+Agent is picked, before that message is stored, and Failed with the cause when the call never went out. The chip
+follows its `@` by Yjs relative position through everyone's edits. It is the caller's: their device remembers
+their last 100 page calls, so the `@` keeps its status when they open the page again; other readers see the plain
+mention.
+
 These screenshots use local synthetic fixtures and the repository theme, not production data.
 
 The Web composer's root `@` list includes the current Channel's live Instances

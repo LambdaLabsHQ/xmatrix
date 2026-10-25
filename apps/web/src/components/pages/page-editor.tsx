@@ -33,11 +33,12 @@ import { PageCommentBox } from "./page-comment-box";
 import type { MarginAgent } from "./page-margin-model";
 import { PageBlameLayer, PageByline, type PageBlameSource } from "./page-blame";
 import { SectionAgentsInPage } from "./page-section-agents";
+import { mountSummonChip, PageMentionSummons, type PageSummons } from "./page-mention-summons";
 import type { PageSessionChanges } from "./page-session-changes";
 import {
-  addColumnAfter, addRowAfter, anchorOffsets, blockKind, caretBlockAnchor, deleteColumn, deleteRow, deleteTable, discussionsKey,
+  addColumnAfter, addRowAfter, anchorOffsets, anchorPosition, blockKind, caretBlockAnchor, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
-  sectionsKey, selectionAnchor, setBlockKind, setLink, type BlockKind, type CursorPresence, type Discussion,
+  sectionsKey, selectionAnchor, setBlockKind, setLink, sharedPosition, type BlockKind, type CursorPresence, type Discussion,
   type HeadingActions, type ReadCard, type SectionNote,
 } from "./page-editor-setup";
 import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
@@ -156,9 +157,15 @@ export interface PageCompletion {
   agents: readonly WriteAgent[];
   /** A page's title and markdown, for its sections after `[[page#`. */
   readPage: (pageId: string) => Promise<{ pageId: string; title: string; body: string }>;
-  /** `@` picked an Agent: it comes to co-write the page from where it was mentioned, told nothing more. */
-  summonAgent: (harness: string, blockId: string) => void;
+  /**
+   * `@` picked an Agent: it comes to co-write the page from where it was mentioned, told nothing more. `at` is
+   * where the `@` is, as a Yjs relative position, so the `@` can show how the call goes.
+   */
+  summonAgent: (harness: string, blockId: string, at: unknown) => void;
 }
+
+/** What takes down the chip drawn into a summoned `@`'s widget. */
+const summonChips = new WeakMap<HTMLElement, () => void>();
 
 /** One row of the menu typing opened. */
 interface MenuItem { key: string; label: string; hint: string; icon: ReactNode; run: (view: EditorView) => void }
@@ -176,7 +183,7 @@ function referenceItem(trigger: PageTrigger, candidate: ReferenceCandidate): Men
 }
 
 function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefined,
-  sections: ReadonlyMap<string, PageSections>): MenuItem[] {
+  sections: ReadonlyMap<string, PageSections>, fragment: PageLiveSession["fragment"]): MenuItem[] {
   if (trigger.kind === "insert") {
     return matchingItems(trigger.query).map((item) => ({ key: item.label, label: item.label, hint: item.hint, icon: item.icon,
       run: (view) => {
@@ -209,7 +216,7 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
       run: (view) => {
         const blockId = pageDocBlockAt(view.state.doc, trigger.from);
         insertReference(trigger, `@${agent.harness}`)(view.state, view.dispatch, view);
-        completion.summonAgent(agent.harness, blockId);
+        completion.summonAgent(agent.harness, blockId, sharedPosition(view.state, fragment, trigger.from));
       },
     }));
 }
@@ -255,7 +262,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readerShown = false, commentInMargin = false, onReaderChanges, onWrite, readFrom, reading,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
-  uploadMedia, onChanges, blame, writing }: {
+  uploadMedia, onChanges, blame, writing, summons }: {
   session: PageLiveSession;
   /** Who wrote what, shown where the reader rests or selects and under the title; without it the page does not say. */
   blame?: PageBlameSource;
@@ -325,6 +332,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   references?: PageReferenceTargets;
   /** What typing `[[`, `#` and `@` offers. */
   completion?: PageCompletion;
+  /** The `@`s this reader called Agents with, each drawn with how its call goes. */
+  summons?: PageSummons;
   /** Where the page reads an image or video pasted into it. */
   mediaUrl?: PageMediaUrl;
   /** Uploads an image or video pasted or dropped into the page. */
@@ -359,8 +368,25 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   ready.current = onReady;
   const readFile = useRef(readGitHubFile);
   readFile.current = readGitHubFile;
-  const referenceTargets = useRef(references);
-  referenceTargets.current = references;
+  const summonList = useRef(summons?.list);
+  summonList.current = summons?.list;
+  // A summoned `@` is the one whose shared position still falls on it.
+  const summonAt = (state: EditorState, from: number, to: number) => {
+    const summon = summonList.current?.find((item) => {
+      const at = anchorPosition(state, session.fragment, item.at);
+      return at !== null && at >= from && at < to;
+    });
+    return summon ? { key: `summon:${summon.id}`, destroy: (element: HTMLElement) => summonChips.get(element)?.(),
+      draw: () => {
+        const element = document.createElement("span");
+        element.className = "page-mention-summon";
+        element.contentEditable = "false";
+        summonChips.set(element, mountSummonChip(element, summon.id));
+        return element;
+      } } : null;
+  };
+  const referenceTargets = useRef(references && { ...references, summonAt });
+  referenceTargets.current = references && { ...references, summonAt };
   const media = useRef({ url: mediaUrl, upload: uploadMedia });
   media.current = { url: mediaUrl, upload: uploadMedia };
   // The files this writer pasted, shown from their own copy; let go with the editor.
@@ -716,7 +742,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   useEffect(() => {
     const current = view.current;
     if (current) current.dispatch(current.state.tr.setMeta(referencesKey, true));
-  }, [references]);
+  }, [references, summons?.list]);
 
   useEffect(() => {
     const current = view.current;
@@ -799,7 +825,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
   const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
   const trigger = canEdit && toolbar?.trigger && toolbar.focused ? toolbar.trigger : null;
-  const menuItems = trigger ? triggerItems(trigger, completion, sectionsRead) : [];
+  const menuItems = trigger ? triggerItems(trigger, completion, sectionsRead, session.fragment) : [];
   menu.current.items = menuItems;
   const menuAt = trigger && menuItems.length ? place(trigger.from) : null;
   const namedPage = trigger?.kind === "page" && trigger.section !== null && completion ? sectionPage(trigger, completion) : null;
@@ -816,6 +842,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   return (
     <div ref={frame} className="relative" data-testid="page-editor">
       <SectionAgentsInPage />
+      {summons && <PageMentionSummons summons={summons} />}
       {/* Surfaces are slips of the page's paper (PaperPopover); the wrappers place them. */}
       {/* Over the page, above the table: taking room in the page would move the text under the pointer. */}
       {canEdit && toolbar?.inTable && tableAt && (
