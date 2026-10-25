@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Machines take the harness list from the Hub
+
+The list of supported harnesses, with how to find, install, update and sign in
+to each, now comes from the Hub when a Machine connects, instead of only from
+the copy built into its CLI. Adding a harness that speaks a protocol xMatrix
+already supports, or fixing an install command, reaches every Machine with a
+Hub deploy. A Machine resends nothing when its list is already current. This
+needs the new CLI once; older CLIs keep their built-in list.
+
 ## Unreleased: The Hub writes what a new Agent reads first
 
 The conversation a newly launched Agent reads before its first turn is now

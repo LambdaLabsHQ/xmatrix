@@ -2824,6 +2824,14 @@ fn machine_daemon_connect_message(
         "capabilities": identity.capabilities,
         "machineMetadata": identity.metadata.read().ok().and_then(|slot| slot.clone()),
     });
+    if identity
+        .capabilities
+        .iter()
+        .any(|capability| capability == crate::hub_harness_registry::CAPABILITY)
+        && let Some(held) = crate::hub_harness_registry::held_sha256()
+    {
+        message["harnessRegistrySha256"] = serde_json::json!(held);
+    }
     if let Ok(activation) = identity.activation.read()
         && let Some(activation) = activation.as_ref()
     {
@@ -2861,6 +2869,10 @@ fn parse_machine_daemon_connected(
             connection_epoch: u64,
             #[serde(default)]
             activation: Option<MachineDaemonActivationReceipt>,
+            /// The Hub's harness registry, sent when it differs from the
+            /// one this machine holds (`hub_harness_registry`).
+            #[serde(default, rename = "harnessRegistry")]
+            harness_registry: Option<String>,
         },
         Error {
             message: String,
@@ -2877,7 +2889,13 @@ fn parse_machine_daemon_connected(
             daemon,
             connection_epoch,
             activation,
-        }) if connection_epoch > 0 => Ok((daemon, connection_epoch, activation)),
+            harness_registry,
+        }) if connection_epoch > 0 => {
+            if let Some(registry) = harness_registry {
+                crate::hub_harness_registry::record(&registry);
+            }
+            Ok((daemon, connection_epoch, activation))
+        }
         Ok(Handshake::MachineDaemonConnected { .. }) => {
             Err("Invalid Machine Daemon connection epoch".to_string().into())
         }

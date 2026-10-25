@@ -32,6 +32,8 @@ export interface MachineDaemonConnectMessage {
   capabilities?: string[];
   machineMetadata?: Record<string, unknown>;
   activation?: MachineDaemonActivationConnect;
+  /** SHA-256 of the harness registry text this daemon holds from the Hub; the Hub resends it only when it differs. */
+  harnessRegistrySha256?: string;
 }
 
 export interface MachineDaemonActivationConnect {
@@ -647,7 +649,9 @@ export type MachineDaemonServerMessage =
   | MachineDaemonAuthRefreshed
   | MachineDaemonUnregistered
   | MachineDaemonShutdown
-  | { type: "machine_daemon_connected"; daemon: SerializedMachineDaemon; connectionEpoch: number; activation?: MachineDaemonActivationReceipt }
+  | { type: "machine_daemon_connected"; daemon: SerializedMachineDaemon; connectionEpoch: number; activation?: MachineDaemonActivationReceipt;
+      /** The Hub's harness registry (`agent-presets.json` text), for a daemon declaring `hub_harness_registry_v1`. */
+      harnessRegistry?: string }
   | MachineDaemonSpawnCommand
   | MachineDaemonStopCommand
   | MachineDaemonRequestResolveCommand

@@ -1,4 +1,5 @@
 import { AGENT_BOOTSTRAP_PROMPTS } from "../agent-bootstrap";
+import { harnessRegistryForConnect } from "../harness-registry-delivery";
 import { plainRecord } from "@xmatrix/protocol";
 import { machineHostnameObservation } from "../machine-hostname-observation";
 import type {
@@ -175,6 +176,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         daemon: serializedDaemon(recordValue(result.daemon, "daemon")),
         connectionEpoch: requiredPositiveInteger(result.connectionEpoch, "connectionEpoch"),
         ...(activation ? { activation: activationReceipt(activation, message.requestId) } : {}),
+        ...harnessRegistryForConnect(message),
       },
     };
   }

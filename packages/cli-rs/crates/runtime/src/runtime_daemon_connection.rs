@@ -2234,6 +2234,8 @@ async fn run_daemon_connection(
             "machine_handoff_export_v1",
             // The owner lists and reclaims this machine's git worktrees.
             "machine_worktree_action_v1",
+            // The daemon keeps the Hub's harness registry and uses it over its compiled copy.
+            "hub_harness_registry_v1",
         ],
     });
     if let Some(platform) = runtime_daemon_harness_action::daemon_platform() {
@@ -2284,6 +2286,7 @@ async fn run_daemon_connection(
             "machine_harness_login_start_cancel_v1".to_string(),
             "machine_handoff_export_v1".to_string(),
             "machine_worktree_action_v1".to_string(),
+            xmatrix_cli_core::hub_harness_registry::CAPABILITY.to_string(),
         ],
     );
     if let Some(activation) = activation.clone() {
