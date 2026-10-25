@@ -531,7 +531,7 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/agent-registrations\/profiles$/u.test(path)) return true;
   if (request.method === "GET" && path === HUB_ROUTES.agent_instances) return true;
   if (request.method === "GET" && path === "/api/channels") return true;
-  if (request.method === "GET" && /^\/api\/channels\/[^/]+\/history$/.test(path)) {
+  if (request.method === "GET" && /^\/api\/channels\/[^/]+\/(?:history|launch-context)$/.test(path)) {
     return true;
   }
   const canWriteAttachments = principal.permissions.includes(

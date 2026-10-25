@@ -11,4 +11,7 @@ export interface AgentBootstrapPrompts {
   connectedApps: string;
   workingModeAutonomous: string;
   workingModeCautious: string;
+  /** Further official texts by name, sent only to a daemon declaring
+   * `bootstrap_prompt_texts_v1`; a name it lacks uses its compiled copy. */
+  texts?: Readonly<Record<string, string>>;
 }

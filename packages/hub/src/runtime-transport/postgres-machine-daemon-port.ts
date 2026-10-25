@@ -1,4 +1,4 @@
-import { AGENT_BOOTSTRAP_PROMPTS } from "../agent-bootstrap";
+import { AGENT_BOOTSTRAP_PROMPTS, AGENT_BOOTSTRAP_PROMPTS_WITH_TEXTS, BOOTSTRAP_PROMPT_TEXTS_CAPABILITY } from "../agent-bootstrap";
 import { plainRecord } from "@xmatrix/protocol";
 import { machineHostnameObservation } from "../machine-hostname-observation";
 import type {
@@ -595,7 +595,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     }
     return result.commands.map((item) => {
       const wrapper = recordValue(item, "commands[]");
-      const command = claimedCommand(wrapper.payload);
+      const command = claimedCommand(wrapper.payload, session.capabilities);
       if (command.type === "machine_quota_probe" &&
           (!session.capabilities.includes("machine_quota_probe_v2") || command.probe.connectionEpoch !== session.connectionEpoch)) {
         throw new Error("Quota probe command does not match the capable active connection");
@@ -895,7 +895,7 @@ function serializedDaemon(value: Record<string, unknown>): SerializedMachineDaem
   };
 }
 
-function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
+function claimedCommand(value: unknown, capabilities: readonly string[]): MachineDaemonLeasedCommand {
   const payload = recordValue(value, "commands[].payload");
   const type = requiredString(payload.type, "commands[].payload.type");
   const requestId = requiredString(payload.requestId, "commands[].payload.requestId");
@@ -996,7 +996,8 @@ function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
   }
   if (type === "machine_spawn_agent") {
     return withMachineSpawnHarness({ ...payload, type, requestId,
-      bootstrapPrompts: AGENT_BOOTSTRAP_PROMPTS }) as MachineDaemonSpawnCommand;
+      bootstrapPrompts: capabilities.includes(BOOTSTRAP_PROMPT_TEXTS_CAPABILITY)
+        ? AGENT_BOOTSTRAP_PROMPTS_WITH_TEXTS : AGENT_BOOTSTRAP_PROMPTS }) as MachineDaemonSpawnCommand;
   }
   if (type === "machine_stop_agent") {
     return { ...payload, type, requestId } as MachineDaemonStopCommand;

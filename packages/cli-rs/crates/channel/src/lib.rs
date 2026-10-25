@@ -28,7 +28,9 @@ use xmatrix_cli_core::wire_compat;
 use xmatrix_cli_core::{config, http};
 
 mod read_context;
-pub use read_context::{ChannelReadContext, load_channel_read_context};
+pub use read_context::{
+    ChannelReadContext, LaunchContext, load_channel_read_context, load_launch_context,
+};
 
 const CHANNEL_FILE_ATTACHMENT_LIMIT: usize = 4;
 const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::media_cache::MEDIA_MAX_BYTES;
