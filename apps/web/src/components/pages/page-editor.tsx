@@ -38,7 +38,7 @@ import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, caretBlockAnchor, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
   sectionsKey, selectionAnchor, setBlockKind, setLink, type BlockKind, type CursorPresence, type Discussion,
-  type HeadingActions, type SectionNote,
+  type HeadingActions, type ReadCard, type SectionNote,
 } from "./page-editor-setup";
 import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
 import type { WriteAgent } from "./page-write-with";
@@ -251,7 +251,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
-  onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, focusedSection = null,
+  onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, readCard = null,
   onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readerShown = false, commentInMargin = false, onReaderChanges, onWrite, readFrom, reading,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
@@ -285,8 +285,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   headingActions?: HeadingActions;
   /** The conversation whose passage is marked, because its card is being read. */
   focusedConversationId?: string | null;
-  /** The section marked, because the card of a conversation about it is being read. */
-  focusedSection?: string | null;
+  /** The card being read in the margin: the section it is about is marked when it has no passage to mark. */
+  readCard?: ReadCard | null;
   onFocusConversation?: (conversationId: string) => void;
   /**
    * Where the margin's anchors are, from the top of the editor, whenever the
@@ -720,8 +720,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
 
   useEffect(() => {
     const current = view.current;
-    if (current) current.dispatch(current.state.tr.setMeta(discussionsKey, { focused: focusedConversationId, section: focusedSection }));
-  }, [focusedConversationId, focusedSection]);
+    if (current) current.dispatch(current.state.tr.setMeta(discussionsKey, { focused: focusedConversationId, read: readCard }));
+  }, [focusedConversationId, readCard]);
 
   useEffect(() => {
     const node = frame.current;

@@ -664,15 +664,19 @@ function currentHeading(): Plugin {
  * a bubble beside it opens the conversation where the margin does not show
  * it. Anchors are Yjs relative positions, so they follow edits; one whose
  * text is gone is not drawn. While the card of a conversation about a whole
- * section is read, that section's text is marked the same way.
+ * section is read, that section's text is marked the same way; so is the
+ * section a discussion's card stands beside once its passage is gone.
  */
 export interface Discussion { linkId: string; conversationId: string; name: string; from: unknown; to: unknown }
 
 /** The passage a comment is being written about, before it is sent; its Yjs relative positions. */
 export interface DiscussionDraft { from: unknown; to: unknown }
 
+/** The card being read in the margin: its conversation, and the section it is about or was started in. */
+export interface ReadCard { conversationId: string; blockId: string }
+
 export const discussionsKey = new PluginKey<{ discussions: Discussion[]; focused: string | null;
-  section: string | null; draft: DiscussionDraft | null; decorations: DecorationSet }>("page-discussions");
+  read: ReadCard | null; draft: DiscussionDraft | null; decorations: DecorationSet }>("page-discussions");
 
 function yMapping(state: EditorState): Map<unknown, unknown> | null {
   const sync = ySyncPluginKey.getState(state) as { binding?: { mapping: Map<unknown, unknown> } } | undefined;
@@ -692,10 +696,20 @@ function anchorPosition(state: EditorState, fragment: Y.XmlFragment, position: u
 }
 
 function discussionDecorations(state: EditorState, fragment: Y.XmlFragment, discussions: Discussion[],
-  focused: string | null, section: string | null, draft: DiscussionDraft | null,
+  focused: string | null, read: ReadCard | null, draft: DiscussionDraft | null,
   openConversation: (conversationId: string) => void): DecorationSet {
   const decorations: Decoration[] = [];
-  if (section) {
+  // The read card's passage is marked where it is in the text. A passage rewritten away leaves its card where it
+  // was, so the section there is marked instead; a card about a whole section marks that section.
+  let section = read?.blockId ?? "";
+  let passage = false;
+  for (const discussion of read ? discussions.filter((entry) => entry.conversationId === read.conversationId) : []) {
+    const from = anchorPosition(state, fragment, discussion.from);
+    const to = anchorPosition(state, fragment, discussion.to);
+    if (from !== null && to !== null && to > from) passage = true;
+    else if (from !== null) section = pageDocBlockAt(state.doc, from) || section;
+  }
+  if (section && !passage) {
     // A section runs from its heading to the next one.
     const blocks = pageDocBlocks(state.doc);
     const at = blocks.findIndex((block) => block.id === section);
@@ -736,21 +750,21 @@ function discussionOverlay(fragment: Y.XmlFragment, openConversation: (conversat
     key: discussionsKey,
     state: {
       init: (_config, state) => ({ discussions: [] as Discussion[], focused: null as string | null,
-        section: null as string | null, draft: null as DiscussionDraft | null,
+        read: null as ReadCard | null, draft: null as DiscussionDraft | null,
         decorations: DecorationSet.create(state.doc, []) }),
       apply(tr, value, _old, state) {
         const meta = tr.getMeta(discussionsKey) as { discussions?: Discussion[]; focused?: string | null;
-          section?: string | null; draft?: DiscussionDraft | null } | undefined;
+          read?: ReadCard | null; draft?: DiscussionDraft | null } | undefined;
         const discussions = meta?.discussions ?? value.discussions;
         const focused = meta && "focused" in meta ? meta.focused ?? null : value.focused;
-        const section = meta && "section" in meta ? meta.section ?? null : value.section;
+        const read = meta && "read" in meta ? meta.read ?? null : value.read;
         const draft = meta && "draft" in meta ? meta.draft ?? null : value.draft;
-        if (discussions === value.discussions && focused === value.focused && section === value.section
+        if (discussions === value.discussions && focused === value.focused && read === value.read
           && draft === value.draft && !tr.docChanged) {
           return value;
         }
-        return { discussions, focused, section, draft,
-          decorations: discussionDecorations(state, fragment, discussions, focused, section, draft, openConversation) };
+        return { discussions, focused, read, draft,
+          decorations: discussionDecorations(state, fragment, discussions, focused, read, draft, openConversation) };
       },
     },
     props: {
