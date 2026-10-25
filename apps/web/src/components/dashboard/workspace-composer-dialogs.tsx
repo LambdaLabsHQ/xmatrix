@@ -103,7 +103,9 @@ import {
   createAttachmentUploadRegistry,
   planAttachmentIntake,
 } from "./composer-attachment-intake";
-import type { AttachmentIntakeEntry } from "./composer-attachment-intake";
+import type { AbortableRequest, AttachmentIntakeEntry } from "./composer-attachment-intake";
+import { createSentUpload, uploadCancelled } from "./sent-upload";
+import type { SentUpload, SentUploadState } from "./sent-upload";
 import { prepareVideoAttachmentFile } from "./video-attachment-compression";
 import { useAttachmentDropSink } from "./composer-attachment-drop-zone";
 import type { AttachmentDropCandidate } from "./composer-attachment-drop-zone";
@@ -448,23 +450,27 @@ export const Composer = memo(function Composer({
   const slotLedgerRef = useRef(createAttachmentSlotLedger());
   const handledMentionInsertRequestIdRef = useRef<number | null>(null);
   const handledAutoFocusRequestRef = useRef(0);
-  // Set for the whole of an intake, including the reads that happen before any
-  // row exists (the desktop clipboard bridge, a new conversation's round-trip).
-  // Every source goes through beginAttachmentIntake, so no source can forget it.
+  // Set while files are inbound but have no row yet (the desktop clipboard
+  // bridge, a new conversation's round-trip). Every source goes through
+  // beginAttachmentIntake, so no source can forget it.
   const [intakeBusy, setIntakeBusy] = useState(false);
   const intakeDepthRef = useRef(0);
+  // Each row's file, so a file sent while uploading can be uploaded again from the message.
+  const uploadSourcesRef = useRef(new Map<string, { entry: AttachmentIntakeEntry<File>; original: boolean }>());
+  // Rows sent before their upload finished: their run reports to the message from here on.
+  const sentUploadsRef = useRef(new Map<string, SentUpload>());
   const uploadGateRef = useRef(boundedConcurrency(ATTACHMENT_UPLOAD_CONCURRENCY));
   const composerIdentity = draftIdentity ?? channel?.id ?? null;
   useLayoutEffect(() => setOpenComposerImageId(null), [composerIdentity]);
   const channelIdRef = useRef<string | null>(composerIdentity);
   const composerDropSinkId = useId();
-  const readingAttachment =
-    intakeBusy ||
-    pendingAttachments.some((attachment) => attachment.status !== "failed");
+  // A file still uploading goes with the message, which waits for it; only a
+  // file without a row yet would be left behind.
+  const uploadingAttachments = pendingAttachments.filter((attachment) => attachment.status !== "failed");
   const canSend =
     writable &&
-    (localDraft.trim().length > 0 || attachments.length > 0) &&
-    !readingAttachment &&
+    (localDraft.trim().length > 0 || attachments.length > 0 || uploadingAttachments.length > 0) &&
+    !intakeBusy &&
     !preparingSend &&
     !sending;
   const composerHint = useComposerHint(writable && !placeholder && localDraft.length === 0);
@@ -718,9 +724,23 @@ export const Composer = memo(function Composer({
     intakeDepthRef.current += 1;
     setIntakeBusy(true);
     setAttachmentError(null);
+    let loading = true;
+    const loaded = () => {
+      if (!loading) return;
+      loading = false;
+      intakeDepthRef.current -= 1;
+      if (intakeDepthRef.current <= 0) {
+        intakeDepthRef.current = 0;
+        setIntakeBusy(false);
+      }
+    };
     try {
       const candidates = await load();
-      return await intakeAttachmentCandidates(candidates);
+      // The rows are committed before the first await below, in the same
+      // render as the busy flag clears: there is no moment without either.
+      const intake = intakeAttachmentCandidates(candidates);
+      loaded();
+      return await intake;
     } catch (error) {
       // Drop and the file picker call this fire-and-forget, so a rejection here
       // would surface as an unhandled rejection and nothing else. Whatever rows
@@ -728,11 +748,7 @@ export const Composer = memo(function Composer({
       setAttachmentError(userErrorMessage(error, "Couldn't attach the file"));
       return 0;
     } finally {
-      intakeDepthRef.current -= 1;
-      if (intakeDepthRef.current <= 0) {
-        intakeDepthRef.current = 0;
-        setIntakeBusy(false);
-      }
+      loaded();
     }
   }
 
@@ -790,7 +806,10 @@ export const Composer = memo(function Composer({
     // Claimed before the first await, so a card removed meanwhile is already
     // dead when its task starts.
     const generation = registry.generation();
-    for (const entry of entries) registry.begin(entry.id);
+    for (const entry of entries) {
+      registry.begin(entry.id);
+      uploadSourcesRef.current.set(entry.id, { entry, original: useOriginalMedia });
+    }
 
     function failEntries(message: string) {
       if (replaces) {
@@ -818,7 +837,11 @@ export const Composer = memo(function Composer({
     // An open Channel's files are visible to its whole Space, so the scope exists before the Channel does.
     const scope = spaceVisibilityScope(spaceId);
     const uploads = entries.map((entry) =>
-      run(() => uploadAttachmentEntry(entry, scope, uploadToken, generation, useOriginalMedia)).then(
+      run(() => uploadAttachmentFile(entry, scope, uploadToken, useOriginalMedia, {
+        isLive: () => registry.isLive(entry.id, generation),
+        track: (request) => registry.trackRequest(entry.id, request),
+        onState: (patch) => updatePendingAttachment(entry.id, patch),
+      })).then(
         (attachment) => ({ ok: true as const, attachment }),
         (error: unknown) => ({ ok: false as const, error })
       )
@@ -829,11 +852,24 @@ export const Composer = memo(function Composer({
     for (const [index, upload] of uploads.entries()) {
       const entry = entries[index];
       const result = await upload;
+      const sent = sentUploadsRef.current.get(entry.id);
       // Checked here as well as inside the task: a card can be removed while an
       // upload that already finished waits its turn to commit.
       if (!registry.isLive(entry.id, generation)) {
         if (result.ok && result.attachment?.url) URL.revokeObjectURL(result.attachment.url);
+        sent?.handover.reject(uploadCancelled());
+        sentUploadsRef.current.delete(entry.id);
         clearPendingAttachment(entry.id);
+        continue;
+      }
+      // Sent with its message meanwhile: the message takes it, the draft never sees it.
+      if (sent) {
+        sentUploadsRef.current.delete(entry.id);
+        registry.settle(entry.id);
+        uploadSourcesRef.current.delete(entry.id);
+        if (!result.ok) sent.handover.reject(result.error);
+        else if (!result.attachment) sent.handover.reject(uploadCancelled());
+        else sent.handover.resolve(result.attachment);
         continue;
       }
       if (!result.ok) {
@@ -886,6 +922,15 @@ export const Composer = memo(function Composer({
     setPreparingSend(true);
     setAttachmentError(null);
     const sendScope = invocationScope;
+    // Taken in the same render that enabled Send: a file that lands while the
+    // send is prepared reaches the message, not a draft that is about to clear.
+    const sentAttachments = attachments.map((attachment) => {
+      const uploaded = { ...attachment } as ComposerChannelAttachment;
+      delete uploaded.sourceMedia;
+      return uploaded;
+    });
+    const uploads = handOverUploads();
+    let handedOver = false;
     try {
       const { body, selections } = sendDraft();
       const sourceBodyHash = selections.length ? await digestCanonicalCloneCborV1(body) : undefined;
@@ -894,69 +939,154 @@ export const Composer = memo(function Composer({
         spaceId: space?.id ?? channel?.spaceId ?? "", body, bodyHash: sourceBodyHash, revision: 1,
       }) : undefined;
       const summonIntents = body === outgoingDraft.body ? await draftIntents.readBeforeSend() : [];
-      if (invocationScopeRef.current !== sendScope) return;
+      if (invocationScopeRef.current !== sendScope) {
+        // The composer moved to another conversation, which ends its uploads.
+        for (const upload of uploads) {
+          sentUploadsRef.current.delete(upload.id);
+          upload.cancel();
+          upload.release();
+        }
+        handedOver = true;
+        return;
+      }
+      const ids = new Set(uploads.map((upload) => upload.id));
+      if (ids.size) setPendingAttachments((current) => current.filter((attachment) => !ids.has(attachment.id)));
       await onSend({
         body,
         ...(invocationSelections ? { invocationSelections } : {}),
         ...(summonIntents.length ? { summonIntents } : {}),
-        attachments: attachments.map((attachment) => {
-          const uploaded = { ...attachment } as ComposerChannelAttachment;
-          delete uploaded.sourceMedia;
-          return uploaded;
-        }),
+        attachments: sentAttachments,
+        ...(uploads.length ? { uploads } : {}),
       });
+      handedOver = true;
     } catch (error) {
       setAttachmentError(userErrorMessage(error, "Couldn't prepare the message"));
     } finally {
+      if (!handedOver) takeBackUploads(uploads);
       preparingSendRef.current = false;
       setPreparingSend(false);
     }
   }
 
+  /**
+   * The files still uploading leave the composer with the message, which
+   * shows them with their progress and is appended once they land
+   * (sent-upload.ts). Their runs carry on; the message can cancel them.
+   */
+  function handOverUploads(): SentUpload[] {
+    const registry = uploadRegistryRef.current;
+    const spaceId = channel?.spaceId ?? space?.id;
+    if (!spaceId || !token) return [];
+    const scope = spaceVisibilityScope(spaceId);
+    const uploadToken = token;
+    const sent: SentUpload[] = [];
+    for (const row of uploadingAttachments) {
+      const source = uploadSourcesRef.current.get(row.id);
+      if (!source || !registry.detach(row.id)) continue;
+      // The row's preview is the message's now; other files get a local copy to open meanwhile.
+      const previewUrl = pendingPreviewUrlsRef.current.get(row.id) ?? URL.createObjectURL(source.entry.file);
+      pendingPreviewUrlsRef.current.delete(row.id);
+      const upload = createSentUpload({
+        id: row.id,
+        preview: {
+          id: row.id, kind: row.kind, name: row.name, size: row.size,
+          mimeType: source.entry.file.type || "application/octet-stream",
+          url: previewUrl,
+        },
+        replacesId: row.replacesId,
+        state: { status: row.status as SentUploadState["status"], progress: row.progress },
+        cancelHandedOver: () => registry.cancel(row.id),
+        rerun: (hooks) => uploadAttachmentFile(source.entry, scope, uploadToken, source.original, hooks),
+      });
+      sentUploadsRef.current.set(row.id, upload);
+      sent.push(upload);
+    }
+    return sent;
+  }
+
+  /** The send did not happen: the files come back to the composer as they now stand. */
+  function takeBackUploads(sent: SentUpload[]) {
+    const ids = new Set(sent.map((upload) => upload.id));
+    if (ids.size) setPendingAttachments((current) => current.filter((attachment) => !ids.has(attachment.id)));
+    for (const upload of sent) {
+      const state = upload.state();
+      if (state.status === "uploaded") {
+        upload.release();
+        void upload.result().then((attachment) => {
+          if (upload.replacesId) {
+            onAttachmentsChange((current) => current.map((item) => item.id === upload.replacesId ? attachment : item));
+          } else appendDraftAttachment(attachment);
+        });
+        continue;
+      }
+      const live = state.status !== "failed" && sentUploadsRef.current.has(upload.id);
+      sentUploadsRef.current.delete(upload.id);
+      if (!live && upload.replacesId) {
+        // A quality change that failed leaves the draft attachment as it was.
+        upload.release();
+        continue;
+      }
+      if (live) uploadRegistryRef.current.reattach(upload.id);
+      const previewUrl = upload.preview.kind === "image" ? upload.preview.url : undefined;
+      if (previewUrl) pendingPreviewUrlsRef.current.set(upload.id, previewUrl);
+      else upload.release();
+      setPendingAttachments((current) => [...current, {
+        id: upload.id, kind: upload.preview.kind, name: upload.preview.name, size: upload.preview.size,
+        previewUrl, replacesId: upload.replacesId,
+        ...(live
+          ? { status: state.status as PendingAttachment["status"], progress: state.progress }
+          : { status: "failed" as const, progress: 0, error: "Couldn't upload the file." }),
+      }]);
+    }
+  }
+
   /** Resolves to null when the task was cancelled at one of the stage boundaries. */
-  async function uploadAttachmentEntry(
+  async function uploadAttachmentFile(
     entry: AttachmentIntakeEntry<File>,
     uploadScope: string,
     uploadToken: string,
-    generation: number,
     useOriginalMedia: boolean,
+    { isLive, track, onState }: {
+      isLive: () => boolean;
+      track: (request: AbortableRequest) => boolean;
+      onState: (patch: Partial<PendingAttachment>) => void;
+    },
   ): Promise<ChannelAttachment | null> {
-    const registry = uploadRegistryRef.current;
     // Queued behind the concurrency gate: nothing to abort, so the check is the
     // only thing standing between a removed card and an upload that still runs.
-    if (!registry.isLive(entry.id, generation)) return null;
+    if (!isLive()) return null;
 
     let uploadFile = entry.file;
     if (entry.kind === "image" && !useOriginalMedia) {
       const prepared = await prepareImageAttachmentFile(entry.file);
-      if (!registry.isLive(entry.id, generation)) return null;
+      if (!isLive()) return null;
       if (!prepared) throw new UserFacingProblem("Image must be 1 MB or smaller.");
       uploadFile = prepared;
     }
     if (entry.kind === "video" && !useOriginalMedia) {
       const controller = new AbortController();
-      if (!registry.trackRequest(entry.id, controller)) return null;
+      if (!track(controller)) return null;
       uploadFile = await prepareVideoAttachmentFile(entry.file, {
         signal: controller.signal,
-        onProgress: (progress) => updatePendingAttachment(entry.id, { status: "compressing", progress }),
+        onProgress: (progress) => onState({ status: "compressing", progress }),
       });
-      if (!registry.isLive(entry.id, generation)) return null;
+      if (!isLive()) return null;
     }
-    updatePendingAttachment(entry.id, { name: uploadFile.name || entry.name, size: uploadFile.size });
+    onState({ name: uploadFile.name || entry.name, size: uploadFile.size });
 
-    updatePendingAttachment(entry.id, { status: "uploading", progress: 4 });
+    onState({ status: "uploading", progress: 4 });
     const uploaded = await uploadChannelAttachment(
       uploadScope,
       uploadToken,
       uploadFile,
-      (progress) => updatePendingAttachment(entry.id, { progress }),
-      (request) => registry.trackRequest(entry.id, request)
+      (progress) => onState({ progress }),
+      track,
     );
     if (uploaded.kind === "video") {
       // Read the file we actually uploaded, so resized dimensions stay accurate.
       const withMetadata = await attachVideoMetadata(uploadFile, uploaded);
-      if (registry.isLive(entry.id, generation)) return withMetadata;
-    } else if (registry.isLive(entry.id, generation)) {
+      if (isLive()) return withMetadata;
+    } else if (isLive()) {
       return uploaded;
     }
     if (uploaded.url) URL.revokeObjectURL(uploaded.url);
@@ -1085,6 +1215,16 @@ export const Composer = memo(function Composer({
   }
 
   function updatePendingAttachment(id: string, patch: Partial<PendingAttachment>) {
+    const sent = sentUploadsRef.current.get(id);
+    if (sent) {
+      if (patch.status !== undefined || patch.progress !== undefined) {
+        sent.handover.update({
+          ...(patch.status && patch.status !== "failed" ? { status: patch.status } : {}),
+          ...(patch.progress !== undefined ? { progress: patch.progress } : {}),
+        });
+      }
+      return;
+    }
     setPendingAttachments((current) =>
       current.map((attachment) => (attachment.id === id ? { ...attachment, ...patch } : attachment))
     );
@@ -1111,6 +1251,7 @@ export const Composer = memo(function Composer({
     }
     uploadRegistryRef.current.settle(id);
     slotLedgerRef.current.settle(id);
+    uploadSourcesRef.current.delete(id);
     setPendingAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
 

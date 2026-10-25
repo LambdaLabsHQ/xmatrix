@@ -741,6 +741,13 @@ export function claimOutgoingClientIdForEntry(
   return matched;
 }
 
+/** The draft's files, then those still uploading, from their local copies. */
+function outgoingAttachments(message: OutgoingMessage): ChannelAttachment[] | undefined {
+  const uploading = (message.uploads ?? []).filter((upload) => !upload.replacesId).map((upload) => upload.preview);
+  const attachments = uploading.length ? [...message.attachments, ...uploading] : message.attachments;
+  return attachments.length > 0 ? attachments : undefined;
+}
+
 export function appendOutgoingTimelineItems(
   timeline: TimelineItem[],
   outgoing: OutgoingMessage[],
@@ -769,7 +776,8 @@ export function appendOutgoingTimelineItems(
       body: message.body,
       replyToMessageId: message.replyToMessageId,
       replyTo: message.replyTo,
-      attachments: message.attachments.length > 0 ? message.attachments : undefined,
+      attachments: outgoingAttachments(message),
+      ...(message.uploads?.length ? { uploads: message.uploads } : {}),
       sentAt: message.sentAt,
       face,
       own: true,
