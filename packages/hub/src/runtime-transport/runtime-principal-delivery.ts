@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { relayRuntimeCellNamed } from "../relay-authority-locator";
 import {
   LiveDeliveryRejectedError,
@@ -30,6 +31,15 @@ export const RUNTIME_CHANNEL_AGENT_PRESENCE_URL = "https://relay-runtime/interna
 /** Cells one delivery has in flight at once. */
 export const RUNTIME_DELIVERY_CONCURRENCY = 32;
 
+/**
+ * Requests one invocation may spend on live delivery, every retry included.
+ * The platform allows a paid invocation 10,000 subrequests; this leaves the
+ * rest to its other calls. A delivery past it reaches no further cell and
+ * reports what it did not reach: a temporary bound, not a promise that a
+ * larger audience is ever reached live (the next read still brings it).
+ */
+export const RUNTIME_DELIVERY_INVOCATION_BUDGET = 5_000;
+
 export type RuntimeDeliveryEnv = Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT">;
 
 /** Who one live delivery is for, as the authority named them when it published it. */
@@ -55,6 +65,31 @@ export type RuntimeLiveDeliverySelf = {
   cellName: string;
   fetch(request: Request): Promise<Response>;
 };
+
+/** What one invocation publishes from: the cell it runs in, if any, and what it has left to spend. */
+interface PublishingContext {
+  self?: RuntimeLiveDeliverySelf;
+  budget: { remaining: number };
+}
+
+const publishing = new AsyncLocalStorage<PublishingContext>();
+
+const freshBudget = () => ({ remaining: RUNTIME_DELIVERY_INVOCATION_BUDGET });
+
+/**
+ * Runs `operation` as work of this cell. Whatever it publishes, however deep in
+ * the code that commits it, serves this cell's own share locally: a call back
+ * into the cell would wait behind the event that is publishing. Work nested in
+ * the same invocation keeps its budget.
+ */
+export function runAsRuntimeCell<T>(self: RuntimeLiveDeliverySelf, operation: () => T): T {
+  return publishing.run({ self, budget: publishing.getStore()?.budget ?? freshBudget() }, operation);
+}
+
+/** Runs one invocation that is no cell's (a Hub request or a scheduled pass): its deliveries share one budget. */
+export function runAsDeliveryInvocation<T>(operation: () => T): T {
+  return publishing.run({ budget: freshBudget() }, operation);
+}
 
 interface RuntimeCellFailure {
   cellName: string;
@@ -122,39 +157,57 @@ export async function deliverToAudience(input: {
   reason?: RuntimePresenceReason;
   concurrency?: number;
 }): Promise<number> {
+  const context = publishing.getStore();
+  const self = input.self ?? context?.self;
+  const budget = context?.budget ?? freshBudget();
   const cells = [...runtimeDeliveryPlan(input.audience)]
-    .filter(([cellName]) => !(input.skipSelf && input.self?.cellName === cellName));
+    .filter(([cellName]) => !(input.skipSelf && self?.cellName === cellName));
+  const delivery = { ...input, ...(self ? { self } : {}), budget };
   const failures: RuntimeCellFailure[] = [];
+  let unspent = 0;
   let next = 0;
   const worker = async () => {
     while (next < cells.length) {
       const [cellName, share] = cells[next++]!;
-      const failure = await deliverToCell(input, cellName, share);
-      if (failure) failures.push(failure);
+      const outcome = await deliverToCell(delivery, cellName, share);
+      if (outcome === "over_budget") unspent += 1;
+      else if (outcome) failures.push(outcome);
     }
   };
   const width = Math.max(1, Math.min(input.concurrency ?? RUNTIME_DELIVERY_CONCURRENCY, cells.length));
   await Promise.all(Array.from({ length: width }, worker));
+  if (unspent > 0) {
+    failures.push({ cellName: `${unspent} cell(s)`, error: new Error("Runtime delivery budget exhausted"),
+      diagnostic: `budget=${RUNTIME_DELIVERY_INVOCATION_BUDGET} unreached=${unspent} of=${cells.length} delivery=${input.label}` });
+  }
   if (failures.length > 0) throw new RuntimeDeliveryError(failures);
   return cells.length;
 }
 
+class RuntimeDeliveryOverBudget extends Error {}
+
 async function deliverToCell(
-  input: Parameters<typeof deliverToAudience>[0],
+  input: Parameters<typeof deliverToAudience>[0] & { budget: { remaining: number } },
   cellName: RelayRuntimeOwnerCell,
   share: RuntimeCellShare,
-): Promise<RuntimeCellFailure | undefined> {
+): Promise<RuntimeCellFailure | "over_budget" | undefined> {
   let attempts = 0;
   let phase: "fetch" | "response" = "fetch";
   let url = "https://relay-runtime/unknown";
+  const local = input.self?.cellName === cellName;
   try {
     await publishWithLiveDeliveryRetry(async () => {
+      // A cell's own share is served in process; every other attempt is a subrequest.
+      if (!local) {
+        if (input.budget.remaining <= 0) throw new RuntimeDeliveryOverBudget();
+        input.budget.remaining -= 1;
+      }
       attempts += 1;
       phase = "fetch";
       const request = input.request(share);
       url = request.url;
-      const response = input.self?.cellName === cellName
-        ? await input.self.fetch(request)
+      const response = local
+        ? await input.self!.fetch(request)
         : await relayRuntimeCellNamed(input.env, cellName).fetch(request);
       phase = "response";
       if (!response.ok) {
@@ -166,6 +219,7 @@ async function deliverToCell(
     });
     return undefined;
   } catch (error) {
+    if (error instanceof RuntimeDeliveryOverBudget && attempts === 0) return "over_budget";
     return { cellName, error, diagnostic: runtimeDeliveryFailureDiagnostic({
       url, route: "principal", sourceCell: input.self?.cellName, targetCell: cellName,
       reason: input.reason, phase, attempts,

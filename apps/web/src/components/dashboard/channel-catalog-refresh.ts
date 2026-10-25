@@ -105,33 +105,33 @@ export function leasedResolveQuery(input: {
   asked: () => (channel: ChannelSnapshot) => void;
 }) {
   const sharedKey = [...input.queryKey, input.lease?.id ?? 0] as QueryKey;
-  const fetchAnswer = async (signal: AbortSignal) => {
+  /* Every read takes its place in the order it was asked, and the shared
+     answer is only ever the answer of the latest read that has finished: a
+     read asked earlier that finishes later hands the cache the answer it
+     finds there, never its own older one. */
+  const askAndCommit = async (signal: AbortSignal, client: QueryClient, fresh: boolean) => {
+    const generation = (resolveReadSerial += 1);
     const mark = input.asked();
     const result = await input.read(signal);
     result.channels.forEach(mark);
+    const committed = committedResolves(client);
+    const hash = JSON.stringify(sharedKey);
+    const held = committed.get(hash);
+    if (held && held.generation > generation) return fresh ? result : held.result;
+    committed.delete(hash);
+    if (committed.size >= 512) committed.delete(committed.keys().next().value!);
+    committed.set(hash, { generation, result });
+    if (fresh) client.setQueryData(sharedKey, result);
     return result;
   };
   if (input.fresh) {
     // A read asked after an event (a message naming a Channel nobody here
     // knew, a conversation the Hub just made) must not join one asked before
     // it and still under way: that one can answer from before the event. It
-    // is a query of its own, and its answer becomes the shared one unless a
-    // read asked later already gave that.
-    const generation = (freshResolveSerial += 1);
+    // is a query of its own; its caller gets its own answer.
     return {
-      queryKey: [...sharedKey, "fresh", generation] as QueryKey,
-      queryFn: async ({ signal, client }: { signal: AbortSignal; client: QueryClient }) => {
-        const result = await fetchAnswer(signal);
-        const written = freshResolveWritten(client);
-        const hash = JSON.stringify(sharedKey);
-        if ((written.get(hash) ?? 0) < generation) {
-          written.delete(hash);
-          if (written.size >= 512) written.delete(written.keys().next().value!);
-          written.set(hash, generation);
-          client.setQueryData(sharedKey, result);
-        }
-        return result;
-      },
+      queryKey: [...sharedKey, "fresh", (freshResolveSerial += 1)] as QueryKey,
+      queryFn: ({ signal, client }: { signal: AbortSignal; client: QueryClient }) => askAndCommit(signal, client, true),
       staleTime: 0,
       gcTime: 0,
       structuralSharing: false as const,
@@ -144,21 +144,22 @@ export function leasedResolveQuery(input: {
     Boolean(result) && (input.channelIds ?? []).every((id) => result!.channels.some((channel) => channel.id === id));
   return {
     queryKey: sharedKey,
-    queryFn: ({ signal }: { signal: AbortSignal }) => fetchAnswer(signal),
+    queryFn: ({ signal, client }: { signal: AbortSignal; client: QueryClient }) => askAndCommit(signal, client, false),
     staleTime: (query: { state: { data?: ChannelSnapshotCatalogResolveResult } }) =>
       answersAll(query.state.data) ? 30_000 : 0,
     structuralSharing: false as const,
   };
 }
 
+let resolveReadSerial = 0;
 let freshResolveSerial = 0;
-const freshResolveWrites = new WeakMap<QueryClient, Map<string, number>>();
+const committedResolveAnswers = new WeakMap<QueryClient, Map<string, { generation: number; result: ChannelSnapshotCatalogResolveResult }>>();
 
-/** The newest fresh read each shared resolve query took its answer from. */
-function freshResolveWritten(client: QueryClient): Map<string, number> {
-  let written = freshResolveWrites.get(client);
-  if (!written) freshResolveWrites.set(client, written = new Map());
-  return written;
+/** The latest-asked finished answer of each shared resolve query. */
+function committedResolves(client: QueryClient) {
+  let committed = committedResolveAnswers.get(client);
+  if (!committed) committedResolveAnswers.set(client, committed = new Map());
+  return committed;
 }
 
 export interface ChannelCatalogChangeDetail {

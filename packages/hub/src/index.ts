@@ -69,6 +69,7 @@ export {
   RelayUserPreferenceAuthority,
 } from "./retained-fact-namespaces";
 export { RelayRuntimeLive } from "./relay-runtime";
+import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 export { DeviceAuthBroker } from "./device-auth";
 import { registerIndexRoutesAdmin } from "./index-routes-admin";
 import { registerIndexRoutesAuthSpace } from "./index-routes-auth-space";
@@ -147,15 +148,16 @@ registerFaceRoutes(app);
 registerAccountDeletionRoutes(app);
 
 export default {
-  fetch: async (request: Request, env: Env, executionCtx: ExecutionContext) => {
+  // An invocation's live deliveries share one subrequest budget (runtime-principal-delivery.ts).
+  fetch: (request: Request, env: Env, executionCtx: ExecutionContext) => runAsDeliveryInvocation(async () => {
     countAuthMetricsIn(env.DIAGNOSTICS_AE);
     try {
       return await (redirectInsecureRequest(request) ?? app.fetch(request, env, executionCtx));
     } finally {
       executionCtx.waitUntil(sendErrorReports());
     }
-  },
-  scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => {
+  }),
+  scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => runAsDeliveryInvocation(() => {
     const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
     run("Account deletion maintenance", () => maintainAccountDeletions(env));
@@ -167,6 +169,6 @@ export default {
     for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
       run(`${provider} lifecycle maintenance`, () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }));
     }
-  },
+  }),
   queue: (batch: MessageBatch<unknown>) => ackRetiredExportQueue(batch),
 } satisfies ExportedHandler<Env>;

@@ -33,13 +33,15 @@ export class PostgresHumanPort implements HumanSocketBackend {
 
   constructor(private readonly dependencies: PostgresHumanPortDependencies) {}
 
-  async authenticate(message: { token: string; requestId?: string }) {
+  async authenticate(message: { token: string; requestId?: string }, admit?: (ownerUserId: string) => void) {
     // Only a refused token asks the client to sign in again; an outage while
     // checking it stays an outage.
     const user = await this.dependencies.authenticate(message.token).catch((error: unknown) => {
       throw error instanceof InvalidAuthTokenError ? new RuntimeClientOperationError("human_auth_invalid") : error;
     });
     if (user.agentRun) throw new RuntimeClientOperationError("human_auth_invalid");
+    // A socket in a cell not its account's is refused before it is counted.
+    admit?.(user.id);
     // Refused after the token check, which is local, and before the session's
     // presence fanout, which is what a redialling client would otherwise cost.
     if (this.dependencies.admitConnect && !await this.dependencies.admitConnect(user.id)) {

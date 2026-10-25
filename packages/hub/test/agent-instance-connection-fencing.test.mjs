@@ -279,3 +279,26 @@ test("a rejected new handshake closes only that socket and preserves a healthy p
   assert.equal(transport.session(healthy).run.instanceId, "instance");
   assert.equal(f.state.instanceStatus, "online");
 });
+
+test("a handshake refused for another owner's cell claims nothing, so the owner's live connection keeps its version", async () => {
+  const f = fixture();
+  const healthy = f.session(await f.port.authenticate(f.message));
+  const claimed = f.state.instanceVersion;
+  const commands = f.commands.length;
+  const misrouted = new AgentInstanceRuntimeTransport(f.port, 1000, undefined, undefined, false, () => "foreign_cell");
+  const socket = new Socket();
+  misrouted.accept(socket);
+  await misrouted.handleFrame(socket, JSON.stringify({ ...f.message, requestId: "misrouted" }));
+  assert.equal(misrouted.session(socket), undefined);
+  assert.equal(socket.sent.at(-1).failure.code, "runtime_cell_foreign");
+  assert.equal(f.state.instanceVersion, claimed);
+  assert.equal(f.commands.length, commands, "no connect was claimed for the refused socket");
+  assert.equal((await f.port.refresh("test-token", healthy)).ownerUserId, "owner", "the live connection is not fenced");
+  // A socket that named no owner is told to upgrade, and claims nothing either.
+  const ownerless = new AgentInstanceRuntimeTransport(f.port, 1000, undefined, undefined, false, () => "upgrade_required");
+  const legacy = new Socket();
+  ownerless.accept(legacy);
+  await ownerless.handleFrame(legacy, JSON.stringify({ ...f.message, requestId: "ownerless" }));
+  assert.equal(ownerless.session(legacy), undefined);
+  assert.equal(f.state.instanceVersion, claimed);
+});

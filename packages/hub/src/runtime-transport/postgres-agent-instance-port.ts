@@ -264,8 +264,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     return await_.call(this.dependencies.signals, binding, timeoutMs);
   }
 
-  async authenticate(message: AgentInstanceConnectMessage): Promise<AgentInstanceAuthorityAuthentication> {
-    const binding = await this.authenticationBinding(message.token, message);
+  async authenticate(message: AgentInstanceConnectMessage, admit?: (ownerUserId: string) => void): Promise<AgentInstanceAuthorityAuthentication> {
+    const binding = await this.authenticationBinding(message.token, message, undefined, admit);
     return {
       principal: binding.principal,
       run: binding.run,
@@ -485,6 +485,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     token: string,
     connectMessage?: AgentInstanceConnectMessage,
     refreshSession?: Readonly<AgentInstanceRuntimeSession>,
+    admit?: (ownerUserId: string) => void,
   ): Promise<{
     user: AuthUser;
     principal: AgentInstanceRunPrincipal;
@@ -503,6 +504,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     }
     if (!user.agentRun) throw new RuntimeClientOperationError("agent_run_credential_required");
     const principal = runPrincipal(user.agentRun);
+    // A socket in a cell not its owner's is refused before it claims the Instance.
+    admit?.(principal.ownerUserId);
     const response = await queryAgentInstanceRun(this.dependencies.runtime, {
       runId: principal.runId,
       ownerUserId: principal.ownerUserId,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { withRegistrationQuota } from "@xmatrix/protocol";
 import { projectRegistrationQuota } from "../src/registration-quota-presentation.ts";
-import { overlayChannelsWithLiveAgentPresence } from "../src/runtime-transport/agent-presence-snapshot.ts";
+import { overlayLiveInstances } from "./support/live-agent-overlay.mjs";
 import { createProductionRelayRuntimeProductPortFactory } from "../src/runtime-transport/production-product-port-factory.ts";
 import { AgentInstanceRuntimeTransport } from "../src/runtime-transport/agent-instance-port.ts";
 
@@ -29,7 +29,7 @@ test("different Channel identities read one tuple quota; stale samples cannot re
       observed_at: now, expires_at: new Date(Date.now() + 60_000).toISOString(), windows_json: [{ label: "5h", usedPercent: 12 }] }];
   } }) };
   await projectRegistrationQuota(database, channels, "read");
-  const projected = overlayChannelsWithLiveAgentPresence(channels, channels.map(c => snapshot(c.id)));
+  const projected = overlayLiveInstances(channels, channels.map(c => snapshot(c.id)));
   for (const c of projected.slice(0, 2)) {
     assert.equal(c.memberPresence[c.id].usage.quotaUsages[0].percent, 12);
     assert.equal(c.memberPresence[c.id].instances[0].usage.totalTokens, 3);
@@ -173,7 +173,7 @@ test("usage-limit holds reach catalog and member presentation without a fabricat
     observed_at: now, expires_at: new Date(Date.now() + 60_000).toISOString(), windows_json: null,
   }] }) };
   await projectRegistrationQuota(database, channels, "held-read");
-  const [live] = overlayChannelsWithLiveAgentPresence(channels, [snapshot("held")]);
+  const [live] = overlayLiveInstances(channels, [snapshot("held")]);
   assert.equal(live.memberPresence.held.usage.quotaState, "exhausted");
   assert.equal(live.memberPresence.held.instances[0].usage.quotaState, "exhausted");
   assert.equal(live.memberPresence.held.usage.quotaUsages[0].label, undefined);

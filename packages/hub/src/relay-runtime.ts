@@ -35,6 +35,7 @@ import {
   type RelayRuntimeOwnerCell,
 } from "./runtime-transport/runtime-cell-locator";
 import type { RuntimeSocketAdmission } from "./runtime-transport/runtime-socket-admission";
+import { runAsRuntimeCell, type RuntimeLiveDeliverySelf } from "./runtime-transport/runtime-principal-delivery";
 import { legacyClientCompatibilityAdmissionEnabled } from "./client-compatibility-gate";
 import { RELAY_RUNTIME_HUMAN_PRESENCE_PATH } from "./runtime-transport/human-presence-fanout";
 import { RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH, RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH } from "./product-agent-model-effort";
@@ -150,9 +151,15 @@ const RELAY_RUNTIME_OWNER_CELL_KEY = "runtime-owner-cell";
 
 /** The sole live relay runtime Durable Object implementation. */
 export class RelayRuntimeLive extends DurableObject<Env> {
-  private readonly productAdapter: RelayRuntimeProductCallbackAdapter | undefined;
+  /** Built once the cell knows whose it is; every event waits for that. */
+  private productAdapter: RelayRuntimeProductCallbackAdapter | undefined;
   /** Set when this object is a user's own cell: the only cells that hold product sockets. */
   private ownerCell: RelayRuntimeOwnerCell | undefined;
+  /** This cell as a publisher; it takes the owner's name once the cell learns whose it is. */
+  private readonly deliverySelf: RuntimeLiveDeliverySelf = {
+    cellName: RELAY_RUNTIME_SELECTED_CELL,
+    fetch: (request: Request) => this.fetch(request),
+  };
   private readonly machineDaemonWakeSignals = new MachineDaemonWakeSignals();
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -161,39 +168,39 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     // this object (and without ending its hibernation), so a dead socket is
     // found in seconds and an idle one costs nothing.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG));
-    const productFactory = relayRuntimeProductFactoryFromEnv(
-      env,
-      (task) => ctx.waitUntil(task),
-      {
-        cellName: () => this.ownerCell ?? RELAY_RUNTIME_SELECTED_CELL,
-        fetch: request => this.fetch(request),
-      },
-      ctx.storage,
-    );
-    this.productAdapter = productFactory
-      ? createRelayRuntimeProductAdapter(ctx, productFactory, {
-          allowLegacyProtocol: legacyClientCompatibilityAdmissionEnabled(env),
-          admit: (ownerUserId) => this.admit(ownerUserId),
-        })
-      : undefined;
-    for (const socket of this.ctx.getWebSockets()) {
-      if (this.productAdapter?.owns(socket)) continue;
-      // Product-domain sockets are restored (or closed) by the product adapter.
-      // Do not treat an expired-but-live Machine Daemon attachment as a generic
-      // Runtime route failure; that immediately drops hub control after wake.
-      if (isProductHibernationAttachment(socket.deserializeAttachment())) continue;
-      socket.close(1008, "Invalid hibernation attachment");
-    }
     ctx.blockConcurrencyWhile(async () => {
       const stored = await ctx.storage.get(RELAY_RUNTIME_OWNER_CELL_KEY);
-      if (isRelayRuntimeOwnerCell(stored)) this.ownerCell = stored;
-      // Sockets came back from hibernation before the cell knew whose it is.
-      this.productAdapter?.refuseForeignSockets((ownerUserId) => this.admit(ownerUserId));
+      if (isRelayRuntimeOwnerCell(stored)) this.ownerCell = this.deliverySelf.cellName = stored;
+      // Sockets come back from hibernation only once the cell knows whose it
+      // is: each is admitted as it is restored, or closed before it is served.
+      const productFactory = relayRuntimeProductFactoryFromEnv(
+        env,
+        (task) => ctx.waitUntil(task),
+        {
+          cellName: () => this.ownerCell ?? RELAY_RUNTIME_SELECTED_CELL,
+          fetch: request => this.fetch(request),
+        },
+        ctx.storage,
+      );
+      this.productAdapter = productFactory
+        ? createRelayRuntimeProductAdapter(ctx, productFactory, {
+            allowLegacyProtocol: legacyClientCompatibilityAdmissionEnabled(env),
+            admit: (ownerUserId) => this.admit(ownerUserId),
+          })
+        : undefined;
+      for (const socket of this.ctx.getWebSockets()) {
+        if (this.productAdapter?.owns(socket)) continue;
+        // Product-domain sockets are restored (or closed) by the product adapter.
+        // Do not treat an expired-but-live Machine Daemon attachment as a generic
+        // Runtime route failure; that immediately drops hub control after wake.
+        if (isProductHibernationAttachment(socket.deserializeAttachment())) continue;
+        socket.close(1008, "Invalid hibernation attachment");
+      }
     });
   }
 
   async fetch(request: Request): Promise<Response> {
-    return withRuntimeDeliveryIngress(runtimeDeliveryFetchIngress(request), async () => {
+    return this.asCell(runtimeDeliveryFetchIngress(request), async () => {
       try {
         return await this.routeFetch(request);
       } catch (error) {
@@ -497,7 +504,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    return withRuntimeDeliveryIngress("socket_message", async () => {
+    return this.asCell("socket_message", async () => {
       if (!this.productAdapter?.owns(socket)) {
         socket.close(1008, "Runtime accepts only product sockets");
         return;
@@ -507,14 +514,14 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   async webSocketClose(socket: WebSocket, code?: number, reason?: string, wasClean?: boolean): Promise<void> {
-    return withRuntimeDeliveryIngress("socket_close", async () => {
+    return this.asCell("socket_close", async () => {
       if (!this.productAdapter?.owns(socket)) return;
       await this.productAdapter.webSocketClose(socket, code, reason, wasClean);
     });
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
-    return withRuntimeDeliveryIngress("socket_error", async () => {
+    return this.asCell("socket_error", async () => {
       if (this.productAdapter?.owns(socket)) {
         await this.productAdapter.webSocketError(socket);
         return;
@@ -523,10 +530,19 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Handles one event as this cell's work: what it publishes, however deep in
+   * the code that commits it, serves this cell's own sockets locally instead
+   * of calling back into the cell, where it would wait behind this event.
+   */
+  private asCell<T>(ingress: Parameters<typeof withRuntimeDeliveryIngress>[0], operation: () => Promise<T>): Promise<T> {
+    return withRuntimeDeliveryIngress(ingress, () => runAsRuntimeCell(this.deliverySelf, operation));
+  }
+
   /** The Worker names the owner cell it routed a socket to; remember it. */
   private async learnOwnerCell(header: string | null): Promise<void> {
     if (!isRelayRuntimeOwnerCell(header) || this.ownerCell === header) return;
-    this.ownerCell = header;
+    this.ownerCell = this.deliverySelf.cellName = header;
     await this.ctx.storage.put(RELAY_RUNTIME_OWNER_CELL_KEY, header);
   }
 

@@ -5,11 +5,8 @@ import * as machine from "../src/runtime-transport/machine-daemon-port.ts";
 import * as human from "../src/runtime-transport/human-port.ts";
 import * as agent from "../src/runtime-transport/agent-instance-port.ts";
 import * as adapter from "../src/runtime-transport/relay-runtime-product-adapter.ts";
-import {
-  liveAgentSessionSnapshots,
-  overlayChannelsWithLiveAgentPresence,
-} from "../src/runtime-transport/agent-presence-snapshot.ts";
-import { agentInstanceAttachment, AttachedSocket } from "./support/runtime-transport.mjs";
+import { createProductionRelayRuntimeProductPortFactory } from "../src/runtime-transport/production-product-port-factory.ts";
+import { agentInstanceAttachment, AttachedSocket, socketFrame } from "./support/runtime-transport.mjs";
 
 // Incident 2026-10-01: a wedged daemon's Instances kept their own sockets open
 // and kept reporting idle, so every reader showed them idle while nothing sent
@@ -54,61 +51,84 @@ function silentAuthority(capabilities) {
   };
 }
 
+/**
+ * One cell's Runtime product over these sockets, its presence reports
+ * published as production publishes them. Records what each person is sent.
+ */
 function product(sockets) {
   const presenceChanges = [];
+  const frames = [];
+  const published = [];
+  const publication = createProductionRelayRuntimeProductPortFactory({}, {
+    readChannel: async () => ({ channel: catalogChannel(), openChannelHumanMemberIdsBySpace: { space: ["user:owner-1", "user:viewer"] } }),
+    readViewers: async () => ["owner-1", "viewer"],
+    readOwnerQuota: async () => [],
+    readQuota: async () => undefined,
+    analytics: { writeDataPoint() {} },
+    readHistory: async () => { throw Error("unexpected history"); },
+  });
   const runtime = adapter.createRelayRuntimeProductAdapter({ getWebSockets: () => sockets }, {
     human: () => silentAuthority(human.HUMAN_AUTHORITY_REQUIRED_CAPABILITIES),
-    agentInstance: () => silentAuthority(agent.AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES),
+    agentInstance: () => ({ ...silentAuthority(agent.AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES), async execute() {} }),
     machineDaemon: () => silentAuthority(machine.MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES),
     onAgentPresenceChange: (input) => {
       presenceChanges.push({ reason: input.reason, reachable: input.machineReachable?.(input.session) });
+      const report = publication.onAgentPresenceChange({ ...input,
+        deliver: (userId, frame) => frames.push({ userId, frame }),
+        deliverAgentPresence: (userId, _channelId, card, channel) => {
+          if (card) frames.push({ userId, frame: card });
+          if (channel) frames.push({ userId, frame: channel });
+        },
+        deliverPresenceChannel: (userId, channel) => frames.push({ userId, frame: channel }),
+      });
+      published.push(report);
+      return report;
     },
   });
-  return { runtime, presenceChanges };
+  // The Instance reports what it is doing, as it does over its socket.
+  const report = (status) => runtime.webSocketMessage(sockets[0], socketFrame("presence_update", { status }));
+  return { runtime, presenceChanges, frames, report, settled: () => Promise.all(published) };
 }
 
-function shown(runtime) {
-  const sessions = runtime.liveAgentSessions();
-  const [channel] = overlayChannelsWithLiveAgentPresence(
-    [catalogChannel(sessions)],
-    sessions,
-  );
-  const instance = Object.values(channel.memberPresence ?? {})
-    .flatMap((presence) => presence.instances ?? [])[0];
-  return {
-    status: instance?.status,
-    offlineReason: instance?.offlineReason,
-    instance: instance?.status,
-  };
+/** How the last card a person was sent shows the Instance. */
+function shown(frames, userId = "owner-1") {
+  const card = frames.filter((sent) => sent.userId === userId && sent.frame.type === "enhanced_presence").at(-1);
+  return { status: card?.frame.agent.status, offlineReason: card?.frame.agent.offlineReason };
 }
 
-test("an Instance whose daemon is connected is shown as it reports", () => {
-  const { runtime } = product([new AttachedSocket(instanceAttachment()), new AttachedSocket(daemonAttachment())]);
-  assert.deepEqual(shown(runtime), { status: "idle", offlineReason: undefined, instance: "idle" });
+test("an Instance whose daemon is connected is shown as it reports", async () => {
+  const { report, frames } = product([new AttachedSocket(instanceAttachment()), new AttachedSocket(daemonAttachment())]);
+  await report("idle");
+  assert.deepEqual(shown(frames), { status: "idle", offlineReason: undefined });
+  assert.deepEqual(shown(frames, "viewer"), { status: "idle", offlineReason: undefined });
 });
 
 test("an Instance whose daemon disconnected is shown offline, and readers are told", async () => {
   const daemonSocket = new AttachedSocket(daemonAttachment());
-  const { runtime, presenceChanges } = product([new AttachedSocket(instanceAttachment()), daemonSocket]);
-  presenceChanges.length = 0;
+  const { runtime, presenceChanges, frames, settled } = product([new AttachedSocket(instanceAttachment()), daemonSocket]);
 
   await runtime.webSocketClose(daemonSocket, 1006, "", false);
+  await settled();
 
-  assert.deepEqual(shown(runtime), { status: "offline", offlineReason: "machine_offline", instance: "offline" });
   assert.deepEqual(presenceChanges, [{ reason: "update", reachable: false }]);
+  for (const userId of ["owner-1", "viewer"]) {
+    assert.deepEqual(shown(frames, userId), { status: "offline", offlineReason: "machine_offline" });
+  }
 });
 
-test("an Instance with no daemon at all is shown offline", () => {
-  const { runtime } = product([new AttachedSocket(instanceAttachment())]);
-  assert.equal(shown(runtime).status, "offline");
+test("an Instance with no daemon at all is shown offline", async () => {
+  const { report, frames } = product([new AttachedSocket(instanceAttachment())]);
+  await report("idle");
+  assert.deepEqual(shown(frames), { status: "offline", offlineReason: "machine_offline" });
 });
 
 test("a quiet connected daemon stays reachable even with the retired ping capability", async () => {
   const longAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   for (const capabilities of [[], ["machine_liveness_ping_v1"]]) {
     const daemonSocket = new AttachedSocket(daemonAttachment({ lastSeenAt: longAgo, capabilities }));
-    const { runtime, presenceChanges } = product([new AttachedSocket(instanceAttachment()), daemonSocket]);
-    assert.deepEqual(shown(runtime), { status: "idle", offlineReason: undefined, instance: "idle" });
+    const { runtime, presenceChanges, frames, report } = product([new AttachedSocket(instanceAttachment()), daemonSocket]);
+    await report("idle");
+    assert.deepEqual(shown(frames), { status: "idle", offlineReason: undefined });
     presenceChanges.length = 0;
     await runtime.webSocketMessage(daemonSocket, JSON.stringify({ type: "ping", requestId: "p-1" }));
     assert.deepEqual(presenceChanges, [], "an optional old-client ping is not a reachability transition");
@@ -118,14 +138,15 @@ test("a quiet connected daemon stays reachable even with the retired ping capabi
 
 test("a daemon socket error pushes machine-offline presence", async () => {
   const daemonSocket = new AttachedSocket(daemonAttachment());
-  const { runtime, presenceChanges } = product([new AttachedSocket(instanceAttachment()), daemonSocket]);
-  presenceChanges.length = 0;
+  const { runtime, presenceChanges, frames, settled } = product([new AttachedSocket(instanceAttachment()), daemonSocket]);
   await runtime.webSocketError(daemonSocket);
-  assert.equal(shown(runtime).offlineReason, "machine_offline");
+  await settled();
+  assert.deepEqual(shown(frames), { status: "offline", offlineReason: "machine_offline" });
   assert.deepEqual(presenceChanges, [{ reason: "update", reachable: false }]);
 });
 
-test("a reconnected daemon brings its Instances back to their reported status", async () => {
+test("a reconnected daemon makes its route reachable again, and says so", async () => {
+  const edges = [];
   const transport = new machine.MachineDaemonRuntimeTransport({
     ...silentAuthority(machine.MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES),
     async authenticate() {
@@ -142,13 +163,9 @@ test("a reconnected daemon brings its Instances back to their reported status", 
         },
       };
     },
-  });
-  const session = instanceAttachment().session;
-  const snapshot = () => liveAgentSessionSnapshots([session], undefined, (target) =>
-    transport.isRouteReachable(target))[0];
+  }, false, undefined, (identity) => edges.push(transport.isRouteReachable(identity)));
 
-  assert.equal(overlayChannelsWithLiveAgentPresence([catalogChannel([snapshot()])], [snapshot()])[0]
-    .memberPresence["instance-1"].instances[0].status, "offline");
+  assert.equal(transport.isRouteReachable(route), false);
 
   const socket = new AttachedSocket();
   transport.accept(socket);
@@ -158,21 +175,24 @@ test("a reconnected daemon brings its Instances back to their reported status", 
     capabilities: ["machine_liveness_ping_v1"],
   }));
 
-  assert.equal(overlayChannelsWithLiveAgentPresence([catalogChannel([snapshot()])], [snapshot()])[0]
-    .memberPresence["instance-1"].instances[0].status, "idle");
+  // The adapter re-publishes the route's Instances on every edge, as the tests above see it do.
+  assert.deepEqual(edges, [true]);
   assert.equal(transport.isRouteReachable({ ...route, hostId: "other-host" }), true,
     "hostname is only an observation");
   assert.equal(transport.isRouteReachable({ ...route, machineId: "other-machine" }), false);
   assert.equal(transport.isRouteReachable({ ...route, ownerUserId: "other-owner" }), false);
 });
 
-test("channel views project the same offline Instance, and keep it in the Channel", () => {
-  const session = instanceAttachment().session;
-  const [snapshot] = liveAgentSessionSnapshots([session], undefined, () => false);
-  const [channel] = overlayChannelsWithLiveAgentPresence([catalogChannel([snapshot])], [snapshot]);
-  const [instance] = channel.memberPresence["instance-1"].instances;
-  assert.equal(instance.status, "offline");
-  assert.equal(instance.offlineReason, "machine_offline");
+test("channel views project the same offline Instance, and keep it in the Channel", async () => {
+  const { report, frames } = product([new AttachedSocket(instanceAttachment())]);
+  await report("idle");
+  const views = frames.filter(({ frame }) => frame.type === "channel_updated");
+  assert.deepEqual(views.map(({ userId }) => userId), ["owner-1", "viewer"]);
+  for (const { frame } of views) {
+    const [instance] = frame.channel.memberPresence["instance-1"].instances;
+    assert.equal(instance.status, "offline");
+    assert.equal(instance.offlineReason, "machine_offline");
+  }
 });
 
 test("claiming commands on a closed socket evicts it and persists the route offline", async () => {
@@ -218,10 +238,12 @@ test("a failed command send evicts the route and publishes offline without a tim
   assert.deepEqual(disconnects, [machine.MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver.code]);
 });
 
-function catalogChannel(sessions) {
-  return { id: sessions[0]?.channelId ?? "channel-1", memberPresence: Object.fromEntries(sessions.map(session => [session.instanceId, {
-    kind: "agent", label: "Claude", registration: { ownerUserId: route.ownerUserId, machineId: route.machineId, harness: "claude" },
-    instances: [{ id: session.instanceId, channelId: session.channelId, channelInstanceId: session.channelInstanceId,
-      connectedAt: session.connectedAt, lastSeenAt: session.lastSeenAt, status: "idle" }],
-  }])) };
+function catalogChannel() {
+  const { session } = instanceAttachment();
+  return { id: session.run.channelId, spaceId: "space", name: "channel", mode: "open",
+    createdAt: session.connectedAt, updatedAt: session.connectedAt, memberPresence: { [session.run.instanceId]: {
+      kind: "agent", label: "Claude", registration: { ownerUserId: route.ownerUserId, machineId: route.machineId, harness: "claude" },
+      instances: [{ id: session.run.instanceId, channelId: session.run.channelId, channelInstanceId: session.run.channelInstanceId,
+        connectedAt: session.connectedAt, lastSeenAt: session.lastSeenAt, status: "idle" }],
+    } } };
 }

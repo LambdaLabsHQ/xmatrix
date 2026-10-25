@@ -79,7 +79,8 @@ import {
   overlayAgentPresenceOnChannel,
   serializeAgentFromSession,
 } from "../src/runtime-transport/agent-instance-live-presentation.ts";
-import { agentMessagePresentationForLiveSnapshot, overlayChannelsWithLiveAgentPresence } from "../src/runtime-transport/agent-presence-snapshot.ts";
+import { agentMessagePresentationForLiveSnapshot } from "../src/runtime-transport/agent-presence-snapshot.ts";
+import { overlayLiveInstances } from "./support/live-agent-overlay.mjs";
 import {
   channelForSharedPresenceFanout,
 } from "../src/runtime-transport/human-live-presence.ts";
@@ -652,7 +653,7 @@ test("live overlay does not resurrect Instances Authority already dropped", () =
     updatedAt: "2026-07-30T07:00:00.000Z",
     memberPresence: {},
   };
-  const [overlaid] = overlayChannelsWithLiveAgentPresence([channel], [{
+  const [overlaid] = overlayLiveInstances([channel], [{
     ownerUserId: "user-1",
     agentId: "agent-1",
     agentName: "Codex",
@@ -727,7 +728,7 @@ test("registration catalog and live presence retain one card per Instance throug
     presentation: { model: "claude", gitBranch: "fix-presence" },
   }));
   for (let refresh = 0; refresh < 2; refresh++) {
-    [channel] = overlayChannelsWithLiveAgentPresence([channel], sessions);
+    [channel] = overlayLiveInstances([channel], sessions);
     const instances = Object.values(channel.memberPresence).flatMap(p => p.instances);
     assert.equal(instances.length, 2);
     assert.deepEqual(instances.map(i => i.id).sort(), ["instance-3", "instance-4"]);

@@ -20,7 +20,7 @@ import {
   type AgentInstanceConnectionPort,
 } from "../connections/agent-instance/controller";
 import { RuntimeClientOperationError, type RuntimeFailureStage } from "./runtime-operation-failure";
-import type { RuntimeSocketAdmit } from "./runtime-socket-admission";
+import { admissionGate, closedIfRefused, refuseConnect, RuntimeSocketRefused, type RuntimeSocketAdmit } from "./runtime-socket-admission";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
 import {
   parseAgentInstanceHibernationAttachment,
@@ -163,7 +163,11 @@ export interface AgentInstanceSocketBackend {
     binding: AgentInstanceControlSwitchBinding,
     timeoutMs: number,
   ): Promise<AgentInstanceControlSwitchResult>;
-  authenticate(message: AgentInstanceConnectMessage): Promise<AgentInstanceAuthorityAuthentication>;
+  /**
+   * `admit` is called once the credential names its Run's owner, before the
+   * connect claims the Instance, and throws when this cell may not hold it.
+   */
+  authenticate(message: AgentInstanceConnectMessage, admit?: (ownerUserId: string) => void): Promise<AgentInstanceAuthorityAuthentication>;
   refresh(token: string, session: Readonly<AgentInstanceRuntimeSession>): Promise<AgentInstanceRunPrincipal>;
   execute(
     session: Readonly<AgentInstanceRuntimeSession>,
@@ -310,6 +314,8 @@ export class AgentInstanceRuntimeTransport {
       ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
       return true;
     }
+    // A socket this cell may not hold is closed before it replaces anything.
+    if (closedIfRefused(ws, this.admit, attachment.session.principal.ownerUserId)) return true;
     if (this.hasNewerConnection(attachment.session.run)) {
       ws.close(1000, "Replaced by newer authenticated connection");
       return true;
@@ -339,15 +345,6 @@ export class AgentInstanceRuntimeTransport {
     return Array.from(this.sockets.entries(), ([, session]) => session);
   }
 
-  /** Close every Instance socket this cell may not hold (human-port.ts `refuseForeignSockets`). */
-  refuseForeignSockets(admit: RuntimeSocketAdmit): void {
-    for (const [socket, session] of this.sockets.entries()) {
-      const admission = admit(session.principal.ownerUserId);
-      if (admission === "admitted") continue;
-      if (admission === "upgrade_required") socket.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
-      else socket.close(1008, "Runtime cell is not this account's");
-    }
-  }
 
   /**
    * Push one committed channel message to every live Agent Instance bound to
@@ -696,18 +693,19 @@ export class AgentInstanceRuntimeTransport {
     let setupComplete = false;
     try {
       await this.sockets.answerOperation(ws, message.requestId, "Agent session request could not be completed", async () => {
-        const authentication = await this.backend.authenticate(message);
-        failureStage = "relay.validate_binding";
-        assertRunBinding(message, authentication);
-        const admission = this.admit?.(authentication.principal.ownerUserId) ?? "admitted";
-        if (admission === "upgrade_required") {
-          this.sockets.send(ws, { type: "error", requestId: message.requestId, message: "Client upgrade required" });
-          this.sockets.remove(ws);
+        const admit = admissionGate(this.admit);
+        let authentication: AgentInstanceAuthorityAuthentication;
+        try {
+          authentication = await this.backend.authenticate(message, admit);
+          admit(authentication.principal.ownerUserId);
+        } catch (error) {
+          if (!(error instanceof RuntimeSocketRefused)) throw error;
           setupComplete = true;
-          ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
+          refuseConnect(this.sockets, ws, message.requestId, error.admission, "Agent session request could not be completed");
           return;
         }
-        if (admission === "foreign_cell") throw new RuntimeClientOperationError("runtime_cell_foreign");
+        failureStage = "relay.validate_binding";
+        assertRunBinding(message, authentication);
         if (this.hasNewerConnection(authentication.run)) {
           throw new RuntimeClientOperationError("agent_connection_superseded");
         }

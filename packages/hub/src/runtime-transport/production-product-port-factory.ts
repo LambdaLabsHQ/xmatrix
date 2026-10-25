@@ -53,6 +53,7 @@ import {
 } from "./channel-agent-presence-delivery";
 import {
   deliverToAudience,
+  runAsRuntimeCell,
   RUNTIME_CHANNEL_AGENT_PRESENCE_URL,
   runtimeJsonRequest,
 } from "./runtime-principal-delivery";
@@ -166,15 +167,28 @@ export function createProductionRelayRuntimeProductPortFactory(
     return { quota, read: true };
   };
 
+  /* Each call of a port runs as this cell's work, so what it publishes, however
+     deep in the code that commits it, serves this cell's own sockets locally. */
+  const runtimeSelf = options.runtimeSelf;
+  const inCell = <Port extends object>(port: Port): Port => runtimeSelf ? new Proxy(port, {
+    get(target, property, receiver) {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => runAsRuntimeCell(
+        { cellName: runtimeSelf.cellName(), fetch: (request) => runtimeSelf.fetch(request) },
+        () => (value as (...values: unknown[]) => unknown).apply(target, args));
+    },
+  }) : port;
+
   return {
-    human: () => PostgresHumanPort.fromEnv({ env }),
-    machineDaemon: (terminateInstance, quotaChanged) => PostgresMachineDaemonPort.fromEnv({
+    human: () => inCell(PostgresHumanPort.fromEnv({ env })),
+    machineDaemon: (terminateInstance, quotaChanged) => inCell(PostgresMachineDaemonPort.fromEnv({
       env, terminateInstance,
       ...(options.runtimeSelf ? { runtimeSelf: options.runtimeSelf } : {}),
       ...(quotaChanged ? { quotaChanged } : {}),
       ...(options.scheduleBackground ? { keepAlive: options.scheduleBackground } : {}),
-    }),
-    agentInstance: () => PostgresAgentInstancePort.fromEnv({
+    })),
+    agentInstance: () => inCell(PostgresAgentInstancePort.fromEnv({
       env,
       history: new AgentChannelHistory({ read: readHistory, serializeAgent: serializeAgentFromSession }),
       signals,
@@ -183,7 +197,7 @@ export function createProductionRelayRuntimeProductPortFactory(
         : {}),
       ...(options.runtimeSelf ? { runtimeSelf: options.runtimeSelf } : {}),
       ...(options.runtime ? { runtime: options.runtime } : {}),
-    }),
+    })),
     onRegistrationQuotaChange: async ({ ownerUserId, deliver }) => {
       // A probe of one machine can move a pool the owner's other machines share.
       const readings = await readOwnerQuota(ownerUserId).catch((error: unknown) => {

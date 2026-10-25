@@ -503,6 +503,36 @@ test("an answer that lacks a Channel asked for is not reused, so a conversation 
   } finally { client.clear(); }
 });
 
+test("the shared resolve answer is always the latest-asked read's, whichever finishes last", async () => {
+  const { QueryClient } = require("@tanstack/react-query");
+  const refresh = require("./channel-catalog-refresh.ts");
+  const answer = (name) => ({ protocolVersion: 1, pathsByChannelId: { channel: ["channel"] },
+    channels: [{ id: "channel", spaceId: "space", name }] });
+  const common = { queryKey: ["xmatrix", "hub", "user", "channels", "space", "resolve", ["channel"], null, true],
+    lease: { id: 1 }, channelIds: ["channel"], asked: () => () => {} };
+  const read = (client, fresh, result) => client.fetchQuery(refresh.leasedResolveQuery({ ...common, fresh, read: () => result }));
+  // A read asked before an event finishes after the fresh one asked after it.
+  let client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  try {
+    let finishOld;
+    const old = read(client, false, new Promise((resolve) => { finishOld = resolve; }));
+    assert.equal((await read(client, true, Promise.resolve(answer("after the event")))).channels[0].name, "after the event");
+    finishOld(answer("before the event"));
+    await old;
+    assert.equal((await read(client, false, Promise.resolve(answer("not asked")))).channels[0].name, "after the event");
+  } finally { client.clear(); }
+  // A fresh read asked first finishes after an ordinary one asked later.
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  try {
+    let finishFresh;
+    const fresh = read(client, true, new Promise((resolve) => { finishFresh = resolve; }));
+    await read(client, false, Promise.resolve(answer("asked later")));
+    finishFresh(answer("asked first"));
+    assert.equal((await fresh).channels[0].name, "asked first", "a fresh read's caller still gets its own answer");
+    assert.equal((await read(client, false, Promise.resolve(answer("not asked")))).channels[0].name, "asked later");
+  } finally { client.clear(); }
+});
+
 test("a read that fails while its authorization stands leaves the list to be read again", async () => {
   const t = await openResolveOwner();
   try {

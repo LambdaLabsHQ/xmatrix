@@ -7,7 +7,7 @@ import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
 import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
-import { parseAgentRegistrationKey, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
 
@@ -719,7 +719,7 @@ async function liveInstanceOwnerUserIds(
   const owners = await transaction.query<QueryResultRow & { owner_user_id: string }>({
     name: "message_live_routing_instance_owners_v1",
     text: `SELECT DISTINCT r.owner_user_id FROM data.runs r
-      WHERE r.channel_id = $1 AND r.status IN ('starting','running','stopping')
+      WHERE r.channel_id = $1 AND r.status IN (${ACTIVE_RUN_STATUS_SQL})
       ORDER BY r.owner_user_id LIMIT 513`,
     values: [channelId], maxRows: 513,
   });

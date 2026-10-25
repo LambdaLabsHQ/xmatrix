@@ -15,9 +15,10 @@ replied.
   active Runs. The publisher sends each of their cells one request saying what
   that cell serves, within a bounded budget, and serves its own cell locally.
   An Agent receives a message once however many people read the Channel.
-- **Admission.** A cell admits only its owner's sockets, checked after
-  authentication and again after hibernation. A socket that names no owner is
-  told to upgrade.
+- **Admission.** A cell admits only its owner's sockets. A connect is checked
+  as soon as its credential names the account, before it claims, counts or
+  announces anything, and a socket back from hibernation before it is restored.
+  A socket that names no owner is told to upgrade.
 - **Presence.** An Agent's status report asks who may read the Channel at every
   report; a remembered audience no longer decides. A Channel snapshot built from
   Agent presence says it speaks for the Agents alone (`presenceCoverage`), and

@@ -244,19 +244,8 @@ export class RelayRuntimeProductCallbackAdapter {
     return this.human.liveSessions();
   }
 
-  /** Close every socket this cell may not hold, once it knows whose cell it is. */
-  refuseForeignSockets(admit: RuntimeSocketAdmit): void {
-    this.human.refuseForeignSockets(admit);
-    this.agentInstance.refuseForeignSockets(admit);
-    this.machineDaemon.refuseForeignSockets(admit);
-  }
-
   liveAgentSessions(binding?: LiveAgentPresentationBinding) {
-    return liveAgentSessionSnapshots(
-      this.agentInstance.liveSessions(),
-      binding,
-      (route) => this.machineDaemon.isRouteReachable(route),
-    );
+    return liveAgentSessionSnapshots(this.agentInstance.liveSessions(), binding);
   }
 
   publishHumanTraceAccess(

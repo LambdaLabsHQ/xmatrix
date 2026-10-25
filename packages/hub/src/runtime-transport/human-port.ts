@@ -38,7 +38,7 @@ import {
   type LiveHumanSessionSnapshot,
 } from "./human-live-presence";
 import { admittedLegacyProtocolVersion } from "../legacy-client-compatibility";
-import type { RuntimeSocketAdmission, RuntimeSocketAdmit } from "./runtime-socket-admission";
+import { admissionGate, closedIfRefused, refuseConnect, RuntimeSocketRefused, type RuntimeSocketAdmit } from "./runtime-socket-admission";
 
 type Message<Type extends HumanClientMessage["type"]> = Extract<
   HumanClientMessage,
@@ -87,7 +87,11 @@ export interface HumanRuntimeSession {
  */
 export interface HumanSocketBackend {
   readonly capabilities: ReadonlySet<HumanAuthorityCapability>;
-  authenticate(message: HumanConnectMessage): Promise<HumanAuthorityAuthentication>;
+  /**
+   * `admit` is called once the credential names its account, before anything
+   * is counted or written, and throws when this cell may not hold the socket.
+   */
+  authenticate(message: HumanConnectMessage, admit?: (ownerUserId: string) => void): Promise<HumanAuthorityAuthentication>;
   focusChannel(
     session: Readonly<HumanRuntimeSession>,
     message: Message<"user_focus_channel">,
@@ -180,6 +184,7 @@ export class HumanRuntimeTransport {
       ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
       return true;
     }
+    if (closedIfRefused(ws, this.admit, attachment.session.user.id)) return true;
     this.sockets.restore(ws, attachment.session);
     return true;
   }
@@ -302,10 +307,10 @@ export class HumanRuntimeTransport {
       return;
     }
     try {
-      const authentication = await this.backend.authenticate(message);
+      const admit = admissionGate(this.admit);
+      const authentication = await this.backend.authenticate(message, admit);
       assertAuthentication(message, authentication);
-      const admission = this.admit?.(authentication.user.id) ?? "admitted";
-      if (admission !== "admitted") return this.refuseAdmission(ws, message.requestId, admission);
+      admit(authentication.user.id);
       const now = new Date().toISOString();
       const device = message.device && typeof message.device === "object" && !Array.isArray(message.device)
         ? message.device as Record<string, unknown>
@@ -342,6 +347,9 @@ export class HumanRuntimeTransport {
         agents: [],
       });
     } catch (error) {
+      if (error instanceof RuntimeSocketRefused) {
+        return refuseConnect(this.sockets, ws, message.requestId, error.admission, "Could not connect this session");
+      }
       this.sockets.sendFailure(ws, message.requestId, error, "Could not connect this session");
       const code = error instanceof RuntimeClientOperationError ? error.failure.code : undefined;
       if (code === HUMAN_AUTH_INVALID_FAILURE_CODE) {
@@ -356,23 +364,6 @@ export class HumanRuntimeTransport {
         ws.close(TRY_AGAIN_LATER_CLOSE_CODE, "Try again later");
       }
     }
-  }
-
-  /**
-   * A socket this cell may not hold. One that named no owner predates owner
-   * routing and is told to upgrade; one that named another account's cell is
-   * closed, and its client redials with its own.
-   */
-  private refuseAdmission(ws: WebSocket, requestId: string | undefined, admission: Exclude<RuntimeSocketAdmission, "admitted">): void {
-    if (admission === "upgrade_required") {
-      this.sockets.send(ws, { type: "error", requestId, message: "Client upgrade required" });
-      this.sockets.remove(ws);
-      ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
-      return;
-    }
-    this.sockets.sendFailure(ws, requestId, new RuntimeClientOperationError("runtime_cell_foreign"), "Could not connect this session");
-    this.sockets.remove(ws);
-    ws.close(1008, "Runtime cell is not this account's");
   }
 
   /**
@@ -422,19 +413,6 @@ export class HumanRuntimeTransport {
     await this.backend.disconnected(session, details);
   }
 
-  /**
-   * Close every socket this cell may not hold. Sockets come back from
-   * hibernation before the cell has read whose it is, so the check made at
-   * connect is made again once it has.
-   */
-  refuseForeignSockets(admit: RuntimeSocketAdmit): void {
-    for (const [socket, session] of this.sockets.entries()) {
-      const admission = admit(session.user.id);
-      if (admission === "admitted") continue;
-      if (admission === "upgrade_required") socket.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
-      else socket.close(1008, "Runtime cell is not this account's");
-    }
-  }
 }
 
 export function humanMessageCompatibility(
