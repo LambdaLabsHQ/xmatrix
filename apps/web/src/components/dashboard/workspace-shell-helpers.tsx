@@ -88,7 +88,7 @@ import type {
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 import type { QuestionnaireAnswer } from "./questionnaire-card";
 import type { SentUpload } from "./sent-upload";
 
@@ -831,7 +831,7 @@ export function attachmentExtensionForMimeType(mimeType: string): string | null 
   }
 }
 
-export function attachmentFetchHref(attachment: ChannelAttachment): string {
+function attachmentFetchHref(attachment: ChannelAttachment): string {
   const source = attachmentSource(attachment);
   if (!source || source.startsWith("data:")) return source;
 
@@ -866,7 +866,7 @@ export async function copyImageAttachmentToClipboard(
   // IPC payload limit during that conversion.
   const bridge = getDesktopBridge();
   if (bridge?.writeClipboardImage) {
-    const imageBlob = await loadAttachmentImageBlob(attachment, resolveMedia);
+    const imageBlob = await loadAttachmentBlob(attachment, resolveMedia);
     const desktopClipboardBlob = await fitDesktopClipboardImageBlob(
       await desktopClipboardImageBlob(imageBlob),
     );
@@ -906,12 +906,13 @@ export async function loadAttachmentImagePngBlob(
   attachment: ChannelAttachment,
   resolveMedia?: () => Promise<ChannelAttachment>,
 ): Promise<Blob> {
-  const typed = await loadAttachmentImageBlob(attachment, resolveMedia);
+  const typed = await loadAttachmentBlob(attachment, resolveMedia);
   if (typed.type === "image/png") return typed;
   return convertImageBlobToPng(typed);
 }
 
-export async function loadAttachmentImageBlob(
+/** An attachment's bytes: the body behind its local object URL, its data URL, or a fetch. */
+export async function loadAttachmentBlob(
   attachment: ChannelAttachment,
   resolveMedia?: () => Promise<ChannelAttachment>,
 ): Promise<Blob> {
@@ -919,7 +920,7 @@ export async function loadAttachmentImageBlob(
   const localMediaBlob = (ready as ResolvedChannelAttachment).localMediaBlob;
   const source = attachmentFetchHref(ready);
   if (!localMediaBlob && !source) {
-    throw new Error("Image attachment is unavailable");
+    throw new Error("Attachment is unavailable");
   }
 
   // CSP correctly blocks fetch(blob:…). Reuse the body that created the local
@@ -931,9 +932,7 @@ export async function loadAttachmentImageBlob(
     blob = dataUrlToBlob(source);
   } else {
     blob = await xmatrixRawResponse(source, { cache: "no-store" }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error("Image attachment request failed");
-      }
+      if (!response.ok) throw await errorFromResponse(response);
       return response.blob();
     });
   }
@@ -1008,7 +1007,7 @@ async function compressImageSourceToJpegBlob(src: string, targetBytes: number): 
   return bestBlob;
 }
 
-export function dataUrlToBlob(dataUrl: string): Blob {
+function dataUrlToBlob(dataUrl: string): Blob {
   const [header, encoded] = dataUrl.split(",", 2);
   const mimeType = header.match(/^data:([^;,]+)/)?.[1] || "application/octet-stream";
   const binary = atob(encoded || "");

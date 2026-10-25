@@ -61,14 +61,13 @@ import {
   type MessageRowChannel, type MessageRowProps,
   attachmentDownloadHref,
   attachmentDownloadName,
-  attachmentFetchHref,
+  loadAttachmentBlob,
   attachmentSource,
   canMentionMessageSender,
   canRebornMessageSender,
   clearMessageLongPress,
   copyImageAttachmentToClipboard,
   copyTextToClipboard,
-  dataUrlToBlob,
   fixedContainingBlockRect, centeredToolbarPosition, morphPanelPosition, observeToolbarLayout,
   isMessageActionBypassTarget,
   isTimelineNearBottom,
@@ -2154,7 +2153,7 @@ export const MessageRow = memo(function MessageRow({
             className="max-h-[94dvh] max-w-[96vw] bg-black object-contain"
             autoPlay
           />
-        ) : open.kind === "markdown" ? (
+        ) : open.kind === "markdown" && attachmentSource(open) ? (
           <MarkdownAttachmentViewer attachment={open} />
         ) : (
           <MediaSkeleton label="Loading attachment" className="app-media-skeleton-stage" />
@@ -3014,14 +3013,7 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
 
     async function loadMarkdown() {
       try {
-        const source = attachmentFetchHref(attachment);
-        if (!source) throw new Error("Markdown attachment is unavailable");
-        const text = source.startsWith("data:")
-          ? await dataUrlToBlob(source).text()
-          : await xmatrixRawResponse(source, { cache: "no-store" }).then(async (response) => {
-              if (!response.ok) throw await errorFromResponse(response);
-              return response.text();
-            });
+        const text = await (await loadAttachmentBlob(attachment)).text();
         if (!cancelled) {
           setContent(text);
           setError(null);
