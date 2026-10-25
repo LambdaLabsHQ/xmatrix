@@ -153,7 +153,6 @@ import { useQuery } from "@tanstack/react-query";
 
 import { createPortal, flushSync } from "react-dom";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
-import { SpaceAllowanceNotice } from "./space-allowance-notice";
 
 export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
@@ -345,7 +344,6 @@ export const Composer = memo(function Composer({
   sendTitle,
   inlineActions,
   afterSend,
-  allowance,
 }: {
   compact?: boolean;
   channel: ChannelSnapshot | null;
@@ -400,8 +398,6 @@ export const Composer = memo(function Composer({
   /** Extra controls inside the input box, before Send. */
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
-  /** Shows, above the input, how close this Space is to having its writes refused. */
-  allowance?: { userId: string; onOpenBilling?: () => void };
 }) {
   const channel = useRealtimeChannel(catalogChannel);
   const writable = isJoined && (Boolean(channel) || startsConversation);
@@ -1295,8 +1291,6 @@ export const Composer = memo(function Composer({
           : "app-composer shrink-0 bg-card px-3 pb-2 pt-2 sm:px-5 sm:pb-5 sm:pt-3",
       )}
     >
-      {allowance && space && <SpaceAllowanceNotice spaceId={space.id} token={token} userId={allowance.userId}
-        onOpenBilling={allowance.onOpenBilling} />}
       {error && <p className="mb-2 text-sm font-medium text-destructive">{error}</p>}
       {attachmentError && <p className="mb-2 text-sm font-medium text-destructive">{attachmentError}</p>}
       {Boolean(invocationDraftRef.current?.bindings.some(isAgentBinding)) && <div aria-label="Selected Agents" className="mb-2 flex flex-wrap gap-2 text-xs text-muted-foreground">

@@ -7,6 +7,7 @@ import type { MentionLocalContext } from "./mention-complete";
 import type { ComposerSendSnapshot } from "./workspace-shell-message-model";
 import { Composer, ComposerIcon } from "./workspace-composer-dialogs";
 import { useAndroidBackDismiss } from "./use-android-back";
+import { SpaceAllowanceNotice } from "./space-allowance-notice";
 
 /**
  * A new conversation is an empty conversation with the usual composer. Its
@@ -32,6 +33,7 @@ export function NewConversation({
   onSend: (channel: ChannelSnapshot, snapshot: ComposerSendSnapshot) => Promise<void>;
   onCancel: () => void;
   onOpenAppsForSpace: (spaceId: string) => void;
+  /** Says, under the conversation, how close this Space is to having its writes refused. */
   allowance?: { userId: string; onOpenBilling?: () => void };
 }) {
   const draftRef = useRef(initialDraft);
@@ -66,7 +68,10 @@ export function NewConversation({
           <X className="size-4" />
         </button>
       </div>
-      <div className="min-h-0 flex-1" />
+      <div className="flex min-h-0 flex-1 flex-col justify-end">
+        {allowance && space && <SpaceAllowanceNotice spaceId={space.id} token={token} userId={allowance.userId}
+          onOpenBilling={allowance.onOpenBilling} />}
+      </div>
       <Composer
         channel={null}
         draftIdentity="new-conversation"
@@ -93,7 +98,6 @@ export function NewConversation({
         onCancelReply={() => {}}
         onAttachmentsChange={setAttachments}
         onOpenAppsForSpace={onOpenAppsForSpace}
-        allowance={allowance}
         onEscape={onCancel}
         onSend={async (snapshot) => {
           draftRef.current = snapshot.body;

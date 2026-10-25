@@ -287,6 +287,7 @@ import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
+import { SpaceAllowanceNotice } from "./space-allowance-notice";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -479,6 +480,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   threadRootMessage,
   threadRootChannel,
   foldsDiscussionHead = false,
+  allowance,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -515,6 +517,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   threadRootChannel?: ChannelSnapshot;
   /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
   foldsDiscussionHead?: boolean;
+  /** Ends the conversation with how close this Space is to having its writes refused. */
+  allowance?: { userId: string; onOpenBilling?: () => void };
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1013,6 +1017,11 @@ export const MessageTimeline = memo(function MessageTimeline({
     return { spaceId, token, onOpenPage };
   }, [space?.id, channel?.spaceId, token, onOpenPage]);
 
+  const allowanceSpaceId = space?.id ?? channel?.spaceId;
+  const allowanceNotice = allowance && allowanceSpaceId
+    ? <SpaceAllowanceNotice spaceId={allowanceSpaceId} token={token} userId={allowance.userId}
+      onOpenBilling={allowance.onOpenBilling} />
+    : null;
   const timelineFooterClassName = cn(
     "app-message-timeline-scroll-end pb-4",
     hasWorkDock && "app-message-timeline-scroll-end-work-dock",
@@ -1233,6 +1242,7 @@ export const MessageTimeline = memo(function MessageTimeline({
           nothingSaid={!error}
         />
       )}
+      {!loading && hasChannels && channel && !hasTimelineContent && allowanceNotice}
 
       {tailMounted && timelineScrollRoot && (
         <TimelineOpeningTail
@@ -1303,6 +1313,7 @@ export const MessageTimeline = memo(function MessageTimeline({
             // non-virtualized timeline's content wrapper used to receive.
             footer: (
               <div ref={messagesEndRef} className={timelineFooterClassName}>
+                {allowanceNotice}
                 <TimelineHeightProbe />
               </div>
             ),

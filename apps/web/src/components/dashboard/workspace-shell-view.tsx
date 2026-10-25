@@ -654,7 +654,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
   }), [machineTargets]);
   const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
-  const composerAllowance = useMemo(() => user ? {
+  const timelineAllowance = useMemo(() => user ? {
     userId: user.id,
     onOpenBilling: () => changeAppViewRef.current("settings", SPACE_BILLING_SECTION),
   } : undefined, [user]);
@@ -1071,7 +1071,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onSend={sendNewConversationMessage}
       onCancel={() => setComposingConversation(false)}
       onOpenAppsForSpace={openAppsForSpace}
-      allowance={composerAllowance}
+      allowance={timelineAllowance}
     />
   );
 
@@ -1157,6 +1157,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       )}
       {!showSpaceAgentSetup && !showSpaceFirstTask && (
       <MessageTimeline
+        allowance={timelineAllowance}
         channel={selectedChannel}
         space={currentSpace}
         token={token ?? null}
@@ -1265,7 +1266,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onAttachmentsChange={changeDraftAttachments}
           onSend={sendComposerMessage}
           onOpenAppsForSpace={openComposerApps}
-          allowance={composerAllowance}
         />
       )}
     </section>
