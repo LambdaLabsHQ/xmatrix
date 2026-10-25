@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Co-writing starts with the document
+
+A newly launched page co-writer receives the current document and its writing
+protocol in the same first model turn as the invitation. Its words stream
+straight into that page, avoiding a separate ordinary task that could spend
+minutes reading commands or waiting for the person to stop typing while the
+live request queued behind it. The original message and execution attribution
+remain. A ten-second startup deadline preserves late requests through the
+ordinary run loop. This is a CLI update for every harness; the Hub protocol
+and older runtime behavior are unchanged.
+
 ## Unreleased: Pages have no claims and no owed updates
 
 Coordination on pages is lock-free, so nothing on a page is claimed and no

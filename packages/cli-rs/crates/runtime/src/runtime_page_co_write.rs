@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use colored::Colorize;
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
 use xmatrix_cli_core::agent_instance_connection::{
     AgentInstanceConnectionClient, AgentInstanceConnectionEvent,
@@ -30,6 +30,8 @@ use xmatrix_cli_core::protocol::ChannelPageCoWrite;
 
 /// Kept below the idle limits between here and the session.
 const HEARTBEAT: Duration = Duration::from_secs(25);
+/// A broken page connection must not hold the launch message indefinitely.
+const INITIAL_TURN_WAIT: Duration = Duration::from_secs(10);
 /// Waits before joining again after the socket closed or could not open.
 const REJOIN_DELAYS: [Duration; 5] = [
     Duration::from_secs(1),
@@ -63,6 +65,10 @@ struct Bridge {
     images: ToPage,
     /// Where the Agent hears what of its answer did not reach the page.
     events: Option<mpsc::UnboundedSender<AgentInstanceConnectionEvent>>,
+    /// A fresh co-writing launch answers the page in its first model turn,
+    /// rather than running an ordinary invitation turn ahead of it.
+    initial_tx: Option<oneshot::Sender<PageCoWriteEvent>>,
+    initial_rx: Option<oneshot::Receiver<PageCoWriteEvent>>,
     stop: watch::Sender<bool>,
 }
 
@@ -112,6 +118,7 @@ pub(crate) fn follow(
     relay: &AgentInstanceConnectionClient,
     channel_id: &str,
     instruction: &ChannelPageCoWrite,
+    initial: bool,
 ) {
     let page = (instruction.space_id.clone(), instruction.page_id.clone());
     let mut all = bridges();
@@ -126,6 +133,12 @@ pub(crate) fn follow(
         return;
     }
     let (stop, stopped) = watch::channel(false);
+    let (initial_tx, initial_rx) = if initial {
+        let (tx, rx) = oneshot::channel();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
     all.insert(
         channel_id.to_string(),
         Bridge {
@@ -136,6 +149,8 @@ pub(crate) fn follow(
             answering: None,
             images: ToPage::default(),
             events: Some(relay.local_event_sender()),
+            initial_tx,
+            initial_rx,
             stop,
         },
     );
@@ -146,6 +161,49 @@ pub(crate) fn follow(
         page,
         stopped,
     ));
+}
+
+/// Fold the page's actual request into the launch input. The same first turn
+/// then has the document, write protocol and streaming destination in every
+/// harness, while retaining the human message and its execution attribution.
+pub(crate) async fn initial_prompt(channel_id: &str) -> Option<String> {
+    let initial = bridges().get_mut(channel_id)?.initial_rx.take()?;
+    let Ok(Ok(PageCoWriteEvent::Turn {
+        channel_id,
+        turn,
+        prompt,
+    })) = tokio::time::timeout(INITIAL_TURN_WAIT, initial).await
+    else {
+        return None;
+    };
+    turn_queued(&channel_id, turn);
+    Some(prompt)
+}
+
+/// The reserved first page request goes to startup once; later requests and
+/// a first request arriving after startup timed out use the ordinary run loop.
+fn deliver_event(
+    events: &mpsc::UnboundedSender<AgentInstanceConnectionEvent>,
+    event: PageCoWriteEvent,
+) -> bool {
+    let initial = if matches!(event, PageCoWriteEvent::Turn { .. }) {
+        bridges()
+            .get_mut(event.channel_id())
+            .and_then(|bridge| bridge.initial_tx.take())
+    } else {
+        None
+    };
+    let event = if let Some(initial) = initial {
+        match initial.send(event) {
+            Ok(()) => return true,
+            Err(event) => event,
+        }
+    } else {
+        event
+    };
+    events
+        .send(AgentInstanceConnectionEvent::PageCoWrite(event))
+        .is_ok()
 }
 
 /// Whether the harness in `channel_id` is answering the page's turn now: all
@@ -261,7 +319,7 @@ async fn run_bridge(
                                         // Only a turn this side opened has an outcome, and the bridge opens none.
                                         PageCoWriteRequest::Outcome { .. } => continue,
                                     };
-                                    if events.send(AgentInstanceConnectionEvent::PageCoWrite(event)).is_err() {
+                                    if !deliver_event(&events, event) {
                                         return;
                                     }
                                 }
@@ -328,6 +386,8 @@ mod tests {
                 answering: None,
                 images: ToPage::default(),
                 events: None,
+                initial_tx: None,
+                initial_rx: None,
                 stop,
             },
         );
@@ -343,6 +403,121 @@ mod tests {
                 serde_json::json!({ "type": if failed { "failed" } else { "done" }, "turn": turn })
             }
         }
+    }
+
+    fn initial_bridge_for_test(channel: &str) -> mpsc::UnboundedReceiver<Out> {
+        let frames = bridge_for_test(channel);
+        let (initial_tx, initial_rx) = oneshot::channel();
+        let mut all = bridges();
+        let bridge = all.get_mut(channel).unwrap();
+        bridge.initial_tx = Some(initial_tx);
+        bridge.initial_rx = Some(initial_rx);
+        frames
+    }
+
+    // Existing trace tests start after a page turn was queued. This protects
+    // the missing startup boundary: the invitation's very first prompt must
+    // already carry the page request, and its first words must stream there.
+    #[tokio::test]
+    async fn a_co_writing_launch_answers_the_page_in_its_first_model_turn() {
+        let _guard = crate::tests::test_process_env_lock();
+        let channel = "c-co-write-initial";
+        let mut frames = initial_bridge_for_test(channel);
+        let (events, mut pending) = mpsc::unbounded_channel();
+        assert!(deliver_event(
+            &events,
+            PageCoWriteEvent::Turn {
+                channel_id: channel.into(),
+                turn: 1,
+                prompt: "[Live co-writing] You joined this page.\n⟦after \"Plan\"⟧\n# Plan".into(),
+            }
+        ));
+        let keys = [
+            "XMATRIX_AUTO_JOIN_CHANNEL_ID",
+            "XMATRIX_INITIAL_MESSAGE",
+            "XMATRIX_RESUME_REQUESTED",
+        ];
+        let previous = keys.map(std::env::var_os);
+        unsafe {
+            std::env::set_var(keys[0], channel);
+            std::env::set_var(keys[1], "@claude launch:force page:page");
+            std::env::remove_var(keys[2]);
+        }
+        let prompt = crate::runtime_resume_input::initial_runtime_turn().await;
+        for (key, value) in keys.into_iter().zip(previous) {
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+        assert_eq!(
+            prompt.as_deref(),
+            Some(
+                "@claude launch:force page:page\n\n[Live co-writing] You joined this page.\n⟦after \"Plan\"⟧\n# Plan"
+            )
+        );
+        assert!(
+            pending.try_recv().is_err(),
+            "no second invitation turn waits behind startup"
+        );
+        observe_trace(channel, "turn_started", &serde_json::json!({}));
+        observe_trace(
+            channel,
+            "assistant_delta",
+            &serde_json::json!({ "delta": "⟦after \"Plan\"⟧Next." }),
+        );
+        observe_trace(channel, "turn_completed", &serde_json::json!({}));
+        assert_eq!(
+            frames.try_recv().ok().map(body),
+            Some(serde_json::json!({
+                "type": "delta", "turn": 1, "text": "⟦after \"Plan\"⟧Next."
+            }))
+        );
+        assert_eq!(
+            frames.try_recv().ok().map(body),
+            Some(serde_json::json!({ "type": "done", "turn": 1 }))
+        );
+        assert!(deliver_event(
+            &events,
+            PageCoWriteEvent::Turn {
+                channel_id: channel.into(),
+                turn: 2,
+                prompt: "People paused.".into(),
+            }
+        ));
+        assert!(matches!(
+            pending.try_recv(),
+            Ok(AgentInstanceConnectionEvent::PageCoWrite(
+                PageCoWriteEvent::Turn { turn: 2, .. }
+            ))
+        ));
+        bridges().remove(channel);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_initial_page_request_survives_the_bounded_startup_wait() {
+        let channel = "c-co-write-late-initial";
+        let _frames = initial_bridge_for_test(channel);
+        assert!(initial_prompt(channel).await.is_none());
+        let (events, mut pending) = mpsc::unbounded_channel();
+        assert!(deliver_event(
+            &events,
+            PageCoWriteEvent::Turn {
+                channel_id: channel.into(),
+                turn: 3,
+                prompt: "Connected later.".into(),
+            }
+        ));
+        assert!(matches!(
+            pending.try_recv(),
+            Ok(AgentInstanceConnectionEvent::PageCoWrite(
+                PageCoWriteEvent::Turn { turn: 3, .. }
+            ))
+        ));
+        assert!(initial_prompt("ordinary-chat").await.is_none());
+        bridges().remove(channel);
     }
 
     #[test]

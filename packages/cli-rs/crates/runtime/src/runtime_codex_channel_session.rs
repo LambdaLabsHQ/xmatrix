@@ -16,7 +16,7 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
         false,
     ));
 
-    let initial_message = crate::runtime_resume_input::initial_runtime_message();
+    let initial_message = crate::runtime_resume_input::initial_runtime_turn().await;
     let initial_message_attachments = read_initial_message_attachments_from_env()?;
     let auto_join_channel_id = non_empty_env("XMATRIX_AUTO_JOIN_CHANNEL_ID");
     let resume_session_key = non_empty_env("XMATRIX_RESUME_SESSION_KEY");
