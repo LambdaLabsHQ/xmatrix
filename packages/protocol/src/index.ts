@@ -633,3 +633,5 @@ export { sameValue } from "./same-value.js";
 export { mergeAgentInstancePresence } from "./instance-presence-merge.js";
 export { usageWithoutQuota, mergeLlmUsagePreferringQuotas, accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "./presence-usage.js";
 export { releaseNotesPath, publishedReleaseNotes } from "./release-notes.js";
+
+export * from "./page-assistant-output.js";

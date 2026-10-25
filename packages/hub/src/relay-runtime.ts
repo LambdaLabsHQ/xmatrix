@@ -53,6 +53,8 @@ import {
 } from "./agent-host-trace";
 import { answerHarnessReleaseWatch, RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH } from "./harness-release-watch";
 import { analyticsWorkerVersion } from "./analytics-sampling";
+import { PageAssistantOutputReceiver, PAGE_ASSISTANT_OUTPUT_PATH } from "./page-assistant-output";
+import { receivePageAssistantOutput } from "./page-assistant-output-runtime";
 
 const MAX_COMMITTED_EVENT_BYTES = 64 * 1024;
 const MAX_EVENT_RECIPIENTS = 1_000;
@@ -161,6 +163,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     fetch: (request: Request) => this.fetch(request),
   };
   private readonly machineDaemonWakeSignals = new MachineDaemonWakeSignals();
+  private readonly pageAssistantOutput = new PageAssistantOutputReceiver();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -219,6 +222,10 @@ export class RelayRuntimeLive extends DurableObject<Env> {
 
   private async routeFetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === PAGE_ASSISTANT_OUTPUT_PATH) {
+      await this.learnOwnerCell(request.headers.get(RELAY_RUNTIME_CELL_HEADER));
+      return receivePageAssistantOutput(request, this.env, this.ctx.storage, this.pageAssistantOutput);
+    }
     if (isRelayRuntimeProductConnectPath(url.pathname)) {
       if (!this.productAdapter) return runtimeTransportUnavailable("product");
       await this.learnOwnerCell(request.headers.get(RELAY_RUNTIME_CELL_HEADER));

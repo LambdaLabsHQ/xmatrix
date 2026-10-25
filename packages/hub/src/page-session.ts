@@ -17,6 +17,8 @@ import * as Y from "yjs";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
+import { PageOutputReceipts, type PageOutputWrite, type PageOutputReceipt,
+  type StoredPageOutputReceipt } from "./page-output-receipts";
 
 /**
  * A page's live co-editing session (docs/design/pages-and-conversations.md
@@ -87,6 +89,8 @@ export interface PageSessionState {
   writing?: Array<{ shown: string; target: string }>;
   /** Where each Agent's caret rests, by awareness client id (absent before carets rested). */
   agents?: RestingAgent[];
+  /** Delivery receipts, saved atomically with the document they describe. */
+  outputs?: StoredPageOutputReceipt[];
 }
 
 /**
@@ -226,6 +230,8 @@ export class PageSession {
   private readonly resting = new Map<number, RestingAgent>();
   /** Agents co-writing the page live, by their runtime's connection. */
   private readonly coWriters = new Map<string, PageCoWriter>();
+  private readonly outputReceipts = new PageOutputReceipts();
+  private readonly outputConnections = new Map<string, { expiresAt: number; notices: PageCoWriteRequest[] }>();
   /** Bumped by every change to the document; its markdown is read at most once per change. */
   private version = 0;
   private cached: { version: number; markdown: string } | null = null;
@@ -339,6 +345,7 @@ export class PageSession {
     await this.serial(async () => {
       if (this.base) return;
       if (persisted) {
+        this.outputReceipts.restore(persisted.outputs ?? []);
         Y.applyUpdate(this.doc, persisted.update, "load");
         this.setHead(this.canonical(persisted.base));
         this.editSeq = persisted.editSeq;
@@ -400,7 +407,38 @@ export class PageSession {
   private async persist(): Promise<void> {
     if (!this.base || this.ended) return;
     await this.ports.persist({ base: this.base, update: Y.encodeStateAsUpdate(this.doc),
-      editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()] });
+      editors: [...this.editors.values()], editSeq: this.editSeq, agents: [...this.resting.values()],
+      outputs: this.outputReceipts.snapshot() });
+  }
+
+  /** An authorized, ordered write from the Hub's assistant-output parser. */
+  async output(principal: PageSessionPrincipal, write: PageOutputWrite): Promise<PageOutputReceipt> {
+    return this.serial(async () => {
+      if (this.ended || !this.base || principal.kind !== "agent" || !principal.runProof || this.base.agentSuggestOnly) {
+        return { status: "rejected", seq: write.seq };
+      }
+      for (const [id, connection] of this.outputConnections) if (connection.expiresAt <= Date.now()) {
+        this.disconnect(id);
+        this.outputConnections.delete(id);
+      }
+      const id = JSON.stringify(["output", principal.id, principal.runProof, write.stream]);
+      return this.outputReceipts.receive(id, write, {
+        persist: () => this.persist(),
+        apply: (first) => {
+          if (first) {
+            this.outputConnections.set(id, { expiresAt: write.expiresAt, notices: [] });
+            this.connect({ id, principal, canEdit: true, coWriter: true, streams: true });
+          }
+          const output = this.outputConnections.get(id)!;
+          const accepted = this.coWriters.get(id)?.receive(write.reply);
+          const notices = output.notices.splice(0);
+          if (!accepted && !notices.some((notice) => notice.type === "limited" || notice.type === "interrupt")) {
+            notices.push({ type: "interrupt", turn: write.reply.turn });
+          }
+          return notices;
+        },
+      });
+    });
   }
 
   /**
@@ -431,7 +469,8 @@ export class PageSession {
   connect(connection: PageSessionConnection, options: { resumed?: boolean } = {}): void {
     this.connections.set(connection.id, connection);
     if (connection.coWriter) {
-      const writer = new PageCoWriter(this.coWriterHost(connection), { streams: connection.streams === true });
+      const writer = new PageCoWriter(this.coWriterHost(connection), { streams: connection.streams === true,
+        immediate: this.outputConnections.has(connection.id) });
       this.coWriters.set(connection.id, writer);
       writer.start(this.canCoWrite(connection), options.resumed === true);
       return;
@@ -636,7 +675,14 @@ export class PageSession {
           at: change.at })) });
       },
       people: () => this.people(),
-      send: (request) => this.ports.send(connection.id, encodeCoWrite(request)),
+      send: (request) => {
+        const output = this.outputConnections.get(connection.id);
+        if (output) {
+          // There is no socket to buffer behind. Only bounded control notices
+          // survive until the next write; the host retains unaccepted text.
+          if (output.notices.length < 32) output.notices.push(request);
+        } else this.ports.send(connection.id, encodeCoWrite(request));
+      },
       observe: (event) => this.ports.observeCoWriting?.(principal, event),
     };
   }

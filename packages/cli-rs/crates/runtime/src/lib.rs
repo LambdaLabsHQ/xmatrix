@@ -119,6 +119,7 @@ mod runtime_handoff_context;
 mod runtime_harness_questions;
 mod runtime_headless_runs;
 mod runtime_page_co_write;
+mod runtime_page_output;
 mod runtime_page_stream_write;
 mod runtime_presence_updates;
 mod runtime_trusted_role_prompt;

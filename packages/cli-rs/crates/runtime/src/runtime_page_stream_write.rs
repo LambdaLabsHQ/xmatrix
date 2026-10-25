@@ -173,9 +173,10 @@ fn locked<T>(mutex: &'static Mutex<T>) -> std::sync::MutexGuard<'static, T> {
 /// Whether the reply in `channel_id` is writing into a page right now: its
 /// words then go out as they come, not gathered for the conversation's trace.
 pub(crate) fn writing(channel_id: &str) -> bool {
-    locked(&CONVERSATIONS)
-        .get(channel_id)
-        .is_some_and(|conversation| conversation.writing.is_some())
+    crate::runtime_page_output::enabled(channel_id)
+        || locked(&CONVERSATIONS)
+            .get(channel_id)
+            .is_some_and(|conversation| conversation.writing.is_some())
 }
 
 /// A trace this runtime publishes for a turn in `channel_id`: the reply's text

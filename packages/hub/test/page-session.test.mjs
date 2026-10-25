@@ -122,6 +122,128 @@ async function annConnected(h) {
   return h.connect("c-ann", human("ann"));
 }
 
+test("Hub output retries acknowledge one document change, including after the Page session restarts", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const h = harness();
+  const ann = await annConnected(h);
+  const expiresAt = now + 60_000;
+  let seq = 0;
+  let at = 0;
+  const send = (reply) => h.session.output(agent, { stream: "reply-1", seq, expiresAt, reply });
+  assert.equal((await send({ type: "write", turn: 1 })).status, "accepted");
+  seq++;
+  for (const text of "⟦after \"none\"⟧\nhello 😀".match(/.{1,5}/gsu)) {
+    now += 500;
+    const reply = { type: "delta", turn: 1, text, paced: { at } };
+    const receipt = await send(reply);
+    assert.equal(receipt.status, "accepted");
+    const before = ann.text.toString();
+    assert.deepEqual(await send(reply), receipt, "a lost response is replayed without a second application");
+    assert.equal(ann.text.toString(), before);
+    at += [...text].length;
+    seq++;
+  }
+  assert.match(ann.text.toString(), /none\n\nhello 😀\n$/u);
+  const end = { stream: "reply-1", seq, expiresAt, reply: { type: "done", turn: 1, paced: { at } } };
+  const receipt = await h.session.output(agent, end);
+  const saved = h.persisted.at(-1);
+  const restored = harness();
+  await restored.session.ensureLoaded(agent, saved);
+  assert.deepEqual(await restored.session.output(agent, end), receipt);
+  assert.equal(restored.session.markdown(), ann.text.toString());
+  assert.equal((await restored.session.output(agent, { ...end, seq: seq + 1,
+    reply: { type: "write", turn: 2 } })).status, "unknown", "lost parser and anchors never restart a write");
+  assert.equal((await h.session.output(agent, { ...end, reply: { type: "failed", turn: 1, paced: { at } } })).status,
+    "rejected", "the same sequence cannot mean different content");
+});
+
+test("Hub output keeps refused text at the sender and never applies beyond the last confirmed sequence", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const h = harness();
+  await annConnected(h);
+  const base = { stream: "reply-2", expiresAt: now + 60_000 };
+  await h.session.output(agent, { ...base, seq: 0, reply: { type: "write", turn: 1 } });
+  await h.session.output(agent, { ...base, seq: 1,
+    reply: { type: "delta", turn: 1, text: "⟦after ", paced: { at: 0 } } });
+  await h.session.output(agent, { ...base, seq: 2,
+    reply: { type: "delta", turn: 1, text: '"none"⟧abc', paced: { at: 7 } } });
+  const next = { ...base, seq: 3, reply: { type: "delta", turn: 1, text: "defghijklm", paced: { at: 17 } } };
+  const refused = await h.session.output(agent, next);
+  assert.equal(refused.status, "limited");
+  assert.equal(refused.at, 17);
+  assert.match(h.session.markdown(), /abc\n$/u);
+  assert.equal((await h.session.output(agent, { ...next, seq: 4 })).status, "out_of_order");
+  now += 500;
+  assert.equal((await h.session.output(agent, next)).status, "accepted");
+  assert.match(h.session.markdown(), /abcdefghijklm\n$/u);
+});
+
+test("a failed persistence leaves the output unknown instead of allowing a replay", async () => {
+  const h = harness();
+  await annConnected(h);
+  const write = { stream: "reply-3", expiresAt: Date.now() + 60_000, seq: 0, reply: { type: "write", turn: 1 } };
+  const persist = h.ports.persist;
+  h.ports.persist = async () => { throw new Error("storage unavailable"); };
+  await assert.rejects(h.session.output(agent, write), /storage unavailable/u);
+  h.ports.persist = persist;
+  assert.equal((await h.session.output(agent, write)).status, "unknown");
+  assert.equal(h.session.markdown(), HEAD);
+});
+
+test("Page output rechecks Run authority before serving even a cached receipt", async (t) => {
+  const h = harness();
+  await annConnected(h);
+  let mayEdit = true;
+  const checks = [];
+  t.mock.method(PostgresPageRepository.prototype, "access", async (input) => {
+    checks.push(input);
+    return { canEdit: mayEdit, agentSuggestOnly: false };
+  });
+  const object = Object.create(RelayPageSession.prototype);
+  Object.assign(object, { session: h.session, tickets: new Map(), spaceId: "space", pageId: "page",
+    rehydrated: Promise.resolve(),
+    env: { RELAY_POSTGRES_SHARD_ID: "test", RELAY_POSTGRES: { connectionString: "postgresql://localhost/unused" } },
+    ctx: { getWebSockets: () => [], storage: { put: async () => {}, get: async () => undefined } } });
+  const write = { stream: "authorized-output", expiresAt: Date.now() + 60_000, seq: 0,
+    reply: { type: "write", turn: 1 } };
+  const request = (principal = agent, event = write) => new Request("https://page-session/internal/output", {
+    method: "POST", body: JSON.stringify({ spaceId: "space", pageId: "page", principal, write: event }) });
+  assert.equal((await object.fetch(request())).status, 200);
+  mayEdit = false;
+  assert.equal((await object.fetch(request())).status, 403, "revocation wins over a delivery receipt");
+  assert.equal(checks.length, 2);
+  assert.deepEqual(checks[0].principal.runProof, agent.runProof);
+  assert.equal((await object.fetch(request(human("owner")))).status, 400, "human sessions cannot impersonate assistant output");
+  assert.equal((await object.fetch(request(agent, { ...write, seq: 1,
+    reply: { type: "delta", turn: 1, text: "too many characters", paced: { at: 0 } } }))).status, 400);
+  assert.equal(checks.length, 2, "malformed writes never reach the page authority");
+  assert.equal(h.session.markdown(), HEAD);
+});
+
+test("an output receipt persists every applied character without waiting for a display timer", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const h = harness();
+  await annConnected(h);
+  const base = { stream: "immediate", expiresAt: now + 60_000 };
+  await h.session.output(agent, { ...base, seq: 0, reply: { type: "write", turn: 1 } });
+  let seq = 1;
+  let at = 0;
+  for (const text of ['⟦after ', '"none"⟧', 'a', 'b']) {
+    const result = await h.session.output(agent, { ...base, seq, reply: { type: "delta", turn: 1, text, paced: { at } } });
+    assert.equal(result.status, "accepted");
+    seq++;
+    at += [...text].length;
+  }
+  assert.match(h.session.markdown(), /ab\n$/u);
+  const restored = harness();
+  await restored.session.ensureLoaded(agent, h.persisted.at(-1));
+  assert.match(restored.session.markdown(), /ab\n$/u, "the confirmed text survived before any display timer fired");
+});
+
 /** The Agent's edit of the page's head: "none" becomes "some". */
 function editAsAgent(h) {
   return h.session.submitEdit(agent, { baseRevision: 1, body: HEAD.replace("none", "some"), conversationIds: [] });

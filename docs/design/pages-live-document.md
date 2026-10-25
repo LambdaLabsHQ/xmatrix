@@ -449,17 +449,35 @@ fact is about.
   - **Writing from a conversation** (decided 2026-10-16). Any Agent in a
     conversation writes into a page the same way, as its model writes, without
     being asked: in its reply, `⟦write page:<id>⟧`, the markers below, then
-    `⟦/write⟧` (`runtime_page_stream_write.rs`). The runtime reads its
-    `assistant_delta` traces; once the opening marker is whole it joins the
-    page's session as a co-writer that streams (`POST …/live` with `coWrite` and
-    `stream`), opens a turn itself (`write`), and sends the words until
-    `⟦/write⟧` or the harness's turn ends. The session asks a streaming
+    `⟦/write⟧`. With `page_assistant_output_v1`, the runtime forwards normalized
+    assistant text through an independent, bounded delivery channel
+    (`POST /api/channels/:id/page-output`). Tool results, reasoning and stored
+    diagnostic traces are excluded. Local attachment paths are resolved by the
+    Host; the Hub's Page-domain parser interprets the outer markers and opens
+    the Page write. Old Hubs retain `runtime_page_stream_write.rs` and the
+    `POST …/live` streaming socket; a Run never switches to that fallback after
+    a new-protocol delivery failure.
+
+    Each model output has a stream id, sequence and confirmed character cursor.
+    A transport retry resends the same bounded frame; the Page records its
+    receipt with the document before acknowledging it. Page authorization is
+    checked even for duplicate deliveries. Limits refuse input and return a
+    retry delay; unaccepted text stays at the Host, never in a Hub playback
+    buffer. New writes are applied synchronously before their receipt is saved.
+    An ambiguous Page RPC is retried with its original operation id. If the
+    Page's live parser and anchors have been lost, the result is `unknown` and
+    the Host stops that output; it never recreates the action or reruns the
+    model. Cancellation fences subsequent delivery. Streams expire after
+    thirty minutes, with bounded receipts and a bounded Host queue; losing a
+    Host process does not promise exactly-once execution or replay its transcript.
+
+    The session asks a streaming
     co-writer nothing, and ends each of its turns with an `outcome`: what did
     not reach the page and why (a quote that is not there, someone editing what
     it wrote), which the conversation hears as its next turn; nothing when all
-    of it did. The socket stays joined until the page has all its words, and a
-    while after, so the next write goes straight in and a person can still take
-    the last one back.
+    of it did. Its live writer retains the last change for undo while it lives.
+    Session-initiated co-writing continues through its existing input bridge;
+    this transport replaces conversation-initiated outer-marker interpretation.
     `page edit` remains for restructuring and for suggest-only pages; its
     committed edit reaches the page whole, as described in §2.
   - **What reaches the page** is only what the Agent writes inside markers
