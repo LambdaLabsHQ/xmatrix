@@ -251,7 +251,8 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
-  onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
+  onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, focusedSection = null,
+  onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readerShown = false, commentInMargin = false, onReaderChanges, onWrite, readFrom, reading,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
   uploadMedia, onChanges, blame, writing }: {
@@ -284,6 +285,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   headingActions?: HeadingActions;
   /** The conversation whose passage is marked, because its card is being read. */
   focusedConversationId?: string | null;
+  /** The section marked, because the card of a conversation about it is being read. */
+  focusedSection?: string | null;
   onFocusConversation?: (conversationId: string) => void;
   /**
    * Where the margin's anchors are, from the top of the editor, whenever the
@@ -717,8 +720,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
 
   useEffect(() => {
     const current = view.current;
-    if (current) current.dispatch(current.state.tr.setMeta(discussionsKey, { focused: focusedConversationId }));
-  }, [focusedConversationId]);
+    if (current) current.dispatch(current.state.tr.setMeta(discussionsKey, { focused: focusedConversationId, section: focusedSection }));
+  }, [focusedConversationId, focusedSection]);
 
   useEffect(() => {
     const node = frame.current;

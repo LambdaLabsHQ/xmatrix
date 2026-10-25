@@ -988,6 +988,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     .map((link) => ({ linkId: link.linkId, conversationId: link.conversationId, from: link.anchor!.from,
       to: link.anchor!.to, name: conversationName(link.conversationId) ?? link.anchor!.quote })),
   [conversationName, linkList]);
+  // The card of a conversation about a section, while read, marks the section as a discussion's card marks its
+  // passage. Only while read: a whole section stays unmarked while its conversation is open beside it.
+  const focusedSection = conversations.find((item) => item.conversationId === focused
+    && item.anchor.startsWith("block:"))?.blockId ?? null;
 
   // When each section last changed, and by whom where; refreshed as revisions land.
   const awareness = useQuery({
@@ -1703,7 +1707,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
                         follow={follow} onOpenConversation={openConversation} discussions={discussions}
                         automations={automationsById} references={references} completion={completion}
-                        focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
+                        focusedConversationId={activeConversationId ?? focused} focusedSection={focusedSection}
+                        onFocusConversation={setFocused}
                         onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile}
                         mediaUrl={mediaUrl} uploadMedia={uploadMedia} onChanges={setSessionChanges} blame={blame}
                         writing={writingNow} />}

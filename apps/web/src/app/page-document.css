@@ -233,6 +233,8 @@
   transition: background 0.12s;
 }
 .page-discussion-focus { background: color-mix(in oklab, #f2b632 50%, transparent); }
+/* A section whose conversation's card is being read: its text, in the discussions' colour, without a passage's rule. */
+.page-section-focus { background: color-mix(in oklab, #f2b632 26%, transparent); border-radius: 2px; }
 /* Marks along the page's scrollbar (§3.2), in the colors the page uses for them. */
 .page-scroll-mark-discussion { background: color-mix(in oklab, #f2b632 85%, transparent); }
 .page-scroll-mark-owed { background: #b45309; }
