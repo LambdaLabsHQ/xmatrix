@@ -177,14 +177,19 @@ export function createProductionRelayRuntimeProductPortFactory(
   /* Each call of a port runs as this cell's work, so what it publishes, however
      deep in the code that commits it, serves this cell's own sockets locally. */
   const runtimeSelf = options.runtimeSelf;
-  /** One Channel's live Instances as their owner's cell holds them; none when it cannot say. */
+  /**
+   * One Channel's live Instances as their owner's cell holds them; none when it
+   * cannot say within the deadline. The card is a head start: the Instance's
+   * next report brings the same.
+   */
   const liveChannelAgents = async (ownerUserId: string, channelId: string): Promise<LiveAgentSessionSnapshot[]> => {
     const cell = relayRuntimeOwnerCellName(ownerUserId);
     const runtime = !cell ? undefined
       : runtimeSelf?.cellName() === cell ? runtimeSelf
         : env.RELAY_RUNTIME ? relayRuntimeCellNamed(env, cell) : undefined;
     if (!runtime) return [];
-    return loadLiveAgentPresenceFromRuntime(runtime, "https://relay-runtime/", { channelId }).catch((error: unknown) => {
+    return loadLiveAgentPresenceFromRuntime(runtime, "https://relay-runtime/", { channelId },
+      FOCUSED_CHANNEL_AGENTS_READ_TIMEOUT_MS).catch((error: unknown) => {
       console.warn("Live Agent presence of a focused Channel could not be read", {
         errorCode: error instanceof Error ? error.name : "unknown",
       });
@@ -238,12 +243,14 @@ export function createProductionRelayRuntimeProductPortFactory(
       const instances = payload ? decodeChannelSnapshot(payload.channel).presence?.instances : undefined;
       if (!payload || !instances?.size) return;
       const owners = new Set([...instances.values()].map((instance) => instance.registration.ownerUserId));
-      const live = await Promise.all([...owners].map((owner) => liveChannelAgents(owner, channelId)));
-      for (const snapshot of live.flat()) {
-        // Only an Instance the Channel's read names is shown, as a live overlay shows only those.
-        if (!instances.has(presenceInstanceId(snapshot.instanceId))) continue;
-        send(liveAgentSnapshotCard(snapshot, channelInstanceQuota(payload.channel, snapshot.instanceId)));
-      }
+      // Each owner's cell is shown as it answers: one that is slow holds back no other's Agents.
+      await Promise.all([...owners].map(async (owner) => {
+        for (const snapshot of await liveChannelAgents(owner, channelId)) {
+          // Only an Instance the Channel's read names is shown, as a live overlay shows only those.
+          if (!instances.has(presenceInstanceId(snapshot.instanceId))) continue;
+          send(liveAgentSnapshotCard(snapshot, channelInstanceQuota(payload.channel, snapshot.instanceId)));
+        }
+      }));
     },
     onChannelCatalogChanged: (spaceId) => {
       // Who may see a Channel of this Space may have changed: read it again.
@@ -420,6 +427,9 @@ export function createProductionRelayRuntimeProductPortFactory(
 }
 
 const PRESENCE_QUOTA_TTL_MS = 60_000;
+
+/** How long a focused Channel waits on one owner's cell, response body included. */
+const FOCUSED_CHANNEL_AGENTS_READ_TIMEOUT_MS = 1_000;
 
 /** When the Instance's own provider reading was taken, if it reported one. */
 function reportedQuotaAt(session: Readonly<AgentInstanceRuntimeSession>): number {

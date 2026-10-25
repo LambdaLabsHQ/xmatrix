@@ -115,7 +115,7 @@ export class HumanAuthorityCapabilityError extends Error {
 /**
  * A person opened a Channel on one socket: `send` reaches that socket, which
  * a newly opened app shows the Channel's Agents from at once, not at their
- * next report.
+ * next report. It runs beside the socket's frames, never ahead of the next.
  */
 export type HumanChannelFocusHandler = (input: {
   userId: string;
@@ -132,6 +132,8 @@ export class HumanRuntimeTransport {
   private readonly allowLegacyProtocol: boolean;
   private readonly admit?: RuntimeSocketAdmit;
   private readonly onChannelFocus?: HumanChannelFocusHandler;
+  /** Each socket's latest focus: what a focus started is shown only while it is still the latest. */
+  private readonly focuses = new WeakMap<WebSocket, object>();
   private readonly presenceDigests = new HumanPresenceDigests((socket, message) => {
     if (this.sockets.get(socket)) this.sockets.send(socket, message);
   });
@@ -415,21 +417,27 @@ export class HumanRuntimeTransport {
       const output = await this.backend.focusChannel(session, message);
       session.focusedChannelId = nextFocusedChannelId;
       this.sockets.sendOutput(ws, output);
-      if (nextFocusedChannelId !== null) await this.showChannelAgents(ws, session.user.id, nextFocusedChannelId);
+      const focus = {};
+      this.focuses.set(ws, focus);
+      if (nextFocusedChannelId !== null) this.showChannelAgents(ws, focus, session.user.id, nextFocusedChannelId);
     } catch (error) {
       this.sockets.sendFailure(ws, message.requestId, error, "Could not open this Channel");
     }
   }
 
-  /** The Channel just opened on `ws`, its Agents as they are now. Never fails the focus. */
-  private async showChannelAgents(ws: WebSocket, userId: string, channelId: string): Promise<void> {
-    try {
-      await this.onChannelFocus?.({ userId, channelId, send: (message) => this.sockets.send(ws, message) });
-    } catch (error) {
-      console.warn("Agents of a focused Channel could not be shown", {
-        errorCode: error instanceof Error ? error.name : "unknown",
+  /**
+   * The Channel just opened on `ws`, its Agents as they are now. A card that
+   * arrives once the socket has moved on (another focus, or closed) is dropped.
+   */
+  private showChannelAgents(ws: WebSocket, focus: object, userId: string, channelId: string): void {
+    if (!this.onChannelFocus) return;
+    const current = () => this.focuses.get(ws) === focus && this.sockets.get(ws) !== undefined;
+    void this.onChannelFocus({ userId, channelId, send: (message) => { if (current()) this.sockets.send(ws, message); } })
+      .catch((error: unknown) => {
+        console.warn("Agents of a focused Channel could not be shown", {
+          errorCode: error instanceof Error ? error.name : "unknown",
+        });
       });
-    }
   }
 
   private async handleDisconnected(

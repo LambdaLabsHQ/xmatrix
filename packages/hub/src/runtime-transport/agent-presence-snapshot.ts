@@ -8,7 +8,7 @@ import {
   type AgentInstancePresentation,
 } from "./agent-instance-presentation";
 import { agentPresenceCard } from "./agent-instance-live-presentation";
-import { loadRuntimePresenceSnapshotEntries } from "./runtime-presence-snapshot";
+import { tryLoadRuntimePresenceSnapshotEntries } from "./runtime-presence-snapshot";
 
 export const RELAY_RUNTIME_AGENT_PRESENCE_PATH = "/internal/agent-presence";
 
@@ -127,10 +127,12 @@ function sessionSelected(
     session.run.instanceId === selection.instanceId);
 }
 
+/** A cell's live sessions; none when it does not answer, or not within `timeoutMs`, body included. */
 export async function loadLiveAgentPresenceFromRuntime(
   runtime: { fetch(request: Request): Promise<Response> },
   requestUrl: string,
   selection?: LiveAgentSessionSelection,
+  timeoutMs?: number,
 ): Promise<LiveAgentSessionSnapshot[]> {
   const url = new URL(RELAY_RUNTIME_AGENT_PRESENCE_PATH, requestUrl);
   if (selection && "agentId" in selection) {
@@ -139,7 +141,7 @@ export async function loadLiveAgentPresenceFromRuntime(
     url.searchParams.set("instanceId", selection.instanceId);
   }
   if (selection) url.searchParams.set("channelId", selection.channelId);
-  return (await loadRuntimePresenceSnapshotEntries(runtime, url))
+  return ((await tryLoadRuntimePresenceSnapshotEntries(runtime, url, timeoutMs)) ?? [])
     .slice(0, MAX_LIVE_AGENT_SESSIONS)
     .flatMap(parseLiveAgentSessionSnapshot);
 }

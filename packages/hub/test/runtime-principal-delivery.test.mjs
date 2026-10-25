@@ -205,32 +205,53 @@ function ownerCell({ machineOnline = true } = {}) {
   return cell;
 }
 
-/** viewer-1 opening channel-1 in their own cell, which may read it unless `readable` is false. */
-async function openChannel(owner, { readable = true } = {}) {
+/** A Channel whose Agents are owned by `owners` (owner-1 owns agent-1/instance-1, and so on). */
+function channelOwnedBy(owners) {
+  return { id: "channel-1", spaceId: "space-1", name: "c", mode: "open", createdAt: now, updatedAt: now,
+    memberPresence: Object.fromEntries(owners.map((owner, index) => [`agent-${index + 1}`, { kind: "agent", label: "Agent",
+      registration: { ownerUserId: owner, machineId: "machine-1", harness: "codex" },
+      instances: [{ id: `instance-${index + 1}`, channelId: "channel-1", channelInstanceId: String(index + 1), status: "idle",
+        connectedAt: now, lastSeenAt: now }] }])) };
+}
+
+/**
+ * viewer-1's socket in their own cell, focusing Channels whose owners' cells
+ * answer as `cells` does; `readable` says whether viewer-1 may read them.
+ * `shown()` waits for what the last focus started.
+ */
+function viewerSocket(cells, { owners = ["owner-1"], readable = true } = {}) {
   const reads = [];
-  const { env, calls } = runtimeEnv(new Map([["user-owner-1", owner]]));
+  const { env, calls } = runtimeEnv(cells);
   const factory = createProductionRelayRuntimeProductPortFactory(env, {
     readChannel: async (channelId, userId) => {
       reads.push([channelId, userId]);
-      return readable ? { openChannelHumanMemberIdsBySpace: {}, channel: { id: "channel-1", spaceId: "space-1", name: "c",
-        mode: "open", createdAt: now, updatedAt: now, memberPresence: { "agent-1": { kind: "agent", label: "Agent",
-          registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" },
-          instances: [{ id: "instance-1", channelId: "channel-1", channelInstanceId: "1", status: "idle",
-            connectedAt: now, lastSeenAt: now }] } } } } : undefined;
+      return readable ? { openChannelHumanMemberIdsBySpace: {}, channel: { ...channelOwnedBy(owners), id: channelId } } : undefined;
     },
     readHistory: async () => { throw new Error("unexpected history"); },
     analytics: { writeDataPoint() {} },
     runtimeSelf: { cellName: () => "user-viewer-1", fetch: () => { throw new Error("Unexpected self RPC"); } },
   });
+  let started = Promise.resolve();
   const human = new HumanRuntimeTransport({ capabilities: new Set(HUMAN_AUTHORITY_REQUIRED_CAPABILITIES),
-    focusChannel: async () => undefined }, { onChannelFocus: factory.onChannelFocus });
+    focusChannel: async () => undefined }, { onChannelFocus: (input) => (started = factory.onChannelFocus(input)) });
   const socket = new FakeSocket();
   assert.equal(human.rehydrate(socket, { version: 1, domain: "human", expiresAt: new Date(Date.now() + 60_000).toISOString(),
     session: { user: { id: "viewer-1", email: "viewer-1@example.test" }, connectedAt: now, lastSeenAt: now,
       focusedChannelId: null, deviceClient: "web", clientVersion: "1.8.0", clientProtocolVersion: 2 } }), true);
-  await human.handleFrame(socket, JSON.stringify({ type: "user_focus_channel", requestId: "focus-1", channelId: "channel-1" }));
-  const cards = socket.sent.filter((frame) => frame.type === "enhanced_presence").map((frame) => frame.agent.instances[0]);
-  return { cards, reads, cells: calls.map((call) => call.cell) };
+  return {
+    socket, reads, cells: () => calls.map((call) => call.cell),
+    focus: (channelId = "channel-1") => human.handleFrame(socket, JSON.stringify({ type: "user_focus_channel", requestId: `focus-${channelId}`, channelId })),
+    ping: () => human.handleFrame(socket, JSON.stringify({ type: "ping", requestId: "ping" })),
+    shown: () => started,
+    cards: () => socket.sent.filter((frame) => frame.type === "enhanced_presence").map((frame) => frame.agent.instances[0]),
+  };
+}
+
+async function openChannel(owner, options) {
+  const viewer = viewerSocket(new Map([["user-owner-1", owner]]), options);
+  await viewer.focus();
+  await viewer.shown();
+  return { cards: viewer.cards(), reads: viewer.reads, cells: viewer.cells() };
 }
 
 test("a person who opens a Channel is shown its Agents as they are now, from the cells that hold them", async () => {
@@ -248,6 +269,60 @@ test("a person who opens a Channel is shown its Agents as they are now, from the
 
   const refused = await openChannel(ownerCell(), { readable: false });
   assert.deepEqual([refused.cards, refused.cells], [[], []], "nobody else's Agents for a Channel the person cannot read");
+});
+
+/** A cell that has not answered yet, by headers or by body, until `answer()`; `cancelled` once its body is. */
+function stalledCell(stalledAt) {
+  let answer;
+  const answered = new Promise((resolve) => { answer = resolve; });
+  const cell = {
+    cancelled: false,
+    answer: () => answer(),
+    fetch: async () => {
+      if (stalledAt === "fetch") { await answered; return Response.json({ sessions: [] }); }
+      return new Response(new ReadableStream({
+        start(controller) { void answered.then(() => {
+          if (cell.cancelled) return;
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ sessions: [] })));
+          controller.close();
+        }); },
+        cancel() { cell.cancelled = true; },
+      }));
+    },
+  };
+  return cell;
+}
+
+for (const stalledAt of ["fetch", "body"]) {
+  test(`a cell stalled at its ${stalledAt} holds back neither another owner's Agents nor the socket's next frame`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const stalled = stalledCell(stalledAt);
+    const viewer = viewerSocket(new Map([["user-owner-1", ownerCell()], ["user-owner-2", stalled]]),
+      { owners: ["owner-1", "owner-2"] });
+    await viewer.focus();
+    await viewer.ping();
+    assert.equal(viewer.socket.sent.filter((frame) => frame.type === "pong").length, 1, "the next frame is answered at once");
+    for (let turn = 0; turn < 10 && viewer.cards().length === 0; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(viewer.cards().map((card) => card.id), ["instance-1"], "the owner that answered is shown");
+    // Past its deadline the stalled read is given up, its body cancelled, and the focus is done.
+    t.mock.timers.tick(1_000);
+    await viewer.shown();
+    assert.equal(stalled.cancelled, stalledAt === "body");
+    stalled.answer();
+    assert.deepEqual(viewer.cards().map((card) => card.id), ["instance-1"]);
+  });
+}
+
+test("a card that arrives after the socket opened another Channel is dropped", async () => {
+  const stalled = stalledCell("fetch");
+  const viewer = viewerSocket(new Map([["user-owner-1", stalled]]));
+  await viewer.focus("channel-1");
+  const first = viewer.shown();
+  await viewer.focus("channel-2");
+  stalled.answer();
+  await first;
+  await viewer.shown();
+  assert.deepEqual(viewer.cards(), [], "nothing of channel-1 reaches a socket now showing channel-2");
 });
 
 test("a Channel snapshot that speaks only for Agents goes only to sockets that read that", () => {
