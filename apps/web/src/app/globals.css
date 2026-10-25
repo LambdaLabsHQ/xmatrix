@@ -7288,8 +7288,11 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .xmatrix-app .app-message-unsent-body {
   opacity: 0.5;
 }
-.xmatrix-app .app-message-unsent {
+.xmatrix-app :is(.app-message-unsent, .app-allowance-notice-blocked) {
   --app-unsent-ink: var(--m-ink-alert, var(--destructive));
+}
+.xmatrix-app .app-allowance-notice:not(.app-allowance-notice-blocked) {
+  --app-unsent-ink: var(--m-ink-attention, var(--accent));
 }
 .xmatrix-app .app-message-unsent[data-message-unsent="unconfirmed"] {
   --app-unsent-ink: var(--m-ink-attention, var(--accent));

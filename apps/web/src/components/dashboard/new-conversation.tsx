@@ -16,7 +16,7 @@ import { useAndroidBackDismiss } from "./use-android-back";
  */
 export function NewConversation({
   space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace, initialDraft = "",
-  error = null,
+  error = null, allowance,
 }: {
   /** What the composer opens holding, for the person to send (a welcome card's). */
   initialDraft?: string;
@@ -32,6 +32,7 @@ export function NewConversation({
   onSend: (channel: ChannelSnapshot, snapshot: ComposerSendSnapshot) => Promise<void>;
   onCancel: () => void;
   onOpenAppsForSpace: (spaceId: string) => void;
+  allowance?: { userId: string; onOpenBilling?: () => void };
 }) {
   const draftRef = useRef(initialDraft);
   const [attachments, setAttachments] = useState<ChannelAttachment[]>([]);
@@ -92,6 +93,7 @@ export function NewConversation({
         onCancelReply={() => {}}
         onAttachmentsChange={setAttachments}
         onOpenAppsForSpace={onOpenAppsForSpace}
+        allowance={allowance}
         onEscape={onCancel}
         onSend={async (snapshot) => {
           draftRef.current = snapshot.body;

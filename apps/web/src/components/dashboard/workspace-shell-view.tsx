@@ -94,6 +94,7 @@ import {
 import { SpaceFirstTaskCard } from "./space-first-task-card";
 import { ListCreate, type CreateAction } from "./list-create";
 import { NewConversation } from "./new-conversation";
+import { SPACE_BILLING_SECTION } from "./settings-billing";
 import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
@@ -653,6 +654,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
   }), [machineTargets]);
   const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
+  const composerAllowance = useMemo(() => user ? {
+    userId: user.id,
+    onOpenBilling: () => changeAppViewRef.current("settings", SPACE_BILLING_SECTION),
+  } : undefined, [user]);
   // The route owns whether a page is open; its tree entry may arrive later.
   // Keep the back bar and its content spacing while the title is loading.
   const openedPage = phonePageOpen
@@ -1066,6 +1071,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onSend={sendNewConversationMessage}
       onCancel={() => setComposingConversation(false)}
       onOpenAppsForSpace={openAppsForSpace}
+      allowance={composerAllowance}
     />
   );
 
@@ -1259,6 +1265,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onAttachmentsChange={changeDraftAttachments}
           onSend={sendComposerMessage}
           onOpenAppsForSpace={openComposerApps}
+          allowance={composerAllowance}
         />
       )}
     </section>
