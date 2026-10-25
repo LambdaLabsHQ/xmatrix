@@ -5,7 +5,7 @@ mod registration;
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use colored::Colorize;
@@ -156,7 +156,36 @@ struct AgentPresetDiscovery {
     workspaces: Vec<PathBuf>,
 }
 
+/// The harness registry this process uses: the Hub's, when the machine holds
+/// one this CLI can read (`xmatrix_cli_core::hub_harness_registry`), else the
+/// copy compiled into it. A daemon that records a newer registry from the Hub
+/// reads it on its next call; each distinct registry is kept for the life of
+/// the process, since callers hold its entries as `'static`. Debug builds
+/// (tests, local development) always use the compiled copy, so a test reads
+/// the registry of the source it was built from, not the machine's cache.
 pub fn agent_presets() -> &'static [AgentPreset] {
+    if cfg!(debug_assertions) {
+        return compiled_presets();
+    }
+    static CURRENT: Mutex<Option<(u64, &'static [AgentPreset])>> = Mutex::new(None);
+    let generation = xmatrix_cli_core::hub_harness_registry::generation();
+    let mut current = CURRENT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((read_at, presets)) = *current
+        && read_at == generation
+    {
+        return presets;
+    }
+    let presets: &'static [AgentPreset] = xmatrix_cli_core::hub_harness_registry::read()
+        .and_then(|text| hub_registry(&text))
+        .map(|presets| &*Box::leak(presets.into_boxed_slice()))
+        .unwrap_or_else(compiled_presets);
+    *current = Some((generation, presets));
+    presets
+}
+
+fn compiled_presets() -> &'static [AgentPreset] {
     static PRESETS: OnceLock<Vec<AgentPreset>> = OnceLock::new();
     PRESETS
         .get_or_init(|| {
@@ -164,6 +193,31 @@ pub fn agent_presets() -> &'static [AgentPreset] {
                 .expect("agent preset registry must be valid JSON")
         })
         .as_slice()
+}
+
+/// The Hub's registry text, when this CLI can read all of it: every entry
+/// parses, there is at least one, and no id repeats. Anything else is
+/// reported and the compiled copy is used instead.
+fn hub_registry(text: &str) -> Option<Vec<AgentPreset>> {
+    let presets: Vec<AgentPreset> = match serde_json::from_str(text) {
+        Ok(presets) => presets,
+        Err(error) => {
+            eprintln!(
+                "⚠ The Hub's harness registry is unreadable here ({error}); using the built-in one"
+            );
+            return None;
+        }
+    };
+    let mut ids = std::collections::HashSet::new();
+    if presets.is_empty()
+        || !presets
+            .iter()
+            .all(|preset| ids.insert(preset.id.to_ascii_lowercase()))
+    {
+        eprintln!("⚠ The Hub's harness registry is empty or repeats an id; using the built-in one");
+        return None;
+    }
+    Some(presets)
 }
 
 pub fn agent_preset_by_id(id: &str) -> Option<&'static AgentPreset> {
@@ -879,5 +933,29 @@ mod cli_binary_tests {
                 .get_envs()
                 .any(|(name, value)| name == "XMATRIX_BIN" && value.is_none())
         );
+    }
+}
+
+#[cfg(test)]
+mod hub_registry_tests {
+    use super::*;
+
+    #[test]
+    fn the_hubs_registry_is_used_whole_or_not_at_all() {
+        let compiled = include_str!("../../../../protocol/src/agent-presets.json");
+        let hub =
+            hub_registry(compiled).expect("the registry this CLI ships reads as a Hub registry");
+        assert_eq!(hub.len(), compiled_presets().len());
+        // A field this CLI does not know yet is ignored, not a reason to refuse.
+        let mut rows: Vec<serde_json::Value> = serde_json::from_str(compiled).unwrap();
+        rows[0]["fieldFromANewerHub"] = serde_json::json!(true);
+        assert!(hub_registry(&serde_json::to_string(&rows).unwrap()).is_some());
+        assert!(hub_registry("[]").is_none());
+        assert!(hub_registry("not json").is_none());
+        rows.push(rows[0].clone());
+        assert!(hub_registry(&serde_json::to_string(&rows).unwrap()).is_none());
+        rows.pop();
+        rows[0]["launcherNames"] = serde_json::json!("not a list");
+        assert!(hub_registry(&serde_json::to_string(&rows).unwrap()).is_none());
     }
 }

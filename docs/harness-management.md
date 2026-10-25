@@ -13,9 +13,30 @@ automatic-update behavior is distinct from `manual` or `notify`. Defaults
 describe upstream behavior, not the effective configuration on a machine.
 
 Install and update recipes are executed only through owner-requested harness
-actions (below). The daemon never runs a recipe it receives: commands name a
-preset and an action, and the daemon looks the recipe up in the registry
-compiled into it. Nothing uninstalls software. ZCode and custom runtimes have
+actions (below). Commands name a preset and an action, never a recipe; the
+daemon looks the recipe up in its registry.
+
+## The registry comes from the Hub
+
+A daemon declaring `hub_harness_registry_v1` receives the Hub's registry text
+(`agent-presets.json`, as the deployed Hub release carries it) in its
+`machine_daemon_connected` frame, unless the `harnessRegistrySha256` it sent on
+connect already matches. It keeps the text in
+`<config dir>/hub-harness-registry.json`, written through a rename, and every
+process of the CLI on that machine (daemon, Run wrappers, commands) uses it
+over the copy compiled into the CLI; a running daemon reads a newly recorded
+registry on its next lookup. A registry this CLI cannot read whole (invalid
+JSON, an entry missing a field it needs, no entries or a repeated id) is
+reported and the compiled copy is used. Fields it does not know are ignored.
+Debug builds (tests, local development) always use the compiled copy.
+
+So a new harness on an existing backend, a changed install, update or login
+recipe, launcher names or a minimum version reach every capable Machine with a
+Hub deploy. A new backend, inventory probe behavior or action kind still needs
+a CLI release. The recipes come only from the Hub's released registry: the
+connected frame is the Hub's own, not a Channel, Page or caller-supplied value,
+and the owner-requested action, its lease and the Machine owner checks are
+unchanged. Nothing uninstalls software. ZCode and custom runtimes have
 explicit unsupported management entries. Pi checks
 the `pi-acp` launcher and probes `pi`; Vibe checks `vibe-acp` and probes `vibe`.
 Cursor recognizes current `agent` and legacy `cursor-agent` aliases without
