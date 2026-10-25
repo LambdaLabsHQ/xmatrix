@@ -74,14 +74,16 @@ test("search is the window's, not the rail's: the top bar opens it in every view
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
 });
 
-test("Enter opens every result at an address that names the search", async ({ page }) => {
+test("every result lists in the panel, and Enter opens the one chosen", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, RELEASE] });
   await stubMessageSearch(page);
   await page.goto(`/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Search", exact: true }).filter({ visible: true }).click();
   await page.keyboard.type("deploy");
   const dialog = page.getByRole("dialog", { name: "Search workspace" });
+  // There is no search page: every result is a row of the panel.
   await expect(dialog.getByText("deploy the hub (1)")).toBeVisible();
+  await expect(dialog.getByText("deploy the hub (2)")).toBeVisible();
   // The Enter that commits an input method's candidate is not the field's.
   const address = page.url();
   for (const ime of [{ isComposing: true, keyCode: 229 }, { isComposing: false, keyCode: 229 }]) {
@@ -91,17 +93,10 @@ test("Enter opens every result at an address that names the search", async ({ pa
   }
   await expect(dialog).toBeVisible();
   expect(page.url()).toBe(address);
-  await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/search\?q=deploy$/u);
-  const results = page.getByRole("region", { name: "Search" });
-  await expect(results.getByText("deploy the hub (2)")).toBeVisible();
-  // The address alone brings the search back.
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page).toHaveURL(/\/search\?q=deploy$/u);
-  await expect(results.getByText("deploy the hub (2)")).toBeVisible();
-  await results.getByText("deploy the hub (2)").click();
-  await expect(page).toHaveURL(new RegExp(`/channels/${RELEASE.name}--${RELEASE.id}`, "u"));
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/channels/${RELEASE.name}--${RELEASE.id}#message:m-2$`, "u"));
 });
 
 test("a conversation found by name opens and is revealed in the list", async ({ page }) => {
@@ -266,15 +261,13 @@ test.describe("on a phone", () => {
     // The close button is where the top bar's search button was.
     const close = (await panel.getByRole("button", { name: "Close search" }).boundingBox())!;
     expect(centre(close)).toBeCloseTo(centre(control), 0);
-    // The field's magnifier and text start on the rows' icon and text columns; ↵ sits under the close button.
+    // The field's magnifier and text start on the rows' icon and text columns.
     const glyph = (await page.locator(".app-search-panel-field > svg").boundingBox())!;
     const rowIcon = (await page.locator(".app-search-panel-row > svg").first().boundingBox())!;
     const inputBox = (await input.boundingBox())!;
     const rowText = (await page.locator(".app-search-panel-row > span").first().boundingBox())!;
-    const hint = (await page.locator(".app-search-panel-hint").boundingBox())!;
     expect(glyph.x).toBeCloseTo(rowIcon.x, 0);
     expect(inputBox.x).toBeCloseTo(rowText.x, 0);
-    expect(centre(hint)).toBeCloseTo(centre(close), 0);
     expect(centre(glyph) - box.x).toBeCloseTo(box.x + box.width - centre(close), 0);
     expect(await input.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
   });
