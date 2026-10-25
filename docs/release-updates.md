@@ -1,5 +1,24 @@
 # Release Updates
 
+## Unreleased: The Hub handles streamed page writing
+
+Page-writing markers in conversation replies and answers to “write together”
+now use one acknowledged output path. The Host forwards assistant text and
+resolves local attachment references; the Hub interprets writing instructions,
+checks current Page access and confirms text only after applying it. A lost
+reply can be retried without writing twice, and rate-limited text stays on the
+Host until the Page accepts it. Human edits, undo and suggestion-only policy
+keep their existing Page semantics. Cancelled or disconnected answers cannot
+be adopted by a new co-writing session. Unclassified Codex raw events remain
+diagnostics and cannot enter this writing path.
+
+This needs the new CLI once. After that, Page parsing and writing policy can
+change with a Hub deploy. Older Hubs keep the previous transport. If a live
+writer's state is lost, the runtime reports an unconfirmed write and stops that
+output instead of replaying the model's task. This does not promise exactly-once
+model execution or a fixed model response time; first visible text is measured
+separately in the end-to-end release verification.
+
 ## Unreleased: Some xmatrix commands now come from the Hub
 
 `xmatrix automation …` is now defined by the Hub: the CLI passes the command

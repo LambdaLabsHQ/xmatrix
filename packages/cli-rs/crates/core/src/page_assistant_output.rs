@@ -2,7 +2,15 @@
 use serde::{Deserialize, Serialize};
 
 pub const CAPABILITY: &str = "page_assistant_output_v1";
+pub const COWRITE_CAPABILITY: &str = "page_cowrite_output_v1";
 pub const MAX_TEXT_BYTES: usize = 4096;
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct OutputTarget {
+    pub page: String,
+    pub session: String,
+    pub turn: u64,
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +22,8 @@ pub struct AssistantOutput {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<OutputTarget>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -80,6 +90,7 @@ mod tests {
             seq: 4,
             kind: "text".into(),
             text: Some("你😀".into()),
+            target: None,
         };
         let mut ack = AssistantOutputAck {
             stream: "s".into(),

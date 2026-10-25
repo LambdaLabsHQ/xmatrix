@@ -1875,7 +1875,7 @@ impl ZcodeAppSession {
                 .and_then(Value::as_str)
                 .is_some_and(|value| value != input_id);
             match event_type {
-                Some("model.streaming") => {
+                Some("model.streaming") if !for_other_input => {
                     if let Some(delta) = payload.get("delta").and_then(Value::as_str) {
                         output.push_str(delta);
                         trace

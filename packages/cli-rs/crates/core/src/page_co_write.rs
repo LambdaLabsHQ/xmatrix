@@ -132,6 +132,8 @@ pub enum PageCoWriteRequest {
     Turn {
         turn: u64,
         text: String,
+        #[serde(default, rename = "outputSession")]
+        output_session: Option<String>,
     },
     Interrupt {
         turn: u64,
@@ -551,6 +553,24 @@ impl PageCoWriteConnector {
         page_id: &str,
         streams: bool,
     ) -> Result<ClientWebSocket> {
+        self.connect_inner(space_id, page_id, streams, false).await
+    }
+
+    pub async fn connect_acknowledged(
+        &self,
+        space_id: &str,
+        page_id: &str,
+    ) -> Result<ClientWebSocket> {
+        self.connect_inner(space_id, page_id, false, true).await
+    }
+
+    async fn connect_inner(
+        &self,
+        space_id: &str,
+        page_id: &str,
+        streams: bool,
+        acknowledged: bool,
+    ) -> Result<ClientWebSocket> {
         let (secure, host) = connection_host(&self.relay_url);
         let token = self.token()?;
         let url = format!(
@@ -562,6 +582,9 @@ impl PageCoWriteConnector {
         let mut body = serde_json::json!({ "document": PAGE_DOCUMENT_FRAGMENT, "coWrite": true });
         if streams {
             body["stream"] = true.into();
+        }
+        if acknowledged {
+            body["acknowledged"] = true.into();
         }
         let ticket: LiveTicket = http::request_json(&url, "POST", Some(&token), Some(body)).await?;
         if !ticket.socket_path.starts_with("/ws/pages/") {
@@ -658,7 +681,8 @@ mod tests {
             decode_request(&session_frame(&long)),
             Some(PageCoWriteRequest::Turn {
                 turn: 2,
-                text: "页".repeat(100)
+                text: "页".repeat(100),
+                output_session: None,
             }),
             "a body longer than one varint byte"
         );

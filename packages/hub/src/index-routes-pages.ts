@@ -601,6 +601,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       const registered = await sessionCall(c.env, spaceId, pageId, "/internal/ticket", {
         ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit, ...(coWriter ? { coWriter: true } : {}),
         ...(streams ? { streams: true } : {}),
+        ...(coWriter && !streams && request.acknowledged === true ? { acknowledged: true } : {}),
       });
       if (!registered.ok) throw new ServiceUnavailable("page_session_unavailable", "Page session is unavailable");
       return c.json({ protocol: `${PAGE_SESSION_SUBPROTOCOL_PREFIX}${ticket}`,

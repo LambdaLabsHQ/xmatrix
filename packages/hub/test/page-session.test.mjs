@@ -159,7 +159,7 @@ test("Hub output retries acknowledge one document change, including after the Pa
   assert.deepEqual(await restored.session.output(agent, end), receipt);
   assert.equal(restored.session.markdown(), ann.text.toString());
   assert.equal((await restored.session.output(agent, { ...end, seq: seq + 1,
-    reply: { type: "write", turn: 2 } })).status, "unknown", "lost parser and anchors never restart a write");
+    reply: { type: "delta", turn: 1, text: "late", paced: { at } } })).status, "unknown", "lost parser and anchors never restart a write");
   assert.equal((await h.session.output(agent, { ...end, reply: { type: "failed", turn: 1, paced: { at } } })).status,
     "rejected", "the same sequence cannot mean different content");
 });
@@ -1150,7 +1150,7 @@ test("summary: a fast completion waits for its pending dispatch to be recorded",
  * An Agent's runtime co-writing the page (page-co-writer.ts): what the session asks it, and its
  * answers, streamed in as the harness writes them.
  */
-function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false, streams = false } = {}) {
+function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false, streams = false, acknowledged = false } = {}) {
   const asked = [];
   const send = h.ports.send;
   h.ports.send = (to, data) => {
@@ -1161,7 +1161,7 @@ function joinCoWriter(h, id = "w-agent", { canEdit = true, resumed = false, stre
     assert.equal(type, PAGE_MESSAGE_CO_WRITE);
     asked.push(JSON.parse(decoding.readVarString(decoder)));
   };
-  h.session.connect({ id, principal: agent, canEdit, coWriter: true, ...(streams ? { streams } : {}) }, { resumed });
+  h.session.connect({ id, principal: agent, canEdit, coWriter: true, streams, acknowledged }, { resumed });
   const reply = (frame) => {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, PAGE_MESSAGE_CO_WRITE);
@@ -1204,6 +1204,31 @@ function placeCaret(h, client, id, words) {
 }
 
 const coWriterOf = (client) => [...client.awareness.getStates().values()].find((state) => state?.user?.kind === "agent");
+
+test("an acknowledged co-writer yields its actual paragraph to a human and refuses the old socket output", async (t) => {
+  const { h, ann, clock } = await outputSession(t);
+  const writer = joinCoWriter(h, "native", { acknowledged: true });
+  const request = writer.turns()[0];
+  const turn = request.turn;
+  const envelope = { stream: "bound-answer", session: request.outputSession, expiresAt: clock.now + 60_000 };
+  let seq = 0;
+  const send = (reply) => h.session.output(agent, { ...envelope, seq: seq++, reply });
+  assert.equal((await send({ type: "answer", turn })).status, "accepted");
+  let at = 0;
+  for (const text of ['⟦after ', '"none"⟧', 'A draft']) {
+    clock.now += 500;
+    assert.equal((await send({ type: "delta", turn, text, paced: { at } })).status, "accepted");
+    at += text.length;
+  }
+  writer.write(1, " socket bypass");
+  assert.doesNotMatch(ann.text.toString(), /socket bypass/u);
+  ann.text.insert(ann.text.toString().indexOf("A draft"), "Ann: ");
+  assert.deepEqual(writer.asked.at(-1), { type: "interrupt", turn });
+  const refused = await send({ type: "delta", turn, text: " too late", paced: { at } });
+  assert.ok(refused.notices.some((notice) => notice.type === "interrupt"));
+  assert.match(ann.text.toString(), /Ann: A draft/u);
+  assert.doesNotMatch(ann.text.toString(), /too late/u);
+});
 
 test("live co-writing follows current edit access and suggestion policy, including late replies", async (t) => {
   for (const policy of ["access", "suggestions"]) await t.test(policy, async (t) => {

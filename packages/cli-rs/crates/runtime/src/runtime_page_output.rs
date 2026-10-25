@@ -11,7 +11,7 @@ use xmatrix_cli_core::agent_instance_connection::{
 };
 use xmatrix_cli_core::error::CliError;
 use xmatrix_cli_core::page_assistant_output::{
-    AssistantOutput, CAPABILITY, MAX_TEXT_BYTES, OutputStatus, chunks,
+    AssistantOutput, CAPABILITY, MAX_TEXT_BYTES, OutputStatus, OutputTarget, chunks,
 };
 use xmatrix_cli_core::page_co_write::{PageCoWriteConnector, PageCoWriteEvent};
 use xmatrix_cli_core::page_media::PageReferences;
@@ -25,7 +25,21 @@ const RETRY_WITHIN: Duration = Duration::from_secs(120);
 struct Stream {
     id: String,
     started_at: i64,
+    target: Option<OutputTarget>,
     cancelled: AtomicBool,
+}
+impl Stream {
+    fn new(target: Option<OutputTarget>) -> Arc<Self> {
+        Arc::new(Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            started_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+            target,
+            cancelled: AtomicBool::new(false),
+        })
+    }
 }
 struct Piece {
     stream: Arc<Stream>,
@@ -57,6 +71,34 @@ impl Forwarder {
         }
         true
     }
+    fn finish(
+        &mut self,
+        events: &mpsc::UnboundedSender<AgentInstanceConnectionEvent>,
+        channel: &str,
+        cancelled: bool,
+    ) {
+        let Some(stream) = self.active.take() else {
+            return;
+        };
+        if cancelled {
+            stream.cancelled.store(true, Ordering::Relaxed);
+        }
+        let tail = self.media.finish();
+        if !tail.is_empty() && !stream.cancelled.load(Ordering::Relaxed) {
+            for text in chunks(&tail) {
+                if !self.enqueue(stream.clone(), Some(text.to_owned())) {
+                    stream.cancelled.store(true, Ordering::Relaxed);
+                    break;
+                }
+            }
+        }
+        self.media = PageReferences::default();
+        if !self.enqueue(stream.clone(), None) {
+            stream.cancelled.store(true, Ordering::Relaxed);
+            report(events, channel,
+                    "Assistant output delivery stopped before its end was acknowledged: the local queue is full.".into());
+        }
+    }
 }
 static FORWARDERS: LazyLock<Mutex<HashMap<String, Forwarder>>> = LazyLock::new(Default::default);
 
@@ -76,7 +118,8 @@ pub(crate) fn observe(
     phase: &str,
     payload: &serde_json::Value,
 ) -> bool {
-    if crate::runtime_page_co_write::answering(channel) {
+    let target = crate::runtime_page_co_write::output_target(channel);
+    if crate::runtime_page_co_write::answering(channel) && target.is_none() {
         return false;
     }
     let mut all = FORWARDERS.lock().unwrap_or_else(|p| p.into_inner());
@@ -112,16 +155,7 @@ pub(crate) fn observe(
         {
             let stream = forwarder
                 .active
-                .get_or_insert_with(|| {
-                    Arc::new(Stream {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        started_at: SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64,
-                        cancelled: AtomicBool::new(false),
-                    })
-                })
+                .get_or_insert_with(|| Stream::new(target.clone()))
                 .clone();
             // Local attachment paths belong to this host; resolve them before
             // forwarding. This adapter does not interpret page-write markers.
@@ -138,31 +172,23 @@ pub(crate) fn observe(
                 }
             }
         }
-    } else if (matches!(
+    } else if phase == "turn_started"
+        && payload.get("continued").and_then(|v| v.as_bool()) != Some(true)
+    {
+        forwarder.finish(&relay.local_event_sender(), channel, false);
+        // Even an answer with no text must acknowledge the Page's turn end.
+        if target.is_some() {
+            forwarder.active = Some(Stream::new(target));
+        }
+    } else if matches!(
         phase,
         "turn_completed" | "turn_failed" | "turn_interrupted" | "turn_cancelled"
-    ) || (phase == "turn_started"
-        && payload.get("continued").and_then(|v| v.as_bool()) != Some(true)))
-        && let Some(stream) = forwarder.active.take()
-    {
-        if matches!(phase, "turn_failed" | "turn_interrupted" | "turn_cancelled") {
-            stream.cancelled.store(true, Ordering::Relaxed);
-        }
-        let tail = forwarder.media.finish();
-        if !tail.is_empty() && !stream.cancelled.load(Ordering::Relaxed) {
-            for text in chunks(&tail) {
-                if !forwarder.enqueue(stream.clone(), Some(text.to_owned())) {
-                    stream.cancelled.store(true, Ordering::Relaxed);
-                    break;
-                }
-            }
-        }
-        forwarder.media = PageReferences::default();
-        if !forwarder.enqueue(stream.clone(), None) {
-            stream.cancelled.store(true, Ordering::Relaxed);
-            report(&relay.local_event_sender(), channel,
-                    "Assistant output delivery stopped before its end was acknowledged: the local queue is full.".into());
-        }
+    ) {
+        forwarder.finish(
+            &relay.local_event_sender(),
+            channel,
+            phase != "turn_completed",
+        );
     }
     true
 }
@@ -239,6 +265,7 @@ async fn forward(
             seq,
             kind: if piece.text.is_some() { "text" } else { "end" }.into(),
             text: piece.text,
+            target: piece.stream.target.clone(),
         };
         let mut confirmed = 0;
         let began = Instant::now();
@@ -383,6 +410,11 @@ mod tests {
         let stream = Arc::new(Stream {
             id: "native-turn".into(),
             started_at: 1,
+            target: Some(OutputTarget {
+                page: "page".into(),
+                session: "socket-one".into(),
+                turn: 42,
+            }),
             cancelled: AtomicBool::new(false),
         });
         sender
@@ -411,6 +443,10 @@ mod tests {
         assert_eq!(received[1], received[2]);
         assert_eq!(received[3]["seq"], 1);
         assert_eq!(received[3]["type"], "end");
+        assert_eq!(
+            received[3]["target"],
+            serde_json::json!({ "page": "page", "session": "socket-one", "turn": 42 })
+        );
         assert!(notices.try_recv().is_err());
     }
 }
