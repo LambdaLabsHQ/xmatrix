@@ -431,7 +431,7 @@ function ConnectorCommandChip({ invocation, text }: { invocation: ConnectorInvoc
     <span className="app-mention-chip app-connector-command-chip" data-connector={invocation.provider}>
       <span className="app-mention-chip-avatar" aria-hidden="true">
         <span className="app-mention-chip-avatar-face">
-          <MentionChipFace of={{ kind: "app", id: invocation.provider, name: invocation.provider }} contain />
+          <MentionChipFace of={{ kind: "app", id: invocation.provider, name: invocation.provider }} />
         </span>
       </span>
       <span className="app-mention-chip-label">
