@@ -596,6 +596,7 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
     // Refuse before the lifetime binding and the status heartbeat: a nested
     // command must leave its parent Run's status file untouched.
     if let Some(Commands::External(args)) = &cli.command
+        && !crate::runtime_hub_command::hub_command_candidate(args)
         && let Some(refusal) = nested_external_command_refusal(args)
     {
         return Err(refusal);
@@ -1732,7 +1733,8 @@ fn runtime_executable_name(runtime: &str) -> &str {
 }
 
 /// An unknown subcommand inside a Run reaches `Commands::External`, which
-/// would start a runtime under the inherited Run identity. Only the Run's own
+/// would start a runtime under the inherited Run identity, unless it is a word
+/// the Hub may define (`runtime_hub_command`), which starts nothing here. Only the Run's own
 /// runtime may do that; anything else is a nested command this CLI lacks
 /// (typically a stale `xmatrix` found on PATH before the daemon's).
 fn nested_external_command_refusal(args: &[String]) -> Option<CliError> {
