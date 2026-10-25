@@ -16,6 +16,16 @@ a CLI release once the daemon supports this field.
 | `connected-apps.md` | Connected app names and `xmatrix connector list` discovery |
 | `working-mode-autonomous.md` | Default: finish through release |
 | `working-mode-cautious.md` | Cautious mode, selected by a Space owner/admin |
+| `session-recovery*.md` | Named text: the first input of a resumed session, with its three continuations |
+
+Named texts travel in the bundle's `texts` map, keyed by file name without
+`.md`, and the runtime reads them with `official_text(<name>)`. The Hub sends
+the map only to a daemon that declared `bootstrap_prompt_texts_v1`; a daemon
+that predates it refuses unknown fields and keeps the fixed fields above. A
+name the Hub does not send falls back to the compiled copy, so moving another
+runtime string here is one new file, one entry in
+`packages/hub/src/agent-bootstrap.ts` and one in `COMPILED_TEXTS`, with no
+schema change.
 
 The daemon validates the version, required nonempty text, NUL exclusion and
 32 KiB serialized envelope limit before starting the child. The wrapper renders

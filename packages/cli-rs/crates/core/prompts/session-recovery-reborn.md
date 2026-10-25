@@ -1,0 +1,1 @@
+The explicit reborn command had no additional text. Start a continuation turn now. If nothing remains to do, report that to the Channel instead of silently waiting for another message.

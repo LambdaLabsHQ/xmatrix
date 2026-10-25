@@ -2234,6 +2234,8 @@ async fn run_daemon_connection(
             "machine_handoff_export_v1",
             // The owner lists and reclaims this machine's git worktrees.
             "machine_worktree_action_v1",
+            // A spawn's prompt bundle may carry further official texts by name.
+            "bootstrap_prompt_texts_v1",
             // The daemon keeps the Hub's harness registry and uses it over its compiled copy.
             "hub_harness_registry_v1",
         ],
@@ -2286,6 +2288,7 @@ async fn run_daemon_connection(
             "machine_harness_login_start_cancel_v1".to_string(),
             "machine_handoff_export_v1".to_string(),
             "machine_worktree_action_v1".to_string(),
+            "bootstrap_prompt_texts_v1".to_string(),
             xmatrix_cli_core::hub_harness_registry::CAPABILITY.to_string(),
         ],
     );
