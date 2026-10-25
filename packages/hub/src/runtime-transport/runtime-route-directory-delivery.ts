@@ -16,6 +16,7 @@ import {
 } from "./runtime-delivery-diagnostics";
 import {
   RELAY_RUNTIME_SELECTED_CELL,
+  relayRuntimeOwnerCellName,
   relayRuntimeRoutingMode,
 } from "./runtime-cell-locator";
 import { RUNTIME_FANOUT_CELLS_PER_SCOPE } from "./runtime-channel-fanout-policy";
@@ -104,7 +105,8 @@ export interface RuntimeRouteDirectoryDeliveryInput {
  * Delivers one committed-event envelope. Shadow mode preserves the original
  * single-cell fetch byte-for-byte and never reads the route directory. Dual
  * mode retains cell-0 for legacy product sockets, adds only validated cells
- * returned by the bounded directory, and gives each cell its own retry budget.
+ * returned by the bounded directory and the recipients' own cells, and gives
+ * each cell its own retry budget.
  */
 export async function publishRuntimeCommittedEvent(
   input: RuntimeRouteDirectoryDeliveryInput,
@@ -301,6 +303,22 @@ function fetchRuntimeCell(
     ? relayRuntimeSingleCell(env) : relayRuntimeCellNamed(env, cellName)).fetch(request);
 }
 
+/**
+ * The cells of the people a delivery names. A person's sockets live in their
+ * own cell (`user-<id>`), which the directory lists only for the Channel they
+ * are viewing; what they are told of anywhere else (a new conversation in the
+ * Space's list, a message in a conversation they are not viewing, a page that
+ * changed) reaches them there. A cell delivers only to its recipients' sockets.
+ */
+function recipientOwnerCells(payload: Record<string, unknown>): RuntimeRouteDirectoryCell[] {
+  const ids = Array.isArray(payload.recipientUserIds) ? payload.recipientUserIds
+    : Array.isArray(payload.recipientPrincipalIds) ? payload.recipientPrincipalIds : [];
+  return ids.flatMap((id) => {
+    const cell = typeof id === "string" ? relayRuntimeOwnerCellName(id) : undefined;
+    return cell ? [cell] : [];
+  });
+}
+
 async function publishRuntimeRouted(
   input: RuntimeRouteDirectoryDeliveryInput,
   request: () => Request,
@@ -313,42 +331,33 @@ async function publishRuntimeRouted(
   const lookedUp = directory
     ? await lookupDirectory(directory, input.scopeId).catch(() => undefined)
     : undefined;
+  const recipients = recipientOwnerCells(input.payload);
   // This projection cannot strand legacy sockets when absent or unavailable.
-  if (lookedUp === undefined) {
+  if (lookedUp === undefined && recipients.length === 0) {
     return fetchRuntimeCell(input.env, RELAY_RUNTIME_SELECTED_CELL, request(), input.self);
   }
-  if (lookedUp.fanout) {
-    const [fanoutSettled, results] = await Promise.all([
-      deliverThroughChannelFanout(input.env, input.scopeId, request, input.self?.cellName),
-      deliverToRuntimeCells({
-        env: input.env,
-        cells: [RELAY_RUNTIME_SELECTED_CELL],
-        request,
-        label,
-        ...(input.self ? { self: input.self } : {}),
-      }),
-    ]);
-    void fanoutSettled;
-    const selected = results.find((result) => result.cellName === RELAY_RUNTIME_SELECTED_CELL);
-    if (!selected || !("response" in selected) || !selected.response) {
-      throw new RuntimeRouteDirectoryDeliveryError([{
-        cellName: RELAY_RUNTIME_SELECTED_CELL,
-        error: new Error("Runtime default cell did not settle"),
-      }]);
-    }
-    return selected.response;
+  const targets = new Set<RuntimeRouteDirectoryCell>([RELAY_RUNTIME_SELECTED_CELL]);
+  let fanout: Promise<void> | undefined;
+  if (lookedUp?.fanout) {
+    // The fanout object reaches its member cells; a recipient's cell among them is not reached twice.
+    const members = new Set(recipients.length === 0 ? [] : (await lookupFanoutMembers(input.env, input.scopeId)
+      .catch(() => undefined) ?? []).map((route) => route.cellName));
+    for (const cell of recipients) if (!members.has(cell)) targets.add(cell);
+    fanout = deliverThroughChannelFanout(input.env, input.scopeId, request, input.self?.cellName);
+  } else {
+    for (const route of lookedUp?.routes ?? []) targets.add(route.cellName);
+    for (const cell of recipients) targets.add(cell);
   }
-  const targets = new Set<RuntimeRouteDirectoryCell>([
-    RELAY_RUNTIME_SELECTED_CELL,
-    ...lookedUp.routes.map((route) => route.cellName),
+  const [, results] = await Promise.all([
+    fanout,
+    deliverToRuntimeCells({
+      env: input.env,
+      cells: [...targets],
+      request,
+      label,
+      ...(input.self ? { self: input.self } : {}),
+    }),
   ]);
-  const results = await deliverToRuntimeCells({
-    env: input.env,
-    cells: [...targets],
-    request,
-    label,
-    ...(input.self ? { self: input.self } : {}),
-  });
   const selected = results.find((result) => result.cellName === RELAY_RUNTIME_SELECTED_CELL);
   if (!selected || !("response" in selected) || !selected.response) {
     throw new RuntimeRouteDirectoryDeliveryError([{

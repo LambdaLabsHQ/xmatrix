@@ -133,6 +133,7 @@ test("Channel observable events fan out once per occupied Runtime cell", async (
   const fixture = dualDelivery({
     "cell-0": async () => Response.json({ ok: true, delivered: 0 }),
     "cell-v1-04": async () => Response.json({ ok: true, delivered: 1 }),
+    "user-reader-b": async () => Response.json({ ok: true, delivered: 1 }),
   });
   const payload = {
     recipientUserIds: ["reader-b"],
@@ -145,7 +146,7 @@ test("Channel observable events fan out once per occupied Runtime cell", async (
     waitUntil: fixture.input.waitUntil,
   });
   assert.equal(response.status, 200);
-  assert.deepEqual(fixture.runtimeCalls.map((call) => call.cell).sort(), ["cell-0", "cell-v1-04"]);
+  assert.deepEqual(fixture.runtimeCalls.map((call) => call.cell).sort(), ["cell-0", "cell-v1-04", "user-reader-b"]);
   for (const call of fixture.runtimeCalls) {
     assert.equal(new URL(call.request.url).pathname, "/internal/product/channel-observable-event");
     assert.deepEqual(await call.request.json(), payload);
@@ -163,6 +164,7 @@ test("live fanout from an occupied owner cell does not RPC back into that same o
       "user-alice": async () => {
         throw new Error("Durable Object queued behind the publishing request");
       },
+      "user-reader-b": async () => Response.json({ human: { delivered: 1 } }),
     },
   });
   const payload = {
@@ -280,6 +282,48 @@ test("fanout delivery is one fanout fetch plus cell-0", async () => {
   assert.equal(fanoutCalls[0].body.url, "https://relay-runtime/internal/committed-event");
   assert.equal(fanoutCalls[0].body.exceptCell, "user-alice");
   assert.equal(JSON.parse(fanoutCalls[0].body.body).changeSeq, 1);
+});
+
+test("a Space's catalog change reaches each recipient's own cell, which no directory lists for the Space", async () => {
+  const runtimeCalls = [];
+  const env = {
+    RELAY_RUNTIME: runtimeNamespace(echoRuntime(["cell-0", "user-alice", "user-bob"]), runtimeCalls),
+    RELAY_RUNTIME_ROUTE_DIRECTORY: directoryNamespace([], []),
+    XMATRIX_RUNTIME_CELL_MODE: "dual",
+  };
+  const event = { type: "space_channel_catalog_changed", spaceId: "space-1", revision: 7 };
+  const response = await publishRuntimeCommittedEvent({
+    env,
+    scopeId: "space-1",
+    payload: { channelId: "space-channel-catalog", changeSeq: 7, event, recipientPrincipalIds: ["alice", "bob"] },
+    waitUntil: () => {},
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(runtimeCalls.map((call) => call.cell).sort(), ["cell-0", "user-alice", "user-bob"]);
+  for (const call of runtimeCalls) assert.deepEqual((await call.request.json()).event, event);
+});
+
+test("a fanout channel's message reaches recipients outside the fanout once, and its members only through it", async () => {
+  const runtimeCalls = [];
+  const fanoutCalls = [];
+  const env = {
+    RELAY_RUNTIME: runtimeNamespace(echoRuntime(["cell-0", "user-alice", "user-bob"]), runtimeCalls),
+    RELAY_RUNTIME_ROUTE_DIRECTORY: directoryNamespace([], [], { fanout: true }),
+    RELAY_RUNTIME_CHANNEL_FANOUT: fanoutNamespace(fanoutCalls, [
+      { cellName: "user-alice", expiresAtMs: 1_700_000_000_000 },
+    ]),
+    XMATRIX_RUNTIME_CELL_MODE: "dual",
+  };
+  const response = await publishRuntimeChannelMessage({
+    env,
+    channelId: SCOPE,
+    payload: { channelId: SCOPE, messageId: "message-1", recipientUserIds: ["alice", "bob"] },
+    waitUntil: () => {},
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(runtimeCalls.map((call) => call.cell).sort(), ["cell-0", "user-bob"]);
+  assert.deepEqual(fanoutCalls.map((call) => call.path).sort(),
+    ["/internal/runtime-channel-fanout/deliver", "/internal/runtime-channel-fanout/members"]);
 });
 
 test("a fanout channel's cells come from the fanout membership", async () => {

@@ -1488,6 +1488,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const created = createConversation({ ...request, token, requestKey }).then((committed) => {
       show((current) => replaceChannel(current, committed));
       settled();
+      // The Hub's answer says it exists: the lists take it now, whatever the socket hears.
+      window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
+        detail: { kind: "structure", spaceId: committed.spaceId },
+      }));
       return committed;
     }, (error: unknown) => {
       show((current) => current.filter((item) => item.id !== channel.id));

@@ -474,6 +474,35 @@ test("an authorization reads for itself: no read under way and no fresh answer o
   } finally { client.clear(); }
 });
 
+test("an answer that lacks a Channel asked for is not reused, so a conversation made meanwhile is found", async () => {
+  const { QueryClient } = require("@tanstack/react-query");
+  const refresh = require("./channel-catalog-refresh.ts");
+  const { readAskedNow } = require("./channel-message-summary.ts");
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+  const queryKey = ["xmatrix", "hub", "user", "channels", "space", "resolve", ["new"], null, true];
+  // The conversation opens at once; the Hub makes it a moment later.
+  let created = false;
+  let asked = 0;
+  const read = () => client.fetchQuery(refresh.leasedResolveQuery({
+    queryKey, lease: { id: 1 }, channelIds: ["new"], asked: readAskedNow,
+    read: async () => {
+      asked += 1;
+      return { protocolVersion: 1, pathsByChannelId: {}, channels: created ? [{ id: "new", spaceId: "space" }] : [] };
+    },
+  }));
+  try {
+    // Opening it asks before the Hub has it: nobody is found.
+    assert.deepEqual((await read()).channels, []);
+    created = true;
+    // Its first message asks again within the cache's lifetime, and the Hub answers.
+    assert.deepEqual((await read()).channels.map((channel) => channel.id), ["new"]);
+    assert.equal(asked, 2);
+    // An answer that holds every Channel asked for is reused as before.
+    await read();
+    assert.equal(asked, 2);
+  } finally { client.clear(); }
+});
+
 test("a read that fails while its authorization stands leaves the list to be read again", async () => {
   const t = await openResolveOwner();
   try {

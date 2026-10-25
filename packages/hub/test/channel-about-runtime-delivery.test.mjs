@@ -79,7 +79,9 @@ test("an About completion delivers its catalog locally and acknowledges without 
       [{ type: "space_channel_catalog_changed", spaceId: "space-1", revision: 7 }],
       [],
     ], "local delivery retains the authoritative audience");
-    assert.deepEqual(remote.map(({ cell: target }) => target), cell === "cell-0" ? [] : ["cell-0"]);
+    // The recipients' own cells are reached too, except the one publishing.
+    assert.deepEqual(remote.map(({ cell: target }) => target).sort(),
+      ["cell-0", "user-owner", "user-reader"].filter((target) => target !== cell));
   }
   assert.deepEqual(committed, ["complete", "about", "complete", "about"]);
 });

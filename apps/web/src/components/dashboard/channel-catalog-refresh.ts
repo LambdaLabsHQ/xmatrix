@@ -96,11 +96,18 @@ export function leasedResolveQuery(input: {
   /** Who asks, in which Space, for which Channels. */
   queryKey: QueryKey;
   lease: CatalogLease | undefined;
+  /** The Channels asked for. */
+  channelIds?: readonly string[];
   fresh?: boolean;
   read: (signal: AbortSignal) => Promise<ChannelSnapshotCatalogResolveResult>;
   /** Takes the order of a read asked now and gives back the mark for its Channels (`readAskedNow`). */
   asked: () => (channel: ChannelSnapshot) => void;
 }) {
+  // An answer that lacks a Channel asked for is never served again: the
+  // Channel may be one being created as it was asked (a new conversation opens
+  // before the Hub has made it), and a later ask has heard that it exists.
+  const answersAll = (result: ChannelSnapshotCatalogResolveResult | undefined) =>
+    Boolean(result) && (input.channelIds ?? []).every((id) => result!.channels.some((channel) => channel.id === id));
   return {
     queryKey: [...input.queryKey, input.lease?.id ?? 0] as QueryKey,
     queryFn: async ({ signal }: { signal: AbortSignal }) => {
@@ -109,7 +116,8 @@ export function leasedResolveQuery(input: {
       result.channels.forEach(mark);
       return result;
     },
-    staleTime: input.fresh ? 0 : 30_000,
+    staleTime: (query: { state: { data?: ChannelSnapshotCatalogResolveResult } }) =>
+      !input.fresh && answersAll(query.state.data) ? 30_000 : 0,
     structuralSharing: false as const,
   };
 }

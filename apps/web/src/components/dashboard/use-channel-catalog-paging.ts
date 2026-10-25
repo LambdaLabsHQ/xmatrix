@@ -458,6 +458,7 @@ export function useChannelCatalogPaging(input: {
           userId, spaceId, channelIds: ids, routeToken, includeParticipants: true,
         }),
         lease,
+        channelIds: ids,
         fresh,
         asked: readAskedNow,
         read: (signal) => fetchChannelCatalogResolve({
