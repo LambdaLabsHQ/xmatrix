@@ -410,38 +410,19 @@ A Space owner or admin publishes a page, and anyone can read it at
   conversations) and a "Live · maintained by agents on xMatrix" footer. The page
   re-reads itself while open, so Agent edits appear.
 
-### 5.6 Claims
+### 5.6 Pull requests that name a block
 
-A claim is a lease on a page block (a heading slug, or the whole page) that
-says "alice's claude:1 is on this". Presence shows who is looking; a claim
-shows Agents who took the work. It locks nothing (decided 2026-10-19:
-coordination is lock-free; only effects that cannot be undone, such as a
-release or a deploy, run one at a time where they happen).
+Coordination is lock-free (decided 2026-10-19, and by Daniel 2026-10-25:
+nothing is claimed). Nobody holds a block before working on it; who is on it
+shows in its presence (§3.4) and in what is written there. Only effects that
+cannot be undone, such as a release or a deploy, run one at a time where they
+happen.
 
-- **Whoever can edit the page claims.** An Agent's claim is held by its
-  Instance and counts against its owner; it points at the conversation doing the
-  work.
-- **Several holders, each told of the others.** A second claim on a held
-  block is taken like the first, and its answer names who else is there. Each
-  conversation on the block gets a notice naming the others, so they can talk,
-  pick other work, or carry on side by side. The competition setting is no
-  longer needed.
-- **Claims live as long as their Run.** When an Agent's Instance ends, its
-  claims in its conversation end with it, so nobody has to release them. Each
-  also lasts 5 minutes to a day (two hours by default) as a backstop; claiming
-  again renews it. A lapsed claim frees the block with no cleanup.
-  The holder, the person it counts against, or a Space owner or admin releases
-  it early.
-- **For Agents, not people.** People neither claim nor see claims; a person
-  sees an Agent through what it writes. Agents use `xmatrix page claim`, `page claims` and
-  `page release`.
 - **Pull requests name the block they work on** with the block's link (Link,
-  next to the block). Naming it gates nothing: there is no `xmatrix/claim`
-  check, and nobody has to hold anything to open one (decided 2026-10-19:
-  coordination is lock-free, see `pages-live-document.md` §3). The author is
-  identified by the GitHub account they linked in their profile. Merging it
-  leaves each block it names owing an update (`pages-live-document.md` §5.2),
-  claimed or not; a claim the author still held there is completed by it.
+  next to the block). Naming it gates nothing: there is no check to pass and
+  nothing to hold. The author is identified by the GitHub account they linked
+  in their profile; a participant whose pull request naming a block is merged
+  becomes a contributor (`open-project-governance.md` §2).
 - **Pre-review before a maintainer.** When a pull request a member of the
   Space (owner, admin or member) opens names a block, or gets new commits
   (drafts excepted), it gets its own review conversation on the block. It
@@ -459,18 +440,20 @@ release or a deploy, run one at a time where they happen).
 ### 6.1 Write-back contract
 
 When a conversation changes the state of something a page describes, the Agent
-that did the work updates that page before it finishes.
+that did the work updates that page when the state changes, and at the latest
+before it finishes.
 
 - **Where the edit goes.** If the knowledge lives in a repository, the Agent
   edits it in the pull request and updates only the page's Status line, linking
   to the pull request.
-- **When the state changes.** Events that change what a block describes
-  (merged pull requests, releases, lapsed claims, finished Automations) ask
-  the responsible Run, then Focus, to write back within minutes
-  (`pages-live-document.md` §5).
-- **At the end of a Run.** `xmatrix page edit` records the write-back, and
-  `xmatrix page done` records that the work changed nothing on the pages. The Agent writes back before voluntarily stopping its Instance; a completed
-  turn does not terminate the Run.
+- **When the state changes.** A merged pull request, a release or a finished
+  Automation changes what a block describes; the Run that did the work writes
+  it back within minutes (`pages-live-document.md` §5). A pull request a Run
+  opens reports back to its conversation, so the Run hears of its merge while
+  it is live.
+- **At the end of a Run.** The Agent writes back with `xmatrix page edit`
+  before voluntarily stopping its Instance, or says in its reply that the work
+  changed nothing on the pages; a completed turn does not terminate the Run.
 
 ### 6.2 Maintenance style
 

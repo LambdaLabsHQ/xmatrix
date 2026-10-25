@@ -11,7 +11,6 @@ const migratedAuthorities = [
   "runtime-control.ts",
   "space-secret-control.ts",
   "app-control.ts",
-  "scheduler-control.ts",
   "automation-control.ts",
   "trace-access-control.ts",
   "cross-space-read-control.ts",

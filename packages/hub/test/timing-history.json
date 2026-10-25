@@ -1274,22 +1274,6 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/github-pull-request-blocks.e2e.mjs": {
-      "durationMs": 5220,
-      "peakRssBytes": 470970368,
-      "peakFdCount": 67,
-      "samples": 1,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/page-claims.e2e.mjs": {
-      "durationMs": 6660,
-      "peakRssBytes": 510152704,
-      "peakFdCount": 67,
-      "samples": 1,
-      "failures": 0,
-      "timeouts": 0
-    },
     "test/page-git.e2e.mjs": {
       "durationMs": 5640,
       "peakRssBytes": 469401600,

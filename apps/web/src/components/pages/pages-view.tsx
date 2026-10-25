@@ -1135,20 +1135,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       notes.set(blockId, existing);
       return existing;
     };
-    const named = (conversationId: string | null | undefined) => {
-      const name = conversationId ? conversationName(conversationId) : null;
-      // A conversation the reader cannot open is not named (pages-live-document.md §3).
-      return conversationId && name ? { id: conversationId, name } : null;
-    };
-    for (const block of awareness.data?.blocks ?? []) {
-      if (block.owed) {
-        const { reason, at, holder, pullRequestUrl } = block.owed;
-        const what = reason === "merged" ? `${pullRequestUrl?.replace(/^https:\/\/github\.com\//u, "") ?? "Its pull request"} merged`
-          : reason === "released" ? `${holder} released the claim` : `${holder}'s claim lapsed`;
-        note(block.blockId).owed = { text: `Update owed · ${what} ${formatRelativeAge(at) ?? at}`,
-          conversation: named(block.owed.conversationId) };
-      }
-    }
     // The Agents working in each section's conversations, on the page or not (§3.2).
     const edge = new Set(atEdge.split("\n"));
     for (const item of conversations) {
@@ -1161,7 +1147,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
     for (const [blockId, count] of sectionConversationCounts(conversations)) note(blockId).conversations = count;
     return notes;
-  }, [atEdge, awareness.data, conversationName, conversations]);
+  }, [atEdge, conversations]);
 
   const document = useQuery({
     ...pageDocumentQuery(user?.id ?? null, spaceId ?? "", pageId ?? "", token),
@@ -1584,7 +1570,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
     return { above, below };
   })();
-  // Where others are, where discussions are and what owes an update, along the scrollbar (§3.2).
+  // Where others are and where discussions are, along the scrollbar (§3.2).
   const scrollMarks = ((): PageScrollMark[] => {
     const article = articleElement.current;
     const column = docColumn.current;
@@ -1606,10 +1592,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
     for (const item of discussions) push({ key: `discussion:${item.linkId}`, kind: "discussion", title: item.name },
       `text:${item.linkId}`);
-    for (const block of awareness.data?.blocks ?? []) {
-      if (block.owed) push({ key: `owed:${block.blockId}`, kind: "owed", title: "Update owed" },
-        block.blockId ? `block:${block.blockId}` : "page");
-    }
     return marks;
   })();
   const listSection = dialog && typeof dialog === "object" && dialog.kind === "conversations" ? dialog : null;

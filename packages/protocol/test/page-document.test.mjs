@@ -127,32 +127,25 @@ test("a revision's change reads as lines kept, removed and added", async () => {
 });
 
 test("changed document blocks ignore a change of markdown style", async () => {
-  const { pageChangedDocBlocks, pageChangedDocBlocksAsync } = await import("../dist/page-document.js");
+  const { pageChangedDocBlocksAsync } = await import("../dist/page-document.js");
   const before = "# Status\n* one\n* two\n\n# Notes\nkept\n";
-  for (const changed of [pageChangedDocBlocks,
-    (before, after) => pageChangedDocBlocksAsync(before, after, async (section) => canonicalPageMarkdown(section))]) {
-    assert.deepEqual(await changed(before, "# Status\n- one\n- two\n\n# Notes\nkept\n"), []);
-    assert.deepEqual(await changed(before, "# Status\n- one\n- three\n\n# Notes\nkept\n"), ["status"]);
-    assert.deepEqual(await changed(before, "# Status\n* one\n* two\n\n# Next\nnew\n"), ["next", "notes"]);
-  }
+  const changed = (before, after) => pageChangedDocBlocksAsync(before, after, async (section) => canonicalPageMarkdown(section));
+  assert.deepEqual(await changed(before, "# Status\n- one\n- two\n\n# Notes\nkept\n"), []);
+  assert.deepEqual(await changed(before, "# Status\n- one\n- three\n\n# Notes\nkept\n"), ["status"]);
+  assert.deepEqual(await changed(before, "# Status\n* one\n* two\n\n# Next\nnew\n"), ["next", "notes"]);
 });
 
 test("changed document blocks parse only the sections whose text differs", async () => {
-  const { canonicalPageMarkdown, pageChangedDocBlocks } = await import("../dist/page-document.js");
+  const { canonicalPageMarkdown, pageChangedDocBlocksAsync } = await import("../dist/page-document.js");
   // A long page whose one section changed: the rest must never be parsed (XMATRIX-HUB-68/69).
   const untouched = Array.from({ length: 200 }, (_, index) => `## Part ${index}\n${"text ".repeat(200)}\n`).join("\n");
   const before = `# Status\nold\n\n${untouched}`;
   const after = `# Status\nnew\n\n${untouched}`;
   const parsed = [];
-  const canonical = (section) => {
+  const canonical = async (section) => {
     parsed.push(section);
     return canonicalPageMarkdown(section);
   };
-  assert.deepEqual(pageChangedDocBlocks(before, after, canonical), ["status"]);
+  assert.deepEqual(await pageChangedDocBlocksAsync(before, after, canonical), ["status"]);
   assert.deepEqual(parsed, ["# Status\nold\n\n", "# Status\nnew\n\n"]);
-  // A section already accounted for is not compared again.
-  parsed.length = 0;
-  assert.deepEqual(pageChangedDocBlocks(before, after.replace("## Part 7\n", "## Part 7\nmore\n"), canonical,
-    new Set(["part-7"])), ["part-7"]);
-  assert.equal(parsed.length, 2);
 });

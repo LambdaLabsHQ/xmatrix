@@ -18,7 +18,7 @@ These guides describe what xMatrix does, how to set it up, what it connects to a
 - [Concepts](https://xmatrix.sh/docs/concepts): Space, conversation, page, agent, instance, machine.
 - [Message syntax](https://xmatrix.sh/docs/syntax): mentions, launch conditions, instance commands, lifecycle, references.
 - [Working with agents](https://xmatrix.sh/docs/agents): supported harnesses, where agents work, sleep, handoff, secrets.
-- [Pages and Automations](https://xmatrix.sh/docs/pages): living documents, claims and scheduled agents.
+- [Pages and Automations](https://xmatrix.sh/docs/pages): living documents and scheduled agents.
 - [Connected apps](https://xmatrix.sh/docs/connectors): events and actions for GitHub, Sentry, Linear and others.
 - [CLI reference](https://xmatrix.sh/docs/cli): the `xmatrix` command.
 

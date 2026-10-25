@@ -43,7 +43,6 @@ test("a phone lists the pages, opens one as a pushed screen, with its controls o
     revisionInfo: { revision: 3, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
   await fixtureJson(page, "page-live", /\/pages\/[^/]+\/live$/u, { protocol: "xmatrix-page-v2.ticket",
     socketPath: "/ws/pages/space-personal/p-xm", canEdit: true, headRevision: 3 });
-  await fixtureJson(page, "page-claims", /\/claims$/u, { claims: [], competitiveBlocks: [] });
   await fixtureJson(page, "page-links", /\/page-links\?.*$/u, { links: [] });
 
   const { dock, list } = await openMobilePages(page);
@@ -107,7 +106,6 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
     { method: "GET" });
     await fixtureJson(page, "page-live", /\/pages\/[^/]+\/live$/u, { protocol: "xmatrix-page-v2.ticket",
       socketPath: "/ws/pages/space-personal/p-new", canEdit: true, headRevision: 3 });
-    await fixtureJson(page, "page-claims", /\/claims$/u, { claims: [], competitiveBlocks: [] });
     await fixtureJson(page, "page-links", /\/page-links\?.*$/u, { links: [] });
     // The live session lets this person edit the empty page.
     await page.routeWebSocket(/\/ws\/pages\//u, (socket) => {

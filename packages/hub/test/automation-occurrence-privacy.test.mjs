@@ -28,7 +28,7 @@ function fixture(existingMode) {
       appendMessage: async command => { appended.push(command); }, schedulePostCommit() {},
       openConversation: input => conversations.openOccurrenceConversation({}, {
         spaceId: "space", pageId: "page", automationId: "automation", occurrenceId: input.occurrence.id,
-        name: "Audit", scheduledFor: input.occurrence.scheduled_for, userId: input.userId, body: input.body,
+        name: "Audit", scheduledFor: input.occurrence.scheduled_for, userId: input.userId,
         privateEvents: input.privateEvents,
       }),
     }, { id: "occurrence", message_id: "message", scheduled_for: "2026-10-17T00:00:00.000Z", trigger_events: events },
@@ -42,7 +42,6 @@ test("connector and GitHub event occurrences keep private context in a closed co
   for (const input of [
     { events: [{ kind: "event", summary: "SYNTHETIC-PRIVATE-SUMMARY" }] },
     { events: [{ kind: "merged", summary: "SYNTHETIC-PRIVATE-SUMMARY" }] },
-    { events: [{ kind: "owed", summary: "A private pull request merged", url: "https://example.invalid/private-pull" }] },
     { triggers: [{ kind: "ci-failed", repository: "org/private" }] },
     { triggers: [{ kind: "event", provider: "slack", source: "*" }] },
   ]) {
@@ -51,11 +50,9 @@ test("connector and GitHub event occurrences keep private context in a closed co
     assert.equal(f.opened[0].mode, "closed");
     assert.equal(f.appended.length, 1);
   }
-  for (const input of [{}, { triggers: [{ kind: "owed" }] }]) {
-    const f = fixture();
-    await f.dispatch(input);
-    assert.equal(f.opened[0].mode, "open", "ordinary Page cadence keeps its visibility");
-  }
+  const f = fixture();
+  await f.dispatch();
+  assert.equal(f.opened[0].mode, "open", "ordinary Page cadence keeps its visibility");
 });
 
 test("retrying a pre-fix open occurrence cannot append newly received private content", async () => {

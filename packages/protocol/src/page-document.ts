@@ -511,40 +511,29 @@ export function canonicalPageMarkdown(markdown: string): string {
  * Block ids whose section differs between two versions of a page, compared as
  * documents so a change of markdown style is no change. Only a section whose
  * text differs is put in canonical form: the sections a revision left alone,
- * most of a long page, are never parsed. `canonical` may memoize across calls;
- * `among`, when given, limits the answer to those ids, so no other is parsed.
+ * most of a long page, are never parsed. `canonical` may memoize across calls,
+ * and the caller may yield in it between expensive parses.
  */
-export function pageChangedDocBlocks(before: string, after: string,
-  canonical: (markdown: string) => string = canonicalPageMarkdown, among?: ReadonlySet<string>): string[] {
-  const changed: string[] = [];
-  for (const { id, old, section } of pageDocBlockChanges(before, after, among)) {
-    if (old === undefined || section === undefined || canonical(old) !== canonical(section)) changed.push(id);
-  }
-  return changed;
-}
-
-/** The same document comparison, allowing a caller to yield between expensive parses. */
 export async function pageChangedDocBlocksAsync(before: string, after: string,
-  canonical: (markdown: string) => Promise<string>, among?: ReadonlySet<string>): Promise<string[]> {
+  canonical: (markdown: string) => Promise<string>): Promise<string[]> {
   const changed: string[] = [];
-  for (const { id, old, section } of pageDocBlockChanges(before, after, among)) {
+  for (const { id, old, section } of pageDocBlockChanges(before, after)) {
     if (old === undefined || section === undefined || await canonical(old) !== await canonical(section)) changed.push(id);
   }
   return changed;
 }
 
-function* pageDocBlockChanges(before: string, after: string, among?: ReadonlySet<string>):
+function* pageDocBlockChanges(before: string, after: string):
   Generator<{ id: string; old?: string; section?: string }> {
   const sections = (markdown: string) => new Map(pageBlocks(markdown)
     .map((block) => [block.id, markdown.slice(block.start, block.end)]));
   const a = sections(before);
   const b = sections(after);
   for (const [id, section] of b) {
-    if (among && !among.has(id)) continue;
     const old = a.get(id);
     if (old !== section) yield { id, old, section };
   }
-  for (const id of a.keys()) if (!b.has(id) && (!among || among.has(id))) yield { id };
+  for (const id of a.keys()) if (!b.has(id)) yield { id };
 }
 
 /** A page's sections as its document holds them: top-level headings, with the ids `pageBlocks` gives. */

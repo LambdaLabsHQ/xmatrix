@@ -490,13 +490,10 @@ function presence(awareness: Awareness, onBlockChange?: (blockId: string) => voi
 }
 
 /**
- * What the page shows beside a section's heading (§3.2): who is on it and what
- * it owes. Who has taken it is the Agents' to know, not drawn for people. As in Google Docs the text itself carries nothing
- * else; who changed it and when is in History.
+ * What the page shows beside a section's heading (§3.2): who is on it and its conversations. As in Google Docs the
+ * text itself carries nothing else; who changed it and when is in History.
  */
 export interface SectionNote {
-  /** Claimed work ended after the section last changed and nobody wrote it back (§5). */
-  owed?: { text: string; conversation: { id: string; name: string } | null };
   /** Agents live in a conversation linked to the section, whether or not they have the page open. */
   working?: SectionAgent[];
   /** Conversations about the section, the quiet ones too (§4.4). */
@@ -518,7 +515,6 @@ export const sectionsKey = new PluginKey<{ notes: Map<string, SectionNote>; deco
 
 // Lucide's icons, drawn here because widgets are plain DOM.
 const ICONS = {
-  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
   talk: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
 } as const;
@@ -578,20 +574,11 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
     const end = block.pos + heading.nodeSize - 1;
     const note = notes.get(block.id) ?? {};
     const working = note.working ?? [];
-    const owed = note.owed ?? null;
     const total = note.conversations?.total ?? 0;
     decorations.push(Decoration.widget(end, () => {
       const holder = document.createElement("span");
       holder.className = "page-section-present";
       holder.contentEditable = "false";
-      // Where work ended and nobody wrote it back; it opens the conversation that did it.
-      if (owed) {
-        const conversation = owed.conversation;
-        const flag = control("page-section-owed", conversation ? `${owed.text} · open ${conversation.name}` : owed.text,
-          () => { if (conversation) openConversation(conversation.id); }, icon("flag", 12), "Update owed");
-        flag.dataset.testid = "page-owed";
-        holder.append(flag);
-      }
       if (working.length > 0) {
         const agents = document.createElement("span");
         agents.className = "page-section-agents";
@@ -605,7 +592,7 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
           () => actions().showConversations?.(block.id), icon("talk", 12), String(total)));
       }
       return holder;
-    }, { side: 1, ignoreSelection: true, key: `present:${block.id}:${JSON.stringify([working, owed, total])}`,
+    }, { side: 1, ignoreSelection: true, key: `present:${block.id}:${JSON.stringify([working, total])}`,
       destroy: (node) => {
         const agents = (node as HTMLElement).querySelector(".page-section-agents");
         if (agents) unmountAgents.get(agents)?.();

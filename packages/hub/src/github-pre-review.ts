@@ -16,8 +16,8 @@ import {
 } from "./github-channel-exposure";
 
 /**
- * Pre-review (docs/design/pages-and-conversations.md §5.6): a claimed pull
- * request gets its own review conversation on the block it works on, and an
+ * Pre-review (docs/design/pages-and-conversations.md §5.6): a member's pull
+ * request gets its own review conversation on the block it names, and an
  * Agent of the Space owner's reviews it there before any maintainer does. The
  * Agent's verdict is the `xmatrix/pre-review` check.
  */

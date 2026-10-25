@@ -1,6 +1,5 @@
-import { tellPageClaimOverlap } from "./page-claim-overlap";
 import { PostgresPageRepository } from "@xmatrix/db";
-import { automationReferences, parseAutoLaunchMentions, plainRecord } from "@xmatrix/protocol";
+import { automationReferences, plainRecord } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { deterministicConversationId } from "./deterministic-id";
 import { openConversation } from "./system-conversation";
@@ -40,17 +39,10 @@ export function occurrenceConversationName(name: string, scheduledFor: string): 
  * occurrence starts clean: what carries over lives on the page, not in an
  * earlier occurrence's conversation. Idempotent per occurrence, so a retried
  * dispatch reopens the same conversation.
- *
- * An occurrence that starts an Agent also claims the section for its
- * conversation, as the Automation, beside anyone else on it (a claim locks
- * nothing; each is told of the other). The Run takes that claim over when it
- * claims the section, and writing the section settles it; a Run that never
- * starts, or ends without writing, leaves the claim to lapse, and the section
- * then owes an update like any other abandoned work (§5.2).
  */
 export async function openOccurrenceConversation(env: Env, input: {
   spaceId: string; pageId: string; automationId: string; occurrenceId: string; name: string;
-  scheduledFor: string; userId: string; body: string; privateEvents: boolean;
+  scheduledFor: string; userId: string; privateEvents: boolean;
 }): Promise<string> {
   const principal = { kind: "user" as const, id: input.userId };
   const channelId = await deterministicConversationId("automation-occurrence", input.occurrenceId);
@@ -75,16 +67,5 @@ export async function openOccurrenceConversation(env: Env, input: {
   const blockId = automationReferences(page.body).get(input.automationId);
   await repository.link({ requestId: crypto.randomUUID(), spaceId: input.spaceId, principal,
     conversationId: channelId, pageId: input.pageId, ...(blockId ? { blockId } : {}), source: "reference" });
-  if (blockId && parseAutoLaunchMentions(input.body).length > 0) {
-    // The occurrence is on its section. Nothing is locked: whoever else is on it is told, and so is it.
-    const held = await repository.claim({ requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId,
-      principal, blockId, conversationId: channelId, holderLabel: input.name.trim().slice(0, 200) || "Automation" })
-      .catch((error: unknown) => {
-        // A person's own claim there is theirs; the occurrence does not take it over.
-        if ((error as { code?: unknown }).code !== "page_block_claimed") throw error;
-        return null;
-      });
-    if (held) await tellPageClaimOverlap(env, { spaceId: input.spaceId, pageId: input.pageId, ...held });
-  }
   return channelId;
 }

@@ -7,7 +7,7 @@ import type { Env } from "./types";
 /**
  * Requests the Web app makes straight to the Hub, as it already opens live
  * page sessions and signs in, instead of through its own Worker: a page's
- * text, margin, sections, claims and Automations, a conversation's history,
+ * text, margin, sections and Automations, a conversation's history,
  * and the ticket a page's live session opens with. Only the app's own origin
  * is answered, with a bearer token and the client identity in headers and
  * never a cookie, so this widens no access: each route still authorizes the
@@ -17,7 +17,7 @@ const DIRECT_ROUTES: ReadonlyArray<{ method: "GET" | "POST"; path: RegExp }> = [
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/recent-changes$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+$/u },
-  { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:awareness|blame|claims|automations|suggestions|read)$/u },
+  { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:awareness|blame|automations|suggestions|read)$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/revisions\/[0-9]+\/moment$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/page-links(?:\/agents)?$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/faces$/u },
