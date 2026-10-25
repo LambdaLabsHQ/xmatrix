@@ -16,6 +16,7 @@ import { base64UrlDecodeBytes } from "./relay-v2-primitives";
 import { pageCoWriteDataPoint } from "./page-co-write-diagnostics";
 import { tellPageCoWriter } from "./page-co-write-instruction";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
+import { parsePageOutputWrite } from "./page-output-receipts";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -220,6 +221,27 @@ export class RelayPageSession extends DurableObject<Env> {
   private async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     try {
+      if (request.method === "POST" && url.pathname === "/internal/output") {
+        const body = await request.json() as { spaceId: string; pageId: string;
+          principal: PageSessionPrincipal; write: unknown };
+        const write = parsePageOutputWrite(body.write);
+        if (!write || body.principal?.kind !== "agent" || !body.principal.runProof) {
+          return Response.json({ error: "Invalid page output" }, { status: 400 });
+        }
+        this.bind(body.spaceId, body.pageId);
+        // Recheck the live Run and Page permission on every delivery, including
+        // retries. A receipt and a marker never grant access to a page.
+        const page = await pages(this.env).access({ requestId: crypto.randomUUID(), spaceId: body.spaceId,
+          pageId: body.pageId, principal: pagePrincipalFromSession(body.principal) });
+        if (!page.canEdit || page.agentSuggestOnly) {
+          return Response.json({ error: "The page does not allow live Agent output" }, { status: 403 });
+        }
+        await this.ctx.storage.put("identity", { spaceId: body.spaceId, pageId: body.pageId });
+        await this.ready(body.principal);
+        const receipt = await this.session.output(body.principal, write);
+        if (this.session.hasPendingEdits) await this.scheduleAlarm(COMMIT_IDLE_MS);
+        return Response.json(receipt);
+      }
       if (request.method === "POST" && url.pathname === "/internal/ticket") {
         const body = await request.json() as Ticket & { ticket: string };
         this.bind(body.spaceId, body.pageId);

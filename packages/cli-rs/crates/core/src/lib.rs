@@ -40,6 +40,7 @@ pub mod machine_daemon_connection;
 pub mod machine_naming;
 pub mod media_cache;
 pub mod message_interaction;
+pub mod page_assistant_output;
 pub mod page_co_write;
 pub mod page_media;
 pub mod presentation_barrier;

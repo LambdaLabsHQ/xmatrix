@@ -464,6 +464,7 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "GET" && path === HUB_ROUTES.connector_usage) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
+  if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-output$/u.test(path)) return true;
   // Channel memory authorizes the exact Run in the repository: read where both
   // it and its owner may, propose where it may write, curate only as the creator.
   if ((request.method === "GET" && /^\/api\/channels\/[^/]+\/memory$/u.test(path)) ||

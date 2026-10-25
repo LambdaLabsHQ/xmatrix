@@ -264,6 +264,29 @@ pub struct ToPage {
     refused: Vec<String>,
 }
 
+/// Resolve host-local attachment references without deciding what a product
+/// may display. The Hub applies image policy only inside actual page writes.
+#[derive(Default)]
+pub struct PageReferences {
+    scanner: ImageScanner,
+}
+
+impl PageReferences {
+    pub fn push(&mut self, text: &str) -> String {
+        self.step(text, false)
+    }
+
+    pub fn finish(&mut self) -> String {
+        self.step("", true)
+    }
+
+    fn step(&mut self, text: &str, end: bool) -> String {
+        self.scanner.push(text, end, &mut |destination| {
+            reference_for_local(destination).map_or(Destination::Keep, Destination::Replace)
+        })
+    }
+}
+
 impl ToPage {
     pub fn new(existing: HashSet<String>) -> Self {
         Self {
