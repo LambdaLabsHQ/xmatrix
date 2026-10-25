@@ -2,12 +2,12 @@ import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW,
   openGeneralChannelWithHistory } from "./workspace-fixtures";
 
-// An App's mark is its own artwork: it stands whole and bare, edge to edge,
-// with no disc, edge or ring around it that could clip it or shrink it.
+// An App's mark is its own artwork: it sits whole on a plain white disc, with
+// no tint, glass edge or ring over it, and no corner clipped by the disc.
 for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2E_MOBILE_CONTEXT]] as const) {
   test.describe(device, () => {
     test.use(context);
-    test("Gmail's whole logo stands bare, edge to edge, in its avatar", async ({ page }) => {
+    test("Gmail's whole logo sits on a plain white disc in its avatar", async ({ page }) => {
       await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 1,
         lastMessageSequence: 1, historyHeadSequence: 1, updatedAt: E2E_NOW }, [{
         messageId: "gmail-avatar", channelId: E2E_CHANNEL.id, sequence: 1,
@@ -23,24 +23,21 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
         const faceNode = node.closest(".identity-avatar-face")!;
         const face = getComputedStyle(faceNode);
         const box = node.getBoundingClientRect();
+        const width = box.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        const height = box.height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+        const scale = Math.min(width / node.naturalWidth, height / node.naturalHeight);
         const faceBox = faceNode.getBoundingClientRect();
-        const scale = Math.min(box.width / node.naturalWidth, box.height / node.naturalHeight);
         return {
           objectFit: style.objectFit,
-          padding: parseFloat(style.paddingLeft) + parseFloat(style.paddingTop),
-          logoWidth: Math.round(node.naturalWidth * scale),
-          faceWidth: Math.round(faceBox.width),
+          fitsDisc: Math.hypot(node.naturalWidth * scale / 2, node.naturalHeight * scale / 2) < Math.min(faceBox.width, faceBox.height) / 2,
           background: face.backgroundColor,
           boxShadow: face.boxShadow,
-          overflow: face.overflow,
         };
       });
       expect(look.objectFit).toBe("contain");
-      expect(look.padding, "the mark is not inset").toBe(0);
-      expect(look.logoWidth, "the mark spans the avatar edge to edge").toBe(look.faceWidth);
-      expect(look.background, "no disc behind the mark").toBe("rgba(0, 0, 0, 0)");
-      expect(look.boxShadow, "no ring around the mark").toBe("none");
-      expect(look.overflow, "nothing clips the mark").toBe("visible");
+      expect(look.fitsDisc, "the full logo's corners must stay within the avatar disc").toBe(true);
+      expect(look.background, "a plain white disc").toBe("rgb(255, 255, 255)");
+      expect(look.boxShadow, "no ring over the mark").toBe("none");
     });
   });
 }

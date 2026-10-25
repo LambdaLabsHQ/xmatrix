@@ -450,7 +450,10 @@ for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
     await releaseFixture(browser, refused ? "writer-create" : "writer-co-writing");
     await expect(controls.getByRole("status")).toHaveCount(0);
     if (refused) {
-      await expect(browser.getByText(/Couldn't start the Agent/u)).toBeVisible();
+      const failed = editor.getByRole("button", { name: "@codex: Failed. Show invocation details" });
+      await expect(failed).toBeVisible();
+      await failed.click();
+      await expect(browser.getByRole("dialog", { name: "@codex", exact: true })).toContainText("Couldn't start the Agent");
       expect(await fixtureRequestBodies(browser, "write-message")).toEqual([]);
       return;
     }

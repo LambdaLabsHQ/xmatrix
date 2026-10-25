@@ -161,7 +161,8 @@ export function pageShellActions(input: {
     // in the conversation when the Agent joins it.
     if (options.coWrite) await pageApi.startCoWriting(page.spaceId, page.pageId, token, channel.id);
     if (options.firstMessage) {
-      options.sent?.(await (delivered ?? input.deliver(channel, options.firstMessage)));
+      const messageId = await (delivered ?? input.deliver(channel, options.firstMessage));
+      options.sent?.(messageId);
       // Its Instance lives in its own conversation, so it is told there, and answers here.
       if (options.call) await input.deliver(options.call.channel, options.call.body(channel.id));
       if (options.open !== false) openPageConversation(channel.id, { focus: false });
