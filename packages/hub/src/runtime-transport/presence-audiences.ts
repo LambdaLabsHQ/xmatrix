@@ -1,13 +1,14 @@
 import { registrationQuotaKey } from "@xmatrix/db";
 import type { AgentRegistrationKey, LlmUsage } from "@xmatrix/protocol";
 
-/** One live Instance's viewers as its last Channel read gave them. */
+/**
+ * What a live Instance's last Channel read gave that its status reports reuse.
+ * Never who may see the Instance: every report asks the authority that.
+ */
 export interface PresenceAudience {
   channelId: string;
   spaceId: string;
   readAt: number;
-  /** The Humans other than the owner who may see the Channel. */
-  viewers: readonly string[];
   registration?: AgentRegistrationKey;
   /** The newest provider reading the Instance had reported when its quota was last read. */
   quotaCheckedThrough: number;

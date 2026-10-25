@@ -42,12 +42,21 @@ export interface HumanConnectMessage {
      * Optional behaviours this client handles. `presence_digest`: Agent
      * presence for conversations it is not showing may arrive batched in one
      * `presence_digest` frame per second instead of one frame per change.
+     * `presence_coverage_v1`: it reads a Channel's `presenceCoverage`, so it
+     * may be sent `channel_updated` frames that speak only for Agents.
      */
     capabilities?: string[];
   };
 }
 
 export const HUMAN_CLIENT_PRESENCE_DIGEST = "presence_digest";
+
+/**
+ * The client keeps the people it knows when a Channel snapshot says it speaks
+ * only for Agents. A client without it reads every snapshot as complete, so
+ * it is never sent one that is not: it learns Agent changes from their cards.
+ */
+export const HUMAN_CLIENT_PRESENCE_COVERAGE = "presence_coverage_v1";
 
 /**
  * Agent presence for conversations this socket is not showing, batched: the

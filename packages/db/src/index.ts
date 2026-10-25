@@ -68,6 +68,8 @@ export {
   MessageAuthorityError,
   PostgresMessageRepository,
   type AppendPostgresMessage,
+  type ChannelLiveAudience,
+  type MessageLiveRouting,
   type MessagePrincipal,
   type MessageSearchCandidate,
   type PostgresMessagePlacement,

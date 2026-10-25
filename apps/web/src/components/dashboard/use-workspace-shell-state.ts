@@ -96,7 +96,7 @@ import { invalidateWorkspaceResources, refetchUnlessHumanPush, setHumanPushConne
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { ChannelPresenceConflict, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -2102,8 +2102,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           type: "human_connect",
           token: tokenRef.current,
           requestId: "web-subscribe",
-          // Presence for conversations not on screen may come as a once-a-second digest.
-          device: { ...browserDevicePresence(desktopBridgeRef.current), capabilities: [HUMAN_CLIENT_PRESENCE_DIGEST] },
+          // Presence for conversations not on screen may come as a once-a-second
+          // digest, and a Channel snapshot may speak for its Agents alone.
+          device: { ...browserDevicePresence(desktopBridgeRef.current),
+            capabilities: [HUMAN_CLIENT_PRESENCE_DIGEST, HUMAN_CLIENT_PRESENCE_COVERAGE] },
         }));
       },
       onPacket: (_live, frames) => {

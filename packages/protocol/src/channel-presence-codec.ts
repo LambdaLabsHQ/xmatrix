@@ -26,8 +26,10 @@ function decodePresence(channel: SerializedChannel | ChannelSnapshot): ChannelSn
     }
     return channel as ChannelSnapshot;
   }
-  const { memberPresence, ...metadata } = channel as SerializedChannel;
+  const { memberPresence, presenceCoverage, ...metadata } = channel as SerializedChannel;
   if (memberPresence === undefined) return { ...metadata, presence: undefined };
+  // Speaking only for Agents, the snapshot carries no people to read.
+  const agentsOnly = presenceCoverage === "agents";
   let presence = emptyChannelPresence(channel.id);
   const humans = new Map<string, HumanPresence>();
   const entries = Object.entries(memberPresence);
@@ -39,6 +41,7 @@ function decodePresence(channel: SerializedChannel | ChannelSnapshot): ChannelSn
   let invalidHumans = 0;
   for (const [member, value] of entries) {
     if (value.kind === "user") {
+      if (agentsOnly) continue;
       if (!member.startsWith("user:")) { invalidHumans++; continue; }
       const { instances: devices = [], kind: _kind, activity: _activity, files: _files, intent: _intent,
         runtimeState: _runtimeState, goal: _goal, usage: _usage, ...human } = value;
@@ -61,6 +64,7 @@ function decodePresence(channel: SerializedChannel | ChannelSnapshot): ChannelSn
     }
   }
   if (aliases || invalidHumans) console.warn("[presence] legacy_wire_aliases", channel.id, { aliases, invalidHumans });
+  if (agentsOnly) return { ...metadata, presence: { ...presence, humansCovered: false } };
   presence = reduceChannelPresence(presence, { type: "humans", humans });
   return { ...metadata, presence };
 }
@@ -69,12 +73,16 @@ function decodePresence(channel: SerializedChannel | ChannelSnapshot): ChannelSn
 export function encodeChannelSnapshot(channel: ChannelSnapshot): SerializedChannel {
   const { presence, ...metadata } = channel;
   if (presence === undefined) return metadata;
-  return { ...metadata, memberPresence: encodeChannelPresence(presence) };
+  return {
+    ...metadata,
+    memberPresence: encodeChannelPresence(presence),
+    ...(presence.humansCovered === false ? { presenceCoverage: "agents" as const } : {}),
+  };
 }
 
 export function encodeChannelPresence(presence: ChannelPresence): Record<string, ChannelMemberPresence> {
   const members: Record<string, ChannelMemberPresence> = {};
-  for (const [id, human] of presence.humans) {
+  for (const [id, human] of presence.humansCovered === false ? [] : presence.humans) {
     const { devices, ...value } = human;
     members[id] = { ...value, kind: "user", instances: devices.map(device => ({ ...device })) };
   }

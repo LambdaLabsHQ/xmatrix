@@ -136,3 +136,25 @@ test("a late message cannot wake an offline Instance even when its sender clock 
   assert.equal(current.status, "offline");
   assert.equal(current.offlineReason, "machine_offline");
 });
+
+test("a snapshot that speaks only for Agents round-trips its coverage and leaves the people as they were", () => {
+  const people = decodeChannelSnapshot(wire({ "user:a": { kind: "user", status: "online" },
+    principal: member([instance("x", "1")]) })).presence;
+  const agentsOnly = decodeChannelSnapshot({ ...wire({ "user:a": { kind: "user", status: "offline" },
+    principal: member([instance("x", "1", { status: "busy" })]) }), presenceCoverage: "agents" });
+  assert.equal(agentsOnly.presence.humansCovered, false);
+  assert.equal(agentsOnly.presence.humans.size, 0);
+  // Encoded again it still says what it speaks for, and carries no people.
+  const encoded = encodeChannelSnapshot(agentsOnly);
+  assert.equal(encoded.presenceCoverage, "agents");
+  assert.deepEqual(Object.keys(encoded.memberPresence), ["x"]);
+  const merged = reduceChannelPresence(people, { type: "snapshot", snapshot: agentsOnly.presence });
+  assert.equal(merged.humans.get("user:a").status, "online");
+  assert.equal(merged.instances.get(presenceInstanceId("x")).status, "busy");
+  assert.equal(merged.humansCovered, undefined);
+  // Coverage stays unknown only until a snapshot speaks for the people.
+  const unknown = reduceChannelPresence(agentsOnly.presence, { type: "snapshot", snapshot: agentsOnly.presence });
+  assert.equal(unknown.humansCovered, false);
+  const known = reduceChannelPresence(unknown, { type: "humans", humans: new Map() });
+  assert.equal(known.humansCovered, undefined);
+});

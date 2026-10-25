@@ -705,6 +705,31 @@ async function liveRecipientUserIds(
 }
 
 /**
+ * The owners of the Channel's active Runs. An Agent Instance's socket lives in
+ * its owner's Runtime cell, so these are the cells a delivery for the
+ * Channel's Agents reaches. The Run's status, not the Instance's reported
+ * presence, decides: a cell holding no live socket for the Channel delivers
+ * nothing, but an Instance whose presence has not caught up must not be
+ * skipped.
+ */
+async function liveInstanceOwnerUserIds(
+  transaction: DatabaseTransaction,
+  channelId: string,
+): Promise<string[]> {
+  const owners = await transaction.query<QueryResultRow & { owner_user_id: string }>({
+    name: "message_live_routing_instance_owners_v1",
+    text: `SELECT DISTINCT r.owner_user_id FROM data.runs r
+      WHERE r.channel_id = $1 AND r.status IN ('starting','running','stopping')
+      ORDER BY r.owner_user_id LIMIT 513`,
+    values: [channelId], maxRows: 513,
+  });
+  if (owners.length > 512) throw new MessageAuthorityError(
+    "live_recipient_limit_exceeded", 503, "Active Run owners exceed 512",
+  );
+  return owners.map((row) => row.owner_user_id);
+}
+
+/**
  * Who a committed message reaches live, and which of them it notifies with
  * their unread attention summary. `attention` is the message's attention rows;
  * the append computes this in its own transaction so the message can be
@@ -752,12 +777,24 @@ async function messageLiveRouting(
     notifications.set(row.subject_id.slice("user:".length), { userId: row.subject_id.slice("user:".length),
       notification: { reason: row.kind, ...(attentionSummary ? { attention: attentionSummary } : {}) } });
   }
-  return { recipientUserIds, recipientNotifications: [...notifications.values()] };
+  return {
+    recipientUserIds,
+    recipientNotifications: [...notifications.values()],
+    instanceOwnerUserIds: await liveInstanceOwnerUserIds(transaction, channelId),
+  };
 }
 
 export interface MessageLiveRouting {
   recipientUserIds: string[];
   recipientNotifications: Record<string, unknown>[];
+  /** Owners of the Channel's active Runs: the cells its Agent Instances are reached in. */
+  instanceOwnerUserIds: string[];
+}
+
+/** Who a live delivery about a Channel is for: its readers and the owners of its active Runs. */
+export interface ChannelLiveAudience {
+  recipientUserIds: string[];
+  instanceOwnerUserIds: string[];
 }
 
 interface MessagePublishRow extends QueryResultRow {
@@ -2845,10 +2882,7 @@ export class PostgresMessageRepository {
     spaceId: string;
     channelId: string;
     messageId: string;
-  }): Promise<{
-    recipientUserIds: string[];
-    recipientNotifications: Record<string, unknown>[];
-  }> {
+  }): Promise<MessageLiveRouting> {
     const { requestId, spaceId, channelId } = channelRequest(input);
     const messageId = bounded(input.messageId, "messageId");
     return this.inSpace(requestId, "message.live-routing", spaceId, async (transaction) => {
@@ -2883,6 +2917,19 @@ export class PostgresMessageRepository {
   }): Promise<string[]> {
     const { requestId, spaceId, channelId } = channelRequest(input);
     return this.inSpace(requestId, "message.live-recipients", spaceId, (transaction) => liveRecipientUserIds(transaction, spaceId, channelId));
+  }
+
+  /** The Channel's live audience as it stands now: who may read it, and whose cells hold its Instances. */
+  async liveAudience(input: {
+    requestId: string;
+    spaceId: string;
+    channelId: string;
+  }): Promise<ChannelLiveAudience> {
+    const { requestId, spaceId, channelId } = channelRequest(input);
+    return this.inSpace(requestId, "message.live-audience", spaceId, async (transaction) => ({
+      recipientUserIds: await liveRecipientUserIds(transaction, spaceId, channelId),
+      instanceOwnerUserIds: await liveInstanceOwnerUserIds(transaction, channelId),
+    }));
   }
 
   /**

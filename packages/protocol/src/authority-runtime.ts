@@ -366,6 +366,13 @@ export interface SerializedChannel {
    */
   visibleHumanMemberIds?: string[];
   memberPresence?: Record<string, ChannelMemberPresence>;
+  /**
+   * What `memberPresence` speaks for. Absent, it is the Channel's whole
+   * presence, people included. `agents`: only its Agent Instances, sent by a
+   * cell that cannot know where the people are; a reader keeps the people it
+   * already knows (connections/human.ts `HUMAN_CLIENT_PRESENCE_COVERAGE`).
+   */
+  presenceCoverage?: "agents";
   metadata?: Record<string, unknown>;
   createdBy: string;
   createdByAgent?: SerializedChannelCreatorAgent;

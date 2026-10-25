@@ -1,5 +1,33 @@
 # Release Updates
 
+## Unreleased: Live updates reach each person in their own Runtime cell
+
+Every product socket has lived in its owner's own Runtime cell since 1.0.0, but
+deliveries were still routed through a directory that listed a person's cell
+only for the conversation they were viewing. A Space's catalog changes and
+workspace lists went to a cell that held no socket at all, and a message in a
+conversation nobody was viewing reached only the owners of its live Agents. A
+new conversation therefore appeared in its creator's list only once an Agent
+replied.
+
+- **Addressing.** The authority names who a delivery is for as it commits it:
+  the people who may read it and, for a message, the owners of the Channel's
+  active Runs. The publisher sends each of their cells one request saying what
+  that cell serves, within a bounded budget, and serves its own cell locally.
+  An Agent receives a message once however many people read the Channel.
+- **Admission.** A cell admits only its owner's sockets, checked after
+  authentication and again after hibernation. A socket that names no owner is
+  told to upgrade.
+- **Presence.** An Agent's status report asks who may read the Channel at every
+  report; a remembered audience no longer decides. A Channel snapshot built from
+  Agent presence says it speaks for the Agents alone (`presenceCoverage`), and
+  only clients that declare `presence_coverage_v1` receive it.
+- **Web.** A resolve asked after a message or a create never takes the answer
+  of one asked before it, and a conversation joins its creator's list as soon as
+  the Hub confirms it.
+- **Retired.** The Runtime route directory and Channel fanout objects stay
+  bound as 410 shells, and `XMATRIX_RUNTIME_CELL_MODE` is gone.
+
 ## Unreleased: Releases deploy concurrently by component dependency
 
 Production Releases deploy side by side unless one has to wait for another

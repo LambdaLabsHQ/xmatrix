@@ -128,15 +128,14 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `RELAY_POSTGRES_SHARD_ID` | var | Shard id the primary database serves (`shard-0`). |
 | `RELAY_RANK_AUTHORITY_DIRECTORY` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_RUNTIME` | binding | Runtime cells holding live Agent and client connections. |
-| `RELAY_RUNTIME_CHANNEL_FANOUT` | binding | Per-channel runtime fanout once a channel outgrows the direct cell list. |
-| `RELAY_RUNTIME_ROUTE_DIRECTORY` | binding | Runtime delivery-scope to cell directory. |
+| `RELAY_RUNTIME_CHANNEL_FANOUT` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
+| `RELAY_RUNTIME_ROUTE_DIRECTORY` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_SCOPED_CONTROL_AUTHORITY` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_SPACE_CAPACITY_AUTHORITY` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_SPACE_DELETION_CLOCK` | binding | Per-Space clock for Space deletion purges. |
 | `RELAY_SPACE_PROJECTION` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_SUMMON_DECISION_CLOCK` | binding | Per-Space clock for decision retention. |
 | `RELAY_X_UPLOAD_EXECUTOR` | binding | Per-upload durable X video executor; stores only references and scheduling state. |
-| `XMATRIX_RUNTIME_CELL_MODE` | var | Runtime cell routing; "dual" activates candidate cells. |
 
 ## Official deployment operations
 

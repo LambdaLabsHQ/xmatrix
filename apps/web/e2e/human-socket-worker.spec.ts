@@ -1,4 +1,4 @@
-import { HUMAN_CLIENT_PRESENCE_DIGEST, type ChannelAttentionSummary, type ChannelMessage } from "@xmatrix/protocol";
+import { HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, type ChannelAttentionSummary, type ChannelMessage } from "@xmatrix/protocol";
 import { expect, test, type Page } from "./fixtures";
 import {
   readNativeHumanSocketTraffic,
@@ -49,7 +49,7 @@ async function openNativeWorker(page: Page) {
     type: "human_connect",
     requestId: "web-subscribe",
     token: expect.any(String),
-    device: { capabilities: expect.arrayContaining([HUMAN_CLIENT_PRESENCE_DIGEST]) },
+    device: { capabilities: expect.arrayContaining([HUMAN_CLIENT_PRESENCE_DIGEST, HUMAN_CLIENT_PRESENCE_COVERAGE]) },
   });
   await expect.poll(() => focuses.get(1)?.channelId).toBe(E2E_CHANNEL.id);
   expect(focuses.get(1)).toMatchObject({

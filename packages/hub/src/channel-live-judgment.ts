@@ -1,22 +1,15 @@
 import { SYSTEM_ANNOTATION_AUTHOR, type ObservabilityEvent } from "@xmatrix/protocol";
 import { postgresMessageLiveRecipientUserIds, withPostgresMessageRequestScope } from "./postgres-message-authority";
-import { publishRuntimeChannelObservableEvent } from "./runtime-transport/runtime-route-directory-delivery";
+import {
+  deliverToAudience,
+  RUNTIME_CHANNEL_OBSERVABLE_EVENT_URL,
+  runtimeJsonRequest,
+} from "./runtime-transport/runtime-principal-delivery";
 import type { Env } from "./types";
 
 /* The Hub's judgments about a Channel's messages, pushed to its live people.
    Kept apart from channel-messages so launch, lifecycle and coordinator code
    can push without loading the whole message surface. */
-
-const MAX_RUNTIME_RECIPIENTS_PER_DELIVERY = 1_000;
-
-/** Live recipients in the batches one Runtime delivery takes. */
-export function recipientBatches(userIds: string[]): string[][] {
-  const batches: string[][] = [];
-  for (let offset = 0; offset < userIds.length; offset += MAX_RUNTIME_RECIPIENTS_PER_DELIVERY) {
-    batches.push(userIds.slice(offset, offset + MAX_RUNTIME_RECIPIENTS_PER_DELIVERY));
-  }
-  return batches;
-}
 
 /**
  * Tell a Channel's people what a message's command came to, as the Hub just
@@ -76,17 +69,10 @@ async function publishChannelMessageJudgment(
     metadata,
     timestamp: new Date().toISOString(),
   };
-  const tasks: Promise<unknown>[] = [];
-  const responses = await Promise.all(recipientBatches(recipientUserIds).map((recipients) =>
-    publishRuntimeChannelObservableEvent({
-      env,
-      waitUntil: (task) => tasks.push(task),
-      channelId,
-      payload: { recipientUserIds: recipients, event: event as unknown as Record<string, unknown> },
-    })));
-  await Promise.allSettled(tasks);
-  if (responses.some((response) => !response.ok)) {
-    throw new Error(`Runtime rejected PostgreSQL ${type} delivery`);
-  }
+  await deliverToAudience({
+    env, label: "Channel observable", audience: { humans: recipientUserIds },
+    request: (share) => runtimeJsonRequest(RUNTIME_CHANNEL_OBSERVABLE_EVENT_URL,
+      { recipientUserIds: [share.owner], event }),
+  });
 }
 

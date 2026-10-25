@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { isRelayRuntimeOwnerCell, RELAY_RUNTIME_SELECTED_CELL } from "./runtime-cell-locator";
+import { isRelayRuntimeOwnerCell } from "./runtime-cell-locator";
 
 type RuntimeDeliveryIngress = "socket_message" | "socket_close" | "socket_error" |
-  "fetch_presence" | "fetch_message" | "fetch_observable" | "fetch_committed" | "fetch_other" | "fanout";
+  "fetch_presence" | "fetch_message" | "fetch_observable" | "fetch_committed" | "fetch_other";
 const ingress = new AsyncLocalStorage<RuntimeDeliveryIngress>();
 
 /** Invocation-local provenance; concurrent sockets and RPCs must never share it. */
@@ -21,7 +21,7 @@ export function runtimeDeliveryFetchIngress(request: Request): RuntimeDeliveryIn
   return FETCH_INGRESS[new URL(request.url).pathname] ?? "fetch_other";
 }
 
-export type RuntimeDeliveryRoute = "directory" | "fanout" | "legacy";
+export type RuntimeDeliveryRoute = "principal";
 export type RuntimePresenceReason = "connect" | "update" | "disconnect";
 
 /** Only fixed labels and bounded retry counts enter exception messages. */
@@ -40,9 +40,6 @@ export function runtimeDeliveryFailureDiagnostic(input: {
     `reason=${input.reason ?? "unknown"} phase=${input.phase} attempts=${input.attempts}`;
 }
 
-function cellRole(cell: string | undefined): "legacy" | "owner" | "partition" | "unknown" {
-  if (cell === undefined) return "unknown";
-  if (cell === RELAY_RUNTIME_SELECTED_CELL) return "legacy";
-  if (isRelayRuntimeOwnerCell(cell)) return "owner";
-  return "partition";
+function cellRole(cell: string | undefined): "owner" | "unknown" {
+  return cell !== undefined && isRelayRuntimeOwnerCell(cell) ? "owner" : "unknown";
 }

@@ -31,9 +31,10 @@ test("an About completion delivers its catalog locally and acknowledges without 
   ]);
   t.mock.method(PostgresSpaceControlRepository.prototype, "getChannel", async () => ({ channel: { id: "channel-1" } }));
 
-  // Both legacy cell-0 and the current owner cell can be the publishing Runtime.
-  for (const cell of ["cell-0", "user-owner"]) {
-    const local = ["owner", "reader", "outsider"].map(userId => [new FakeSocket(), { userId }]);
+  // The completion arrives on the owner's daemon socket, in the owner's own cell.
+  for (const cell of ["user-owner"]) {
+    // A cell holds only its owner's sockets; the reader is reached in their own cell.
+    const local = [[new FakeSocket(), { userId: "owner" }]];
     const runtime = Object.create(RelayRuntimeLive.prototype);
     runtime.productAdapter = {
       publishHumanChannelCatalogChanged: (message, recipientUserIds) =>
@@ -48,9 +49,6 @@ test("an About completion delivers its catalog locally and acknowledges without 
     const env = {
       RELAY_POSTGRES: { connectionString: "postgres://authority.invalid/xmatrix" },
       RELAY_POSTGRES_SHARD_ID: "shard-0",
-      XMATRIX_RUNTIME_CELL_MODE: "dual",
-      RELAY_RUNTIME_ROUTE_DIRECTORY: { idFromName: name => name, get: () => ({ fetch: async () =>
-        Response.json({ routes: [{ cellName: cell, expiresAtMs: Date.now() + 60_000 }] }) }) },
       RELAY_RUNTIME: recordingRuntimeNamespace(remote, async (target, request) => {
         if (target === cell) {
           selfRpc.push(target);
@@ -76,12 +74,10 @@ test("an About completion delivers its catalog locally and acknowledges without 
     assert.equal(localRequests.length, 1);
     assert.deepEqual(local.map(([socket]) => socket.sent), [
       [{ type: "space_channel_catalog_changed", spaceId: "space-1", revision: 7 }],
-      [{ type: "space_channel_catalog_changed", spaceId: "space-1", revision: 7 }],
-      [],
-    ], "local delivery retains the authoritative audience");
-    // The recipients' own cells are reached too, except the one publishing.
-    assert.deepEqual(remote.map(({ cell: target }) => target).sort(),
-      ["cell-0", "user-owner", "user-reader"].filter((target) => target !== cell));
+    ], "the owner's own sockets are served locally");
+    // Every other recipient is reached in their own cell, once.
+    assert.deepEqual(remote.map(({ cell: target }) => target), ["user-reader"]);
+    assert.deepEqual(JSON.parse(await remote[0].request.text()).recipientPrincipalIds, ["reader"]);
   }
-  assert.deepEqual(committed, ["complete", "about", "complete", "about"]);
+  assert.deepEqual(committed, ["complete", "about"]);
 });

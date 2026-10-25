@@ -20,7 +20,6 @@ import {
   hubOrigin,
   requireAuth,
   requireHumanAuth,
-  getRelayRuntime,
   productCommandId,
   privateResponse,
   jsonErrors,
@@ -405,14 +404,15 @@ export function registerObservabilityMemoryRoutes(app: Hono<{ Bindings: Env }>):
       timestamp: new Date().toISOString(),
     };
     try {
-      await getRelayRuntime(c.env).fetch(new Request(
+      // The caller's sockets live in their own cell.
+      await Promise.all(relayRuntimeCellsForOwners(c.env, [authUser.id]).map((cell) => cell.fetch(new Request(
         "https://relay-runtime/internal/product-human/observable-event",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ userId: authUser.id, event }),
         },
-      ));
+      ))));
     } catch {
       // Best-effort live fanout; AE write already succeeded.
     }

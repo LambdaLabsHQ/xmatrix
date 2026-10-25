@@ -1,14 +1,16 @@
-import { MessageAuthorityError } from "@xmatrix/db";
+import { MessageAuthorityError, type MessageLiveRouting } from "@xmatrix/db";
 import type { AuthorityPrincipal } from "./product-message-command";
 import type { Env } from "./types";
-import { recipientBatches } from "./channel-live-judgment";
 import { postBillingNotice } from "./billing-notice";
 import { resolveChannelCatalog } from "./spaces";
 import {
-  publishRuntimeChannelMessage,
-  publishRuntimeChannelObservableEvent,
+  deliverToAudience,
+  RUNTIME_CHANNEL_MESSAGE_URL,
+  RUNTIME_CHANNEL_OBSERVABLE_EVENT_URL,
+  runtimeJsonRequest,
+  type RuntimeAudience,
   type RuntimeLiveDeliverySelf,
-} from "./runtime-transport/runtime-route-directory-delivery";
+} from "./runtime-transport/runtime-principal-delivery";
 import {
   channelAttentionUpdatedEvent,
   channelMemberReadEvent,
@@ -21,6 +23,7 @@ import {
   postgresMessageAppend,
   postgresMessageErrorResponse,
   postgresMessageHistory,
+  postgresMessageLiveAudience,
   postgresMessageLiveDeliveryRouting,
   postgresMessageLiveRecipientUserIds,
   postgresMessageMutation,
@@ -89,17 +92,11 @@ export async function channelMessageCommand(
       if (!tombstoneMessage || typeof tombstoneMessage !== "object" || Array.isArray(tombstoneMessage)) {
         throw new Error("PostgreSQL tombstone delivery evidence is unavailable");
       }
-      const recipients = await postgresMessageLiveRecipientUserIds(env, channelId, scope);
-      const tasks: Promise<unknown>[] = [];
-      const responses = await Promise.all(recipientBatches(recipients).map((recipientUserIds) =>
-        publishRuntimeChannelMessage({
-          env, channelId, waitUntil: (task) => tasks.push(task),
-          payload: { ...tombstoneMessage, deliveryKind: "update", recipientUserIds },
-        })));
-      await Promise.allSettled(tasks);
-      if (responses.some((response) => !response.ok)) {
-        throw new Error("Runtime rejected PostgreSQL tombstone delivery");
-      }
+      const audience = await postgresMessageLiveAudience(env, channelId, scope);
+      await deliverChannelMessage(env, { ...tombstoneMessage, deliveryKind: "update" }, {
+        recipientUserIds: audience.recipientUserIds, recipientNotifications: [],
+        instanceOwnerUserIds: audience.instanceOwnerUserIds,
+      });
     }
     return receipt;
   });
@@ -162,7 +159,7 @@ export async function appendChannelMessage(
   return committed;
 }
 
-type LiveRouting = { recipientUserIds: string[]; recipientNotifications: Record<string, unknown>[] };
+type LiveRouting = MessageLiveRouting;
 
 /* Who a just-committed message reaches, as its append read it in the same
    transaction. Kept beside the receipt, never in it: the receipt goes back to
@@ -172,7 +169,38 @@ const committedRouting = new WeakMap<object, LiveRouting>();
 function isLiveRouting(value: unknown): value is LiveRouting {
   return Boolean(value && typeof value === "object" &&
     Array.isArray((value as LiveRouting).recipientUserIds) &&
-    Array.isArray((value as LiveRouting).recipientNotifications));
+    Array.isArray((value as LiveRouting).recipientNotifications) &&
+    Array.isArray((value as LiveRouting).instanceOwnerUserIds));
+}
+
+/**
+ * One committed message (or its tombstone) to everyone it reaches: each
+ * reader in their own cell, and the Channel's Agent Instances in their
+ * owners' cells. Every cell gets one request saying which of the two it
+ * serves, so an Instance receives the message once however many people read
+ * the Channel.
+ */
+async function deliverChannelMessage(
+  env: Env,
+  payload: Omit<Record<string, unknown>, "recipientUserIds">,
+  routing: LiveRouting,
+  self?: RuntimeLiveDeliverySelf,
+): Promise<void> {
+  const notifications = new Map(routing.recipientNotifications.flatMap((entry) =>
+    typeof entry.userId === "string" ? [[entry.userId, entry] as const] : []));
+  const audience: RuntimeAudience = {
+    humans: routing.recipientUserIds,
+    instanceOwners: routing.instanceOwnerUserIds,
+  };
+  await deliverToAudience({
+    env, audience, label: "Channel", ...(self ? { self } : {}),
+    request: (share) => runtimeJsonRequest(RUNTIME_CHANNEL_MESSAGE_URL, {
+      ...payload,
+      recipientUserIds: share.human ? [share.owner] : [],
+      recipientNotifications: share.human && notifications.has(share.owner) ? [notifications.get(share.owner)] : [],
+      instances: share.instances,
+    }),
+  });
 }
 
 /** The live routing the append of `committed` read, when this request made it; a replay has none. */
@@ -268,26 +296,9 @@ export async function publishChannelLiveDelivery(
       env, channelId, String(payload.messageId || ""), scope,
     ),
   );
-  const responses = await Promise.all(
-    recipientBatches(routing.recipientUserIds).map((recipientUserIds) => {
-      const recipients = new Set(recipientUserIds);
-      return publishRuntimeChannelMessage({
-        env,
-        waitUntil,
-        channelId,
-        payload: {
-          ...payload,
-          recipientUserIds,
-          recipientNotifications: routing.recipientNotifications.filter((entry) =>
-            typeof entry.userId === "string" && recipients.has(entry.userId)),
-        },
-        ...(self ? { self } : {}),
-      });
-    }),
-  );
-  const rejected = responses.find((response) => !response.ok);
-  if (rejected) throw new Error(`RelayRuntime rejected PostgreSQL Channel delivery (${rejected.status})`);
-  // The people this message is addressed to are also reached where no client of theirs is open.
+  const delivered = deliverChannelMessage(env, payload, routing, self);
+  // The people this message is addressed to are also reached where no client
+  // of theirs is open, whether or not one of their cells could be reached.
   const addressed = routing.recipientNotifications.flatMap((entry) => typeof entry.userId === "string" ? [entry.userId] : []);
   const notification = addressed.length > 0 && env.PUSH_CONFIG ? messagePushNotification(channelId, payload) : null;
   if (notification) waitUntil(Promise.resolve().then(() => pushToPeople({
@@ -297,12 +308,11 @@ export async function publishChannelLiveDelivery(
     // query data. Keep the batch diagnostic independent of foreign error text.
     console.error("Push delivery failed");
   }));
-  return;
+  await delivered;
 }
 
 export async function publishChannelMemberRead(
   env: Env,
-  waitUntil: (task: Promise<unknown>) => void,
   input: {
     channelId: string;
     subjectId: string;
@@ -316,29 +326,16 @@ export async function publishChannelMemberRead(
     env,
     (scope) => postgresMessageLiveRecipientUserIds(env, input.channelId, scope),
   )).filter((userId) => userId !== input.actorUserId);
-  const deliveries = recipientBatches(recipientUserIds).map((recipients) =>
-    publishRuntimeChannelObservableEvent({
-      env,
-      waitUntil,
-      channelId: input.channelId,
-      payload: {
-        recipientUserIds: recipients,
-        event: channelMemberReadEvent(input) as unknown as Record<string, unknown>,
-      },
-    }));
-  deliveries.push(publishRuntimeChannelObservableEvent({
-    env,
-    waitUntil,
-    channelId: input.channelId,
-    payload: {
-      recipientUserIds: [input.actorUserId],
-      event: channelAttentionUpdatedEvent(input) as unknown as Record<string, unknown>,
-    },
-  }));
-  const responses = await Promise.all(deliveries);
-  if (responses.some((response) => !response.ok)) {
-    throw new Error("Runtime rejected PostgreSQL read-state delivery");
-  }
+  const readEvent = channelMemberReadEvent(input);
+  const attentionEvent = channelAttentionUpdatedEvent(input);
+  // The reader is told what now waits on them; everyone else, where they have read to.
+  await deliverToAudience({
+    env, label: "Channel observable", audience: { humans: [...recipientUserIds, input.actorUserId] },
+    request: (share) => runtimeJsonRequest(RUNTIME_CHANNEL_OBSERVABLE_EVENT_URL, {
+      recipientUserIds: [share.owner],
+      event: share.owner === input.actorUserId ? attentionEvent : readEvent,
+    }),
+  });
   return true;
 }
 
@@ -350,7 +347,6 @@ export async function publishChannelMemberRead(
  */
 export async function markCardAnswered(
   env: Env,
-  waitUntil: (task: Promise<unknown>) => void,
   channelId: string,
   messageId: string,
   userId: string,
@@ -363,7 +359,7 @@ export async function markCardAnswered(
     if (result.responded !== true) return;
     const attention = result.attention && typeof result.attention === "object" && !Array.isArray(result.attention)
       ? result.attention as import("@xmatrix/protocol").ChannelAttentionSummary : undefined;
-    await publishChannelMemberRead(env, waitUntil, {
+    await publishChannelMemberRead(env, {
       channelId, subjectId: `user:${userId}`, readSequence: Number(result.ackedSequence), actorUserId: userId,
       ...(attention ? { attention } : {}),
     });

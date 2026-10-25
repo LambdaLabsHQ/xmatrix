@@ -282,10 +282,6 @@ RELAY_AUTOMATION_EXECUTION_ENABLED = "true"
 # Scheduled Agents are one-shot executions. The owning Channel family durably stops any process
 # that has not reported its terminal lifecycle within thirty minutes.
 RELAY_AUTOMATION_RUN_TIMEOUT_MS = "1800000"
-# Runtime route-directory, socket occupancy, and per-cell committed-event
-# delivery are all present. Exact "dual" activates candidate Runtime cells;
-# every other value remains the compatibility single-cell path.
-XMATRIX_RUNTIME_CELL_MODE = "dual"
 # Transitional compatibility adapter for published 0.15.53-0.15.63
 # CLI/daemon binaries. Those binaries report their version in the realtime
 # connect frame but predate request-level compatibility headers. Keep one Hub

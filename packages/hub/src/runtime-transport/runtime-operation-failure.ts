@@ -150,6 +150,7 @@ const CLIENT_FAILURES = {
   channel_access_changed: ["You no longer have access to this Channel", "authority.access"],
   human_auth_invalid: ["Your sign-in expired or is not valid here. Sign in again.", "relay.authenticate"],
   human_rate_limited: ["Too many connections from this account. Reconnecting shortly.", "relay.authenticate"],
+  runtime_cell_foreign: ["This connection named another account's Runtime cell. Reconnect with your own account.", "relay.authenticate"],
   agent_run_credential_required: ["An Agent Instance run credential is required", "relay.authenticate"],
   agent_run_credential_invalid: ["The Agent run credential is invalid or expired. Reconnect with a fresh credential.", "relay.authenticate"],
   agent_run_binding_mismatch: ["Agent credential does not match the live Authority run", "relay.validate_binding"],

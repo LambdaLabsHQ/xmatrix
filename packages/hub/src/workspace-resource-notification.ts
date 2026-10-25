@@ -6,17 +6,18 @@ import {
   type PostgresAuthorityFleetEnv,
 } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS, postgresAuthorityShardId } from "./postgres-authority-http";
-import { publishRuntimeCommittedEvent } from "./runtime-transport/runtime-route-directory-delivery";
+import {
+  deliverToAudience,
+  RUNTIME_COMMITTED_EVENT_URL,
+  runtimeJsonRequest,
+} from "./runtime-transport/runtime-principal-delivery";
 import type { Env } from "./types";
 
 const WORKSPACE_RESOURCE_COMMITTED_EVENT_CHANNEL = "workspace-resource";
-const RECIPIENT_BATCH = 200;
-const DELIVERY_CONCURRENCY = 16;
 
 export type WorkspaceResourceEnv = PostgresAuthorityFleetEnv & {
   RELAY_RUNTIME?: Env["RELAY_RUNTIME"];
-  RELAY_RUNTIME_ROUTE_DIRECTORY?: Env["RELAY_RUNTIME_ROUTE_DIRECTORY"];
-  XMATRIX_RUNTIME_CELL_MODE?: Env["XMATRIX_RUNTIME_CELL_MODE"];
+  XMATRIX_RUNTIME_LOCATION_HINT?: Env["XMATRIX_RUNTIME_LOCATION_HINT"];
 };
 
 /**
@@ -52,7 +53,7 @@ export async function notifyWorkspaceResource(env: WorkspaceResourceEnv, input: 
         revision,
         ...(channelId ? { channelId } : {}),
       };
-      await publishRecipientBatches(env, audience.spaceId, event, recipientUserIds);
+      await publishToRecipients(env, event, recipientUserIds);
     }
   } catch (error) {
     console.error("Workspace resource realtime acceleration failed", error);
@@ -73,36 +74,25 @@ async function spaceMemberAudiences(env: WorkspaceResourceEnv, spaceIds: readonl
   }));
 }
 
-async function publishRecipientBatches(
+/** Tells each recipient, in their own cell, to re-read one workspace list. */
+async function publishToRecipients(
   env: WorkspaceResourceEnv,
-  spaceId: string,
   event: HumanWorkspaceResourceChangedMessage,
   recipientUserIds: readonly string[],
 ): Promise<void> {
-  const batches: string[][] = [];
-  for (let offset = 0; offset < recipientUserIds.length; offset += RECIPIENT_BATCH) {
-    batches.push(recipientUserIds.slice(offset, offset + RECIPIENT_BATCH));
-  }
-  const publishBatch = async (recipientPrincipalIds: string[]) => {
-    try {
-      const response = await publishRuntimeCommittedEvent({
-        env: env as Pick<Env, "RELAY_RUNTIME" | "RELAY_RUNTIME_ROUTE_DIRECTORY" | "XMATRIX_RUNTIME_CELL_MODE">,
-        waitUntil: () => undefined, scopeId: spaceId,
-        payload: {
-          channelId: WORKSPACE_RESOURCE_COMMITTED_EVENT_CHANNEL,
-          changeSeq: event.revision,
-          event,
-          recipientPrincipalIds,
-        },
-      });
-      if (!response.ok) {
-        throw new Error(`RelayRuntime rejected workspace resource change (${response.status})`);
-      }
-    } catch (error) {
-      console.error("Workspace resource realtime acceleration failed", error);
-    }
-  };
-  for (let offset = 0; offset < batches.length; offset += DELIVERY_CONCURRENCY) {
-    await Promise.all(batches.slice(offset, offset + DELIVERY_CONCURRENCY).map(publishBatch));
+  if (!env.RELAY_RUNTIME) return;
+  try {
+    await deliverToAudience({
+      env: env as Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT">,
+      label: "Workspace resource", audience: { humans: recipientUserIds },
+      request: (share) => runtimeJsonRequest(RUNTIME_COMMITTED_EVENT_URL, {
+        channelId: WORKSPACE_RESOURCE_COMMITTED_EVENT_CHANNEL,
+        changeSeq: event.revision,
+        event,
+        recipientPrincipalIds: [share.owner],
+      }),
+    });
+  } catch (error) {
+    console.error("Workspace resource realtime acceleration failed", error);
   }
 }

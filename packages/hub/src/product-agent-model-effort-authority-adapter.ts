@@ -10,9 +10,17 @@ import {
   type ProductAgentControlResult,
 } from "./product-agent-model-effort";
 import { recordCommandResult } from "./command-result";
-import { runtimeCellsForChannel } from "./runtime-transport/runtime-route-directory-delivery";
+import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
+import { postgresMessageLiveAudience, withPostgresMessageRequestScope } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import type { Env } from "./types";
+
+/** The cells holding the Channel's Agent Instances: its active Runs' owners' own cells. */
+async function channelInstanceCells(env: Env, channelId: string) {
+  const { instanceOwnerUserIds } = await withPostgresMessageRequestScope(env,
+    (scope) => postgresMessageLiveAudience(env, channelId, scope));
+  return relayRuntimeCellsForOwners(env, instanceOwnerUserIds);
+}
 
 
 
@@ -71,7 +79,7 @@ export function createProductAgentControlAuthorityPort(input: {
       // The waiter registry is Runtime process memory, so the whole
       // request/confirm exchange has to happen inside the Durable Object
       // holding the Instance's socket; ask every cell that may hold it.
-      const cells = await runtimeCellsForChannel(input.env, channelId);
+      const cells = await channelInstanceCells(input.env, channelId);
       const outcomes = await Promise.all(cells.map(async (runtime): Promise<ProductAgentControlOutcome> => {
         const response = await runtime.fetch(
           new Request(`https://relay-runtime.internal${RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH}`, {
@@ -107,7 +115,7 @@ export function createProductAgentControlAuthorityPort(input: {
        waits. A runtime that predates the frame reads it as a committed
        Channel instruction instead. */
     async continueTurn(channelId, { instanceId, requestIds, body }) {
-      const cells = await runtimeCellsForChannel(input.env, channelId);
+      const cells = await channelInstanceCells(input.env, channelId);
       const delivered = await Promise.all(cells.map(async (runtime) => {
         const response = await runtime.fetch(
           new Request(`https://relay-runtime.internal${RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH}`, {

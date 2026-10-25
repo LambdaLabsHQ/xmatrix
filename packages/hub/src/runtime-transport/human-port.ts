@@ -6,7 +6,7 @@ import type {
   HumanTraceAccessServerMessage,
   HumanWorkspaceResourceChangedMessage,
 } from "@xmatrix/protocol/connections/human";
-import { HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
+import { HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
 import {
   CLIENT_UPGRADE_REQUIRED_CLOSE_CODE,
   HUMAN_AUTH_INVALID_FAILURE_CODE,
@@ -37,8 +37,8 @@ import {
   liveHumanSessionSnapshots,
   type LiveHumanSessionSnapshot,
 } from "./human-live-presence";
-import type { LiveAgentSessionSnapshot } from "./agent-presence-snapshot";
 import { admittedLegacyProtocolVersion } from "../legacy-client-compatibility";
+import type { RuntimeSocketAdmission, RuntimeSocketAdmit } from "./runtime-socket-admission";
 
 type Message<Type extends HumanClientMessage["type"]> = Extract<
   HumanClientMessage,
@@ -76,22 +76,9 @@ export interface HumanRuntimeSession {
   clientProtocolVersion?: number;
   /** The client takes Agent presence for conversations it is not showing as a once-a-second digest. */
   presenceDigest?: true;
+  /** The client reads `presenceCoverage`, so it may be sent Channel snapshots that speak only for Agents. */
+  presenceCoverage?: true;
 }
-
-/**
- * Live Human presence fanout hook. Implementations may publish channel_updated
- * snapshots; failures must never fail the Human socket frame itself.
- */
-export type HumanPresenceChangeHandler = (input: {
-  reason: "connect" | "focus" | "disconnect";
-  previousFocusedChannelId: string | null;
-  nextFocusedChannelId: string | null;
-  session: Readonly<HumanRuntimeSession>;
-  liveSessions: readonly LiveHumanSessionSnapshot[];
-  /** Authenticated live Agent presentations available for the focused channel. */
-  liveAgentSessions: readonly LiveAgentSessionSnapshot[];
-  deliver: (userId: string, message: HumanServerMessage) => void;
-}) => void | Promise<void>;
 
 /**
  * Abstract typed Authority boundary. Concrete HTTP/DO dispatch belongs to the
@@ -126,10 +113,9 @@ export class HumanRuntimeTransport {
   readonly controller: HumanConnectionController;
   private readonly backend: HumanSocketBackend;
   private readonly sockets: RuntimeSocketState<HumanRuntimeSession, HumanServerMessage>;
-  private readonly onPresenceChange?: HumanPresenceChangeHandler;
   private readonly refusedSignInCloseDelayMs: number;
-  private readonly liveAgentSessions?: () => readonly LiveAgentSessionSnapshot[];
   private readonly allowLegacyProtocol: boolean;
+  private readonly admit?: RuntimeSocketAdmit;
   private readonly presenceDigests = new HumanPresenceDigests((socket, message) => {
     if (this.sockets.get(socket)) this.sockets.send(socket, message);
   });
@@ -139,16 +125,15 @@ export class HumanRuntimeTransport {
   };
 
   constructor(backend: HumanSocketBackend, options?: {
-    onPresenceChange?: HumanPresenceChangeHandler;
-    liveAgentSessions?: () => readonly LiveAgentSessionSnapshot[];
     allowLegacyProtocol?: boolean;
     refusedSignInCloseDelayMs?: number;
+    /** Whether this cell may hold a socket of the account it authenticated as. */
+    admit?: RuntimeSocketAdmit;
   }) {
     this.backend = backend;
     this.refusedSignInCloseDelayMs = options?.refusedSignInCloseDelayMs ?? REFUSED_SIGN_IN_CLOSE_DELAY_MS;
-    this.onPresenceChange = options?.onPresenceChange;
-    this.liveAgentSessions = options?.liveAgentSessions;
     this.allowLegacyProtocol = options?.allowLegacyProtocol === true;
+    this.admit = options?.admit;
     const missing = HUMAN_AUTHORITY_REQUIRED_CAPABILITIES.filter(
       (capability) => !backend.capabilities.has(capability),
     );
@@ -246,10 +231,26 @@ export class HumanRuntimeTransport {
       delivered = true;
       if (!session.presenceDigest || session.focusedChannelId === channelId) {
         if (card) this.sockets.send(socket, card);
-        if (channel) this.sockets.send(socket, channel);
+        if (channel && session.presenceCoverage) this.sockets.send(socket, channel);
       } else if (card) {
         this.presenceDigests.add(socket, card.agent);
       }
+    }
+    return delivered;
+  }
+
+  /**
+   * A Channel snapshot from an Agent presence change. It speaks only for the
+   * Channel's Agents, so only a socket that reads `presenceCoverage` takes it;
+   * any other would read it as the people having left, and learns the change
+   * from the Agent's card instead.
+   */
+  deliverPresenceChannel(userId: string, channel: Extract<HumanServerMessage, { type: "channel_updated" }>): boolean {
+    let delivered = false;
+    for (const [socket, session] of this.sockets.entries()) {
+      if (session.user.id !== userId || !session.presenceCoverage) continue;
+      this.sockets.send(socket, channel);
+      delivered = true;
     }
     return delivered;
   }
@@ -303,6 +304,8 @@ export class HumanRuntimeTransport {
     try {
       const authentication = await this.backend.authenticate(message);
       assertAuthentication(message, authentication);
+      const admission = this.admit?.(authentication.user.id) ?? "admitted";
+      if (admission !== "admitted") return this.refuseAdmission(ws, message.requestId, admission);
       const now = new Date().toISOString();
       const device = message.device && typeof message.device === "object" && !Array.isArray(message.device)
         ? message.device as Record<string, unknown>
@@ -314,6 +317,8 @@ export class HumanRuntimeTransport {
       const clientProtocolVersion = Number(device.protocolVersion);
       const presenceDigest = Array.isArray(device.capabilities) &&
         device.capabilities.includes(HUMAN_CLIENT_PRESENCE_DIGEST);
+      const presenceCoverage = Array.isArray(device.capabilities) &&
+        device.capabilities.includes(HUMAN_CLIENT_PRESENCE_COVERAGE);
       const session: HumanRuntimeSession = {
         user: authentication.user,
         connectedAt: now,
@@ -325,6 +330,7 @@ export class HumanRuntimeTransport {
         ...(clientVersion ? { clientVersion } : {}),
         ...(Number.isSafeInteger(clientProtocolVersion) ? { clientProtocolVersion } : {}),
         ...(presenceDigest ? { presenceDigest: true as const } : {}),
+        ...(presenceCoverage ? { presenceCoverage: true as const } : {}),
       };
       this.sockets.establish(ws, session, authentication.connected);
       // Pure-Authority does not host live agent_list inventory (that is REST/profile
@@ -334,12 +340,6 @@ export class HumanRuntimeTransport {
         type: "agent_list",
         requestId: message.requestId,
         agents: [],
-      });
-      await this.emitPresenceChange({
-        reason: "connect",
-        previousFocusedChannelId: null,
-        nextFocusedChannelId: null,
-        session,
       });
     } catch (error) {
       this.sockets.sendFailure(ws, message.requestId, error, "Could not connect this session");
@@ -356,6 +356,23 @@ export class HumanRuntimeTransport {
         ws.close(TRY_AGAIN_LATER_CLOSE_CODE, "Try again later");
       }
     }
+  }
+
+  /**
+   * A socket this cell may not hold. One that named no owner predates owner
+   * routing and is told to upgrade; one that named another account's cell is
+   * closed, and its client redials with its own.
+   */
+  private refuseAdmission(ws: WebSocket, requestId: string | undefined, admission: Exclude<RuntimeSocketAdmission, "admitted">): void {
+    if (admission === "upgrade_required") {
+      this.sockets.send(ws, { type: "error", requestId, message: "Client upgrade required" });
+      this.sockets.remove(ws);
+      ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
+      return;
+    }
+    this.sockets.sendFailure(ws, requestId, new RuntimeClientOperationError("runtime_cell_foreign"), "Could not connect this session");
+    this.sockets.remove(ws);
+    ws.close(1008, "Runtime cell is not this account's");
   }
 
   /**
@@ -385,21 +402,14 @@ export class HumanRuntimeTransport {
       });
     }
     try {
-      const previousFocusedChannelId = session.focusedChannelId;
       const nextFocusedChannelId = message.channelId;
-      if (previousFocusedChannelId === nextFocusedChannelId) {
+      if (session.focusedChannelId === nextFocusedChannelId) {
         this.sockets.sendOutput(ws, await this.backend.focusChannel(session, message));
         return;
       }
       const output = await this.backend.focusChannel(session, message);
       session.focusedChannelId = nextFocusedChannelId;
       this.sockets.sendOutput(ws, output);
-      await this.emitPresenceChange({
-        reason: "focus",
-        previousFocusedChannelId,
-        nextFocusedChannelId,
-        session,
-      });
     } catch (error) {
       this.sockets.sendFailure(ws, message.requestId, error, "Could not open this Channel");
     }
@@ -409,38 +419,20 @@ export class HumanRuntimeTransport {
     session: Readonly<HumanRuntimeSession>,
     details: { code?: number; reason?: string; wasClean?: boolean },
   ): Promise<void> {
-    try {
-      await this.backend.disconnected(session, details);
-    } finally {
-      await this.emitPresenceChange({
-        reason: "disconnect",
-        previousFocusedChannelId: session.focusedChannelId,
-        nextFocusedChannelId: null,
-        session,
-      });
-    }
+    await this.backend.disconnected(session, details);
   }
 
-  private async emitPresenceChange(input: {
-    reason: "connect" | "focus" | "disconnect";
-    previousFocusedChannelId: string | null;
-    nextFocusedChannelId: string | null;
-    session: Readonly<HumanRuntimeSession>;
-  }): Promise<void> {
-    if (!this.onPresenceChange) return;
-    try {
-      await this.onPresenceChange({
-        ...input,
-        liveSessions: this.liveSessions(),
-        liveAgentSessions: this.liveAgentSessions?.() ?? [],
-        deliver: (userId, message) => {
-          for (const [socket, candidate] of this.sockets.entries()) {
-            if (candidate.user.id === userId) this.sockets.send(socket, message);
-          }
-        },
-      });
-    } catch {
-      // Live presence is best-effort process memory; never fail the Human frame.
+  /**
+   * Close every socket this cell may not hold. Sockets come back from
+   * hibernation before the cell has read whose it is, so the check made at
+   * connect is made again once it has.
+   */
+  refuseForeignSockets(admit: RuntimeSocketAdmit): void {
+    for (const [socket, session] of this.sockets.entries()) {
+      const admission = admit(session.user.id);
+      if (admission === "admitted") continue;
+      if (admission === "upgrade_required") socket.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
+      else socket.close(1008, "Runtime cell is not this account's");
     }
   }
 }

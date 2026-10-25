@@ -10,6 +10,9 @@ import type { Env } from "./types";
  * Channel-family directories, rank directory and policy locator retired with
  * the Durable Object control plane; their namespaces stay bound as shells. The
  * Space projection lost its writers with them, so its rows are only history.
+ * The Runtime route directory and its Channel fanout retired when live
+ * delivery came to be addressed to each recipient's own cell
+ * (runtime-principal-delivery.ts); their rows are expired routing leases.
  */
 class RetainedFactNamespace extends DurableObject<Env> {
   async fetch(): Promise<Response> {
@@ -40,3 +43,5 @@ export class RelayRankAuthorityDirectory extends RetainedFactNamespace {}
 export class RelayAgentAppPolicyLocator extends RetainedFactNamespace {}
 export class RelayChannelFamilyData extends RetainedFactNamespace {}
 export class RelaySpaceProjection extends RetainedFactNamespace {}
+export class RelayRuntimeRouteDirectory extends RetainedFactNamespace {}
+export class RelayRuntimeChannelFanout extends RetainedFactNamespace {}

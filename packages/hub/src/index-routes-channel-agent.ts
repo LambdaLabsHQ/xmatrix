@@ -566,11 +566,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
         actorUserId: authUser.id,
         ...(attention ? { attention } : {}),
       };
-      c.executionCtx.waitUntil(publishChannelMemberRead(
-        c.env,
-        (task) => c.executionCtx.waitUntil(task),
-        memberRead,
-      ).catch((error: unknown) => {
+      c.executionCtx.waitUntil(publishChannelMemberRead(c.env, memberRead).catch((error: unknown) => {
         console.error("Channel family member-read delivery failed", {
           channelId,
           error: error instanceof Error ? error.message : String(error),

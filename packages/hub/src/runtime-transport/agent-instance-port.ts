@@ -20,6 +20,7 @@ import {
   type AgentInstanceConnectionPort,
 } from "../connections/agent-instance/controller";
 import { RuntimeClientOperationError, type RuntimeFailureStage } from "./runtime-operation-failure";
+import type { RuntimeSocketAdmit } from "./runtime-socket-admission";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
 import {
   parseAgentInstanceHibernationAttachment,
@@ -221,6 +222,8 @@ export class AgentInstanceRuntimeTransport {
     private readonly onPresenceChange?: AgentInstancePresenceChangeHandler,
     private readonly onClientNetworkSample?: AgentInstanceClientNetworkSampleHandler,
     private readonly allowLegacyProtocol = false,
+    /** Whether this cell may hold a socket of the owner an Instance authenticated under. */
+    private readonly admit?: RuntimeSocketAdmit,
   ) {
     this.backend = backend;
     const missing = AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES.filter(
@@ -334,6 +337,16 @@ export class AgentInstanceRuntimeTransport {
   handleFrame(ws: WebSocket, frame: string | ArrayBuffer): Promise<void> { return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame)); }
   liveSessions(): readonly Readonly<AgentInstanceRuntimeSession>[] {
     return Array.from(this.sockets.entries(), ([, session]) => session);
+  }
+
+  /** Close every Instance socket this cell may not hold (human-port.ts `refuseForeignSockets`). */
+  refuseForeignSockets(admit: RuntimeSocketAdmit): void {
+    for (const [socket, session] of this.sockets.entries()) {
+      const admission = admit(session.principal.ownerUserId);
+      if (admission === "admitted") continue;
+      if (admission === "upgrade_required") socket.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
+      else socket.close(1008, "Runtime cell is not this account's");
+    }
   }
 
   /**
@@ -686,6 +699,15 @@ export class AgentInstanceRuntimeTransport {
         const authentication = await this.backend.authenticate(message);
         failureStage = "relay.validate_binding";
         assertRunBinding(message, authentication);
+        const admission = this.admit?.(authentication.principal.ownerUserId) ?? "admitted";
+        if (admission === "upgrade_required") {
+          this.sockets.send(ws, { type: "error", requestId: message.requestId, message: "Client upgrade required" });
+          this.sockets.remove(ws);
+          setupComplete = true;
+          ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
+          return;
+        }
+        if (admission === "foreign_cell") throw new RuntimeClientOperationError("runtime_cell_foreign");
         if (this.hasNewerConnection(authentication.run)) {
           throw new RuntimeClientOperationError("agent_connection_superseded");
         }

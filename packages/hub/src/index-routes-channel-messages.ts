@@ -8,7 +8,7 @@ import type { Env } from "./types";
 import { LIVE_RUN_LAUNCH_FIELDS, liveRunIsAdmitted, snapshotLiveRunFromProductGateway } from "./live-run-admission";
 import { type AuthUser } from "./auth";
 import { agentMessagePresentationForLiveBinding, loadLiveAgentPresenceFromRuntime } from "./runtime-transport/agent-presence-snapshot";
-import { runtimeCellsForChannel } from "./runtime-transport/runtime-route-directory-delivery";
+import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { dispatchProductMessagePostCommit, productMessageControlFinishesBeforeResponse } from "./product-message-post-commit";
 import { productMessageSenderPresentation } from "./message-sender-presentation";
@@ -267,7 +267,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
            new source *should* cover it is precisely how every header committed
            bare for two weeks; the binding push-down already made it cheap. */
         const liveAgentSessions = principal
-          ? (await Promise.all((await runtimeCellsForChannel(c.env, channelId)).map((cell) =>
+          ? (await Promise.all(relayRuntimeCellsForOwners(c.env, [principal.ownerUserId]).map((cell) =>
               loadLiveAgentPresenceFromRuntime(cell, c.req.url, {
                 agentId: principal.agentId,
                 runId: principal.runId,

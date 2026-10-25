@@ -16,6 +16,7 @@ import {
 } from "../connections/machine-daemon/controller";
 import { RuntimeClientOperationError, supersededMachineDaemonConnection } from "./runtime-operation-failure";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
+import type { RuntimeSocketAdmit } from "./runtime-socket-admission";
 import {
   MACHINE_DAEMON_CATALOG_HEAL_INTERVAL_MS,
   parseMachineDaemonHibernationAttachment,
@@ -207,6 +208,8 @@ export class MachineDaemonRuntimeTransport {
      * only: callers re-read {@link isRouteReachable}; nothing here is authority.
      */
     private readonly onRouteReachabilityChange?: (identity: MachineDaemonRouteIdentity) => void,
+    /** Whether this cell may hold a socket of the machine owner a daemon authenticated as. */
+    private readonly admit?: RuntimeSocketAdmit,
   ) {
     this.backend = backend;
     const missing = MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES.filter(
@@ -336,6 +339,16 @@ export class MachineDaemonRuntimeTransport {
   accept(ws: WebSocket): void { this.controller.socket.accept(ws); }
   session(ws: WebSocket): Readonly<MachineDaemonRuntimeSession> | undefined {
     return this.sockets.get(ws);
+  }
+
+  /** Close every daemon socket this cell may not hold (human-port.ts `refuseForeignSockets`). */
+  refuseForeignSockets(admit: RuntimeSocketAdmit): void {
+    for (const [socket, session] of this.sockets.entries()) {
+      const admission = admit(session.principal.ownerUserId);
+      if (admission === "admitted") continue;
+      if (admission === "upgrade_required") socket.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
+      else socket.close(1008, "Runtime cell is not this account's");
+    }
   }
   hibernationAttachment(ws: WebSocket): MachineDaemonHibernationAttachment | undefined {
     const session = this.sockets.get(ws);
@@ -497,6 +510,14 @@ export class MachineDaemonRuntimeTransport {
     await this.sockets.answerOperation(ws, message.requestId, MACHINE_DAEMON_FAILURE_COPY.connect, async () => {
       const authentication = await this.backend.authenticate(message);
       assertMachineBinding(message, authentication);
+      const admission = this.admit?.(authentication.principal.ownerUserId) ?? "admitted";
+      if (admission === "upgrade_required") {
+        this.sockets.send(ws, { type: "error", requestId: message.requestId, message: "Client upgrade required" });
+        this.sockets.remove(ws);
+        ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
+        return;
+      }
+      if (admission === "foreign_cell") throw new RuntimeClientOperationError("runtime_cell_foreign");
       const now = new Date().toISOString();
       const session: MachineDaemonRuntimeSession = {
         principal: authentication.principal,

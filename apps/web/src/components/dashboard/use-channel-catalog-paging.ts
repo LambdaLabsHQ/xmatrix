@@ -536,7 +536,8 @@ export function useChannelCatalogPaging(input: {
           unknown,
           limit: RESOLVE_LIMIT,
           authorized: () => lease !== undefined && targetSpaceId === spaceId && leaseOf(targetSpaceId) === lease,
-          resolve: async (channelIds) => (await resolve(targetSpaceId, channelIds)).channels,
+          // A message names these Channels now: an answer asked before it cannot speak for them.
+          resolve: async (channelIds) => (await resolve(targetSpaceId, channelIds, undefined, true)).channels,
         });
       };
       refreshSpaceCatalogForMessages({ ...lists, details, resolveMessageChannels });

@@ -1092,6 +1092,18 @@ export async function postgresMessageLiveRecipientUserIds(
   });
 }
 
+/** The Channel's live audience as it stands now: its readers and the owners of its active Runs. */
+export async function postgresMessageLiveAudience(
+  env: Env,
+  channelId: string,
+  dependencies: PostgresMessageDependencies = {},
+) {
+  const context = await postgresMessageBackgroundContext(env, channelId, "message-live-audience", dependencies);
+  return context.messages.liveAudience({
+    requestId: context.requestId, spaceId: context.spaceId, channelId: context.channelId,
+  });
+}
+
 export async function postgresMessageRepairSenderSnapshots(
   env: Env,
   input: Record<string, unknown>,

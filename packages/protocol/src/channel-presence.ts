@@ -26,6 +26,11 @@ export interface ChannelPresence {
   readonly channelId: string;
   readonly humans: ReadonlyMap<string, HumanPresence>;
   readonly instances: ReadonlyMap<PresenceInstanceId, AgentInstancePresence>;
+  /**
+   * `false`: this presence speaks only for Agents (`presenceCoverage: "agents"`
+   * on the wire), so `humans` says nothing about the Channel's people.
+   */
+  readonly humansCovered?: false;
 }
 
 /** Internal model. The legacy member-to-array wire shape never enters a store. */
@@ -71,10 +76,18 @@ export function reduceChannelPresence(state: ChannelPresence, change: ChannelPre
         ? mergeAgentInstancePresence(current, incoming) : incoming;
       instances.set(incoming.id, sameValue(current, value) ? current! : value);
     }
-    const next = { ...snapshot, instances };
+    // A snapshot that speaks only for Agents leaves the people as they were.
+    const { humansCovered, ...covered } = snapshot;
+    const next: ChannelPresence = humansCovered === false
+      ? { ...covered, humans: state.humans, ...(state.humansCovered === false ? { humansCovered } : {}), instances }
+      : { ...covered, instances };
     return sameValue(state, next) ? state : next;
   }
-  if (change.type === "humans") return change.humans === state.humans ? state : { ...state, humans: new Map(change.humans) };
+  if (change.type === "humans") {
+    if (change.humans === state.humans && state.humansCovered !== false) return state;
+    const { humansCovered: _uncovered, ...rest } = state;
+    return { ...rest, humans: new Map(change.humans) };
+  }
   const id = change.type === "upsert" ? change.instance.id : change.instanceId;
   if (typeof id !== "string" || !id) throw new TypeError("An exact Instance identity is required");
   const current = state.instances.get(id);

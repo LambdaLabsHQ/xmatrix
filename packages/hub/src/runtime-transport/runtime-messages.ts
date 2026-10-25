@@ -12,7 +12,7 @@ import {
 import { productMessageSenderPresentation } from "../message-sender-presentation";
 import { dispatchProductMessagePostCommit, productMessageControlFinishesBeforeResponse } from "../product-message-post-commit";
 import { AgentLaunchHandoverUnavailable } from "../agent-launch-coordinator-wake";
-import type { RuntimeLiveDeliverySelf } from "./runtime-route-directory-delivery";
+import type { RuntimeLiveDeliverySelf } from "./runtime-principal-delivery";
 import { postgresMessageFailure } from "../postgres-message-authority";
 
 /** What a runtime socket's message commands are answered with. */
