@@ -418,8 +418,8 @@ mod tests {
     // Existing trace tests start after a page turn was queued. This protects
     // the missing startup boundary: the invitation's very first prompt must
     // already carry the page request, and its first words must stream there.
-    #[tokio::test]
-    async fn a_co_writing_launch_answers_the_page_in_its_first_model_turn() {
+    #[test]
+    fn a_co_writing_launch_answers_the_page_in_its_first_model_turn() {
         let _guard = crate::tests::test_process_env_lock();
         let channel = "c-co-write-initial";
         let mut frames = initial_bridge_for_test(channel);
@@ -443,7 +443,11 @@ mod tests {
             std::env::set_var(keys[1], "@claude launch:force page:page");
             std::env::remove_var(keys[2]);
         }
-        let prompt = crate::runtime_resume_input::initial_runtime_turn().await;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let prompt = runtime.block_on(crate::runtime_resume_input::initial_runtime_turn());
         for (key, value) in keys.into_iter().zip(previous) {
             unsafe {
                 match value {
