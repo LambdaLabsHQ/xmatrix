@@ -124,10 +124,7 @@ integration("every Space- or Channel-keyed table is either purged or deliberatel
       ORDER BY 1`);
     const classified = new Set([...SPACE_PURGE_STEPS.map((step) => step.table),
       ...Object.keys(SPACE_PURGE_EXCLUDED_TABLES)]);
-    // Nothing reads or writes these since page claims were removed; the contract migration that drops them
-    // takes them out of here.
-    const dropping = new Set(["data.page_block_competitions", "data.page_claims", "data.space_action_claims"]);
-    assert.deepEqual(rows.map((row) => row.name).filter((name) => !classified.has(name) && !dropping.has(name)), []);
+    assert.deepEqual(rows.map((row) => row.name).filter((name) => !classified.has(name)), []);
     const { rows: tables } = await client.query(`SELECT table_schema||'.'||table_name AS name
       FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema IN ('data','control')`);
     const live = new Set(tables.map((row) => row.name));

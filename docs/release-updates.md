@@ -23,11 +23,13 @@ The GitHub App publishes no `xmatrix/claim` check; a repository that still
 lists it among its required checks should drop it, or its pull requests wait
 on a check that never arrives.
 
-Migration evidence: a follow-up contract migration drops `data.page_claims`,
-`data.page_block_competitions` and `data.space_action_claims` and removes the
-`owed` triggers left in Automations. It is applied once the deployed Hub no
-longer names those tables; until then the Space and Conversation purges no
-longer empty them, and the drop takes their rows.
+Migration evidence: contract migration `0215_contract_drop_page_claims` drops
+`data.page_claims`, `data.page_block_competitions` and
+`data.space_action_claims`, once the deployed Hub no longer names them (the
+contract-readers gate checks it). Between that deploy and the drop the Space
+and Conversation purges leave their rows, and the drop takes them. The one
+Automation with an `owed` trigger was edited before the release, so no stored
+trigger names it.
 
 ## Unreleased: Releases deploy concurrently by component dependency
 
