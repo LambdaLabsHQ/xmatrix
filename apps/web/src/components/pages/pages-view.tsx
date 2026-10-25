@@ -10,7 +10,7 @@ import {
   type FaceOf, type ChannelSnapshot, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
-  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share, Trash2, Undo2, X,
+  Check, ChevronLeft, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -67,6 +67,7 @@ import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation"
 import { PageTreeRow } from "./page-tree-row";
 import { pageMentions, type PageReferenceTargets } from "./page-reference-chips";
 import type { PageSummons } from "./page-mention-summons";
+import type { PageEditOpening } from "@/components/dashboard/page-edit-cards";
 import { usePageSummons, type PageSummon } from "./page-summon-store";
 import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -541,7 +542,7 @@ const NO_MEMBERS: readonly SpaceMember[] = [];
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
   renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation,
-  onConversationIntent, onDiscuss, canMigrate, layout = "desktop", focusSection = null,
+  onConversationIntent, onDiscuss, canMigrate, layout = "desktop", focusSection = null, onReturnToMessage,
   creation, members = NO_MEMBERS }: {
   spaceId: string | null;
   token: string;
@@ -581,7 +582,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   /** On a phone a page is a pushed screen, like a conversation; the shell's back bar carries its title. */
   layout?: "desktop" | "phone";
   /** A section a reference opened the page at; a new `seq` brings it into view again. */
-  focusSection?: { pageId: string; blockId: string; seq: number } | null;
+  focusSection?: { pageId: string; blockId: string; seq: number; opening?: PageEditOpening } | null;
+  /** Goes back to the message whose edit card opened the page. */
+  onReturnToMessage?: (from: PageEditOpening["from"]) => void;
   creation: PageCreation;
 }) {
   const { user } = useAuth();
@@ -773,8 +776,30 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     window.document.addEventListener("visibilitychange", read);
     return () => { window.clearTimeout(timer); window.document.removeEventListener("visibilitychange", read); };
   }, [drawn, headRevision, markSeen, mode, readFrom, viewport]);
-  const readerDiff = useMemo(() => readerBaseline === null || headRevision === null || diffViewed || !drawn ? null
-    : { body: readerBaseline, head: headRevision }, [diffViewed, drawn, headRevision, readerBaseline]);
+  // Opened from a message's edit card: the page shows what changed since that edit's base, marked over the text,
+  // and offers the way back to the message.
+  const [cameFrom, setCameFrom] = useState<{ pageId: string; opening: PageEditOpening; body: string | null } | null>(null);
+  const openingSeq = useRef<number | null>(null);
+  useEffect(() => {
+    const opening = focusSection?.opening;
+    if (!opening || !spaceId || openingSeq.current === focusSection.seq) return;
+    openingSeq.current = focusSection.seq;
+    const target = focusSection.pageId;
+    setCameFrom({ pageId: target, opening, body: opening.since > 0 ? null : "" });
+    if (opening.since <= 0) return;
+    void pageApi.read(spaceId, target, token, opening.since).then((result) => setCameFrom((current) =>
+      current?.opening === opening ? { ...current, body: result.page.body } : current), () => undefined);
+  }, [focusSection, spaceId, token]);
+  const editBaseline = cameFrom?.pageId === pageId ? cameFrom.body : null;
+  useEffect(() => {
+    if (editBaseline === null) return;
+    setDiffViewed(false);
+    setDiffShown(true);
+  }, [editBaseline]);
+  const readerDiff = useMemo(() => {
+    const baseline = editBaseline ?? readerBaseline;
+    return baseline === null || headRevision === null || diffViewed || !drawn ? null : { body: baseline, head: headRevision };
+  }, [diffViewed, drawn, editBaseline, headRevision, readerBaseline]);
   const queryClient = useQueryClient();
   const userId = user?.id ?? null;
   const userName = user?.name || user?.email || "";
@@ -1637,6 +1662,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     </>
   );
 
+  // Back to the message whose edit card opened this page, named by its conversation.
+  const backTo = cameFrom?.pageId === pageId && onReturnToMessage ? cameFrom.opening.from : null;
+  const back = backTo ? (
+    <button type="button" className="app-page-back mr-auto" data-testid="page-back-to-message"
+      onClick={() => onReturnToMessage!(backTo)}>
+      <ChevronLeft aria-hidden="true" />
+      <span>{conversationName(backTo.channelId) ?? "Back to the conversation"}</span>
+    </button>
+  ) : <span className="mr-auto" />;
   // The page's column, with room for the margin beside it when there is one.
   const column = cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]");
   return (
@@ -1649,7 +1683,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         {!phone && (
           <div className="app-page-band shrink-0 px-6 lg:px-12">
             <header className={cn(column, "app-band-header flex flex-wrap items-center gap-1.5")} data-testid="page-controls">
-              <span className="mr-auto" />
+              {back}
               {/* The page speaks of saving only when something is wrong; who wrote it stands under its title. */}
               <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="page-save-state">
                 {offline ? "Offline · your changes sync when you reconnect"
@@ -1671,7 +1705,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
             : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pt-4 pb-6 lg:px-12"}>
             <div className={column}>
-              {phone && <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>}
+              {phone && <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{backTo && back}{controls}</div>}
               {notice && <p className={noticeClass("attention", "mb-3 rounded-md px-3 py-2 text-sm")}>{notice}</p>}
               {migration.data?.state === "proposed" && (
                 // An Agent drafted the move; it waits for an owner or admin, however many pages exist.

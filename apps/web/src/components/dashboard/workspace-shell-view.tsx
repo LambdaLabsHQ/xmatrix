@@ -99,6 +99,7 @@ import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
 import { mobileBackState, DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
 import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
+import type { PageEditOpening } from "@/components/dashboard/page-edit-cards";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, usePageCreation } from "@/components/pages/page-creation";
 import { searchWorkspacePages } from "./workspace-message-search";
 import { channelTitle } from "@/components/dashboard/channel-links";
@@ -614,11 +615,13 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     : {}, [selectedChannel, view, workspaceSearchHere]);
   const pageCreation = usePageCreation(currentSpaceId, token ?? "", openPage);
   // A `page:<id>#<section>` chip opens the page at that section; a new seq scrolls there again.
+  // An edit card opens it showing what changed since, with the way back to its message.
   const [pageSectionRequest, setPageSectionRequest] =
-    useState<{ pageId: string; blockId: string; seq: number } | null>(null);
-  const openPageAt = useStableCallback((pageId: string, blockId?: string | null) => {
+    useState<{ pageId: string; blockId: string; seq: number; opening?: PageEditOpening } | null>(null);
+  const openPageAt = useStableCallback((pageId: string, blockId?: string | null, opening?: PageEditOpening) => {
     openPage(pageId);
-    setPageSectionRequest((current) => blockId ? { pageId, blockId, seq: (current?.seq ?? 0) + 1 } : null);
+    setPageSectionRequest((current) => blockId || opening
+      ? { pageId, blockId: blockId ?? "", seq: (current?.seq ?? 0) + 1, ...(opening ? { opening } : {}) } : null);
   });
   // `#` completion and `channel:<id>` chips read the channels this reader can see.
   const navigateToChannelRef = useRef(navigateToChannel);
@@ -1302,6 +1305,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId} creation={pageCreation}
       members={currentSpace?.members}
       onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}
+      onReturnToMessage={(from) => navigateToChannel(from.channelId, from.messageId)}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>
         renderConversationSurface(placement === "margin" ? "page-margin" : "beside-page") } : {})}

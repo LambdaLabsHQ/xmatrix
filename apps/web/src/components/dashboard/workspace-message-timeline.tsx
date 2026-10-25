@@ -214,9 +214,10 @@ import {
   type MentionReadChannelScope,
   type MentionReadMessageScope,
 } from "@/components/dashboard/mention-read-chip";
-import { PageReferenceScopeProvider } from "@/components/dashboard/page-reference-chip";
+import { PageReferenceScopeProvider, type PageReferenceScope } from "@/components/dashboard/page-reference-chip";
+import { PageEditCards, useMessagePageEdits } from "@/components/dashboard/page-edit-cards";
 
-import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow,
+import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow, PageMessageEdit,
   InteractionLaunchOption } from "@xmatrix/protocol";
 import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation } from "@xmatrix/protocol";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
@@ -508,7 +509,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onDiscussPassage?: (message: TimelineItem, quote: string) => void;
   reborningSenderKey: string | null;
   /** Opens a `page:<id>` chip from a message, at its section when it names one (pages-and-conversations.md §4.3). */
-  onOpenPage: (pageId: string, blockId?: string | null) => void;
+  onOpenPage: PageReferenceScope["onOpenPage"];
   onMessageExposed: (channelId: string, sequence: number) => void;
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
@@ -522,6 +523,10 @@ export const MessageTimeline = memo(function MessageTimeline({
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
   const visibleInvocationIds = visibleInvocationScope?.channelId === channel?.id ? visibleInvocationScope?.ids : undefined;
   const agentLaunchQuery = useChannelAgentLaunches(channel, token, timeline, visibleInvocationIds, currentUserIdentityId);
+  // What the Agent messages in view changed on pages, drawn with each of them.
+  const [visibleAgentScope, setVisibleAgentScope] = useState<{ channelId: string; ids: string[] } | null>(null);
+  const pageEditsByMessage = useMessagePageEdits(channel?.id ?? null, token,
+    visibleAgentScope?.channelId === channel?.id ? visibleAgentScope?.ids ?? NO_IDS : NO_IDS);
   const refetchAgentLaunches = agentLaunchQuery.refetch;
   const invocationQueryData = agentLaunchQuery.error instanceof InvocationAccessError ? undefined : agentLaunchQuery.data;
   const agentLaunchesByMessage = useMemo(() => {
@@ -952,13 +957,9 @@ export const MessageTimeline = memo(function MessageTimeline({
       const currentIds = new Set(timeline.map((message) => message.messageId || message.id));
       const ids = items.flatMap(({ data }) => data && currentIds.has(data.messageId || data.id) && isInvocationSource(data)
         ? [data.messageId || data.id] : []);
-      setVisibleInvocationScope((previous) => {
-        if (previous?.channelId === channel.id && (ids.length > 0 || previous.ids.length === 0)) {
-          const held = new Set(previous.ids);
-          if (ids.every((id) => held.has(id))) return previous;
-        }
-        return { channelId: channel.id, ids };
-      });
+      setVisibleInvocationScope((previous) => heldScope(previous, channel.id, ids));
+      setVisibleAgentScope((previous) => heldScope(previous, channel.id, items.flatMap(({ data }) =>
+        data && data.senderKind === "agent" && data.messageId && currentIds.has(data.messageId) ? [data.messageId] : [])));
     }
     const exposedHighWaterByChannel = new Map<string, number>();
     for (const { data: message } of items) {
@@ -1119,6 +1120,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 <MessageRow
                   message={message}
                   agentLaunches={agentLaunchesByMessage.get(message.messageId || message.id) ?? NO_LAUNCHES}
+                  pageEdits={pageEditsByMessage.get(message.messageId || message.id)}
                   agentStops={stopsByMessage.get(message.messageId || message.id) ?? NO_STOPS}
                   stopReceiptsLoaded={isStopCommand(message)
                     ? agentLaunchQuery.data !== undefined || agentLaunchQuery.isError : true}
@@ -1468,6 +1470,16 @@ const EMPTY_FOLDS: ReadonlySet<string> = new Set();
 /* Rows are memoized on identity: a fresh `[]` per render would re-render every
    visible message, Markdown included, on each realtime event in the Space. */
 const NO_LAUNCHES: readonly SerializedAgentLaunch[] = [];
+const NO_IDS: readonly string[] = [];
+
+/** The rows a question is asked about, kept while it still covers every one in view (see the invocation scope). */
+function heldScope(previous: { channelId: string; ids: string[] } | null, channelId: string, ids: string[]) {
+  if (previous?.channelId === channelId && (ids.length > 0 || previous.ids.length === 0)) {
+    const held = new Set(previous.ids);
+    if (ids.every((id) => held.has(id))) return previous;
+  }
+  return { channelId, ids };
+}
 const NO_REJECTIONS: readonly SerializedAgentInvocationRejection[] = [];
 const NO_CONTINUATIONS: readonly SerializedAgentContinuation[] = [];
 const NO_STOPS: readonly SerializedAgentStop[] = [];
@@ -1662,6 +1674,7 @@ function NamedMachineRunFailureNotice({ body, metadata, spaceId, token }: {
 export const MessageRow = memo(function MessageRow({
   message,
   agentLaunches,
+  pageEdits,
   agentStops = NO_STOPS,
   stopReceiptsLoaded = false,
   invocationRejections,
@@ -1700,6 +1713,8 @@ export const MessageRow = memo(function MessageRow({
 }: {
   message: TimelineItem;
   agentLaunches: readonly SerializedAgentLaunch[];
+  /** What this Agent message changed on pages, since its previous message. */
+  pageEdits?: readonly PageMessageEdit[];
   agentStops?: readonly SerializedAgentStop[];
   /** The invocation query has answered, so an empty stop list is a real absence. */
   stopReceiptsLoaded?: boolean;
@@ -2660,6 +2675,10 @@ export const MessageRow = memo(function MessageRow({
         {!recalled && message.editedAt && (
           <div className="mt-1 text-xs text-muted-foreground">edited {formatTime(message.editedAt)}</div>
         )}
+        {/* What the message did on pages, as a tool call's result: outside its text, so folding the text keeps it. */}
+        {pageEdits?.length && !recalled && message.messageId && channel ? (
+          <PageEditCards edits={pageEdits} channelId={channel.id} messageId={message.messageId} />
+        ) : null}
         {!recalled && collapsible && expanded && (
           <button
             type="button"

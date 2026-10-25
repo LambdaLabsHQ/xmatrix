@@ -250,6 +250,119 @@ export function pageChangeGist(before: string, after: string): { blockId: string
   return { blockId: pageChangedBlocks(before, after)[0] ?? null, gist: null };
 }
 
+/** One stretch of a changed line: kept as it was, or added or taken out. */
+export interface PageEditSegment { text: string; change?: "added" | "removed" }
+
+/**
+ * One line a change touched, as a reader sees it: the section it is in, whether it is new, rewritten or taken
+ * out, and its words with what was added and what was taken out marked where they stand, as a proofreader
+ * marks paper. Markdown syntax is not shown.
+ */
+export interface PageEditGlimpse {
+  /** The section's slug ('' before the first heading), and its title. */
+  blockId: string;
+  section: string;
+  kind: "added" | "changed" | "removed";
+  segments: PageEditSegment[];
+}
+
+/** Words of Latin script whole, and each CJK character alone, so a rewrite marks what a reader changed. */
+const EDIT_TOKEN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[\p{L}\p{N}_]+|\s+|[^\s]/gu;
+/** Past this many tokens a rewritten line is shown as taken out and added whole, not word by word. */
+const EDIT_TOKENS = 600;
+
+function lineSegments(before: string, after: string): PageEditSegment[] {
+  const a = before.match(EDIT_TOKEN) ?? [];
+  const b = after.match(EDIT_TOKEN) ?? [];
+  if (a.length > EDIT_TOKENS || b.length > EDIT_TOKENS) {
+    return [{ text: before, change: "removed" }, { text: " " }, { text: after, change: "added" }];
+  }
+  const segments: PageEditSegment[] = [];
+  const push = (text: string, change?: PageEditSegment["change"]) => {
+    if (!text) return;
+    const last = segments.at(-1);
+    if (last && last.change === change) last.text += text;
+    else segments.push(change ? { text, change } : { text });
+  };
+  for (const part of diffComm(a, b)) {
+    if (part.common) push(part.common.join(""));
+    else {
+      push((part.buffer1 ?? []).join(""), "removed");
+      push((part.buffer2 ?? []).join(""), "added");
+    }
+  }
+  return segments;
+}
+
+/** Whether two lines share enough of their words to be one line rewritten. */
+function alike(before: string, after: string): boolean {
+  const a = before.match(EDIT_TOKEN)?.filter((token) => token.trim()) ?? [];
+  const b = after.match(EDIT_TOKEN)?.filter((token) => token.trim()) ?? [];
+  if (!a.length || !b.length) return false;
+  if (a.length > EDIT_TOKENS || b.length > EDIT_TOKENS) return false;
+  const kept = diffComm(a, b).reduce((count, part) => count + (part.common?.length ?? 0), 0);
+  // Measured against the shorter line, so a line grown well past what it said still reads as rewritten.
+  return kept / Math.min(a.length, b.length) >= 0.5;
+}
+
+/** A markdown line as words: a heading's text too, and nothing for a fence or a rule. */
+function shownLine(line: string): string {
+  const heading = HEADING.exec(line);
+  return heading ? headingText(heading[2]!) : /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u.test(line) ? "" : plainPageLine(line);
+}
+
+/**
+ * What changed from `before` to `after`, line by line as a reader sees it (see `PageEditGlimpse`), in the order
+ * of the page. A line rewritten in place is one glimpse with its words marked; lines only added or only taken out
+ * are glimpses of their own. Lines that only changed syntax, and code, are left out.
+ */
+export function pageEditGlimpses(before: string, after: string): PageEditGlimpse[] {
+  const prose = (text: string) => [...markdownLines(text)];
+  const oldLines = prose(before);
+  const newLines = prose(after);
+  const oldBlocks = pageBlocks(before);
+  const newBlocks = pageBlocks(after);
+  const sectionAt = (blocks: PageBlock[], offset: number) => {
+    let found: PageBlock | undefined;
+    for (const block of blocks) if (block.start <= offset) found = block;
+    return found ? { blockId: found.id, section: found.title } : { blockId: "", section: "" };
+  };
+  const glimpses: PageEditGlimpse[] = [];
+  for (const hunk of diffIndices(lines(before), lines(after))) {
+    const [oldStart, oldLength] = hunk.buffer1;
+    const [newStart, newLength] = hunk.buffer2;
+    const shown = (line: { line: string; offset: number }) => ({ ...line, text: shownLine(line.line),
+      heading: HEADING.test(line.line) });
+    const taken = oldLines.slice(oldStart, oldStart + oldLength).filter((line) => line.prose).map(shown)
+      .filter((line) => line.text);
+    const added = newLines.slice(newStart, newStart + newLength).filter((line) => line.prose).map(shown)
+      .filter((line) => line.text);
+    // A line is rewritten in place only by a line like it: otherwise one went and another came.
+    const pairs = new Map<number, (typeof taken)[number]>();
+    let from = 0;
+    for (const was of taken) {
+      const index = added.findIndex((now, at) => at >= from && !pairs.has(at) && now.heading === was.heading
+        && alike(was.text, now.text));
+      if (index < 0) continue;
+      pairs.set(index, was);
+      from = index + 1;
+    }
+    const paired = new Set(pairs.values());
+    for (const was of taken) {
+      if (paired.has(was)) continue;
+      glimpses.push({ ...sectionAt(oldBlocks, was.offset), kind: "removed", segments: [{ text: was.text, change: "removed" }] });
+    }
+    added.forEach((now, index) => {
+      const was = pairs.get(index);
+      // A new section is named by the lines under it.
+      if (was?.text === now.text || (!was && now.heading)) return;
+      glimpses.push(was ? { ...sectionAt(newBlocks, now.offset), kind: "changed", segments: lineSegments(was.text, now.text) }
+        : { ...sectionAt(newBlocks, now.offset), kind: "added", segments: [{ text: now.text, change: "added" }] });
+    });
+  }
+  return glimpses;
+}
+
 const PAGE_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /** A section slug as `pageHeadingSlug` writes it (letters, digits, `_` and `-`). */
 const PAGE_BLOCK_SLUG = "[\\p{L}\\p{N}_-]{1,180}";

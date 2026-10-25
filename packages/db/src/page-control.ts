@@ -15,7 +15,7 @@ import { reconcilePageAutomations, removePageAutomations } from "./automation-pa
 import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
-  PageAuthor, PageAutomationAnchorChange, PageBlame, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageOwedUpdate, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
+  PageAuthor, PageAutomationAnchorChange, PageBlame, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageMessageEdit, PageOwedUpdate, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
 } from "@xmatrix/protocol";
 
 export type { PageAuthor, PageClaim, PageDocument, PageLink, PageRevision, PageSummary, PublicPage };
@@ -73,6 +73,9 @@ const MAX_LINKS = 500;
 const DEFAULT_CLAIM_MINUTES = 120;
 const MAX_CLAIM_MINUTES = 24 * 60;
 const MAX_CONVERSATION_PAGES = 20;
+/** The messages one read of their page edits may name, as a timeline shows them. */
+const MAX_PAGE_EDIT_MESSAGES = 100;
+const MAX_PAGE_EDIT_REVISIONS = 2000;
 const BLOCK = /^[a-z0-9\p{L}\p{N}][a-z0-9\p{L}\p{N}_-]{0,199}$/u;
 
 function bounded(value: unknown, field: string, max = 300): string {
@@ -507,6 +510,66 @@ export class PostgresPageRepository {
         if (!rev) throw new PageControlError("page_revision_not_found", 404);
         return { ...this.summary(tree.get(pageId)!), body: rev.body ?? "", revisionInfo: revisionOf(rev) };
       }) };
+    });
+  }
+
+  /**
+   * What each of an Agent's messages in a conversation follows on pages: the revisions its Instance committed from
+   * that conversation after its previous message, up to this one. A message shows them, as a tool call shows what
+   * it did; nothing else is said in the conversation. Only pages the reader can open are named.
+   */
+  async conversationPageEdits(input: { requestId: string; conversationId: string; messageIds: readonly string[];
+    principal: PagePrincipal }): Promise<{ spaceId: string; edits: PageMessageEdit[] }> {
+    const messageIds = [...new Set(input.messageIds.map((id) => bounded(id, "messageId")))];
+    if (messageIds.length > MAX_PAGE_EDIT_MESSAGES) {
+      throw new PageControlError("invalid_request", 400, `at most ${MAX_PAGE_EDIT_MESSAGES} messages`);
+    }
+    return this.inConversation(input, "page.conversation.edits", async (tx, spaceId, actor) => {
+      if (messageIds.length === 0) return { spaceId, edits: [] };
+      const edited = new Set((await linkRows(tx, spaceId, null, input.conversationId))
+        .filter((link) => link.source === "edit").map((link) => link.page_id));
+      if (edited.size === 0) return { spaceId, edits: [] };
+      const tree = new Map((await this.accessibleTree(tx, spaceId, actor))
+        .filter((row) => edited.has(row.page_id)).map((row) => [row.page_id, row]));
+      if (tree.size === 0) return { spaceId, edits: [] };
+      const rows = await tx.query<QueryResultRow & { message_id: string; page_id: string; revision: string;
+        based_on_revision: string | null }>({
+        name: "page_message_edits_v1",
+        text: `WITH sent AS (
+            SELECT message_id, author_id, sent_at FROM data.messages
+            WHERE space_id=$1 AND channel_id=$2 AND message_id = ANY($3::text[]) AND author_kind='agent'
+              AND message_kind='xmatrix.message.text' AND deleted_at IS NULL AND recalled_at IS NULL
+          ), spans AS (
+            SELECT sent.*, (SELECT before.sent_at FROM data.messages before
+                WHERE before.space_id=$1 AND before.author_kind='agent' AND before.author_id=sent.author_id
+                  AND before.sent_at < sent.sent_at AND before.channel_id=$2
+                  AND before.message_kind='xmatrix.message.text' AND before.deleted_at IS NULL
+                ORDER BY before.sent_at DESC LIMIT 1) AS since
+            FROM sent
+          )
+          SELECT spans.message_id, r.page_id, r.revision::text, r.based_on_revision::text
+          FROM spans JOIN data.page_revisions r ON r.space_id=$1 AND r.page_id = ANY($4::text[])
+            AND $2 = ANY(r.conversation_ids) AND r.kind IN ('edit', 'accepted', 'restore')
+            AND r.authors_json @> jsonb_build_array(jsonb_build_object('kind', 'agent', 'id', spans.author_id))
+            AND r.created_at <= spans.sent_at AND (spans.since IS NULL OR r.created_at > spans.since)
+          ORDER BY spans.message_id, r.page_id, r.revision
+          LIMIT ${MAX_PAGE_EDIT_REVISIONS}`,
+        values: [spaceId, input.conversationId, messageIds, [...tree.keys()]],
+        maxRows: MAX_PAGE_EDIT_REVISIONS,
+      });
+      const edits = new Map<string, PageMessageEdit>();
+      for (const row of rows) {
+        const key = `${row.message_id}\u0000${row.page_id}`;
+        let edit = edits.get(key);
+        if (!edit) {
+          edit = { messageId: row.message_id, pageId: row.page_id, title: this.summary(tree.get(row.page_id)!).title,
+            revisions: [] };
+          edits.set(key, edit);
+        }
+        edit.revisions.push({ revision: Number(row.revision),
+          basedOnRevision: row.based_on_revision === null ? null : Number(row.based_on_revision) });
+      }
+      return { spaceId, edits: [...edits.values()] };
     });
   }
 

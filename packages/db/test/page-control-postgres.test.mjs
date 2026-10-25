@@ -853,6 +853,45 @@ integration("a revision's moment is its conversation's newest message by then, f
   }
 });
 
+integration("an Agent message shows the page revisions its Instance committed there since its previous message", async () => {
+  const { client, ids, pages, owner, agent, viewer } = await pageTest("message-edits");
+  try {
+    const r = () => crypto.randomUUID();
+    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Plan",
+      body: "# Plan\n\nDraft.\n" });
+    const at = (seconds) => new Date(Date.now() + seconds * 1000);
+    const message = (id, sequence, sentAt, authorKind = "agent", authorId = ids.instance) => client.query(`INSERT INTO data.messages
+      (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,
+       message_kind,content_hash,payload_kind,payload_ref,sent_at,updated_at,search_rank_sequence,legacy_body,created_at)
+      VALUES ($1,$2,$3,$4,1,$5,$6,'xmatrix.message.text','hash','inline','inline',$7,$7,$3,'hello',$7)`,
+    [ids.space, ids.open, id, sequence, authorKind, authorId, sentAt]);
+    const edit = (baseRevision, body) => pages.edit({ requestId: r(), spaceId: ids.space, pageId: page.pageId,
+      principal: agent, baseRevision, conversationIds: [ids.open], body });
+    await message("asked", 1, at(-120), "user", ids.member);
+    await edit(1, "# Plan\n\nBudget.\n");
+    await edit(2, "# Plan\n\nBudget 2.\n");
+    await message("first-reply", 2, at(60));
+    await pages.edit({ requestId: r(), spaceId: ids.space, pageId: page.pageId, principal: owner, baseRevision: 3,
+      conversationIds: [ids.open], body: "# Plan\n\nBudget 3.\n" });
+    await message("second-reply", 3, at(120));
+    const edits = (principal, messageIds) => pages.conversationPageEdits({ requestId: r(), conversationId: ids.open,
+      messageIds, principal });
+    const { spaceId, edits: found } = await edits(owner, ["asked", "first-reply", "second-reply"]);
+    assert.equal(spaceId, ids.space);
+    assert.deepEqual(found, [{ messageId: "first-reply", pageId: page.pageId, title: "Plan",
+      revisions: [{ revision: 2, basedOnRevision: 1 }, { revision: 3, basedOnRevision: 2 }] }],
+    "a person's message and a revision someone else made show nothing");
+    assert.deepEqual((await edits(viewer, ["first-reply"])).edits.map((item) => item.pageId), [page.pageId]);
+    await pages.update({ requestId: r(), spaceId: ids.space, pageId: page.pageId, principal: owner, accessMode: "restricted" });
+    assert.deepEqual((await edits(viewer, ["first-reply"])).edits, [], "a page the reader cannot open is not named");
+    await assert.rejects(pages.conversationPageEdits({ requestId: r(), conversationId: ids.closed, messageIds: [],
+      principal: viewer }), (error) => error.status === 403 || error.status === 404);
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
 integration("a released claim owes an update unless its conversation wrote the section while holding it", async () => {
   const { client, ids, pages, owner, agent } = await pageTest("claims-owed");
   try {

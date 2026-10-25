@@ -268,8 +268,19 @@ it belongs in the repository.**
   `[[Title]]`, and the message is sent with the id tokens above. `#` followed
   by a digit stays text, so `#3484` remains a pull-request number. Editing a
   picked name drops the pick and sends the text as written.
-- **Edit events.** When an Agent edits a page, a compact inline event shows
-  what changed and links to the revision. It is not a chat message.
+- **Edit cards.** An Agent's message carries a card for each page its
+  Instance changed from that conversation since its previous message there,
+  as a tool call carries its result. It is not a chat message of its own. The
+  card names the page (and the section when all changes are in one), counts
+  the changed lines, and shows up to three of them as the page marks what
+  changed since it was read: a margin bar, new words underlined, words taken
+  out struck through, a whole new or removed line labelled. No code diff, no
+  markdown syntax. Opening the card opens the page at the first change with
+  everything since that edit's base marked over the text, and a back control
+  that returns to the message. The Hub answers the cards for the Agent
+  messages a reader has on screen (`POST /api/channels/:id/page-edits/query`),
+  from revision authorship and the conversation the revision names; only
+  pages the reader can open are named.
 - **Summons.** Invocation status works as it does today.
 
 ### 4.4 Watching Agents collaborate

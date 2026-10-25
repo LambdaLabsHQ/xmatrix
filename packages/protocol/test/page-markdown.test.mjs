@@ -180,3 +180,22 @@ test("a word merge keeps what one side only added beside the other side's change
   assert.deepEqual(mergePageWords("会议 开始\n", "会议马上开始\n", "会议 开始了\n"), { ok: true, text: "会议马上开始了\n" },
     "CJK merges character by character");
 });
+
+test("an edit reads as the lines it touched, words marked where they stand", async () => {
+  const { pageEditGlimpses } = await import("../dist/index.js");
+  const before = "# 巴厘岛\n\n## 预算\n\n每月预算 1.5 万人民币。\n\n待定。\n";
+  const after = "# 巴厘岛\n\n## 预算\n\n每月预算 2 万人民币。\n\n## 住宿\n\n- 乌布 **Alaya** 民宿\n";
+  assert.deepEqual(pageEditGlimpses(before, after), [
+    { blockId: "预算", section: "预算", kind: "changed", segments: [
+      { text: "每月预算 " }, { text: "1.5", change: "removed" }, { text: "2", change: "added" }, { text: " 万人民币。" }] },
+    { blockId: "预算", section: "预算", kind: "removed", segments: [{ text: "待定。", change: "removed" }] },
+    { blockId: "住宿", section: "住宿", kind: "added", segments: [{ text: "乌布 Alaya 民宿", change: "added" }] },
+  ]);
+});
+
+test("unchanged text and syntax-only changes show nothing", async () => {
+  const { pageEditGlimpses } = await import("../dist/index.js");
+  assert.deepEqual(pageEditGlimpses("a\n\nb\n", "a\n\nb\n"), []);
+  assert.deepEqual(pageEditGlimpses("- item\n", "* item\n"), []);
+  assert.deepEqual(pageEditGlimpses("keep\n\ngone line\n", "keep\n").map((glimpse) => glimpse.kind), ["removed"]);
+});

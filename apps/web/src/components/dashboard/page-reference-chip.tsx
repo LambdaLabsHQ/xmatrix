@@ -26,11 +26,13 @@ import { useAppPortalContainer } from "./app-portal-container";
 import { useMessageReferenceCatalog } from "./message-reference-catalog";
 import { channelLabel } from "./reference-complete";
 import { InlineRowPreview } from "./inline-row-preview";
+import type { PageEditOpening } from "./page-edit-cards";
 
 export type PageReferenceScope = {
   spaceId: string;
   token: string;
-  onOpenPage: (pageId: string, blockId?: string | null) => void;
+  /** `opening` says what changed since, and the message to go back to, when an edit card opens it. */
+  onOpenPage: (pageId: string, blockId?: string | null, opening?: PageEditOpening) => void;
 };
 
 /** The first meaningful line of a section: what the page says about it now. */

@@ -253,6 +253,17 @@ export interface PageAwareness {
   blocks: PageBlockAwareness[];
 }
 
+/**
+ * What an Agent's message changed on a page: the revisions its Instance committed from the message's conversation
+ * since its previous message there, oldest first. Shown with the message, as a tool call shows what it did.
+ */
+export interface PageMessageEdit {
+  messageId: string;
+  pageId: string;
+  title: string;
+  revisions: Array<{ revision: number; basedOnRevision: number | null }>;
+}
+
 export interface PageDocument extends PageSummary {
   body: string;
   revisionInfo: PageRevision;

@@ -9160,3 +9160,71 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 [data-animation-visible="false"]::after {
   animation-play-state: paused !important;
 }
+
+/*
+ * What an Agent message changed on pages (page-edit-cards.tsx): a slip of tinted paper under the message, as a
+ * tool call's result. The page's name is the first and largest line; each changed line is marked as the page marks
+ * what changed since it was read: a bar in the margin, new words underlined, words taken out struck through.
+ */
+.xmatrix-app .app-page-edits { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-width: 34rem; }
+.xmatrix-app .app-page-edit {
+  border-radius: 10px;
+  padding: 10px 14px 8px;
+  background: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.xmatrix-app .app-page-edit:hover { background: color-mix(in oklab, var(--foreground) 7%, transparent); }
+.xmatrix-app .app-page-edit:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.xmatrix-app .app-page-edit-title { display: flex; align-items: center; gap: 7px; font-size: 15px; line-height: 1.35; font-weight: 650; }
+.xmatrix-app .app-page-edit-title svg { width: 15px; height: 15px; flex: none; opacity: .7; }
+.xmatrix-app .app-page-edit-count { margin: 2px 0 8px; font-size: 12.5px; color: var(--muted-foreground); }
+.xmatrix-app .app-page-edit-count strong { font-weight: 600; color: var(--m-ink-attention, var(--accent)); }
+.xmatrix-app .app-page-edit-loading { margin-bottom: 2px; }
+.xmatrix-app .app-page-edit-line {
+  position: relative;
+  margin: 0 0 8px;
+  padding-left: 13px;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.xmatrix-app .app-page-edit-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .3em;
+  bottom: .3em;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--m-ink-attention, var(--accent));
+}
+.xmatrix-app .app-page-edit-line[data-kind="removed"]::before { background: color-mix(in oklab, var(--foreground) 22%, transparent); }
+.xmatrix-app .app-page-edit-where { display: block; font-size: 12px; line-height: 1.4; color: var(--muted-foreground); }
+.xmatrix-app .app-page-edit-line ins {
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklab, var(--m-ink-attention, var(--accent)) 85%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: .24em;
+  text-decoration-skip-ink: none;
+}
+.xmatrix-app .app-page-edit-line del { color: var(--m-ink-secondary, var(--muted-foreground)); text-decoration: line-through; }
+.xmatrix-app .app-page-edit-line del + ins { margin-left: .25em; }
+.xmatrix-app .app-page-edit-more { display: flex; justify-content: space-between; margin: 0 0 2px; font-size: 12.5px; color: var(--muted-foreground); }
+.xmatrix-app .app-page-edit-open { font-weight: 600; color: var(--foreground); }
+/* Back to the message an edit card opened the page from. */
+.xmatrix-app .app-page-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 18rem;
+  height: 28px;
+  padding: 0 12px 0 7px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+.xmatrix-app .app-page-back:hover { background: color-mix(in oklab, var(--foreground) 9%, transparent); }
+.xmatrix-app .app-page-back svg { width: 16px; height: 16px; flex: none; }
+.xmatrix-app .app-page-back span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
