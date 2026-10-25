@@ -114,3 +114,26 @@ test("a 404 from Space billing means the deployment has no Space plans", () => {
   assert.equal(spacePlansAbsent(new Error("offline")), false);
   assert.equal(spacePlansAbsent(null), false);
 });
+
+test("the composer warns from the last fifth of Free, and blocks at zero", () => {
+  const { spaceAllowanceNotice } = require("./space-plan-mark.ts");
+  const free = (remaining) => ({ plan: "free", subscription: null, freeUsage: { acceptedMessages: 500 - remaining, limit: 500, remaining } });
+  assert.equal(spaceAllowanceNotice(free(101)), null);
+  assert.deepEqual(spaceAllowanceNotice(free(100)), { kind: "free-low", remaining: 100, limit: 500 });
+  assert.deepEqual(spaceAllowanceNotice(free(1)), { kind: "free-low", remaining: 1, limit: 500 });
+  assert.deepEqual(spaceAllowanceNotice(free(0)), { kind: "free-used", limit: 500 });
+  // An unread or malformed counter must not warn about a limit nobody has read.
+  for (const freeUsage of [undefined, null, {}, { remaining: "0" }]) {
+    assert.equal(spaceAllowanceNotice({ plan: "free", subscription: null, freeUsage }), null);
+  }
+  assert.equal(spaceAllowanceNotice(null), null);
+});
+
+test("Pro warns only when its Agent credits are paused", () => {
+  const { spaceAllowanceNotice } = require("./space-plan-mark.ts");
+  const exhaustedFree = { acceptedMessages: 500, limit: 500, remaining: 0 };
+  assert.equal(spaceAllowanceNotice({ plan: "pro", freeUsage: exhaustedFree }), null);
+  assert.equal(spaceAllowanceNotice({ plan: "pro", freeUsage: exhaustedFree, credits: { paused: false, resetsOn: "2026-11-01" } }), null);
+  assert.deepEqual(spaceAllowanceNotice({ plan: "pro", credits: { paused: true, resetsOn: "2026-11-01" } }),
+    { kind: "credits-paused", resetsOn: "2026-11-01" });
+});

@@ -79,7 +79,11 @@ function spaceBillingKey(userId: string, spaceId: string) {
   return xmatrixQueryKeys.domain({ userId }, "billing", [spaceId]);
 }
 
-export function useSpaceBilling(userId: string, spaceId: string | null) {
+export function useSpaceBilling(userId: string, spaceId: string | null, options?: {
+  /** How soon to read again, from what was last read. */
+  refetchInterval?: (billing: SpaceBilling | undefined) => number | false;
+}) {
+  const refetchInterval = options?.refetchInterval;
   return useQuery({
     queryKey: spaceBillingKey(userId, spaceId ?? ""),
     queryFn: ({ signal }) => xmatrixApiRequest<{ billing: SpaceBilling }>({
@@ -87,6 +91,9 @@ export function useSpaceBilling(userId: string, spaceId: string | null) {
     }).then((payload) => payload.billing),
     enabled: Boolean(spaceId),
     retry: (failures, error) => !spacePlansAbsent(error) && failures < 3,
+    refetchInterval: refetchInterval
+      ? (query) => spacePlansAbsent(query.state.error) ? false : refetchInterval(query.state.data)
+      : undefined,
   });
 }
 

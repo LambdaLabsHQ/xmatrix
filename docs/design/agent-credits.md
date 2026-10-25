@@ -90,6 +90,16 @@ re-authorizing open connections.
 
 Settings → Billing shows the month's usage, the pack balance and the grace.
 
+A Free Space posts no notice when it nears or reaches its 500 writes. Instead
+an ask card, the same brass slip as an approval, docks above the composer where
+Pending approvals dock, read from the Space's billing summary
+(`spaceAllowanceNotice`). It counts down once the last fifth of the allowance is
+left, and becomes a blocking notice at zero. A Pro Space gets the same notice
+while its Agent writes are paused. The notice says that Agent replies stop too,
+because a refused Agent reply leaves nothing in the timeline. It links an owner
+to Settings → Billing and tells other members to ask the owner. A send refused
+for the plan re-reads the summary, so the notice appears at once.
+
 ## Where it is enforced
 
 - **Messages.** The official policy charges the credit in the same SQL statement

@@ -131,6 +131,27 @@ const en = {
   noNative: (platform: string) => `A native ${platform} download is not available here. Open the web app to stay connected.`,
   openWebApp: "Open web app",
   otherMac: (name: string) => `${name} Mac`,
+  /** Above the composer once a Space nears or passes the point its writes are refused (space-allowance-notice.tsx). */
+  allowance: {
+    freeLow: (remaining: number, limit: number) =>
+      `${remaining} of ${limit} free writes left in this Space (messages and page edits, by people and Agents alike). When they run out, new messages and Agent replies can't be saved.`,
+    freeUsed: (limit: number | null) =>
+      `This Space has used all ${limit === null ? "its" : limit} free messages and page edits. New messages and Agent replies can't be saved until it upgrades to Pro.`,
+    creditsPaused: (resetsOn: string | null) =>
+      `This Space's Agent credits are used up for this month, so Agent replies are paused${resetsOn ? ` until ${resetsOn}` : ""}. Your own messages still go through.`,
+    kind: "Plan",
+    runningLow: "Running low",
+    stopped: "Writes stopped",
+    freeLowTitle: (remaining: number) => `${remaining} free writes left`,
+    freeUsedTitle: "This Space's free allowance is used up",
+    creditsPausedTitle: "Agent replies are paused",
+    upgrade: "Upgrade to Pro",
+    hide: "Hide",
+    show: "Show",
+    buyCredits: "Buy credits",
+    askOwnerUpgrade: "Ask the Space owner to upgrade.",
+    askOwnerCredits: "Ask the Space owner to buy credits.",
+  },
   allPlatforms: "All platforms and preview builds",
 };
 
@@ -243,6 +264,26 @@ const zh: OnboardingCopy = {
   noNative: (platform) => `${platform} 暂时没有原生 App，打开网页版就能随时查看。`,
   openWebApp: "打开网页版",
   otherMac: (name) => name === "Intel" ? "Intel 芯片的 Mac" : "Apple 芯片的 Mac",
+  allowance: {
+    freeLow: (remaining, limit) =>
+      `这个 Space 的免费额度还剩 ${remaining} / ${limit} 次（消息和页面编辑合计，人和 Agent 都算）。用完后，新消息和 Agent 回复都无法保存。`,
+    freeUsed: (limit) =>
+      `这个 Space 的${limit === null ? "" : ` ${limit} 次`}免费额度已用完，新消息和 Agent 回复都无法保存。升级到 Pro 即可继续使用。`,
+    creditsPaused: (resetsOn) =>
+      `这个 Space 本月的 Agent credit 已用完，Agent 回复已暂停${resetsOn ? `，${resetsOn} 恢复` : ""}。你自己发的消息不受影响。`,
+    kind: "套餐",
+    runningLow: "即将用完",
+    stopped: "已停止写入",
+    freeLowTitle: (remaining) => `免费额度还剩 ${remaining} 次`,
+    freeUsedTitle: "这个 Space 的免费额度已用完",
+    creditsPausedTitle: "Agent 回复已暂停",
+    upgrade: "升级到 Pro",
+    hide: "隐藏",
+    show: "显示",
+    buyCredits: "购买 credit",
+    askOwnerUpgrade: "请 Space 所有者升级。",
+    askOwnerCredits: "请 Space 所有者购买 credit。",
+  },
   allPlatforms: "所有平台和预览版",
 };
 
