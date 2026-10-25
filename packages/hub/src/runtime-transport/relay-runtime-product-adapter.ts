@@ -8,6 +8,7 @@ import {
 } from "./agent-instance-port";
 import {
   HumanRuntimeTransport,
+  type HumanChannelFocusHandler,
   type HumanChannelLiveDeliveryInput,
   type HumanChannelLiveDeliveryResult,
   type HumanSocketBackend,
@@ -28,7 +29,7 @@ import {
   liveAgentMachineRoute,
   liveAgentSessionSnapshots,
   type LiveAgentMachineRoute,
-  type LiveAgentPresentationBinding,
+  type LiveAgentSessionSelection,
 } from "./agent-presence-snapshot";
 
 export const RELAY_RUNTIME_HUMAN_CONNECT_PATH = "/internal/product-connect/human";
@@ -48,6 +49,8 @@ export interface RelayRuntimeProductPortFactory {
     quotaChanged?: (route: { ownerUserId: string; machineId: string }) => Promise<void>): MachineDaemonSocketBackend;
   /** Who may see a Channel of this Space may have changed. */
   onChannelCatalogChanged?: (spaceId: string) => void;
+  /** A person opened a Channel on one socket (human-port.ts). */
+  onChannelFocus?: HumanChannelFocusHandler;
   /** A daemon read its machine's quota again: the owner's Agents show the new reading. */
   onRegistrationQuotaChange?: (input: { ownerUserId: string;
     deliver: (userId: string, message: import("@xmatrix/protocol/connections/human").HumanServerMessage) => boolean;
@@ -108,6 +111,7 @@ export function createRelayRuntimeProductAdapter(
   const human = new HumanRuntimeTransport(factory.human(), {
     allowLegacyProtocol: options.allowLegacyProtocol === true,
     ...(options.admit ? { admit: options.admit } : {}),
+    ...(factory.onChannelFocus ? { onChannelFocus: factory.onChannelFocus } : {}),
   });
   const agentPresenceChange: AgentInstancePresenceChangeHandler | undefined = factory.onAgentPresenceChange
     ? (input) => factory.onAgentPresenceChange!({
@@ -244,8 +248,9 @@ export class RelayRuntimeProductCallbackAdapter {
     return this.human.liveSessions();
   }
 
-  liveAgentSessions(binding?: LiveAgentPresentationBinding) {
-    return liveAgentSessionSnapshots(this.agentInstance.liveSessions(), binding);
+  liveAgentSessions(selection?: LiveAgentSessionSelection) {
+    return liveAgentSessionSnapshots(this.agentInstance.liveSessions(), selection,
+      (route) => this.machineDaemon.isRouteReachable(route));
   }
 
   publishHumanTraceAccess(

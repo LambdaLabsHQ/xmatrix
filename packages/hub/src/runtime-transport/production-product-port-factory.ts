@@ -31,7 +31,7 @@ import {
   mergeAgentInstancePresentation,
 } from "./agent-instance-presentation";
 import {
-  overlayAgentPresenceOnChannel, overlayAgentPresenceSnapshot,
+  agentPresenceCard, overlayAgentPresenceOnChannel, overlayAgentPresenceSnapshot,
   serializeAgentFromSession,
 } from "./agent-instance-live-presentation";
 import { AgentChannelHistory, type ReadAgentChannelHistory } from "./agent-channel-history";
@@ -58,6 +58,13 @@ import {
   runtimeJsonRequest,
 } from "./runtime-principal-delivery";
 import { RuntimeClientOperationError, runtimeFailureOrigin } from "./runtime-operation-failure";
+import {
+  liveAgentSnapshotCard,
+  loadLiveAgentPresenceFromRuntime,
+  type LiveAgentSessionSnapshot,
+} from "./agent-presence-snapshot";
+import { relayRuntimeOwnerCellName } from "./runtime-cell-locator";
+import { relayRuntimeCellNamed } from "../relay-authority-locator";
 import {
   PRESENCE_AUDIENCE_TTL_MS, PresenceAudiences, type PresenceAudience, type PresenceStorage,
 } from "./presence-audiences";
@@ -170,6 +177,20 @@ export function createProductionRelayRuntimeProductPortFactory(
   /* Each call of a port runs as this cell's work, so what it publishes, however
      deep in the code that commits it, serves this cell's own sockets locally. */
   const runtimeSelf = options.runtimeSelf;
+  /** One Channel's live Instances as their owner's cell holds them; none when it cannot say. */
+  const liveChannelAgents = async (ownerUserId: string, channelId: string): Promise<LiveAgentSessionSnapshot[]> => {
+    const cell = relayRuntimeOwnerCellName(ownerUserId);
+    const runtime = !cell ? undefined
+      : runtimeSelf?.cellName() === cell ? runtimeSelf
+        : env.RELAY_RUNTIME ? relayRuntimeCellNamed(env, cell) : undefined;
+    if (!runtime) return [];
+    return loadLiveAgentPresenceFromRuntime(runtime, "https://relay-runtime/", { channelId }).catch((error: unknown) => {
+      console.warn("Live Agent presence of a focused Channel could not be read", {
+        errorCode: error instanceof Error ? error.name : "unknown",
+      });
+      return [];
+    });
+  };
   const inCell = <Port extends object>(port: Port): Port => runtimeSelf ? new Proxy(port, {
     get(target, property, receiver) {
       const value: unknown = Reflect.get(target, property, receiver);
@@ -209,6 +230,19 @@ export function createProductionRelayRuntimeProductPortFactory(
       for (const { registration, usage } of readings) {
         await audiences.rememberQuota(registration, usage);
         publishQuota(ownerUserId, registration, usage, deliver);
+      }
+    },
+    onChannelFocus: async ({ userId, channelId, send }) => {
+      // The read is this person's authorization, and it names the Channel's Instances.
+      const payload = await readChannel(channelId, userId, "agent-presence");
+      const instances = payload ? decodeChannelSnapshot(payload.channel).presence?.instances : undefined;
+      if (!payload || !instances?.size) return;
+      const owners = new Set([...instances.values()].map((instance) => instance.registration.ownerUserId));
+      const live = await Promise.all([...owners].map((owner) => liveChannelAgents(owner, channelId)));
+      for (const snapshot of live.flat()) {
+        // Only an Instance the Channel's read names is shown, as a live overlay shows only those.
+        if (!instances.has(presenceInstanceId(snapshot.instanceId))) continue;
+        send(liveAgentSnapshotCard(snapshot, channelInstanceQuota(payload.channel, snapshot.instanceId)));
       }
     },
     onChannelCatalogChanged: (spaceId) => {
@@ -535,19 +569,10 @@ function humanEnhancedPresenceFrame(
   offlineReason: AgentInstanceOfflineReason | undefined,
   accountQuota: LlmUsage | undefined,
 ): Extract<HumanServerMessage, { type: "enhanced_presence" }> {
-  const agentStatus = status ?? session.run.instanceStatus;
-  // Carry the Agent's account windows, not just this Instance's last read, so
-  // the Human UI patches every Channel showing the Agent with the same meters.
-  const usage = withRegistrationQuota(session.presentation?.usage, accountQuota);
-  const { usage: _instanceUsage, ...presentation } = session.presentation ?? {};
-  return {
-    type: "enhanced_presence",
-    agent: {
-      ...serializeAgentFromSession(session, { ...presentation, ...(usage ? { usage } : {}) },
-        agentStatus, offlineReason),
-      status: agentStatus,
-    },
-  };
+  return agentPresenceCard(session, {
+    ...(status ? { status } : {}), ...(offlineReason ? { offlineReason } : {}),
+    ...(accountQuota ? { registrationQuota: accountQuota } : {}), executionKey: session.principal.executionKey,
+  });
 }
 
 function liveAgentSignalMessage(

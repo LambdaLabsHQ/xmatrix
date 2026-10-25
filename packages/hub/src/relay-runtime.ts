@@ -232,15 +232,17 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       });
     }
     if (request.method === "GET" && url.pathname === RELAY_RUNTIME_AGENT_PRESENCE_PATH) {
-      const filterNames = ["agentId", "runId", "instanceId", "channelId"] as const;
+      // One Agent message's exact Instance, or every Instance of one Channel.
+      const bindingNames = ["agentId", "runId", "instanceId"] as const;
       const filters = {
         agentId: boundedId(url.searchParams.get("agentId"), 200),
         runId: boundedId(url.searchParams.get("runId"), 200),
         instanceId: boundedId(url.searchParams.get("instanceId"), 200),
         channelId: boundedId(url.searchParams.get("channelId"), 180),
       };
-      const filterRequested = filterNames.some((name) => url.searchParams.has(name));
-      if (filterRequested && filterNames.some((name) => !filters[name])) {
+      const bindingRequested = bindingNames.some((name) => url.searchParams.has(name));
+      if ((bindingRequested || url.searchParams.has("channelId")) &&
+          (!filters.channelId || (bindingRequested && bindingNames.some((name) => !filters[name])))) {
         return Response.json({ error: "Incomplete Agent presence binding" }, {
           status: 400,
           headers: { "cache-control": "no-store" },
@@ -250,14 +252,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
          Agent message's send path, and materializing every other live session
          first is work this single cell does for nobody. */
       const sessions = this.productAdapter?.liveAgentSessions(
-        filterRequested
-          ? {
-              agentId: filters.agentId!,
-              runId: filters.runId!,
-              instanceId: filters.instanceId!,
-              channelId: filters.channelId!,
-            }
-          : undefined,
+        bindingRequested
+          ? { agentId: filters.agentId!, runId: filters.runId!, instanceId: filters.instanceId!, channelId: filters.channelId! }
+          : filters.channelId ? { channelId: filters.channelId } : undefined,
       ) ?? [];
       return Response.json({ sessions }, {
         headers: { "cache-control": "private, no-store" },

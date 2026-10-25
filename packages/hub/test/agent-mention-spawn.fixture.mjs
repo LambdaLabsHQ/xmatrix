@@ -2,6 +2,7 @@ import {
   agentInstanceWsUrl,
   createTestInbox as makeInbox,
   connectTestAgentFixture,
+  credentialOwner,
   humanWsUrl,
   machineDaemonWsUrl,
   mintMachineDaemonCredential,
@@ -65,7 +66,8 @@ async function connectAgent(worker, body, token = MOCK_TOKEN) {
 
 async function registerAgent(worker, body, token = MOCK_TOKEN) {
   const isDaemon = body.agentType === "xmatrix_daemon";
-  const ws = await openWebSocket(isDaemon ? machineDaemonWsUrl(worker) : agentInstanceWsUrl(worker));
+  const owner = credentialOwner(worker, token);
+  const ws = await openWebSocket(isDaemon ? machineDaemonWsUrl(worker, owner) : agentInstanceWsUrl(worker, owner));
   const inbox = makeInbox(ws);
   let machineCredential;
 
@@ -122,7 +124,7 @@ async function registerAgent(worker, body, token = MOCK_TOKEN) {
 }
 
 async function connectUser(worker, token = MOCK_TOKEN) {
-  const ws = await openWebSocket(humanWsUrl(worker));
+  const ws = await openWebSocket(humanWsUrl(worker, credentialOwner(worker, token)));
   const inbox = makeInbox(ws);
 
   ws.send(JSON.stringify({

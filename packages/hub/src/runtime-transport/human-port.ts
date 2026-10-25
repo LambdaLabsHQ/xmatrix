@@ -112,6 +112,17 @@ export class HumanAuthorityCapabilityError extends Error {
   }
 }
 
+/**
+ * A person opened a Channel on one socket: `send` reaches that socket, which
+ * a newly opened app shows the Channel's Agents from at once, not at their
+ * next report.
+ */
+export type HumanChannelFocusHandler = (input: {
+  userId: string;
+  channelId: string;
+  send: (message: HumanServerMessage) => void;
+}) => Promise<void>;
+
 /** Pure-Authority transport adapter for `/ws/humans`. */
 export class HumanRuntimeTransport {
   readonly controller: HumanConnectionController;
@@ -120,6 +131,7 @@ export class HumanRuntimeTransport {
   private readonly refusedSignInCloseDelayMs: number;
   private readonly allowLegacyProtocol: boolean;
   private readonly admit?: RuntimeSocketAdmit;
+  private readonly onChannelFocus?: HumanChannelFocusHandler;
   private readonly presenceDigests = new HumanPresenceDigests((socket, message) => {
     if (this.sockets.get(socket)) this.sockets.send(socket, message);
   });
@@ -133,11 +145,13 @@ export class HumanRuntimeTransport {
     refusedSignInCloseDelayMs?: number;
     /** Whether this cell may hold a socket of the account it authenticated as. */
     admit?: RuntimeSocketAdmit;
+    onChannelFocus?: HumanChannelFocusHandler;
   }) {
     this.backend = backend;
     this.refusedSignInCloseDelayMs = options?.refusedSignInCloseDelayMs ?? REFUSED_SIGN_IN_CLOSE_DELAY_MS;
     this.allowLegacyProtocol = options?.allowLegacyProtocol === true;
     this.admit = options?.admit;
+    this.onChannelFocus = options?.onChannelFocus;
     const missing = HUMAN_AUTHORITY_REQUIRED_CAPABILITIES.filter(
       (capability) => !backend.capabilities.has(capability),
     );
@@ -401,8 +415,20 @@ export class HumanRuntimeTransport {
       const output = await this.backend.focusChannel(session, message);
       session.focusedChannelId = nextFocusedChannelId;
       this.sockets.sendOutput(ws, output);
+      if (nextFocusedChannelId !== null) await this.showChannelAgents(ws, session.user.id, nextFocusedChannelId);
     } catch (error) {
       this.sockets.sendFailure(ws, message.requestId, error, "Could not open this Channel");
+    }
+  }
+
+  /** The Channel just opened on `ws`, its Agents as they are now. Never fails the focus. */
+  private async showChannelAgents(ws: WebSocket, userId: string, channelId: string): Promise<void> {
+    try {
+      await this.onChannelFocus?.({ userId, channelId, send: (message) => this.sockets.send(ws, message) });
+    } catch (error) {
+      console.warn("Agents of a focused Channel could not be shown", {
+        errorCode: error instanceof Error ? error.name : "unknown",
+      });
     }
   }
 

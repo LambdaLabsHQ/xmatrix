@@ -25,7 +25,7 @@ test("a model or effort answer reaches a connected person live and stays on the 
     assert.equal(channel.response.status, 200, JSON.stringify(channel.payload));
     const channelId = channel.payload.channel.id;
 
-    ws = await openWebSocket(humanWsUrl(worker));
+    ws = await openWebSocket(humanWsUrl(worker, OWNER.id));
     const inbox = inboxOf(ws);
     ws.send(JSON.stringify({ type: "human_connect", token: OWNER.token, requestId: "connect-owner",
       device: { client: "desktop", version: "0.16.160", protocolVersion: 2 } }));

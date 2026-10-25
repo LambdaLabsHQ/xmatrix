@@ -40,7 +40,7 @@ test("a registered Agent's @mention notifies the Human with their attention summ
     const channel = (await requestJson(worker, OWNER, "/api/channels", { method: "POST",
       body: JSON.stringify({ spaceId: space.id, name: "agent-mention", mode: "open" }) })).payload.channel;
 
-    ws = await openWebSocket(humanWsUrl(worker));
+    ws = await openWebSocket(humanWsUrl(worker, TARGET.id));
     const frames = [];
     ws.addEventListener("message", event => frames.push(JSON.parse(event.data)));
     ws.send(JSON.stringify({ type: "human_connect", token: TARGET.token, requestId: "connect-target",

@@ -1,9 +1,11 @@
 import { ChannelPresenceConflict, decodeChannelSnapshot, encodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, withRegistrationQuota, type AgentInstancePresence, type ChannelSnapshot } from "@xmatrix/protocol";
 import type {
+  LlmUsage,
   SerializedAgent,
   SerializedAgentInstance,
   SerializedChannel,
 } from "@xmatrix/protocol";
+import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
 import type { AgentInstanceRuntimeSession } from "./agent-instance-port";
 import {
   agentSummaryPresentation,
@@ -126,6 +128,43 @@ export function serializeAgentFromSession(
       ...(presentation?.workspaceName ? { workspaceName: presentation.workspaceName } : {}),
     },
   });
+}
+
+/**
+ * The card people are shown for one live Instance: as it reports itself, with
+ * the status it is shown in and its registration's quota reading.
+ */
+export function agentPresenceCard(
+  session: Readonly<AgentInstanceLivePresenceSession>,
+  input: {
+    status?: SerializedAgentInstance["status"];
+    offlineReason?: SerializedAgentInstance["offlineReason"];
+    registrationQuota?: LlmUsage;
+    executionKey?: string;
+  } = {},
+): Extract<HumanServerMessage, { type: "enhanced_presence" }> {
+  const status = input.status ?? session.run.instanceStatus;
+  // Carry the Agent's account windows, not just this Instance's last read, so
+  // the Human UI patches every Channel showing the Agent with the same meters.
+  const usage = withRegistrationQuota(session.presentation?.usage, input.registrationQuota);
+  const { usage: _instanceUsage, ...presentation } = session.presentation ?? {};
+  return {
+    type: "enhanced_presence",
+    agent: {
+      ...serializeAgentFromLivePresence(session, {
+        presentation: { ...presentation, ...(usage ? { usage } : {}) },
+        status,
+        ...(input.offlineReason ? { offlineReason: input.offlineReason } : {}),
+        metadata: {
+          runId: session.principal.runId,
+          ...(input.executionKey ? { executionKey: input.executionKey } : {}),
+          ...(presentation.workspace ? { workspace: presentation.workspace } : {}),
+          ...(presentation.workspaceName ? { workspaceName: presentation.workspaceName } : {}),
+        },
+      }),
+      status,
+    },
+  };
 }
 
 export function serializeAgentFromLivePresence(

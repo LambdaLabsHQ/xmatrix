@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { RelayRuntimeLive } from "../src/relay-runtime.ts";
+import { RelayPostgresAgentLaunchChannel } from "../src/postgres-agent-launch-channel-do.ts";
+import { RelayPageSession } from "../src/page-session-do.ts";
+import { RelayXUploadExecutor } from "../src/connectors/x-upload-executor-do.ts";
 import { publishChannelLiveDelivery } from "../src/channel-messages.ts";
 import { relayChannelCatalogPublishCommittedChanges } from "../src/relay-channel-catalog-notification-delivery.ts";
 import { RelayRuntimeProductCallbackAdapter } from "../src/runtime-transport/relay-runtime-product-adapter.ts";
@@ -153,6 +156,19 @@ test("a Channel's Agent receives a message once, however many people read the Ch
   assert.equal(calls.filter((call) => call.cell === "user-user-1").length, 1);
 });
 
+test("a recalled message's tombstone reaches its reader and the Channel's Agent, each in their own cell", async () => {
+  const reader = humanCell("reader", { focusedChannelId: "channel-1" });
+  const agent = new AgentInstanceRuntimeTransport({ capabilities: new Set(AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES) });
+  const agentSocket = new FakeSocket();
+  assert.equal(agent.rehydrate(agentSocket, agentInstanceAttachment()), true);
+  const { env } = runtimeEnv(new Map([["user-reader", runtimeCell(reader.human)], ["user-user-1", runtimeCell(undefined, agent)]]));
+  const tombstone = { ...message, body: "", deliveryKind: "update", entityVersion: 2, recalledAt: now };
+  await publishChannelLiveDelivery(env, () => {}, "channel-1", tombstone, undefined,
+    { recipientUserIds: ["reader"], recipientNotifications: [], instanceOwnerUserIds: ["user-1"] });
+  assert.equal(received(reader.socket, "channel_message_updated"), 1);
+  assert.equal(received(agentSocket, "channel_message_updated"), 1);
+});
+
 test("only a cell the plan names as holding Instances serves them; a publisher that names no share is served as before", async () => {
   const agent = new AgentInstanceRuntimeTransport({ capabilities: new Set(AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES) });
   const socket = new FakeSocket();
@@ -163,6 +179,75 @@ test("only a cell the plan names as holding Instances serves them; a publisher t
   assert.equal(received(socket), 0);
   await post({ messageId: "message-2" });
   assert.equal(received(socket), 1);
+});
+
+/** A Machine Daemon socket of owner-1's machine-1, back from hibernation. */
+function daemonAttachment() {
+  return { version: 1, domain: "machine_daemon", expiresAt: new Date(Date.now() + 60_000).toISOString(), session: {
+    principal: { ownerUserId: "owner-1", ownerEmail: "owner-1@example.test", machineId: "machine-1", hostId: "host-1" },
+    connectionEpoch: 1, displayName: "Workstation", clientVersion: "1.0.350", clientProtocolVersion: 2,
+    capabilities: [], machineMetadata: {}, connectedAt: now, lastSeenAt: now } };
+}
+
+/** owner-1's cell, holding its Instance in channel-1 and, unless `machineOnline` is false, its daemon. */
+function ownerCell({ machineOnline = true } = {}) {
+  const agent = new AgentInstanceRuntimeTransport({ capabilities: new Set(AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES) });
+  assert.equal(agent.rehydrate(new FakeSocket(), agentInstanceAttachment({
+    principal: { ownerUserId: "owner-1" },
+    run: { channelInstanceId: "1", instanceStatus: "idle" },
+    session: { presentation: { model: "gpt-5.6-sol", gitBranch: "fix/presence" } },
+  })), true);
+  const daemon = new MachineDaemonRuntimeTransport({ capabilities: new Set(MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES) });
+  if (machineOnline) assert.equal(daemon.rehydrate(new FakeSocket(), daemonAttachment()), true);
+  const cell = Object.create(RelayRuntimeLive.prototype);
+  cell.productAdapter = new RelayRuntimeProductCallbackAdapter({ getWebSockets: () => [], acceptWebSocket() {} },
+    new HumanRuntimeTransport({ capabilities: new Set(HUMAN_AUTHORITY_REQUIRED_CAPABILITIES) }), agent, daemon);
+  return cell;
+}
+
+/** viewer-1 opening channel-1 in their own cell, which may read it unless `readable` is false. */
+async function openChannel(owner, { readable = true } = {}) {
+  const reads = [];
+  const { env, calls } = runtimeEnv(new Map([["user-owner-1", owner]]));
+  const factory = createProductionRelayRuntimeProductPortFactory(env, {
+    readChannel: async (channelId, userId) => {
+      reads.push([channelId, userId]);
+      return readable ? { openChannelHumanMemberIdsBySpace: {}, channel: { id: "channel-1", spaceId: "space-1", name: "c",
+        mode: "open", createdAt: now, updatedAt: now, memberPresence: { "agent-1": { kind: "agent", label: "Agent",
+          registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" },
+          instances: [{ id: "instance-1", channelId: "channel-1", channelInstanceId: "1", status: "idle",
+            connectedAt: now, lastSeenAt: now }] } } } } : undefined;
+    },
+    readHistory: async () => { throw new Error("unexpected history"); },
+    analytics: { writeDataPoint() {} },
+    runtimeSelf: { cellName: () => "user-viewer-1", fetch: () => { throw new Error("Unexpected self RPC"); } },
+  });
+  const human = new HumanRuntimeTransport({ capabilities: new Set(HUMAN_AUTHORITY_REQUIRED_CAPABILITIES),
+    focusChannel: async () => undefined }, { onChannelFocus: factory.onChannelFocus });
+  const socket = new FakeSocket();
+  assert.equal(human.rehydrate(socket, { version: 1, domain: "human", expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    session: { user: { id: "viewer-1", email: "viewer-1@example.test" }, connectedAt: now, lastSeenAt: now,
+      focusedChannelId: null, deviceClient: "web", clientVersion: "1.8.0", clientProtocolVersion: 2 } }), true);
+  await human.handleFrame(socket, JSON.stringify({ type: "user_focus_channel", requestId: "focus-1", channelId: "channel-1" }));
+  const cards = socket.sent.filter((frame) => frame.type === "enhanced_presence").map((frame) => frame.agent.instances[0]);
+  return { cards, reads, cells: calls.map((call) => call.cell) };
+}
+
+test("a person who opens a Channel is shown its Agents as they are now, from the cells that hold them", async () => {
+  const opened = await openChannel(ownerCell());
+  assert.deepEqual(opened.reads, [["channel-1", "viewer-1"]], "the read is the viewer's own authorization");
+  assert.deepEqual(opened.cells, ["user-owner-1"]);
+  assert.equal(opened.cards.length, 1);
+  assert.equal(opened.cards[0].model, "gpt-5.6-sol");
+  assert.equal(opened.cards[0].gitBranch, "fix/presence");
+  assert.equal(opened.cards[0].status, "idle");
+
+  const offline = (await openChannel(ownerCell({ machineOnline: false }))).cards[0];
+  assert.deepEqual([offline.status, offline.offlineReason], ["offline", "machine_offline"],
+    "the cell that knows the machine is down says so");
+
+  const refused = await openChannel(ownerCell(), { readable: false });
+  assert.deepEqual([refused.cards, refused.cells], [[], []], "nobody else's Agents for a Channel the person cannot read");
 });
 
 test("a Channel snapshot that speaks only for Agents goes only to sockets that read that", () => {
@@ -371,6 +456,57 @@ test("one invocation's deliveries share one budget: retries spend it, the cell's
   // A new invocation has a new budget.
   await runAsDeliveryInvocation(() => deliverToAudience({ env, audience: { humans: ["fresh"] }, label: "next", request: anyRequest }));
   assert.equal(calls.at(-1).cell, "user-fresh");
+});
+
+/**
+ * A pass that publishes to every cell but one the budget allows, then to two
+ * more: one invocation reaches exactly the budget and reports the rest.
+ */
+function passOverBudget() {
+  const { env, calls } = answeringEnv();
+  const readers = (count, prefix) => Array.from({ length: count }, (_, index) => `${prefix}-${index}`);
+  const publish = (humans) => deliverToAudience({ env, audience: { humans }, label: "pass", request: anyRequest });
+  return { calls, run: async () => {
+    await publish(readers(RUNTIME_DELIVERY_INVOCATION_BUDGET - 1, "first"));
+    await publish(["last", "over"]);
+  } };
+}
+
+async function spendsOneBudget(entry, inject) {
+  const pass = passOverBudget();
+  let failure;
+  await entry(inject(() => pass.run().catch((error) => { failure = error; })));
+  assert.equal(pass.calls.length, RUNTIME_DELIVERY_INVOCATION_BUDGET);
+  assert.equal(failure?.name, "RuntimeDeliveryError");
+}
+
+test("each event of an object that publishes and is not a Runtime cell spends one budget", async () => {
+  const coordinator = () => {
+    const object = Object.create(RelayPostgresAgentLaunchChannel.prototype);
+    const values = new Map();
+    object.state = { storage: { get: async (key) => values.get(key), put: async (key, value) => { values.set(key, value); },
+      setAlarm: async () => {} } };
+    return object;
+  };
+  await spendsOneBudget((object) => object.alarm(), (run) => Object.assign(coordinator(), { lanes: { claim: run } }));
+  let pending;
+  await spendsOneBudget(async (object) => {
+    const response = await object.fetch(new Request("https://coordinator/wake", { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ channelId: "channel" }) }));
+    assert.equal(response.status, 200);
+    await pending;
+  }, (run) => Object.assign(coordinator(), { lanes: { claim: () => (pending = run()) } }));
+
+  const uploads = (run) => Object.assign(Object.create(RelayXUploadExecutor.prototype), { executor: { alarm: run, enqueue: run } });
+  await spendsOneBudget((object) => object.alarm(), uploads);
+  await spendsOneBudget((object) => object.enqueue({}), uploads);
+
+  const page = (handler, run) => Object.assign(Object.create(RelayPageSession.prototype), { [handler]: run });
+  await spendsOneBudget((object) => object.alarm(), (run) => page("onAlarm", run));
+  await spendsOneBudget((object) => object.webSocketMessage({}, new ArrayBuffer(0)), (run) => page("onSocketMessage", run));
+  await spendsOneBudget((object) => object.webSocketClose({}), (run) => page("onSocketClose", run));
+  await spendsOneBudget((object) => object.webSocketError({}), (run) => page("onSocketClose", run));
+  await spendsOneBudget((object) => object.fetch(new Request("https://page/")), (run) => page("onRequest", run));
 });
 
 test("a Machine Daemon's completion report tells its owner locally and every other reader in their own cell", async (t) => {

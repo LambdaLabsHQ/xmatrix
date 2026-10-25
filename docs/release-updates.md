@@ -22,7 +22,10 @@ replied.
 - **Presence.** An Agent's status report asks who may read the Channel at every
   report; a remembered audience no longer decides. A Channel snapshot built from
   Agent presence says it speaks for the Agents alone (`presenceCoverage`), and
-  only clients that declare `presence_coverage_v1` receive it.
+  only clients that declare `presence_coverage_v1` receive it. A person who
+  opens a Channel is sent each of its Agents' cards as they are now (branch,
+  goal, model catalog, commands, offline while its machine is), read from the
+  cells that hold them; before, only the owner's own Agents were shown this way.
 - **Web.** A resolve asked after a message or a create never takes the answer
   of one asked before it, and a conversation joins its creator's list as soon as
   the Hub confirms it.

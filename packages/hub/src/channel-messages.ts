@@ -194,12 +194,16 @@ async function deliverChannelMessage(
   };
   await deliverToAudience({
     env, audience, label: "Channel", ...(self ? { self } : {}),
-    request: (share) => runtimeJsonRequest(RUNTIME_CHANNEL_MESSAGE_URL, {
-      ...payload,
-      recipientUserIds: share.human ? [share.owner] : [],
-      recipientNotifications: share.human && notifications.has(share.owner) ? [notifications.get(share.owner)] : [],
-      instances: share.instances,
-    }),
+    request: (share) => {
+      // A notification is named only for a reader it is for: a tombstone carries none.
+      const notification = share.human ? notifications.get(share.owner) : undefined;
+      return runtimeJsonRequest(RUNTIME_CHANNEL_MESSAGE_URL, {
+        ...payload,
+        recipientUserIds: share.human ? [share.owner] : [],
+        ...(notification ? { recipientNotifications: [notification] } : {}),
+        instances: share.instances,
+      });
+    },
   });
 }
 

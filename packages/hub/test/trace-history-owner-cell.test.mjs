@@ -15,7 +15,7 @@ function fixture(cellAnswers) {
     "@xmatrix/db": { PostgresTraceAccessRepository },
     "./relay-runtime": { RELAY_RUNTIME_AGENT_TRACE_PATH: "/internal/product-trace/instance-events" },
     "./relay-authority-locator": {
-      relayRuntimeCellsForOwners: (_env, owners) => ["cell-0", ...owners.map((owner) => `user-${owner}`)]
+      relayRuntimeCellsForOwners: (_env, owners) => owners.map((owner) => `user-${owner}`)
         .map((name) => ({ fetch: async () => { asked.push(name); return Response.json(cellAnswers[name]); } })),
     },
     "./trace-authorization-batch": { traceAuthorizationChecksForChannels: () => [] },
@@ -34,24 +34,16 @@ const read = (app) => app.request("/api/trace/instances/instance-1/events?limit=
 
 test("a trace read reaches the host whose socket is in its owner's cell", async () => {
   const { app, asked } = fixture({
-    "cell-0": offline,
     "user-owner": { availability: "available", complete: true, events: [], nextCursor: null },
   });
   const response = await read(app);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).availability, "available");
-  assert.deepEqual(asked.sort(), ["cell-0", "user-owner"]);
+  assert.deepEqual(asked, ["user-owner"]);
 });
 
-test("a host still on the single cell answers too, and no cell holding it says offline", async () => {
-  const legacy = fixture({
-    "cell-0": { availability: "available", complete: true, events: [], nextCursor: null },
-    "user-owner": offline,
-  });
-  assert.equal((await (await read(legacy.app)).json()).availability, "available");
-
-  const absent = fixture({ "cell-0": offline, "user-owner": offline });
-  const body = await (await read(absent.app)).json();
+test("a host its owner's cell does not hold reads offline", async () => {
+  const body = await (await read(fixture({ "user-owner": offline }).app)).json();
   assert.equal(body.availability, "unavailable");
   assert.equal(body.reason, "host_offline");
 });

@@ -9,6 +9,7 @@ import { AgentLaunchCoordinatorLanes } from "./postgres-agent-launch-coordinator
 import { backgroundAdmissionFor } from "./postgres-background-admission-do";
 import { recordAgentLaunchCoordinator } from "./postgres-coordination-observability";
 import type { Env } from "./types";
+import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 
 /** How long a pass waits when the shard's permits cannot be asked at all. */
 const ADMISSION_UNAVAILABLE_RETRY_MS = 5_000;
@@ -179,9 +180,18 @@ export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
   /**
    * The writer's handoff. It resolves once this object has durably recorded
    * which Channel it serves, so a writer that awaits it knows the work has an
-   * owner; the pass itself runs after the response.
+   * owner; the pass itself runs after the response. A wake and an alarm are
+   * each one delivery invocation: what their pass publishes shares one budget.
    */
   async fetch(request: Request): Promise<Response> {
+    return runAsDeliveryInvocation(() => this.wake(request));
+  }
+
+  async alarm(): Promise<void> {
+    await runAsDeliveryInvocation(() => this.lanes.claim());
+  }
+
+  private async wake(request: Request): Promise<Response> {
     if (request.method !== "POST" || new URL(request.url).pathname !== "/wake") {
       return new Response("Not found", { status: 404 });
     }
@@ -201,9 +211,5 @@ export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
     await this.state.storage.setAlarm(Date.now() + 5_000);
     void this.lanes.claim();
     return Response.json({ ok: true });
-  }
-
-  async alarm(): Promise<void> {
-    await this.lanes.claim();
   }
 }

@@ -1,5 +1,5 @@
 import { plainRecord, repoSummonReference } from "@xmatrix/protocol";
-import type { LiveAgentStatus } from "@xmatrix/protocol";
+import type { AgentInstanceOfflineReason, AgentStatus, LiveAgentStatus, LlmUsage } from "@xmatrix/protocol";
 import { isLiveAgentStatus } from "@xmatrix/protocol";
 import type { AgentInstanceRuntimeSession } from "./agent-instance-port";
 import {
@@ -7,6 +7,7 @@ import {
   sanitizeAgentInstancePresentation,
   type AgentInstancePresentation,
 } from "./agent-instance-presentation";
+import { agentPresenceCard } from "./agent-instance-live-presentation";
 import { loadRuntimePresenceSnapshotEntries } from "./runtime-presence-snapshot";
 
 export const RELAY_RUNTIME_AGENT_PRESENCE_PATH = "/internal/agent-presence";
@@ -27,6 +28,12 @@ export interface LiveAgentSessionSnapshot {
   repository?: string;
   /** What the Instance last reported over its own socket. */
   status: LiveAgentStatus;
+  /**
+   * Present when the Machine Daemon hosting this Run is unreachable. The
+   * Instance socket is still open, but nothing it is sent will be acted on, so
+   * every presentation projects it `offline` ({@link projectedLiveAgentStatus}).
+   */
+  machineOffline?: true;
   connectedAt: string;
   lastSeenAt: string;
   presentation?: AgentInstancePresentation;
@@ -49,6 +56,15 @@ export function liveAgentMachineRoute(
   };
 }
 
+/** The status every reader is shown: offline while the hosting machine is. */
+export function projectedLiveAgentStatus(
+  snapshot: Pick<LiveAgentSessionSnapshot, "status" | "machineOffline">,
+): { status: AgentStatus; offlineReason?: AgentInstanceOfflineReason } {
+  return snapshot.machineOffline
+    ? { status: "offline", offlineReason: "machine_offline" }
+    : { status: snapshot.status };
+}
+
 export interface LiveAgentPresentationBinding {
   agentId: string;
   runId: string;
@@ -56,17 +72,25 @@ export interface LiveAgentPresentationBinding {
   channelId: string;
 }
 
+/** What one read asks for: one Agent message's exact Instance, or every Instance of one Channel. */
+export type LiveAgentSessionSelection = LiveAgentPresentationBinding | { channelId: string };
+
 export function liveAgentSessionSnapshots(
   sessions: Iterable<Readonly<AgentInstanceRuntimeSession>>,
   /* Every Agent message send reads exactly one binding. Rejecting the other
      sessions here — before each is sanitized into a snapshot — is what keeps
      that read proportional to the answer instead of to everything live. */
-  binding?: LiveAgentPresentationBinding,
+  selection?: LiveAgentSessionSelection,
+  /* Absent where no Machine Daemon transport is composed: every Instance then
+     keeps the status it reports. */
+  machineReachable?: (route: LiveAgentMachineRoute) => boolean,
 ): LiveAgentSessionSnapshot[] {
   const snapshots: LiveAgentSessionSnapshot[] = [];
   for (const session of sessions) {
     if (snapshots.length >= MAX_LIVE_AGENT_SESSIONS) break;
-    if (binding && !sessionMatchesBinding(session, binding)) continue;
+    if (selection && !sessionSelected(session, selection)) continue;
+    const machineOffline = machineReachable !== undefined &&
+      !machineReachable(liveAgentMachineRoute(session));
     snapshots.push({
       ownerUserId: session.principal.ownerUserId,
       agentId: session.principal.agentId,
@@ -82,6 +106,7 @@ export function liveAgentSessionSnapshots(
       ...(session.run.cwd ? { cwd: session.run.cwd } : {}),
       ...(session.run.repository ? { repository: session.run.repository } : {}),
       status: session.run.instanceStatus,
+      ...(machineOffline ? { machineOffline: true as const } : {}),
       connectedAt: session.connectedAt,
       lastSeenAt: session.lastSeenAt,
       ...(session.presentation
@@ -92,31 +117,58 @@ export function liveAgentSessionSnapshots(
   return snapshots;
 }
 
-function sessionMatchesBinding(
+function sessionSelected(
   session: Readonly<AgentInstanceRuntimeSession>,
-  binding: LiveAgentPresentationBinding,
+  selection: LiveAgentSessionSelection,
 ): boolean {
-  return session.principal.agentId === binding.agentId &&
-    session.principal.runId === binding.runId &&
-    session.run.instanceId === binding.instanceId &&
-    session.run.channelId === binding.channelId;
+  if (session.run.channelId !== selection.channelId) return false;
+  return !("agentId" in selection) || (session.principal.agentId === selection.agentId &&
+    session.principal.runId === selection.runId &&
+    session.run.instanceId === selection.instanceId);
 }
 
 export async function loadLiveAgentPresenceFromRuntime(
   runtime: { fetch(request: Request): Promise<Response> },
   requestUrl: string,
-  binding?: LiveAgentPresentationBinding,
+  selection?: LiveAgentSessionSelection,
 ): Promise<LiveAgentSessionSnapshot[]> {
   const url = new URL(RELAY_RUNTIME_AGENT_PRESENCE_PATH, requestUrl);
-  if (binding) {
-    url.searchParams.set("agentId", binding.agentId);
-    url.searchParams.set("runId", binding.runId);
-    url.searchParams.set("instanceId", binding.instanceId);
-    url.searchParams.set("channelId", binding.channelId);
+  if (selection && "agentId" in selection) {
+    url.searchParams.set("agentId", selection.agentId);
+    url.searchParams.set("runId", selection.runId);
+    url.searchParams.set("instanceId", selection.instanceId);
   }
+  if (selection) url.searchParams.set("channelId", selection.channelId);
   return (await loadRuntimePresenceSnapshotEntries(runtime, url))
     .slice(0, MAX_LIVE_AGENT_SESSIONS)
     .flatMap(parseLiveAgentSessionSnapshot);
+}
+
+/**
+ * The card a person is shown for a live Instance another cell holds, as a
+ * status report from it shows it: offline while its machine is, with its
+ * registration's quota reading.
+ */
+export function liveAgentSnapshotCard(
+  snapshot: Readonly<LiveAgentSessionSnapshot>,
+  registrationQuota: LlmUsage | undefined,
+): ReturnType<typeof agentPresenceCard> {
+  const { status, offlineReason } = projectedLiveAgentStatus(snapshot);
+  return agentPresenceCard({
+    principal: { ownerUserId: snapshot.ownerUserId, agentId: snapshot.agentId, agentName: snapshot.agentName,
+      runId: snapshot.runId, channelId: snapshot.channelId },
+    run: {
+      runId: snapshot.runId, agentId: snapshot.agentId, instanceId: snapshot.instanceId, channelId: snapshot.channelId,
+      ...(snapshot.channelInstanceId ? { channelInstanceId: snapshot.channelInstanceId } : {}),
+      machineId: snapshot.machineId, hostId: snapshot.hostId,
+      ...(snapshot.cwd ? { cwd: snapshot.cwd } : {}),
+      ...(snapshot.repository ? { repository: snapshot.repository } : {}),
+      status: "running", instanceStatus: snapshot.status,
+    },
+    connectedAt: snapshot.connectedAt,
+    lastSeenAt: snapshot.lastSeenAt,
+    ...(snapshot.presentation ? { presentation: snapshot.presentation } : {}),
+  }, { status, ...(offlineReason ? { offlineReason } : {}), ...(registrationQuota ? { registrationQuota } : {}) });
 }
 
 export function agentMessagePresentationForLiveBinding(
@@ -206,6 +258,7 @@ function parseLiveAgentSessionSnapshot(value: unknown): LiveAgentSessionSnapshot
   const cwd = boundedText(value.cwd, 2_048);
   const repositoryText = boundedText(value.repository, 2_048);
   const repository = repositoryText ? repoSummonReference(repositoryText) : undefined;
+  const machineOffline = value.machineOffline === true;
   const presentation = value.presentation === undefined
     ? undefined
     : sanitizeAgentInstancePresentation(value.presentation);
@@ -223,6 +276,7 @@ function parseLiveAgentSessionSnapshot(value: unknown): LiveAgentSessionSnapshot
     ...(cwd ? { cwd } : {}),
     ...(repository ? { repository } : {}),
     status,
+    ...(machineOffline ? { machineOffline: true as const } : {}),
     connectedAt,
     lastSeenAt,
     ...(presentation ? { presentation } : {}),

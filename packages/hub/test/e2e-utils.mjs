@@ -134,19 +134,20 @@ export async function startHubWorker(options = {}) {
     ?.split("\n")
     .slice(1, 8)
     .join("\n");
+  const vars = {
+    // Domain credentials are intentionally signed even in local tests. Keep
+    // the signing boundary real instead of teaching product code a mock
+    // credential bypass.
+    BETTER_AUTH_SECRET: "xmatrix-hub-e2e-domain-principal-signing-secret",
+    XMATRIX_SECRET_CATALOG_KEY: "xmatrix-hub-e2e-dedicated-secret-authority-key",
+    ...workerOptions.vars,
+  };
   const worker = await unstable_dev(entrypoint, {
     config: "wrangler.test.toml",
     local: true,
     logLevel: "error",
     ...workerOptions,
-    vars: {
-      // Domain credentials are intentionally signed even in local tests. Keep
-      // the signing boundary real instead of teaching product code a mock
-      // credential bypass.
-      BETTER_AUTH_SECRET: "xmatrix-hub-e2e-domain-principal-signing-secret",
-      XMATRIX_SECRET_CATALOG_KEY: "xmatrix-hub-e2e-dedicated-secret-authority-key",
-      ...workerOptions.vars,
-    },
+    vars,
     ...(persistTo ? { persist: true, persistTo } : { persist: false }),
     experimental: {
       // Keep real Worker HTTP/auth/bindings, but omit Wrangler's extra dev
@@ -169,7 +170,31 @@ export async function startHubWorker(options = {}) {
     if (input instanceof Request) return fetch(new Request(input, { ...init, headers }));
     return fetch(input, { ...init, headers });
   };
+  mockUsersByWorker.set(worker, mockUserIds(vars));
   return workerResourceAudit.track(worker, { entrypoint, creationStack });
+}
+
+const mockUsersByWorker = new WeakMap();
+
+/** The user each mock token signs in as, read from the worker's vars as the Hub reads them (src/auth.ts). */
+function mockUserIds(vars) {
+  const users = new Map();
+  const token = vars.XMATRIX_MOCK_AUTH_TOKEN?.trim();
+  if (token) users.set(token, vars.XMATRIX_MOCK_AUTH_USER_ID?.trim() || "mock-user");
+  const listed = vars.XMATRIX_MOCK_AUTH_USERS?.trim() ? JSON.parse(vars.XMATRIX_MOCK_AUTH_USERS) : {};
+  for (const [listedToken, user] of Object.entries(listed)) {
+    if (typeof user?.id === "string") users.set(listedToken, user.id);
+  }
+  return users;
+}
+
+/**
+ * The account a credential signs in as: a Run credential's owner, or the user
+ * a mock token stands for. A client names it when it opens its socket, so the
+ * socket lands in that account's own Runtime cell, as the CLI and Web do.
+ */
+export function credentialOwner(worker, token) {
+  return tokenPayload(token)?.xmatrixAgentRun?.ownerUserId ?? mockUsersByWorker.get(worker)?.get(token);
 }
 
 export function wsUrl(worker) {
@@ -177,23 +202,25 @@ export function wsUrl(worker) {
   return `ws://${host}:${worker.port}/ws`;
 }
 
-export function agentInstanceWsUrl(worker) {
-  return compatibleSocketUrl(worker, "/agent-instances", "cli");
+export function agentInstanceWsUrl(worker, ownerUserId) {
+  return compatibleSocketUrl(worker, "/agent-instances", "cli", ownerUserId);
 }
 
-export function machineDaemonWsUrl(worker) {
-  return compatibleSocketUrl(worker, "/machine-daemons", "daemon");
+export function machineDaemonWsUrl(worker, ownerUserId) {
+  return compatibleSocketUrl(worker, "/machine-daemons", "daemon", ownerUserId);
 }
 
-export function humanWsUrl(worker) {
-  return compatibleSocketUrl(worker, "/humans", "app");
+export function humanWsUrl(worker, userId) {
+  return compatibleSocketUrl(worker, "/humans", "app", userId);
 }
 
-function compatibleSocketUrl(worker, path, component) {
+/** A socket URL naming the account it will sign in as, which picks that account's Runtime cell. */
+function compatibleSocketUrl(worker, path, component, ownerUserId) {
   const url = new URL(`${wsUrl(worker)}${path}`);
   url.searchParams.set("x-xmatrix-client-component", component);
   url.searchParams.set("x-xmatrix-client-version", "0.16.698");
   url.searchParams.set("x-xmatrix-client-protocol", "2");
+  if (ownerUserId) url.searchParams.set("owner", ownerUserId);
   return url.toString();
 }
 
@@ -260,16 +287,20 @@ function fixtureRuntimeMetadata(metadata = {}, identitySeed) {
   return next;
 }
 
-function principalType(token) {
+function tokenPayload(token) {
   if (typeof token !== "string") return undefined;
   const [, encoded] = token.split(".");
   if (!encoded) return undefined;
   try {
-    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-    return payload.principalType || (payload.xmatrixAgentRun ? "agent_run" : undefined);
+    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   } catch {
     return undefined;
   }
+}
+
+function principalType(token) {
+  const payload = tokenPayload(token);
+  return payload?.principalType || (payload?.xmatrixAgentRun ? "agent_run" : undefined);
 }
 
 async function bootstrapChannel(worker, token, spaceId) {
@@ -398,7 +429,8 @@ export async function connectTestRuntime(worker, body, token, makeInbox) {
     token = prepared.token;
   }
 
-  const ws = await openWebSocket(isDaemon ? machineDaemonWsUrl(worker) : agentInstanceWsUrl(worker));
+  const owner = credentialOwner(worker, token);
+  const ws = await openWebSocket(isDaemon ? machineDaemonWsUrl(worker, owner) : agentInstanceWsUrl(worker, owner));
   const inbox = makeInbox(ws);
   const expectedType = isDaemon ? "machine_daemon_connected" : "agent_instance_connected";
   let machineCredential;

@@ -57,7 +57,7 @@ test("an Agent message commits the presentation its runtime reported", async () 
 
     /* A presence update is not echoed to its own sender, so watch it land on a
        Human socket -- the same frame the Details rail reads. */
-    human = await openWebSocket(humanWsUrl(worker));
+    human = await openWebSocket(humanWsUrl(worker, userId));
     const humanInbox = createTestInbox(human);
     human.send(JSON.stringify({
       type: "human_connect",

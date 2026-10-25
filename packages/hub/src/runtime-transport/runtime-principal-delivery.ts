@@ -86,9 +86,13 @@ export function runAsRuntimeCell<T>(self: RuntimeLiveDeliverySelf, operation: ()
   return publishing.run({ self, budget: publishing.getStore()?.budget ?? freshBudget() }, operation);
 }
 
-/** Runs one invocation that is no cell's (a Hub request or a scheduled pass): its deliveries share one budget. */
+/**
+ * Runs one invocation that is no cell's: a Hub request, a scheduled pass, or
+ * an event of a Durable Object that publishes and is not a Runtime cell. Its
+ * deliveries share one budget, and work nested in it keeps that budget.
+ */
 export function runAsDeliveryInvocation<T>(operation: () => T): T {
-  return publishing.run({ budget: freshBudget() }, operation);
+  return publishing.run({ budget: publishing.getStore()?.budget ?? freshBudget() }, operation);
 }
 
 interface RuntimeCellFailure {

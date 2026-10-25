@@ -43,7 +43,7 @@ test("an Agent's attachment reaches a live Human socket with the message that ca
       intentId: admittedPayload.intentId, channelId,
     });
 
-    const ws = await openWebSocket(humanWsUrl(worker));
+    const ws = await openWebSocket(humanWsUrl(worker, userId));
     human = ws;
     const inbox = inboxOf(ws);
     ws.send(JSON.stringify({

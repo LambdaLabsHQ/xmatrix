@@ -42,7 +42,7 @@ async function setProfile(worker, user, displayName, handle) {
 }
 
 async function connectHuman(worker, user) {
-  const ws = await openWebSocket(humanWsUrl(worker));
+  const ws = await openWebSocket(humanWsUrl(worker, user.id));
   const inbox = inboxOf(ws);
   ws.send(JSON.stringify({
     type: "human_connect",
