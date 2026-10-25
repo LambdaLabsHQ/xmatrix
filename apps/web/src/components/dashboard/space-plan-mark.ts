@@ -30,6 +30,8 @@ export interface SpacePlanBilling {
   /** Present on every summary, including Pro's — the lifetime Free allowance is
    * counted whatever the plan, so it only describes a Space that is on Free. */
   freeUsage?: { acceptedMessages?: number; limit?: number; remaining?: number } | null;
+  /** A Pro Space's Agent credits this month; `paused` once Agent writes are refused. */
+  credits?: { paused?: boolean; resetsOn?: string } | null;
 }
 
 export interface SpacePlanMark {
@@ -108,6 +110,34 @@ function freeMark(billing: SpacePlanBilling): SpacePlanMark {
       ? "This Space is on Free"
       : `Free — ${remaining} of ${limit} messages and page edits left`,
   };
+}
+
+/** What the composer warns about: a Space close to, or past, the point where
+ * its writes are refused. Nothing in the timeline says so — a refused Agent
+ * reply leaves no message at all — so the warning stands above the composer
+ * (user 2026-10-25: a Space ran out of Free mid-task and its owner kept coming
+ * back to Agents that had gone quiet, without ever seeing why). */
+export type SpaceAllowanceNotice =
+  | { kind: "free-low"; remaining: number; limit: number }
+  | { kind: "free-used"; limit: number | null }
+  | { kind: "credits-paused"; resetsOn: string | null };
+
+/** The share of the Free allowance left at which the composer starts warning. */
+export const FREE_ALLOWANCE_WARNING_SHARE = 0.2;
+
+export function spaceAllowanceNotice(billing: SpacePlanBilling | null | undefined): SpaceAllowanceNotice | null {
+  if (billing?.plan === "pro") {
+    if (billing.credits?.paused !== true) return null;
+    const resetsOn = billing.credits.resetsOn;
+    return { kind: "credits-paused", resetsOn: typeof resetsOn === "string" && resetsOn ? resetsOn : null };
+  }
+  if (billing?.plan !== "free") return null;
+  const remaining = countOrNull(billing.freeUsage?.remaining);
+  const limit = countOrNull(billing.freeUsage?.limit);
+  if (remaining === null) return null;
+  if (remaining <= 0) return { kind: "free-used", limit };
+  if (limit === null || remaining > limit * FREE_ALLOWANCE_WARNING_SHARE) return null;
+  return { kind: "free-low", remaining, limit };
 }
 
 /** The counter arrives over the wire, so a missing or malformed one must read

@@ -9,6 +9,15 @@ Hub deploy. `xmatrix commands` lists every command defined this way, and
 work on the machine itself stay in the CLI. This needs the new CLI once; older
 CLIs keep their built-in `automation` command.
 
+## Unreleased: Machines take the harness list from the Hub
+
+The list of supported harnesses, with how to find, install, update and sign in
+to each, now comes from the Hub when a Machine connects, instead of only from
+the copy built into its CLI. Adding a harness that speaks a protocol xMatrix
+already supports, or fixing an install command, reaches every Machine with a
+Hub deploy. A Machine resends nothing when its list is already current. This
+needs the new CLI once; older CLIs keep their built-in list.
+
 ## Unreleased: Official runtime texts can change with the Hub
 
 The Hub can now send the runtime further official texts by name, beside the

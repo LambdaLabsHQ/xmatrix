@@ -32,6 +32,7 @@ pub mod fs;
 pub mod git_credential;
 pub mod hex;
 pub mod http;
+pub mod hub_harness_registry;
 pub mod human_connection;
 pub mod instant;
 pub mod local_http_response;

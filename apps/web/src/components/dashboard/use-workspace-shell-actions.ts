@@ -1,4 +1,6 @@
 "use client";
+
+import { useQueryClient } from "@tanstack/react-query";
 import { presenceInstanceId } from "@xmatrix/protocol";
 
 import type { ObservabilityEvent } from "@xmatrix/protocol";
@@ -166,6 +168,7 @@ import {
   viewLabels,
 } from "./workspace-shell-modules";
 import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
+import { refreshSpaceAllowanceAfterRefusal } from "./space-allowance-notice";
 import { channelEventViews } from "./workspace-shell-presence";
 import { sameValue, shareByKey } from "../../lib/same-value";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
@@ -183,6 +186,7 @@ const NO_TIMELINE_EVENTS: readonly ObservabilityEvent[] = [];
 
 export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const fetch = useXMatrixQueryFetch(s.authenticatedUserId);
+  const queryClient = useQueryClient();
   const { profileUserId, setProfileUserId } = useHumanProfileViewState();
   const {
     setBrowserPath,
@@ -2657,6 +2661,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         void reconcileUnconfirmedSend(channelId, clientMessageId);
       } else {
         setHistoryError(message ?? null);
+        refreshSpaceAllowanceAfterRefusal(queryClient, s.user?.id, channel.spaceId, err);
       }
       return null;
     }
