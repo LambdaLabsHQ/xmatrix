@@ -16,7 +16,7 @@ mod runtime_utf8_shell;
 pub use runtime_utf8_shell::maybe_run_utf8_shell;
 include!("runtime_harness_cli.rs");
 include!("runtime_agent_cli_admission.rs");
-mod automation;
+mod runtime_hub_command;
 mod runtime_unknown_command;
 pub use runtime_unknown_command::unknown_command_error;
 #[cfg(all(unix, any(target_os = "macos", test)))]

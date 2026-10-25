@@ -557,6 +557,8 @@ export function agentRunHttpRouteAllowed(
   ) {
     return true;
   }
+  // Hub-defined CLI commands; each acts only through routes this check admits on its own.
+  if (request.method === "POST" && path === "/api/cli/commands/run") return true;
   if (
     (request.method === "GET" || request.method === "POST") &&
     path === HUB_ROUTES.automations
