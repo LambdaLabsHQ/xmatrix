@@ -23,9 +23,19 @@ pub fn unknown_command_error(cli: &Cli) -> Option<clap::Error> {
 
 fn unknown_command_error_for(args: &[String], in_run: bool) -> Option<clap::Error> {
     let word = args.first()?;
-    if in_run || xmatrix_cli_agent::agent_preset_for_launcher(word).is_some() {
+    // A word the Hub may define is asked of it first (`runtime_hub_command`).
+    if in_run
+        || xmatrix_cli_agent::agent_preset_for_launcher(word).is_some()
+        || crate::runtime_hub_command::hub_command_candidate(args)
+    {
         return None;
     }
+    Some(unrecognized_command(word))
+}
+
+/// The usage error clap gives a mistyped command, with its suggestion.
+pub(crate) fn unrecognized_command(word: &str) -> clap::Error {
+    let word = &word.to_string();
     let mut command = Cli::command();
     command.build();
     let suggestions = suggested_commands(&command, word);
@@ -44,7 +54,7 @@ fn unknown_command_error_for(args: &[String], in_run: bool) -> Option<clap::Erro
         ContextKind::Usage,
         ContextValue::StyledStr(command.render_usage()),
     );
-    Some(error)
+    error
 }
 
 /// Visible commands close to `word`, closest first.
@@ -72,7 +82,7 @@ mod tests {
 
     #[test]
     fn a_typo_outside_a_run_is_an_unknown_command_with_a_suggestion() {
-        let error = unknown_command_error_for(&args(&["logn"]), false).expect("usage error");
+        let error = unrecognized_command("logn");
         assert_eq!(error.kind(), ErrorKind::InvalidSubcommand);
         let rendered = error.render().to_string();
         assert!(
@@ -85,7 +95,7 @@ mod tests {
 
     #[test]
     fn a_word_far_from_every_command_gets_no_suggestion() {
-        let error = unknown_command_error_for(&args(&["zzzzqqq"]), false).expect("usage error");
+        let error = unrecognized_command("zzzzqqq");
         let rendered = error.render().to_string();
         assert!(
             rendered.contains("unrecognized subcommand 'zzzzqqq'"),
@@ -98,6 +108,12 @@ mod tests {
     fn a_known_harness_keeps_the_passthrough() {
         assert!(unknown_command_error_for(&args(&["claude"]), false).is_none());
         assert!(unknown_command_error_for(&args(&["codex", "--help"]), false).is_none());
+    }
+
+    #[test]
+    fn a_plain_word_is_asked_of_the_hub_before_it_is_called_unknown() {
+        assert!(unknown_command_error_for(&args(&["automation", "list"]), false).is_none());
+        assert!(unknown_command_error_for(&args(&["Logn"]), false).is_some());
     }
 
     #[test]

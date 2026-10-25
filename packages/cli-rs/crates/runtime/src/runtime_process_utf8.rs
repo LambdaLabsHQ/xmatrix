@@ -908,9 +908,14 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
             cmd_page(&hub_url, &token, command).await
         }
-        Some(Commands::Automation { command }) => {
+        Some(Commands::External(args))
+            if crate::runtime_hub_command::hub_command_candidate(&args) =>
+        {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
-            automation::cmd_automation(&hub_url, &token, command).await
+            match crate::runtime_hub_command::run_hub_command(&hub_url, &token, &args).await? {
+                Some(code) => std::process::exit(code),
+                None => crate::runtime_unknown_command::unrecognized_command(&args[0]).exit(),
+            }
         }
         Some(Commands::External(args)) => {
             http::mark_process_as_daemon();
