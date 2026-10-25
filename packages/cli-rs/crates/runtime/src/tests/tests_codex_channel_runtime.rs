@@ -76,9 +76,41 @@ fn combined_inbound_prompt_preserves_reply_and_attachment_context() {
 }
 
 #[test]
+fn the_hubs_rendering_is_the_turn_and_this_machine_adds_where_its_files_are() {
+    let message = |hub_prompt: Option<&str>| InboundChannelMessage {
+        hub_prompt: hub_prompt.map(str::to_string),
+        entity_version: None,
+        body_hash: None,
+        message_id: "m-hub".to_string(),
+        channel_id: "chan-hub-prompt".to_string(),
+        sequence: Some(1),
+        from: test_sender("Yiming Hu"),
+        body: "look".to_string(),
+        reply_to_message_id: None,
+        reply_to: None,
+        attachments: Some(vec![test_attachment("att-1", "one.png")]),
+        metadata: None,
+    };
+    let agent = test_agent_record();
+    let hub = "xMatrix channel chan-hub-prompt messageId=m-hub from Yiming Hu [user]:look";
+    assert_eq!(message(Some(hub)).prompt_text(&agent, None), hub);
+    let mut files = LocalImageFiles::empty();
+    files.remember_path("att-1", PathBuf::from("/tmp/one.png"));
+    let with_files = message(Some(hub)).prompt_text(&agent, Some(&files));
+    assert!(with_files.starts_with(hub), "{with_files}");
+    assert!(
+        with_files.ends_with("\n\nLocal copies:\n- image one.png at /tmp/one.png (68 bytes, image/png) — read this file to view the image"),
+        "{with_files}"
+    );
+    // From an older Hub the runtime still writes the message itself.
+    assert!(message(None).prompt_text(&agent, None).starts_with("xMatrix channel chan-hub-prompt messageId=m-hub deliveredAt="));
+}
+
+#[test]
 fn combined_inbound_attachments_collects_all_messages() {
     let messages = vec![
         InboundChannelMessage {
+            hub_prompt: None,
             entity_version: None,
             body_hash: None,
             message_id: "m1".to_string(),
@@ -92,6 +124,7 @@ fn combined_inbound_attachments_collects_all_messages() {
             metadata: None,
         },
         InboundChannelMessage {
+            hub_prompt: None,
             entity_version: None,
             body_hash: None,
             message_id: "m2".to_string(),
@@ -265,6 +298,7 @@ fn inbound_drain_ignores_attachment_bearing_slash_messages() {
     message.attachments = Some(vec![test_attachment("att-1", "one.png")]);
     tx.send(AgentInstanceConnectionEvent::Server(
         AgentInstanceServerMessage::ChannelMessageReceived {
+            prompt: None,
             message,
             client_message_id: None,
             ack_required,

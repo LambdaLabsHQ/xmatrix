@@ -3955,6 +3955,7 @@ pub(crate) mod tests {
             interrupt_requested: Some(true),
             steer_allowed: None,
             delivery_intent: None,
+            prompt: None,
         };
 
         assert!(deduper.accept(&live));
@@ -4003,6 +4004,7 @@ pub(crate) mod tests {
                     interrupt_requested: None,
                     steer_allowed: None,
                     delivery_intent: None,
+                    prompt: None,
                 }))
                 .await
                 .unwrap();
