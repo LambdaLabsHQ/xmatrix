@@ -663,7 +663,8 @@ function currentHeading(): Plugin {
  * Discussions anchored in the text (§4.3): the passage is highlighted, and
  * a bubble beside it opens the conversation where the margin does not show
  * it. Anchors are Yjs relative positions, so they follow edits; one whose
- * text is gone is not drawn.
+ * text is gone is not drawn. While the card of a conversation about a whole
+ * section is read, that section's text is marked the same way.
  */
 export interface Discussion { linkId: string; conversationId: string; name: string; from: unknown; to: unknown }
 
@@ -671,7 +672,7 @@ export interface Discussion { linkId: string; conversationId: string; name: stri
 export interface DiscussionDraft { from: unknown; to: unknown }
 
 export const discussionsKey = new PluginKey<{ discussions: Discussion[]; focused: string | null;
-  draft: DiscussionDraft | null; decorations: DecorationSet }>("page-discussions");
+  section: string | null; draft: DiscussionDraft | null; decorations: DecorationSet }>("page-discussions");
 
 function yMapping(state: EditorState): Map<unknown, unknown> | null {
   const sync = ySyncPluginKey.getState(state) as { binding?: { mapping: Map<unknown, unknown> } } | undefined;
@@ -691,8 +692,18 @@ function anchorPosition(state: EditorState, fragment: Y.XmlFragment, position: u
 }
 
 function discussionDecorations(state: EditorState, fragment: Y.XmlFragment, discussions: Discussion[],
-  focused: string | null, draft: DiscussionDraft | null, openConversation: (conversationId: string) => void): DecorationSet {
+  focused: string | null, section: string | null, draft: DiscussionDraft | null,
+  openConversation: (conversationId: string) => void): DecorationSet {
   const decorations: Decoration[] = [];
+  if (section) {
+    // A section runs from its heading to the next one.
+    const blocks = pageDocBlocks(state.doc);
+    const at = blocks.findIndex((block) => block.id === section);
+    if (at >= 0) {
+      decorations.push(Decoration.inline(blocks[at]!.pos, blocks[at + 1]?.pos ?? state.doc.content.size,
+        { class: "page-section-focus" }));
+    }
+  }
   if (draft) {
     const from = anchorPosition(state, fragment, draft.from);
     const to = anchorPosition(state, fragment, draft.to);
@@ -725,18 +736,21 @@ function discussionOverlay(fragment: Y.XmlFragment, openConversation: (conversat
     key: discussionsKey,
     state: {
       init: (_config, state) => ({ discussions: [] as Discussion[], focused: null as string | null,
-        draft: null as DiscussionDraft | null, decorations: DecorationSet.create(state.doc, []) }),
+        section: null as string | null, draft: null as DiscussionDraft | null,
+        decorations: DecorationSet.create(state.doc, []) }),
       apply(tr, value, _old, state) {
-        const meta = tr.getMeta(discussionsKey) as {
-          discussions?: Discussion[]; focused?: string | null; draft?: DiscussionDraft | null } | undefined;
+        const meta = tr.getMeta(discussionsKey) as { discussions?: Discussion[]; focused?: string | null;
+          section?: string | null; draft?: DiscussionDraft | null } | undefined;
         const discussions = meta?.discussions ?? value.discussions;
         const focused = meta && "focused" in meta ? meta.focused ?? null : value.focused;
+        const section = meta && "section" in meta ? meta.section ?? null : value.section;
         const draft = meta && "draft" in meta ? meta.draft ?? null : value.draft;
-        if (discussions === value.discussions && focused === value.focused && draft === value.draft && !tr.docChanged) {
+        if (discussions === value.discussions && focused === value.focused && section === value.section
+          && draft === value.draft && !tr.docChanged) {
           return value;
         }
-        return { discussions, focused, draft,
-          decorations: discussionDecorations(state, fragment, discussions, focused, draft, openConversation) };
+        return { discussions, focused, section, draft,
+          decorations: discussionDecorations(state, fragment, discussions, focused, section, draft, openConversation) };
       },
     },
     props: {
