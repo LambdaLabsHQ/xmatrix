@@ -9274,7 +9274,6 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 .xmatrix-app .app-page-edit-title svg { width: 15px; height: 15px; flex: none; opacity: .7; }
 .xmatrix-app .app-page-edit-count { margin: 2px 0 8px; font-size: 12.5px; color: var(--muted-foreground); }
 .xmatrix-app .app-page-edit-count strong { font-weight: 600; color: var(--m-ink-attention, var(--accent)); }
-.xmatrix-app .app-page-edit-loading { margin-bottom: 2px; }
 .xmatrix-app .app-page-edit-line {
   position: relative;
   margin: 0 0 8px;

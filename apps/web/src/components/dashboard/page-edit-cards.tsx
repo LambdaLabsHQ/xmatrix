@@ -9,6 +9,7 @@ import { xmatrixHubRead } from "@/lib/query/hub-read";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { pageApi } from "@/lib/pages/page-client";
 import { usePageReferenceScope } from "./page-reference-chip";
+import { heldPageMessageEdits } from "./page-message-edits-hold";
 
 /** Where a page opened from a message's edit card: what changed since, and the message to go back to. */
 export interface PageEditOpening { since: number; from: { channelId: string; messageId: string } }
@@ -24,12 +25,13 @@ const SHOWN = 3;
 export function useMessagePageEdits(channelId: string | null, token: string | null,
   messageIds: readonly string[]): ReadonlyMap<string, readonly PageMessageEdit[]> {
   const { user } = useAuth();
-  const query = useQuery({
+  const query = useQuery<{ edits?: PageMessageEdit[] }>({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-message-edits",
       [channelId ?? "", ...messageIds]),
     enabled: Boolean(channelId && token && messageIds.length),
     retry: false,
     staleTime: 60_000,
+    placeholderData: (previous) => heldPageMessageEdits(previous, messageIds),
     queryFn: ({ signal }) => xmatrixHubRead<{ edits?: PageMessageEdit[] }>({ method: "POST",
       hubPath: HUB_ROUTES.channel_page_edits(channelId!), webUrl: WEB_PROXY_ROUTES.channel_page_edits(channelId!),
       body: { messageIds }, token: token!, signal }),
@@ -98,9 +100,10 @@ function PageEditCard({ edit, spaceId, token, onOpen }: {
     if (runs.some(({ from, to }) => body(from) === undefined || body(to) === undefined)) return null;
     return runs.flatMap(({ from, to }) => pageEditGlimpses(body(from)!, body(to)!));
   }, [read.bodies, revisions, runs]);
-  // A page the reader cannot open, or an edit that changed only how the text is written, says nothing.
-  if (failed || glimpses?.length === 0) return null;
-  const shown = glimpses ?? [];
+  // A page the reader cannot open, or an edit that changed only how the text is written, says nothing. Until
+  // its revisions are read the card is not drawn either, so it never shows and then takes itself back.
+  if (failed || !glimpses?.length) return null;
+  const shown = glimpses;
   const sections = [...new Set(shown.map((glimpse) => glimpse.section).filter(Boolean))];
   const oneSection = sections.length === 1 && shown.every((glimpse) => glimpse.section === sections[0]);
   const since = runs[0]!.from;
@@ -113,29 +116,27 @@ function PageEditCard({ edit, spaceId, token, onOpen }: {
         <FileText aria-hidden="true" />
         <span>{edit.title}{oneSection && <> › {sections[0]}</>}</span>
       </p>
-      {glimpses ? <>
-        <p className="app-page-edit-count">
-          <strong>{shown.length === 1 ? "1 change" : `${shown.length} changes`}</strong>
-          {!oneSection && sections.length > 0 && <> · {sections.slice(0, 4).join(", ")}</>}
+      <p className="app-page-edit-count">
+        <strong>{shown.length === 1 ? "1 change" : `${shown.length} changes`}</strong>
+        {!oneSection && sections.length > 0 && <> · {sections.slice(0, 4).join(", ")}</>}
+      </p>
+      {shown.slice(0, SHOWN).map((glimpse, index) => (
+        <div key={index} className="app-page-edit-line" data-kind={glimpse.kind}>
+          {(!oneSection || glimpse.kind !== "changed") && (
+            <span className="app-page-edit-where">
+              {[!oneSection && glimpse.section, glimpse.kind === "added" ? "New" : glimpse.kind === "removed" ? "Removed" : null]
+                .filter(Boolean).join(" · ")}
+            </span>
+          )}
+          {glimpse.segments.map((segment, at) => segment.change === "added" ? <ins key={at}>{segment.text}</ins>
+            : segment.change === "removed" ? <del key={at}>{segment.text}</del> : <span key={at}>{segment.text}</span>)}
+        </div>
+      ))}
+      {shown.length > SHOWN && (
+        <p className="app-page-edit-more">
+          <span>{shown.length - SHOWN} more</span><span className="app-page-edit-open">Open in page →</span>
         </p>
-        {shown.slice(0, SHOWN).map((glimpse, index) => (
-          <div key={index} className="app-page-edit-line" data-kind={glimpse.kind}>
-            {(!oneSection || glimpse.kind !== "changed") && (
-              <span className="app-page-edit-where">
-                {[!oneSection && glimpse.section, glimpse.kind === "added" ? "New" : glimpse.kind === "removed" ? "Removed" : null]
-                  .filter(Boolean).join(" · ")}
-              </span>
-            )}
-            {glimpse.segments.map((segment, at) => segment.change === "added" ? <ins key={at}>{segment.text}</ins>
-              : segment.change === "removed" ? <del key={at}>{segment.text}</del> : <span key={at}>{segment.text}</span>)}
-          </div>
-        ))}
-        {shown.length > SHOWN && (
-          <p className="app-page-edit-more">
-            <span>{shown.length - SHOWN} more</span><span className="app-page-edit-open">Open in page →</span>
-          </p>
-        )}
-      </> : <p className="app-page-edit-count app-page-edit-loading">Reading the change…</p>}
+      )}
     </div>
   );
 }
