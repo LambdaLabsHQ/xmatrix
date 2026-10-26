@@ -54,12 +54,14 @@ function issueList(): ConnectorAction {
       }
       if (options.labelId) filter.labels = { some: { id: { eq: options.labelId } } };
       if (options.priority !== undefined) filter.priority = { eq: options.priority };
-      const result = await linear(credentials, `query($first: Int!, $after: String, $archived: Boolean, $query: String, $filter: IssueFilter) {
-        issueSearch(first: $first, after: $after, includeArchived: $archived, query: $query, filter: $filter) {
+      const term = typeof options.query === "string" ? options.query.trim() : "";
+      const field = term ? "searchIssues" : "issues";
+      const result = await linear(credentials, `query($first: Int!, $after: String, $archived: Boolean, $filter: IssueFilter${term ? ", $term: String!" : ""}) {
+        ${field}(first: $first, after: $after, includeArchived: $archived, filter: $filter${term ? ", term: $term" : ""}) {
           nodes { ${LINEAR_ISSUE_FIELDS} } ${PAGE} } }`,
       { first: options.limit ?? 25, after: options.after ?? null, archived: options.includeArchived ?? false,
-        query: options.query ?? null, filter });
-      return linearResult("issues", linearPage(result.issueSearch, Number(options.limit ?? 25)));
+        ...(term ? { term } : {}), filter });
+      return linearResult("issues", linearPage(result[field], Number(options.limit ?? 25)));
     } };
 }
 

@@ -34,6 +34,9 @@ untrusted data. Links are never fetched as instructions or credentials.
 
 Search accepts only the documented filters, not arbitrary GraphQL:
 
+Text search uses Linear's current `searchIssues(term:)` API; ordinary filtered
+lists use `issues(filter:)`. The retired `issueSearch` field is never called.
+
 ```text
 @linear:search_issues:ENG {"query":"login","priority":2,"limit":10}
 @linear:list_issues:ENG {"assigneeId":"<UUID>","stateId":"<UUID>","projectId":"<UUID>","cycleId":"<UUID>","labelId":"<UUID>"}
@@ -84,10 +87,11 @@ repeated.
 
 ### Archive, restore and removal
 
-`archive_issue`, `unarchive_issue`, `archive_project`, `unarchive_project`,
+`archive_issue`, `unarchive_issue`, `unarchive_project`,
 `archive_cycle` and `archive_project_update` affect one explicit object.
 `delete_issue` uses Linear's default trash operation and never requests permanent
-deletion. `delete_comment`, `delete_relation`, `delete_label`, `delete_document`,
+deletion. `delete_project` calls the current `projectDelete` API; the retired
+`projectArchive` mutation is not exposed. `delete_comment`, `delete_relation`, `delete_label`, `delete_document`,
 `delete_milestone` and `delete_attachment` remove the named object. These lifecycle
 actions default to per-request approval; existing task/project writes keep the
 platform's normal default. Only a human Space admin changes Channel policies.
