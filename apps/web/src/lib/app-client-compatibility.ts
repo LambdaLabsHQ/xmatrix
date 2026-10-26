@@ -19,15 +19,45 @@ import { xmatrixRawResponse } from "@/lib/query/api-client";
 type CompatibilityResult = { identity: ClientCompatibilityIdentity; decision: ClientCompatibilityDecision };
 const admissionCache = new ClientAdmissionCache<CompatibilityResult>();
 
+function admissionKey(identity: ClientCompatibilityIdentity): string {
+  return JSON.stringify([xmatrixHubOrigin(), identity.component, identity.version,
+    identity.protocolVersion, identity.platform ?? null]);
+}
+
+/** The last build this device's Hub admitted; never user data. */
+const ADMITTED_STORAGE_KEY = "xmatrix.app-admitted";
+
+function readAdmitted(): string | null {
+  try { return window.localStorage.getItem(ADMITTED_STORAGE_KEY); } catch { return null; }
+}
+
+function writeAdmitted(key: string | null): void {
+  try {
+    if (key) window.localStorage.setItem(ADMITTED_STORAGE_KEY, key);
+    else window.localStorage.removeItem(ADMITTED_STORAGE_KEY);
+  } catch { /* storage unavailable: every start asks the Hub first */ }
+}
+
 /** Only app startup reuses admission. Socket recovery must ask the server again. */
 export async function admitAppCompatibility(identity: ClientCompatibilityIdentity): Promise<CompatibilityResult> {
-  const key = JSON.stringify([xmatrixHubOrigin(), identity.component, identity.version,
-    identity.protocolVersion, identity.platform ?? null]);
+  const key = admissionKey(identity);
   return admissionCache.read(key, async () => {
     const result = await requestAppCompatibility(identity);
     if (!result.decision.compatible) admissionCache.clear();
+    writeAdmitted(result.decision.compatible ? key : null);
     return result;
   });
+}
+
+/**
+ * A build the Hub admitted before starts at once on the next load, while the
+ * Hub is asked again; a refusal still opens the upgrade wall. Asking first made
+ * every load, a notification's included, wait behind the preparation bar.
+ */
+export function admitRememberedAppCompatibility(identity: ClientCompatibilityIdentity): boolean {
+  if (readAdmitted() !== admissionKey(identity) || !evaluateClientCompatibility(identity).compatible) return false;
+  acceptedIdentity = identity;
+  return true;
 }
 
 let acceptedIdentity: ClientCompatibilityIdentity | undefined;

@@ -43,7 +43,24 @@ async function dispatchAndroidBackForTest(page: Page) {
 }
 
 async function installAndroidBackBridge(page: Page) {
-  await page.addInitScript(() => {
+  await installNativeBridge(page, "android");
+}
+
+async function nativeBackForTest(page: Page) {
+  return page.evaluate(() => (window as typeof window & { __xmatrixNativeBack?: () => boolean }).__xmatrixNativeBack?.());
+}
+
+async function openAppLinkForTest(page: Page, href: string) {
+  return page.evaluate((link) => (
+    window as typeof window & { __openAppLinkForTest?: (href: string) => boolean }
+  ).__openAppLinkForTest?.(link), href);
+}
+
+async function installNativeBridge(page: Page, client: "android" | "ios") {
+  await page.addInitScript((client) => {
+    const appLinkListeners = new Set<(href: string) => boolean>();
+    (window as typeof window & { __openAppLinkForTest?: (href: string) => boolean })
+      .__openAppLinkForTest = (href) => Array.from(appLinkListeners).reverse().some((listener) => listener(href));
     const listeners = new Set<() => boolean>();
     const disabledUpdateStatus = () => ({
       state: "disabled" as const,
@@ -52,11 +69,11 @@ async function installAndroidBackBridge(page: Page) {
       updatedAt: new Date().toISOString(),
     });
     (window as typeof window & { xmatrixDesktop?: unknown }).xmatrixDesktop = {
-      client: "android",
-      platform: "android",
+      client,
+      platform: client,
       getContext: async () => ({
-        client: "android",
-        platform: "android",
+        client,
+        platform: client,
         version: "0.16.160",
         isPackaged: true,
         startUrl: "https://xmatrix.sh/app",
@@ -69,10 +86,17 @@ async function installAndroidBackBridge(page: Page) {
       openCliInstall: async () => undefined,
       checkForUpdates: async () => disabledUpdateStatus(),
       getUpdateStatus: async () => disabledUpdateStatus(),
-      onBackRequested: (listener: () => boolean) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
+      setMobileTabState: async () => undefined,
+      onOpenAppLink: (listener: (href: string) => boolean) => {
+        appLinkListeners.add(listener);
+        return () => appLinkListeners.delete(listener);
       },
+      ...(client === "android" ? {
+        onBackRequested: (listener: () => boolean) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      } : {}),
     };
     (window as typeof window & { __dispatchAndroidBackForTest?: () => boolean })
       .__dispatchAndroidBackForTest = () => {
@@ -81,7 +105,7 @@ async function installAndroidBackBridge(page: Page) {
         }
         return false;
       };
-  });
+  }, client);
 }
 
 async function openGeneralChannel(page: Page, channel: unknown = E2E_CHANNEL) {
@@ -167,8 +191,14 @@ test("mobile Channels lists every conversation flat", async ({ page }) => {
   await expect(page.locator(".app-mobile-chat-row .app-mobile-chat-title")).toHaveText(["child", "root"]);
 });
 
-test("returning to the mobile channel list does not create a history loop", async ({ page }) => {
+function historyLength(page: Page) {
+  return page.evaluate(() => window.history.length);
+}
+
+test("phone screens go Back to their parent without growing the history", async ({ page }) => {
   await openMoreChildWorkspace(page);
+  await expect(page.getByRole("button", { name: "More", exact: true })).toHaveAttribute("aria-current", "page");
+  const entries = await historyLength(page);
 
   await page.getByRole("button", { name: "Channels" }).tap();
   const channelList = page.locator(".app-mobile-channel-list-pane");
@@ -184,13 +214,37 @@ test("returning to the mobile channel list does not create a history loop", asyn
   await expect(backToChannels).toBeVisible();
   await page.goBack();
   await expect(channelList).toBeVisible();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/channels$/);
+  expect(await historyLength(page)).toBe(entries);
+});
+
+test("a conversation loaded directly goes Back to its channel list", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await page.goto("/app/personal-sspaceperso/channels/general--channel-general");
+  await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/activity$/);
-  await expect(page.getByRole("button", { name: "More", exact: true })).toHaveAttribute(
-    "aria-current",
-    "page"
-  );
+  await expectChannelListVisible(page);
+});
+
+test("the iOS app's edge swipe goes Back in the page, and a notification opens without a reload", async ({ page }) => {
+  await installNativeBridge(page, "ios");
+  const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
+  await page.goto("/app/personal-sspaceperso/channels");
+  await page.evaluate(() => { (window as typeof window & { __samePage?: boolean }).__samePage = true; });
+  const entries = await historyLength(page);
+
+  expect(await openAppLinkForTest(page, `${new URL(page.url()).origin}/app?channel=channel-ops`)).toBe(true);
+  await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
+  await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
+  expect(await page.evaluate(() => (window as typeof window & { __samePage?: boolean }).__samePage)).toBe(true);
+
+  expect(await nativeBackForTest(page)).toBe(true);
+  await expectChannelListVisible(page);
+  // A dock tab's own screen has nothing to go Back to; the app keeps it.
+  expect(await nativeBackForTest(page)).toBe(false);
+  expect(await historyLength(page)).toBe(entries);
 });
 
 test("a conversation opened from a notification goes back to the channel list, not the conversation before it", async ({ page }) => {
@@ -714,8 +768,12 @@ test("More tab hosts overflow views and returns from Settings without a history 
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/more$/);
   await expect(moreTab).toHaveAttribute("aria-current", "page");
 
+  // The browser's Back from a More child is the same step.
+  await page.getByRole("button", { name: /^Settings/ }).tap();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/settings$/);
   await page.goBack();
-  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/activity$/);
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/more$/);
+  await expect(page.getByRole("button", { name: "Back to More" })).toHaveCount(0);
 });
 
 test("Agents lists registrations by runtime and opens one over the list on a phone", async ({ page }) => {
@@ -851,9 +909,13 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(usage).toContainText("checked just now");
   const running = detail.getByRole("region", { name: "Running now · 1" });
   await expect(running).toContainText("mobile-actions-agent:2");
+  const agentUrl = page.url();
   await running.getByRole("button", { name: "#general" }).tap();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/channels\/general--channel-general$/);
+  // A conversation goes Back to its own list, however it was reached.
   await page.goBack();
+  await expectChannelListVisible(page);
+  await page.goto(agentUrl);
   /* One switch turns it off in this Space at once, with no confirmation. */
   const enabled = detail.getByRole("switch", { name: "Enabled: mobile-actions-agent" });
   await expect(enabled).toHaveAttribute("aria-checked", "true");

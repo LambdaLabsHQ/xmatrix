@@ -28,7 +28,8 @@ import { sameValue } from "../../lib/same-value";
 import { ManageSecretsProvider } from "./secret-request-card";
 import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
-import { useAndroidBackHandler } from "./use-android-back";
+import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
+import { closeToolItem } from "./tool-split";
 import { Loader2, Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
@@ -832,21 +833,19 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     });
   }, [changeAppView, currentSpaceId, desktopBridge, isIOSNativeShell, selectSpace]);
 
-  useAndroidBackHandler(true, () => {
-    if (mobileChannelDetailsOpen) {
-      closeMobileChannelDetails();
-      return true;
-    }
-    if (view === "messages" && selectedChannel) {
-      backToChannelList();
-      return true;
-    }
-    if (view !== "messages" && view !== "more" && MORE_TAB_VIEWS.includes(view)) {
-      backToMore();
-      return true;
-    }
-    return false;
-  });
+  // A phone screen's parent, the same one its bar's chevron goes to. A layer
+  // over the screen (a sheet, the new-conversation form) consumes Back first.
+  useSystemBackHandler(isMobileViewport, () => {
+    if (mobileChannelDetailsOpen) closeMobileChannelDetails();
+    else if (phonePageConversation) closePageConversation();
+    else if (phonePageOpen) closePage();
+    else if (view === "messages" && selectedChannel) backToChannelList();
+    else if (SPLIT_TOOL_VIEWS.includes(view) && closeToolItem()) return true;
+    else if (view !== "messages" && view !== "more" && MORE_TAB_VIEWS.includes(view)) backToMore();
+    else return false;
+    return true;
+  }, { screen: true });
+  useBrowserBackEntry(isMobileViewport && !desktopBridge);
 
   // A decision made from the Agents page or the review dialog changes the Space
   // list; that change is the signal to re-read this Channel's pending cards.

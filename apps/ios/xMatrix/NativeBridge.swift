@@ -53,6 +53,16 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         });
       };
 
+      // A notification or link the app opens: true when the page opened it
+      // itself, so the app does not load the page afresh.
+      const appLinkListeners = new Set();
+      window.__xmatrixOpenAppLink = (href) => {
+        for (const listener of Array.from(appLinkListeners).reverse()) {
+          try { if (listener(href) === true) return true; } catch (_) {}
+        }
+        return false;
+      };
+
       window.xmatrixDesktop = {
         client: "ios",
         platform: "ios",
@@ -78,6 +88,10 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         onMobileTabChange: (listener) => {
           mobileTabListeners.add(listener);
           return () => mobileTabListeners.delete(listener);
+        },
+        onOpenAppLink: (listener) => {
+          appLinkListeners.add(listener);
+          return () => appLinkListeners.delete(listener);
         },
         checkForUpdates: () => Promise.resolve(disabledUpdateStatus()),
         getUpdateStatus: () => Promise.resolve(disabledUpdateStatus()),

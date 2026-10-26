@@ -9,6 +9,7 @@ import type { AdminAuditEvent, AdminSpaceSummary } from "@xmatrix/protocol";
 
 import { AdminTable, type AdminColumn } from "./admin-table";
 import { useAdminAudit, useAdminParam, usePlatformOverview } from "./platform-admin-data";
+import { useSystemBackDismiss } from "./use-system-back";
 import { AdminSpaceDetailView } from "./platform-admin-space";
 import { adminTime, formatAdminAge, formatAdminCount } from "./platform-admin-overview";
 import { AdminQueryView } from "./workspace-platform-admin-view";
@@ -41,6 +42,8 @@ const SPACE_COLUMNS: AdminColumn<AdminSpaceSummary>[] = [
 
 export function PlatformAdminSpaces({ token }: { token?: string }) {
   const [openSpaceId, setOpenSpaceId] = useAdminParam("space");
+  // Back from a record is its list.
+  useSystemBackDismiss(Boolean(openSpaceId), () => setOpenSpaceId(""));
   if (openSpaceId) {
     return <AdminSpaceDetailView token={token} spaceId={openSpaceId} onBack={() => setOpenSpaceId("", { push: true })} />;
   }

@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { QueryClient, useQuery } from "@tanstack/react-query";
-import { admitAppCompatibility, detectAppCompatibilityIdentity } from "@/lib/app-client-compatibility";
+import {
+  admitAppCompatibility,
+  admitRememberedAppCompatibility,
+  detectAppCompatibilityIdentity,
+} from "@/lib/app-client-compatibility";
 import { xmatrixHubOrigin } from "@/lib/query/api-client";
 
 const RETRY_DELAY_MS = 2000;
@@ -20,17 +24,20 @@ export function AppPreparationGate(props: { children: React.ReactNode }) {
   const hubOrigin = xmatrixHubOrigin();
   const identity = useQuery({
     queryKey: ["app-client-identity", hubOrigin],
-    queryFn: detectAppCompatibilityIdentity,
+    queryFn: async () => {
+      const detected = await detectAppCompatibilityIdentity();
+      return { identity: detected, remembered: admitRememberedAppCompatibility(detected) };
+    },
     staleTime: Infinity,
     retry: true,
     retryDelay: RETRY_DELAY_MS,
   }, admissionClient);
   const [progress, setProgress] = useState(INITIAL_PROGRESS);
   const compatibility = useQuery({
-    queryKey: ["app-client-compatibility", hubOrigin, identity.data],
+    queryKey: ["app-client-compatibility", hubOrigin, identity.data?.identity],
     enabled: Boolean(identity.data),
     queryFn: async () => {
-      const { decision } = await admitAppCompatibility(identity.data!);
+      const { decision } = await admitAppCompatibility(identity.data!.identity);
       if (!decision.compatible) {
         window.location.replace("/upgrade-required");
         return false;
@@ -41,7 +48,7 @@ export function AppPreparationGate(props: { children: React.ReactNode }) {
     retryDelay: RETRY_DELAY_MS,
     staleTime: Infinity,
   }, admissionClient);
-  const ready = compatibility.data === true;
+  const ready = compatibility.data === true || (compatibility.data === undefined && identity.data?.remembered === true);
 
   useEffect(() => {
     if (ready) return;

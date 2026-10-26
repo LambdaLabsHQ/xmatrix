@@ -60,7 +60,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
-import { useAndroidBackDismiss } from "./use-android-back";
+import { useSystemBackDismiss } from "./use-system-back";
 
 import {
   ArrowUp,
@@ -818,7 +818,7 @@ export function MobileSpaceSheet({
   currentSpaceId: string | null;
   onSelectSpace: (spaceId: string) => void;
 }) {
-  useAndroidBackDismiss(open, () => onOpenChange(false));
+  useSystemBackDismiss(open, () => onOpenChange(false));
 
   function renderOption(space: SerializedSpace) {
     const selected = space.id === currentSpaceId;

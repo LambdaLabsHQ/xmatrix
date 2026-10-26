@@ -9,6 +9,7 @@ import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
 import { OverlayScrollbars } from "@/components/ui/overlay-scrollbars";
 import { OVERLAY_SCROLLBARS_MODE_SCRIPT } from "@/components/ui/overlay-scrollbars-mode";
 import { shareImage, siteUrl } from "@/lib/site-url";
+import { browserBackEntryScript } from "@/components/dashboard/browser-back-entry-script";
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
@@ -80,6 +81,7 @@ export default function RootLayout(props: { children: React.ReactNode }) {
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: browserBackEntryScript }} />
       </head>
       <body className="site-canvas antialiased">
         <LiquidGlassFilter />

@@ -7,7 +7,7 @@ import {
   type SerializedSpace,
 } from "@xmatrix/protocol";
 
-import { useAndroidBackDismiss } from "@/components/dashboard/use-android-back";
+import { useSystemBackDismiss } from "@/components/dashboard/use-system-back";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { Input } from "@/components/ui/input";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
@@ -71,7 +71,7 @@ export function AgentConfigPage({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installMessage, setInstallMessage] = useState("");
-  useAndroidBackDismiss(Boolean(state), onCancel, busy);
+  useSystemBackDismiss(Boolean(state), onCancel, busy);
 
   if (!state) return null;
 

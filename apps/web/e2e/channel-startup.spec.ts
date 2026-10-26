@@ -86,6 +86,21 @@ test("exact Channel links start history before resolve and defer secondary reque
     new URL(url).searchParams.get("limit") === "10")).toHaveLength(1);
 });
 
+test("a build the Hub admitted before opens on the next load while the Hub is asked again", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+  const row = page.getByRole("button", { name: "general", exact: true });
+  await expect(row).toBeVisible();
+
+  await fixtureRule(page, { id: "held-compatibility", pattern: /\/api\/(?:xmatrix\/)?client-compatibility(?:\?.*)?$/,
+    responder: { kind: "deferred", json: { compatible: true, code: "compatible", protocolVersion: 2,
+      upgradeUrl: "https://xmatrix.sh/download" } } });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect.poll(async () => (await fixtureRequests(page, "held-compatibility")).length).toBe(1);
+  await expect(row).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Preparing" })).toHaveCount(0);
+});
+
 test("resolving an anonymous session does not repeat compatibility admission", async ({ page }) => {
   await page.addInitScript(() => {
     (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true;

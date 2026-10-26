@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { Loader2 } from "lucide-react";
 
 import { useEscapeDismiss } from "./use-overlay-dismiss";
-import { useAndroidBackDismiss } from "@/components/dashboard/use-android-back";
+import { useSystemBackDismiss } from "@/components/dashboard/use-system-back";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
 
@@ -40,7 +40,7 @@ export function CenteredDialogShell({
   children: React.ReactNode;
   onCancel: () => void;
 }) {
-  useAndroidBackDismiss(open, onCancel, busy);
+  useSystemBackDismiss(open, onCancel, busy);
 
   useEscapeDismiss(open && !busy, onCancel);
 

@@ -3,16 +3,19 @@ import type { ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
 import { spaceAppPath } from "./channel-links";
 import {
   MOBILE_CHANNEL_DETAILS_HASH,
-  MOBILE_CHANNEL_DETAILS_RETURN_PATH_STATE_KEY,
-  MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY,
+  clearBrowserHash,
   currentBrowserLocation,
-  isMobileChannelDetailsHistoryState,
   isMobileChannelDetailsLocation,
-  pushBrowserHistoryState,
   pushBrowserPath,
   replaceBrowserPath,
 } from "./workspace-shell-navigation";
 
+/*
+ * A phone's conversation screens go Back to their parent: channel details to
+ * the conversation, a conversation to its Space's channel list. Neither reads
+ * the browser history, so however the screen was reached (a list tap, a
+ * notification, a new conversation, a thread) Back lands in the same place.
+ */
 export function createMobileChannelHistoryNavigation(options: {
   mobileChannelDetailsOpen: boolean;
   setMobileChannelDetailsOpen: (open: boolean) => void;
@@ -42,73 +45,36 @@ export function createMobileChannelHistoryNavigation(options: {
 
   function openMobileChannelDetails() {
     if (mobileChannelDetailsOpen) return;
-    const currentPath = currentBrowserLocation();
     setMobileChannelDetailsOpen(true);
     setBrowserHash(MOBILE_CHANNEL_DETAILS_HASH);
-    if (
-      !isMobileChannelDetailsLocation() &&
-      !isMobileChannelDetailsHistoryState(window.history.state, currentPath)
-    ) {
-      pushBrowserHistoryState(
-        { [MOBILE_CHANNEL_DETAILS_RETURN_PATH_STATE_KEY]: currentPath },
-        `${currentPath}${MOBILE_CHANNEL_DETAILS_HASH}`
-      );
-    }
+    // The entry keeps Next.js's router state, so the router stays on the Channel.
+    if (!isMobileChannelDetailsLocation()) pushBrowserPath(`${currentBrowserLocation()}${MOBILE_CHANNEL_DETAILS_HASH}`, {});
   }
 
   function closeMobileChannelDetails() {
     setMobileChannelDetailsOpen(false);
-    if (
-      isMobileChannelDetailsLocation() ||
-      isMobileChannelDetailsHistoryState(window.history.state, currentBrowserLocation())
-    ) {
-      window.history.back();
-    }
+    setBrowserHash("");
+    clearBrowserHash();
   }
 
   /* Clearing the selection drops the messages view into its mobile list state. */
-  function showMobileChannelList(useExistingHistoryEntry = false) {
+  function backToChannelList() {
     const spaceId = selectedChannel?.spaceId || currentSpaceId;
     const nextPath = spaceId ? `${spaceAppPath(spaceId, spaces)}/channels` : "/app";
-    const historyState = window.history.state;
-    const currentPath = currentBrowserLocation();
-    const detailsHistoryOpen =
-      isMobileChannelDetailsLocation() ||
-      isMobileChannelDetailsHistoryState(historyState, currentPath);
-    const canReuseListEntry =
-      useExistingHistoryEntry &&
-      historyState?.[MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY] === nextPath;
     runMobileScreenTransition("back", () => {
       setSelectedChannelId(null);
       selectedChannelIdRef.current = null;
       setMobileChannelDetailsOpen(false);
       setReplyTarget(null);
-      // A channel opened from this list already has the list immediately behind
-      // it. Reuse that entry so the Back button cannot add list/detail cycles.
-      // Summary / channel-info adds one more same-URL entry on top, so list
-      // return has to skip that overlay too.
-      if (canReuseListEntry && detailsHistoryOpen) {
-        window.history.go(-2);
-      } else if (canReuseListEntry) {
-        window.history.back();
-      } else if (useExistingHistoryEntry) {
-        replaceBrowserPath(nextPath);
-      } else {
-        pushBrowserPath(nextPath);
-      }
+      replaceBrowserPath(nextPath);
       setBrowserPath(nextPath);
       setBrowserHash("");
     });
   }
 
-  function backToChannelList() {
-    showMobileChannelList(true);
-  }
-
   return {
     openMobileChannelDetails,
     closeMobileChannelDetails,
-    showMobileChannelList,
     backToChannelList,
   };
 }

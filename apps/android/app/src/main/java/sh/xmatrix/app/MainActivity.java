@@ -101,7 +101,7 @@ public final class MainActivity extends ComponentActivity {
         // An in-place sign-in came back: its page is still open and takes the code.
         bridge.signInReturned(uri);
       } else if (!AppConfiguration.isNativeLoginResume(uri)) {
-        loadInitialUrl(intent);
+        openIntentUrl(intent);
       }
     } else {
       showUnsupportedWebView();
@@ -203,19 +203,43 @@ public final class MainActivity extends ComponentActivity {
 
   private void loadInitialUrl(Intent intent) {
     usePackagedAssets = false;
+    String targetUrl = intentUrl(intent);
+    webView.loadUrl(targetUrl == null ? AppConfiguration.START_URL : targetUrl);
+  }
+
+  /**
+   * A notification or link reaching the running app opens in its page when the
+   * page can show it (a conversation, a page): loading the page afresh started
+   * the whole app again behind its preparation bar. With nothing to open, the
+   * page stays where it is.
+   */
+  private void openIntentUrl(Intent intent) {
+    WebView currentWebView = webView;
+    if (currentWebView == null || currentWebView.getUrl() == null) {
+      loadInitialUrl(intent);
+      return;
+    }
+    String targetUrl = intentUrl(intent);
+    if (targetUrl == null) return;
+    WebAppLinks.open(currentWebView, targetUrl, opened -> {
+      if (opened || webView != currentWebView) return;
+      usePackagedAssets = false;
+      currentWebView.loadUrl(targetUrl);
+    });
+  }
+
+  private static String intentUrl(Intent intent) {
     Uri uri = intent == null ? null : intent.getData();
     if (uri == null) {
       uri = PushMessaging.conversationLink(intent);
     }
-    String targetUrl;
     if (uri != null && AppConfiguration.APP_SCHEME.equalsIgnoreCase(uri.getScheme())) {
-      targetUrl = AppConfiguration.mapDeepLink(uri);
-    } else if (uri != null && AppConfiguration.isTrustedNavigation(uri)) {
-      targetUrl = uri.toString();
-    } else {
-      targetUrl = AppConfiguration.START_URL;
+      return AppConfiguration.mapDeepLink(uri);
     }
-    webView.loadUrl(targetUrl);
+    if (uri != null && AppConfiguration.isTrustedNavigation(uri)) {
+      return uri.toString();
+    }
+    return null;
   }
 
   private boolean handleUrl(Uri uri) {

@@ -259,7 +259,7 @@ import {
 import { normalizeMessageBodyForDisplay } from "@/components/dashboard/message-text";
 
 import { MobileInlineActions } from "./mobile-inline-actions";
-import { useAndroidBackHandler } from "./use-android-back";
+import { useSystemBackHandler } from "./use-system-back";
 
 
 
@@ -1760,7 +1760,7 @@ export const MessageRow = memo(function MessageRow({
   // repaint after a shared load settles, so an authority change cannot render
   // the previous store for one commit while an effect catches up.
   const [, setAttachmentMediaRevision] = useState(0);
-  useAndroidBackHandler(Boolean(openAttachment || actionsOpen), () => {
+  useSystemBackHandler(Boolean(openAttachment || actionsOpen), () => {
     if (openAttachment) setOpenAttachment(null);
     else setActionsOpen(false);
     return true;
