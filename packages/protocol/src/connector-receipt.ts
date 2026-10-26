@@ -59,7 +59,9 @@ function receiptSubject(subject: string): string {
  * its first statement's action and outcome. */
 export function connectorReceiptPreview(preview: string): string | undefined {
   if (!preview.startsWith(CONNECTOR_RECEIPT_HEADING)) return undefined;
-  const first = preview.slice(CONNECTOR_RECEIPT_HEADING.length).trim().replace(/^- /u, "").split(/\s+- (?=\S)/u)[0]!;
+  // Start only at whitespace-run boundaries, avoiding repeated suffix scans when no separator follows.
+  const first = preview.slice(CONNECTOR_RECEIPT_HEADING.length).trim().replace(/^- /u, "")
+    .split(/(?<!\s)\s+- (?=\S)/u, 1)[0]!;
   const match = RECEIPT_LINE.exec(first);
   if (!match) return first;
   const status = match[2]!;
