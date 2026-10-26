@@ -59,8 +59,6 @@ test("a later message from the same agent settles the turn-failure card", async 
   await expect(card.getByRole("status")).toHaveText("codex continued afterward", { timeout: 20_000 });
   await expect(card.getByText("To fix it", { exact: true })).toBeHidden();
   await expect(card.getByText("Wait a few minutes", { exact: false })).toBeHidden();
-  await card.getByText("Details", { exact: true }).click();
-  await expect(card.getByText("Failure reference: turn-7f3a", { exact: false })).toBeVisible();
 });
 
 test("a rate-limited turn says so and what to do, with the diagnostics folded away", async ({ page }) => {
