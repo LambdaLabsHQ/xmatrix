@@ -1,4 +1,4 @@
-import { plainRecord, utf8ByteLength } from "@xmatrix/protocol";
+import { connectorReceiptBody, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
@@ -101,7 +101,7 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     commandId: `product:${manifest.id}-status:${input.messageId}`.slice(0, 200),
     messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200),
     channelId: input.channelId,
-    body: `App connector command status:\n${lines.map((line) => `- ${line}`).join("\n")}`,
+    body: connectorReceiptBody(lines),
     // Paid X work is already charged before I/O. Its receipt must remain
     // publishable when that call used the final credit or was refused.
     ...(manifest.id === "x" ? { messageKind: "xmatrix.system.x_receipt" } : {}),

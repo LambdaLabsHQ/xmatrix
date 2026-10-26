@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChannelSnapshot } from "@xmatrix/protocol";
+import { connectorReceiptPreview, type ChannelSnapshot } from "@xmatrix/protocol";
 import { channelPreviewModel } from "./inline-preview-markdown";
 import { InlineRowPreview } from "./inline-row-preview";
 
@@ -10,7 +10,8 @@ export function ChannelRowPreview({ channel }: { channel: ChannelSnapshot }) {
   if (model.kind === "plain") return <>{model.text}</>;
   return (
     <>
-      {model.label}: <InlineRowPreview text={model.body} />
+      {model.label}: <InlineRowPreview text={(channel.lastMessage?.from.kind === "app"
+        && connectorReceiptPreview(model.body)) || model.body} />
     </>
   );
 }

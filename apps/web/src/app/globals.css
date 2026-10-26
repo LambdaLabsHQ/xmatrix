@@ -9223,6 +9223,39 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 }
 
 /*
+ * What an App answered a connector command with (connector-receipt-card.tsx): the same slip of tinted paper as a
+ * page edit, one entry per statement. The outcome leads in its status ink beside what ran; what it returned
+ * follows in the body's own type, and a private result says where it went in quiet ink.
+ */
+.xmatrix-app .app-connector-receipt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+  max-width: 34rem;
+  border-radius: 10px;
+  padding: 9px 14px;
+  background: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+}
+.xmatrix-app .app-connector-receipt-head { display: flex; align-items: center; gap: 7px; font-size: 14px; line-height: 1.4; }
+.xmatrix-app .app-connector-receipt-head svg { width: 15px; height: 15px; flex: none; }
+.xmatrix-app .app-connector-receipt-entry[data-status="completed"] .app-connector-receipt-head svg { opacity: .7; }
+.xmatrix-app .app-connector-receipt-subject { font-weight: 650; overflow-wrap: anywhere; }
+.xmatrix-app .app-connector-receipt-status { font-size: 12.5px; font-weight: 600; }
+.xmatrix-app .app-connector-receipt-entry[data-status="completed"] .app-connector-receipt-status { color: var(--muted-foreground); }
+.xmatrix-app .app-connector-receipt-detail { margin-top: 3px; padding-left: 22px; overflow-wrap: anywhere; }
+.xmatrix-app .app-connector-receipt-private {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  padding-left: 22px;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
+.xmatrix-app .app-connector-receipt-private svg { width: 12px; height: 12px; flex: none; }
+
+/*
  * What an Agent message changed on pages (page-edit-cards.tsx): a slip of tinted paper under the message, as a
  * tool call's result. The page's name is the first and largest line; each changed line is marked as the page marks
  * what changed since it was read: a bar in the margin, new words underlined, words taken out struck through.
