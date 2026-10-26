@@ -143,8 +143,8 @@ test("workspace discovery and not-found errors distinguish connected scope from 
 test("project, cycle, document, label, dependency and attachment writes use typed destinations", async () => {
   for (const [action, target, fields, operation, resource, expected] of [
     ["update_project", ID, { name: "Project", statusId: OTHER }, "projectUpdate", "project", { name: "Project", statusId: OTHER }],
-    ["create_cycle", ID, { startsAt: "2026-11-01T00:00:00Z", endsAt: "2026-11-15T00:00:00Z" }, "cycleCreate", "cycle",
-      { startsAt: "2026-11-01T00:00:00Z", endsAt: "2026-11-15T00:00:00Z", teamId: ID }],
+    ["update_cycle", ID, { name: "Renamed cycle", endsAt: "2026-11-15T00:00:00Z" }, "cycleUpdate", "cycle",
+      { name: "Renamed cycle", endsAt: "2026-11-15T00:00:00Z" }],
     ["create_document", "*", { title: "Document", projectId: ID }, "documentCreate", "document", { title: "Document", projectId: ID }],
     ["create_label", "*", { name: "Workspace label" }, "issueLabelCreate", "issueLabel", { name: "Workspace label" }],
     ["create_relation", ID, { relatedIssueId: OTHER, type: "blocks" }, "issueRelationCreate", "issueRelation",
@@ -170,7 +170,7 @@ test("unknown fields, invalid values, ambiguous label edits and oversized input 
     ["update_issue", ID, { dueDate: "2026-02-30" }], ["update_issue", ID, { apiKey: "secret" }],
     ["update_issue", ID, { labelIds: [ID], addedLabelIds: [OTHER] }],
     ["update_issue", ID, { title: "" }], ["update_issue", ID, { description: "x".repeat(17_000) }],
-    ["create_cycle", "ENG", { startsAt: "2026-11-15T00:00:00Z", endsAt: "2026-11-01T00:00:00Z" }],
+    ["update_cycle", ID, { startsAt: "2026-11-15T00:00:00Z", endsAt: "2026-11-01T00:00:00Z" }],
     ["create_project", "ENG", { name: "P", startDate: "2026-12-01", targetDate: "2026-11-01" }],
     ["create_attachment", ID, { title: "bad", url: "https://user:password@example.com" }],
     ["search_issues", "*", { limit: 51 }], ["search_issues", "*", { filter: { query: "mutation" } }],

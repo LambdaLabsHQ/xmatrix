@@ -66,7 +66,7 @@ edits an existing comment.
 | Writes | Input |
 | --- | --- |
 | `create_project:<team>` / `update_project:<UUID>` | `name`, `description`, `content`, `statusId`, `priority`, `leadId`, `memberIds`, `startDate`, `targetDate`, `color`; update also accepts nonempty `teamIds` |
-| `create_cycle:<team>` / `update_cycle:<UUID>` | `name`, `description`, `startsAt`, `endsAt`, `completedAt`; creation requires ordered ISO timestamps |
+| `update_cycle:<UUID>` | `name`, `description`, `startsAt`, `endsAt`, `completedAt`; explicit date pairs must be ordered ISO timestamps |
 | `create_label:<team or *>` / `update_label:<UUID>` | `name`, `description`, `color` (`#rrggbb`), `parentId`, `isGroup`; `*` creates a workspace label |
 | `create_document:*` / `update_document:<UUID>` | `title`, `content`, `projectId`, `issueId`, `cycleId`, `teamId`, `parentDocumentId` |
 | `create_milestone:<project UUID>` / `update_milestone:<UUID>` | `name`, `description`, `targetDate` |
@@ -91,6 +91,16 @@ deletion. `delete_comment`, `delete_relation`, `delete_label`, `delete_document`
 `delete_milestone` and `delete_attachment` remove the named object. These lifecycle
 actions default to per-request approval; existing task/project writes keep the
 platform's normal default. Only a human Space admin changes Channel policies.
+
+## Cycle creation
+
+Linear has retired its `cycleCreate` mutation with the explicit deprecation
+reason "Cycle creation is not supported." The connector therefore does not
+advertise or call it. Enable and schedule cycles in Linear Team Settings;
+Linear automatically creates them. Use `list_cycles`, `read_cycle`,
+`update_cycle`, and task `cycleId` assignment with those existing cycles. A team
+with cycles disabled returns an empty list; this is not a failed connection.
+See [Linear cycles](https://linear.app/docs/use-cycles).
 
 ## Events and acceptance
 
