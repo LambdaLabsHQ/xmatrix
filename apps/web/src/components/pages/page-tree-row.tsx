@@ -57,18 +57,22 @@ function useLongPress(onLongPress: (() => void) | undefined) {
   };
 }
 
-export function PageTreeRow({ depth, selected, open, onToggle, expandHidden, onLongPress, children }: {
+export function PageTreeRow({ depth, selected, open, onToggle, expandHidden, onLongPress, pageId, drop, dragging, children }: {
   depth: number; selected: boolean; open: boolean; onToggle: () => void;
   expandHidden?: boolean;
   /** Opens the row's actions; only a touch long-presses. */
   onLongPress?: () => void;
+  pageId?: string;
+  drop?: "above" | "below" | null;
+  dragging?: boolean;
   children: ReactNode;
 }) {
   const press = useLongPress(onLongPress);
   return (
     <div className={`app-page-row app-list-row group flex min-h-8 items-center gap-1${selected
       ? " app-page-row-selected font-semibold" : ""}`}
-      style={{ "--page-depth": depth } as CSSProperties} {...press}>
+      style={{ "--page-depth": depth } as CSSProperties} {...press}
+      data-page-id={pageId} data-page-drop={drop || undefined} data-page-dragging={dragging ? "" : undefined}>
       <button type="button" aria-label={open ? "Collapse" : "Expand"}
         className={`flex size-5 shrink-0 items-center justify-center text-muted-foreground ${expandHidden ? "invisible" : ""}`}
         onClick={onToggle}>

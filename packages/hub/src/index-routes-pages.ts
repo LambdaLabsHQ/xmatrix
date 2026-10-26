@@ -637,7 +637,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     const authUser = await requireAuth(c.req.raw, c.env);
     if (typeof body.title === "string") await renamePage(c.env, c.req.param("spaceId"), c.req.param("pageId"), authUser, body.title);
     const structural = ["parentPageId", "afterPageId", "accessMode", "agentSuggestOnly", "access"]
-      .some((field) => body[field] !== undefined);
+      .some((field) => body[field] !== undefined) || typeof body.beforePageId === "string";
     if (!structural) {
       return repository(c.env).read({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
         pageId: c.req.param("pageId"), principal: runPrincipalOf(authUser) });
@@ -647,6 +647,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       principal: runPrincipalOf(authUser),
       ...(body.parentPageId !== undefined ? { parentPageId: body.parentPageId as string | null } : {}),
       ...(body.afterPageId !== undefined ? { afterPageId: body.afterPageId as string | null } : {}),
+      ...(typeof body.beforePageId === "string" ? { beforePageId: body.beforePageId } : {}),
       ...(body.accessMode !== undefined ? { accessMode: body.accessMode as "open" | "restricted" } : {}),
       ...(typeof body.agentSuggestOnly === "boolean" ? { agentSuggestOnly: body.agentSuggestOnly } : {}),
       ...(Array.isArray(body.access) ? { access: body.access as Array<{ userId: string; access: "read" | "edit" }> } : {}),

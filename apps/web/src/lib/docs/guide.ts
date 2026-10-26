@@ -48,7 +48,9 @@ function guideHref(file: string): string {
 /** A file opens with `---`, `title: "…"`, `description: "…"`, `---`; GitHub draws that as a table. */
 const FRONT_MATTER = /^---\ntitle: "([^"\n]+)"\ndescription: "([^"\n]+)"\n---\n+/u;
 
-export const guidePages: GuidePage[] = sources.map(([file, source]) => {
+export const guidePages: GuidePage[] = sources.map(([file, raw]) => {
+  // A Windows checkout rewrites the guide to CRLF; the pages are authored with LF.
+  const source = raw.replaceAll("\r\n", "\n");
   const frontMatter = FRONT_MATTER.exec(source);
   if (!frontMatter) throw new Error(`docs/guide/${file}.md needs a front matter title and description`);
   const markdown = source.slice(frontMatter[0].length);

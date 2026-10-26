@@ -75,6 +75,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't load your Spaces",
   "Couldn't load your workspace",
   "Couldn't move this Space to pages",
+  "Couldn't move this page",
   "Couldn't name this machine",
   "Couldn't open the thread",
   "Couldn't open this channel link",

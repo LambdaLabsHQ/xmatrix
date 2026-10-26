@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, utf8ByteLength } from "@xmatrix/protocol";
+import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, utf8ByteLength } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import { spaceBilling } from "@xmatrix/billing";
 import { readsOnly } from "./space-roles.js";
@@ -176,17 +176,13 @@ function iso(value: Date | string): string {
 
 /** Between two sibling positions (either may be absent), a key that sorts strictly between them. */
 export function pagePositionBetween(before: string | null, after: string | null): string {
-  const digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  const lo = before ?? "";
-  const hi = after ?? "";
-  if (hi && lo >= hi) throw new PageControlError("invalid_page_position", 400, "positions are out of order");
-  let result = "";
-  for (let i = 0; ; i++) {
-    const a = i < lo.length ? digits.indexOf(lo[i]!) : 0;
-    const b = hi && i < hi.length ? digits.indexOf(hi[i]!) : digits.length;
-    if (b - a > 1) return result + digits[Math.floor((a + b) / 2)]!;
-    result += digits[a]!;
-    if (result.length >= 99) throw new PageControlError("page_position_exhausted", 409);
+  try {
+    return positionBetween(before, after);
+  } catch (error) {
+    if (error instanceof PagePositionError) {
+      throw new PageControlError(error.code, error.code === "invalid_page_position" ? 400 : 409, error.message);
+    }
+    throw error;
   }
 }
 
@@ -729,14 +725,18 @@ export class PostgresPageRepository {
     return Number(rows[0]?.count ?? 0);
   }
 
-  private async positionAfter(tx: DatabaseTransaction, spaceId: string, parentPageId: string | null,
-    afterPageId: string | null): Promise<string> {
-    const siblings = await tx.query<QueryResultRow & { page_id: string; position: string }>({
+  private async siblingPositions(tx: DatabaseTransaction, spaceId: string, parentPageId: string | null) {
+    return tx.query<QueryResultRow & { page_id: string; position: string }>({
       name: "page_siblings_v1",
       text: `SELECT page_id, position FROM data.pages WHERE space_id=$1
         AND parent_page_id IS NOT DISTINCT FROM $2 ORDER BY position, page_id LIMIT ${MAX_PAGES}`,
       values: [spaceId, parentPageId], maxRows: MAX_PAGES,
     });
+  }
+
+  private async positionAfter(tx: DatabaseTransaction, spaceId: string, parentPageId: string | null,
+    afterPageId: string | null): Promise<string> {
+    const siblings = await this.siblingPositions(tx, spaceId, parentPageId);
     if (afterPageId === null) {
       const last = siblings.at(-1);
       return pagePositionBetween(last?.position ?? null, null);
@@ -744,6 +744,16 @@ export class PostgresPageRepository {
     const index = siblings.findIndex((row) => row.page_id === afterPageId);
     if (index < 0) throw new PageControlError("page_not_found", 404, "afterPageId is not a sibling");
     return pagePositionBetween(siblings[index]!.position, siblings[index + 1]?.position ?? null);
+  }
+
+  /** Immediately before `beforePageId`, which must already be a sibling of the page's new parent. */
+  private async positionBefore(tx: DatabaseTransaction, spaceId: string, parentPageId: string | null,
+    beforePageId: string): Promise<string> {
+    const siblings = await this.siblingPositions(tx, spaceId, parentPageId);
+    const index = siblings.findIndex((row) => row.page_id === beforePageId);
+    if (index < 0) throw new PageControlError("page_not_found", 404, "beforePageId is not a sibling");
+    const previous = index > 0 ? siblings[index - 1]!.position : null;
+    return pagePositionBetween(previous, siblings[index]!.position);
   }
 
   private async insertRevision(tx: DatabaseTransaction, spaceId: string, pageId: string, revision: number,
@@ -1213,7 +1223,7 @@ export class PostgresPageRepository {
   }
 
   async update(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal;
-    parentPageId?: string | null; afterPageId?: string | null;
+    parentPageId?: string | null; afterPageId?: string | null; beforePageId?: string;
     accessMode?: "open" | "restricted"; agentSuggestOnly?: boolean;
     access?: Array<{ userId: string; access: "read" | "edit" }> }): Promise<{ page: PageSummary }> {
     const spaceId = bounded(input.spaceId, "spaceId");
@@ -1225,16 +1235,21 @@ export class PostgresPageRepository {
       const now = new Date().toISOString();
       let parent = row.parent_page_id;
       let position = row.position;
-      if (input.parentPageId !== undefined || input.afterPageId !== undefined) {
+      if (input.beforePageId !== undefined && input.afterPageId !== undefined) {
+        throw new PageControlError("invalid_request", 400, "a page is placed before or after one sibling");
+      }
+      if (input.parentPageId !== undefined || input.afterPageId !== undefined || input.beforePageId !== undefined) {
         parent = input.parentPageId === undefined ? row.parent_page_id
           : input.parentPageId === null ? null : bounded(input.parentPageId, "parentPageId");
         if (parent) {
           await this.page(tx, spaceId, actor, parent, "edit");
           await this.rejectCycle(tx, spaceId, pageId, parent);
         } else if (actor.role !== "owner" && actor.role !== "admin") {
-          throw new PageControlError("page_root_admin_only", 403);
+          throw new PageControlError("page_root_admin_only", 403, "Only Space owners and admins move top-level pages");
         }
-        position = await this.positionAfter(tx, spaceId, parent, input.afterPageId ?? null);
+        position = input.beforePageId !== undefined
+          ? await this.positionBefore(tx, spaceId, parent, bounded(input.beforePageId, "beforePageId"))
+          : await this.positionAfter(tx, spaceId, parent, input.afterPageId ?? null);
       }
       const admin = actor.role === "owner" || actor.role === "admin";
       if ((input.accessMode !== undefined || input.access !== undefined) && !admin) {
