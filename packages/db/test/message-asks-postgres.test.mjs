@@ -83,6 +83,16 @@ integration("unaddressed publications require one current author choice and neve
       assert.equal(Number(author.status === "fulfilled") + Number(jev.status === "fulfilled" && jev.value.claimed), 1);
       assert.equal(decision.chosen_harness, decision.chosen_by === "author" ? "codex" : "claude");
     });
+    await t.test("an attachment without a caption can be asked explicitly, while an empty publication has no action", async () => {
+      for (const id of ["attachment", "empty"]) await channel(id, { text: "" });
+      await f.run(`UPDATE data.messages SET attachments_json='[{"attachmentId":"photo"}]' WHERE message_id='attachment'`);
+      await asks.observe(request("attachment", { body: "" }));
+      await asks.observe(request("empty", { body: "" }));
+      assert.equal((await read("attachment"))[0].canAsk, true);
+      assert.deepEqual(await read("empty"), []);
+      await pick("attachment", "codex", { body: "" });
+      assert.equal(await authored("attachment"), true);
+    });
     await t.test("a failed first-message reading can be chosen explicitly and remains recoverable even when sent long ago", async () => {
       await channel("failed", { sequence: 1, metadata: { autoName: true } });
       await choices.open({ requestId: "failed-open", channelId: "failed", messageId: "failed", authorUserId: "owner" });

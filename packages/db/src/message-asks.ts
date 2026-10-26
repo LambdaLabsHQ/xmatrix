@@ -11,7 +11,7 @@ import type { QueryResultRow } from "pg";
  * never becomes a new launch. In particular this does not resume stopped Agents. */
 function messageCanOfferAsk(body: string): boolean {
   const plan = parseMessageInteraction(body);
-  return !!body.trim() && !plan.refused && !plan.stop && !plan.controls.length &&
+  return !plan.refused && !plan.stop && !plan.controls.length &&
     !plan.reborn.length && !plan.handoff.length && !plan.launches.length && !plan.mentions.length;
 }
 
@@ -62,11 +62,12 @@ export class PostgresMessageAskRepository {
         FROM data.messages m JOIN data.channels c USING (space_id,channel_id)
         WHERE m.space_id=$1 AND m.channel_id=$2 AND m.message_id=$3 AND m.author_kind='user' AND m.author_id=$4
           AND m.message_kind='xmatrix.message.text' AND m.body_hash=$5
+          AND ($6::boolean OR COALESCE(jsonb_array_length(m.attachments_json),0)>0)
           AND m.edited_at IS NULL AND m.recalled_at IS NULL AND m.deleted_at IS NULL
           AND m.sent_at>clock_timestamp()-interval '1 minute'
           AND NOT (${RECEIVER_SQL}) AND NOT (${DECISION_OWNS_SQL})
         ON CONFLICT (channel_id,message_id) DO NOTHING`,
-      values: [this.placement.spaceId, input.channelId, input.messageId, input.actorUserId, hash], maxRows: 0,
+      values: [this.placement.spaceId, input.channelId, input.messageId, input.actorUserId, hash, !!input.body.trim()], maxRows: 0,
     }));
   }
 

@@ -96,7 +96,7 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
   app.post("/api/channels/:channelId/messages/:messageId/launch-choice", (c) => jsonErrors(c, async () => {
     const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
     const input = await c.req.json().catch(() => null) as { body?: unknown; harness?: unknown; shown?: unknown; ask?: unknown } | null;
-    if (!input || typeof input.body !== "string" || !input.body.trim() || input.body.length > 200_000 ||
+    if (!input || typeof input.body !== "string" || (!input.body.trim() && input.ask !== true) || input.body.length > 200_000 ||
         (input.shown !== undefined && (input.shown !== true || input.harness !== undefined)) ||
         (input.ask !== undefined && (input.ask !== true || input.shown !== undefined || typeof input.harness !== "string")) ||
         (input.harness !== undefined && (typeof input.harness !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(input.harness)))) {
