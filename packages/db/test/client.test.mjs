@@ -12,6 +12,9 @@ import {
   DatabaseRowLimitError,
   SpacePlacementHints,
   PostgresAccountDeletionRepository,
+  readRegistrationQuotaState,
+  readOwnerRegistrationQuotaState,
+  registrationQuotaKey,
 } from "../dist/index.js";
 
 function fakeFactory(options = {}) {
@@ -414,7 +417,7 @@ test("lost wire responses discard the checkout without queuing rollback or anoth
  */
 function retryPool(failOn, failures, fence = { __xmatrix_fence_shard_id: "shard-0",
   __xmatrix_fence_placement_epoch: 2, __xmatrix_fence_state: "active", __xmatrix_fence_target_shard_id: null },
-checkoutFailures = []) {
+checkoutFailures = [], readRows) {
   const clients = [];
   const checkouts = [];
   let current = null;
@@ -437,7 +440,8 @@ checkoutFailures = []) {
             if (failures[index] && failOn.test(text)) throw failures[index];
             const row = text.includes("__xmatrix_fence_shard_id")
               ? { ...fence, __xmatrix_read_row: true, id: index } : { id: index };
-            return { rows: [row], rowCount: 1 };
+            const rows = readRows ?? [row];
+            return { rows, rowCount: rows.length };
           },
           release(destroy) {
             client.releases.push(destroy);
@@ -455,6 +459,42 @@ checkoutFailures = []) {
 
 const singleRead = { requestId: "single-timeout", operation: "read", statement: "single_read" };
 const readOne = (transaction) => transaction.query({ name: "read_v1", text: "SELECT one", maxRows: 1 });
+
+// PostgreSQL quota tests own pool selection and freshness. These protect the
+// callers' lost-response recovery, which generic client tests cannot select.
+for (const ownerRead of [false, true]) {
+  const key = { ownerUserId: "owner", machineId: "machine", harness: "codex" };
+  const read = database => ownerRead
+    ? readOwnerRegistrationQuotaState(database, key.ownerUserId, "quota-recovery")
+    : readRegistrationQuotaState(database, [key], "quota-recovery");
+  const label = ownerRead ? "owner" : "batch";
+  test(`${label} registration quotas recover a lost read without BEGIN or COMMIT`, async () => {
+    const observedAt = new Date(Date.now() - 1000).toISOString();
+    const fake = retryPool(/registration_quota_observations/u, [new Error("Query read timeout")],
+      undefined, [], [{ owner_user_id: key.ownerUserId, machine_id: key.machineId, harness: key.harness,
+        observed_at: observedAt, expires_at: new Date(Date.now() + 60_000).toISOString(),
+        source: "daemon", remaining: 60, windows_json: [] }]);
+    const database = createAuthorityDatabase({ connectionString: "postgres://example.invalid/xmatrix",
+      shardId: "shard-0", poolFactory: fake.factory, connectivityBreaker: new ConnectivityBreaker("shard-0") });
+    const result = await read(database);
+    const usage = ownerRead ? result[0].usage : result.get(registrationQuotaKey(key));
+    assert.equal(usage.quotaObservedAt, observedAt);
+    assert.equal(usage.quotaUsages[0].percent, 40);
+    assert.equal(fake.clients.length, 2);
+    assert.deepEqual(fake.clients.map(client => client.releases), [[true], [false]]);
+    assert.deepEqual(fake.clients.map(client => client.queries.length), [1, 1],
+      "only the read is sent on either checkout");
+  });
+  test(`${label} registration quotas surface a second loss and destroy both checkouts`, async () => {
+    const second = new Error("Query read timeout");
+    const fake = retryPool(/registration_quota_observations/u, [new Error("Query read timeout"), second]);
+    const database = createAuthorityDatabase({ connectionString: "postgres://example.invalid/xmatrix",
+      shardId: "shard-0", poolFactory: fake.factory, connectivityBreaker: new ConnectivityBreaker("shard-0") });
+    await assert.rejects(read(database), error => error === second);
+    assert.equal(fake.clients.length, 2, "no third attempt");
+    assert.deepEqual(fake.clients.map(client => client.releases), [[true], [true]]);
+  });
+}
 
 test("a single read recovers its initial transport checkout failure before entering the callback", async () => {
   for (const placement of [undefined, context.placement]) {

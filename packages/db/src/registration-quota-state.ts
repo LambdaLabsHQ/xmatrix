@@ -49,7 +49,7 @@ export async function readRegistrationQuotaState(database: AuthorityDatabase,
   const unique = [...new Map(keys.map(key => [registrationQuotaKey(key), key])).values()];
   if (unique.length > 512) throw new Error("Registration quota selector limit exceeded");
   if (!unique.length) return new Map();
-  const rows = await database.transaction({ requestId, operation: "registration.quota.read" }, tx =>
+  const rows = await database.transaction({ requestId, operation: "registration.quota.read", statement: "single_read" }, tx =>
     tx.query<QueryResultRow>({ name: "registration_quota_state_v4", text: `SELECT ${REGISTRATION_QUOTA_STATE_COLUMNS}
       FROM jsonb_to_recordset($1::jsonb) requested("ownerUserId" text,"machineId" text,harness text)
       JOIN control.agent_registration_environments e ON e.owner_user_id=requested."ownerUserId"
@@ -67,7 +67,7 @@ export async function readRegistrationQuotaState(database: AuthorityDatabase,
  */
 export async function readOwnerRegistrationQuotaState(database: AuthorityDatabase, ownerUserId: string,
   requestId: string): Promise<RegistrationQuotaReading[]> {
-  const rows = await database.transaction({ requestId, operation: "registration.quota.read-owner" }, tx =>
+  const rows = await database.transaction({ requestId, operation: "registration.quota.read-owner", statement: "single_read" }, tx =>
     tx.query<QueryResultRow>({ name: "registration_quota_owner_state_v1", text: `SELECT ${REGISTRATION_QUOTA_STATE_COLUMNS}
       FROM control.agent_registration_environments e ${REGISTRATION_QUOTA_STATE_JOIN}
       WHERE e.owner_user_id=$1`, values: [ownerUserId], maxRows: 512 }));
