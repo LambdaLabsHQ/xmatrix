@@ -58,7 +58,7 @@ use the connector registry. The later sections define provider-specific bounds.
 | --- | --- | --- |
 | Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and default policies are shared with clients |
 | Executor | `ConnectorProvider` and `platform-providers.ts` | Provider-owned parse/prepare/execute, authenticated Check and bounded outbound HTTP |
-| Commands | `connector-commands.ts`, `connectors/usage.ts` | Channel commands publish their receipts; `xmatrix call` returns a read action's parameters/result only to its authenticated calling Run. Discover actions with `xmatrix connector list` |
+| Commands | `connector-commands.ts`, `connectors/usage.ts` | Channel commands publish their receipts; `xmatrix call --public` records normal read results; `--private` keeps the invocation visible and masks only the Channel/history result, returning the original to its caller. Discover actions with `xmatrix connector list` |
 | Policy and approval | Scoped connector repositories and approval routes | Channel allow/ask/disallow, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
 | Credentials | Encrypted connector credential repository | Per-Space provider grants; company app secrets remain Hub-held, and OAuth refresh failures do not become wider grants |
 | Inbound | Generic event ingress plus provider-specific native routes | Authenticated deliveries normalize to typed source/event identities and route through explicit subscriptions |
@@ -486,34 +486,44 @@ matching messages (id, received time, sender, subject, snippet) and
 reduced to text, truncated at 8,000 characters) and every distinct http(s)
 link the message contains, fenced as untrusted content.
 
-Gmail `search` and `read` support both delivery modes. A Channel command's
-receipt carries the result and execution history keeps its bounded excerpt;
-everyone in the Channel sees that content. `xmatrix call "@gmail:search:* <query>"`
-and `xmatrix call "@gmail:read:<message id>"` instead return it only to the
-authenticated calling Run. The same distinction applies to all declared connector
-read actions with an installed executor. Parameters go in the request body,
-outside messages; results go in that request's response, without a Channel
-receipt, execution-history excerpt, stored result reference or raw error report.
-The caller controls its local stdout and any subsequent use of the result.
+Connector reads have normal and private result modes. Use
+`xmatrix call "@gmail:search:* <query>" --public` for a normal result, or
+`xmatrix call "@gmail:read:<message id>" --private` for a private result.
+Both commit the invocation as the authenticated Agent, retain its parameters,
+record execution status and reply to that message with the connector receipt.
+Normal results and bounded execution excerpts are visible normally. Private
+results, URLs and failure details are replaced with a fixed `[hidden — private
+call]` mask **before** either Channel publication or execution-history writes.
+There is no hidden original in message metadata, attachments or the execution
+record. The original result or provider error returns directly to the caller.
+Synchronous receipts do not wake the caller a second time.
 
-`POST /api/connectors/call` accepts only `{ command }`. The live Run token owns
-the Channel, Instance and owner identity; callers cannot select another Run or
-Channel. The existing Channel connection, action catalog, policy and provider
-ownership checks still apply. Run/registration/Channel access and live policy
-are checked before execution and again before returning the result. `ask` and
-`disallow` refuse a private read; approval, policy changes, subscriptions and
-writes retain their existing Channel path. There is no asynchronous result to
-poll or replay, and aggregate upstream metering contains only existing IDs/enums.
-Requests are bounded to 32 KiB and results to 256 KiB, with `private, no-store`
-responses on success and failure. No provider token is exported.
+`POST /api/connectors/call` accepts `{ command, resultVisibility: "public" |
+"private" }`. The Run token owns the Channel, Instance and author; the owning
+message authority checks its exact Run proof when committing the invocation.
+The existing action catalog, connection, mailbox ownership and Channel policy
+remain authoritative. Run/registration/Channel access and policy are rechecked
+before provider execution and before returning an in-flight result. `ask` and
+`disallow` refuse the call; writes, subscriptions and approval remain on the
+existing Channel command path. Requests are bounded to 32 KiB and original
+results to 256 KiB, with `private, no-store` HTTP responses in both modes.
+Aggregate metering contains only the existing IDs and enums.
 
-The Hub does not extract codes or links or automatically create secrets. A caller
-that needs a private credential can consume the response locally, including
-creating a fresh secret through the existing `secret set --value-stdin` boundary;
-an existing alias cannot be overwritten. Manual `secret-add` and `secret exec`
-remain available. Search snippets, headers and links may contain credentials,
-so neither search nor read should be sent as a Channel command for such work.
-See the [operations guidance](../operations/app-connectors.md#qa-login-codes).
+Visibility selection is explicit in the CLI: a bare call, or both flags, fails
+before I/O rather than silently publishing an old private script's parameters.
+The original 1.9.1-beta.1 API request without a visibility is now rejected with
+HTTP 400 before publication. Its callers must choose a mode explicitly; there
+is no fallback that silently makes previously private invocation parameters
+public. Malformed modes are rejected without coercion.
+
+The Hub does not extract codes or automatically create Secrets. An authorized
+caller can consume a private result locally or save it under a fresh alias using
+`secret set --value-stdin`; existing aliases remain admin-managed. **Invocation
+parameters are public in both current modes**, so never put credentials in the
+query or target. Mail snippets, headers, bodies and links may contain credentials;
+use a private result for those reads. `xmatrix send` continues to run the normal
+public Channel command path. See the
+[operations guidance](../operations/app-connectors.md#qa-login-codes).
 
 Inline
 `multipart/mixed` body segments retain their order, choosing plain text or

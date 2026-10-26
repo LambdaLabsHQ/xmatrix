@@ -365,15 +365,19 @@ sample them: an absent point alone never proves a stage was not entered.
 No pass, target, owner, registry or exception identity is recorded. A deferred
 pass is not counted as completed; transport failures remain Sentry errors.
 
-Use `xmatrix call "@gmail:search:* <Gmail query>"` (or one connected mailbox
-address instead of `*`) and `xmatrix call "@gmail:read:<message id>"` for a
-caller-only result. The command's parameters and response stay outside Channel
-messages and execution-history excerpts. `--json` returns the result object.
-The same private call works for other installed connector read actions.
+Use `xmatrix call "@gmail:search:* <Gmail query>" --private` (or one connected
+mailbox address instead of `*`) and
+`xmatrix call "@gmail:read:<message id>" --private` when result values must stay caller-only. Both normal (`--public`)
+and private calls retain their invocation, parameters and status in the Channel.
+Private receipts and execution history contain a fixed mask rather than the
+original result, links or failure details. The caller receives the unchanged
+original; `--json` returns its result object. Never put a credential in visible
+invocation parameters. A mode must be chosen explicitly; old bare CLI calls
+fail before publishing anything.
 
-Sending a search/read command with `xmatrix send` instead publishes its result
-to the Channel receipt and a bounded execution-history excerpt. Everyone who
-can read that Channel can then read the mail.
+The same modes work for other installed connector read actions. Sending a
+search/read command with `xmatrix send` keeps its normal public result receipt
+and execution-history excerpt.
 
 Gmail calls go through Composio on the shared project key, which the operator
 pays for. Each Composio call (proxied Gmail reads and sends, Connect links,
@@ -382,16 +386,18 @@ mail, addresses or account ids; see [usage cost metering](usage-cost-metering.md
 
 ### QA login codes
 
-Use the private `xmatrix call` path for authorized mail-code retrieval. Search
+Use `xmatrix call --private` for authorized mail-code retrieval. Search
 subjects/snippets and read bodies/links can all contain credentials. Capture the
 private response in the consuming process without printing it, adding it to
 arguments, or recording it in traces, screenshots, HTML or request logs. The
 Hub returns the content to the caller; it does not extract a code or link and
 does not automatically write a Secret. A caller may save an authorized value
 to a fresh alias through `secret set --value-stdin`. Policy and mailbox ownership
-are unchanged; an `ask` or `disallow` action is refused by the private path.
+are unchanged; an `ask` or `disallow` action is refused. Invocation parameters
+remain public; result values and errors are masked before Channel/history writes.
 
-Do not send credential searches or reads as Channel messages. A closed Channel
+Do not put credentials in invocation parameters or publish credential results
+with a normal Channel command. A closed Channel
 or saving a published receipt afterwards does not undo its disclosure. Do not
 restore connector MCP or substitute a runtime Gmail plugin. Record fresh mail
 delivery and automatic login as verified only after exercising that actual flow.
@@ -413,8 +419,9 @@ choose broader secret access. Existing-secret replacement/deletion remains a
 Space admin action; use a fresh alias for a new one-time-code attempt.
 
 ### Agent commands
-- `xmatrix call "<connector command>"` returns a read result only to the live
-  requesting Run, scoped to its own Channel and existing action policy. Writes
+- `xmatrix call "<connector command>" --public|--private` records the invocation
+  in the Run's Channel under its existing policy. Public results are normal;
+  private result values return only to that caller and are masked in receipts. Writes
   and actions requiring approval use `xmatrix send`; their visible receipt
   replies to the command message.
 - The launch prompt names the Space's connected apps. `xmatrix connector list`
