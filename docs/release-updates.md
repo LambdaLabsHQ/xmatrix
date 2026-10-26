@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Billing reads recover a lost database response
+
+Billing summaries, including the plan check used by search reranking and Jev
+admission, now use independent single reads with the existing Space placement
+fence and membership check. A lost response gets one fresh connection attempt;
+exhausted recovery still surfaces the database failure. The read no longer
+waits for an unnecessary BEGIN or COMMIT. Billing mutations keep their existing
+transaction and reconciliation behavior. This repairs HUB-AM's recovery gap,
+without claiming the underlying transport stall is diagnosed. No migration is
+needed; recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Workspace refresh rejections identify the receiving build
 
 Rejected workspace refreshes retain a fixed validation stage, a known resource

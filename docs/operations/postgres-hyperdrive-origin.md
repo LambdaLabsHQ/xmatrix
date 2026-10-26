@@ -47,6 +47,13 @@ operator) must bound its own queries.
 
 ## Session features under Hyperdrive
 
+Billing summaries use the client's independent `single_read` statements on one
+request session, including membership and placement checks. Each lost response
+may recover once on a fresh checkout; repeated loss still fails the request.
+These reads retain READ COMMITTED's per-statement snapshots without a read-only
+BEGIN/COMMIT. Provider billing mutations still summarize inside their owning
+transaction and retain their existing commit reconciliation.
+
 Unclassified runtime socket database failures report the client's bounded
 failure evidence under `runtime.database`: operation, shard, statement mode,
 phase, named query, SQLSTATE and elapsed time. The Sentry issue reader exposes
