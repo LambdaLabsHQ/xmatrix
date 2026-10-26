@@ -24,6 +24,13 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Compact message previews resolve Page and Channel references through the
+reader's Space catalog; unavailable or truncated locators use generic labels.
+Message chips and document prose also avoid raw-ID fallbacks. Web lint rejects
+direct Page IDs in visible JSX and DOM text, while shared renderers handle
+dynamic message contents. Editable source and routing retain their identifiers.
+See [inline references](../design/pages-and-conversations.md).
+
 Repository launch candidates preload once on entering a Space and are shared
 by its composers without polling. GitHub connection changes and signed catalog
 events invalidate the affected Space's query and version its edge-cache key;

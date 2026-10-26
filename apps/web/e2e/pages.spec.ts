@@ -941,12 +941,14 @@ test("a page: reference in a page's text is a chip with the page's title that op
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
   const editor = browser.getByTestId("page-editor");
-  const chip = editor.getByTestId("page-reference-chip");
+  const chip = editor.getByTestId("page-reference-chip").filter({ hasText: "Launch plan" });
   await expect(chip).toHaveText("Launch plan › status");
-  // The id is hidden behind its chip; one in code, or to a page this reader cannot see, stays as typed.
-  await expect(editor.locator(".page-reference-source")).toBeHidden();
+  // Code remains editable source; an unavailable prose reference still hides its locator.
+  await expect(editor.locator(".page-reference-source")).toHaveCount(2);
+  await expect(editor.locator(".page-reference-source:visible")).toHaveCount(0);
   await expect(editor.locator("code")).toHaveText(`page:${planId}`);
-  await expect(editor).toContainText(`See page:${unseenId} too.`);
+  await expect(editor.getByTestId("page-reference-chip").filter({ hasText: /^Page$/u })).toHaveCount(1);
+  await expect.poll(() => editor.innerText()).not.toContain(unseenId);
 
   // `[[` on the page completes a page as in the composer, and the pick is a chip again.
   await editor.getByText("too.").click();
@@ -1410,6 +1412,29 @@ test("a page's conversations sit beside what they are about, and one opens there
   await expect(open).toBeHidden();
   await expect(cards).toHaveCount(2);
   await expect(browser).toHaveURL(/page=p-relay$/u);
+});
+
+test("a co-writing margin card displays a Page title instead of the system notice's locator", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const referencedId = "1d183157-be5d-4d07-9c31-203fe5688245";
+  const bodyPreview = `Co-writing page:${referencedId} live.`;
+  const recent = new Date().toISOString();
+  await stubPages(browser, [page("p-relay", null, "Relay", "V"),
+    page(referencedId, null, "巴厘岛旅居计划", "W")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+    links: [{ linkId: "l-writing", conversationId: E2E_CHANNEL.id, pageId: "p-relay", blockId: "status", source: "manual",
+      createdAt: recent, lastSeenAt: recent }],
+    conversations: [{ conversationId: E2E_CHANNEL.id, name: "Co-writing › 巴厘岛旅居计划", activityAt: recent,
+      headSequence: 1, readSequence: 1, agents: [],
+      lastMessage: { from: { kind: "system", label: "xMatrix" }, bodyPreview, sentAt: recent } }],
+  });
+  await openLivePage(browser);
+  const card = browser.getByTestId("page-margin").getByTestId("page-margin-card");
+  await expect(card).toContainText("Co-writing 巴厘岛旅居计划 live.");
+  await expect(card).not.toContainText(referencedId);
+  // The preview is text inside the card's own button, with no nested reference buttons.
+  await expect(card.getByRole("button")).toHaveCount(0);
+  await browser.screenshot({ path: test.info().outputPath("co-writing-readable-page-reference.png") });
 });
 
 test("a page's conversation missing from the loaded list is read while its card is rested on, and opens beside the page", async ({ page: browser }) => {

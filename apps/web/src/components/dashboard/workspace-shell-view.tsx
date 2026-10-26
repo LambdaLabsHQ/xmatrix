@@ -638,8 +638,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   );
   const messageReferenceCatalog = useMemo<MessageReferenceCatalog>(() => ({
     channels: referenceChannels,
+    pages: pageTree.data,
     onOpenChannel: (channelId) => navigateToChannelRef.current(channelId),
-  }), [referenceChannels]);
+  }), [referenceChannels, pageTree.data]);
   const changeAppViewRef = useRef(changeAppView);
   changeAppViewRef.current = changeAppView;
   // The Machines the Machines view lists for this Space, scoped the same way, so

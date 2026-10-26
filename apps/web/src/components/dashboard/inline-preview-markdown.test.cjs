@@ -50,23 +50,31 @@ test("a conversation preview renders inline marks and leaves the rest as text", 
   assert.deepEqual(inlinePreviewSegments("***both***"), [{ mark: "strong", text: "both" }]);
 });
 
-function renderPreview(channel) {
+function renderPreview(channel, catalog = null) {
+  const modules = new Map();
   function loadComponent(file) {
-    const compiled = ts.transpileModule(fs.readFileSync(path.join(__dirname, file), "utf8"), {
+    file = path.resolve(__dirname, file);
+    if (modules.has(file)) return modules.get(file);
+    const compiled = ts.transpileModule(fs.readFileSync(file, "utf8"), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
       fileName: file,
     }).outputText;
     const mod = { exports: {} };
     new Function("exports", "require", "module", compiled)(mod.exports, (id) => {
-      if (id === "./inline-preview-markdown") return loaded.exports;
-      if (id === "./inline-row-preview") return loadComponent("inline-row-preview.tsx");
+      if (id.startsWith(".")) {
+        const target = path.resolve(path.dirname(file), id);
+        return loadComponent(fs.existsSync(`${target}.ts`) ? `${target}.ts` : `${target}.tsx`);
+      }
       return require(id);
     }, mod);
+    modules.set(file, mod.exports);
     return mod.exports;
   }
   const { ChannelRowPreview } = loadComponent("channel-row-preview.tsx");
+  const { MessageReferenceCatalogProvider } = loadComponent("message-reference-catalog.tsx");
+  const { createElement } = require("react");
   return require("react-dom/server").renderToStaticMarkup(
-    require("react").createElement(ChannelRowPreview, { channel }),
+    createElement(MessageReferenceCatalogProvider, { catalog }, createElement(ChannelRowPreview, { channel })),
   );
 }
 
@@ -78,6 +86,28 @@ test("the row renders the author's text plain and the body's inline marks", () =
     },
   });
   assert.equal(html, "**claude:3**: 新进展： - <strong>新发现 (A 线)</strong>: <em>notes</em> <code>code</code> <s>old</s>");
+});
+
+// The screenshot's system message went through this compact renderer, bypassing message chips.
+// Test the actual rendered preview so raw IDs cannot leak via its Markdown marks or missing context.
+test("previews show current reference titles and never fall back to Page locators", () => {
+  const pageId = "1d183157-be5d-4d07-9c31-203fe5688245";
+  const channelId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const preview = (bodyPreview, catalog) => renderPreview({
+    lastMessage: { from: { label: "xMatrix" }, bodyPreview },
+  }, catalog);
+  const catalog = { pages: [{ pageId, title: "巴厘岛旅居计划" }], channels: [
+    { id: channelId, name: "Planning" },
+  ] };
+  assert.equal(preview(`Co-writing page:${pageId} live.`, catalog), "xMatrix: Co-writing 巴厘岛旅居计划 live.");
+  assert.equal(preview(`Co-writing page:${pageId} ended.`), "xMatrix: Co-writing Page ended.");
+  assert.equal(preview(`**page:${pageId}#plan (r4)** and \`channel:${channelId}\``, catalog),
+    "xMatrix: <strong>巴厘岛旅居计划 › Section (r4)</strong> and <code>Planning</code>");
+  assert.equal(preview(`page:${pageId} and channel:${channelId}`, { pages: [], channels: [] }), "xMatrix: Page and Channel");
+  assert.equal(preview(`\`page:${pageId.slice(0, 19)}...`), "xMatrix: `Page");
+  assert.equal(preview(`page:${pageId}`, { ...catalog, pages: [{ pageId, title: "**Renamed** <script>" }] }),
+    "xMatrix: **Renamed** &lt;script&gt;");
+  assert.equal(preview(`[page:${pageId}](https://example.test)`), "xMatrix: Page");
 });
 
 test("the preview line keeps the author in front of the body", () => {
