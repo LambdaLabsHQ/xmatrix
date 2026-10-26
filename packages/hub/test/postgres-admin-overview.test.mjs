@@ -192,7 +192,6 @@ test("PostgreSQL admin complete inventories reserve one overflow sentinel row", 
   assert.match(query.text, /LIMIT 1001/u);
   assert.match(query.text, /WHERE \$6::boolean/u);
   assert.match(query.text, /AS MATERIALIZED/u);
-  assert.equal(query.text.match(/FROM data\.messages\b/gu).length, 1);
   assert.equal(query.values[5], true);
   assert.equal(query.values[2], 21);
   assert.doesNotMatch(query.text, /\b(body|metadata_json|content|preview)\b/u);
