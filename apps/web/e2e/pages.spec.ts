@@ -1881,7 +1881,7 @@ test("beside a long page, the margin tells what it holds out of view, and only t
   const below = browser.getByTestId("page-offscreen-below");
   await expect(below).toBeInViewport();
   await expect(below).toContainText("1 conversation below");
-  await expect(below.locator(".page-margin-instance[data-status='busy']")).toHaveText("claude:2");
+  await expect(below).toContainText("claude:2 working");
   await expect(browser.getByTestId("page-offscreen-above")).toHaveCount(0);
   // It stands in the margin, on the cards' edges.
   const [edge, column] = [(await below.boundingBox())!, (await margin.boundingBox())!];
@@ -1894,6 +1894,82 @@ test("beside a long page, the margin tells what it holds out of view, and only t
   await expect(pill).toBeInViewport();
   await expect(below).toHaveCount(0);
   await expect(browser.getByTestId("page-offscreen-above")).toHaveCount(0);
+});
+
+// Protects navigation across a document: both directions, readable unread counts, position jumps and resolved filtering.
+// The existing single-writer case covers presence, but cannot detect a missing direction or a misplaced conversation mark.
+test("page conversation navigation shows both directions and jumps from its position rail", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const reviews = [
+    { id: "c-first", title: "First review", paragraph: 1, unread: 3 },
+    { id: "c-middle", title: "Middle review", paragraph: 30, unread: 0 },
+    { id: "c-later", title: "Later review", paragraph: 55, unread: 2 },
+    { id: "c-last", title: "Last review", paragraph: 60, unread: 0 },
+    { id: "c-resolved", title: "Finished review", paragraph: 5, unread: 0 },
+  ];
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  const { editor } = await openLongPage(browser, async (server) => {
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+      links: reviews.map((review) => {
+        const quote = `Background paragraph ${review.paragraph}.`;
+        return { linkId: `l-${review.id}`, conversationId: review.id, pageId: "p-relay", source: "discuss",
+          blockId: "status", createdAt: NOW, lastSeenAt: review.id === "c-resolved" ? NOW : recent,
+          resolvedAt: review.id === "c-resolved" ? NOW : null,
+          anchor: { quote, from: positionAt(server, quote, false), to: positionAt(server, quote, true) } };
+      }),
+      conversations: reviews.map((review) => ({ conversationId: review.id, name: review.title,
+        activityAt: review.id === "c-resolved" ? NOW : recent,
+        headSequence: 1 + review.unread, readSequence: 1, lastMessage: null, agents: [] })),
+    });
+  });
+  const article = browser.locator(".app-page-article");
+  const middle = editor.getByText("Background paragraph 30.", { exact: true });
+  await middle.scrollIntoViewIfNeeded();
+  const above = browser.getByTestId("page-offscreen-above");
+  const below = browser.getByTestId("page-offscreen-below");
+  await expect(above).toContainText("1 conversation above");
+  await expect(above).toContainText("3 unread");
+  await expect(below).toContainText("2 conversations below");
+  await expect(below).toContainText("2 unread");
+  await expect(above).toBeInViewport();
+  await expect(below).toBeInViewport();
+  const edgeBox = (await below.boundingBox())!;
+  const articleBox = (await article.boundingBox())!;
+  expect(edgeBox.y + edgeBox.height, "the whole lower navigation stays inside the scrollport").toBeLessThanOrEqual(articleBox.y + articleBox.height);
+  const style = await below.evaluate((node) => ({ height: node.getBoundingClientRect().height,
+    shadow: getComputedStyle(node).boxShadow, background: getComputedStyle(node).backgroundColor }));
+  expect(style).toEqual({ height: 32, shadow: "none", background: "rgba(0, 0, 0, 0)" });
+  const rail = browser.getByRole("navigation", { name: "Page positions" });
+  await expect(rail.getByRole("button")).toHaveCount(4);
+  const viewport = browser.getByTestId("page-scroll-viewport");
+  const start = await viewport.evaluate((node) => node.style.top);
+  await browser.screenshot({ path: test.info().outputPath("conversation-navigation-desktop.png") });
+
+  // The lower navigation goes to the nearest conversation, rather than the end of the document.
+  await below.click();
+  await expect(editor.getByText("Background paragraph 55.", { exact: true })).toBeInViewport();
+  await expect.poll(() => viewport.evaluate((node) => node.style.top)).not.toBe(start);
+  // Marks jump to their document anchor, even when the margin cards have been displaced.
+  await rail.getByRole("button", { name: "First review · 3 unread", exact: true }).click();
+  await expect(editor.getByText("Background paragraph 1.", { exact: true })).toBeInViewport();
+  await expect.poll(() => article.evaluate((node) => node.scrollTop)).toBeLessThan(500);
+
+  const all = browser.getByRole("button", { name: "All conversations, 5", exact: true });
+  await all.click();
+  const list = browser.getByTestId("page-conversations");
+  await expect(list.getByRole("button", { name: /Finished review/u })).toBeVisible();
+  await list.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(list.getByRole("button", { name: /Finished review/u })).toHaveCount(0);
+  await expect(list.getByRole("button", { name: /First review/u })).toBeVisible();
+  await list.getByRole("button", { name: "Resolved", exact: true }).click();
+  await expect(list.getByRole("button", { name: /Finished review/u })).toBeVisible();
+  await expect(list.getByRole("button", { name: /First review/u })).toHaveCount(0);
+  await browser.getByRole("button", { name: "Done", exact: true }).click();
+  await browser.setViewportSize({ width: 393, height: 852 });
+  await expect(all).toBeInViewport();
+  await all.click();
+  await expect(list).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("conversation-navigation-phone.png") });
 });
 
 test("on a long page, who works out of view shows at its edges, and what an Agent writes is highlighted as its own", async ({ page: browser }) => {

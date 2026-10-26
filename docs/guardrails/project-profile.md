@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Page conversation navigation uses quiet lines at both margin edges with explicit
+unread counts, a clickable position rail showing the current viewport, and a
+toolbar count opening the existing All / Open / Resolved conversation list.
+See [live documents](../design/pages-live-document.md#44-conversations-beside-the-page).
+
 Machine daemon commands and Run lifecycle/execution report mutations replay
 once in a fresh PostgreSQL session after transport loss before COMMIT. Wakes,
 route publication and notices remain outside that database-only boundary;

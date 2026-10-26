@@ -133,21 +133,28 @@ export function PageChangeMark({ top, away, label, testId, children }: {
 }
 
 /** A place on the page worth finding, drawn along its scrollbar (§3.2). */
-export interface PageScrollMark { key: string; fraction: number; kind: "person" | "discussion"; color?: string;
-  title: string }
+export interface PageScrollMark { key: string; fraction: number; top: number; kind: "person" | "discussion";
+  color?: string; unread?: number; title: string }
 
-/** Where others are and where discussions are, along the page's scrollbar. */
-export function PageScrollMarks({ marks }: { marks: PageScrollMark[] }) {
+/** The document's conversation distribution and current viewport, with a keyboard-accessible jump per mark. */
+export function PageScrollMarks({ marks, viewport, onJump }: { marks: PageScrollMark[];
+  viewport: { start: number; size: number }; onJump: (top: number) => void }) {
   if (marks.length === 0) return null;
   return (
-    <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-1.5" aria-hidden="true" data-testid="page-scroll-marks">
+    <nav className="absolute inset-y-8 right-0 z-10 w-4" aria-label="Page positions" data-testid="page-scroll-marks">
+      <span aria-hidden="true" className="absolute inset-y-0 right-1.5 w-px bg-foreground/10" />
+      <span aria-hidden="true" data-testid="page-scroll-viewport" className="page-scroll-viewport pointer-events-none absolute inset-x-0 rounded-sm"
+        style={{ top: `${Math.max(0, Math.min(1, viewport.start)) * 100}%`, height: `${Math.min(1, viewport.size) * 100}%` }} />
       {marks.map((mark) => (
-        <span key={mark.key} title={mark.title}
-          className={cn("absolute right-0 h-1 w-1.5 rounded-l-sm", mark.kind === "discussion" && "page-scroll-mark-discussion")}
-          style={{ top: `calc(${Math.min(1, Math.max(0, mark.fraction)) * 100}% - 2px)`,
-            ...(mark.kind === "person" && mark.color ? { backgroundColor: mark.color } : {}) }} />
+        <button type="button" key={mark.key} title={mark.title} aria-label={mark.title} onClick={() => onJump(mark.top)}
+          className="absolute right-0 flex h-4 w-4 -translate-y-1/2 items-center justify-end rounded-sm hover:bg-foreground/10 focus-visible:outline-2 focus-visible:outline-primary"
+          style={{ top: `clamp(8px, ${Math.min(1, Math.max(0, mark.fraction)) * 100}%, calc(100% - 8px))` }}>
+          <span className={cn("h-0.5 w-2 rounded-l-sm", mark.unread ? "bg-destructive"
+            : mark.kind === "discussion" && "page-scroll-mark-discussion")}
+            style={mark.kind === "person" && mark.color ? { backgroundColor: mark.color } : undefined} />
+        </button>
       ))}
-    </div>
+    </nav>
   );
 }
 
@@ -237,16 +244,27 @@ export function ConversationList({ conversations, blocks, onOpen, focusBlockId =
   /** Resolves an open discussion, for people who edit the page. */
   onResolve?: (linkId: string) => void;
 }) {
+  const [filter, setFilter] = useState<"all" | "open" | "resolved">("all");
+  const filtered = conversations.filter((item) => filter === "all" || (filter === "resolved" ? item.resolved : !item.resolved));
   const sections = [{ id: "", title: "This page" }, ...blocks.map((block) => ({ id: block.id, title: block.title }))];
   const ordered = focusBlockId === null ? sections
     : [...sections.filter((section) => section.id === focusBlockId), ...sections.filter((section) => section.id !== focusBlockId)];
-  const bySection = (blockId: string) => conversations.filter((conversation) => conversation.blockId === blockId)
+  const bySection = (blockId: string) => filtered.filter((conversation) => conversation.blockId === blockId)
     .sort((a, b) => Number(b.live) - Number(a.live) || Date.parse(b.activityAt) - Date.parse(a.activityAt));
   if (conversations.length === 0) {
     return <p className="text-sm text-muted-foreground">No conversations are about this page yet. Select text or hover a heading and choose Discuss.</p>;
   }
   return (
     <div className="space-y-4" data-testid="page-conversations">
+      <div className="flex gap-1" role="group" aria-label="Filter conversations">
+        {(["all", "open", "resolved"] as const).map((value) => (
+          <Button key={value} size="sm" variant={filter === value ? "secondary" : "ghost"}
+            aria-pressed={filter === value} onClick={() => setFilter(value)}>
+            {value === "all" ? "All" : value === "open" ? "Open" : "Resolved"}
+          </Button>
+        ))}
+      </div>
+      {filtered.length === 0 && <p className="text-sm text-muted-foreground">No {filter} conversations.</p>}
       {ordered.map((section) => {
         const items = bySection(section.id);
         if (items.length === 0) return null;
