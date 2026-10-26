@@ -34,8 +34,9 @@ pending failure; intentional cancellation is not converted into failure.
 The Web draws a notice that carries `xmatrixFailureEvidence` as a problem card
 (`turn-failure.ts`): HTTP 429 is "rate limited by its provider", 401/403 is
 "the provider refused", a timeout, DNS, TLS or connection category is "couldn't
-reach its provider", a process category is "its program stopped", and anything
-else is "couldn't finish this turn". Only the recorded evidence decides, never
+reach its provider", a process category is "its program stopped", a provider
+category with no HTTP status, error code, socket close, or exit code says the
+turn stopped there, and anything else is "couldn't finish this turn". Only the recorded evidence decides, never
 the prose. A Hub-classified used-up account carries the additive `usageLimit`
 field in its evidence and takes precedence over HTTP 429: its card says that
 the quota is used up and suggests waiting for reset or handing work to another
@@ -46,6 +47,10 @@ Each card names what to do next in English or Chinese. The original cause line
 is always visible, including on older notices and unknown failures, so opening
 Details is not necessary to discover the actual error. Full diagnostics and
 correlation identifiers remain under Details. A notice without evidence reads as written.
+Once that same Agent posts a later message of its own, the card settles: its
+rail goes quiet, it says the Agent continued, and it no longer asks for a reply.
+The notice stays in the Channel. A human reply, another failure, or a system
+notice leaves it asking.
 Because the Agent did start, a turn failure is never badged "couldn't start",
 even when its detail mentions a usage limit.
 

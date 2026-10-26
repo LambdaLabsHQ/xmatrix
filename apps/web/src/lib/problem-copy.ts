@@ -104,11 +104,18 @@ const en = {
       explanation: "The program running it exited unexpectedly, so this turn didn't finish.",
       steps: ["Reply to it to try again.", "If it keeps happening, update it on the computer it runs on."],
     },
+    no_status: {
+      title: (agent: string) => `${agent} couldn't finish this turn`,
+      explanation: "This turn stopped without an HTTP status or an error code from the provider.",
+      steps: ["Reply to it to continue."],
+    },
     unknown: {
       title: (agent: string) => `${agent} couldn't finish this turn`,
       explanation: "",
       steps: ["Reply to it to try again."],
     },
+    continueLabel: "To continue",
+    continued: (agent: string) => `${agent} continued afterward`,
   },
   relativeTime: (at: string | undefined, now: number) => relativeTime("en", at, now),
 };
@@ -198,11 +205,18 @@ const zh: ProblemCopy = {
       explanation: "运行它的程序意外退出，这一轮没有做完。",
       steps: ["回复它重试。", "如果反复出现，在运行它的电脑上更新它。"],
     },
+    no_status: {
+      title: (agent) => `${agent} 这一轮没有做完`,
+      explanation: "服务商没有返回 HTTP 状态或错误码，这一轮停在了当时的位置。",
+      steps: ["回复它，让它接着做。"],
+    },
     unknown: {
       title: (agent) => `${agent} 这一轮没有做完`,
       explanation: "",
       steps: ["回复它重试。"],
     },
+    continueLabel: "接着做",
+    continued: (agent) => `${agent} 后来继续了`,
   },
   relativeTime: (at, now) => relativeTime("zh", at, now),
 };
