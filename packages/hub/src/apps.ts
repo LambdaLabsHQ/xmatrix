@@ -4,8 +4,9 @@ import { AppControlError, PostgresAppRepository, type AuthorityDatabase } from "
 import { getAppConnectorProvider, type AppConnectorConnectionView } from "./app-connectors";
 import { forgetGitHubSubscriptions, type GitHubSubscriptionIndex } from "./github-subscription-index";
 import { postgresAuthorityDatabase, type PostgresAuthorityBindingEnv } from "./postgres-authority-http";
+import { notifyWorkspaceResource, type WorkspaceResourceEnv } from "./workspace-resource-notification";
 
-type SubscriptionIndexEnv = PostgresAuthorityBindingEnv & {
+type SubscriptionIndexEnv = PostgresAuthorityBindingEnv & WorkspaceResourceEnv & {
   GITHUB_SUBSCRIPTION_INDEX?: DurableObjectNamespace<GitHubSubscriptionIndex>;
 };
 
@@ -31,7 +32,7 @@ export async function upsertAppConnection(env: SubscriptionIndexEnv, input: {
   if (utf8ByteLength(JSON.stringify(input.body)) > 64 * 1024) {
     throw new AppControlError("invalid_app_request", 400, "body is too large");
   }
-  return afterGitHubSubscriptionWrite(env, await appRepository(env).upsert({ commandId: input.commandId,
+  const result = await afterGitHubSubscriptionWrite(env, await appRepository(env).upsert({ commandId: input.commandId,
     spaceId: input.spaceId, actorUserId: input.actorUserId,
     provider: { id: provider.id, name: provider.name, authMode: provider.auth.type,
       scopes: provider.auth.scopes, secretRefs: provider.auth.secretRefs,
@@ -39,6 +40,8 @@ export async function upsertAppConnection(env: SubscriptionIndexEnv, input: {
         id: capability.id, scopes: capability.scopes,
       })), metadataFields: (provider.connectionMetadata ?? []).map((field) => field.id) },
     body: input.body, at: new Date().toISOString() }));
+  if (provider.id === "github") await notifyWorkspaceResource(env, { spaceId: input.spaceId, resource: "launch_targets" });
+  return result;
 }
 
 type AppCommandKind = Parameters<PostgresAppRepository["command"]>[1];
@@ -49,19 +52,25 @@ type AppCommandKind = Parameters<PostgresAppRepository["command"]>[1];
  * principal it names.
  */
 export async function appCommand(env: SubscriptionIndexEnv, kind: AppCommandKind, input: Record<string, unknown>) {
-  return afterGitHubSubscriptionWrite(env, await appRepository(env).command({ ...input, at: new Date().toISOString() },
+  const result = await afterGitHubSubscriptionWrite(env, await appRepository(env).command({ ...input, at: new Date().toISOString() },
     kind));
+  if (input.providerId === "github" && kind === "delete") {
+    await notifyWorkspaceResource(env, { spaceId: String(input.spaceId), resource: "launch_targets" });
+  }
+  return result;
 }
 
 /**
  * Record the GitHub user GitHub Connect named as the one handing these
  * installations to the Space; only installations it links now are recorded.
  */
-export async function recordGitHubInstallationLinks(env: PostgresAuthorityBindingEnv, input: {
+export async function recordGitHubInstallationLinks(env: PostgresAuthorityBindingEnv & WorkspaceResourceEnv, input: {
   spaceId: string; actorUserId: string; githubUserId: number; installationIds: string[];
 }): Promise<string[]> {
-  return (await appRepository(env).recordGitHubInstallationLinks({ requestId: crypto.randomUUID(), ...input,
-    at: new Date().toISOString() })).recorded;
+  const result = await appRepository(env).recordGitHubInstallationLinks({ requestId: crypto.randomUUID(), ...input,
+    at: new Date().toISOString() });
+  await notifyWorkspaceResource(env, { spaceId: input.spaceId, resource: "launch_targets" });
+  return result.recorded;
 }
 
 /** One of a Space's app connections, as a user who may see it reads it. */

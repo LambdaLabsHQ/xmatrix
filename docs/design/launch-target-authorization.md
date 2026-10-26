@@ -92,16 +92,35 @@ Selection does not follow the rule that credentials already follow.
    managed clone under a Space grant runs through Git's credential helper rather
    than `gh`, which authenticates as the machine's own GitHub account.
 
-5. **The repo list is cached for a minute, not projected.** The first plan here
-   was a `space_repo_grants` table maintained by `installation` /
-   `installation_repositories` webhooks. That is the wrong shape: a maintained
-   projection is stale for as long as a webhook is late or lost, and it splits the
-   authorization answer into two sources that can disagree. A read-through cache
-   keyed by the Space's *installation ids* is strictly better — connecting or
-   disconnecting an installation changes the key and is visible at once, and every
-   other change is bounded by a 60-second TTL rather than by delivery. The mint
-   still re-resolves on every credential, so the cache decides how long a repo can
-   be *offered* after access changed, never how long it can be used.
+5. **Read once per Space, refresh on changes.** Entering a Space starts one
+   user-and-Space-scoped query, shared by its composers and subsequent `@` picks.
+   Opening completion never starts another read. The query has no polling timer;
+   it is refreshed by `workspace_resource_changed: launch_targets` after GitHub
+   connection changes or signed GitHub catalog events. Socket reconnection
+   invalidates it to recover events missed offline, and the picker retains Retry.
+   A change cancels an older in-flight query before re-reading, including a first
+   read that has no cached data yet. Inactive queries retain the ordinary bounded
+   client cache lifetime.
+
+   GitHub `installation`, `installation_repositories`, `repository`, `push`,
+   `member`, `membership` and `organization` deliveries locate currently linked,
+   configured connections and advance their version in one bounded transaction.
+   The edge cache key includes that version, installation ids and linker ids:
+   even another region or a late old cache write cannot revive the previous
+   answer after a processed event. Only the affected Spaces receive a content-free
+   refresh notice. Connect, Disconnect, Unlink, Check and link confirmation also
+   announce changes. The existing edge response TTL remains 60 seconds; it is
+   not a refresh timer. Configure the App's corresponding webhook subscriptions
+   to receive these changes. A missed delivery can leave an online candidate
+   list stale until reconnect, Retry or a new session; it never grants execution.
+
+   Each fresh catalog proves the recorded linker's administration from GitHub.
+   For a personal repository, its current owner type `User` and stable owner id
+   prove sole ownership; a login match or an organization's id cannot. Other
+   repositories retain live collaborator permission checks, with eight workers
+   that take the next repository as soon as a slot is free. Archived repositories
+   are not offered or checked. The mint still checks the actual repository live,
+   independently of every selection cache.
 
 6. **The mint is bound to a Run and to Git's permissions.** The daemon names
    the Run (`runId`, `executionKey`) its credential grant was issued for, and

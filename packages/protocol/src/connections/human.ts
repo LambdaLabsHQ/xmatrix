@@ -112,7 +112,7 @@ export type HumanChannelCatalogChangedMessage = {
  * change of it, and the client re-reads it on that frame instead of on a timer.
  */
 export const WORKSPACE_RESOURCE_KINDS = [
-  "automations", "channel_transfers", "cross_space_reads", "connector_action_requests",
+  "automations", "channel_transfers", "cross_space_reads", "connector_action_requests", "launch_targets",
 ] as const;
 
 export type WorkspaceResourceKind = (typeof WORKSPACE_RESOURCE_KINDS)[number];

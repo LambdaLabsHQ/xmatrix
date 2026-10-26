@@ -22,7 +22,6 @@ import {
   WEB_PROXY_ROUTES,
   faceInitials,
   pageBlocks,
-  type SpaceLaunchTargetsResponse,
   type AgentInvocationSelection,
   type AppConnectorCompletionResponse,
   type ChannelSnapshot,
@@ -86,6 +85,7 @@ import {
   type ReferenceCandidate,
 } from "./reference-complete";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { spaceLaunchTargetsQuery } from "./space-launch-targets-query";
 
 type MentionDynamicLoadState =
   | { status: "loading" }
@@ -247,29 +247,12 @@ export function useComposerCompletion({
       space,
     ]
   );
-  const launchCompletionActive = Boolean(fieldCompletion || continuingLaunch ||
-    preliminaryMentionCompletion.stage === "target" && preliminaryMentionCompletion.active);
   /* Launch targets are the Space's, so a new conversation — no Channel yet —
      completes the same repos as every conversation in its Space. */
+  const launchCompletionActive = Boolean(fieldCompletion || continuingLaunch ||
+    preliminaryMentionCompletion.stage === "target" && preliminaryMentionCompletion.active);
   const launchTargetSpaceId = space?.id ?? channel?.spaceId;
-  const launchTargetsQuery = useQuery({
-    queryKey: xmatrixQueryKeys.domain(
-      { userId: user?.id ?? "anonymous" }, "composer-launch-targets",
-      [launchTargetSpaceId ?? null],
-    ),
-    queryFn: async ({ signal }) => {
-      const payload = await xmatrixApiRequest<SpaceLaunchTargetsResponse>({
-        url: WEB_PROXY_ROUTES.space_launch_targets(launchTargetSpaceId!),
-        token: token ?? undefined,
-        signal,
-      });
-      if (payload.spaceId !== launchTargetSpaceId) {
-        throw new Error("Launch target response did not match the requested Space");
-      }
-      return payload;
-    },
-    enabled: Boolean(enabled && launchTargetSpaceId && launchCompletionActive && token),
-  });
+  const launchTargetsQuery = useQuery(spaceLaunchTargetsQuery(user?.id, token, launchTargetSpaceId, enabled));
   const launchTargets = launchTargetsQuery.data;
   const launchTargetLoadState: LaunchTargetLoadState | undefined = launchTargetsQuery.isError
     ? {

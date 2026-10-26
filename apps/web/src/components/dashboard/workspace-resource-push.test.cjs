@@ -27,7 +27,9 @@ test("human push suppresses fallback polls and names the list to re-read", async
     const grant = ["cross-space-read-grant", "user", "space-1", "grant-1"];
     const approvals = ["connector-action-approvals", "user", "channel-1"];
     const elsewhere = ["connector-action-approvals", "user", "channel-2"];
-    const held = [space, other, page, transfers, wide, pending, grant, approvals, elsewhere];
+    const launch = ["xmatrix", "hub", "user", "space-launch-targets", "space-1"];
+    const otherLaunch = ["xmatrix", "hub", "user", "space-launch-targets", "space-2"];
+    const held = [space, other, page, transfers, wide, pending, grant, approvals, elsewhere, launch, otherLaunch];
     // A query read again is fresh; one already invalidated does not report a second invalidation.
     const read = () => { for (const queryKey of held) client.setQueryData(queryKey, { ok: true }); };
     read();
@@ -56,6 +58,9 @@ test("human push suppresses fallback polls and names the list to re-read", async
       resource: "connector_action_requests", spaceId: "space-1", channelId: "channel-1",
     });
     assert.deepEqual(fetched, [approvals]);
+    fetched.length = 0;
+    await push.invalidateWorkspaceResources(client, { resource: "launch_targets", spaceId: "space-1" });
+    assert.deepEqual(fetched, [launch]);
 
     // Every list the Hub announces is one this client holds and re-reads on its
     // frame: a list announced with no query here would be kept current by a timer.
@@ -63,13 +68,13 @@ test("human push suppresses fallback polls and names the list to re-read", async
     for (const resource of WORKSPACE_RESOURCE_KINDS) {
       read();
       fetched.length = 0;
-      push.invalidateWorkspaceResources(client, { resource, spaceId: "space-1", channelId: "channel-1" });
+      await push.invalidateWorkspaceResources(client, { resource, spaceId: "space-1", channelId: "channel-1" });
       assert.ok(fetched.length > 0, `${resource} names no cached list`);
     }
     // A socket that just connected names no list: every announced one is read again.
     read();
     fetched.length = 0;
-    push.invalidateWorkspaceResources(client);
+    await push.invalidateWorkspaceResources(client);
     assert.equal(fetched.length, held.length);
     client.clear();
   } finally {

@@ -24,7 +24,7 @@ function repo(fields) {
     description: fields.description,
     pushed_at: fields.pushed_at,
     updated_at: fields.updated_at,
-    owner: { login: fields.owner },
+    owner: { login: fields.owner, id: fields.ownerId, type: fields.ownerType },
   };
 }
 
@@ -183,4 +183,112 @@ test("launch targets and completion offer only repositories the installation's l
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("personal ownership proves catalog administration by stable id, never by login alone", async () => {
+  const linker = { githubUserId: 93939, login: "renamed-owner" };
+  const checked = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url.includes("/access_tokens")) return jsonResponse({ token: "ghs_catalog", permissions: { metadata: "read" } });
+    if (url.includes("/installation/repositories")) return jsonResponse({ repositories: [
+      repo({ id: 1, owner: "old-login", ownerId: linker.githubUserId, ownerType: "User", name: "owned" }),
+      repo({ id: 2, owner: linker.login, ownerId: 222, ownerType: "User", name: "transferred" }),
+      repo({ id: 3, owner: linker.login, ownerId: linker.githubUserId, ownerType: "Organization", name: "org" }),
+      repo({ id: 4, owner: linker.login, name: "missing-owner-proof" }),
+      repo({ id: 5, owner: "old-login", ownerId: linker.githubUserId, ownerType: "User", name: "archived", archived: true }),
+    ] });
+    if (url.endsWith(`/user/${linker.githubUserId}`)) return jsonResponse({ id: linker.githubUserId, login: linker.login });
+    if (url.endsWith(`/collaborators/${linker.login}/permission`)) {
+      checked.push(url.split("/")[5]);
+      return jsonResponse({ permission: "read", user: { id: linker.githubUserId } });
+    }
+    return jsonResponse({}, 404);
+  };
+  try {
+    const connection = githubConnection({ githubLinks: [{ installationId: "777", githubUserId: linker.githubUserId }] });
+    assert.deepEqual((await spaceLaunchTargetRepositories(GITHUB_APP_ENV, connection)).map(target => target.value),
+      ["old-login/owned"]);
+    assert.deepEqual(checked.sort(), ["missing-owner-proof", "org", "transferred"]);
+    assert.deepEqual(await spaceLaunchTargetRepositories(GITHUB_APP_ENV, { ...connection, githubLinks: [] })
+      .catch(error => error.message), "github_repository_not_delegated", "ownership never substitutes for a Space's link proof");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a slow catalog permission read does not idle the other bounded workers", async () => {
+  const original = globalThis.fetch;
+  let releaseSlow;
+  const slow = new Promise(resolve => { releaseSlow = resolve; });
+  let active = 0, peak = 0;
+  const checked = [];
+  const repositories = Array.from({ length: 24 }, (_, id) => repo({ id, owner: "org", name: `repo-${id}` }));
+  globalThis.fetch = async input => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url.includes("/access_tokens")) return jsonResponse({ token: "ghs_catalog", permissions: { metadata: "read" } });
+    if (url.includes("/installation/repositories")) return jsonResponse({ repositories });
+    if (url.includes("/collaborators/")) {
+      const name = url.split("/")[5];
+      checked.push(name);
+      active++; peak = Math.max(peak, active);
+      if (name === "repo-0") await slow;
+      active--;
+    }
+    return githubLinkerAnswer(url) ?? jsonResponse({}, 404);
+  };
+  const read = spaceLaunchTargetRepositories(GITHUB_APP_ENV, githubConnection());
+  try {
+    // Let all non-blocked fetch/body/signing continuations finish without a wall-clock threshold.
+    for (let turn = 0; turn < 100 && !checked.includes("repo-23"); turn++) {
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+    assert.ok(checked.includes("repo-23"), "later repos must be checked while the first request is still pending");
+    assert.ok(peak <= 8, "the catalog keeps its provider concurrency bound");
+  } finally {
+    releaseSlow();
+    const targets = await read;
+    globalThis.fetch = original;
+    assert.equal(targets.length, repositories.length);
+    assert.equal(new Set(checked).size, repositories.length);
+  }
+});
+
+test("a GitHub event's connection version bypasses a previously authorized edge catalog", async t => {
+  const saved = new Map();
+  const previousCaches = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  t.after(() => {
+    if (previousCaches) Object.defineProperty(globalThis, "caches", previousCaches);
+    else delete globalThis.caches;
+  });
+  globalThis.caches = { open: async () => ({
+    match: async key => saved.get(key.url)?.clone(),
+    put: async (key, response) => { saved.set(key.url, response.clone()); },
+  }) };
+  let administers = true, catalogs = 0;
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async input => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url.includes("/access_tokens")) return jsonResponse({ token: "ghs_catalog", permissions: { metadata: "read" } });
+    if (url.includes("/installation/repositories")) {
+      catalogs++;
+      return jsonResponse({ repositories: [repo({ id: 1, owner: "org", name: "private", private: true })] });
+    }
+    const answer = githubLinkerAnswer(url);
+    if (url.includes("/collaborators/") && !administers) {
+      const permission = await answer.json();
+      return jsonResponse({ ...permission, permission: "read" });
+    }
+    return answer ?? jsonResponse({}, 404);
+  };
+  const connection = githubConnection({ version: 1 });
+  const targets = await spaceLaunchTargetRepositories(GITHUB_APP_ENV, connection);
+  assert.equal(targets.length, 1);
+  assert.deepEqual(await spaceLaunchTargetRepositories(GITHUB_APP_ENV, connection), targets);
+  assert.equal(catalogs, 1, "the same Space's edge answer is shared");
+  administers = false;
+  assert.deepEqual(await spaceLaunchTargetRepositories(GITHUB_APP_ENV, { ...connection, version: 2 }), []);
+  assert.equal(catalogs, 2, "a processed event cannot reuse the previous authorization hint");
 });
