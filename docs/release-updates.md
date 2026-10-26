@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: Escape closes the focused attachment preview
+
+Markdown and video previews close on Escape even when their own controls have
+focus. Their container still keeps keyboard events out of the conversation.
+An image opened inside Markdown closes first; a second Escape closes the
+Markdown preview. This is a hosted Web fix with no data or native migration.
+
 ## Unreleased: Repository completion loads once per Space
 
 Entering a Space preloads its launch candidates once and shares the result

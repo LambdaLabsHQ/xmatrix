@@ -77,6 +77,8 @@ including concurrent uploads and directory repair. See [blob reference commits](
 Uploaded files and pending message previews retain their browser-local Blob,
 so Markdown and clipboard readers do not fetch a CSP-blocked object URL.
 Wire bindings and the durable tail cache exclude these local bytes.
+Plain attachment previews handle Escape inside their own event boundary.
+An image opened from Markdown closes first, leaving its parent preview open.
 
 The shared timeline plays video and audio attachments using native HTML media
 controls, backed by Chromium in Electron. Generic MIME attachments use known
