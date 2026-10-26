@@ -116,6 +116,11 @@ test("queued start notices are waiting, not ordinary system facts", () => {
     ),
     "error",
   );
+  // A turn that hit a usage limit did start; it is not "couldn't start".
+  assert.equal(
+    systemNoticeTone("xMatrix could not complete this codex turn: You've hit your usage limit. Try again later."),
+    "fact",
+  );
   assert.equal(
     systemNoticeTone("Stopped @codex-legend on Devs-MacBook-Pro.local."),
     "fact",
