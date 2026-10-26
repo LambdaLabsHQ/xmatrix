@@ -335,6 +335,8 @@ export const HUB_ROUTES = {
     `/api/channels/${encodeURIComponent(channelId)}/page-edits/query`,
   channel_message_decision_evidence: (channelId: string, messageId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/decision-evidence`,
+  channel_message_connector_result: (channelId: string, messageId: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/connector-result`,
   agent_launch_retry: (launchId: string) =>
     `/api/agent-launches/${encodeURIComponent(launchId)}/retry`,
   channel_message_launch_anyway: (channelId: string, messageId: string) =>
@@ -456,6 +458,8 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/page-edits/query`,
   channel_message_decision_evidence: (channelId: string, messageId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/decision-evidence`,
+  channel_message_connector_result: (channelId: string, messageId: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/connector-result`,
   agent_launch_retry: (launchId: string) =>
     `/api/xmatrix/agent-launches/${encodeURIComponent(launchId)}/retry`,
   channel_message_launch_anyway: (channelId: string, messageId: string) =>

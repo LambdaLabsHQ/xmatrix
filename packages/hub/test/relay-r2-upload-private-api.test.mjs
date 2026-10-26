@@ -93,13 +93,15 @@ test('knowing a restricted payload hash cannot verify it through a public or dif
 
 const unreachableContent = new Proxy({}, { get: () => async () => { assert.fail('must not reach content authority'); } });
 
-test('public blob commit cannot forge server-authored summon evidence', async () => {
+test('public blob commit cannot forge server-authored private records', async () => {
+  for (const ownerKind of ['summon_decision', 'connector_result']) {
   await assert.rejects(handleRelayR2BlobRefCommit({
     request: new Request('https://internal/commit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'request',
-      intentId: 'intent', refId: 'ref', ownerKind: 'summon_decision', ownerId: 'source', visibilityScopeId: 'channel-user:channel:user' }) }),
+      intentId: 'intent', refId: 'ref', ownerKind, ownerId: 'source', visibilityScopeId: 'channel-user:channel:user' }) }),
     principal: { kind: 'user', id: 'user' }, now: Date.now(), bucket: {},
     content: unreachableContent,
   }), error => error.code === 'not_authorized');
+  }
 });
 
 test('public upload cannot claim the internal decision purpose', async () => {

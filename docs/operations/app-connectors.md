@@ -367,11 +367,11 @@ pass is not counted as completed; transport failures remain Sentry errors.
 
 Use `xmatrix call "@gmail:search:* <Gmail query>" --private` (or one connected
 mailbox address instead of `*`) and
-`xmatrix call "@gmail:read:<message id>" --private` when result values must stay caller-only. Both normal (`--public`)
+`xmatrix call "@gmail:read:<message id>" --private` when results must stay with the calling Agent and its Human owner. Both normal (`--public`)
 and private calls retain their invocation, parameters and status in the Channel.
 Private receipts and execution history contain a fixed mask rather than the
 original result, links or failure details. The caller receives the unchanged
-original; `--json` returns its result object. Never put a credential in visible
+original; `--json` returns its result object. Its Human owner sees a protected Web result for 30 days while retaining Channel access; other members and Agent Runs cannot read that endpoint. Older results without a retained original stay unavailable. Never put a credential in visible
 invocation parameters. A mode must be chosen explicitly; old bare CLI calls
 fail before publishing anything.
 
@@ -421,7 +421,7 @@ Space admin action; use a fresh alias for a new one-time-code attempt.
 ### Agent commands
 - `xmatrix call "<connector command>" --public|--private` records the invocation
   in the Run's Channel under its existing policy. Public results are normal;
-  private result values return only to that caller and are masked in receipts. Writes
+  private result values return to the caller and its Human owner’s protected Web view, while shared receipts remain masked. Writes
   and actions requiring approval use `xmatrix send`; their visible receipt
   replies to the command message.
 - The launch prompt names the Space's connected apps. `xmatrix connector list`

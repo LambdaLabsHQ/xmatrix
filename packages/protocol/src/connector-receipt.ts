@@ -1,6 +1,6 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
 
-/** Both modes record the invocation; only private results stay caller-only. */
+/** Both modes record the invocation; private originals stay outside shared history. */
 export type ConnectorResultVisibility = "public" | "private";
 
 export const PRIVATE_CONNECTOR_RESULT = "Result: [hidden — private call]";
@@ -16,7 +16,7 @@ export interface ConnectorReceiptEntry {
   status?: ConnectorReceiptStatus;
   /** What it returned or why it did not run; empty when the outcome says it all. */
   detail: string;
-  /** A private call: the result went only to its caller. */
+  /** A private call: shared readers receive a mask, with a separate Human owner view. */
   private: boolean;
 }
 

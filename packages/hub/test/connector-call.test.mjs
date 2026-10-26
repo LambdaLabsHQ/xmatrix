@@ -29,7 +29,7 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 // Here we protect private response delivery, policy admission, and masking
 // before result persistence, which public Channel-command tests cannot see.
 function fixture({ mode = null, failAtAuthorization, otherMailbox = false, changeConnection = false } = {}) {
-  const checks = [], reports = [], policies = [], appends = [], persisted = [];
+  const checks = [], reports = [], policies = [], appends = [], persisted = [], privateRecords = [];
   let scopes = 0;
   const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
     ownerUserId: "member", spaceId: "space", executionKey: "execution-alpha" };
@@ -78,10 +78,11 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, chang
     "./connectors/connector-commands": executor,
     "./connectors/http": { ProviderRequestError },
     "./connectors/command-support": support,
+    "./connectors/private-result-content": { writeConnectorPrivateResult: async (_env, record) => { privateRecords.push(record); } },
     "./product-message-append": { dispatchProductMessageAppend: append },
     "./app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
   })[name]).registerConnectorCallRoutes(app);
-  return { checks, reports, policies, appends, persisted, request: (body, token = "agent") => app.request(protocol.HUB_ROUTES.connector_call,
+  return { checks, reports, policies, appends, persisted, privateRecords, request: (body, token = "agent") => app.request(protocol.HUB_ROUTES.connector_call,
     { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: typeof body === "string" ? body : JSON.stringify({ resultVisibility: "private", ...body }) }, {}) };
 }
@@ -92,7 +93,7 @@ test("private CLI call sends arguments directly and prints only its own result",
   const output = await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", `@gmail:read:${id}`, "--private", "--json"], call);
   assert.deepEqual(calls, [["POST", protocol.HUB_ROUTES.connector_call, { command: `@gmail:read:${id}`, resultVisibility: "private" }]]);
   assert.equal(JSON.parse(output.stdout).summary, privateText);
-  assert.match((await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", "--help"], call)).stdout, /only this caller/);
+  assert.match((await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", "--help"], call)).stdout, /calling Agent and its Human owner/);
   assert.equal(calls.length, 1, "help never runs an action");
   for (const flags of [[], ["--private", "--public"]]) {
     const invalid = await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", `@gmail:read:${id}`, ...flags], call);
@@ -108,7 +109,7 @@ test("normal and private calls record the same invocation; only the private Chan
     const { result } = await fetched([gmail(privateText)], () => f.request({ command, resultVisibility: visibility }));
     assert.equal(result.status, 200, await result.clone().text());
     assert.match((await result.json()).summary, /654321.*fixture-private/);
-    assert.equal(f.checks.length, 3, "Run authorization is checked at entry, before provider I/O and before return");
+    assert.equal(f.checks.length, 4, "Run access is rechecked after provider I/O and owner-only storage, before return");
     assert.equal(result.headers.get("cache-control"), "private, no-store");
     assert.equal(f.appends.length, 2);
     assert.equal(f.appends[0].body, command);
@@ -118,6 +119,13 @@ test("normal and private calls record the same invocation; only the private Chan
     assert.equal(receipt.residual.replyToMessageId, f.appends[0].messageId);
     assert.equal(receipt.residual.appMetadata.xmatrixConnectorRequesterInstanceId, undefined,
       "a synchronous return must not resume the caller a second time");
+    assert.equal(f.privateRecords.length, visibility === "private" ? 1 : 0);
+    if (visibility === "private") {
+      assert.equal(f.privateRecords[0].ownerUserId, "member");
+      assert.equal(f.privateRecords[0].messageId, receipt.messageId);
+      assert.match(f.privateRecords[0].detail, /654321.*fixture-private/);
+      assert.equal(receipt.residual.appMetadata.xmatrixPrivateConnectorResultOwner, "member");
+    }
     const history = f.persisted.find(row => row.kind === "finalize-execution").input;
     assert.equal(history.status, "completed");
     for (const output of [receipt.body, JSON.stringify(f.persisted)]) {
@@ -165,7 +173,7 @@ test("private reads cannot bypass ask/disallow, perform writes, or read another 
 });
 
 test("revocation or replaced connection while a provider read is in flight withholds the private response", async () => {
-  for (const options of [{ failAtAuthorization: 3 }, { changeConnection: true }]) {
+  for (const options of [{ failAtAuthorization: 3 }, { failAtAuthorization: 4 }, { changeConnection: true }]) {
     const f = fixture(options);
     const { result, calls } = await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}` }));
     assert.equal(result.status, 403); assert.equal(calls.length, 1);
@@ -192,4 +200,13 @@ test("provider failures remain caller-only; unexpected errors cannot enter error
     assert.equal(result.headers.get("cache-control"), "private, no-store");
     assert.ok(f.reports.every(report => !report.includes("654321") && !report.includes("fixture-private")));
   }
+});
+
+// A failed provider response can contain the same credentials as a success.
+test("a revoked Run cannot collect a private provider error after its read was in flight", async () => {
+  const f = fixture({ failAtAuthorization: 3 });
+  const { result } = await fetched([{ body: { status: 403, data: { error: { message: privateText } } } }],
+    () => f.request({ command: `@gmail:read:${id}` }));
+  assert.equal(result.status, 403);
+  assert.doesNotMatch(await result.text(), /654321|fixture-private/);
 });

@@ -304,7 +304,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",
-      description: "Search and read with xmatrix call --public for normal results or --private to mask the Channel/history result. Both record invocation parameters; only private result values go solely to the caller. Sending search/read with xmatrix send publishes results normally. Signs in through Composio. Each mailbox serves only its owner and their Agents. Sending and replying ask for approval by default.",
+      description: "Search and read with xmatrix call --public for normal results or --private to mask the Channel/history result. Both record invocation parameters; private originals go to the caller and its Human owner’s protected Web view for 30 days. Sending search/read with xmatrix send publishes results normally. Signs in through Composio. Each mailbox serves only its owner and their Agents. Sending and replying ask for approval by default.",
       oauth: { authorizeUrl: "https://backend.composio.dev/api/v3.1/connected_accounts/link",
         tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "mailboxes", flow: "composio" },
       credentials: [{ id: "mailboxes", label: "Mailboxes", managed: true, description: "Each Connect adds a mailbox; a Space admin assigns each one to a member or an Agent. Never typed by hand." }],

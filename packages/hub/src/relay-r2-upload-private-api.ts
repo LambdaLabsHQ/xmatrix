@@ -337,7 +337,7 @@ export async function handleRelayR2BlobRefCommit(input: {
   exactFields(value, ["requestId", "intentId", "refId", "ownerKind", "ownerId", "visibilityScopeId"]);
   const refId = id(value.refId, "refId");
   const ownerKind = bounded(value.ownerKind, "ownerKind", 80);
-  if (ownerKind === "summon_decision") fail("not_authorized", 403, "decision evidence is server-authored");
+  if (["summon_decision", "connector_result"].includes(ownerKind)) fail("not_authorized", 403, "private records are server-authored");
   const ownerId = bounded(value.ownerId, "ownerId");
   const visibilityScopeId = bounded(value.visibilityScopeId, "visibilityScopeId");
   if (input.expectedScopeId !== undefined && visibilityScopeId !== input.expectedScopeId) {

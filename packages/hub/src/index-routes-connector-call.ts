@@ -16,29 +16,49 @@ import { getAppConnectorProvider } from "./app-connectors";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import type { ConnectorCommandInput } from "./connectors/provider";
 import type { Env } from "./types";
+import { readConnectorPrivateResult, writeConnectorPrivateResult } from "./connectors/private-result-content";
 
 const NO_STORE = { "cache-control": "private, no-store" };
 
 /** Recorded calls keep their invocation visible. A private result crosses
- * only the authenticated response; messages and history receive a fixed mask. */
+ * the calling response and the Human owner’s protected view; shared history receives a mask. */
 export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void {
+  app.get("/api/channels/:channelId/messages/:messageId/connector-result", async c => {
+    try {
+      const user = await requireAuth(c.req.raw, c.env);
+      if (user.agentRun) return c.json({ error: "Private results require their Human owner" }, 403, NO_STORE);
+      return c.json(await readConnectorPrivateResult(c.env, { channelId: c.req.param("channelId"),
+        messageId: c.req.param("messageId"), ownerUserId: user.id }), 200, NO_STORE);
+    } catch (error) {
+      const status = error instanceof ControlError || error instanceof ProviderRequestError ? error.status
+        : error instanceof AuthFailure ? 401 : 503;
+      return c.json({ error: "Private result is unavailable" }, status as ContentfulStatusCode, NO_STORE);
+    }
+  });
   app.post(HUB_ROUTES.connector_call, async c => {
     let invocation: { manifest: AppConnectorProviderManifest; input: ConnectorCommandInput;
-      actionId: string; visibility: ConnectorResultVisibility } | undefined;
+      spaceId: string; actionId: string; visibility: ConnectorResultVisibility } | undefined;
     let receiptAttempted = false;
+    let authorizeCaller: (() => Promise<void>) | undefined;
     const publish = async (status: "completed" | "failed" | "blocked", summary: string) => {
       if (!invocation) return;
       receiptAttempted = true;
-      const { manifest, input, actionId, visibility } = invocation;
+      const { manifest, input, actionId, visibility, spaceId } = invocation;
+      if (visibility === "private") await writeConnectorPrivateResult(c.env, {
+        channelId: input.channelId, spaceId, ownerUserId: input.actorUserId,
+        messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200), detail: summary,
+      });
       await publishCommandStatus(manifest, input, [commandResult(manifest.name, actionId, {
         status, summary: visibility === "private" ? PRIVATE_CONNECTOR_RESULT : summary,
-      })], { resumeRequester: false });
+      })], { resumeRequester: false,
+        ...(visibility === "private" ? { privateResultOwnerUserId: input.actorUserId } : {}) });
     };
     try {
       const user = await requireAuth(c.req.raw, c.env);
       const run = user.agentRun;
       if (!run?.instanceId) return c.json({ error: "Connector calls require an Agent Run" }, 403, NO_STORE);
       const authorize = async () => { await requireAgentRunChannelDelegation(c.env, run, []); };
+      authorizeCaller = authorize;
       await authorize();
       const bytes = await readBoundedRequestBody(c.req.raw, 32 * 1024);
       if (!bytes) return c.json({ error: "Connector call is too large" }, 413, NO_STORE);
@@ -69,9 +89,10 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       });
       if (!appended.ok) throw new ProviderRequestError(appended.status, "The call's Channel record could not be saved");
       invocation = { manifest: getAppConnectorProvider(provider.id)!, input,
-        actionId: parsed.actionId, visibility: resultVisibility };
+        spaceId: run.spaceId, actionId: parsed.actionId, visibility: resultVisibility };
       const result = await callConnectorRead(provider.id, input, parsed.actionId, action, parsed.statement, authorize, resultVisibility);
       await publish("completed", `${result.summary}${result.url ? ` — ${result.url}` : ""}`);
+      await authorize();
       return c.json(result, 200, NO_STORE);
     } catch (error) {
       if (invocation && !receiptAttempted) {
@@ -84,6 +105,11 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       }
       // Provider errors may contain private data too. The receipt applies its
       // chosen visibility; raw exceptions never reach shared error reporting.
+      if (error instanceof ProviderRequestError && authorizeCaller) {
+        try { await authorizeCaller(); }
+        catch (denied) { return privateResponse(requestErrorResponse(c,
+          denied instanceof PermissionFailure || denied instanceof AuthFailure ? denied : new Error("Caller access is unavailable"))); }
+      }
       if (error instanceof ProviderRequestError) return c.json({ error: error.message },
         (error.status >= 400 && error.status <= 599 ? error.status : 502) as ContentfulStatusCode, NO_STORE);
       const safe = error instanceof ControlError || error instanceof AuthFailure || error instanceof PermissionFailure

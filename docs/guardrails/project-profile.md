@@ -70,7 +70,7 @@ boundary. Stopped Instances remain stopped. See
 Connector reads have normal (`xmatrix call --public`) and private (`--private`)
 result modes. Both retain their invocation and parameters in the Channel;
 private receipts and execution history receive a fixed mask before any result
-write, while the original value or provider error returns to the caller.
+write. The original value or provider error returns to the caller and is retained in restricted content for its Human owner’s Web view for 30 days; other members and Agent Runs cannot read that view.
 Run, mailbox and Channel-policy checks remain unchanged. See
 [connector delivery](../design/connector-platform.md).
 
