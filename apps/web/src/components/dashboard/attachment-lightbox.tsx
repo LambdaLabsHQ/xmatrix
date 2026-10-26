@@ -61,7 +61,13 @@ export function AttachmentLightbox({
       onTouchEnd={contain}
       onWheel={contain}
       onContextMenu={contain}
-      onKeyDown={contain}
+      onKeyDown={(event) => {
+        contain(event);
+        if (!fullBleed && event.key === "Escape") {
+          event.preventDefault();
+          onRequestClose();
+        }
+      }}
     >
       <div
         ref={backdropRef}

@@ -219,6 +219,10 @@ test.describe("with a mouse", () => {
     await expect(page.getByRole("dialog", { name: "chart" }).getByRole("img", { name: "chart" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "chart" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "notes.md" })).toBeVisible();
+    const attachment = page.getByRole("dialog", { name: "notes.md" });
+    await expect(attachment).toBeVisible();
+    await attachment.getByRole("button", { name: "Close attachment" }).focus();
+    await page.keyboard.press("Escape");
+    await expect(attachment).toHaveCount(0);
   });
 });
