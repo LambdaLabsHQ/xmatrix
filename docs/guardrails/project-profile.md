@@ -29,6 +29,10 @@ independent single reads with placement fencing and bounded lost-response
 recovery, matching the Channel catalog. See
 [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
 
+Registration quota projections and owner refreshes use independent single reads
+with one fresh-connection recovery after a lost response, without BEGIN/COMMIT.
+See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Turn-failure cards use the original error as their title for every cause,
 including unknown and historical errors. Hub classifications supply next steps
 without replacing that error. Exhausted provider accounts get reset or handoff

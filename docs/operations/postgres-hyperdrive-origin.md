@@ -143,6 +143,10 @@ event redaction still finish before any catalog result is returned. Automation
 mutations and their commit reconciliation remain explicit transactions.
 Channel catalog pages, counts, participant reads and exact-ID resolution use
 the same per-statement recovery, with authorization still checked by their SQL.
+Registration quota projections, both authorized batches and owner refreshes,
+also use one `single_read` each (HUB-AQ). A lost response retries once on a fresh
+checkout without BEGIN/COMMIT; repeated loss still fails. Registration keys,
+pool joins, reading freshness and quota observation writes are unchanged.
 
 Sentry event claiming (including receipt cleanup), Gmail route cleanup and
 claiming and fenced completion, and Bot room expiry cleanup (Google Chat, Feishu, Telegram and Teams)
