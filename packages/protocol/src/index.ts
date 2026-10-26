@@ -564,6 +564,7 @@ export {
 export {
   connectorOperationIds, parseConnectorActionCommand, parseConnectorInvocation,
 } from "./connector-command.js";
+export { PRIVATE_CONNECTOR_RESULT, type ConnectorResultVisibility } from "./connector-command.js";
 export type {
   ConnectorInvocation, ParsedConnectorActionCommand,
 } from "./connector-command.js";

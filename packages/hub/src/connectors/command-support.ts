@@ -95,7 +95,7 @@ export async function withExecution(
    trusted caller identity survives approvals and durable execution; provider
    text and mutable names never decide who receives the result as work. */
 export async function publishCommandStatus(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput,
-  lines: readonly string[]): Promise<void> {
+  lines: readonly string[], options: { resumeRequester?: boolean } = {}): Promise<void> {
   if (lines.length === 0) return;
   const response = await dispatchProductMessageAppend(input.env, input.channelId, {
     commandId: `product:${manifest.id}-status:${input.messageId}`.slice(0, 200),
@@ -108,7 +108,7 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     principal: { kind: "user", id: input.actorUserId },
     appAuthorId: manifest.id,
     residual: { appMetadata: { xmatrixProvenance: "system_fact",
-      ...(input.senderKind === "agent" && input.senderId && input.commandMessageId !== null
+      ...(options.resumeRequester !== false && input.senderKind === "agent" && input.senderId && input.commandMessageId !== null
         ? { xmatrixConnectorRequesterInstanceId: input.senderId } : {}) },
       ...(input.commandMessageId === null ? {} : { replyToMessageId: input.commandMessageId ?? input.messageId }) },
   });

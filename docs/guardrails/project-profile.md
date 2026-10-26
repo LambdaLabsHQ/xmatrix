@@ -61,12 +61,12 @@ Instances and resume sleeping/interrupted ones through the bounded wake
 boundary. Stopped Instances remain stopped. See
 [Connector delivery](../design/connector-platform.md).
 
-`xmatrix call "<connector command>"` returns a declared read action's result
-only to its authenticated calling Run. Parameters, results and provider errors
-stay outside Channel messages and execution-history excerpts; live Run, mailbox
-ownership and Channel action policy still apply. Writes keep their existing
-Channel approval flow. The Hub does not extract credentials or create Secrets
-from mail. See [private connector calls](../design/connector-platform.md).
+Connector reads have normal (`xmatrix call --public`) and private (`--private`)
+result modes. Both retain their invocation and parameters in the Channel;
+private receipts and execution history receive a fixed mask before any result
+write, while the original value or provider error returns to the caller.
+Run, mailbox and Channel-policy checks remain unchanged. See
+[connector delivery](../design/connector-platform.md).
 
 Gmail notifications default to minute INBOX count polling with a separate
 15-minute Composio incremental-ID check. Our Google grant uses labels plus
@@ -260,13 +260,9 @@ The Gmail connector preserves ordered inline mixed body segments, excludes
 attachment subtrees, and marks incomplete MIME previews. Native availability
 uses Composio's managed client with its approved full-mailbox grant; the Hub
 limits calls to an endpoint list. `send`/`reply` ask for a Space admin's
-approval of each email by default. Search/read post their results, including
-mail content, to the calling Channel, where its members can read them;
-execution history keeps a bounded excerpt. Every action starts as a visible
-Channel command; the former connector MCP and caller-only result path are retired.
-Gmail-to-Space-secret transfer is not implemented, so these reads cannot satisfy
-a QA rule that login codes stay out of messages. The supported manual secret
-card and process injection path is documented in
+approval of each email by default. Read result delivery follows the normal/private
+modes described above. Gmail-to-Space-secret transfer is not automatic; private
+results can be consumed through the existing local secret boundary. See
 [connector operations](../operations/app-connectors.md#qa-login-codes).
 Its Composio path is independent of runtime-provided Gmail plugins; see
 [connector platform](../design/connector-platform.md).
