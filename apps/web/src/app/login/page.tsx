@@ -150,8 +150,9 @@ function LoginContent() {
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   /* A password or social sign-in that waits on the authenticator code arrives with `two_factor`. */
-  const [step, setStep] = useState<"email" | "otp" | "two_factor">(
+  const [step, setStep] = useState<"email" | "otp" | "two_factor" | "complete">(
     () => searchParams.get("two_factor") ? "two_factor" : "email");
+  const [signedInPath, setSignedInPath] = useState<string | null>(null);
   const [secondCode, setSecondCode] = useState("");
   const [useBackupCode, setUseBackupCode] = useState(false);
   const [trustDevice, setTrustDevice] = useState(true);
@@ -211,10 +212,10 @@ function LoginContent() {
   const formError = cliError || error || authError || (oauthError ? socialSignInFailure(oauthError) : "");
   const cliMode = Boolean(deviceCode || legacyCliContext);
   const awaitingDeviceConfirmation = Boolean(
-    session?.access_token && deviceCode && userCode && !deviceApprovalConfirmed && !cliComplete,
+    step !== "two_factor" && session?.access_token && deviceCode && userCode && !deviceApprovalConfirmed && !cliComplete,
   );
   const awaitingLegacyConfirmation = Boolean(
-    session?.access_token && cliCallbackContext && !legacyApprovalConfirmed && !cliComplete,
+    step !== "two_factor" && session?.access_token && cliCallbackContext && !legacyApprovalConfirmed && !cliComplete,
   );
   const desktopMode = Boolean(desktopBridge) && !cliMode;
   const desktopModeActive = desktopMode && !user;
@@ -358,7 +359,6 @@ function LoginContent() {
             relayUrl: payload.relayUrl,
           });
           setDesktopLogin({ status: "complete" });
-          router.replace(nextPath || "/app");
           return;
         }
 
@@ -476,6 +476,9 @@ function LoginContent() {
   }
 
   useEffect(() => {
+    // A remembered session does not finish this visit's pending verification.
+    // Every destination, including device approval, waits on the same step.
+    if (step === "two_factor") return;
     async function approveDeviceLogin() {
       if (
         !session?.access_token ||
@@ -568,7 +571,7 @@ function LoginContent() {
     if (user) {
       // An app's sign-in that stopped for the second factor goes back to the Hub, which hands the app its code.
       if (continueAfterSecondFactor) window.location.replace(continueAfterSecondFactor);
-      else router.replace(nextPath || "/app");
+      else router.replace(signedInPath ?? (nextPath || "/app"));
     }
   }, [
     cliCallbackContext,
@@ -581,6 +584,8 @@ function LoginContent() {
     nextPath,
     router,
     session?.access_token,
+    signedInPath,
+    step,
     user,
   ]);
 
@@ -655,8 +660,7 @@ function LoginContent() {
     let active = true;
     void PublicKeyCredential.isConditionalMediationAvailable?.().then((available) => {
       if (!active || !available) return;
-      signInWithPasskey(true)
-        .then(() => { if (active) router.replace(nextPath || "/app"); })
+      void signInWithPasskey(true)
         // Nothing chosen, or the prompt was set aside for another way in.
         .catch(() => undefined);
     });
@@ -670,7 +674,6 @@ function LoginContent() {
     try {
       await signInWithPasskey();
       rememberSignInMethod("passkey");
-      if (!cliMode) router.replace(nextPath || "/app");
     } catch (nextError) {
       if (!isAbort(nextError)) setError(formatLoginError(nextError));
       setSocialLoading(null);
@@ -686,11 +689,12 @@ function LoginContent() {
     try {
       const signedIn = await signInAppWithProvider(desktopBridge, provider);
       if (attempt !== appSignInAttemptRef.current) return;
+      setSignedInPath(signedIn.newAccount && !nextPath ? `/app?${NEW_ACCOUNT_FLAG}=1` : nextPath || "/app");
       await setSessionFromAuthResponse(signedIn.session);
       rememberSignInMethod(provider);
-      router.replace(signedIn.newAccount && !nextPath ? `/app?${NEW_ACCOUNT_FLAG}=1` : nextPath || "/app");
     } catch (nextError) {
       if (attempt !== appSignInAttemptRef.current) return;
+      setSignedInPath(null);
       if (!isAbort(nextError)) {
         setError(nextError instanceof AppSignInRefused ? socialSignInFailure(nextError.code) : formatLoginError(nextError));
       }
@@ -717,7 +721,6 @@ function LoginContent() {
         setSocialLoading(null);
         return;
       }
-      router.replace(nextPath || "/app");
     } catch (nextError) {
       if (!isAbort(nextError)) setError(formatLoginError(nextError));
       setSocialLoading(null);
@@ -761,9 +764,6 @@ function LoginContent() {
         setStep("two_factor");
         return;
       }
-      if (!cliMode) {
-        router.push(nextPath || "/app");
-      }
     } catch (nextError) {
       const unanswered = isTransientAuthSessionError(nextError);
       setCodeUnanswered(unanswered);
@@ -783,6 +783,7 @@ function LoginContent() {
     try {
       // Signed in now: the page's signed-in exit takes it from here, so no second navigation races it.
       await verifySecondFactor(code, { backup: useBackupCode, trustDevice });
+      setStep("complete");
     } catch (nextError) {
       setSecondCode("");
       setError(formatLoginError(nextError));
@@ -811,7 +812,11 @@ function LoginContent() {
     setLoading(true);
     const query = new URLSearchParams(searchParams);
     for (const name of ["error", "error_description", "auth_error", "two_factor"]) query.delete(name);
+    // Starting over abandons this app handoff, even if sign-out gets no answer.
+    if (step === "two_factor") query.delete("continue");
     await logout({ redirectTo: `/login?${query}` });
+    changeEmail();
+    setSecondCode("");
     setLoading(false);
   }
 
@@ -903,6 +908,8 @@ function LoginContent() {
             declineLabel="Cancel" onDecline={() => router.replace("/app")}
             onSwitchAccount={() => void switchAccount()} />
         </>
+      ) : step === "complete" ? (
+        <AuthRequest icon={<Spinner />} title="Signing in…" />
       ) : browserSignIn ? (
         <>
           <AuthHeading
@@ -1089,15 +1096,7 @@ function LoginContent() {
             }}>
               {useBackupCode ? "Use your authenticator app" : "Use a backup code"}
             </button>
-            <button type="button" className="auth-text-button" disabled={loading} onClick={() => {
-              changeEmail();
-              setSecondCode("");
-              if (searchParams.get("two_factor")) {
-                const query = new URLSearchParams(searchParams);
-                query.delete("two_factor");
-                router.replace(`/login${query.toString() ? `?${query}` : ""}`);
-              }
-            }}>
+            <button type="button" className="auth-text-button" disabled={loading} onClick={() => void switchAccount()}>
               Start over
             </button>
           </AuthLinks>

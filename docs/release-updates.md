@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: A remembered session cannot skip a login's second factor
+
+An app's provider sign-in that asks for an authenticator or backup code stays
+on that step until this visit verifies it, even when the sign-in browser already
+has a website session. The same pending step holds webpage redirects and device
+approval. Starting over abandons that app handoff and signs out before offering
+another login. Successful login handlers now feed one signed-in exit, preserving
+the app's finish address and a new account's welcome path without competing
+navigations.
+
+This is a hosted Web change; no native shell or CLI update is needed. Recovery
+uses a CI-validated beta Web release reverting the change and restores the
+previous remembered-session behavior; there is no data migration.
+
 ## Unreleased: Search timeouts retain recovery diagnostics
 
 The common Hub PostgreSQL outage response reports the original exception and

@@ -8,8 +8,8 @@ type AuthorizeRequest = { url: string; redirectParam: string };
  * A phone app that can open the provider's page in place: the shell's sheet is
  * stubbed to answer the address the Hub would send it back to.
  */
-async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerState?: "same" | "other"; client?: "ios" | "desktop" }) {
-  await page.addInitScript(({ inPlace, answerState, client = "ios" }) => {
+async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerState?: "same" | "other"; client?: "ios" | "desktop"; newAccount?: boolean }) {
+  await page.addInitScript(({ inPlace, answerState, client = "ios", newAccount = false }) => {
     const shell = window as unknown as Record<string, unknown>;
     shell.__xmatrixDisableMockAuth = true;
     shell.__authorizeRequests = [];
@@ -23,7 +23,7 @@ async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerSta
         authorizeInBrowser: async (request: AuthorizeRequest) => {
           (shell.__authorizeRequests as AuthorizeRequest[]).push(request);
           const state = answerState === "same" ? new URL(request.url).searchParams.get("state") : "someone-elses-state";
-          return `xmatrix://auth?code=${"c".repeat(64)}&state=${state}`;
+          return `xmatrix://auth?code=${"c".repeat(64)}&state=${state}${newAccount ? "&new_account=1" : ""}`;
         },
       } : {}),
     };
@@ -50,28 +50,32 @@ const signedIn = {
   hubUrl: "https://xmatrix-hub.test", relayUrl: "wss://xmatrix-hub.test",
 };
 
-test("an app signs in with Google in place, redeeming the code with the verifier behind its challenge", async ({ page }) => {
-  await openAsPhoneApp(page, { inPlace: true, answerState: "same" });
-  const redeemed = await stubRedemption(page);
-  await page.goto("/login");
-  await expect(page.getByRole("button", { name: "Sign in with browser" })).toHaveCount(0);
-  await expect(page.getByLabel("Email address")).toBeVisible();
+for (const newAccount of [false, true]) {
+  test(`an app signs in with Google and keeps its landing path (new account: ${newAccount})`, async ({ page }) => {
+    await openAsPhoneApp(page, { inPlace: true, answerState: "same", newAccount });
+    const redeemed = await stubRedemption(page);
+    await page.goto("/login");
+    await expect(page.getByRole("button", { name: "Sign in with browser" })).toHaveCount(0);
+    await expect(page.getByLabel("Email address")).toBeVisible();
 
-  await page.getByRole("button", { name: "Continue with Google" }).click();
-  await page.waitForURL(/\/app/u);
+    await page.getByRole("button", { name: "Continue with Google" }).click();
+    await page.waitForURL(/\/app/u);
 
-  const [request] = await page.evaluate(() => (window as unknown as { __authorizeRequests: AuthorizeRequest[] }).__authorizeRequests);
-  const start = new URL(request.url);
-  expect(start.pathname).toBe("/api/auth/app/start");
-  expect(request.redirectParam).toBe("redirect_uri");
-  expect(start.searchParams.get("provider")).toBe("google");
-  expect(start.searchParams.get("code_challenge_method")).toBe("S256");
-  expect(redeemed).toHaveLength(1);
-  expect(redeemed[0].code).toBe("c".repeat(64));
-  // Only the page that started the sign-in holds the verifier its challenge was made from.
-  expect(createHash("sha256").update(redeemed[0].codeVerifier).digest("base64url"))
-    .toBe(start.searchParams.get("code_challenge"));
-});
+    expect(new URL(page.url()).searchParams.get("new_account")).toBe(newAccount ? "1" : null);
+
+    const [request] = await page.evaluate(() => (window as unknown as { __authorizeRequests: AuthorizeRequest[] }).__authorizeRequests);
+    const start = new URL(request.url);
+    expect(start.pathname).toBe("/api/auth/app/start");
+    expect(request.redirectParam).toBe("redirect_uri");
+    expect(start.searchParams.get("provider")).toBe("google");
+    expect(start.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(redeemed).toHaveLength(1);
+    expect(redeemed[0].code).toBe("c".repeat(64));
+    // Only the page that started the sign-in holds the verifier its challenge was made from.
+    expect(createHash("sha256").update(redeemed[0].codeVerifier).digest("base64url"))
+      .toBe(start.searchParams.get("code_challenge"));
+  });
+}
 
 test("an answer carrying another sign-in's state is refused before any code is redeemed", async ({ page }) => {
   await openAsPhoneApp(page, { inPlace: true, answerState: "other" });

@@ -83,7 +83,14 @@ that started the flow can redeem the code, at `/api/auth/app/token`, because it
 alone holds the PKCE verifier; the code lasts two minutes, is handed over once,
 and a lost redemption answer is replayed rather than issuing a second session.
 An account with two-step verification is asked for its code in the sheet, and
-the Hub then continues to the app. Apple identity tokens are accepted only for
+the Hub then continues to the app. The login page's pending verification step
+holds every signed-in exit, including device approval, even if the browser
+already has a website session. Only a successful check of this visit's
+authenticator or backup code completes that step; starting over abandons the
+app handoff and signs out before showing another sign-in. Successful login
+handlers supply state and the landing path to one navigation effect rather
+than navigating themselves.
+Apple identity tokens are accepted only for
 the iOS app's bundle id; `/sign-in/social` with an identity token is a first
 factor and waits for the second like any other. Shells without in-place sign-in
 keep the browser device-code flow.
