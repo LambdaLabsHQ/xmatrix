@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, openGeneralChannelWithHistory } from "./workspace-fixtures";
+import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, conversationOpened, fixtureJson, fixtureRequests, installWorkspaceStubs, openGeneralChannelWithHistory } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -55,4 +55,35 @@ test("a long connector result folds under Show more", async ({ page }) => {
   await more.click();
   await expect(card.locator(".rich-message-collapsed")).toHaveCount(0);
   await expect(card).toContainText("Request data omitted");
+});
+
+// The Human sees a protected value automatically; another owner never triggers its read.
+// Text never loads external media or enters a passage-to-shared-conversation action.
+test("private originals are fetched only for their owner and stay outside shared message actions", async ({ page }) => {
+  const value = 'Private fixture detail <img src="https://private.invalid/never-fetch">';
+  const channel = { ...E2E_CHANNEL, messageCount: 2, lastMessageSequence: 2, historyHeadSequence: 2, updatedAt: E2E_NOW };
+  const messages = [
+    { ...receipt(1, "Google Search Console inspect_url: completed; Result: [hidden — private call]."),
+      metadata: { xmatrixProvenance: "system_fact", xmatrixPrivateConnectorResultOwner: "e2e-user" } },
+    { ...receipt(2, "Google Search Console inspect_url: completed; Result: [hidden — private call]."),
+      metadata: { xmatrixProvenance: "system_fact", xmatrixPrivateConnectorResultOwner: "another-user" } },
+  ];
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [channel] });
+  await fixtureJson(page, "private-result-history", "**/api/xmatrix/channels/channel-general/history**", { messages, hasMore: false });
+  await fixtureJson(page, "private-original", /\/api\/xmatrix\/channels\/[^/]+\/messages\/[^/]+\/connector-result$/u, { detail: value });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await conversationOpened(page);
+  const original = page.getByTestId("private-connector-result");
+  await expect(original).toHaveText(value, { timeout: 20_000 });
+  await expect(page.getByTestId("connector-receipt").nth(0)).toContainText("visible to you");
+  await expect(page.getByTestId("connector-receipt").nth(1)).not.toContainText(value);
+  const reads = (await fixtureRequests(page, "private-original")).map(url => new URL(url).pathname);
+  expect(reads.length).toBeGreaterThan(0);
+  expect(reads.every(path => path === `/api/xmatrix/channels/${E2E_CHANNEL.id}/messages/receipt-1/connector-result`)).toBe(true);
+  await expect(original.locator("img")).toHaveCount(0);
+  await original.evaluate(body => {
+    const range = document.createRange(); range.selectNodeContents(body);
+    document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range);
+  });
+  await expect(page.getByTestId("message-selection-menu")).toHaveCount(0);
 });

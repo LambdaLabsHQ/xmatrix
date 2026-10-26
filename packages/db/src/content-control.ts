@@ -268,7 +268,7 @@ export class PostgresContentRepository {
 
   async createIntent(input: {
     requestId: string; commandId: string; intentId: string; scopeId: string;
-    contentHash: string; encodedBytes: number; expiresAt: string; principal: ContentPrincipal; purpose?: "summon_decision";
+    contentHash: string; encodedBytes: number; expiresAt: string; principal: ContentPrincipal; purpose?: "summon_decision" | "connector_result";
   }): Promise<Record<string, unknown>> {
     const { requestId, commandId } = command(input);
     const intentId = text(input.intentId, "intentId");
@@ -282,8 +282,8 @@ export class PostgresContentRepository {
       throw new ContentControlError("invalid_blob_intent", 400, "blob expiry is invalid");
     }
     const scope = await this.resolveScope(requestId, scopeId);
-    if (input.purpose !== undefined && (input.purpose !== "summon_decision" || !scope.readerUserId)) {
-      throw new ContentControlError("invalid_decision_scope", 400, "Decision upload requires a restricted scope");
+    if (input.purpose !== undefined && (!["summon_decision", "connector_result"].includes(input.purpose) || !scope.readerUserId)) {
+      throw new ContentControlError("invalid_decision_scope", 400, "Private record upload requires a restricted scope");
     }
     const requestDigest = await digest(input);
     const placement = await this.spaces.resolve(requestId, "content.intent.create", scope.spaceId);
@@ -331,8 +331,8 @@ export class PostgresContentRepository {
             encodedBytes, now, expiresAt], maxRows: 0,
         });
         if (input.purpose) await tx.query({ name: "content_decision_intent_mark_v1",
-          text: "UPDATE data.blob_upload_intents SET purpose='summon_decision' WHERE space_id=$1 AND intent_id=$2",
-          values: [scope.spaceId, intentId], maxRows: 0 });
+          text: "UPDATE data.blob_upload_intents SET purpose=$3 WHERE space_id=$1 AND intent_id=$2",
+          values: [scope.spaceId, intentId, input.purpose], maxRows: 0 });
         result = { intentId, scopeId, contentHash, objectKey, encodedBytes,
           checksum: contentHash, state: "pending", version: 1, createdAt: now, expiresAt };
       }
@@ -384,8 +384,9 @@ export class PostgresContentRepository {
       if (!rows[0]) throw new ContentControlError(
         "blob_intent_unavailable", 404, "live pending upload intent is required",
       );
-      if (rows[0].purpose === "summon_decision") throw new ContentControlError(
-        "decision_writer_required", 403, "Decision uploads require the internal decision writer");
+      if (["summon_decision", "connector_result"].includes(String(rows[0].purpose))) throw new ContentControlError(
+        rows[0].purpose === "summon_decision" ? "decision_writer_required" : "private_record_writer_required",
+        403, "Private records require their internal writer");
       return serializeIntent(rows[0]);
     });
   }
@@ -596,8 +597,9 @@ export class PostgresContentRepository {
       if (!rows[0]) throw new ContentControlError("blob_ref_not_found", 404, "blob reference not found");
       // Decision evidence has additional source-publication and expiry checks.
       // Generic blob reads must not bypass the dedicated forensic reader.
-      if (rows[0].owner_kind === "summon_decision") throw new ContentControlError(
-        "decision_reader_required", 403, "Decision records require the decision evidence endpoint",
+      if (["summon_decision", "connector_result"].includes(String(rows[0].owner_kind))) throw new ContentControlError(
+        rows[0].owner_kind === "summon_decision" ? "decision_reader_required" : "private_record_reader_required",
+        403, "Private records require their dedicated reader",
       );
       return serializeRef(rows[0]);
     });
@@ -628,6 +630,33 @@ export class PostgresContentRepository {
         values: [spaceId, `sha256:${input.contentHash}`, pageId, PAGE_MEDIA_OWNER_KIND], maxRows: 1,
       });
       return { held: rows[0]?.held === true, heldForPage: rows[0]?.held_for_page === true };
+    });
+  }
+
+  /** The original calling Human retains access while the Channel and receipt remain readable.
+   * Agent tokens and public blob routes cannot collect another invocation's result. */
+  async connectorResultRef(input: {
+    requestId: string; channelId: string; messageId: string; principal: ContentPrincipal;
+  }): Promise<Record<string, unknown>> {
+    if (input.principal.kind !== "user") throw new ContentControlError("forbidden", 403, "Private results require their Human owner");
+    const requestId = text(input.requestId, "requestId", 200);
+    const channelId = text(input.channelId, "channelId"), messageId = text(input.messageId, "messageId");
+    const scopeId = restrictedChannelContentScope(channelId, input.principal.id);
+    const scope = await this.resolveScope(requestId, scopeId);
+    return this.spaces.transaction(requestId, "content.connector-result.read", scope.spaceId, async tx => {
+      await this.authorize(tx, scope, input.principal, "content_history_read");
+      const rows = await tx.query<QueryResultRow>({ name: "content_connector_result_ref_v1",
+        text: `SELECT r.*,o.storage_key,o.checksum,o.byte_length FROM data.content_refs r
+          JOIN data.content_objects o ON o.space_id=r.space_id AND o.object_id=r.child_object_id
+          JOIN data.messages m ON m.space_id=r.space_id AND m.channel_id=$2 AND m.message_id=r.owner_id
+          WHERE r.space_id=$1 AND r.root_set_id=$3 AND r.generation=0
+            AND r.owner_kind='connector_result' AND r.owner_id=$4 AND r.ref_id='connector-result:'||$4
+            AND m.author_kind='app' AND m.deleted_at IS NULL AND m.recalled_at IS NULL
+            AND r.created_at > $5::timestamptz LIMIT 1`,
+        values: [scope.spaceId, channelId, scopeId, messageId,
+          new Date(Date.now() - DECISION_RETENTION_MS).toISOString()], maxRows: 1 });
+      if (!rows[0]) throw new ContentControlError("not_found", 404, "Private result is unavailable");
+      return serializeRef(rows[0]);
     });
   }
 
@@ -695,7 +724,7 @@ export class PostgresContentRepository {
     const retired = await this.spaces.transaction(requestId, "content.decisions.orphans", placement, async tx => {
       const candidates = await tx.query<QueryResultRow>({ name: "content_decision_orphan_scan_v1",
         text: `SELECT intent_id,scope_id,object_key,checksum FROM data.blob_upload_intents
-          WHERE space_id=$1 AND purpose='summon_decision' AND expires_at <= $2::timestamptz
+          WHERE space_id=$1 AND purpose IN ('summon_decision','connector_result') AND expires_at <= $2::timestamptz
           ORDER BY expires_at,intent_id LIMIT $3`, values: [spaceId, cutoff, limit], maxRows: limit });
       const retired: Array<{ intentId: string; version: number }> = [];
       for (const row of candidates) {
@@ -706,7 +735,7 @@ export class PostgresContentRepository {
         await this.lockRestrictedObject(tx, spaceId, objectKey);
         const current = await tx.query<QueryResultRow>({ name: "content_decision_orphan_lock_v1",
           text: `SELECT version FROM data.blob_upload_intents WHERE space_id=$1 AND intent_id=$2
-            AND purpose='summon_decision' AND expires_at <= $3::timestamptz FOR UPDATE SKIP LOCKED`,
+            AND purpose IN ('summon_decision','connector_result') AND expires_at <= $3::timestamptz FOR UPDATE SKIP LOCKED`,
           values: [spaceId, row.intent_id, cutoff], maxRows: 1 });
         if (!current[0]) continue;
         await tx.query({ name: "content_decision_orphan_retire_v1",
@@ -740,12 +769,12 @@ export class PostgresContentRepository {
       const rows = await tx.query<QueryResultRow>({ name: "content_decision_next_maintenance_v1",
         text: `SELECT MIN(due_at) AS due_at FROM (
           SELECT MIN(created_at)+interval '30 days' AS due_at FROM data.content_refs
-            WHERE space_id=$1 AND generation=0 AND owner_kind='summon_decision'
+            WHERE space_id=$1 AND generation=0 AND owner_kind IN ('summon_decision','connector_result')
           UNION ALL SELECT MIN(GREATEST(not_before,COALESCE(lease_until,not_before))) AS due_at
             FROM data.content_gc_candidates WHERE space_id=$1 AND reason IN ('decision-expired','decision-upload-expired')
               AND status IN ('pending','leased') AND attempts < 100
           UNION ALL SELECT MIN(expires_at)+interval '31 days' AS due_at FROM data.blob_upload_intents
-            WHERE space_id=$1 AND purpose='summon_decision'
+            WHERE space_id=$1 AND purpose IN ('summon_decision','connector_result')
         ) due`, values: [spaceId], maxRows: 1 });
       return rows[0]?.due_at ? new Date(rows[0].due_at as string | Date).getTime() : null;
     });
@@ -838,7 +867,7 @@ export class PostgresContentRepository {
         text: `SELECT r.ref_id,r.root_set_id,r.child_object_id,o.storage_key,o.checksum,o.gc_not_before
           FROM data.content_refs r JOIN data.content_objects o
             ON o.space_id=r.space_id AND o.object_id=r.child_object_id
-          WHERE r.space_id=$1 AND r.generation=0 AND r.owner_kind='summon_decision'
+          WHERE r.space_id=$1 AND r.generation=0 AND r.owner_kind IN ('summon_decision','connector_result')
             AND r.created_at <= $2::timestamptz
           ORDER BY r.created_at,r.ref_id LIMIT $3 FOR UPDATE OF r,o SKIP LOCKED`,
         values: [spaceId, cutoff, limit], maxRows: limit,
@@ -850,7 +879,7 @@ export class PostgresContentRepository {
         }
         await tx.query({ name: "content_decision_expire_v1",
           text: `DELETE FROM data.content_refs WHERE space_id=$1 AND root_set_id=$2
-            AND generation=0 AND ref_id=$3 AND owner_kind='summon_decision'
+            AND generation=0 AND ref_id=$3 AND owner_kind IN ('summon_decision','connector_result')
             AND created_at <= $4::timestamptz`,
           values: [spaceId, row.root_set_id, row.ref_id, cutoff], maxRows: 0 });
         const remaining = await tx.query({ name: "content_decision_remaining_v1",

@@ -2667,8 +2667,11 @@ export const MessageRow = memo(function MessageRow({
               <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody}
                 spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
             ) : connectorReceipt ? (
-              <div {...(message.messageId ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents} />
+              <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
+                <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}
+                  {...(channel && message.messageId && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string"
+                    ? { privateResult: { channelId: channel.id, messageId: message.messageId,
+                      ownerUserId: message.metadata.xmatrixPrivateConnectorResultOwner, token } } : {})} />
               </div>
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />

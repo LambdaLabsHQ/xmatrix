@@ -1,21 +1,12 @@
 import { createPostgresAuthorityDatabase, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import { PostgresChannelSpaceDirectory, PostgresContentRepository } from "@xmatrix/db";
-import { digestCanonicalCloneCborV1, immutableContentObjectKey, restrictedChannelContentScope, sha256Hex } from "@xmatrix/protocol";
+import { digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import { DecisionEvidenceStepFailed, type DecisionEvidenceStage, type RoutingDecisionEvent, type RoutingEvaluator } from "./agent-routing-evaluation";
-import { cloudflareRelayPrivateR2UploadPort } from "./relay-r2-upload-private-api";
-import { executeRelayR2UploadGatewayRequest, RELAY_R2_UPLOAD_CHECKSUM_HEADER } from "./relay-r2-upload-gateway";
+import { writeRestrictedRecord, RestrictedRecordWriteFailure } from "./restricted-record-content";
+export { retryRestrictedRecordStep as retrySummonDecisionStep } from "./restricted-record-content";
+import { retryRestrictedRecordStep as retrySummonDecisionStep } from "./restricted-record-content";
 
 type DecisionContentAuthority = Pick<PostgresContentRepository, "createIntent" | "commitRef">;
-
-/** Every retry repeats one idempotent step with identical authority inputs. */
-export async function retrySummonDecisionStep<T>(step: () => Promise<T>): Promise<T> {
-  try { return await step(); }
-  catch (error) {
-    console.warn("Summon decision step retried", { error: error instanceof Error ? error.message : String(error) });
-    await new Promise(resolve => setTimeout(resolve, 100));
-    return step();
-  }
-}
 
 /** Runs one evidence step and tags any failure with that step's category. */
 async function evidenceStep<T>(stage: DecisionEvidenceStage, step: () => Promise<T>): Promise<T> {
@@ -31,36 +22,18 @@ export function withSummonDecisionContent(input: {
   evaluate: RoutingEvaluator; content: DecisionContentAuthority; bucket: R2Bucket;
   actorUserId: string; channelId: string; sourceMessageId: string; invocationId: string;
 }): RoutingEvaluator {
-  const scopeId = restrictedChannelContentScope(input.channelId, input.actorUserId);
-  const principal = { kind: "user" as const, id: input.actorUserId };
   const recordDecision = async (event: RoutingDecisionEvent) => {
     const refId = `decision:${event.decisionId}:${event.status}`;
     const payload = { version: 1, sourceMessageId: input.sourceMessageId, invocationId: input.invocationId,
       ...event, ...(event.status === "started" ? { inputDigest: await digestCanonicalCloneCborV1(event.input) } : {}) };
-    const bytes = new TextEncoder().encode(JSON.stringify(payload));
-    if (bytes.byteLength > 128 * 1024) throw new DecisionEvidenceStepFailed("oversize");
-    const checksum = await sha256Hex(bytes);
-    const objectKey = immutableContentObjectKey(scopeId, checksum);
-    const now = Date.now();
-    const intentId = `intent:${refId}`;
-    const intent = { requestId: refId, commandId: `create:${refId}`, intentId,
-      scopeId, purpose: "summon_decision", contentHash: checksum, encodedBytes: bytes.byteLength,
-      expiresAt: new Date(now + 15 * 60_000).toISOString(), principal } as const;
-    await evidenceStep("intent", () => retrySummonDecisionStep(() => input.content.createIntent(intent)));
-    await evidenceStep("upload", () => retrySummonDecisionStep(() => executeRelayR2UploadGatewayRequest({
-      request: new Request("https://internal/api/relay-v2/private-r2/upload", { method: "PUT", body: bytes,
-        headers: { "content-length": String(bytes.byteLength), [RELAY_R2_UPLOAD_CHECKSUM_HEADER]: checksum } }),
-      now, visibilityScopeId: scopeId,
-      intent: { intentId, visibilityScopeId: scopeId, contentHash: checksum, checksumSha256: checksum,
-        encodedSize: bytes.byteLength, finalKey: objectKey, expiresAt: now + 15 * 60_000,
-        state: "pending", allowStaging: false },
-      bucket: cloudflareRelayPrivateR2UploadPort(input.bucket),
-    })));
-    const committed = { requestId: refId, commandId: `commit:${refId}`, intentId,
-      expectedIntentVersion: 1, refId, ownerKind: "summon_decision", ownerId: input.sourceMessageId,
-      scopeId, objectKey, checksum, encodedBytes: bytes.byteLength,
-      verifiedAt: new Date().toISOString(), principal };
-    await evidenceStep("commit", () => retrySummonDecisionStep(() => input.content.commitRef(committed)));
+    try {
+      await writeRestrictedRecord({ content: input.content, bucket: input.bucket,
+        actorUserId: input.actorUserId, channelId: input.channelId, refId,
+        ownerId: input.sourceMessageId, kind: "summon_decision", payload, maximumBytes: 128 * 1024 });
+    } catch (error) {
+      if (error instanceof RestrictedRecordWriteFailure) throw new DecisionEvidenceStepFailed(error.stage);
+      throw error;
+    }
   };
   return Object.assign(((request, options) => input.evaluate(request, options)) as RoutingEvaluator, { recordDecision });
 }
