@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Client } from "pg";
 import { createAuthorityDatabase, PostgresAutomationRepository, PostgresBillingRepository, PostgresChannelCatalogRepository,
-  PostgresPageRepository } from "../dist/index.js";
+  PostgresPageRepository, PostgresSpaceControlRepository } from "../dist/index.js";
 import { integration, connectionString } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
 import { describePageConversations } from "../dist/page-conversations.js";
@@ -23,6 +23,7 @@ function recoveringDatabase(readFault) {
         if (fault?.matches.test(text) && fault.remaining > 0) {
           fault.remaining -= 1;
           fault.checkouts.push(entry);
+          await fault.beforeThrow?.();
           throw fault.error;
         }
         return result;
@@ -33,6 +34,18 @@ function recoveringDatabase(readFault) {
     },
   });
   return { database, clients };
+}
+
+async function assertReadRecovery(read, expected, clients, injectFault) {
+  const before = clients.length;
+  const fault = injectFault();
+  assert.deepEqual(await read(), expected);
+  assert.equal(fault.checkouts.length, 1);
+  assert.ok(fault.checkouts[0].ended, "the stalled checkout is destroyed");
+  assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1, "recovery uses a new connection");
+  assert.ok(clients.slice(before).every(entry => entry.ended), "all request sessions close");
+  assert.ok(clients.slice(before).every(entry => !entry.queries.some(sql => /^(BEGIN|COMMIT)/u.test(sql))),
+    "lock-free reads avoid transaction-opening and commit round trips");
 }
 
 // The existing catalog privacy tests use healthy connections. Exercise the
@@ -108,15 +121,8 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
       const expected = await read();
       assert.ok(JSON.stringify(expected).includes(evidence), "the accessible page or live activity is returned");
       for (const matches of stages) {
-        const before = clients.length;
-        fault = { matches, remaining: 1, error: new Error("Query read timeout"), checkouts: [] };
-        assert.deepEqual(await read(), expected);
-        assert.equal(fault.checkouts.length, 1);
-        assert.equal(fault.checkouts[0].ended, true);
-        assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1);
-        assert.ok(clients.slice(before).every(entry => entry.ended), "request sessions close after recovery");
-        assert.ok(clients.slice(before).every(entry => !entry.queries.some(sql => sql.startsWith("BEGIN"))),
-          "lock-free page reads never wait for an unnecessary transaction opening");
+        await assertReadRecovery(read, expected, clients, () =>
+          fault = { matches, remaining: 1, error: new Error("Query read timeout"), checkouts: [] });
       }
       fault = { matches: failureMatch, remaining: 3,
         error: new Error("Query read timeout"), checkouts: [] };
@@ -160,6 +166,57 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
   } finally {
     await f.client.query("DELETE FROM data.page_links WHERE space_id=$1", [f.ids.space]);
     await f.client.query("DELETE FROM data.automations WHERE automation_id=$1", [automationId]);
+    await f.close();
+  }
+});
+
+// Healthy catalog tests cover authorization and presence, and the generic
+// client tests cover retry. Neither catches a detail read opening BEGIN or
+// losing a later presence/member response through the actual repository SQL.
+integration("Channel details recover each lost read and recheck access (XMATRIX-HUB-AR)", async () => {
+  const f = await spaceSecretFixture();
+  let fault;
+  const { database, clients } = recoveringDatabase(() => fault);
+  const spaces = new PostgresSpaceControlRepository(database, "shard-0");
+  const read = () => spaces.getChannel({ requestId: crypto.randomUUID(), spaceId: f.ids.space,
+    channelId: f.ids.channel, principal: { kind: "user", id: f.ids.owner } });
+  const channelRead = /FROM data\.channels c JOIN data\.spaces s/u;
+  try {
+    for (const mode of ["open", "closed"]) {
+      await f.client.query("UPDATE data.channels SET mode=$2 WHERE channel_id=$1", [f.ids.channel, mode]);
+      if (mode === "closed") await f.client.query(`INSERT INTO data.channel_access
+        (channel_id,space_id,subject_kind,subject_id,grant_version,created_at,updated_at)
+        VALUES($1,$2,'user',$3,1,now(),now())`, [f.ids.channel, f.ids.space, f.ids.owner]);
+      const expected = await read();
+      assert.ok(JSON.stringify(expected.channel.memberPresence).includes(f.ids.instance));
+      const memberRead = mode === "open" ? /SELECT user_id FROM data\.space_members/u
+        : /SELECT m\.user_id FROM data\.space_members m/u;
+      for (const matches of [channelRead, /FROM data\.instances i/u, /SELECT \* FROM \(SELECT i\.instance_id/u, memberRead]) {
+        await assertReadRecovery(read, expected, clients, () =>
+          fault = { matches, remaining: 1, error: new Error("Query read timeout"), checkouts: [] });
+      }
+    }
+    for (const [error, attempts] of [[new Error("Query read timeout"), 2],
+      [Object.assign(new Error("statement timeout"), { code: "57014" }), 1]]) {
+      fault = { matches: channelRead, remaining: 3, error, checkouts: [] };
+      await assert.rejects(read(), error);
+      assert.equal(fault.checkouts.length, attempts, "recovery is bounded and only retries lost responses");
+    }
+    fault = { matches: channelRead, remaining: 1, error: new Error("Query read timeout"), checkouts: [],
+      beforeThrow: () => f.client.query("UPDATE control.space_placement SET placement_epoch=2 WHERE space_id=$1",
+        [f.ids.space]) };
+    await assert.rejects(read(), /local Space placement fence is stale/u);
+    assert.equal(fault.checkouts.length, 1, "recovery refuses the stale placement");
+    fault = undefined;
+    await f.client.query("UPDATE control.space_placement SET placement_epoch=1 WHERE space_id=$1", [f.ids.space]);
+    fault = { matches: channelRead, remaining: 1, error: new Error("Query read timeout"), checkouts: [],
+      beforeThrow: () => f.client.query("DELETE FROM data.channel_access WHERE channel_id=$1 AND subject_id=$2",
+        [f.ids.channel, f.ids.owner]) };
+    await assert.rejects(read(), { code: "channel_not_found" });
+    assert.equal(fault.checkouts.length, 1, "replayed SELECT checks the now-revoked grant");
+    assert.ok(clients.every(entry => entry.ended));
+  } finally {
+    await f.client.query("DELETE FROM data.channel_access WHERE channel_id=$1", [f.ids.channel]);
     await f.close();
   }
 });

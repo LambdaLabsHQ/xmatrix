@@ -166,6 +166,13 @@ report reconciliation; it never triggers an immediate replay. This repairs the
 HUB-AN/AP recovery gap without attributing the underlying transport stall.
 Lock-free page search uses per-statement `single_read` recovery, including its
 membership and accessible-page checks (HUB-99).
+Channel detail reads use the same request-local, per-statement recovery for
+the authorized Channel row, live/resting Instance presence and visible Human
+members (HUB-AR), as the catalog already does. Each read checks its placement
+fence; the Channel row's shared capability predicate checks current membership
+and grants again if its response is lost. There is no enclosing BEGIN/COMMIT
+or cross-statement snapshot guarantee. A second lost response or an answered
+SQL/domain error still propagates.
 
 Sentry recovery claims try the same transaction advisory capacity lock that
 webhook admission takes exclusively. A busy app returns no jobs for that pass,

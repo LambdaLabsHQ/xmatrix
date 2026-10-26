@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Channel details, including the connector approval list's access check, use
+independent single reads with placement fencing and bounded lost-response
+recovery, matching the Channel catalog. See
+[PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Turn-failure cards expose the original cause before Details, including unknown
 and historical errors. Hub-classified exhausted provider accounts have distinct
 quota-reset or handoff guidance; known reset timestamps display in UTC. The
