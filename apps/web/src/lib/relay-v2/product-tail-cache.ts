@@ -52,7 +52,9 @@ function safeCount(value: unknown, minimum = 0): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum;
 }
 
-const VOLATILE_ATTACHMENT_KEYS = ["dataUrl", "url", "objectKey", "thumbnailUrl"] as const;
+const VOLATILE_ATTACHMENT_KEYS = [
+  "dataUrl", "url", "objectKey", "thumbnailUrl", "localMediaBlob", "sourceMedia", "relayV2Upload",
+] as const;
 
 /**
  * Persisted attachments keep only stable record descriptors. Bodies, data

@@ -468,6 +468,7 @@ export async function uploadChannelAttachment(
     mimeType,
     size: file.size,
     url: URL.createObjectURL(file),
+    localMediaBlob: file,
     objectKey: upload.objectKey,
     contentHash: upload.contentHash,
     relayV2Upload: upload,
