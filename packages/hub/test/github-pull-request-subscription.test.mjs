@@ -38,6 +38,15 @@ test("an event names the pull requests it is about", () => {
 test("the opener hears others' merge, reviews and comments, never its own", () => {
   assert.equal(message("pull_request", { action: "closed", pull_request: { ...pull, merged: true },
     sender: { login: "yiming" } }), "yiming merged pull request [acme/app#7](https://github.com/acme/app/pull/7): Fix it");
+  assert.equal(message("pull_request", { action: "closed", pull_request: { ...pull, merged: true },
+    sender: { login: "xmatrix-connector[bot]" } }),
+    "Merged [acme/app#7](https://github.com/acme/app/pull/7): Fix it");
+  assert.equal(message("pull_request", { action: "closed", pull_request: pull,
+    sender: { login: "xmatrix-connector[bot]" } }),
+    "Closed [acme/app#7](https://github.com/acme/app/pull/7): Fix it");
+  assert.equal(message("pull_request", { action: "closed", pull_request: { ...pull, title: "", merged: true },
+    sender: { login: "xmatrix-connector[bot]" } }),
+    "Merged [acme/app#7](https://github.com/acme/app/pull/7)");
   assert.match(message("pull_request", { action: "closed", pull_request: pull, sender: { login: "yiming" } }),
     /^yiming closed pull request/u);
   assert.equal(message("pull_request", { action: "closed", pull_request: { ...pull, merged: true },
