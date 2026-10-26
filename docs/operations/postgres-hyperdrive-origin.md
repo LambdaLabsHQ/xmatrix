@@ -83,6 +83,15 @@ import work, not a recurring application query. Migration 0164 already restored
 the machine-command claim and dispatch indexes after hostname retirement;
 verify their presence before adding overlapping provider recommendations.
 
+The 26 October report's `machine_run_routes (owner_user_id, machine_id, …)`
+recommendation was the same hostname retirement again: dropping `host_id` in
+0137 silently dropped the Machine Run route index and the Launch delivery index,
+so every daemon report and reconnect scanned those tables. Migration 0220
+rebuilds both without the column. `migration-index-drift-postgres.test.mjs` now
+applies every migration in order and fails when an index disappears without a
+migration naming it; its short accepted list records each historical loss and
+why nothing reads by it.
+
 Migration 0184 adds an ordered partial index for unfinished launch cancellations
 on `(channel_id, updated_at, run_id)`. The existing Channel open-work index serves
 preparation and due-time reads but retains completed aborts and cannot supply
