@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isLaunchHintRejection, launchRefusal, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
   preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut,
-  harnessSignedOutNoticeOf, HARNESS_SIGNED_OUT_NOTICE_KIND,
-  REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
+  harnessSignedOutNoticeOf, HARNESS_SIGNED_OUT_NOTICE_KIND, daemonOfflineRefusal, machineOfflineNoticeOf,
+  MACHINE_OFFLINE_NOTICE_KIND, parseOfflineMachines, REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
 
 test("every registered summon rejection has a public, bounded explanation", () => {
   for (const code of REGISTRATION_PREPARATION_REJECTION_CODES) {
@@ -13,7 +13,7 @@ test("every registered summon rejection has a public, bounded explanation", () =
   assert.equal(preparationFailureSummary("registration_repository_unavailable"), undefined);
   assert.equal(preparationRejectionMessage("registration_environment_private_provider_payload"), undefined);
   // An offline machine is told apart from a missing registration or Workspace.
-  assert.match(preparationFailureSummary("registration_daemon_offline"), /machine is offline.*when it reconnects\.$/);
+  assert.match(preparationFailureSummary("registration_daemon_offline"), /computer this agent runs on is offline.*send your message again\.$/);
   assert.doesNotMatch(preparationRejectionMessage("registration_daemon_offline"), /workspace|registered environment/i);
 });
 
@@ -39,6 +39,30 @@ test("a named offline machine is not reported as a missing registration", () => 
   assert.equal(code("registration_machine_unavailable", "Other", offline), "registration_machine_unavailable");
   assert.equal(code("registration_not_found", undefined, offline), "registration_not_found");
   assert.equal(code("registration_harness_unavailable", "Laptop", offline), "registration_harness_unavailable");
+});
+
+test("an offline refusal names its machines and how to bring one back", () => {
+  const blocked = [{ machineId: "laptop-id", machineName: "Laptop", reason: "daemon_offline" },
+    { machineId: "laptop-id", machineName: "Laptop", reason: "daemon_offline" },
+    { machineId: "mac-id", reason: "harness_signed_out", signedOut: { harness: "codex", program: "Codex", machineId: "mac-id" } }];
+  // Each offline machine once; a machine blocked for another reason is not offline.
+  assert.deepEqual(daemonOfflineRefusal(blocked), { code: "registration_daemon_offline",
+    offline: [{ machineId: "laptop-id", machineName: "Laptop" }] });
+  assert.deepEqual(launchRefusal("registration_machine_unavailable", "Laptop", blocked.slice(0, 1)),
+    { code: "registration_daemon_offline", offline: [{ machineId: "laptop-id", machineName: "Laptop" }] });
+  assert.equal(preparationRejectionMessage("registration_daemon_offline", [{ machineId: "laptop-id", machineName: "Laptop" }]),
+    "Laptop is offline, so nothing was launched. Turn it on and open xMatrix there (the desktop app, or `xmatrix setup daemon` in a terminal), " +
+    "then send your message again. No launch was allocated.");
+  // A stored detail is read back only whole and bounded.
+  assert.equal(parseOfflineMachines([{ machineId: "" }]), undefined);
+  assert.equal(parseOfflineMachines([{ machineId: "a", machineName: "x\ny" }]), undefined);
+  assert.equal(parseOfflineMachines(Array.from({ length: 9 }, (_, index) => ({ machineId: `m${index}` }))), undefined);
+  assert.deepEqual(parseOfflineMachines([{ machineId: "a" }]), [{ machineId: "a" }]);
+  // The notice carries the machines and the summon to send again.
+  assert.deepEqual(machineOfflineNoticeOf({ kind: MACHINE_OFFLINE_NOTICE_KIND, offline: [{ machineId: "a" }],
+    sourceMention: "@zcode", sourceMessageId: "m1" }), { offline: [{ machineId: "a" }], summon: { sourceMention: "@zcode", sourceMessageId: "m1" } });
+  assert.equal(machineOfflineNoticeOf({ kind: MACHINE_OFFLINE_NOTICE_KIND, offline: [] }), null);
+  assert.equal(machineOfflineNoticeOf({ kind: HARNESS_SIGNED_OUT_NOTICE_KIND, offline: [{ machineId: "a" }] }), null);
 });
 
 test("a launch only a too-old harness could take names the program, its version and the update", () => {

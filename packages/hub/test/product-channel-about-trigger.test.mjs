@@ -92,6 +92,19 @@ test("naming a machine is a card hint; quota and an offline machine still post",
     ["registration_quota_exhausted", "registration_daemon_offline"]);
 });
 
+test("an offline refusal posts which machine and the summon, so the Web can show how to bring it back", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "summon",
+    senderKind: "user", senderId: "human", actorUserId: "human", body: "@zcode fix it" };
+  const notices = [];
+  const offline = [{ machineId: "machine:laptop", machineName: "Laptop" }];
+  await dispatchProductMessageLaunches(input, { registration: async () => ({ selectionCount: 1, prepared: [],
+    rejected: [{ code: "registration_daemon_offline", sourceMention: "@zcode", offline }] }) }, async value => notices.push(value));
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].body, /^Agent launch failed: Laptop is offline/);
+  assert.deepEqual(notices[0].metadata, { kind: "xmatrix.machine-offline.v1", offline, sourceMention: "@zcode" });
+  assert.equal(notices[0].replyToMessageId, "summon");
+});
+
 test("direct text never bypasses an explicit registration selection or a failed authority read", async () => {
   const input = { env: {}, channelId: "channel", messageId: "message",
     senderKind: "user", senderId: "human", actorUserId: "human", body: "@codex repo:owner/repo task" };

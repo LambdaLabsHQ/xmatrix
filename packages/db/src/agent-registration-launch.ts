@@ -36,11 +36,13 @@ import {
   type HarnessParameter,
   harnessParameterObservation,
   launchHarnessParameters,
+  daemonOfflineRefusal,
   launchRefusal,
   validateHarnessParameterValues,
   type AutoLaunchTags,
   type HarnessTooOld,
   type HarnessSignedOut,
+  type OfflineMachine,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
   type DraftSummonIntent,
@@ -680,17 +682,18 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
     const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld;
-      signedOut?: HarnessSignedOut }> = [];
+      signedOut?: HarnessSignedOut; offline?: OfflineMachine[] }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
     const summonText = (selection: { start: number; end: number; text: string }) =>
       input.body.slice(selection.start, selectionLaunchConditions(input.body, selection).end);
-    // A refusal keeps what its error says is too old or signed out, so the reply can name it.
+    // A refusal keeps what its error says is too old, signed out or offline, so the reply can name it.
     const refused = (selectionIndex: number, selection: { start: number; end: number; text: string }, code: string, error: unknown) => {
       const tooOld = error instanceof RegistrationAccessError ? error.tooOld : undefined;
       const signedOut = error instanceof RegistrationAccessError ? error.signedOut : undefined;
+      const offline = error instanceof RegistrationAccessError ? error.offline : undefined;
       rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}),
-        ...(signedOut ? { signedOut } : {}) });
+        ...(signedOut ? { signedOut } : {}), ...(offline?.length ? { offline } : {}) });
     };
     for (const [selectionIndex, selection] of source.selections.entries()) {
       if (input.forceMention !== undefined && summonText(selection) !== input.forceMention) continue;
@@ -724,9 +727,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const listed = await this.candidatesFor({ ...target, managedWorkspace }, repositoryCatalog);
         const candidates = listed.offered;
         if (!candidates.length) {
-          const refusal = listed.offlineOnly ? { code: "registration_daemon_offline" }
+          const refusal = listed.offlineOnly ? daemonOfflineRefusal(listed.blocked)
             : launchRefusal("registration_not_found", options.tags.machine, listed.blocked);
-          throw new RegistrationAccessError(refusal.code, refusal.code === "registration_daemon_offline" ? 409 : 404, refusal.tooOld, refusal.signedOut);
+          throw RegistrationAccessError.refusal(refusal, refusal.code === "registration_daemon_offline" ? 409 : 404);
         }
         if (!choose) {
           rejected.push({ selectionIndex, code: "registration_selection_unconfigured", sourceMention: summonText(selection) });
@@ -838,9 +841,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       if (requiredHostCapabilities.length && (await this.candidatesFor({ managedWorkspace: true }, repositoryCatalog)).offered.length) {
         throw new RegistrationAccessError("registration_capability_unavailable", 409);
       }
-      const refusal = listed.offlineOnly ? { code: "registration_daemon_offline" }
+      const refusal = listed.offlineOnly ? daemonOfflineRefusal(listed.blocked)
         : launchRefusal("registration_not_found", input.tags?.machine, listed.blocked);
-      throw new RegistrationAccessError(refusal.code, refusal.code === "registration_daemon_offline" ? 409 : 404, refusal.tooOld, refusal.signedOut);
+      throw RegistrationAccessError.refusal(refusal, refusal.code === "registration_daemon_offline" ? 409 : 404);
     }
     // A caller may constrain the directory or repository it states.
     const tags: AutoLaunchTags = { ...input.tags };
@@ -922,7 +925,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const candidates = listed.offered;
     if (!candidates.length) {
       const refusal = launchRefusal("registration_not_found", undefined, listed.blocked);
-      throw new RegistrationAccessError(refusal.code, 404, refusal.tooOld, refusal.signedOut);
+      throw RegistrationAccessError.refusal(refusal, 404);
     }
     const selected = await choose({ message: input.body, tags: {}, candidates, managedWorkspace: true, askToStart: true,
       ...(input.onHarness ? { onHarness: input.onHarness } : {}) });
