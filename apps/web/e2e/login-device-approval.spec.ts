@@ -49,3 +49,16 @@ test("the request shows where it came from, and declining it ends it without app
   ]);
   expect(await fixtureRequests(page, "device-approve")).toHaveLength(0);
 });
+
+test("a remembered session waits for a pending second factor before offering device approval", async ({ page }) => {
+  await stubApproval(page);
+  await page.route("**/api/auth/two-factor/verify-totp", route => route.fulfill({
+    status: 401, json: { code: "INVALID_CODE", message: "Invalid code" },
+  }));
+  await page.goto(`${DEVICE_LOGIN}&two_factor=1`);
+  await expect(page.getByRole("heading", { name: "Two-step verification" })).toBeVisible();
+  await expect(page.getByTestId("device-approval-code")).toHaveCount(0);
+  await page.getByLabel("Authentication code", { exact: true }).fill("000000");
+  await expect(page.getByText("That code didn't match.", { exact: false })).toBeVisible();
+  expect(await fixtureRequests(page, "device-approve")).toHaveLength(0);
+});

@@ -98,28 +98,70 @@ test("three unanswered code checks keep the code and offer to try again", async 
   await expect.poll(() => check.calls()).toBe(6);
 });
 
-test("an app's sign-in that stopped for the second factor goes back to the Hub, not into the web", async ({ page }) => {
-  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
-  const state = { signedIn: false };
-  await hubSessionOnceSignedIn(page, state);
-  await page.route("**/api/auth/two-factor/verify-totp", route => {
-    state.signedIn = true;
-    return route.fulfill({ json: { token: "s", user: { id: "user-1" } } });
-  });
-  // The Hub's answer is left out: the page must leave only for it, with nothing else overtaking it.
+async function recordAppFinishes(page: import("@playwright/test").Page) {
   const finishes: string[] = [];
   await page.route("https://xmatrix-hub.xmatrix.sh/api/auth/app/finish**", route => {
     finishes.push(route.request().url());
-    return route.abort();
+    return route.fulfill({ contentType: "text/html", body: "App finish" });
   });
-  const pages: string[] = [];
-  page.on("framenavigated", frame => { if (frame === page.mainFrame()) pages.push(new URL(frame.url()).pathname); });
+  return finishes;
+}
 
-  const finish = "https://xmatrix-hub.xmatrix.sh/api/auth/app/finish?flow=f";
+// The prior happy path began signed out. It could not catch a remembered
+// website session completing an app handoff before this visit verifies a code.
+for (const { remembered, backup } of [
+  { remembered: false, backup: false },
+  { remembered: true, backup: false },
+  { remembered: true, backup: true },
+]) {
+  test(`an app handoff waits for this visit's ${backup ? "backup" : "authenticator"} code (remembered session: ${remembered})`, async ({ page }) => {
+    await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
+    const state = { signedIn: remembered };
+    await hubSessionOnceSignedIn(page, state);
+    let verifies = 0;
+    await page.route(`**/api/auth/two-factor/verify-${backup ? "backup-code" : "totp"}`, route => {
+      verifies += 1;
+      if (verifies === 1) return route.fulfill({ status: 401, json: { code: "INVALID_CODE", message: "Invalid code" } });
+      state.signedIn = true;
+      return route.fulfill({ json: { token: "s", user: { id: "user-1" } } });
+    });
+    const finishes = await recordAppFinishes(page);
+    const pages: string[] = [];
+    page.on("framenavigated", frame => { if (frame === page.mainFrame()) pages.push(new URL(frame.url()).pathname); });
+
+    const finish = "https://xmatrix-hub.xmatrix.sh/api/auth/app/finish?flow=f";
+    await page.goto(`/login?two_factor=1&continue=${encodeURIComponent(finish)}`);
+    if (backup) await page.getByRole("button", { name: "Use a backup code" }).click();
+    const input = page.getByLabel(backup ? "Backup code" : "Authentication code", { exact: true });
+    await input.fill(backup ? "invalid-backup" : "000000");
+    if (backup) await page.getByRole("button", { name: "Verify", exact: true }).click();
+    await expect(page.getByText("That code didn't match.", { exact: false })).toBeVisible();
+    expect(finishes).toEqual([]);
+    await expect(input).toHaveValue("");
+    await input.fill(backup ? "valid-backup" : "123456");
+    if (backup) await page.getByRole("button", { name: "Verify", exact: true }).click();
+    await expect.poll(() => finishes).toEqual([finish]);
+    expect(verifies).toBe(2);
+    expect(pages).not.toContain("/app");
+  });
+}
+
+test("starting a two-factor visit over signs out before showing another sign-in", async ({ page }) => {
+  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
+  const state = { signedIn: true };
+  await hubSessionOnceSignedIn(page, state);
+  let signOuts = 0;
+  await page.route("**/api/auth/sign-out", route => {
+    signOuts += 1;
+    state.signedIn = false;
+    return route.fulfill({ json: { success: true } });
+  });
+  const finishes = await recordAppFinishes(page);
+  const finish = "https://xmatrix-hub.xmatrix.sh/api/auth/app/finish?flow=restart";
   await page.goto(`/login?two_factor=1&continue=${encodeURIComponent(finish)}`);
-  await page.getByLabel("Authentication code").fill("123456");
-
-  await expect.poll(() => finishes).toEqual([finish]);
-  await page.waitForTimeout(1_500);
-  expect(pages).not.toContain("/app");
+  await page.getByRole("button", { name: "Start over", exact: true }).click();
+  await expect(page.getByLabel("Email address")).toBeVisible();
+  expect(signOuts).toBe(1);
+  expect(finishes).toEqual([]);
+  expect(new URL(page.url()).searchParams.get("continue")).toBeNull();
 });
