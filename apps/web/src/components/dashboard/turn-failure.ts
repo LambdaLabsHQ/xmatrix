@@ -19,7 +19,7 @@ export function turnFailureEvidenceOf(metadata: Record<string, unknown> | undefi
     ? usageLimit.resetsAt : undefined;
   return { category: evidence.category as AgentFailureEvidence["category"], httpStatuses: numbers("httpStatuses"), codes: strings("codes"),
     requestIds: strings("requestIds"), websocketCloseCodes: numbers("websocketCloseCodes"), exitCodes: numbers("exitCodes"),
-    ...(usageLimit ? { usageLimit: { ...(resetsAt ? { resetsAt } : {}) } } : {}) };
+    ...(usageLimit ? { usageLimit: resetsAt ? { resetsAt } : {} } : {}) };
 }
 
 /** The original cause line remains visible, including for notices from older Hubs. No classification from prose. */

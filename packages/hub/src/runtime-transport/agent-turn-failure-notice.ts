@@ -42,7 +42,7 @@ export function agentTurnFailureAppendCommand(input: {
   const background = input.reason === "background_tasks_interrupted";
   const reset = input.resetsAt ? Date.parse(input.resetsAt) : Number.NaN;
   const usageLimit = input.reason === AGENT_USAGE_LIMIT_LIFECYCLE_REASON
-    ? { ...(Number.isFinite(reset) ? { resetsAt: new Date(reset).toISOString().replace(/\.000Z$/u, "Z") } : {}) } : undefined;
+    ? (Number.isFinite(reset) ? { resetsAt: new Date(reset).toISOString().replace(/\.000Z$/u, "Z") } : {}) : undefined;
   // A notice that names its failure is keyed by it; one without falls back to
   // the Instance and its opening text, which a replay repeats exactly.
   if (input.noticeId ? !/^[a-zA-Z0-9_-]{1,120}$/.test(input.noticeId) : background) return null;
