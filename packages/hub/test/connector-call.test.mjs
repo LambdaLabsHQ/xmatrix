@@ -28,7 +28,7 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 // their own PostgreSQL tests own membership, registration and grant validation.
 // Here we protect private response delivery, policy admission, and masking
 // before result persistence, which public Channel-command tests cannot see.
-function fixture({ mode = null, failAtAuthorization, otherMailbox = false, changeConnection = false } = {}) {
+function fixture({ mode = null, failAtAuthorization, otherMailbox = false, changeConnection = false, changePolicy = false } = {}) {
   const checks = [], reports = [], policies = [], appends = [], persisted = [], privateRecords = [];
   let scopes = 0;
   const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
@@ -55,7 +55,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, chang
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "member", machineId: "machine", harness: "codex" }) },
     "../app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
     "./command-support": support,
-    "./credentials": { connectorActionPolicyRepository: () => ({ mode: async input => { policies.push(input); return mode; } }) },
+    "./credentials": { connectorActionPolicyRepository: () => ({ mode: async input => { policies.push(input); return changePolicy && policies.length >= 2 ? "disallow" : mode; } }) },
     "./connection-credentials": { connectionCredentials: async () => credentials },
     "./http": { ProviderRequestError },
     "../usage-cost-metering": metering,
@@ -172,12 +172,14 @@ test("private reads cannot bypass ask/disallow, perform writes, or read another 
   assert.equal(result.status, 403); assert.equal(calls.length, 0);
 });
 
-test("revocation or replaced connection while a provider read is in flight withholds the private response", async () => {
-  for (const options of [{ failAtAuthorization: 3 }, { failAtAuthorization: 4 }, { changeConnection: true }]) {
-    const f = fixture(options);
-    const { result, calls } = await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}` }));
-    assert.equal(result.status, 403); assert.equal(calls.length, 1);
-    assert.doesNotMatch(await result.text(), /654321|fixture-private/);
+test("Run, connection or policy revocation withholds both successful and failed in-flight private reads", async () => {
+  for (const options of [{ failAtAuthorization: 3 }, { failAtAuthorization: 4 }, { changeConnection: true }, { changePolicy: true }]) {
+    for (const response of [gmail(privateText), { body: { status: 403, data: { error: { message: privateText } } } }]) {
+      const f = fixture(options);
+      const { result, calls } = await fetched([response], () => f.request({ command: `@gmail:read:${id}` }));
+      assert.equal(result.status, 403); assert.equal(calls.length, 1);
+      assert.doesNotMatch(await result.text(), /654321|fixture-private/);
+    }
   }
 });
 
@@ -200,13 +202,4 @@ test("provider failures remain caller-only; unexpected errors cannot enter error
     assert.equal(result.headers.get("cache-control"), "private, no-store");
     assert.ok(f.reports.every(report => !report.includes("654321") && !report.includes("fixture-private")));
   }
-});
-
-// A failed provider response can contain the same credentials as a success.
-test("a revoked Run cannot collect a private provider error after its read was in flight", async () => {
-  const f = fixture({ failAtAuthorization: 3 });
-  const { result } = await fetched([{ body: { status: 403, data: { error: { message: privateText } } } }],
-    () => f.request({ command: `@gmail:read:${id}` }));
-  assert.equal(result.status, 403);
-  assert.doesNotMatch(await result.text(), /654321|fixture-private/);
 });

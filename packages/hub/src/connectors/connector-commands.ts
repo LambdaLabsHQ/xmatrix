@@ -122,9 +122,11 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
     const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorize,
       `call:${input.messageId}`);
     if (typeof context === "string") throw new ProviderRequestError(403, context);
-    const result = await action.execute(context, parsed);
-    // A stopped Run or revoked grant cannot collect a response that was in flight.
-    await authorize();
+    let result: ConnectorActionResult;
+    try { result = await action.execute(context, parsed); }
+    // Provider errors can contain the same private values as successes.
+    // Recheck the Run, connection and policy before either leaves the executor.
+    finally { await authorize(); }
     if (utf8ByteLength(JSON.stringify(result)) > 256 * 1024) {
       throw new ProviderRequestError(413, "Connector result is too large; narrow the request");
     }
