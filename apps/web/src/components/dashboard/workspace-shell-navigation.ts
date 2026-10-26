@@ -15,6 +15,7 @@ export function mobileBackState(view: AppView, input: {
 import {
   decodePathSegment,
 } from "./workspace-shell-path";
+import { BROWSER_BACK_ENTRY_STATE_KEY } from "./browser-back-entry-script";
 import { pointerActivationAlreadyHandled } from "./pointer-activation-guard";
 
 import {
@@ -214,10 +215,6 @@ export const MORE_TAB_VIEWS: readonly AppView[] = [
 
 
 
-export const MOBILE_MORE_RETURN_PATH_STATE_KEY = "__xmatrixMobileMoreReturnPath";
-
-
-
 export const viewLabels: Record<AppView, string> = {
   pages: "Pages",
   messages: "Channels",
@@ -393,51 +390,44 @@ export function appViewPath(
 
 
 
-export const MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY = "__xmatrixMobileChannelListReturnPath";
-
-export const MOBILE_CHANNEL_DETAILS_RETURN_PATH_STATE_KEY = "__xmatrixMobileChannelDetailsReturnPath";
-
 export const MOBILE_CHANNEL_DETAILS_HASH = "#channel-details";
-
-export function isMobileChannelDetailsHistoryState(state: unknown, path: string): boolean {
-  return Boolean(
-    state &&
-    typeof state === "object" &&
-    (state as Record<string, unknown>)[MOBILE_CHANNEL_DETAILS_RETURN_PATH_STATE_KEY] === path
-  );
-}
 
 export function isMobileChannelDetailsLocation(hash = typeof window === "undefined" ? "" : window.location.hash): boolean {
   return hash === MOBILE_CHANNEL_DETAILS_HASH;
 }
 
+
+/* Every write to the current entry keeps that mark: it says where the entry
+   sits, not what it shows. */
+function entryState(state: Record<string, unknown> | null): Record<string, unknown> | null {
+  const current: unknown = window.history.state;
+  const marked = Boolean(current && typeof current === "object" &&
+    (current as Record<string, unknown>)[BROWSER_BACK_ENTRY_STATE_KEY]);
+  return marked ? { ...state, [BROWSER_BACK_ENTRY_STATE_KEY]: true } : state;
+}
+
+/**
+ * A phone screen goes Back to its parent screen, never to the entry before
+ * it, so on a phone moving between screens rewrites the one entry instead of
+ * stacking another. Elsewhere it is an ordinary browser step.
+ */
 export function pushBrowserPath(path: string, state?: Record<string, unknown>) {
   if (currentBrowserLocation() === path) return;
-  window.history.pushState(state ? { ...window.history.state, ...state } : null, "", path);
+  const data = state ? { ...window.history.state, ...state } : null;
+  if (window.matchMedia("(max-width: 767px)").matches) window.history.replaceState(entryState(data), "", path);
+  else window.history.pushState(data, "", path);
 }
-
-/** Overlay history entry. `url` should differ from the current href so Next.js and WKWebView keep it. */
-export function pushBrowserHistoryState(state: Record<string, unknown>, url?: string) {
-  if (typeof window === "undefined") return;
-  window.history.pushState(
-    { ...window.history.state, ...state },
-    "",
-    url ?? `${window.location.pathname}${window.location.search}${window.location.hash}`
-  );
-}
-
-
 
 export function replaceBrowserPath(path: string) {
   if (currentBrowserLocation() === path) return;
-  window.history.replaceState(null, "", path);
+  window.history.replaceState(entryState(null), "", path);
 }
 
 
 
 export function clearBrowserHash() {
   if (typeof window === "undefined" || !window.location.hash) return;
-  window.history.replaceState(null, "", currentBrowserLocation());
+  window.history.replaceState(entryState(null), "", currentBrowserLocation());
 }
 
 

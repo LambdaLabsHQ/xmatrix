@@ -92,7 +92,7 @@ const navigationSource = fs.readFileSync(
   "utf8"
 );
 const androidBackSource = fs.readFileSync(
-  path.join(__dirname, "use-android-back.ts"),
+  path.join(__dirname, "use-system-back.ts"),
   "utf8"
 );
 // The iOS shell replaces the web dock with a native UITabBar, so the two tab

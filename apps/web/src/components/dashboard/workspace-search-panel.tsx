@@ -15,7 +15,7 @@ import { isImeKeyDown } from "@/lib/ime-keydown";
 import { cn } from "@/lib/utils";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { useEscapeDismiss } from "./use-overlay-dismiss";
-import { useAndroidBackDismiss } from "./use-android-back";
+import { useSystemBackDismiss } from "./use-system-back";
 
 /** Marks a control that opens search; the panel unfolds from it. */
 export const SEARCH_ANCHOR_ATTRIBUTE = "data-search-anchor";
@@ -120,7 +120,7 @@ export function SearchPanel({
 }) {
   const [placement, setPlacement] = useState<PanelPlacement | null>(null);
 
-  useAndroidBackDismiss(open, onCancel);
+  useSystemBackDismiss(open, onCancel);
   useEscapeDismiss(open, onCancel);
 
   useLayoutEffect(() => {

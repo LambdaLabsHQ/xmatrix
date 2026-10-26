@@ -87,17 +87,25 @@ Do not add numeric z-index literals or intermediate `calc(... + 1)` layers. Comp
 
 ## Navigation contract
 
-`WorkspaceAppShell` currently synchronizes `AppView` with the History API. Until this becomes a dedicated tab-and-stack reducer, navigation must observe these rules:
+On a phone the screen is named by its URL and has one fixed parent; Back goes to that parent and never walks the browser history:
 
-- Selecting a dock destination pushes one history entry.
+| Screen | Back goes to |
+| --- | --- |
+| Channel details / Summary (`#channel-details`) | the conversation |
+| A conversation | its Space's channel list |
+| A conversation beside a page | the page |
+| A page | the page list |
+| A destination's open item (`?item=`) | that destination's list |
+| A More child | More |
+| A dock tab's own screen | nothing (Back leaves the app) |
+
+- Moving between screens rewrites the current history entry (`pushBrowserPath` replaces on a phone), so history never grows and cannot loop. Desktop keeps ordinary browser steps.
+- Every Back input runs the same consumers (`use-system-back.ts`): the bar's chevron, Android's Back, the iOS app's left-edge swipe (`window.__xmatrixNativeBack`), and a phone browser's Back button. A layer over the screen (a sheet, a dialog, the new-conversation form) consumes Back before the screen does.
+- The iOS app turns off WebKit's own back-forward swipe: it walked the history and showed a snapshot of an earlier page.
+- A phone browser keeps one marked entry (`__xmatrixBackEntry`) above the page so its Back button reaches those consumers; the entry is put back after each handled Back, and with nothing left Back leaves the app.
+- A notification or link the native app opens is handed to the running page first (`onOpenAppLink`); the app loads the page afresh only when the page did not open it.
 - A phone keeps one mounted pane per dock tab and slides between them, so switching a tab is orthogonal: it neither rebuilds nor refetches the screen it leaves. Pages, Channels, Agents, and More each own their pane (Agents and More each render their own tool surface). A pane mounts the first time its tab is shown and then stays; Pages is not mounted at startup, because its tree prefetches page documents.
-- Opening a More child pushes an entry whose `__xmatrixMobileMoreReturnPath` state stores its parent URL.
-- The visible **Back to More** action uses browser back for a marked entry, preserving native swipe and Android back behavior.
-- A directly loaded More child has no parent entry, so **Back to More** replaces the current URL instead of adding another entry.
-- Opening mobile Summary or channel info pushes one `#channel-details` history entry whose `__xmatrixMobileChannelDetailsReturnPath` state stores the current channel path, so iOS swipe-back, Android Back, and the overlay close action return to the message column instead of the channel list.
 - A bare workspace URL represents Chats; it must not recreate a removed overview screen.
-
-The long-term target is an explicit `{ tab, stack }` navigation state where detail screens push, back pops, and dock visibility derives from stack depth.
 
 ## Screen-title contract
 
@@ -113,8 +121,8 @@ Mobile shell changes should cover at least:
 
 - each dock destination and its active state;
 - More-to-child and child-to-More navigation;
-- browser back after using the visible back button;
-- swipe-back / history.back() from Summary or channel details returning to the message column;
+- Back from every screen in the table above, by the chevron, Android Back and browser Back;
+- that history does not grow while moving between screens;
 - direct loading of a More child;
 - title clearance below the top bar and content clearance above the dock;
 - sheet visibility above both chrome surfaces;

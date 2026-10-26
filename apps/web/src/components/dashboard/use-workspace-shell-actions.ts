@@ -33,10 +33,7 @@ import {
 import { createMobileChannelHistoryNavigation } from "./mobile-channel-history-navigation";
 import { sendHumanChannelFocus } from "./send-human-channel-focus";
 import { pointerActivationAlreadyHandled } from "./pointer-activation-guard";
-import {
-  MORE_TAB_VIEWS,
-  toolItemPath,
-} from "./workspace-shell-navigation";
+import { toolItemPath } from "./workspace-shell-navigation";
 
 import {
   useCallback,
@@ -96,8 +93,6 @@ import {
   DESKTOP_SETUP_VERSION,
   EVENT_LIMIT,
   LocalManagedAgent,
-  MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY,
-  MOBILE_MORE_RETURN_PATH_STATE_KEY,
   OLDER_HISTORY_LIMIT,
   OutgoingMessage,
   SpaceInviteResult,
@@ -107,7 +102,6 @@ import {
   agentInstanceStopBody,
   agentPresetOrCustom,
   appLinkMessageIdFromHash,
-  appRouteInfo,
   appViewPath,
   appendChannelMessageWithAttachments,
   claimOutgoingClientIdForEntry,
@@ -119,7 +113,6 @@ import {
   canInviteToSpace,
   clearBrowserHash,
   copyTextToClipboard,
-  currentBrowserLocation,
   daemonStatusNeedsSessionSync,
   defaultAgentName,
   parseConfigList,
@@ -1295,10 +1288,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
     const viewPath = appViewPath(nextView === "messages" ? s.selectedChannel : null, nextView, s.currentSpaceId, s.spaces);
     const nextPath = toolItemPath(viewPath, item ?? null);
-    const pathState = s.view === "more" && MORE_TAB_VIEWS.includes(nextView)
-      ? { [MOBILE_MORE_RETURN_PATH_STATE_KEY]: appViewPath(null, "more", s.currentSpaceId, s.spaces) }
-      : undefined;
-    pushBrowserPath(nextPath, pathState);
+    pushBrowserPath(nextPath);
     setBrowserPath(nextPath);
   }
 
@@ -1318,10 +1308,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setMobileChannelDetailsOpen(false);
     setReplyTarget(null);
     const nextPath = appViewPath(null, "profile", spaceId, s.spaces);
-    const pathState = s.view === "more"
-      ? { [MOBILE_MORE_RETURN_PATH_STATE_KEY]: appViewPath(null, "more", spaceId, s.spaces) }
-      : undefined;
-    pushBrowserPath(nextPath, pathState);
+    pushBrowserPath(nextPath);
     setBrowserPath(nextPath);
   }
 
@@ -1351,12 +1338,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setSelectedChannelId(null);
     setMobileChannelDetailsOpen(false);
     setReplyTarget(null);
-
-    if (window.history.state?.[MOBILE_MORE_RETURN_PATH_STATE_KEY] === nextPath) {
-      window.history.back();
-    } else {
-      replaceBrowserPath(nextPath);
-    }
+    replaceBrowserPath(nextPath);
     setBrowserPath(nextPath);
   }
 
@@ -1410,14 +1392,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const navigationSpaces = channelInState ? s.spaces : s.spacesRef.current;
 
     const nextPath = `${channelAppPath(channel, navigationSpaces)}${messageId ? `#message:${messageId}` : ""}`;
-    const currentPath = currentBrowserLocation();
-    const currentRoute = appRouteInfo(currentPath);
-    const mobileChannelListReturnPath =
-      currentRoute.view === "messages" &&
-      !currentRoute.channelKey &&
-      !currentRoute.legacyChannelId
-        ? currentPath
-        : null;
     const commitNavigation = () => {
       const hasImmediateHistory = Boolean(
         s.mobileListFixture?.history[channelId] || s.historyCacheRef.current.has(channelId)
@@ -1438,9 +1412,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       // No eager mark-read here: the timeline reports rendered rows through
       // handleTimelineMessageExposed once the navigation lands, so the cursor
       // only clears for messages the user actually got on screen.
-      pushBrowserPath(nextPath, {
-        [MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY]: mobileChannelListReturnPath,
-      });
+      // The entry keeps Next.js's router state, so the router does not follow.
+      pushBrowserPath(nextPath, {});
       setBrowserPath(nextPath);
     };
     if (s.selectedChannelIdRef.current !== channelId) {

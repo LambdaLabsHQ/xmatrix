@@ -136,5 +136,10 @@ test.describe("on a phone", () => {
     await expect.poll(() => fixtureRequestBodies(page, "conversation-create")).toEqual([expect.objectContaining({
       name: "check the release", metadata: { createdBy: "web", autoName: true } })]);
     await expect(page).toHaveURL(new RegExp(`check-the-release--${CREATED_CHANNEL_ID}`, "u"));
+
+    // Back from the conversation its first message made is its Space's list, not the conversation again.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/channels$/);
+    await expect(page.locator(".app-mobile-channel-list-pane")).toBeVisible();
   });
 });

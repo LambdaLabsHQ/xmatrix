@@ -53,6 +53,8 @@ struct WebContainerView: UIViewRepresentable {
         private weak var containerView: UIView?
         private let webViewFactory: (WKWebViewConfiguration) -> WKWebView
         private let runScript: (WKWebView, String) -> Void
+        /// Runs a script that answers true or false.
+        private let askScript: (WKWebView, String, @escaping (Bool) -> Void) -> Void
 
         func attach(to containerView: UIView) {
             self.containerView = containerView
@@ -64,10 +66,14 @@ struct WebContainerView: UIViewRepresentable {
             },
             runScript: @escaping (WKWebView, String) -> Void = { webView, script in
                 webView.evaluateJavaScript(script)
+            },
+            askScript: @escaping (WKWebView, String, @escaping (Bool) -> Void) -> Void = { webView, script, answer in
+                webView.evaluateJavaScript(script) { result, _ in answer((result as? Bool) == true) }
             }
         ) {
             self.webViewFactory = webViewFactory
             self.runScript = runScript
+            self.askScript = askScript
             super.init()
             NotificationCenter.default.addObserver(
                 self,
@@ -166,7 +172,13 @@ struct WebContainerView: UIViewRepresentable {
             configuration.websiteDataStore = .default()
 
             let webView = webViewFactory(configuration)
-            webView.allowsBackForwardNavigationGestures = true
+            // WebKit's own swipe walked the browser history and showed a
+            // snapshot of whatever the page was before; the edge swipe goes
+            // Back the way the page does instead.
+            webView.allowsBackForwardNavigationGestures = false
+            let edgeSwipe = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgeSwipe(_:)))
+            edgeSwipe.edges = .left
+            webView.addGestureRecognizer(edgeSwipe)
             let pageCoordinator = PageCoordinator(owner: self)
             webView.navigationDelegate = pageCoordinator
             webView.uiDelegate = pageCoordinator
@@ -186,7 +198,7 @@ struct WebContainerView: UIViewRepresentable {
                 self?.update(state)
             }
             bridge.onOpenURL = { [weak self] url in
-                self?.load(url)
+                self?.openDeepLink(url)
             }
             Task { @MainActor [weak bridge] in
                 NotificationTaps.shared.deliver { userInfo in
@@ -238,8 +250,33 @@ struct WebContainerView: UIViewRepresentable {
             NotificationCenter.default.post(name: .xmatrixMobileTabStateChanged, object: state)
         }
 
+        /// A notification or link opens in the running page when it names
+        /// something there (a conversation, a page); loading the page afresh
+        /// started the whole app again behind its preparation bar.
         func openDeepLink(_ url: URL) {
-            load(url)
+            guard
+                let webView, webView.url != nil,
+                let data = try? JSONSerialization.data(withJSONObject: [url.absoluteString]),
+                let arguments = String(data: data, encoding: .utf8)
+            else {
+                load(url)
+                return
+            }
+            askScript(webView, "window.__xmatrixOpenAppLink?.(...\(arguments)) === true") { [weak self] opened in
+                if !opened { self?.load(url) }
+            }
+        }
+
+        /// The left-edge swipe, once it travelled far or fast enough, is the
+        /// page's Back: to the parent screen, or closing the top layer.
+        @objc func handleEdgeSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
+            guard gesture.state == .ended, let view = gesture.view else { return }
+            edgeSwipeEnded(distance: gesture.translation(in: view).x, speed: gesture.velocity(in: view).x)
+        }
+
+        func edgeSwipeEnded(distance: CGFloat, speed: CGFloat) {
+            guard let webView, distance > 80 || speed > 600 else { return }
+            runScript(webView, "window.__xmatrixNativeBack?.();")
         }
 
         fileprivate func navigationFinished() {

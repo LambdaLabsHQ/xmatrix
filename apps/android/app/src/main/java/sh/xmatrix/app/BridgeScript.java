@@ -9,6 +9,7 @@ final class BridgeScript {
     "  let nextRequestId = 1;\n" +
     "  const pending = new Map();\n" +
     "  const backListeners = new Set();\n" +
+    "  const appLinkListeners = new Set();\n" +
     "  window.xmatrixNative.onmessage = (event) => {\n" +
     "    try {\n" +
     "      const message = JSON.parse(String(event.data || '{}'));\n" +
@@ -51,6 +52,18 @@ final class BridgeScript {
     "      backListeners.add(listener);\n" +
     "      return () => backListeners.delete(listener);\n" +
     "    },\n" +
+    "    onOpenAppLink: (listener) => {\n" +
+    "      if (typeof listener !== 'function') return () => {};\n" +
+    "      appLinkListeners.add(listener);\n" +
+    "      return () => appLinkListeners.delete(listener);\n" +
+    "    },\n" +
+    "    __openAppLink: (href) => {\n" +
+    "      for (const listener of Array.from(appLinkListeners).reverse()) {\n" +
+    "        try { if (listener(href) === true) return true; }\n" +
+    "        catch (error) { console.error('Android app link listener failed', error); }\n" +
+    "      }\n" +
+    "      return false;\n" +
+    "    },\n" +
     "    __dispatchBackRequested: () => {\n" +
     "      for (const listener of Array.from(backListeners).reverse()) {\n" +
     "        try { if (listener() === true) return true; }\n" +
@@ -67,7 +80,7 @@ final class BridgeScript {
     "})();";
   }
 
-  private static String quote(String value) {
+  static String quote(String value) {
     String safe = value == null ? "" : value;
     return "'" + safe
       .replace("\\", "\\\\")

@@ -15,6 +15,7 @@ import { AdminTable, type AdminColumn } from "./admin-table";
 import { AdminUserConnectors } from "./platform-admin-user-connectors";
 import { AdminPaperAction } from "./admin-paper";
 import { openAdminSpace, useAdminParam, useAdminUserDetail, usePlatformOverview } from "./platform-admin-data";
+import { useSystemBackDismiss } from "./use-system-back";
 import {
   adminTime,
   adminUserLabel,
@@ -79,6 +80,8 @@ function userSearchText(user: AdminUserSummary): string {
 
 export function PlatformAdminUsers({ token }: { token?: string }) {
   const [openUserId, setOpenUserId] = useAdminParam("user");
+  // Back from a record is its list.
+  useSystemBackDismiss(Boolean(openUserId), () => setOpenUserId(""));
   if (openUserId) {
     return <AdminUserDetailView token={token} userId={openUserId} onBack={() => setOpenUserId("", { push: true })} />;
   }

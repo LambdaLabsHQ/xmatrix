@@ -2,9 +2,6 @@ import type { ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
 import {
   appViewPath, pagesViewPath, pagesViewSelection, pushBrowserPath, replaceBrowserPath, type AppView,
 } from "@/components/dashboard/workspace-shell-navigation";
-
-/** Marks the history entry that opened a conversation beside a page, so closing it steps Back. */
-const PAGE_CONVERSATION_STATE_KEY = "__xmatrixPageConversation";
 import { pageApi, type PageLinkAnchor } from "@/lib/pages/page-client";
 import type { ConversationRequest } from "@/components/dashboard/start-conversation";
 import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
@@ -84,19 +81,14 @@ export function pageShellActions(input: {
       input.setSelectedChannelId(conversationId);
       // Moving from one conversation to another keeps a single step to go Back from.
       if (input.selectedChannelId) window.history.replaceState(window.history.state, "", nextPath);
-      else pushBrowserPath(nextPath, { [PAGE_CONVERSATION_STATE_KEY]: true });
+      else pushBrowserPath(nextPath, {});
       input.setBrowserPath(nextPath);
     }
     if (options.focus) input.focusComposer();
   }
 
-  /** Closes the conversation beside the page, as Back would. */
+  /** Closes the conversation beside the page, as Back does. */
   function closePageConversation() {
-    const state = window.history.state as Record<string, unknown> | null;
-    if (state?.[PAGE_CONVERSATION_STATE_KEY]) {
-      window.history.back();
-      return;
-    }
     input.setSelectedChannelId(null);
     const nextPath = pagesPath(input.selectedPageId, null);
     replaceBrowserPath(nextPath);

@@ -11,6 +11,7 @@ final class WebContainerTests: XCTestCase {
             requests.append(request)
             return nil
         }
+        override var url: URL? { requests.last?.url }
     }
 
     final class DownloadLinkAction: WKNavigationAction {
@@ -24,11 +25,13 @@ final class WebContainerTests: XCTestCase {
     }
 
     private func makeCoordinator(
-        runScript: @escaping (WKWebView, String) -> Void = { _, _ in }
+        runScript: @escaping (WKWebView, String) -> Void = { _, _ in },
+        askScript: @escaping (WKWebView, String, @escaping (Bool) -> Void) -> Void = { _, _, answer in answer(false) }
     ) -> (WebContainerView.Coordinator, UIView) {
         let coordinator = WebContainerView.Coordinator(
             webViewFactory: { RecordingWebView(frame: .zero, configuration: $0) },
-            runScript: runScript
+            runScript: runScript,
+            askScript: askScript
         )
         let container = UIView()
         coordinator.attach(to: container)
@@ -118,6 +121,34 @@ final class WebContainerTests: XCTestCase {
         XCTAssertTrue(coordinator.webView === first)
         XCTAssertEqual(container.subviews.count, 1)
         XCTAssertEqual(first.requests.map(\.url), [agents, channel])
+    }
+
+    func testALinkThePageOpensDoesNotReloadIt() {
+        var asked: [String] = []
+        let (coordinator, container) = makeCoordinator(askScript: { _, script, answer in
+            asked.append(script)
+            answer(true)
+        })
+        defer { withExtendedLifetime(container) {} }
+        coordinator.load(AppConfiguration.mobileTabURL(.pages))
+        let channel = AppConfiguration.mapDeepLink(URL(string: "xmatrix://channel/test-channel")!)
+        coordinator.openDeepLink(channel)
+        XCTAssertEqual(page(coordinator).requests.map(\.url), [AppConfiguration.mobileTabURL(.pages)])
+        XCTAssertEqual(asked.count, 1)
+        XCTAssertTrue(asked[0].hasPrefix("window.__xmatrixOpenAppLink?.(...[\""))
+        XCTAssertTrue(asked[0].contains("test-channel"))
+    }
+
+    func testEdgeSwipeGoesBackInThePageNotThroughHistory() {
+        var scripts: [String] = []
+        let (coordinator, container) = makeCoordinator { scripts.append($1) }
+        defer { withExtendedLifetime(container) {} }
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        XCTAssertFalse(page(coordinator).allowsBackForwardNavigationGestures)
+        coordinator.edgeSwipeEnded(distance: 20, speed: 100)
+        XCTAssertEqual(scripts, [])
+        coordinator.edgeSwipeEnded(distance: 120, speed: 0)
+        XCTAssertEqual(scripts, ["window.__xmatrixNativeBack?.();"])
     }
 
     func testReportedViewPicksTheActiveTab() {

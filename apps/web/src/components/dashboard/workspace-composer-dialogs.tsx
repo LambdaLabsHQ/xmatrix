@@ -5,7 +5,7 @@ import { useRealtimeChannel } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { ImageGalleryLightbox } from "./attachment-lightbox";
-import { useAndroidBackHandler } from "./use-android-back";
+import { useSystemBackHandler } from "./use-system-back";
 import { useComposerHint } from "./composer-hints";
 import { useDraftSummonIntents } from "./use-draft-summon-intents";
 import { draftSummonReadingsForDisplay, forceDraftSummon } from "./summon-intent";
@@ -491,7 +491,7 @@ export const Composer = memo(function Composer({
     return attachment.kind === "image" && src ? [{ id: attachment.id, name: attachment.name, src }] : [];
   }), [attachments, pendingAttachments]);
   const openComposerImage = composerImages.find((image) => image.id === openComposerImageId) ?? null;
-  useAndroidBackHandler(Boolean(openComposerImage), () => {
+  useSystemBackHandler(Boolean(openComposerImage), () => {
     setOpenComposerImageId(null);
     return true;
   });

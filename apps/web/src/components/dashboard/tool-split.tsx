@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, createContext, useCallback, useContext, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Children, createContext, useContext, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ChevronDown, ChevronLeft, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ListColumnResizeHandle } from "./list-column-resize";
@@ -40,24 +40,32 @@ function readItem(): string | null {
   return toolItemSelection(window.location.href);
 }
 
+function selectToolItem(next: string | null, options: { replace?: boolean } = {}) {
+  if (next === readItem()) return;
+  const url = parseAppLocation(window.location.href);
+  if (next) url.searchParams.set(ITEM_PARAM, next);
+  else url.searchParams.delete(ITEM_PARAM);
+  const path = `${url.pathname}${url.search}${url.hash}`;
+  // Moving between items replaces; opening one from the bare list is a step Back returns from.
+  if (options.replace || readItem()) replaceBrowserPath(path);
+  else pushBrowserPath(path);
+  window.dispatchEvent(new Event(ITEM_EVENT));
+}
+
+/** Back from an open item to its destination's list. False when none is open. */
+export function closeToolItem(): boolean {
+  if (!readItem()) return false;
+  selectToolItem(null);
+  return true;
+}
+
 /**
  * The item a destination has open, named in its address (`?item=<key>`) so it
  * can be shared and Back closes it. The destination's own path is kept.
  */
 export function useToolItem(): [string | null, (item: string | null, options?: { replace?: boolean }) => void] {
   const item = useSyncExternalStore(subscribe, readItem, () => null);
-  const select = useCallback((next: string | null, options: { replace?: boolean } = {}) => {
-    if (next === readItem()) return;
-    const url = parseAppLocation(window.location.href);
-    if (next) url.searchParams.set(ITEM_PARAM, next);
-    else url.searchParams.delete(ITEM_PARAM);
-    const path = `${url.pathname}${url.search}${url.hash}`;
-    // Moving between items replaces; opening one from the bare list is a step Back returns from.
-    if (options.replace || readItem()) replaceBrowserPath(path);
-    else pushBrowserPath(path);
-    window.dispatchEvent(new Event(ITEM_EVENT));
-  }, []);
-  return [item, select];
+  return [item, selectToolItem];
 }
 
 export function ToolSplit({ list, detail, open, label }: {

@@ -6,7 +6,7 @@ import type { ChannelAttachment, ChannelSnapshot, SerializedSpace, SerializedWor
 import type { MentionLocalContext } from "./mention-complete";
 import type { ComposerSendSnapshot } from "./workspace-shell-message-model";
 import { Composer, ComposerIcon } from "./workspace-composer-dialogs";
-import { useAndroidBackDismiss } from "./use-android-back";
+import { useSystemBackDismiss } from "./use-system-back";
 import { SpaceAllowanceNotice } from "./space-allowance-notice";
 
 /**
@@ -45,7 +45,7 @@ export function NewConversation({
   // creates a second conversation.
   const created = useRef<Promise<ChannelSnapshot> | null>(null);
   const [locked, setLocked] = useState(false);
-  useAndroidBackDismiss(true, onCancel, sending);
+  useSystemBackDismiss(true, onCancel, sending);
 
   const conversation = useCallback(() => {
     if (!created.current) {

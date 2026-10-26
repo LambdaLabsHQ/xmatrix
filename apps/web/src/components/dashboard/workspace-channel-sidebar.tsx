@@ -4,7 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useRealtimeChannel } from "./realtime-channels";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { MobileInlineActions } from "./mobile-inline-actions";
-import { useAndroidBackDismiss } from "./use-android-back";
+import { useSystemBackDismiss } from "./use-system-back";
 
 import {
   ChannelPresenceAvatars,
@@ -1296,7 +1296,7 @@ export function MobileChannelInlineActions({
   const ref = useRef<HTMLDivElement | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
-  useAndroidBackDismiss(true, onClose);
+  useSystemBackDismiss(true, onClose);
 
   useEffect(() => {
     const closeOnOutsidePointer = (event: PointerEvent) => {
