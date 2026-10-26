@@ -365,10 +365,15 @@ sample them: an absent point alone never proves a stage was not entered.
 No pass, target, owner, registry or exception identity is recorded. A deferred
 pass is not counted as completed; transport failures remain Sentry errors.
 
-Gmail search/read answer in the Channel receipt that replies to the command,
-like every other action, so everyone who can read the Channel reads the mail.
-Read mail in a Channel only the people who may see it are in. Search is
-`@gmail:search:* <Gmail query>` or `@gmail:search:<connected mailbox> <Gmail query>`.
+Use `xmatrix call "@gmail:search:* <Gmail query>"` (or one connected mailbox
+address instead of `*`) and `xmatrix call "@gmail:read:<message id>"` for a
+caller-only result. The command's parameters and response stay outside Channel
+messages and execution-history excerpts. `--json` returns the result object.
+The same private call works for other installed connector read actions.
+
+Sending a search/read command with `xmatrix send` instead publishes its result
+to the Channel receipt and a bounded execution-history excerpt. Everyone who
+can read that Channel can then read the mail.
 
 Gmail calls go through Composio on the shared project key, which the operator
 pays for. Each Composio call (proxied Gmail reads and sends, Connect links,
@@ -377,17 +382,19 @@ mail, addresses or account ids; see [usage cost metering](usage-cost-metering.md
 
 ### QA login codes
 
-Do not search for or read login codes with Gmail actions when the QA contract
-requires credentials to stay out of messages and logs. Search already returns
-subjects/snippets, and read returns the body/links. Both enter the Channel
-receipt and a bounded execution-history excerpt. A closed Channel or saving
-the result as a secret afterwards does not avoid this persistence.
+Use the private `xmatrix call` path for authorized mail-code retrieval. Search
+subjects/snippets and read bodies/links can all contain credentials. Capture the
+private response in the consuming process without printing it, adding it to
+arguments, or recording it in traces, screenshots, HTML or request logs. The
+Hub returns the content to the caller; it does not extract a code or link and
+does not automatically write a Secret. A caller may save an authorized value
+to a fresh alias through `secret set --value-stdin`. Policy and mailbox ownership
+are unchanged; an `ask` or `disallow` action is refused by the private path.
 
-There is currently no connector action for a Gmail-to-Space-secret transfer
-without publishing mail content. Do not restore connector MCP, call the provider
-through a hidden side path, or substitute a runtime Gmail plugin. Mark fresh
-email delivery and automatic login unverified when this is the required path;
-historical pre-channel-only coverage does not verify the current behavior.
+Do not send credential searches or reads as Channel messages. A closed Channel
+or saving a published receipt afterwards does not undo its disclosure. Do not
+restore connector MCP or substitute a runtime Gmail plugin. Record fresh mail
+delivery and automatic login as verified only after exercising that actual flow.
 
 The supported manual secret path, when explicitly authorized, is:
 
@@ -398,16 +405,18 @@ The supported manual secret path, when explicitly authorized, is:
    The child consumes the environment variable without printing it, putting it
    in arguments, or capturing it in traces, screenshots, HTML or request logs.
 
-This verifies manual secret handling only, not connector delivery or automatic
-mail-code retrieval. Do not create a real code request merely to validate docs.
+This manual flow verifies manual secret handling only, not connector delivery
+or automatic mail-code retrieval. Do not create a real code request merely to validate docs.
 An Agent's `secret set --value-stdin` accepts an already-held, authorized local
 value; it is not an email reader. It cannot overwrite an existing alias or
 choose broader secret access. Existing-secret replacement/deletion remains a
 Space admin action; use a fresh alias for a new one-time-code attempt.
 
 ### Agent commands
-- An Agent acts only by posting the command with `xmatrix send`, so every call is a
-  message the Channel sees, parsed like anyone's, and its receipt replies to it.
+- `xmatrix call "<connector command>"` returns a read result only to the live
+  requesting Run, scoped to its own Channel and existing action policy. Writes
+  and actions requiring approval use `xmatrix send`; their visible receipt
+  replies to the command message.
 - The launch prompt names the Space's connected apps. `xmatrix connector list`
   prints each one's commands for the Run's Channel.
 

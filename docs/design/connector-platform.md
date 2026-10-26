@@ -58,7 +58,7 @@ use the connector registry. The later sections define provider-specific bounds.
 | --- | --- | --- |
 | Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and default policies are shared with clients |
 | Executor | `ConnectorProvider` and `platform-providers.ts` | Provider-owned parse/prepare/execute, authenticated Check and bounded outbound HTTP |
-| Commands | `connector-commands.ts`, `connectors/usage.ts` | A command runs only from a committed Channel message, whoever wrote it; Agents read what they can send with `xmatrix connector list` |
+| Commands | `connector-commands.ts`, `connectors/usage.ts` | Channel commands publish their receipts; `xmatrix call` returns a read action's parameters/result only to its authenticated calling Run. Discover actions with `xmatrix connector list` |
 | Policy and approval | Scoped connector repositories and approval routes | Channel allow/ask/disallow, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
 | Credentials | Encrypted connector credential repository | Per-Space provider grants; company app secrets remain Hub-held, and OAuth refresh failures do not become wider grants |
 | Inbound | Generic event ingress plus provider-specific native routes | Authenticated deliveries normalize to typed source/event identities and route through explicit subscriptions |
@@ -486,27 +486,33 @@ matching messages (id, received time, sender, subject, snippet) and
 reduced to text, truncated at 8,000 characters) and every distinct http(s)
 link the message contains, fenced as untrusted content.
 
-Gmail `search` and `read` answer like every other action: the receipt that
-replies to the command's message carries what they found, and the execution
-record keeps its bounded excerpt. Whoever can read the Channel reads the mail,
-so read mail in a Channel only the people who may see it are in. Search is
-`@gmail:search:* <Gmail query>`, or a connected mailbox address in place of `*`.
+Gmail `search` and `read` support both delivery modes. A Channel command's
+receipt carries the result and execution history keeps its bounded excerpt;
+everyone in the Channel sees that content. `xmatrix call "@gmail:search:* <query>"`
+and `xmatrix call "@gmail:read:<message id>"` instead return it only to the
+authenticated calling Run. The same distinction applies to all declared connector
+read actions with an installed executor. Parameters go in the request body,
+outside messages; results go in that request's response, without a Channel
+receipt, execution-history excerpt, stored result reference or raw error report.
+The caller controls its local stdout and any subsequent use of the result.
 
-This is not a secret-ingestion capability. Search snippets, headers and links
-can themselves contain login credentials, before a full-message read. There is
-no Gmail action that extracts a code into a Space secret without first publishing
-the read result. Do not use search/read for credentials that must stay out of
-messages; a closed Channel still stores messages and does not satisfy that rule.
-Piping a published receipt into `secret set` cannot undo the disclosure.
+`POST /api/connectors/call` accepts only `{ command }`. The live Run token owns
+the Channel, Instance and owner identity; callers cannot select another Run or
+Channel. The existing Channel connection, action catalog, policy and provider
+ownership checks still apply. Run/registration/Channel access and live policy
+are checked before execution and again before returning the result. `ask` and
+`disallow` refuse a private read; approval, policy changes, subscriptions and
+writes retain their existing Channel path. There is no asynchronous result to
+poll or replay, and aggregate upstream metering contains only existing IDs/enums.
+Requests are bounded to 32 KiB and results to 256 KiB, with `private, no-store`
+responses on success and failure. No provider token is exported.
 
-The existing separate secret flow is a Run's `secret-add` request card, answered
-by a current Human Space admin, then `secret exec` injection into a process that
-does not expose the value. An Agent can also create a fresh secret from an
-already-authorized local value through `secret set --value-stdin`; this supplies
-no way to fetch mail privately and cannot overwrite an existing alias. An
-automated Gmail-to-secret transfer is not implemented. Adding one would require
-an explicit typed capability and secret-authority checks while keeping the
-command and value-free outcome visible; a hidden connector MCP is not a fallback.
+The Hub does not extract codes or links or automatically create secrets. A caller
+that needs a private credential can consume the response locally, including
+creating a fresh secret through the existing `secret set --value-stdin` boundary;
+an existing alias cannot be overwritten. Manual `secret-add` and `secret exec`
+remain available. Search snippets, headers and links may contain credentials,
+so neither search nor read should be sent as a Channel command for such work.
 See the [operations guidance](../operations/app-connectors.md#qa-login-codes).
 
 Inline

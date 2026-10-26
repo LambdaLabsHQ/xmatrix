@@ -22,6 +22,12 @@ test("Hub commands answer a person and a Run through the Hub's own routes", asyn
     const listing = await run(worker, MOCK_TOKEN, ["commands"]);
     assert.equal(listing.exitCode, 0);
     assert.match(listing.stdout, /automation pause\s+Pause an Automation/);
+    assert.match(listing.stdout, /call\s+Call a connected app read action privately/);
+    const privateHelp = await run(worker, MOCK_TOKEN, ["call", "--help"]);
+    assert.match(privateHelp.stdout, /only this caller receives/);
+    const humanCall = await run(worker, MOCK_TOKEN, ["call", "@gmail:read:18f2a9c0d1e2b3a4"]);
+    assert.equal(humanCall.exitCode, 1);
+    assert.match(humanCall.stderr, /require an Agent Run/);
     const list = await run(worker, MOCK_TOKEN, ["automation", "list", "--channel", channelId]);
     assert.deepEqual(list, { stdout: "", exitCode: 0 });
 
@@ -33,6 +39,9 @@ test("Hub commands answer a person and a Run through the Hub's own routes", asyn
     const asRun = await run(worker, runToken, ["automation", "list", "--channel", channelId, "--json"]);
     assert.equal(asRun.exitCode, 0, asRun.stderr);
     assert.deepEqual(JSON.parse(asRun.stdout), []);
+    const privateRead = await run(worker, runToken, ["call", "@gmail:read:18f2a9c0d1e2b3a4"]);
+    assert.equal(privateRead.exitCode, 1);
+    assert.match(privateRead.stderr, /connect Gmail/);
     const refused = await run(worker, runToken, ["automation", "pause", "missing", "--version", "1"]);
     assert.equal(refused.exitCode, 1);
     assert.match(refused.stderr, /^error: .*\(HTTP 4\d\d\)\n$/);

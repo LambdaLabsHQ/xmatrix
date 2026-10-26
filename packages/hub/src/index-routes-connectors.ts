@@ -1,6 +1,7 @@
 import { registerGmailNotificationRoutes } from "./index-routes-gmail-notifications";
 import { registerXAccountRoutes } from "./index-routes-x-accounts";
 import { registerConnectorApprovalRoutes } from "./index-routes-connector-approvals";
+import { registerConnectorCallRoutes } from "./index-routes-connector-call";
 import { handleDiscordLifecycleDelivery } from "./connectors/discord-events";
 import { registerTeamsRoutes } from "./index-routes-teams";
 import { handleTeamsAppDelivery } from "./connectors/teams-ingress";
@@ -70,6 +71,7 @@ function errorResponse(error: unknown): Response {
 
 export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
   registerConnectorApprovalRoutes(app);
+  registerConnectorCallRoutes(app);
   registerGmailNotificationRoutes(app);
   registerXAccountRoutes(app);
   registerDingTalkRoutes(app);

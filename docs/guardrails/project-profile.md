@@ -61,6 +61,13 @@ Instances and resume sleeping/interrupted ones through the bounded wake
 boundary. Stopped Instances remain stopped. See
 [Connector delivery](../design/connector-platform.md).
 
+`xmatrix call "<connector command>"` returns a declared read action's result
+only to its authenticated calling Run. Parameters, results and provider errors
+stay outside Channel messages and execution-history excerpts; live Run, mailbox
+ownership and Channel action policy still apply. Writes keep their existing
+Channel approval flow. The Hub does not extract credentials or create Secrets
+from mail. See [private connector calls](../design/connector-platform.md).
+
 Gmail notifications default to minute INBOX count polling with a separate
 15-minute Composio incremental-ID check. Our Google grant uses labels plus
 basic mailbox identity, while existing Composio content access stays separate.

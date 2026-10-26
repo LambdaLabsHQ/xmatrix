@@ -287,6 +287,8 @@ test("an Agent Run reads its connector usage, but not a read-only Channel About 
   assert.equal(agentRunHttpRouteAllowed(request("GET"), run), true);
   assert.equal(agentRunHttpRouteAllowed(request("POST"), run), false);
   assert.equal(agentRunHttpRouteAllowed(request("POST", "/api/connectors/mcp"), run), false);
+  assert.equal(agentRunHttpRouteAllowed(request("POST", "/api/connectors/call"), run), true);
+  assert.equal(agentRunHttpRouteAllowed(request("GET", "/api/connectors/call"), run), false);
 });
 
 test("OpenConnector runs one runtime action with JSON input and shields its result", async () => {

@@ -34,7 +34,8 @@ export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) => {
     const actions = manifest.actions.flatMap((action) => action.effect ? [{
       command: `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`,
-      effect: action.effect, description: action.description,
+      effect: action.effect, description: action.description + (action.effect === "read"
+        ? ` For a caller-only result, run xmatrix call "@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}".` : ""),
     }] : []);
     return actions.length > 0 ? [{ provider: manifest.id, name: manifest.name, actions }] : [];
   });

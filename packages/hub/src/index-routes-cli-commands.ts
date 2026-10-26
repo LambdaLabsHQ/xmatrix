@@ -3,6 +3,7 @@ import type { Env } from "./types";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import { CliRouteError, commandsListing, runCliCommand, type CliCommand } from "./cli-commands";
 import { AUTOMATION_COMMANDS, AUTOMATION_GROUP } from "./cli-commands-automation";
+import { CONNECTOR_CALL_COMMAND } from "./cli-commands-call";
 
 const COMMANDS: CliCommand[] = [
   {
@@ -10,6 +11,7 @@ const COMMANDS: CliCommand[] = [
     run: async () => ({ stdout: commandsListing(COMMANDS, GROUPS) }),
   },
   ...AUTOMATION_COMMANDS,
+  CONNECTOR_CALL_COMMAND,
 ];
 const GROUPS: Record<string, string> = { ...AUTOMATION_GROUP };
 
