@@ -212,8 +212,14 @@ When a start fails, the daemon status carries where (`cli_install`,
 CLI's last lines; for a LaunchAgent that did not come up, the lines are read
 from `~/Library/Logs/xmatrix-daemon.err.log`. The App redacts them before they
 leave the machine (home directory, emails, URL queries, tokens; at most 8 lines
-and 600 characters). The App's first screen says what it means in one sentence,
-shows those lines and offers "Try again". The Web sends each failure once per
+and 600 characters). The App's first screen shows a problem card. A cause the
+lines themselves name gets its own title and fix steps (`daemonProblem` in
+`space-agent-setup.ts`): Windows refusing to register the scheduled task, a
+CLI file an older running daemon still holds (`os error 32`/`33`), and a
+daemon Windows ended from outside (exit code 4294967295). Any other failure says
+what it means in one sentence. Either way the lines and exit code are folded
+under Details, the card follows the person's language, and "Try again" starts
+the service once more. The Web sends each failure once per
 page to `POST /api/observable/desktop-daemon-failure`, which writes one point to
 the diagnostics dataset under the person's keyed hash.
 

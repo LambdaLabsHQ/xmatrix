@@ -201,3 +201,22 @@ test("a failed daemon start is shown, as a sentence, only while the daemon is do
   assert.match(daemonFailureSentence({ stage: "service_start", detail: "" }), /background service/);
   assert.match(daemonFailureSentence({ stage: "exit", detail: "" }), /stopped right after/);
 });
+
+test("a failed daemon start names its cause only from the words Windows reported", () => {
+  const { daemonProblem } = require("./space-agent-setup.ts");
+  // As users' machines reported them (redacted), in English and Chinese Windows.
+  const denied = "error: Registering Scheduled Task xmatrix-daemon failed: Register-ScheduledTask : Access is denied.\n" +
+    "+ CategoryInfo          : PermissionDenied: (PS_ScheduledTask:Root/Microsoft/...S_ScheduledTask) [Register-ScheduledTask]";
+  const deniedGarbled = "error: Registering Scheduled Task xmatrix-daemon failed: Register-ScheduledTask : ��\n" +
+    "+ CategoryInfo          : PermissionDenied: (PS_ScheduledTask:Root/Microsoft/...S_ScheduledTask)";
+  assert.equal(daemonProblem({ stage: "cli_install", detail: denied, exitCode: 1 }), "task_permission_denied");
+  assert.equal(daemonProblem({ stage: "cli_install", detail: deniedGarbled, exitCode: 1 }), "task_permission_denied");
+  assert.equal(daemonProblem({ stage: "cli_install", detail: "error: 另一个程序正在使用此文件，进程无法访问。 (os error 32)", exitCode: 1 }), "file_in_use");
+  assert.equal(daemonProblem({ stage: "exit", detail: "error: 另一个程序已锁定文件的一部分，进程无法访问。 (os error 33)", exitCode: 1 }), "file_in_use");
+  assert.equal(daemonProblem({ stage: "exit", detail: "Environment: production\nHub: https://xmatrix-hub.xmatrix.sh", exitCode: 4294967295 }), "stopped_by_setup");
+  // A forced stop that also printed its own error is that error, not a forced stop.
+  assert.equal(daemonProblem({ stage: "exit", detail: "error: config is invalid", exitCode: 4294967295 }), "unknown");
+  // "Permission denied" alone (a macOS LaunchAgent, a file) is not the scheduled-task case.
+  assert.equal(daemonProblem({ stage: "cli_install", detail: "Permission denied", exitCode: 1 }), "unknown");
+  assert.equal(daemonProblem({ stage: "service_start", detail: "Command failed: launchctl kickstart -k gui/501/sh.xmatrix.daemon" }), "unknown");
+});

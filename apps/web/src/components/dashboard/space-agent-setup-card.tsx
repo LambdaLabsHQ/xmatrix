@@ -3,10 +3,12 @@
 import { useDesktopDaemonFailureDelivered } from "@/lib/desktop-daemon-failure-report";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
-import { Check, CloudOff, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
+import { AlertTriangle, Check, CloudOff, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { noticeClass } from "@/components/ui/status-tone";
 import type { OnboardingCopy } from "@/lib/onboarding-copy";
-import { useOnboardingCopy } from "@/lib/onboarding-locale";
+import { useOnboardingCopy, useOnboardingLocale } from "@/lib/onboarding-locale";
+import { PROBLEM_COPY } from "@/lib/problem-copy";
+import { ProblemCard } from "./problem-card";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { Face } from "./face";
 import { defaultInstallPlatform, type InstallPlatform } from "./connect-machine";
@@ -16,12 +18,12 @@ import { BringAgentsIn, RemoteMachineHint } from "./bring-agents-in";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
 import {
   daemonFailureSentence,
+  daemonProblem,
   shownDaemonFailure,
   type SpaceAgentSetupCandidate,
   type SpaceAgentSetupState,
 } from "./space-agent-setup";
 import type { DesktopDaemonFailure, DesktopDaemonStatus } from "@/lib/desktop/bridge";
-import { cn } from "@/lib/utils";
 
 /* The first screen of a Space that has no agent yet. It replaces the bare
    "No conversations yet" empty state: instead of asking the human to understand
@@ -90,7 +92,8 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {daemonFailure && state.kind !== "daemon-stopped" && (
-          <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mb-6" />
+          <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mb-6"
+            spaceId={spaceId} token={token} userId={userId} />
         )}
         {state.kind === "unreachable" && <UnreachablePanel copy={copy} onRetry={onRetryAgents} />}
         {/* Web and phone: the same flow xMatrix sends in a welcome conversation. */}
@@ -113,7 +116,8 @@ export function SpaceAgentSetupCard({
               body={copy.turnOnInstalled}
             />
             {state.kind === "daemon-stopped" && daemonFailure && (
-              <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mt-4" />
+              <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mt-4"
+                spaceId={spaceId} token={token} userId={userId} />
             )}
             {state.kind === "daemon-stopped" && !daemonFailure && (
               <div className={noticeClass("attention", "mt-4 p-3")}>
@@ -159,41 +163,50 @@ export function SpaceAgentSetupCard({
   );
 }
 
-/* The background service did not start: what that means, one way to try
-   again, and the CLI's last lines (already redacted on this machine), which
-   the App also sends to xMatrix. */
+/* The background service did not start. A cause its own words name gets a
+   problem card that says what happened and how to fix it; anything else says
+   what it means for the person. Either way the CLI's last lines (already
+   redacted on this machine, and also sent to xMatrix) are folded into
+   Details, and Try again starts it once more. */
 function DaemonFailureNotice({
   copy,
   failure,
   starting,
   onRetry,
   className,
+  spaceId,
+  token,
+  userId,
 }: {
   copy: OnboardingCopy;
   failure: DesktopDaemonFailure;
   starting: boolean;
   onRetry: () => void;
   className?: string;
+  spaceId: string | null;
+  token: string | undefined;
+  userId: string | undefined;
 }) {
   const delivered = useDesktopDaemonFailureDelivered(failure);
+  const problemCopy = PROBLEM_COPY[useOnboardingLocale(spaceId, token, userId)];
+  const problem = daemonProblem(failure);
+  const known = problem === "unknown" ? null : problemCopy.daemon[problem];
   return (
-    <div className={noticeClass("attention", cn("p-3", className))} role="alert">
-      <p className="text-sm">{daemonFailureSentence(failure, copy)}</p>
-      {failure.detail && (
-        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
-          {failure.detail}
-        </pre>
-      )}
-      {delivered && <p className="mt-2 text-xs text-muted-foreground">{copy.failureReported}</p>}
-      <button
-        type="button"
-        disabled={starting}
-        onClick={onRetry}
-        className={actionClass({ variant: "primary", size: "md" }, "mt-3")}
-      >
-        {starting ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-        {starting ? copy.tryingAgain : copy.tryAgain}
-      </button>
+    <div className={className} role="alert">
+      <ProblemCard icon={<AlertTriangle className="size-[18px]" />}
+        title={known?.title ?? daemonFailureSentence(failure, copy)}
+        explanation={known?.explanation}
+        stepsLabel={problemCopy.stepsLabel} steps={known?.steps ?? []}
+        actions={<button type="button" disabled={starting} onClick={onRetry} className={actionClass({ variant: "primary", size: "md" })}>
+          {starting ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          {starting ? problemCopy.daemon.tryingAgain : problemCopy.daemon.tryAgain}
+        </button>}
+        detailsLabel={problemCopy.detailsLabel}
+        details={(failure.detail || failure.exitCode !== undefined || delivered) ? <>
+          {failure.detail && <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{failure.detail}</pre>}
+          {failure.exitCode !== undefined && <p>{problemCopy.daemon.exitCode(failure.exitCode)}</p>}
+          {delivered && <p>{copy.failureReported}</p>}
+        </> : undefined} />
     </div>
   );
 }

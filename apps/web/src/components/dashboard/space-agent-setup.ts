@@ -128,6 +128,25 @@ export function daemonFailureSentence(failure: DesktopDaemonFailure, copy: Onboa
   return copy.daemonFailure(failure.stage);
 }
 
+/** A background-service failure whose cause its own words name, so the card
+ * can say how to fix it; anything else is `unknown` and is shown as written. */
+export type DaemonProblem = "task_permission_denied" | "file_in_use" | "stopped_by_setup" | "unknown";
+
+/** Windows' exit code for a process ended from outside (TerminateProcess with -1). */
+const FORCE_STOPPED_EXIT_CODE = 4294967295;
+
+export function daemonProblem(failure: DesktopDaemonFailure): DaemonProblem {
+  const detail = failure.detail;
+  if (/Register-ScheduledTask/iu.test(detail) && /Access is denied|PermissionDenied|0x80070005|拒绝访问/iu.test(detail)) {
+    return "task_permission_denied";
+  }
+  if (/os error 3[23]\b|being used by another process|locked a portion of the file|另一个程序(?:正在使用|已锁定)/iu.test(detail)) {
+    return "file_in_use";
+  }
+  if (failure.stage === "exit" && failure.exitCode === FORCE_STOPPED_EXIT_CODE && !/^error:/imu.test(detail)) return "stopped_by_setup";
+  return "unknown";
+}
+
 /* The failure to show: only while the daemon is not running. */
 export function shownDaemonFailure(status: DesktopDaemonStatus | null | undefined): DesktopDaemonFailure | null {
   return status && status.state !== "running" && status.failure ? status.failure : null;
