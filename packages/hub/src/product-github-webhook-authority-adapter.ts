@@ -1,5 +1,6 @@
 import { plainRecord } from "@xmatrix/protocol";
 import { githubCommitCheckVerdict, githubRepositoryDelegated, type GitHubCommitCheckVerdict } from "./app-connectors";
+import { ServiceUnavailable } from "./error-contract";
 import { resolveGitHubSubscriptionRoutes } from "./github-subscription-route-directory";
 import {
   githubIssueSourceRef,
@@ -27,6 +28,45 @@ import {
 
 function record(value: unknown): Record<string, unknown> {
   return plainRecord(value) ?? {};
+}
+
+/** GitHub's own outage, the same class a repository-token mint answers as unavailable. */
+const GITHUB_API_OUTAGE = /^github_api_(?:429|5\d\d)$/u;
+
+function githubApiOutage(error: unknown): boolean {
+  return error instanceof Error && GITHUB_API_OUTAGE.test(error.message);
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Read a settled verdict. The read has not posted a message, so a GitHub
+ * outage is tried once more. A second outage refuses the delivery: GitHub
+ * redelivers it. Acknowledging success would drop the verdict. Any other
+ * failure is not replayed.
+ */
+async function readSettledCheckVerdict(read: () => Promise<GitHubCommitCheckVerdict>,
+  delivery: string): Promise<GitHubCommitCheckVerdict | undefined> {
+  try {
+    return await read();
+  } catch (error) {
+    if (!githubApiOutage(error)) {
+      console.error("GitHub check verdict failed", { delivery, error: errorText(error) });
+      return undefined;
+    }
+  }
+  try {
+    return await read();
+  } catch (error) {
+    if (!githubApiOutage(error)) {
+      console.error("GitHub check verdict failed", { delivery, error: errorText(error) });
+      return undefined;
+    }
+    throw new ServiceUnavailable("github_check_verdict_unavailable",
+      "GitHub could not be read; the delivery will be retried");
+  }
 }
 
 export interface ProductGitHubWebhookDependencies {
@@ -112,12 +152,10 @@ export async function dispatchProductGitHubWebhook(input: {
       if (route.sourceKind === "issue" &&
           (number === undefined || !githubIssueSubscriptionCurrent(input.event, input.payload, route.createdAt))) return 0;
       if (settledSha && number !== undefined && !verdicts.has(number)) {
-        verdicts.set(number, checkVerdict(input.env, installationId, repository.owner, repository.repo, settledSha, number)
-          .catch((error: unknown) => {
-            console.error("GitHub check verdict failed", { delivery: input.delivery,
-              error: error instanceof Error ? error.message : String(error) });
-            return undefined;
-          }));
+        const pullNumber = number;
+        verdicts.set(number, readSettledCheckVerdict(
+          () => checkVerdict(input.env, installationId, repository.owner, repository.repo, settledSha, pullNumber),
+          input.delivery));
       }
       const verdict = number === undefined ? undefined : await verdicts.get(number);
       const body = number === undefined ? repositoryBody : githubPullRequestEventMessage({

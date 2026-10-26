@@ -8,6 +8,7 @@ import {
   subscribeConversationToPullRequest,
   subscribeRunToPullRequest,
 } from "../src/github-pull-request-subscription.ts";
+import { ServiceUnavailable } from "../src/error-contract.ts";
 import { dispatchProductGitHubWebhook } from "../src/product-github-webhook-authority-adapter.ts";
 
 /**
@@ -241,6 +242,58 @@ test("a subscription made before its issue existed named an earlier issue and he
   await dispatchProductGitHubWebhook({ env: {}, event: "issue_comment", delivery: "d-5", payload },
     current.dependencies);
   assert.equal(current.appended.length, 1);
+});
+
+test("a GitHub outage while reading a settled verdict is replayed once, then the delivery is refused", async () => {
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => { logged.push(args); };
+  const payload = { ...base, action: "completed",
+    check_suite: { head_sha: "abcdef1234567", pull_requests: [{ number: 7 }] } };
+  try {
+    const recovered = harness({ routes: [issueRoute, { ...issueRoute, channelId: "channel-2" }] });
+    let reads = 0;
+    recovered.dependencies.checkVerdict = async (...args) => {
+      recovered.verdicts.push(args.slice(1));
+      reads += 1;
+      if (reads === 1) throw new Error("github_api_429");
+      return { state: "passed", failed: [], settledAt: "2026-10-08T22:00:00Z" };
+    };
+    const result = await dispatchProductGitHubWebhook({ env: {}, event: "check_suite", delivery: "d-outage", payload },
+      recovered.dependencies);
+    assert.equal(result.delivered, 2);
+    assert.equal(reads, 2, "the shared read is replayed once, not once per Channel");
+    assert.equal(recovered.appended[0].body, "CI passed on [acme/app#7](https://github.com/acme/app/pull/7) at abcdef1.");
+    assert.equal(logged.length, 0);
+
+    const refused = harness({ routes: [issueRoute] });
+    let refusedReads = 0;
+    refused.dependencies.checkVerdict = async () => {
+      refusedReads += 1;
+      throw new Error("github_api_502");
+    };
+    await assert.rejects(() => dispatchProductGitHubWebhook({ env: {}, event: "check_suite", delivery: "d-down", payload },
+      refused.dependencies), (error) => error instanceof ServiceUnavailable
+        && error.code === "github_check_verdict_unavailable" && error.status === 503 && error.retryable === true);
+    assert.equal(refusedReads, 2);
+    assert.equal(refused.appended.length, 0, "a refused delivery has not posted the verdict");
+    assert.equal(logged.length, 0);
+
+    const missing = harness({ routes: [issueRoute] });
+    let missingReads = 0;
+    missing.dependencies.checkVerdict = async () => {
+      missingReads += 1;
+      throw new Error("github_api_404");
+    };
+    assert.equal((await dispatchProductGitHubWebhook({ env: {}, event: "check_suite", delivery: "d-missing", payload },
+      missing.dependencies)).delivered, 0);
+    assert.equal(missingReads, 1, "a missing pull request is not replayed");
+    assert.equal(missing.appended.length, 0);
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0][1].error, "github_api_404");
+  } finally {
+    console.error = original;
+  }
 });
 
 test("two pull requests sharing a commit retain separate head checks and share each read across Channels", async () => {
