@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Machine reports and enrollment recover a lost database response
+
+Machine daemon commands, Run lifecycle mutations and execution report storage
+retry once in a fresh database session after a connection loss before COMMIT.
+The failed session closes first, and locks and authority checks run again;
+socket wakes, route publication and notices remain outside the replay.
+Unknown COMMIT results keep their existing receipt reconciliation. This fixes
+HUB-AN/AP's recovery gap without claiming the transport stall is diagnosed.
+No migration or client update is needed. Recovery is a CI-validated beta
+release reverting this change.
+
 ## Unreleased: Page references stay readable in compact previews
 
 Co-writing notices in page margin cards, conversation rows and other compact

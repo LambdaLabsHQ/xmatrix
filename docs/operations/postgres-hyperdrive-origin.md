@@ -146,6 +146,16 @@ Once COMMIT has been sent, connection loss is an unknown result: no immediate
 replay occurs, and the next bounded cleanup pass or expired-lease recovery
 reconciles it. Provider calls and notification delivery are outside the replay.
 
+Machine daemon commands (including enrollment) and the database mutation in
+Run lifecycle and execution reports use the same one-replay boundary. Each
+attempt owns and closes a new session, including when its repository received
+a request session. Replays restart the command's locks, placement fence and
+authority checks; observed hostname state is local to each attempt. Runtime
+route publication, socket wakes and Channel notices remain outside that boundary.
+COMMIT uncertainty still escapes to the existing command receipt and execution
+report reconciliation; it never triggers an immediate replay. This repairs the
+HUB-AN/AP recovery gap without attributing the underlying transport stall.
+
 Sentry recovery claims try the same transaction advisory capacity lock that
 webhook admission takes exclusively. A busy app returns no jobs for that pass,
 without changing attempts, leases or receipt cleanup; the minute recovery wake

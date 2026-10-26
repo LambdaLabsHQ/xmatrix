@@ -45,6 +45,7 @@ integration("snapshot migration preserves the highest causal head; hostname chan
         await connection.query("COMMIT");return value;
       } catch(error) {await connection.query("ROLLBACK");throw error;} finally {await connection.end();}
     }};
+    database.openSession = () => ({ ...database, close: async () => {} });
     const repository=new PostgresMachineLifecycleRepository(database);
     const input=(epoch,sequence,hostId)=>({commandId:randomUUID(),ownerUserId:"owner",machineId:"machine",hostId,
       principal:{kind:"machine",ownerUserId:"owner",machineId:"machine"},channelId:"channel",eventType:"machine_run_snapshot",connectionEpoch:epoch,
