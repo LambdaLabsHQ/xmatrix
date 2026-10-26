@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Daemon reports and reconnects use their Machine indexes again
+
+Migration 0137 retired `host_id`, and PostgreSQL dropped the two indexes that
+contained it. Since then every daemon report scanned all Machine Run routes
+and every reconnect scanned all Launches. Expand migration 0220 rebuilds both
+concurrently without the column, during the release's normal migration step;
+no query, behavior or client changes. A new schema test fails whenever an
+index disappears without a migration naming it. Recovery is a CI-validated
+beta release; the indexes are inert to older Hubs and need no rollback.
+
 ## Unreleased: Channel replies explain the work and wait for presence
 
 The shared Agent reporting contract keeps material findings and decisions in
