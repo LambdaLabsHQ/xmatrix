@@ -1,4 +1,5 @@
 import { reportPostgresConflict } from "./postgres-conflict-diagnostic";
+import { recordMessageSearchFailure } from "./postgres-request-failure";
 import {
   DatabaseCommitUnknownError,
   ContentControlError,
@@ -1321,6 +1322,12 @@ export async function postgresMessageSearch(
       ...(input.from ? { authorKind: input.from.kind } : {}),
       ...(input.from?.kind === "user" ? { authorId: input.from.userId } : {}),
       limit: requested,
+    }).catch((error: unknown) => {
+      recordMessageSearchFailure(error, {
+        channelFiltered: Boolean(input.channelId), authorFilter: input.from?.kind ?? "none",
+        resumed: Boolean(input.resumeToken), cursorPresent: Boolean(beforeRank), scanned, requested,
+      });
+      throw error;
     });
     for (const candidate of candidates) {
       scanned += 1;

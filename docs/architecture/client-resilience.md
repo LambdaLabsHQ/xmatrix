@@ -160,6 +160,12 @@ An answer is for a person and a machine; a report is for whoever debugs it.
   path, never its body or query. The answer quotes the report's id as
   `reference`; `<ErrorNotice>` shows it ("Report: …"), so one id finds the log.
   A cron task is reported under its task name.
+- **PostgreSQL outages.** The common transient boundary reports the original
+  exception once as `postgres.unavailable`, retaining bounded named-query,
+  phase, code and duration evidence from both failed recovery attempts.
+  Message search also reports filter categories, cursor presence and scan
+  progress, never search terms, cursor values, author or Channel identities.
+  The Sentry issue reader exposes only that validated diagnostic projection.
 - **Retry policy.** When Query's bounded retries give up on a transient failure
   the error is marked `persistent`, and the person reads that xMatrix is still
   unavailable after several tries rather than "try again in a moment".

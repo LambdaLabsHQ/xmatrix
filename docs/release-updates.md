@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Search timeouts retain recovery diagnostics
+
+The common Hub PostgreSQL outage response reports the original exception and
+both failed database attempts in one Sentry event. Failed message searches add
+filter categories and pagination progress, without search text, cursor values,
+identities or SQL. The issue reader exposes this bounded evidence so repeated
+slow queries can be distinguished from transport stalls. Recovery remains one
+fresh connection attempt and exhausted requests remain retryable HTTP 503s.
+This adds diagnostics; the cause of HUB-AG's two read timeouts is not yet known.
+
 ## Unreleased: Authentication request bodies are bounded before validation
 
 The Hub refuses authentication bodies larger than 64 KiB with HTTP 413 and

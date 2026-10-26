@@ -1,5 +1,6 @@
 import { ControlError, DetailedControlError } from "@xmatrix/db";
 import { reportPostgresConflict } from "./postgres-conflict-diagnostic";
+import { reportPostgresUnavailable } from "./postgres-request-failure";
 
 import { DURABLE_OBJECT_RETRY_AFTER_SECONDS, transientDurableObjectFailure } from "./durable-object-failure";
 import {
@@ -72,7 +73,7 @@ export function transientFailure(error: unknown): RequestFailure | null {
       headers: { "retry-after": String(postgresRetryAfterSeconds(error)) } };
   }
   if (retryablePostgresFailure(error)) {
-    console.error("PostgreSQL is unavailable", error);
+    reportPostgresUnavailable(error);
     return { status: 503, body: { error: "xMatrix is briefly unavailable; try again", code: "postgres_unavailable", retryable: true },
       headers: { "retry-after": String(postgresRetryAfterSeconds(error)) } };
   }
