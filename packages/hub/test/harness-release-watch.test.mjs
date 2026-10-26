@@ -171,3 +171,61 @@ test("the Runtime cell runs the release pass on its own database bindings", asyn
   await assert.rejects(runtime.fetch(new Request(`https://relay-runtime${RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH}`,
     { method: "POST" })), /PostgreSQL Machine bindings are unavailable/u);
 });
+
+// Sentry can retain only the caller's capture stack after a cell reset. These
+// owner-boundary tests protect evidence of receiver progress and safe recovery;
+// scheduled-task-failure.test.mjs already owns the Sentry envelope contract.
+function observedWatchEnv(points) {
+  return { RELAY_AUTHORITY_OBSERVABILITY_ENABLED: "true", CF_VERSION_METADATA: { id: "test-version" },
+    RELAY_AUTHORITY_OBSERVABILITY_AE: { writeDataPoint: point => points.push(point) } };
+}
+
+test("a lost response distinguishes a completed receiver from a failed caller, then re-reads targets", async () => {
+  const points = [];
+  const env = observedWatchEnv(points);
+  let issued = 0;
+  let reads = 0;
+  let loseResponse = true;
+  const reset = Object.assign(new Error("storage reset"), { retryable: true });
+  const runtime = runtimeNamespace(async () => {
+    const response = await answerHarnessReleaseWatch(env, cellEnv => watchHarnessReleases(cellEnv, {
+      presets: [npm], latest: async () => "2.1.289",
+      targets: async () => { reads++; return issued ? [] : [target("claude", "private-owner")]; },
+      issue: async () => { issued++; },
+    }));
+    if (loseResponse) { loseResponse = false; throw reset; }
+    return response;
+  });
+  await assert.rejects(watchHarnessReleasesBesidePostgres({ ...env, RELAY_RUNTIME: runtime }),
+    error => error.cause === reset);
+  assert.equal(runtime.calls.length, 1, "a potentially committed pass is never immediately replayed");
+  assert.deepEqual(await watchHarnessReleasesBesidePostgres({ ...env, RELAY_RUNTIME: runtime }), { issued: 0 });
+  assert.equal(reads, 2, "the next scheduled pass reads current authority again");
+  assert.equal(issued, 1);
+  assert.deepEqual(points.filter(point => ["completed", "failed"].includes(point.blobs[1]))
+    .map(point => [point.blobs[0], point.blobs[1], point.doubles[1]]), [
+    ["runtime", "completed", 1], ["cron", "failed", 0],
+    ["runtime", "completed", 0], ["cron", "completed", 0],
+  ]);
+  assert.ok(points.some(point => point.blobs[1] === "target_read"));
+  assert.ok(points.every(point => point.indexes[0] === "harness_release_watch_v1" &&
+    point.blobs[2] === "test-version" && Number.isFinite(point.doubles[0]) && point.doubles[0] >= 0));
+  assert.doesNotMatch(JSON.stringify(points), /private-owner|2\.1\.289|storage reset/);
+});
+
+test("receiver read failures retain progress and deferral, and broken telemetry preserves defects", async () => {
+  const points = [];
+  const env = observedWatchEnv(points);
+  const outage = Object.assign(new Error("Connection terminated unexpectedly"), { code: "ECONNRESET" });
+  const response = await answerHarnessReleaseWatch(env, cellEnv => watchHarnessReleases(cellEnv, {
+    presets: [npm], latest: async () => "2.1.289", targets: async () => { throw outage; },
+  }));
+  assert.equal(response.status, 503);
+  assert.deepEqual(points.map(point => point.blobs.slice(0, 2)), [
+    ["runtime", "started"], ["runtime", "registry_read"], ["runtime", "target_read"],
+    ["runtime", "close"], ["runtime", "deferred"],
+  ]);
+  const defect = new TypeError("original failure");
+  env.RELAY_AUTHORITY_OBSERVABILITY_AE.writeDataPoint = () => { throw new Error("telemetry unavailable"); };
+  await assert.rejects(answerHarnessReleaseWatch(env, async () => { throw defect; }), error => error === defect);
+});

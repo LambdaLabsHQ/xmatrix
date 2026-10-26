@@ -350,6 +350,21 @@ pass reads current targets again. The target lookup is a `single_read`, whose
 lost SQL response can be retried once on a fresh checkout independently of
 notice issuance. Request, registry, daemon and response content stay private.
 
+The authority observation dataset also records `harness_release_watch_v1`
+checkpoints: `blob1` is `cron` or `runtime`, `blob2` is the stage, `blob3`
+the Worker version; `double1` is elapsed milliseconds and `double2` notices
+issued so far. Runtime stages begin with `started`, then `registry_read`,
+`target_read`, `notice_issue` and `close`, with a terminal `completed`,
+`deferred` or `failed`; cron records only start and terminal outcomes.
+Stages mark entry, not successful completion; `close` runs even after failure.
+A reset may prevent terminal emission. Compare checkpoints around the Sentry
+event and subsequent minutes to distinguish failure before handler entry,
+interrupted work, and a lost reply after receiver completion, and to verify
+that later passes complete. Points are best effort and Analytics Engine may
+sample them: an absent point alone never proves a stage was not entered.
+No pass, target, owner, registry or exception identity is recorded. A deferred
+pass is not counted as completed; transport failures remain Sentry errors.
+
 Gmail search/read answer in the Channel receipt that replies to the command,
 like every other action, so everyone who can read the Channel reads the mail.
 Read mail in a Channel only the people who may see it are in. Search is
