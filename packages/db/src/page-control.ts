@@ -434,7 +434,7 @@ export class PostgresPageRepository {
     return inActiveSpace(this.database, { requestId, operation, spaceId }, PageControlError, callback);
   }
 
-  /** Lock-free activity reads retain READ COMMITTED's per-statement snapshots and placement fences. */
+  /** Lock-free reads retain READ COMMITTED's per-statement snapshots and placement fences. */
   private async readInSpace<T>(requestId: string, operation: string, spaceId: string,
     callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
     const session = this.database.openSession();
@@ -616,7 +616,7 @@ export class PostgresPageRepository {
     const spaceId = bounded(input.spaceId, "spaceId");
     const query = typeof input.query === "string" ? input.query.trim() : "";
     if (!query || query.length > 200) throw new PageControlError("invalid_request", 400, "Search query is invalid");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.search", spaceId, async (tx) => {
+    return this.readInSpace(bounded(input.requestId, "requestId"), "page.search", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const tree = await this.accessibleTree(tx, spaceId, actor);
       if (tree.length === 0) return { results: [] };

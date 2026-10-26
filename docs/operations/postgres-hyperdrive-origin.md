@@ -155,6 +155,8 @@ route publication, socket wakes and Channel notices remain outside that boundary
 COMMIT uncertainty still escapes to the existing command receipt and execution
 report reconciliation; it never triggers an immediate replay. This repairs the
 HUB-AN/AP recovery gap without attributing the underlying transport stall.
+Lock-free page search uses per-statement `single_read` recovery, including its
+membership and accessible-page checks (HUB-99).
 
 Sentry recovery claims try the same transaction advisory capacity lock that
 webhook admission takes exclusively. A busy app returns no jobs for that pass,

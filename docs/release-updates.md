@@ -8,6 +8,9 @@ The failed session closes first, and locks and authority checks run again;
 socket wakes, route publication and notices remain outside the replay.
 Unknown COMMIT results keep their existing receipt reconciliation. This fixes
 HUB-AN/AP's recovery gap without claiming the transport stall is diagnosed.
+Page search also uses independent single reads with the existing membership,
+page access and placement checks, recovering HUB-99's lost response without
+an unnecessary transaction opening.
 No migration or client update is needed. Recovery is a CI-validated beta
 release reverting this change.
 
