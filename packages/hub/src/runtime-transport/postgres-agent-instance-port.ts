@@ -732,6 +732,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       detail: message.detail,
       pendingTasks: message.pendingTasks,
       reason: message.reason,
+      resetsAt: message.resetsAt,
       ...(signedOut ? { signedOut } : {}),
       noticeId,
       senderSnapshot: agentMessagePresentation(session.presentation) ?? {},

@@ -42,6 +42,8 @@ test("a usage-limited turn holds its pool, then only posts a handoff to @auto as
     ["append-message", "registration-usage-limit-hold", "append-message"]);
   const [notice, hold, handoff] = commands;
   assert.equal(notice.input.residual.appMetadata.xmatrixTurnFailure, true);
+  assert.deepEqual(notice.input.residual.appMetadata.xmatrixFailureEvidence.usageLimit,
+    { resetsAt: "2026-10-01T13:00:00Z" });
   assert.match(notice.input.body, /hit your limit/);
   assert.deepEqual(hold.input, { commandId: hold.input.commandId, actorUserId: "owner", channelId: "channel",
     sourceInstanceId: "instance-1", resetsAt: "2026-10-01T13:00:00Z" });
@@ -73,6 +75,7 @@ test("an ordinary turn failure never starts a handoff", async () => {
   const { commands, port, session } = harness();
   await port.execute(session, { ...limited, reason: "turn_failed", detail: "stream disconnected" });
   assert.deepEqual(commands.map(command => command.family), ["append-message"]);
+  assert.equal(commands[0].input.residual.appMetadata.xmatrixFailureEvidence.usageLimit, undefined);
 });
 
 test("a refused hold still hands the work off", async () => {
@@ -127,6 +130,18 @@ test("each failure has its own notice: a named failure by its id, an unnamed one
 test("Hub reads a usage limit from the original error even when the host said only turn_failed", async () => {
   const { commands, port, session } = harness();
   await port.execute(session, { ...limited, reason: "turn_failed", resetsAt: undefined });
+  assert.deepEqual(commands.map(command => command.family), ["append-message", "registration-usage-limit-hold", "append-message"]);
+  assert.deepEqual(commands[0].input.residual.appMetadata.xmatrixFailureEvidence.usageLimit, {});
+});
+
+test("Claude's session-limit error reaches the card without inventing an HTTP status or reset date", async () => {
+  const { commands, port, session } = harness();
+  await port.execute(session, { ...limited, reason: "turn_failed", resetsAt: undefined,
+    detail: "You've hit your session limit · resets 2:50am (UTC)" });
+  const notice = commands[0].input;
+  assert.deepEqual(notice.residual.appMetadata.xmatrixFailureEvidence.usageLimit, {});
+  assert.deepEqual(notice.residual.appMetadata.xmatrixFailureEvidence.httpStatuses, []);
+  assert.match(notice.body, /resets 2:50am \(UTC\)/u);
   assert.deepEqual(commands.map(command => command.family), ["append-message", "registration-usage-limit-hold", "append-message"]);
 });
 
