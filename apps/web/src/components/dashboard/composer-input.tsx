@@ -116,6 +116,7 @@ function ComposerInputSurface({
   selectedWorkspaceId = null,
   onWorkspaceSelect,
   onConfigureAppConnector,
+  onEditHarnessProfile,
   boxHeader,
   inputLeading,
   inputTrailing,
@@ -167,6 +168,7 @@ function ComposerInputSurface({
     selectedWorkspaceId,
     onWorkspaceSelect,
     onConfigureAppConnector,
+    onEditHarnessProfile,
   });
 
   if (completionApiRef) {

@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -43,6 +44,8 @@ import { Face } from "@/components/dashboard/face";
 import { MentionCategoryLabel } from "./mention-category-label";
 import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
+import { HARNESS_PROFILE_COPY } from "@/lib/harness-profile-copy";
+import { useOnboardingLocale } from "@/lib/onboarding-locale";
 import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonStartCandidates } from "./auto-launch-completion";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -128,6 +131,8 @@ export type ComposerContextFields = {
   selectedWorkspaceId?: string | null;
   onWorkspaceSelect?: (workspaceTarget: string | null) => void;
   onConfigureAppConnector?: (providerId: string) => void;
+  /** Opens the editor for what this harness is good at. Absent outside the workspace. */
+  onEditHarnessProfile?: (harness: string) => void;
 };
 
 export type ComposerCompletionInput = ComposerContextFields & {
@@ -189,8 +194,11 @@ export function useComposerCompletion({
   instanceTargetScope = "channel",
   fieldRef,
   onConfigureAppConnector,
+  onEditHarnessProfile,
 }: ComposerCompletionInput): ComposerCompletionApi {
   const { user } = useAuth();
+  const profileCopy = HARNESS_PROFILE_COPY[useOnboardingLocale(space?.id, token, user?.id)];
+  const profileHintId = useId();
   const referenceCatalog = useMessageReferenceCatalog();
   const mentionListRef = useRef<HTMLDivElement | null>(null);
   const mentionOptionRefs = useRef<Array<HTMLElement | null>>([]);
@@ -961,6 +969,12 @@ export function useComposerCompletion({
                       <MentionCategoryLabel section={section} />
                     </div>
                   ) : null}
+                  {onEditHarnessProfile && section.kind === "agent" &&
+                    section.candidates.some((candidate) => candidate.invocationTarget?.kind === "capability") ? (
+                    <p id={profileHintId} className="app-mention-profile-hint">
+                      {profileCopy.hint}
+                    </p>
+                  ) : null}
                   {section.candidates.map((candidate, sectionIndex) => {
                     const index = section.startIndex + sectionIndex;
                     const isApp = candidate.kind === "app";
@@ -983,10 +997,12 @@ export function useComposerCompletion({
                       (candidate.completionSuffix === ":" || Boolean(candidate.invocationTarget || candidate.launchTags));
                     const detail = candidate.description ||
                       (candidate.mention && candidate.mention !== candidate.name ? `@${candidate.mention}` : "");
+                    const profileHarness = onEditHarnessProfile && candidate.invocationTarget?.kind === "capability"
+                      ? candidate.invocationTarget.harness : null;
 
-                    return (
+                    const option = (
                       <CompletionOptionButton
-                        key={candidate.id}
+                        key={profileHarness ? undefined : candidate.id}
                         optionRef={(node) => {
                           mentionOptionRefs.current[index] = node;
                         }}
@@ -1060,6 +1076,29 @@ export function useComposerCompletion({
                           )}
                         </span>
                       </CompletionOptionButton>
+                    );
+                    if (!profileHarness || !onEditHarnessProfile) return option;
+                    return (
+                      <div key={candidate.id} className="app-mention-capability">
+                        {option}
+                        <button
+                          type="button"
+                          className="app-mention-profile-edit"
+                          aria-label={profileCopy.editNamed(candidate.name)}
+                          aria-describedby={profileHintId}
+                          onPointerDown={(event) => {
+                            if (event.pointerType === "mouse") event.preventDefault();
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onEditHarnessProfile(profileHarness);
+                          }}
+                        >
+                          <span className="hidden sm:inline">{profileCopy.editLong}</span>
+                          <span className="sm:hidden">{profileCopy.edit}</span>
+                        </button>
+                      </div>
                     );
                   })}
                   {section.hiddenCount > 0 &&

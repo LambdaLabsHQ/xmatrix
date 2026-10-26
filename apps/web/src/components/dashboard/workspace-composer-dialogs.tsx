@@ -337,6 +337,7 @@ export const Composer = memo(function Composer({
   onRemoveQuote,
   onAttachmentsChange,
   onOpenAppsForSpace,
+  onEditHarnessProfile,
   onSend,
   onEscape,
   placeholder,
@@ -390,6 +391,8 @@ export const Composer = memo(function Composer({
     value: ChannelAttachment[] | ((current: ChannelAttachment[]) => ChannelAttachment[])
   ) => void;
   onOpenAppsForSpace: (spaceId: string) => void;
+  /** Opens what this harness is good at. Omitted where the workspace is not behind the composer. */
+  onEditHarnessProfile?: (harness: string) => void;
   onSend: (snapshot: ComposerSendSnapshot) => void | Promise<void>;
   onEscape?: () => void;
   placeholder?: string;
@@ -1351,6 +1354,7 @@ export const Composer = memo(function Composer({
           onConfigureAppConnector={() => {
             if (space) onOpenAppsForSpace(space.id);
           }}
+          onEditHarnessProfile={onEditHarnessProfile}
           completionApiRef={completionApiRef}
           fieldRef={fieldRef}
           placeholder={placeholder || (channel && !isJoined ? "Join channel to send" : composerHint)}

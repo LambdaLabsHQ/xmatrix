@@ -33,6 +33,7 @@ import {
 import { createMobileChannelHistoryNavigation } from "./mobile-channel-history-navigation";
 import { sendHumanChannelFocus } from "./send-human-channel-focus";
 import { pointerActivationAlreadyHandled } from "./pointer-activation-guard";
+import { agentHarnessItemId } from "./agent-list-groups";
 import { toolItemPath } from "./workspace-shell-navigation";
 
 import {
@@ -1289,6 +1290,19 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const viewPath = appViewPath(nextView === "messages" ? s.selectedChannel : null, nextView, s.currentSpaceId, s.spaces);
     const nextPath = toolItemPath(viewPath, item ?? null);
     pushBrowserPath(nextPath);
+    setBrowserPath(nextPath);
+  }
+
+  /**
+   * Opens what the Space says this harness is for. `edit=profile` asks that
+   * editor to take the caret; the item address is the harness itself.
+   */
+  function openHarnessProfile(harness: string) {
+    const item = agentHarnessItemId(harness);
+    changeAppView("agents", item);
+    const viewPath = appViewPath(null, "agents", s.currentSpaceId, s.spaces);
+    const nextPath = `${toolItemPath(viewPath, item)}&edit=profile`;
+    replaceBrowserPath(nextPath);
     setBrowserPath(nextPath);
   }
 
@@ -2896,6 +2910,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
+    openHarnessProfile,
     openHumanProfile,
     profileUserId,
     openSchedule,
