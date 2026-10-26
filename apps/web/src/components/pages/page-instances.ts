@@ -12,27 +12,23 @@ export interface PageInstance {
   name: string;
   harness: string;
   conversationId: string;
-  /** Where it is at work: a section of this page, this page, or another page by its title. */
+  /** Where on the page it is at work: the section it last touched, or the page. */
   where: string;
 }
 
 /**
- * The Instances an `@` offers: each live one at work on any of the Space's pages, once, those on this page first.
- * Only one whose conversation the reader can write in is offered, since it is told there.
+ * The Instances an `@` offers: each live one in a conversation linked to this page, once. Instances at work on other
+ * pages are not offered. Only one whose conversation the reader can write in is offered, since it is told there.
  */
-export function pageInstances(byPage: ReadonlyMap<string, readonly PageInstanceSource[]>, pageId: string | null,
-  pageTitle: (pageId: string) => string | null, reachable: (conversationId: string) => boolean): PageInstance[] {
+export function pageInstances(onPage: readonly PageInstanceSource[], reachable: (conversationId: string) => boolean):
+  PageInstance[] {
   const seen = new Set<string>();
   const instances: PageInstance[] = [];
-  const here = pageId ? [[pageId, byPage.get(pageId) ?? []] as const] : [];
-  for (const [onPage, agents] of [...here, ...[...byPage].filter(([id]) => id !== pageId)]) {
-    for (const agent of agents) {
-      if (seen.has(agent.instanceId) || !reachable(agent.conversationId)) continue;
-      seen.add(agent.instanceId);
-      instances.push({ name: agent.name, harness: agent.harness ?? agent.name.split(":")[0]!,
-        conversationId: agent.conversationId,
-        where: onPage === pageId ? agent.section || "This page" : pageTitle(onPage) ?? "Another page" });
-    }
+  for (const agent of onPage) {
+    if (seen.has(agent.instanceId) || !reachable(agent.conversationId)) continue;
+    seen.add(agent.instanceId);
+    instances.push({ name: agent.name, harness: agent.harness ?? agent.name.split(":")[0]!,
+      conversationId: agent.conversationId, where: agent.section || "This page" });
   }
   return instances;
 }

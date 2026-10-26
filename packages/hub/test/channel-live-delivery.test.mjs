@@ -41,3 +41,11 @@ test("live message IDs preserve the authority's 300-byte bound", () => {
     assert.equal(parse({ ...envelope, body: "x".repeat(64 * 1024 + 1) }), undefined);
   }
 });
+
+test("a live message keeps what an Agent's execution binds to, so the Hub can say the Agent took it", () => {
+  const bodyHash = "a".repeat(64);
+  const delivery = parseAgentChannelLiveDelivery({ ...envelope, entityVersion: 1, bodyHash });
+  assert.equal(delivery.entityVersion, 1);
+  assert.equal(delivery.bodyHash, bodyHash);
+  assert.equal(parseAgentChannelLiveDelivery({ ...envelope, entityVersion: 1, bodyHash: "short" }).bodyHash, undefined);
+});

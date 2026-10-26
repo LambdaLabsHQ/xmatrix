@@ -47,7 +47,7 @@ function SummonChip({ summon, token }: { summon: PageSummon; token: string }) {
   // A live Instance called by name starts nothing: its chip is whether it took the message.
   if (summon.instance) {
     return <MentionInstanceCallChip name={summon.harness} harness={summon.harness.split(":")[0]!}
-      execution={records.data?.executions?.[0]} failure={summon.failure} />;
+      sent={Boolean(messageId)} execution={records.data?.executions?.[0]} failure={summon.failure} />;
   }
   const launch = records.data?.launches[0];
   if (launch) {

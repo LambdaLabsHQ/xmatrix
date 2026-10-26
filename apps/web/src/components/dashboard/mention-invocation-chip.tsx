@@ -393,8 +393,8 @@ export function MentionSummonSent({ name, failure }: { name: string; failure: st
  * An `@` that called a live Instance by name, in its own conversation: nothing starts, so the chip says whether the
  * Instance took the message, from its execution of it.
  */
-export function MentionInstanceCallChip({ name, harness, execution, failure }: {
-  name: string; harness: string; execution?: SerializedAgentMessageExecution; failure: string | null;
+export function MentionInstanceCallChip({ name, harness, sent, execution, failure }: {
+  name: string; harness: string; sent: boolean; execution?: SerializedAgentMessageExecution; failure: string | null;
 }) {
   const failed = failure ?? (execution && (execution.state === "failed" || execution.state === "interrupted")
     ? "Its turn on this did not finish. Its conversation says why." : null);
@@ -404,8 +404,11 @@ export function MentionInstanceCallChip({ name, harness, execution, failure }: {
     : execution
       ? { ...invocationChipStatus("Started", `${name} took it in its conversation.`), terminal: true,
         steps: [{ label: "Message sent", state: "done" }, { label: "Taken by the Instance", state: "done", at: execution.startedAt }] }
-      : { ...invocationChipStatus("Starting", `Telling ${name} in its conversation.`, true), terminal: false,
-        steps: [{ label: "Message sent", status: "Sending", state: "current" }] };
+      : sent
+        ? { ...invocationChipStatus("Starting", `Sent to ${name} in its conversation.`), terminal: false,
+          steps: [{ label: "Message sent", state: "done" }, { label: "Taken by the Instance", status: "Sent", state: "current" }] }
+        : { ...invocationChipStatus("Starting", `Telling ${name} in its conversation.`, true), terminal: false,
+          steps: [{ label: "Message sent", status: "Sending", state: "current" }] };
   return <InvocationChip label={name} name={name} face={{ kind: "agent", name, harness }} sourceAddress={`@${name}`}
     subtitle="Live Instance" view={view} />;
 }

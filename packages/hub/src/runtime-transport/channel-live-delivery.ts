@@ -1,6 +1,6 @@
 import { plainDeliveryRecord as plainObject } from "./delivery-record";
 import { parseChannelTombstoneDelivery } from "./channel-tombstone-delivery";
-import { utf8ByteLength, type ChannelAttentionSummary, type ChannelMessageNotification } from "@xmatrix/protocol";
+import { messagePublicationEvidence, utf8ByteLength, type ChannelAttentionSummary, type ChannelMessageNotification } from "@xmatrix/protocol";
 import type { AgentChannelLiveDeliveryInput } from "./agent-instance-port";
 import type { HumanChannelLiveDeliveryInput } from "./human-port";
 
@@ -25,6 +25,8 @@ function parseChannelLiveDeliveryCore(input: Record<string, unknown>): AgentChan
     channelId,
     messageId,
     sequence,
+    // What an Agent's runtime binds its execution to: without it the Hub cannot say the Agent took the message.
+    ...messagePublicationEvidence(input),
     body,
     from,
     sentAt,
