@@ -262,6 +262,17 @@ html:has(.site-page) {
   background: oklch(0.991 0.004 88);
 }
 
+/* The hero art ends in the paper instead of on a hard edge above the agent strip. */
+.site-hero::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: min(12rem, 30%);
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--background));
+}
+
 /* Paper as a surface: a hairline and no shadow, so it reads as the same
    sheet as the page, just bounded. */
 .site-paper-sheet {
@@ -1044,11 +1055,13 @@ html:has(.site-page) {
   }
 }
 
-/* The agents people already use, passing under the hero as one row of glass chips. */
+/* The agents people already use, passing under the hero as one row of glass chips. Only the sides clip,
+   and the bottom leaves room for the chips' shadows, so they fade out instead of ending on a line. */
 .site-agent-strip {
   position: relative;
-  padding-block: 1.5rem 0.5rem;
-  overflow: hidden;
+  margin-bottom: -2rem;
+  padding-block: 1.5rem 2.5rem;
+  overflow-x: clip;
 }
 
 /* The row fades into the paper at both ends. Paper drawn over it, not a mask: a mask would hide the paper
