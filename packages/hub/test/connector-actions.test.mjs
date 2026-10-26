@@ -70,6 +70,8 @@ test("action commands take one statement whose text spans the following lines", 
   assert.equal(connectorForCommand("@slack:post:C0123456789 hello")?.id, "slack");
   assert.equal(connectorForCommand("@slack:policy:post allow")?.id, "slack");
   assert.equal(connectorForCommand("@slack:nope:C1 hi"), undefined, "an unknown action is not a command");
+  assert.equal(connectorForCommand("@linear:create_cycle:MAD {}"), undefined,
+    "Linear retired manual cycle creation; only its supported cycle workflows are commands");
   assert.equal(connectorForCommand("@circleci:post:x hi"), undefined, "an event-only provider takes no actions");
   assert.deepEqual(parsePolicyCommand({ target: "post", text: "allow" }), { actionId: "post", mode: "allow" });
   assert.deepEqual(parsePolicyCommand({ target: "post", text: "default" }), { actionId: "post", mode: null });
