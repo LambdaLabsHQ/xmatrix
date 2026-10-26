@@ -190,16 +190,16 @@ function validatedQuery(query: DatabaseQuery): DatabaseQuery {
 }
 
 function errorCode(error: unknown): string {
+  const supplied = error && typeof error === "object" && "code" in error &&
+    typeof error.code === "string" && error.code.length <= 80 ? error.code : undefined;
   // Hyperdrive can attach PostgreSQL's generic 58000 to a transport failure.
-  // Its exact driver message is more specific than that SQLSTATE.
-  if (error instanceof Error) {
+  // Its exact driver message is more specific than that SQLSTATE, but never
+  // overrides an explicit rejection such as authentication or a SQL defect.
+  if (error instanceof Error && (supplied === undefined || supplied === "58000")) {
     const code = DRIVER_ERROR_CODES.get(error.message);
     if (code) return code;
   }
-  if (error && typeof error === "object" && "code" in error &&
-      typeof error.code === "string" && error.code.length <= 80) {
-    return error.code;
-  }
+  if (supplied !== undefined) return supplied;
   if (error instanceof DatabaseContractError) return "DATABASE_CONTRACT_ERROR";
   return "database_error";
 }
@@ -393,11 +393,11 @@ class PgDatabaseTransaction implements DatabaseTransaction {
 }
 
 /**
- * Reissues a single read once on a fresh checkout after `stalled` timed out,
- * running `attempt` on it. Supplied by the session that owns the checkout.
+ * Retries a single read's checkout or lost response, running `attempt` on a
+ * fresh checkout. Supplied by the session that owns the recovery budget.
  */
 type SingleReadRetry = <T>(
-  stalled: PgClientPort,
+  stalled: PgClientPort | undefined,
   failure: unknown,
   attempt: (client: PgClientPort) => Promise<T>,
 ) => Promise<T>;
@@ -735,13 +735,29 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
     const startedAt = performance.now();
     this.stats.startTransaction(context.operation, startedAt - queuedAt, queuedAt);
     try {
-      const client = await this.connection(context);
+      let readRetried = false;
+      let readFailure: unknown;
+      const retry: SingleReadRetry = (stalled, failure, attempt) => {
+        if (readRetried) {
+          this.connectionUnusable = true;
+          linkDatabaseFailures(failure, readFailure);
+          throw failure;
+        }
+        readRetried = true;
+        readFailure = failure;
+        return this.retrySingleRead(context, stalled, failure, attempt);
+      };
+      const client = await this.connection(context).catch(error => {
+        // No callback or SQL has run. Checkout and query recovery share one
+        // attempt so a stalled connection followed by a stalled read is bounded.
+        if (context.statement !== "single_read" || !commitResultMayBeUnknown(error)) throw error;
+        return retry(undefined, error, async connected => connected);
+      });
       let began = false;
       try {
         if (preparation) await this.dingtalkPreparedIdentity(client,preparation);
         if (context.statement === "single_read") {
-          return await callback(new PgSingleReadTransaction(client, context, this.options, this.stats,
-            (stalled, failure, attempt) => this.retrySingleRead(context, stalled, failure, attempt)));
+          return await callback(new PgSingleReadTransaction(client, context, this.options, this.stats, retry));
         }
         // A failed opening can leave its transaction block open. ROLLBACK
         // closes it; without one, PostgreSQL only answers with a warning.
@@ -794,20 +810,20 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
   }
 
   /**
-   * The single retry of a single read whose response was lost. The stalled checkout still
-   * has the query in flight, so it is destroyed, never reused or queued
+   * The single retry of a single read's checkout or lost response. A stalled checkout
+   * still has the query in flight, so it is destroyed, never reused or queued
    * behind; the retry takes a new checkout through the shard breaker, and an
    * open breaker or failed checkout surfaces the original failure. The
    * session stays usable only if the retry succeeds.
    */
   private async retrySingleRead<T>(
     context: DatabaseRequestContext,
-    stalled: PgClientPort,
+    stalled: PgClientPort | undefined,
     failure: unknown,
     attempt: (client: PgClientPort) => Promise<T>,
   ): Promise<T> {
     this.connectionPromise = null;
-    stalled.release?.(true);
+    stalled?.release?.(true);
     let client: PgClientPort;
     try {
       client = await this.connection(context);
