@@ -184,7 +184,11 @@ after preparation still refuse publication.
 
 On a single-node cluster a provider restart or maintenance drops every origin
 connection. Hub requests fail with retryable 503s, the connectivity breaker
-opens, and single reads retry once on a fresh connection. When the origin is
+opens, and single reads retry once on a fresh connection. Initial transport
+checkout failures and lost read responses share that one recovery attempt;
+neither an explicit database rejection nor an open breaker triggers a retry.
+Both failed attempts retain their bounded phase evidence. This never replays
+an explicit transaction or a COMMIT with an unknown result. When the origin is
 back but Hyperdrive keeps failing (stale pooled connections), restart the
 configuration's pool from the Cloudflare dashboard (Hyperdrive → configuration
 → Danger zone → restart), then confirm `GET /health/postgres` returns 200 and

@@ -413,13 +413,19 @@ test("lost wire responses discard the checkout without queuing rollback or anoth
  * read answers with the admitted fence of `context.placement`.
  */
 function retryPool(failOn, failures, fence = { __xmatrix_fence_shard_id: "shard-0",
-  __xmatrix_fence_placement_epoch: 2, __xmatrix_fence_state: "active", __xmatrix_fence_target_shard_id: null }) {
+  __xmatrix_fence_placement_epoch: 2, __xmatrix_fence_state: "active", __xmatrix_fence_target_shard_id: null },
+checkoutFailures = []) {
   const clients = [];
+  const checkouts = [];
   let current = null;
   return {
     clients,
+    checkouts,
     factory: () => ({
       async connect() {
+        const failure = checkoutFailures[checkouts.length];
+        checkouts.push(failure);
+        if (failure) throw failure;
         if (current) return current;
         const index = clients.length;
         const client = {
@@ -449,6 +455,76 @@ function retryPool(failOn, failures, fence = { __xmatrix_fence_shard_id: "shard-
 
 const singleRead = { requestId: "single-timeout", operation: "read", statement: "single_read" };
 const readOne = (transaction) => transaction.query({ name: "read_v1", text: "SELECT one", maxRows: 1 });
+
+test("a single read recovers its initial transport checkout failure before entering the callback", async () => {
+  for (const placement of [undefined, context.placement]) {
+    const failure = new Error("Connection terminated due to connection timeout");
+    const fake = retryPool(/never/u, [], undefined, [failure]);
+    const observations = [];
+    const session = createAuthorityDatabase({
+      connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
+      observer: point => observations.push(point),
+      connectivityBreaker: new ConnectivityBreaker("shard-0"),
+    }).openSession();
+    let entered = 0;
+    const rows = await session.transaction({ ...singleRead, ...(placement ? { placement } : {}) }, tx => {
+      entered++;
+      return readOne(tx);
+    });
+    assert.deepEqual(rows, [{ id: 0 }]);
+    assert.equal(entered, 1);
+    assert.equal(fake.checkouts.length, 2);
+    assert.equal(fake.clients[0].queries.length, 1);
+    assert.deepEqual(observations.filter(point => point.queryName === "database_phase_pool_checkout_v1")
+      .map(point => point.outcome), ["error", "ok"]);
+    await session.close();
+    assert.deepEqual(fake.clients[0].releases, [false]);
+  }
+});
+
+test("checkout and SQL failures share the single read's one recovery attempt and retain both failures", async () => {
+  for (const stage of ["checkout", "sql"]) {
+    const first = new Error("Connection terminated due to connection timeout");
+    const second = new Error(stage === "checkout" ? "timeout exceeded when trying to connect" : "Query read timeout");
+    const fake = retryPool(/single_read/u, stage === "sql" ? [second] : [], undefined,
+      stage === "checkout" ? [first, second] : [first]);
+    const session = createAuthorityDatabase({
+      connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
+      connectivityBreaker: new ConnectivityBreaker("shard-0"),
+    }).openSession();
+    await assert.rejects(session.transaction(singleRead, readOne), error =>
+      error === (stage === "checkout" ? first : second));
+    const evidence = databaseFailureEvidence(stage === "checkout" ? first : second);
+    assert.deepEqual(evidence.map(item => item.phase), ["pool_checkout", stage === "checkout" ? "pool_checkout" : "sql"]);
+    assert.equal(fake.checkouts.length, 2, "no third checkout after either second failure");
+    await assert.rejects(session.transaction(singleRead, readOne), /session is unusable/u);
+    await session.close();
+    if (stage === "sql") assert.deepEqual(fake.clients[0].releases, [true]);
+  }
+});
+
+test("single-read checkout recovery respects explicit rejections and the connectivity breaker", async () => {
+  for (const failure of [Object.assign(new Error("Connection terminated due to connection timeout"), { code: "28P01" }),
+    new Error("unknown checkout failure")]) {
+    const fake = retryPool(/never/u, [], undefined, [failure]);
+    await assert.rejects(createAuthorityDatabase({
+      connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
+      connectivityBreaker: new ConnectivityBreaker("shard-0"),
+    }).transaction(singleRead, readOne), error => error === failure);
+    assert.equal(fake.checkouts.length, 1);
+    assert.equal(fake.clients.length, 0);
+  }
+  const breaker = new ConnectivityBreaker("shard-0");
+  for (let index = 0; index < 4; index++) breaker.failure();
+  const failure = new Error("Connection terminated due to connection timeout");
+  const fake = retryPool(/never/u, [], undefined, [failure]);
+  await assert.rejects(createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
+    connectivityBreaker: breaker,
+  }).transaction(singleRead, readOne), error => error === failure);
+  assert.equal(fake.checkouts.length, 1, "the open breaker refuses before the second pool call");
+  assert.deepEqual(databaseFailureEvidence(failure).map(item => item.code), ["CONNECT_TIMEOUT", "DATABASE_CIRCUIT_OPEN"]);
+});
 
 test("a timed-out single read is retried once on a fresh checkout", async () => {
   for (const placement of [undefined, context.placement]) {

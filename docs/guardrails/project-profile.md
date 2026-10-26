@@ -207,7 +207,9 @@ exception callers, plus issue occurrence totals and first/last-seen UTC times.
 Harness release watch failures distinguish Runtime fetch, body and contract
 phases with bounded duration, HTTP status and platform flags; the pass is never
 blindly replayed after a lost response, while its target lookup retries as a
-single read on a fresh connection.
+single read on a fresh connection. Initial transport checkout failures and lost
+read responses share one recovery attempt, preserve both failure phases, and
+respect explicit SQLSTATE rejections and the connectivity breaker.
 Generated locations exclude URL credentials, queries, fragments and inline code;
 source context, locals and request data remain private. See
 [connector operations](../operations/app-connectors.md).
