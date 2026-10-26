@@ -61,6 +61,15 @@ beside each other. Together with Desktop, Android, both Rust jobs, the selector
 and aggregate, the full matrix has 19 jobs. The primary job also saves its
 Next.js and Turbo build caches without waiting for browser sampling to finish.
 
+Hub shards share the checked-in `packages/hub/test/timing-history.json` snapshot.
+Refresh it from complete passing hosted suites when new files accumulate:
+unmeasured files otherwise receive the median weight regardless of their actual
+cost. The current snapshot uses two complete hosted suites and the telemetry
+updater's duration smoothing. Existing resource peaks are retained; new files
+have unknown peaks because the source logs contain only elapsed time.
+The snapshot affects scheduling, never test
+discovery or authorization; all shards of one revision must use the same input.
+
 Each hosted job carries PNPM's lockfile supply-chain verification record
 (`lockfile-verified.jsonl`) in the Actions cache, keyed by the lockfile, the
 workspace policy files and the PNPM version. PNPM itself skips its per-entry
