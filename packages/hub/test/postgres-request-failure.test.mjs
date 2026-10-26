@@ -1,10 +1,10 @@
-import { captureErrorReports, exceptionEvents } from "./support/error-reports.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAuthorityDatabase } from "@xmatrix/db";
 import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { transientFailure } from "../src/error-contract.ts";
 import { postgresMessageSearch } from "../src/postgres-message-authority.ts";
+import { captureErrorReports, exceptionEvents } from "./support/error-reports.mjs";
 import { sentryEventMetadata } from "../src/connectors/actions/sentry-event-metadata.ts";
 
 // HUB-AG: console capture discarded the driver's linked retry evidence and
