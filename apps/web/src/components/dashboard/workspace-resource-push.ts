@@ -36,6 +36,8 @@ export function refetchUnlessHumanPush(intervalMs: number): number | false {
  * reads `refetchUnlessHumanPush` instead of a fixed timer.
  */
 const HOLDS_RESOURCE: Record<WorkspaceResourceKind, (key: QueryKey, change: WorkspaceResourceChange) => boolean> = {
+  launch_targets: (key, { spaceId }) => key[0] === "xmatrix" && key[3] === "space-launch-targets" &&
+    (!spaceId || key[4] === spaceId),
   automations: (key, { spaceId }) => key[0] === "xmatrix" &&
     (key[3] === "automations" || key[3] === "page-automations") && (!spaceId || key[4] === spaceId),
   // A space-wide queue (empty channel slot) still includes this channel.
@@ -49,9 +51,14 @@ const HOLDS_RESOURCE: Record<WorkspaceResourceKind, (key: QueryKey, change: Work
 };
 
 /** Re-read the lists whose fixed polls stop while the Human socket is up: the named one, or all of them. */
-export function invalidateWorkspaceResources(client: QueryClient, change: WorkspaceResourceChange = {}): void {
+export async function invalidateWorkspaceResources(client: QueryClient, change: WorkspaceResourceChange = {}): Promise<void> {
   const kinds: readonly WorkspaceResourceKind[] = change.resource ? [change.resource] : WORKSPACE_RESOURCE_KINDS;
-  void client.invalidateQueries({
+  // Even a first read (with no cached data) may have started before this event.
+  // Retire it before invalidating so its later success cannot swallow the change.
+  if (kinds.includes("launch_targets")) await client.cancelQueries({
+    predicate: query => HOLDS_RESOURCE.launch_targets(query.queryKey, change),
+  });
+  await client.invalidateQueries({
     predicate: (query) => kinds.some((kind) => HOLDS_RESOURCE[kind](query.queryKey, change)),
   });
 }

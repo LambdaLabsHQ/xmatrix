@@ -2,6 +2,7 @@ import { checkAppConnectorProviderConnection, type AppConnectorConnectionView } 
 import { verifyConnectorConnection } from "./connectors/connection-check";
 import { appCommand, getAppConnection } from "./apps";
 import type { Env } from "./types";
+import { notifyWorkspaceResource } from "./workspace-resource-notification";
 
 /**
  * The only way a connection becomes Connected: the provider is asked, and the
@@ -28,6 +29,9 @@ export async function checkAppConnection(env: Env, input: {
     ok = false;
     message = error instanceof Error ? error.message.slice(0, 240) : "Connector provider check failed";
   }
-  return appCommand(env, "check", { commandId: input.commandId, connectionId,
+  const result = await appCommand(env, "check", { commandId: input.commandId, connectionId,
     expectedVersion: connection.version, principal, ok, message });
+  if (connection.providerId === "github") await notifyWorkspaceResource(env, { spaceId: input.spaceId,
+    resource: "launch_targets" });
+  return result;
 }

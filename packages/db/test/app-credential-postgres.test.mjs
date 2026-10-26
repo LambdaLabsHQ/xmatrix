@@ -47,6 +47,41 @@ async function withDatabase(run) {
 
 const policy = { allowed: ["ingressKey", "signingSecret", "apiToken"] };
 
+integration("GitHub catalog events fence caches only for currently linked configured connections, atomically within a bound", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await withDatabase(async ({ sql: otherSql, space: other }) => {
+      await addConnection(sql, space, "github");
+      await addConnection(otherSql, other, "github");
+      await sql("UPDATE data.app_connector_connections SET metadata_json=$2 WHERE space_id=$1 AND provider_id='github'",
+        [space, { installationIds: ["777"] }]);
+      await otherSql("UPDATE data.app_connector_connections SET metadata_json=$2 WHERE space_id=$1 AND provider_id='github'",
+        [other, { installationId: "777" }]);
+      const apps = new PostgresAppRepository(database);
+      const invalidate = (installationId = "777", limit = 1000) => apps.invalidateGitHubRepositoryCatalog({
+        requestId: crypto.randomUUID(), installationId, limit });
+      const rows = async () => (await sql("SELECT * FROM data.app_connector_connections WHERE space_id=ANY($1::text[]) ORDER BY connection_id",
+        [[space, other]])).rows;
+      const before = await rows();
+      assert.deepEqual(await invalidate("888"), []);
+      await assert.rejects(invalidate("777", 1), /exceeds its bound/);
+      assert.deepEqual(await rows(), before, "overflow cannot partially invalidate connected Spaces");
+      assert.deepEqual((await invalidate()).sort(), [space, other].sort());
+      const after = await rows();
+      for (let index = 0; index < before.length; index++) {
+        assert.deepEqual(after[index], { ...before[index], version: String(Number(before[index].version) +
+          (before[index].provider_id === "github" ? 1 : 0)) }, "events never change grants, configuration or other providers");
+      }
+      // Retained link rows or an old metadata shape must not select an unlinked installation.
+      await otherSql("UPDATE data.app_connector_connections SET metadata_json=$2 WHERE space_id=$1 AND provider_id='github'",
+        [other, { installationIds: ["888"] }]);
+      assert.deepEqual(await invalidate(), [space]);
+      await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1 AND provider_id='github'", [space]);
+      assert.deepEqual(await invalidate(), []);
+      await assert.rejects(invalidate("not-an-installation"), /Invalid GitHub catalog/);
+    });
+  });
+});
+
 integration("connector credentials are encrypted, admin-written, and readable only as generated fields", async () => {
   await withDatabase(async ({ sql, database, space }) => {
     const credentials = new PostgresAppCredentialRepository(database, material);

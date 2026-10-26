@@ -44,6 +44,7 @@ export interface GitHubRepositoryRef {
 type GitHubInstallationRepository = {
   id: string;
   owner: string;
+  ownerUserId?: number;
   name: string;
   private: boolean;
   archived: boolean;
@@ -511,7 +512,8 @@ const DELEGATION_CHECKS_AT_ONCE = 8;
 
 /**
  * The installation's repositories its linking administrator administers now,
- * each asked separately: names, descriptions and privacy of the rest (one
+ * each proved from GitHub: personal ownership by stable id, otherwise current
+ * collaborator administration. Names, descriptions and privacy of the rest (one
  * added to the installation later, or one they no longer administer) are not
  * offered. An installation too large to check is not offered at all.
  */
@@ -520,14 +522,26 @@ async function githubDelegatedRepositories(env: AppConnectorEnv, connection: App
   if (repositories.length > DELEGATED_CATALOG_LIMIT) throw new Error("github_repository_catalog_too_large");
   const linker = await githubLinker(env, connection, installationId, token);
   if (!linker) throw new Error("github_repository_not_delegated");
-  const delegated: GitHubInstallationRepository[] = [];
-  for (let offset = 0; offset < repositories.length; offset += DELEGATION_CHECKS_AT_ONCE) {
-    const batch = repositories.slice(offset, offset + DELEGATION_CHECKS_AT_ONCE);
-    const answers = await Promise.all(batch.map((repository) =>
-      githubUserAdministers(env, token, linker, repository.owner, repository.name)));
-    delegated.push(...batch.filter((_, index) => answers[index]));
-  }
-  return delegated;
+  const answers = Array.from({ length: repositories.length }, () => false);
+  let next = 0;
+  let failed = false;
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(DELEGATION_CHECKS_AT_ONCE, repositories.length) }, async () => {
+    while (!failed && next < repositories.length) {
+      const index = next++;
+      const repository = repositories[index];
+      if (repository.archived) continue;
+      // GitHub's current catalog identifies the sole owner of a personal repo.
+      // Neither a matching login nor an organization's id proves this.
+      answers[index] = repository.ownerUserId === linker.githubUserId ||
+        await githubUserAdministers(env, token, linker, repository.owner, repository.name).catch(error => {
+          failed = true;
+          throw error;
+        });
+    }
+  }));
+  const failure = workers.find(result => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+  return repositories.filter((_, index) => answers[index]);
 }
 
 /**
@@ -1048,9 +1062,9 @@ export async function resolveAppConnectorCompletionOptions(
  * and every member of the Space asks the same question, but each answer costs a
  * paged walk of GitHub's installation catalog.
  *
- * A minute is the whole staleness budget: the credential mint re-resolves the
- * connector every single time, so this only decides how long a repo can still be
- * *offered* after access to it changed — never how long one can be used.
+ * The Web preloads once per Space and refreshes on events, never on a timer.
+ * This TTL bounds edge reuse on a fresh read; signed GitHub changes advance
+ * the connection version in the key. The mint rechecks permission independently.
  */
 const SPACE_LAUNCH_REPOSITORY_CACHE_SECONDS = 60;
 
@@ -1098,7 +1112,7 @@ function spaceLaunchRepositoryCacheKey(connection: AppConnectorConnectionView): 
   const linkers = (connection.githubLinks ?? []).map((link) => `${link.installationId}=${link.githubUserId}`).sort();
   return new Request(
     `https://launch-targets.xmatrix.internal/${encodeURIComponent(connection.id)}` +
-      `/${encodeURIComponent(installationIds.join(","))}/${encodeURIComponent(linkers.join(","))}`
+      `/${encodeURIComponent(installationIds.join(","))}/${encodeURIComponent(linkers.join(","))}/${connection.version ?? 0}`
   );
 }
 
@@ -2201,6 +2215,10 @@ async function fetchGitHubInstallationRepositories(
           listed.set(id, {
             id,
             owner,
+            ...(githubObject(repository.owner).type === "User" &&
+              Number.isSafeInteger(githubNumber(githubObject(repository.owner).id)) &&
+              Number(githubObject(repository.owner).id) > 0
+              ? { ownerUserId: Number(githubObject(repository.owner).id) } : {}),
             name,
             private: githubBoolean(repository.private) === true,
             archived: githubBoolean(repository.archived) === true,

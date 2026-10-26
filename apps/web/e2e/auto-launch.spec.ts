@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { E2E_CHANNEL, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureRule, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { E2E_CHANNEL, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureRequests, fixtureRule, openWorkspaceWithStubs } from "./workspace-fixtures";
 import { expectDraft, setDraftSelection } from "./composer-draft";
 
 test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false });
@@ -22,6 +22,27 @@ async function selectRepository(page: import("@playwright/test").Page) {
   await input.press("Tab");
   return input;
 }
+
+test("the Space preloads repositories before typing and a GitHub change refreshes its shared answer", async ({ page }) => {
+  const input = page.locator(".composer-textarea").first();
+  await expectDraft(input, "");
+  await expect.poll(async () => (await fixtureRequests(page, "launch-targets")).length).toBe(1);
+  for (let pick = 0; pick < 3; pick++) {
+    await input.fill("@auto repo:");
+    await expect(page.getByRole("option").filter({ hasText: "repo:owner/xmatrix" })).toBeVisible();
+    await input.fill("");
+  }
+  expect((await fixtureRequests(page, "launch-targets")).length).toBe(1);
+  await fixtureJson(page, "github-catalog-change", "**/api/xmatrix/spaces/*/launch-targets**", {
+    spaceId: E2E_SPACE.id, repoStatus: "authorized", repos: [{ value: "owner/renamed" }], workspaces: [],
+  });
+  await page.evaluate(spaceId => window.dispatchEvent(new CustomEvent("xmatrix:workspace-resource-changed", {
+    detail: { spaceId, resource: "launch_targets" },
+  })), E2E_SPACE.id);
+  await input.fill("@auto repo:");
+  await expect(page.getByRole("option").filter({ hasText: "repo:owner/renamed" })).toBeVisible();
+  expect((await fixtureRequests(page, "github-catalog-change")).length).toBe(1);
+});
 
 test("a fresh @ offers runtimes only, and conditions after the summon", async ({ page }) => {
   const input = page.locator(".composer-textarea").first();

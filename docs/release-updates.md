@@ -1,5 +1,23 @@
 # Release Updates
 
+## Unreleased: Repository completion loads once per Space
+
+Entering a Space preloads its launch candidates once and shares the result
+across composers and repeated `@` picks. There is no repository polling timer.
+GitHub connection changes and signed repository/installation events invalidate
+the affected Space's query; socket reconnection recovers missed notifications.
+GitHub catalog events advance the connection version used by edge caches, so
+an older regional cache write cannot undo an invalidation. Existing clients
+ignore the new resource notification; the hosted beta Web consumes it.
+
+Cold catalog reads avoid redundant personal-owner permission requests using
+GitHub's current stable owner id, and keep eight permission workers occupied
+without batch barriers. The actual repository credential mint retains its live
+permission checks. App webhook subscriptions determine which provider changes
+arrive; missed events may leave suggestions stale until reconnect or Retry.
+No schema migration is needed. Recovery is a CI-validated beta release reverting
+the change; candidate queries then return to loading on completion.
+
 ## Unreleased: A remembered session cannot skip a login's second factor
 
 An app's provider sign-in that asks for an authenticator or backup code stays
