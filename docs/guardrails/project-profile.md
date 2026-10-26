@@ -28,9 +28,10 @@ Registration quota projections and owner refreshes use independent single reads
 with one fresh-connection recovery after a lost response, without BEGIN/COMMIT.
 See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
 
-Turn-failure cards expose the original cause before Details, including unknown
-and historical errors. Hub-classified exhausted provider accounts have distinct
-quota-reset or handoff guidance; known reset timestamps display in UTC. The
+Turn-failure cards use the original error as their title for every cause,
+including unknown and historical errors. Hub classifications supply next steps
+without replacing that error. Exhausted provider accounts get reset or handoff
+guidance; known reset timestamps display in UTC. The
 existing quota hold and handoff authority is unchanged. See
 [turn failures](../operations/agent-turn-failures.md).
 

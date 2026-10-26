@@ -47,11 +47,12 @@ these changes.
 
 ## Unreleased: Failed turns show their actual cause and exhausted quota
 
-Turn-failure cards keep the provider's original error visible without opening
-Details, including unknown failures and historical notices. The Hub projects
+Turn-failure cards use the program's original error as their title for every
+cause, including unknown failures and historical notices. The error passes
+through without requiring a category-specific title. The Hub projects
 its existing used-up-account classification into additive failure evidence;
-the Web gives that condition its own English/Chinese card with reset-or-handoff
-steps instead of immediate retry advice. Structured reset times display in UTC;
+the Web uses it for English/Chinese reset-or-handoff steps instead of immediate
+retry advice, without replacing the original error. Structured reset times display in UTC;
 prose-only reset hints remain as written. HTTP rate limiting stays distinct,
 and the existing quota hold and automatic handoff are unchanged.
 This needs a beta Hub/Web release, no native update or data migration. Older
