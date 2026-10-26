@@ -1282,7 +1282,7 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   await editor.locator("h2", { hasText: "Status" }).getByRole("button", { name: "1 conversation about this section" }).click();
   const list = browser.getByTestId("page-conversations");
   await expect(list).toContainText("In progress");
-  await list.getByRole("button", { name: "Resolve" }).click();
+  await list.getByRole("button", { name: "Resolve", exact: true }).click();
   await expect.poll(async () => fixtureRequestBodies(browser, "link-resolve")).toEqual([{ resolved: true }]);
 });
 
