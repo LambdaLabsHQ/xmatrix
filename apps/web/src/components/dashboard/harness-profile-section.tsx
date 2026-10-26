@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { HARNESS_PROFILE_DESCRIPTION_LIMIT, WEB_PROXY_ROUTES, type AgentRegistrationSummary } from "@xmatrix/protocol";
 
@@ -10,7 +10,9 @@ import { noticeClass } from "@/components/ui/status-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
+import { agentHarnessItemId } from "./agent-list-groups";
 import { ToolDetailSection } from "./tool-split";
+import { parseAppLocation } from "./workspace-shell-navigation";
 
 /**
  * What the Space says this harness is for, edited where it is read. The text
@@ -28,11 +30,21 @@ export function HarnessProfileSection({ registration, token, onSaved }: {
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
   const profile = registration.profile;
-  // A Hub that does not report profiles has nothing to show or edit.
-  if (!profile) return null;
   const { harness, spaceId } = registration.key;
   const editable = registration.canDescribe === true && Boolean(token);
+  // The mention menu opens this agent with `edit=profile` so the caret lands
+  // in the text the list was showing.
+  useEffect(() => {
+    if (!editable) return;
+    const url = parseAppLocation(window.location.href);
+    if (url.searchParams.get("edit") !== "profile") return;
+    if (url.searchParams.get("item") !== agentHarnessItemId(harness)) return;
+    fieldRef.current?.focus();
+  }, [editable, harness]);
+  // A Hub that does not report profiles has nothing to show or edit.
+  if (!profile) return null;
   const changed = draft !== null && draft.trim() !== profile.description;
 
   async function save() {
@@ -56,6 +68,7 @@ export function HarnessProfileSection({ registration, token, onSaved }: {
       {editable ? (
         <form className="grid gap-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
           <textarea
+            ref={fieldRef}
             aria-label={`When to pick ${harness}`}
             value={draft ?? profile.description}
             rows={4}

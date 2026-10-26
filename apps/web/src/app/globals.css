@@ -7388,10 +7388,47 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   color: var(--muted-foreground);
   font-size: 11px;
 }
+/* The specialty line is the Space's own text. The hint says so, and the control
+   opens the editor without taking the row's click, which still summons. */
+.app-mention-profile-hint {
+  margin: 0 18px 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.xmatrix-app .app-mention-suggestions .app-mention-capability {
+  display: flex;
+  align-items: center;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+}
+.xmatrix-app .app-mention-suggestions .app-mention-capability button.app-completion-option {
+  width: auto !important;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 !important;
+}
+.app-mention-profile-edit {
+  flex: 0 0 auto;
+  max-width: 46%;
+  margin: 0;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: right;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.app-mention-profile-edit:hover { color: var(--foreground); }
 /* A finger needs a taller target than a pointer. */
 @media (pointer: coarse) {
   .xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option { min-height: 38px; }
   .xmatrix-app .app-mention-suggestions .app-mention-category button.app-mention-category-more { min-height: 32px; }
+  .app-mention-profile-edit { min-height: 38px; padding-inline: 10px; }
 }
 
 .app-invocation-popup:has(.app-routing-board) { width: min(520px, calc(100vw - 24px)); }

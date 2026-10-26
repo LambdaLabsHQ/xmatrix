@@ -298,6 +298,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
+    openHarnessProfile,
     openSchedule,
     clearScheduleFocus,
     openAppsForSpace,
@@ -1074,6 +1075,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onSend={sendNewConversationMessage}
       onCancel={() => setComposingConversation(false)}
       onOpenAppsForSpace={openAppsForSpace}
+      onEditHarnessProfile={openHarnessProfile}
       allowance={composerAllowance}
     />
   );
@@ -1270,6 +1272,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onAttachmentsChange={changeDraftAttachments}
           onSend={sendComposerMessage}
           onOpenAppsForSpace={openComposerApps}
+          onEditHarnessProfile={openHarnessProfile}
         />
       )}
     </section>

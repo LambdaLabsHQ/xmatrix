@@ -95,7 +95,7 @@ xmatrix agent describe codex "Careful code review and audits. Slow at UI work." 
 xmatrix agent describe codex --space <space-id>    # print the current description
 ```
 
-The description covers every agent of that harness in the Space. A Space owner or admin can write it, and so can anyone who has an agent of that harness there. Its first sentence shows under the harness when you type `@`. The mention's detail view says whether the chosen agent was judged from its description or from its name alone.
+The description covers every agent of that harness in the Space. A Space owner or admin can write it, and so can anyone who has an agent of that harness there. Its first sentence shows under the harness when you type `@`. That list says the text can be written, and **Click to edit what it's good at** opens this editor for that agent. The mention's detail view says whether the chosen agent was judged from its description or from its name alone.
 
 ### Keep a machine for yourself
 

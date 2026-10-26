@@ -342,6 +342,16 @@ export function toolItemPath(viewPath: string, item: string | null): string {
 }
 
 /**
+ * The mention menu opens When to pick it with `edit=profile`. That marker is
+ * part of an Agents address while it is there; other list addresses do not carry it.
+ */
+export function agentsProfileEditPath(viewPath: string, location: string): string {
+  const item = toolItemSelection(location);
+  const path = toolItemPath(viewPath, item);
+  return item && parseAppLocation(location).searchParams.get("edit") === "profile" ? `${path}&edit=profile` : path;
+}
+
+/**
  * Admin filters and Settings/Apps provider return parameters live in the
  * query. Canonicalizing their Space path must preserve those parameters until
  * the owning view consumes them.

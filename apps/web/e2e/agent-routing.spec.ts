@@ -113,6 +113,33 @@ test("an edited selection is sent as written, never bound to the old pick", asyn
 });
 
 
+for (const mobile of [false, true]) {
+  test.describe(`what an agent is good at, from the mention menu, on ${mobile ? "mobile" : "desktop"}`, () => {
+    test.use({ viewport: mobile ? { width: 393, height: 852 } : { width: 1280, height: 900 },
+      isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 });
+    test("says that text can be written and opens the editor", async ({ page }) => {
+      const locations = ["Workstation", "MacBook"].map((machineName, index) => ({
+        key: { spaceId: E2E_SPACE.id, ownerUserId: `owner-${index}`, machineId: `machine-${index}`, harness: "codex" },
+        displayName: "codex", ownerName: `Owner ${index + 1}`, machineName, version: 1, state: "enabled",
+        models: ["same-model"], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false,
+        canRemoveFromSpace: false, canDescribe: true, profile: { description: "Careful code review.", revision: 2 },
+      }));
+      await fixtureJson(page, "registration-catalog", /\/agent-registrations(?:\?[^#]*)?$/u, {
+        registrations: locations, capabilities: [{ harness: "codex", models: ["same-model"], locations }],
+      });
+      await page.goto("/app/personal-sspaceperso/channels/channel-general");
+      const draft = page.locator(".composer-textarea").first();
+      await draft.fill("@");
+      await expect(page.getByText("What an agent is good at can be written.")).toBeVisible();
+      await page.getByRole("button", { name: "Click to edit what codex is good at" }).click();
+      await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
+      const text = page.getByLabel("When to pick codex");
+      await expect(text).toHaveValue("Careful code review.");
+      await expect(text).toBeFocused();
+    });
+  });
+}
+
 test("restored channel drafts keep an explicit machine selection", async ({ page }) => {
   const { draft, locations } = await canonicalComposer(page);
   await selectMacBook(page, draft);

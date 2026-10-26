@@ -16,7 +16,8 @@ import { SpaceAllowanceNotice } from "./space-allowance-notice";
  * names and summarises the conversation from what it is about.
  */
 export function NewConversation({
-  space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace, initialDraft = "",
+  space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace,
+  onEditHarnessProfile, initialDraft = "",
   error = null, allowance,
 }: {
   /** What the composer opens holding, for the person to send (a welcome card's). */
@@ -33,6 +34,7 @@ export function NewConversation({
   onSend: (channel: ChannelSnapshot, snapshot: ComposerSendSnapshot) => Promise<void>;
   onCancel: () => void;
   onOpenAppsForSpace: (spaceId: string) => void;
+  onEditHarnessProfile?: (harness: string) => void;
   /** Says, under the conversation, how close this Space is to having its writes refused. */
   allowance?: { userId: string; onOpenBilling?: () => void };
 }) {
@@ -98,6 +100,7 @@ export function NewConversation({
         onCancelReply={() => {}}
         onAttachmentsChange={setAttachments}
         onOpenAppsForSpace={onOpenAppsForSpace}
+        onEditHarnessProfile={onEditHarnessProfile}
         onEscape={onCancel}
         onSend={async (snapshot) => {
           draftRef.current = snapshot.body;
