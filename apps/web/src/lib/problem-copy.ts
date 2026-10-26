@@ -18,6 +18,9 @@ function relativeTime(locale: OnboardingLocale, at: string | undefined, now: num
 const en = {
   stepsLabel: "To fix it",
   detailsLabel: "Details",
+  originalError: (message: string) => `Original error: ${message}`,
+  quotaResets: (at: string) => `Quota resets: ${at}`,
+  noProviderDetail: "The program did not report a specific error.",
   errorCode: (code: string) => `Error code: ${code}`,
   copy: "Copy",
   copied: "Copied",
@@ -72,6 +75,12 @@ const en = {
   },
   /* An Agent's turn did not finish (turn-failure-notice.tsx turnProblem). */
   turn: {
+    usage_limited: {
+      title: (agent: string) => `${agent}'s provider quota is used up`,
+      explanation: "Its provider account has no usage left, so this turn could not finish.",
+      steps: ["Wait for the provider quota to reset before asking this agent to continue.",
+        "To continue sooner, hand the work to another agent with available quota."],
+    },
     rate_limited: {
       title: (agent: string) => `${agent} was rate limited by its provider`,
       explanation: "The provider turned down more requests for now (HTTP 429), so this turn didn't finish.",
@@ -116,6 +125,9 @@ export type ProblemCopy = typeof en;
 const zh: ProblemCopy = {
   stepsLabel: "怎么修复",
   detailsLabel: "详情",
+  originalError: (message) => `原始错误：${message}`,
+  quotaResets: (at) => `额度重置时间：${at}`,
+  noProviderDetail: "运行程序没有提供具体错误。",
   errorCode: (code) => `错误码：${code}`,
   copy: "复制",
   copied: "已复制",
@@ -168,6 +180,11 @@ const zh: ProblemCopy = {
     },
   },
   turn: {
+    usage_limited: {
+      title: (agent) => `${agent} 的服务商额度已用尽`,
+      explanation: "它使用的服务商账号没有剩余额度，这一轮无法继续。",
+      steps: ["等服务商额度重置后，再让这个 Agent 继续。", "需要尽快继续的话，交给还有额度的其他 Agent 接手。"],
+    },
     rate_limited: {
       title: (agent) => `${agent} 被服务商限流了`,
       explanation: "服务商暂时拒绝了更多请求（HTTP 429），这一轮没有做完。",

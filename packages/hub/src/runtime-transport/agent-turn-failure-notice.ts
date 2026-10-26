@@ -1,5 +1,6 @@
 import {
   AGENT_SIGNED_OUT_LIFECYCLE_REASON,
+  AGENT_USAGE_LIMIT_LIFECYCLE_REASON,
   HARNESS_SIGNED_OUT_NOTICE_KIND,
   type HarnessSignedOut,
   agentTurnFailureNoticeBody,
@@ -25,6 +26,7 @@ export function agentTurnFailureAppendCommand(input: {
   /** The host's count of tasks still pending when its provider stream ended. */
   pendingTasks?: number | null;
   reason?: string | null;
+  resetsAt?: string | null;
   /** For a turn its program refused as signed out: what to sign in, drawn as the sign-in. */
   signedOut?: HarnessSignedOut;
   noticeId?: string | null;
@@ -38,6 +40,9 @@ export function agentTurnFailureAppendCommand(input: {
   const channelId = input.channelId.trim();
   if (!channelId) return null;
   const background = input.reason === "background_tasks_interrupted";
+  const reset = input.resetsAt ? Date.parse(input.resetsAt) : Number.NaN;
+  const usageLimit = input.reason === AGENT_USAGE_LIMIT_LIFECYCLE_REASON
+    ? (Number.isFinite(reset) ? { resetsAt: new Date(reset).toISOString().replace(/\.000Z$/u, "Z") } : {}) : undefined;
   // A notice that names its failure is keyed by it; one without falls back to
   // the Instance and its opening text, which a replay repeats exactly.
   if (input.noticeId ? !/^[a-zA-Z0-9_-]{1,120}$/.test(input.noticeId) : background) return null;
@@ -76,7 +81,8 @@ export function agentTurnFailureAppendCommand(input: {
           xmatrixProvenance: "system_fact",
           xmatrixSystemNotice: true,
           ...(background ? { xmatrixBackgroundTaskInterruption: true } : { xmatrixTurnFailure: true }),
-          ...(!background ? { xmatrixFailureEvidence: { version: 1, ...agentFailureEvidence(input.detail) } } : {}),
+          ...(!background ? { xmatrixFailureEvidence: { version: 1, ...agentFailureEvidence(input.detail),
+            ...(usageLimit ? { usageLimit } : {}) } } : {}),
           ...(input.signedOut && input.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON
             ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut: input.signedOut } : {}),
         },

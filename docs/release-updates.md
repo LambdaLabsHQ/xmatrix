@@ -35,6 +35,18 @@ marks a departed sender offline. This is a hosted Web fix with no schema or
 native migration. Recovery is a CI-validated beta Hub/Web release reverting
 these changes.
 
+## Unreleased: Failed turns show their actual cause and exhausted quota
+
+Turn-failure cards keep the provider's original error visible without opening
+Details, including unknown failures and historical notices. The Hub projects
+its existing used-up-account classification into additive failure evidence;
+the Web gives that condition its own English/Chinese card with reset-or-handoff
+steps instead of immediate retry advice. Structured reset times display in UTC;
+prose-only reset hints remain as written. HTTP rate limiting stays distinct,
+and the existing quota hold and automatic handoff are unchanged.
+This needs a beta Hub/Web release, no native update or data migration. Older
+clients ignore the added field. Recovery is a CI-validated beta reverting the change.
+
 ## Unreleased: Machine reports and enrollment recover a lost database response
 
 Machine daemon commands, Run lifecycle mutations and execution report storage

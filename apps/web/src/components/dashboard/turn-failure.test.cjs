@@ -46,3 +46,13 @@ test("only a turn-failure notice with well-formed evidence is read as one", () =
   assert.equal(turnFailureEvidenceOf({ xmatrixTurnFailure: true }), null);
   assert.equal(turnFailureEvidenceOf({ xmatrixTurnFailure: true, xmatrixFailureEvidence: { ...evidence, category: "guess" } }), null);
 });
+
+test("quota presentation uses only the Hub classification, ahead of any HTTP rate limit", () => {
+  const metadata = (usageLimit) => ({ xmatrixTurnFailure: true,
+    xmatrixFailureEvidence: { ...agentFailureEvidence("unexpected status 429"), usageLimit } });
+  assert.equal(turnProblem(turnFailureEvidenceOf(metadata({}))), "usage_limited");
+  for (const malformed of [true, "usage_limited", []]) {
+    assert.equal(turnProblem(turnFailureEvidenceOf(metadata(malformed))), "rate_limited");
+  }
+  assert.deepEqual(turnFailureEvidenceOf(metadata({ resetsAt: "not a date" })).usageLimit, {});
+});

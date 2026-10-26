@@ -24,6 +24,12 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Turn-failure cards expose the original cause before Details, including unknown
+and historical errors. Hub-classified exhausted provider accounts have distinct
+quota-reset or handoff guidance; known reset timestamps display in UTC. The
+existing quota hold and handoff authority is unchanged. See
+[turn failures](../operations/agent-turn-failures.md).
+
 Machine daemon commands and Run lifecycle/execution report mutations replay
 once in a fresh PostgreSQL session after transport loss before COMMIT. Wakes,
 route publication and notices remain outside that database-only boundary;
