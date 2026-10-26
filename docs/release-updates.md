@@ -7,7 +7,9 @@ across composers and repeated `@` picks. There is no repository polling timer.
 GitHub connection changes and signed repository/installation events invalidate
 the affected Space's query; socket reconnection recovers missed notifications.
 GitHub catalog events advance the connection version used by edge caches, so
-an older regional cache write cannot undo an invalidation. Existing clients
+an older regional cache write cannot undo an invalidation. Reconfirming an
+existing installation also advances that version, even when its linker stays
+the same. Existing clients
 ignore the new resource notification; the hosted beta Web consumes it.
 
 Cold catalog reads avoid redundant personal-owner permission requests using
