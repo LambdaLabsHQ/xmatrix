@@ -307,7 +307,10 @@ $action = New-ScheduledTaskAction `
   -Execute $InstallPath `
   -Argument "daemon" `
   -WorkingDirectory $installDirectory
-$trigger = New-ScheduledTaskTrigger -AtLogOn
+# A logon trigger without -User fires for every user, and registering one
+# needs an elevated shell; a standard user gets "Access is denied".
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
 $settings = New-ScheduledTaskSettingsSet `
   -RestartCount 999 `
   -RestartInterval (New-TimeSpan -Minutes 1) `
@@ -544,7 +547,7 @@ mod tests {
         assert!(script.contains("-Execute $InstallPath"));
         assert!(script.contains("-Argument \"daemon\""));
         assert!(script.contains("-WorkingDirectory $installDirectory"));
-        assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn"));
+        assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));
         assert!(script.contains("-RestartCount 999"));
         assert!(script.contains("$keepExistingTask = ("));
         assert!(script.contains("if (-not $keepExistingTask)"));
