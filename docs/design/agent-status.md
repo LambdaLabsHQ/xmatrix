@@ -38,6 +38,11 @@ Channel/Instance, at most three per five minutes and only on incoming reports;
 short coalescing and bounded eviction let a read racing ahead of commit recover. Invalid
 Authority snapshots are diagnosed and isolated rather than repeatedly fetched.
 
+A message's Instance status stays unknown until the Channel has a presence
+snapshot. History arriving first must not produce an `instance offline` badge
+or an offline avatar. Once loaded, an authoritative snapshot that omits the
+exact Instance still marks that historical sender offline.
+
 Legacy grouped rows split into individual Instances without copying aggregate
 Run activity, intent or clocks to siblings; only registration-level quota is
 shared. Canonical entries win over duplicate aliases, which are diagnosed.

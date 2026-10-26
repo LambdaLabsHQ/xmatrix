@@ -221,8 +221,9 @@ message ids are preserved, so an Agent can still reply to or quote any entry.
 The shared contract requires explicit updates for accepted tasks:
 
 > When you take on a task, promptly send one short channel update saying
-> what you will do. At significant milestones, edit that same status
-> message; report blockers promptly and send a separate final result before
+> what you will do. Edit that status for routine progress, keeping the
+> approach visible. Send material findings and decisions as separate replies
+> explaining the cause, chosen fix and why; send a final result before
 > ending the turn. Follow the user's reporting preferences. Context-only
 > messages and other Agents' progress are not new tasks and need no
 > acknowledgement. Keep multi-step plans current with the runtime's plan
@@ -230,9 +231,14 @@ The shared contract requires explicit updates for accepted tasks:
 
 Invocation state records startup evidence. A status message tells the reader
 what the Agent accepted and what remains; editing it keeps that information
-current without a sequence of progress messages. Completed steps and PRs
-continue to appear as activity. Local runtime output is private execution
-output and is published to a Channel only through an explicit send.
+current without a sequence of progress messages. Findings and decisions stay
+in separate messages so editing the status does not erase the explanation.
+The final reply states the change, validation, live status and remaining work.
+Completed steps and PRs continue to appear as activity. Local runtime output,
+including Codex commentary and Claude/ACP assistant text, is execution output
+and is published to a Channel only through an explicit send. The shared
+contract and Codex's compact reminder make that distinction explicit; no
+adapter automatically publishes the execution transcript as speech.
 
 ## 6. Security and privacy
 
