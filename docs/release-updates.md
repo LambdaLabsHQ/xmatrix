@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Migration regressions execute in the PostgreSQL release gate
+
+The Hub release suite now runs the index drift, Machine query plan and online
+migration recovery regressions against its isolated PostgreSQL database.
+Ordinary Node checks skip database integrations, and these files were missing
+from the real database suite's explicit list. This completes the regression
+gate for migration 0220; it needs no new production migration. Release and
+recovery still use the existing CI-validated beta train.
+
 ## Unreleased: Daemon reports and reconnects use their Machine indexes again
 
 Migration 0137 retired `host_id`, and PostgreSQL dropped the two indexes that
