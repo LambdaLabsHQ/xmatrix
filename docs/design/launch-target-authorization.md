@@ -109,7 +109,9 @@ Selection does not follow the rule that credentials already follow.
    even another region or a late old cache write cannot revive the previous
    answer after a processed event. Only the affected Spaces receive a content-free
    refresh notice. Connect, Disconnect, Unlink, Check and link confirmation also
-   announce changes. The existing edge response TTL remains 60 seconds; it is
+   announce changes. Confirmation advances the connection version even when the
+   same GitHub user confirms the same installations, so its refresh bypasses
+   earlier provider answers. The existing edge response TTL remains 60 seconds; it is
    not a refresh timer. Configure the App's corresponding webhook subscriptions
    to receive these changes. A missed delivery can leave an online candidate
    list stale until reconnect, Retry or a new session; it never grants execution.
