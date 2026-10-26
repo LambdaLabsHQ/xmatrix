@@ -66,6 +66,8 @@ import { instanceCall, pageInstances, type PageInstance } from "./page-instances
 import type { ConversationCall } from "@/components/dashboard/page-shell-actions";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
+import { usePageRowDrag } from "./page-tree-drag";
+import { pageTreeAfterDrop, type PageDrop } from "./page-tree-move";
 import { pageMentions, type PageReferenceTargets } from "./page-reference-chips";
 import type { PageSummons } from "./page-mention-summons";
 import type { PageEditOpening } from "@/components/dashboard/page-edit-cards";
@@ -179,11 +181,12 @@ export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary" | "h
   return age ? `Edited ${age}` : "";
 }
 
-function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect, onPrefetch, onCreateChild }: {
+function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect, onPrefetch, onCreateChild, drag }: {
   page: PageSummary; childrenOf: Map<string | null, PageSummary[]>; activity: PageTreeActivities; depth: number;
   selectedPageId: string | null; onSelect: (pageId: string) => void; onPrefetch: (pageId: string) => void;
   /** Makes a page under this one, from the row itself. */
   onCreateChild?: (pageId: string) => void;
+  drag: ReturnType<typeof usePageRowDrag>;
 }) {
   const children = childrenOf.get(page.pageId) ?? [];
   const [open, setOpen] = useState(true);
@@ -203,10 +206,13 @@ function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect,
   const unread = typeof page.readRevision === "number" ? Math.max(0, page.headRevision - page.readRevision) : 0;
   return (
     <li>
-      <PageTreeRow depth={depth} selected={selected} open={open}
+      <PageTreeRow depth={depth} selected={selected} open={open} pageId={page.pageId}
+        drop={drag.hint?.lineId === page.pageId ? drag.hint.edge : null}
+        dragging={drag.draggingId === page.pageId}
         onToggle={() => setOpen((value) => !value)} expandHidden={children.length === 0}
         onLongPress={onCreateChild ? () => setActionsOpen(true) : undefined}>
-        <button type="button" className="flex min-w-0 flex-1 flex-col text-left"
+        <button type="button" className={`flex min-w-0 flex-1 flex-col text-left${page.canEdit ? " cursor-grab" : ""}`}
+          {...drag.bind(page.pageId, page.canEdit && page.pageId !== NEW_PAGE_ID)}
           onClick={() => onSelect(page.pageId)} onPointerEnter={() => onPrefetch(page.pageId)}
           onFocus={() => onPrefetch(page.pageId)}>
           <span className="app-page-row-title-line flex min-w-0 items-center gap-2">
@@ -249,7 +255,8 @@ function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect,
         <ul>
           {children.map((child) => (
             <TreeNode key={child.pageId} page={child} childrenOf={childrenOf} activity={activity} depth={depth + 1}
-              selectedPageId={selectedPageId} onSelect={onSelect} onPrefetch={onPrefetch} onCreateChild={onCreateChild} />
+              selectedPageId={selectedPageId} onSelect={onSelect} onPrefetch={onPrefetch} onCreateChild={onCreateChild}
+              drag={drag} />
           ))}
         </ul>
       )}
@@ -366,6 +373,23 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
   }, [queryClient, spaceId, token, tree.data, userId]);
   const childrenOf = useMemo(() => pageChildren(tree.data ?? []), [tree.data]);
   const roots = childrenOf.get(null) ?? [];
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const movePage = useCallback(async (pageId: string, drop: PageDrop) => {
+    if (!spaceId) return;
+    setMoveError(null);
+    const key = xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-tree", [spaceId]);
+    const previous = queryClient.getQueryData<PageSummary[]>(key);
+    if (previous) queryClient.setQueryData(key, pageTreeAfterDrop(previous, pageId, drop));
+    try {
+      const { page } = await pageApi.update(spaceId, pageId, token, drop);
+      queryClient.setQueryData<PageSummary[]>(key, (current) => current?.map((item) => item.pageId === page.pageId
+        ? { ...item, parentPageId: page.parentPageId, position: page.position, updatedAt: page.updatedAt } : item));
+    } catch (error) {
+      if (previous) queryClient.setQueryData(key, previous);
+      setMoveError(userErrorMessage(error, "Couldn't move this page"));
+    }
+  }, [queryClient, spaceId, token, userId]);
+  const drag = usePageRowDrag(tree.data ?? [], (pageId, drop) => void movePage(pageId, drop));
   // Read again only when the tree says a page changed: it rides the tree's refresh, with no clock of its own.
   const [moreChanges, setMoreChanges] = useState(false);
   const changeLimit = moreChanges ? MORE_RECENT_CHANGES : RECENT_CHANGES;
@@ -407,10 +431,11 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
         )}
         {/* The list always meets the plank with a section's name, never a bare row. */}
         {roots.length > 0 && <ListSectionHeading label="All pages" mark={{ icon: Files, tone: "primary" }} />}
+        {moveError && <p className={`${inset} text-sm text-destructive`}>{moveError}</p>}
         <ul>{roots.map((page) => (
           <TreeNode key={page.pageId} page={page} childrenOf={childrenOf} activity={activity} depth={0}
             selectedPageId={selectedPageId} onSelect={onSelectPage} onPrefetch={prefetch}
-            onCreateChild={(pageId) => void creation.create(pageId)} />
+            onCreateChild={(pageId) => void creation.create(pageId)} drag={drag} />
         ))}</ul>
       </div>
     </>

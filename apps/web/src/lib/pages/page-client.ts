@@ -55,7 +55,7 @@ export const pageApi = {
     xmatrixApiRequest<{ page: PageSummary; seeded?: boolean }>({ url: WEB_PROXY_ROUTES.space_pages(spaceId), token,
       method: "POST", body: input }),
   update: (spaceId: string, pageId: string, token: string, input: { title?: string; parentPageId?: string | null;
-    afterPageId?: string | null; accessMode?: "open" | "restricted"; agentSuggestOnly?: boolean }) =>
+    afterPageId?: string | null; beforePageId?: string; accessMode?: "open" | "restricted"; agentSuggestOnly?: boolean }) =>
     xmatrixApiRequest<{ page: PageSummary }>({ url: WEB_PROXY_ROUTES.space_page(spaceId, pageId), token,
       method: "PATCH", body: input }),
   publish: (spaceId: string, pageId: string, token: string, published: boolean) =>
