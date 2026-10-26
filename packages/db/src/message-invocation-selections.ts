@@ -3,6 +3,7 @@ import { agentPresetForLauncher, createInstanceMentions, deriveHarnessInvocation
 import type { DatabaseTransaction } from "./contracts.js";
 import { requireChannelCapability } from "./channel-capability-policy.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
+import { messageChoiceSourceCurrentSql } from "./message-choice-source.js";
 
 /** The append/edit transaction supplies its authenticated actor and canonical
  * body. A picker reference is intent, never a grant or an execution receipt. */
@@ -81,9 +82,10 @@ export async function messageAuthoredForActor(tx: DatabaseTransaction, input: {
 /** The first message this summon answers was decided to start a harness, and is the actor's. */
 async function firstMessageSummonOfActor(tx: DatabaseTransaction, input: {
   spaceId: string; channelId: string; messageId: string; actorUserId: string }): Promise<boolean> {
-  const rows = await tx.query({ name: "message_invocation_first_message_summon_v1", text: `SELECT 1 AS present
-    FROM data.first_message_launch_choices
-    WHERE space_id=$1 AND channel_id=$2 AND $3='xmatrix-summon:'||message_id AND author_user_id=$4 AND choice='start'`,
+  const rows = await tx.query({ name: "message_invocation_first_message_summon_v2", text: `SELECT 1 AS present
+    FROM data.first_message_launch_choices choice
+    WHERE choice.space_id=$1 AND choice.channel_id=$2 AND $3='xmatrix-summon:'||choice.message_id
+      AND choice.author_user_id=$4 AND choice.choice='start' AND ${messageChoiceSourceCurrentSql("choice")}`,
   values: [input.spaceId, input.channelId, input.messageId, input.actorUserId], maxRows: 1 });
   return Boolean(rows[0]);
 }

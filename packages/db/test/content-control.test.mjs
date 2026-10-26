@@ -134,7 +134,7 @@ test('decision listing binds source author, current channel, restricted root and
     if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel', space_id: 'space', shard_id: 'shard', placement_epoch: 1, entity_version: 1 }];
     if (query.name === 'space_placement_resolve_v1') return [activePlacementRow("space", { shardId: "shard" })];
     if (query.name === 'channel_capability_content_history_read_v3') return allowed ? [{ channel_id: 'channel', space_id: 'space', mode: 'open', metadata_json: {}, version: 1 }] : [];
-    if (query.name === 'runtime_initial_message_source_v4') return unchanged && query.values[3] === 'author'
+    if (query.name === 'runtime_initial_message_source_v5') return unchanged && query.values[3] === 'author'
       ? [{ entity_version: 1, body_hash: 'a'.repeat(64), timeline_sequence: 1 }] : [];
     if (query.name === 'content_summon_decision_refs_v1') {
       assert.deepEqual(query.values.slice(0, 3), ['space', 'channel-user:channel:author', 'message']);
@@ -191,7 +191,7 @@ test('Agent decision evidence derives Human root after exact Run and both Channe
     const admission = registeredRunRows(query, { runId: 'run', spaceId: 'space', channelId: 'birth', ownerUserId: runOwner });
     if (admission) return admission;
     if (query.name === 'content_decision_source_owner_v3') return [{ owner_user_id: sourceOwner }];
-    if (query.name === 'runtime_initial_message_source_v4') {
+    if (query.name === 'runtime_initial_message_source_v5') {
       assert.equal(query.values[3], sourceOwner);
       return [{ entity_version: 1, body_hash: 'a'.repeat(64), timeline_sequence: 1 }];
     }

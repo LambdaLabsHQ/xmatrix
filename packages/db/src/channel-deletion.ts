@@ -40,7 +40,7 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
     "data.registration_launch_intents", "data.registration_stop_intents",
     "data.channel_access", "data.channel_content_counters", "data.channel_message_sequences",
     "data.channel_metadata_revisions", "data.channel_transfer_proposals",
-    "data.cross_space_read_notices", "data.delivery_cursors", "data.first_message_launch_choices",
+    "data.cross_space_read_notices", "data.delivery_cursors", "data.first_message_launch_choices", "data.message_asks",
     "data.message_annotations", "data.message_attachment_refs", "data.message_attachments",
     "data.message_attention", "data.message_attention_revisions", "data.message_mutations",
     "data.message_reactions", "data.message_sequence_reservations", "data.messages",

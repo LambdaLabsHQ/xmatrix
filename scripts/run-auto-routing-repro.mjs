@@ -114,6 +114,7 @@ try {
     // Withdrawn, ended and retired registration Runs get exact stop obligations.
     "packages/db/test/agent-registration-revocation-postgres.test.mjs",
     "packages/db/test/first-message-launch-choice-postgres.test.mjs",
+    "packages/db/test/message-asks-postgres.test.mjs",
     "packages/db/test/legacy-hostname-retirement-postgres.test.mjs",
     "packages/db/test/machine-harness-inventory-postgres.test.mjs",
     "packages/db/test/agent-registration-control-postgres.test.mjs",

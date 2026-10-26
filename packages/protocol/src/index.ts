@@ -202,7 +202,7 @@ export {
   FIRST_MESSAGE_LAUNCH_WINDOW_MS,
 } from "./agent-launch.js";
 export type {
-  AgentInvocationQueryPage, AgentLaunchActivity, AgentLaunchState, InvocationDiagnosticsReport,
+  AgentInvocationQueryPage, SerializedMessageAsk, AgentLaunchActivity, AgentLaunchState, InvocationDiagnosticsReport,
   RoutingDecisionEvidence, SerializedAgentInvocationRejection, SerializedAgentLaunch,
   SerializedFirstMessageLaunchChoice,
 } from "./agent-launch.js";

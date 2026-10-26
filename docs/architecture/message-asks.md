@@ -1,7 +1,8 @@
 # Every message someone waits on has one owner
 
-Status: proposed (2026-10-26). Draft — the model and rollout below are under
-review; nothing here is implemented yet.
+Status: first delivery increment implemented (2026-10-26). The broader outcome
+and recovery model below remains a design; the shipped boundary is described
+separately and does not claim every execution is tracked.
 
 ## Why
 
@@ -12,11 +13,12 @@ classification is the authority for KPIs):
 
 - 90 registered, 38 connected a computer, 33 had an Agent, 31 sent a message, 22
   ever received an Agent reply, 5 sent messages on two or more days.
-- Of the 29 who had an Agent and sent messages, **9 never received a reply**.
+- Among people who had an Agent and sent messages, **9 never received a reply**.
   13 of 31 first messages went unanswered; only 4 of those people were answered
   later.
-- Of 326 messages, 255 were answered within 30 minutes (median 20 s, p90 72 s).
-  Speed is not the problem. The other 71 were:
+- Of 326 messages, 255 had subsequent Agent speech within 30 minutes (median
+  20 s, p90 72 s). This timing proxy is not causal proof of an answer. The
+  other 71 exposed these delivery and feedback gaps:
 
 | Outcome | Messages | What happened |
 | --- | --- | --- |
@@ -65,105 +67,173 @@ choice uses `routingReady`, which ignores sign-in, version and machine; the Agen
 page never looks at sign-in). Thirteen components explain "no agent answered" in
 their own words and looks, and four of them end in "send again" or "check again".
 
-## Invariants
+## Contracts
 
-1. **Total addressing.** When a Human's speech message commits, it resolves to
-   exactly one of: the Agents it asks; nobody yet, shown under it with the one
-   action that asks someone; or nothing to answer (a lifecycle control, a message
-   to people only).
-2. **Total outcome.** An ask ends answered (its addressee spoke after it) or
-   closed by a person (recalled, stopped, or they asked someone else). Every
-   other state names what it waits on.
-3. **Resume on facts.** When the fact an ask waits on changes (an agent is in,
-   the machine is online, the program is signed in or updated), the Hub continues
-   the same ask by itself. No copy asks a person to send a message again.
-4. **One surface.** One line under the message draws the ask, and every surface
-   that says whether an Agent can take work reads the same readiness facts.
+1. **Explicit ownership.** An interpreted publication has an identified recipient,
+   an author action to choose one, or a known non-task owner such as a control,
+   Human mention or Automation. Missing tracking stays unknown. It never proves
+   failed delivery and never authorizes a retry.
+2. **Causal outcomes.** Ordinary Agent speech proves output, not completion.
+   An execution bound to the source publication and its explicit final reply
+   prove the Agent declared that execution complete. They do not prove Human
+   acceptance. Multiple invocations settle separately.
+3. **Authorized continuation.** A selected request may resume after a blocking
+   fact changes. An unselected publication cannot: reconnecting a computer only
+   updates available choices. D61 and the existing first-message routing scope
+   remain unchanged.
+4. **One presentation owner.** Each migrated path uses the original message's
+   line. Existing failure cards stay in place until their domain has a verified
+   replacement. Readiness is a projection; current server grants still authorize
+   every selection and admission.
 
-## Model
+## Implemented increment: unaddressed publications
 
-An **Ask** is a Human speech message that is owed an answer, per addressee. It is
-the logical invocation the routing contract assumed: Launches, Runs and wakes are
-its attempts.
+`data.message_asks` stores positive evidence that an ordinary Human publication
+had no delivery owner when successfully interpreted. It records Space, Channel,
+message, author, invocation input version and body hash. It is not a second Run,
+Launch or completion ledger. The table is indexed by Channel/message and Space,
+travels with Space shard moves and is deleted with its Channel or Space. Moving
+a Channel to another Space invalidates its unaddressed evidence rather than
+carrying an action into a new authority scope.
 
-`data.message_asks`, keyed `(space_id, channel_id, message_id, addressee)`:
+The Hub records this evidence only for a fresh, unchanged, non-platform Human
+publication after successful interpretation. It uses the unified interaction
+plan, persisted picker/Instance targets, Human attention recipients, existing
+Run/Instance ownership and the persisted Automation occurrence. Controls,
+connector commands and Automation messages never become unaddressed speech.
+A sleeping/interrupted Instance remains owned by the existing wake path (#952),
+including its offline wait. Stopped or failed continuity does not automatically
+restart: an otherwise unaddressed publication can offer an explicit new choice.
+An addressed failed summon retains its existing rejection card.
 
-| Column | Meaning |
-| --- | --- |
-| `addressee` | `instance:<id>`, `harness:<name>`, `auto`, or `conversation` (whoever is working in it) |
-| `author_user_id`, `timeline_sequence` | the asker and where the message sits |
-| `state` | `asking` (an attempt is under way), `waiting` (blocked on a fact that clears by itself), `unaddressed` (nobody was asked), `failed` (an attempt ended without an answer and needs a person), `closed` |
-| `reason_code`, `subject`, `detail_json` | for `waiting`, `unaddressed` and `failed`: one code from a closed list, what it is about (`machine:<id>`, `registration:<owner>/<machine>/<harness>`, `space`), and the bounded public facts the line needs (program, machine name, version, minimum) |
-| `attempt`, `launch_id`, `run_id`, `instance_id` | the current attempt |
-| `expires_at` | waiting longer than this (24 hours) closes it as expired |
+A new unnamed conversation or Page/passage discussion belongs to the existing
+first-message decision even before that decision's row is inserted. An open or
+settled decision therefore cannot produce a second chooser. An undecided failed
+reading (including an empty Space) may offer the new action; an explicit
+`none` remains settled. The first-message authority excludes persisted
+Automation occurrences, irrespective of their display author.
 
-What the row stores is what no other table records: whom the message asks, why
-nobody was asked, and what it waits on. Progress that other tables already record
-is read from them, not copied: a Launch or wake under way, an execution accepted,
-and above all **answered**, which is any speech by the addressee (or, for
-`conversation`, by any Agent) after the message. A Human speech message older
-than a minute with no ask row is drawn as "didn't reach an agent", so a lost
-post-commit is visible rather than silent.
+The first page of the existing, authorized invocation query carries `asks` for
+its selected publications and author. An Ask's historical unaddressed fact and
+its current `canAsk` projection are separate: current recipients, permissions,
+source changes or a settled decision remove the action. No row means unknown.
+There is no historical backfill, age-based failure inference or browser retry.
 
-### Resolution (Hub, at post-commit)
+The Web draws **No Agent was asked** under the original publication. Available
+harnesses are explicit choices. If there are no registrations, this same place
+contains the established connection steps; an existing but unusable registration
+is not described as needing installation. A reader with a tracked source does
+not also see its legacy connect-agents onboarding reply. Other clients keep
+that compatibility reply. Neither mounting the line nor connecting a computer
+submits a task.
 
-In order, without new semantic routing (D61 stands):
+The author's click sends `ask: true` to the existing launch-choice endpoint.
+The Hub requires Human authentication, the original author, current Channel
+`runtime_new_work`, current source hash/version, an unrecalled/undeleted source,
+and an eligible harness. It locks the Channel and source, then claims the same
+`data.first_message_launch_choices` row as the original chooser. Two devices,
+Jev and retried HTTP requests cannot write different successful choices.
+A settled `none` is never overwritten. A later deliberate request is a new
+publication; this increment does not invent a replacement generation.
 
-1. **Named agents.** Instance, harness and `@auto` mentions and picker selections
-   are asked; each preparation refusal becomes that addressee's `waiting` or
-   `failed` state instead of an "Agent launch failed" message.
-2. **The conversation's Agents.** A live Instance receives the message as today; a
-   resting one wakes as today. Either makes it `conversation`, `asking`.
-   Continuity does not depend on whether a process happens to be alive: if the
-   conversation's last Instance ended without a person stopping it (startup failure,
-   exit, wake failure), the ask names that Agent and resumes it.
-3. **A new conversation's first message.** Jev's first-message decision, as today; a
-   decision of "nothing" is `unaddressed`, not a dead end.
-4. **Nobody.** A named conversation, the welcome conversation, or a conversation
-   whose Agent a person stopped: `unaddressed`. The line offers the Space's ready
-   Agents, the one most recently used first; one tap asks it on the author's behalf.
-   If the Space has no ready Agent, the line is the connect step instead, and the ask
-   waits on `space`.
+The choice captures the original input version/hash. The existing system summon
+is authorized by that durable choice; its prefix or reply target alone is not
+permission. Both launch ownership and initial-input provenance recheck the
+original publication. Admission also retains current Channel/registration
+checks. Edits, recall and deletion therefore fence late dispatch. A Channel stop
+fences pending Ask choices even before a Run exists; the cancelled choice cannot
+be replayed into a new launch. Already admitted work is stopped through the
+existing Run fence.
 
-### Outcome
+The existing summon coordinator owns durable handover and transport replay.
+The HTTP action awaits its wake and dispatch instead of acknowledging a
+fire-and-forget promise. A lost response reuses the same choice and deterministic
+summon ID; coordinator reconciliation finishes a committed unsummoned choice.
+Its recovery budget begins at the explicit decision, including when an earlier
+failed first-message reading was created long before it. Uncertain dispatch
+continues to report uncertainty rather than allocate new work.
 
-- A preparation refusal for a fact that can change (machine offline, program signed
-  out, too old, quota) is `waiting` with that subject. A refusal no fact will clear
-  is `failed` with its action.
-- A Run that ends before its addressee spoke (`runtime.startup_failed`,
-  `runtime.turn_failed`, exit, interrupted, a completed turn without a reply to an
-  explicit ask) makes the ask `failed`, with the program's own words and two
-  actions: try again, or ask another Agent. Startup failure first tries another
-  eligible registration once, as the routing contract already specifies.
-- An Agent reply answers it. A recall, a stop of the addressee, or asking someone
-  else closes it.
+## Next model: invocation outcomes and fact recovery
 
-### Resume
+This section is the required contract for extending beyond unaddressed speech,
+not a claim that those paths already use Ask rows.
 
-The writes that change a blocking fact wake the Channels whose asks wait on it, the
-way `wakeInstancesAwaitingMachine` already does for resting Instances: a daemon
-connecting (`machine:`), a registration enabled or an inventory report that turns a
-program signed in, installed or new enough (`registration:`), an agent entering
-the Space (`space`). The Channel coordinator re-runs that ask's resolution as its
-author with an idempotent command id per attempt; a `harness:` ask is summoned
-like the first-message summon, an `instance:` or `conversation` ask is woken or
-reborn. Expiry is the coordinator's only timed step.
+### Identity and parsing
 
-### One surface
+An invocation is keyed by source publication input version, selection/invocation
+index and explicit generation. A resolved stable target and all machine,
+repository, workspace, model and permission constraints accompany it. `auto` and
+`conversation` are resolution modes, not identities. Two auto mentions or two
+mentions of one harness with different constraints remain two invocations.
+Retargeting replaces only the specified invocation generation, not every request
+by that author.
 
-The Web reads the asks of the visible messages with the timeline and draws one
-line under each Human message: who it went to and where that stands ("claude is
-working", "Waiting for MacBook to come online, it continues by itself", "Claude Code on
-MacBook isn't signed in · Sign in", "kimi couldn't start: … · Try again · Ask
-claude", "No agent was asked · claude · codex"). The agentless reply, the launch
-choice's settled line, the signed-out and offline cards, the "Agent launch
-failed" messages and the chip notes become this line. The composer later shows
-the same resolution before sending.
+Consume the unified interaction plan and verified publication provenance before
+resolving requests. Lifecycle controls own their spans, as do connector commands;
+quoted, escaped and code mentions do not create work. Automation occurrences keep
+their original authority and no-mention behavior. Agent-authored summons keep
+their existing intent checks and failure feedback; a Human-only Ask extension
+cannot silently retire those checks.
 
-## Rollout
+### Outcome evidence
 
-| Phase | Ships | Removes |
-| --- | --- | --- |
-| 1 | The table, resolution at post-commit, the read endpoint and the line, including "didn't reach an agent" | Every silent outcome: nothing a person writes can disappear without a line |
-| 2 | Resume on facts; refusals write `waiting`; one readiness predicate shared by routing, the welcome, the line and the Agents page | Every "send again" and "check again" |
-| 3 | Run-terminal outcomes and startup fallback write `failed`; the old notices and cards are retired; the composer preview | The parallel failure surfaces |
+The execution report already binds source input/version/hash to an execution.
+The final-reply fact binds Run, Instance, execution and reply body hash. Derive
+completion from those causal facts, per invocation. An acknowledgement followed
+by failure is not answered; a late reply to another task does not settle this
+one; one recipient cannot settle the others. Old clients without execution/final
+provenance remain unknown.
+
+Execution evidence currently expires after 30 days. Until a separately reviewed
+compact terminal-evidence retention contract exists, expired evidence becomes
+unknown rather than a permanent inferred completion. A future terminal snapshot
+must have one documented owner and be written before its causal evidence is
+purged, not reconstructed from later speech.
+
+### Recovery and cancellation
+
+An authorized blocked request records its durable intent and fixed deadline
+(24 hours from initial authorization, never extended by reconnect or replay).
+The change to its blocking fact writes a durable wake obligation. Registering a
+wait rechecks the fact/version after the wait commits, so an online transition
+cannot fall between observing offline and publishing the wait. Bounded batches
+must durably schedule their remainder. Quota resets also need a next reevaluation
+time; expiry cannot be the only timed event.
+
+Transport replay reuses one durable intent. A genuinely new attempt atomically
+increments the invocation generation. Command IDs alone are insufficient:
+registration reborn's natural key includes source message and Instance. Reconcile
+unknown COMMIT and sent-but-unacknowledged work before any new attempt.
+
+The existing Instance wake lock and pending continuation own #952 recovery.
+A request must claim or associate that continuation rather than independently
+summon another harness/Instance. Cancellation, expiry, retargeting and final
+admission compete at the same authority boundary and recheck source version,
+generation and current grants. A stop can cancel queued work when no process
+exists. Recalled input cannot undo external actions already taken, and the UI
+must not promise that it can.
+
+### Readiness and presentation migration
+
+Build one typed readiness projection from registration grants, owner membership,
+policy, environment, actual installed/signed-in/version facts and daemon
+connection. Evaluate it for the author, Channel and invocation constraints. A
+connected computer is not an Agent, an enabled registration is not proof of a
+usable program, and readiness never replaces admission authorization.
+
+Migrate preparation refusals, Run-terminal outcomes and the corresponding UI
+surfaces one domain at a time, with negative and recovery tests at each owning
+boundary. Startup fallback must preserve the logical invocation. Retire an old
+notice only after its new path distinguishes rejection, unknown dispatch,
+execution failure, output and final receipt. The composer may preview the same
+projection once the migrated domains can supply it reliably.
+
+## Verification
+
+The first increment protects named/later/welcome publications, no automatic
+launch on reload, missing history staying unknown, author identity, current
+grants, two-device arbitration, Jev ownership, failed-first-message recovery,
+source edit/recall/delete and stop-before-admission. PostgreSQL tests exercise
+the real authority and migrations; browser tests verify the original-message
+choice and exact explicit request. Existing first-message, summon reconciliation,
+Run fence and launch admission tests retain their contracts.

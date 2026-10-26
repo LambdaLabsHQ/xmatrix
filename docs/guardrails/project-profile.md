@@ -24,6 +24,12 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Unaddressed Human speech has positive, publication-bound evidence and an
+explicit author choice under its original message. It shares the first-message
+launch decision and durable summon coordinator. Missing tracking stays unknown;
+connecting a computer starts no unselected request. See
+[message asks](../architecture/message-asks.md).
+
 Machine daemon commands and Run lifecycle/execution report mutations replay
 once in a fresh PostgreSQL session after transport loss before COMMIT. Wakes,
 route publication and notices remain outside that database-only boundary;

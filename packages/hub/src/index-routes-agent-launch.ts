@@ -6,10 +6,10 @@ import { registerAgentRegistrationRoutes } from "./index-routes-agent-registrati
 import { registerAgentRoutingRoutes } from "./index-routes-agent-routing";
 import { registerSummonIntentRoutes } from "./index-routes-summon-intent";
 import { actorUserId, requireAuth, requireHumanAuth, jsonErrors } from "./index-shared";
-import { claimFirstMessageLaunch, dispatchRegistrationLaunchAnyway, showFirstMessageLaunch } from "./registration-launch-dispatch";
+import { claimFirstMessageLaunch, dispatchRegistrationLaunchAnyway, messageAskAction, showFirstMessageLaunch } from "./registration-launch-dispatch";
 import { runtimePlacement, runtimeRepository } from "./runtime";
 import { summonFirstMessageHarness } from "./product-message-post-commit";
-import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
+import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel, wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 
 const NO_STORE = { "cache-control": "private, no-store" };
 
@@ -95,14 +95,23 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
      message's one decision first, so Jev's reading can never summon a second Agent. */
   app.post("/api/channels/:channelId/messages/:messageId/launch-choice", (c) => jsonErrors(c, async () => {
     const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
-    const input = await c.req.json().catch(() => null) as { body?: unknown; harness?: unknown; shown?: unknown } | null;
+    const input = await c.req.json().catch(() => null) as { body?: unknown; harness?: unknown; shown?: unknown; ask?: unknown } | null;
     if (!input || typeof input.body !== "string" || !input.body.trim() || input.body.length > 200_000 ||
         (input.shown !== undefined && (input.shown !== true || input.harness !== undefined)) ||
+        (input.ask !== undefined && (input.ask !== true || input.shown !== undefined || typeof input.harness !== "string")) ||
         (input.harness !== undefined && (typeof input.harness !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(input.harness)))) {
       return c.json({ error: "body is required and harness must name one harness" }, 400);
     }
     const channelId = c.req.param("channelId"), messageId = c.req.param("messageId");
     const actor = actorUserId(authUser), harness = input.harness as string | undefined, body = input.body;
+    if (input.ask === true && harness) {
+      await messageAskAction({ env: c.env, channelId, messageId, actorUserId: actor, body, harness });
+      // The existing durable summon lane owns transport recovery. Its wake is
+      // acknowledged before success; an uncertain request replays this choice.
+      await wakeAgentLaunchCoordinator(c.env, channelId, ["firstMessageSummon"]);
+      await summonFirstMessageHarness({ env: c.env, channelId, messageId, actorUserId: actor, harness });
+      return c.json({ claimed: true }, 202, NO_STORE);
+    }
     if (input.shown) {
       // The author sees the choice now: the window restarts from here.
       return c.json(await showFirstMessageLaunch({ ...runtimePlacement(c.env),

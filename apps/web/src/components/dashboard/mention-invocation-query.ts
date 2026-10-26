@@ -53,6 +53,7 @@ export async function loadInvocationPages(input: {
   const targets: SerializedAgentMessageTarget[] = [];
   const targetIds = new Set<string>();
   const launchChoices: SerializedFirstMessageLaunchChoice[] = [];
+  const asks: NonNullable<AgentInvocationQueryPage["asks"]> = [];
   const stops: SerializedAgentStop[] = [];
   const stopIds = new Set<string>();
   try {
@@ -111,6 +112,14 @@ export async function loadInvocationPages(input: {
               launchChoices.some(known => known.messageId === choice.messageId)) throw new Error("Launch choice scope changed");
           launchChoices.push(choice);
         }
+        if (page.asks !== undefined && (!Array.isArray(page.asks) || page.asks.length > 100)) throw new Error("Invalid invocation page");
+        for (const ask of page.asks ?? []) {
+          if (ask.channelId !== input.channelId || !selected.has(ask.messageId) ||
+              ask.state !== "unaddressed" || typeof ask.canAsk !== "boolean" || asks.some(known => known.messageId === ask.messageId)) {
+            throw new Error("Message ask scope changed");
+          }
+          asks.push(ask);
+        }
         for (const stop of page.stops ?? []) {
           if (stop.channelId !== input.channelId || !selected.has(stop.sourceMessageId) ||
               typeof stop.stopId !== "string" || stopIds.has(stop.stopId)) throw new Error("Stop receipt scope or ordering changed");
@@ -129,7 +138,7 @@ export async function loadInvocationPages(input: {
         cursor = page.nextCursor;
       }
     }
-    return { launches, rejections, continuations, executions, targets, launchChoices, stops, nextCursor: null };
+    return { launches, rejections, continuations, executions, targets, launchChoices, asks, stops, nextCursor: null };
   } finally {
     clearTimeout(timeout);
     input.signal.removeEventListener("abort", cancel);

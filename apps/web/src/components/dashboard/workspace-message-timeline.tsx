@@ -286,6 +286,7 @@ import { useSystemBackHandler } from "./use-system-back";
 import { cn } from "@/lib/utils";
 import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
+import { MessageAskLine } from "./message-ask-line";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
 import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
@@ -570,8 +571,10 @@ export const MessageTimeline = memo(function MessageTimeline({
   }, [invocationQueryData]);
   const launchChoicesByMessage = useMemo(() => new Map((invocationQueryData?.launchChoices ?? [])
     .map(choice => [choice.messageId, choice] as const)), [invocationQueryData]);
+  const asksByMessage = useMemo(() => new Map((invocationQueryData?.asks ?? [])
+    .map(ask => [ask.messageId, ask] as const)), [invocationQueryData]);
   const registrationCatalog = useAgentRegistrationCatalog(channel?.spaceId ?? "", token ?? "",
-    Boolean(token && channel?.spaceId && (channel.metadata?.autoName === true || launchChoicesByMessage.size)));
+    Boolean(token && channel?.spaceId && (channel.metadata?.autoName === true || launchChoicesByMessage.size || asksByMessage.size)));
   // What the reader may start, as launch options; the Hub's choice record becomes their decision window.
   const launchOptions = useMemo(() => (registrationCatalog.data?.capabilities ?? [])
     .filter(group => group.locations.some(location => location.state === "enabled" && location.routingReady))
@@ -598,6 +601,15 @@ export const MessageTimeline = memo(function MessageTimeline({
     // Someone already decided: the refreshed record says what.
     if (!response.ok && response.status !== 409) throw await errorFromResponse(response);
     await refetchAgentLaunches();
+  }, [channelId, refetchAgentLaunches, token]);
+  const askAgent = useCallback(async (messageId: string, body: string, harness: string) => {
+    if (!token || !channelId) return;
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_choice(channelId, messageId), {
+      method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ body, harness, ask: true }),
+    });
+    await refetchAgentLaunches();
+    if (!response.ok) throw await errorFromResponse(response);
   }, [channelId, refetchAgentLaunches, token]);
   const messageTargetEvidence = useMemo(() => {
     const grouped = new Map<string, { executions: NonNullable<AgentInvocationQueryPage["executions"]> }>();
@@ -698,7 +710,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   // that changed draws again: folds and headed rows are rebuilt each time.
   const heldRowsRef = useRef<TimelineItem[]>([]);
   const rows = useMemo(() => (heldRowsRef.current = shareByKey(heldRowsRef.current,
-    buildConversationRows(timeline), (row) => row.id)), [timeline]);
+    buildConversationRows(timeline.filter(message => !(onboardingStageOf(message.metadata) === "connect-agents" &&
+      message.replyTo && asksByMessage.has(message.replyTo.messageId)))), (row) => row.id)), [timeline, asksByMessage]);
   const [expandedFolds, setExpandedFolds] = useState<{ channelId?: string; ids: ReadonlySet<string> }>(
     () => ({ ids: new Set() }),
   );
@@ -1137,6 +1150,10 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onLaunchAnyway={launchAnyway}
                   onResendRefusedSummon={resendRefusedSummon}
                   ownsRefusedSummon={ownsRefusedSummon}
+                  askOffered={asksByMessage.get(message.messageId || message.id)?.canAsk === true}
+                  askCatalogReady={registrationCatalog.isSuccess}
+                  askHasRegistrations={Boolean(registrationCatalog.data?.registrations.length)}
+                  onAskAgent={askAgent}
                   launchWindow={launchWindowsByMessage.get(message.messageId || message.id)}
                   launchChoiceOffered={offersLaunchChoice(message, channel)}
                   launchOptions={launchOptions}
@@ -1691,6 +1708,10 @@ export const MessageRow = memo(function MessageRow({
   onLaunchAnyway,
   onResendRefusedSummon,
   ownsRefusedSummon,
+  askOffered = false,
+  askCatalogReady = false,
+  askHasRegistrations = false,
+  onAskAgent,
   launchWindow,
   launchChoiceOffered = false,
   launchOptions = NO_LAUNCH_OPTIONS,
@@ -1736,6 +1757,10 @@ export const MessageRow = memo(function MessageRow({
   /** Whether the viewer wrote that refused summon, so the notice can offer to send it again. */
   ownsRefusedSummon?: (sourceMessageId: string) => boolean;
   /** A new conversation's first message: which Agent starts, chosen for a few seconds. */
+  askOffered?: boolean;
+  askCatalogReady?: boolean;
+  askHasRegistrations?: boolean;
+  onAskAgent?: (messageId: string, body: string, harness: string) => Promise<void>;
   launchWindow?: InteractionDecisionWindow;
   /** The author's own fresh first message, offered before the Hub's record arrives. */
   launchChoiceOffered?: boolean;
@@ -2888,11 +2913,16 @@ export const MessageRow = memo(function MessageRow({
           </div>
         )}
         {/* After the words and the pictures. A choice between them reads as a second message. */}
-        {!recalled && !editing && !contextOnly && message.messageId && onLaunchChoice && (launchWindow || launchChoiceOffered) && (
+        {!recalled && !editing && !contextOnly && !askOffered && message.messageId && onLaunchChoice && (launchWindow || launchChoiceOffered) && (
           <FirstMessageLaunchChoice messageId={message.messageId} window={launchWindow} offeredAt={launchChoiceOffered ? message.sentAt : undefined}
             own={Boolean(message.own)} options={launchOptions}
             onChoose={harness => onLaunchChoice(message.messageId!, message.body, harness)}
             onShown={() => onLaunchChoice(message.messageId!, message.body, "shown")} />
+        )}
+        {!recalled && !editing && !contextOnly && message.own && askOffered && message.messageId && onAskAgent && channel && (
+          <MessageAskLine options={launchOptions} catalogReady={askCatalogReady} hasRegistrations={askHasRegistrations}
+            spaceId={channel.spaceId} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
+            onAsk={harness => onAskAgent(message.messageId!, message.body, harness)} />
         )}
         {!contextOnly && !recalled && threadChip.present && !!message.threadReplies?.length && (
           <div className="app-thread-reply-preview mt-2 max-w-xl space-y-2 border-l-2 border-border pl-3">

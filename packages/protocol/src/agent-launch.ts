@@ -104,8 +104,19 @@ export interface AgentInvocationQueryPage {
   executions?: import("./agent-message-execution.js").SerializedAgentMessageExecution[];
   /** First-page only: the launch choice a new conversation's first message offers. */
   launchChoices?: SerializedFirstMessageLaunchChoice[];
+  /** Positive evidence of an unaddressed publication, only for its author.
+   * Absent on older Hubs and untracked history; absence means unknown. */
+  asks?: SerializedMessageAsk[];
   /** First-page only: stop commands in this selection, one row per fenced Run. */
   stops?: import("./agent-stop-command.js").SerializedAgentStop[];
+}
+
+export interface SerializedMessageAsk {
+  channelId: string;
+  messageId: string;
+  state: "unaddressed";
+  /** Current authority still permits offering the author's explicit choice. */
+  canAsk: boolean;
 }
 
 /** How long a new conversation's first message waits for its author to choose

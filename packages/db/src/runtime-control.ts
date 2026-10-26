@@ -1,6 +1,7 @@
 import { cleanRepositoryBaseline, localLlmUsage } from "@xmatrix/protocol";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { readFirstMessageLaunchChoices } from "./first-message-launch-choice.js";
+import { readMessageAsks } from "./message-asks.js";
 import { initialMessageSource } from "./runtime-initial-input.js";
 import { publicLaunchFailureCode, publicLaunchFailureMessage, publicRuntimeErrorCode } from "./runtime-public-failure.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
@@ -1300,6 +1301,7 @@ export class PostgresRuntimeRepository {
       }, scope);
       // A first message's launch choice is one row per message: the first page carries them all.
       const launchChoices = input.cursor || runFilter ? [] : await readFirstMessageLaunchChoices(tx, channelId, sourceMessageIds);
+      const asks = input.cursor || runFilter ? [] : await readMessageAsks(tx, channelId, sourceMessageIds, input.actorUserId);
       // The stop chip reads the same first page. A command fences at most 200
       // Runs; 500 covers a page of messages without a second cursor.
       const stopRows = input.cursor || runFilter ? [] : await tx.query<QueryResultRow>({
@@ -1328,6 +1330,7 @@ export class PostgresRuntimeRepository {
       return { launches: launchPage.map(serializeAgentLaunch), rejections: rejectionPage.flatMap(serializeInvocationRejections),
         continuations: continuationPage.flatMap(serializeAgentContinuation),
         ...(launchChoices.length ? { launchChoices } : {}),
+        ...(asks.length ? { asks } : {}),
         ...(stops.length ? { stops } : {}),
         ...(paginated ? { executions: executionPage.records, targets: targetPage.records, nextCursor } : {}) };
     });

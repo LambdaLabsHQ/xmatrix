@@ -22,7 +22,7 @@ import { connectorForCommand } from "./connectors/registry";
 import type { Env } from "./types";
 import { relayCrossChannelReply, type CrossChannelReplyOrigin } from "./product-cross-channel-reply";
 import { recordAgentLaunchStage } from "./postgres-observability";
-import { dispatchRegistrationLaunchesAfterMessage, markFirstMessageSummoned, wakeRestingInstances } from "./registration-launch-dispatch";
+import { dispatchRegistrationLaunchesAfterMessage, markFirstMessageSummoned, messageAskAction, wakeRestingInstances } from "./registration-launch-dispatch";
 import { runtimeRepository } from "./runtime";
 import { ControlError } from "@xmatrix/db";
 import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake";
@@ -252,6 +252,11 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // Nobody was summoned by the first message of a conversation: Jev reads
     // whether its author wants an Agent to start (an unnamed one or a discussion).
     if (input.sequence === 1) await (dispatch.newConversation ?? startNewConversation)(input);
+    // Only a successful interpretation may certify nobody received it. Failed
+    // dispatch, untracked history, Automation and non-speech stay unknown.
+    if (input.senderKind === "user" && !connectorForCommand(input.body)) {
+      await messageAskAction(input);
+    }
     return false;
   } catch (error) {
     // Committed launch work its Channel was not told about: fail the message
