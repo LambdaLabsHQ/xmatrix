@@ -7,8 +7,8 @@ import { useOnboardingLocale } from "@/lib/onboarding-locale";
 import { PROBLEM_COPY } from "@/lib/problem-copy";
 import { ProblemCard } from "./problem-card";
 
-/* A turn its Agent could not finish: what the evidence says happened, what to
-   do next, and the notice as written folded into Details. */
+/* The original error leads. Recorded evidence supplies next steps, never a
+   replacement for the program's own cause. Full diagnostics stay in Details. */
 export function TurnFailureNotice({ evidence, agent, body, continued = false, spaceId, token, userId }: {
   evidence: AgentFailureEvidence;
   /** The Agent as the Channel names it. */
@@ -29,13 +29,8 @@ export function TurnFailureNotice({ evidence, agent, body, continued = false, sp
   }).format(new Date(resetsAt)) + " UTC" : undefined;
   return (
     <ProblemCard icon={<AlertTriangle className="size-[18px]" />}
-      title={problem.title(agent)}
-      explanation={<>
-        {problem.explanation ? <span className="block">{problem.explanation}</span> : null}
-        {summary ? <span className="mt-1 block whitespace-pre-wrap break-words">{copy.originalError(summary)}</span> : null}
-        {reset ? <span className="mt-1 block">{copy.quotaResets(reset)}</span> : null}
-        {!summary && !problem.explanation ? copy.noProviderDetail : null}
-      </>}
+      title={summary || problem.title(agent)}
+      explanation={reset ? copy.quotaResets(reset) : !summary ? problem.explanation || copy.noProviderDetail : undefined}
       {...(continued ? { status: { resolved: true, label: copy.turn.continued(agent) } }
         : { stepsLabel: problemKey === "no_status" ? copy.turn.continueLabel : copy.stepsLabel, steps: problem.steps })}
       detailsLabel={copy.detailsLabel}
