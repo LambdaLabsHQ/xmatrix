@@ -35,6 +35,7 @@ export function launchChoiceView(window: InteractionDecisionWindow | undefined,
   const recommended = window.recommendation;
   const read = recommended !== undefined ? { recommended } : {};
   const decided = window.decision;
+  if (window.failureCode === "message_ask_stopped") return { kind: "none", by: "author", failureCode: window.failureCode };
   const option = decided?.optionId ? window.options.find(item => item.optionId === decided.optionId) : undefined;
   if (decided && option) {
     return { kind: "chosen", option, by: decided.by };

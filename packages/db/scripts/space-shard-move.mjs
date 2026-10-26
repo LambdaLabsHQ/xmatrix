@@ -28,7 +28,7 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "cross_space_read_grants",
   "cross_space_read_notices",
   "delivery_cursors",
-  "first_message_launch_choices",
+  "first_message_launch_choices", "message_asks",
   "idempotency_keys",
   "message_annotations",
   "message_attachment_refs",

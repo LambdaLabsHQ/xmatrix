@@ -8,7 +8,7 @@ import { launchChoiceRead, launchChoiceView, type LaunchChoiceView } from "./fir
 import { userErrorMessage } from "@/lib/user-facing-error";
 
 /** The face of the harness the option starts (protocol faces.ts); blank for one with no mark. */
-function OptionMark({ option }: { option: InteractionLaunchOption }) {
+export function OptionMark({ option }: { option: InteractionLaunchOption }) {
   const icon = avatarImageSrc(useFace({ kind: "agent", name: option.displayName, harness: option.harness }).imageUrl);
   return icon
     // eslint-disable-next-line @next/next/no-img-element -- an 18px harness preset icon, as on summon chips.
@@ -28,7 +28,7 @@ function useNow(active: boolean) {
 }
 
 /** Why nothing could start, in words; an unknown code is shown as it is. */
-const failureNote = (code: string) => preparationFailureSummary(code) ?? code;
+const failureNote = (code: string) => code === "message_ask_stopped" ? "Stopped before the Agent started" : preparationFailureSummary(code) ?? code;
 
 /**
  * After a new conversation's first message, once its words and pictures are

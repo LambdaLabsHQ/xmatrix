@@ -41,6 +41,9 @@ test("Jev's reading shows during the window and the decision settles the card", 
   assert.equal(decided.kind, "chosen");
   assert.equal(decided.option.displayName, "claude");
   assert.equal(decided.by, "jev");
+  assert.deepEqual(launchChoiceView(record({ choice: { start: true, harness: "codex", by: "author", at: sent },
+    failureCode: "message_ask_stopped" }), {}, at(5_000)),
+    { kind: "none", by: "author", failureCode: "message_ask_stopped" });
   // Jev could not decide and nobody chose: nothing starts, and the card says why.
   assert.deepEqual(launchChoiceView(record({ open: false, failureCode: "registration_not_found" }), {}, at(4_000)),
     { kind: "none", by: "jev", failureCode: "registration_not_found" });

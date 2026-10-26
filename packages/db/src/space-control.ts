@@ -708,6 +708,11 @@ async function moveChannelSpaceFacts(
       values, maxRows: 0,
     });
     await transaction.query({
+      name: "channel_move_message_asks_v1",
+      text: `DELETE FROM data.message_asks WHERE space_id=$1 AND channel_id=ANY($2::text[])`,
+      values: [sourceSpaceId, channelIds], maxRows: 0,
+    });
+    await transaction.query({
       name: "channel_move_agent_message_executions_v1",
       text: `UPDATE data.agent_message_executions ${CHANNEL_MOVE_FACT_SQL}`,
       values, maxRows: 0,

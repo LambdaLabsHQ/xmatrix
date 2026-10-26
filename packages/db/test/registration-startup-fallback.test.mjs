@@ -22,7 +22,7 @@ async function fixture({ body, messageId = "message-1", author = { kind: "user",
         mode: "conversation", metadata_json: {}, version: 1 }];
       if (statement.name === "message_invocation_selections_source_v1") return [{ author_kind: author.kind,
         author_id: author.id, timeline_sequence: 7, body_hash: bodyHash, input_version: 1, agent_invocation_targets_json: null }];
-      if (statement.name === "message_invocation_first_message_summon_v1") return [{ present: 1 }];
+      if (statement.name === "message_invocation_first_message_summon_v2") return [{ present: 1 }];
       throw new Error(`Unexpected query ${statement.name}`);
     } });
   } };

@@ -557,7 +557,7 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
     if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel-1', space_id: 'space-1', shard_id: 'shard-0', placement_epoch: 1, entity_version: 4 }];
     if (query.name === 'space_placement_resolve_v1') return [activePlacementRow()];
     if (['channel_capability_runtime_new_work_v3', 'channel_capability_runtime_history_read_v3'].includes(query.name)) return allowed ? [channel] : [];
-    if (query.name === 'runtime_initial_message_source_v4') return published ? [{ entity_version: 1, body_hash: bodyHash, timeline_sequence: 1 }] : [];
+    if (query.name === 'runtime_initial_message_source_v5') return published ? [{ entity_version: 1, body_hash: bodyHash, timeline_sequence: 1 }] : [];
     if (query.name === 'runtime_invocation_rejections_v4') return saved ? [{ ...saved, command_id: 'routing-preflight:message', created_at: '2026-09-22T18:00:00Z', expires_at: '2026-09-23T18:00:00Z' }] : [];
     if (query.name === 'runtime_replay_read_v1') return saved ? [saved] : [];
     if (query.name === 'runtime_replay_write_v1') saved = { command_kind: query.values[2], request_digest: query.values[3], result_json: JSON.parse(query.values[4]) };

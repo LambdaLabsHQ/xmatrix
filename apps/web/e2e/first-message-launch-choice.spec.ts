@@ -14,10 +14,10 @@ function location(harness: string) {
     models: [], canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false };
 }
 
-async function install(page: Page, launchChoices: unknown[]) {
+async function install(page: Page, launchChoices: unknown[], settings: { metadata?: Record<string, unknown>; asks?: unknown[] } = {}) {
   const push = await routeInvocationPush(page);
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE],
-    channels: [{ ...E2E_CHANNEL, metadata: { autoName: true }, messageCount: 1, historyHeadSequence: 1 }] });
+    channels: [{ ...E2E_CHANNEL, metadata: settings.metadata ?? { autoName: true }, messageCount: 1, historyHeadSequence: 1 }] });
   await fixtureJson(page, "first-history", "**/api/xmatrix/channels/channel-general/history**", {
     messages: [{ messageId, channelId: E2E_CHANNEL.id, sequence: 1, body, sentAt: E2E_NOW, from: E2E_USER_SENDER }], hasMore: false,
   });
@@ -25,13 +25,13 @@ async function install(page: Page, launchChoices: unknown[]) {
   await fixtureJson(page, "first-catalog", "**/api/xmatrix/spaces/*/agent-registrations", {
     registrations: locations, capabilities: locations.map(item => ({ harness: item.key.harness, models: [], locations: [item] })),
   });
-  await launches(page, launchChoices);
+  await launches(page, launchChoices, settings.asks);
   return push;
 }
 
-async function launches(page: Page, launchChoices: unknown[]) {
+async function launches(page: Page, launchChoices: unknown[], asks: unknown[] = []) {
   await fixtureJson(page, "first-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
-    { launches: [], rejections: [], continuations: [], launchChoices });
+    { launches: [], rejections: [], continuations: [], launchChoices, asks });
 }
 
 const openChoice = (extra: Record<string, unknown> = {}) => ({ channelId: E2E_CHANNEL.id, messageId, deadlineAt, ...extra });
@@ -155,4 +155,36 @@ test("reopened after Jev could not read it, the card says why and never counts d
   await expect(failed).toContainText("xMatrix could not select a registered environment.");
   await expect(failed.getByRole("button")).toHaveCount(0);
   expect(await fixtureRequestBodies(page, "late-shown")).toEqual([]);
+});
+
+
+test("a named conversation offers its unanswered publication only after server evidence and an explicit author pick", async ({ page }) => {
+  const ask = { channelId: E2E_CHANNEL.id, messageId, state: "unaddressed", canAsk: true };
+  const push = await install(page, [], { metadata: {}, asks: [ask] });
+  await fixtureJson(page, "ask-pick", `**/api/xmatrix/channels/channel-general/messages/${messageId}/launch-choice`, { claimed: true });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const line = page.getByRole("group", { name: "Ask an Agent", exact: true });
+  await expect(line).toContainText("No Agent was asked");
+  await expect(line.locator(".launch-choice-count")).toHaveCount(0);
+  await expect(line.getByRole("button", { name: "Ask an Agent: codex", exact: true })).toBeEnabled();
+  expect(await fixtureRequestBodies(page, "ask-pick")).toEqual([]);
+  await shot(page, "message-ask-unaddressed");
+  await page.reload();
+  await expect(line).toBeVisible();
+  expect(await fixtureRequestBodies(page, "ask-pick")).toEqual([]);
+  await line.getByRole("button", { name: "Ask an Agent: codex", exact: true }).click();
+  await expect.poll(async () => fixtureRequestBodies(page, "ask-pick")).toEqual([{ body, harness: "codex", ask: true }]);
+  await launches(page, [openChoice({ open: false, choice: { start: true, harness: "codex", by: "author", at: E2E_NOW } })],
+    [{ ...ask, canAsk: false }]);
+  await push();
+  await expect(page.locator(".launch-choice[data-state='chosen']")).toContainText("Your pick");
+  await expect(line).toHaveCount(0);
+  await shot(page, "message-ask-chosen");
+});
+
+test("untracked history in a named conversation does not invent a failed-delivery action", async ({ page }) => {
+  await install(page, [], { metadata: {} });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await expect(page.getByText(body, { exact: true })).toBeVisible();
+  await expect(page.locator(".launch-choice")).toHaveCount(0);
 });

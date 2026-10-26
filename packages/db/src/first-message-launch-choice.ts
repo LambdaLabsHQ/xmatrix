@@ -156,7 +156,7 @@ const FIRST_MESSAGE_SUMMON_GIVE_UP_SECONDS = 15 * 60;
  */
 export const FIRST_MESSAGE_SUMMON_PENDING_SQL = `choice.summoned_at IS NULL AND choice.failure_code IS NULL
   AND choice.choice IS DISTINCT FROM 'none'
-  AND choice.created_at>clock_timestamp()-make_interval(secs => ${FIRST_MESSAGE_SUMMON_GIVE_UP_SECONDS})`;
+  AND COALESCE(choice.chosen_at,choice.created_at)>clock_timestamp()-make_interval(secs => ${FIRST_MESSAGE_SUMMON_GIVE_UP_SECONDS})`;
 export const FIRST_MESSAGE_SUMMON_DUE_AT_SQL = `COALESCE(choice.chosen_at,choice.deadline_at)
   +make_interval(secs => ${FIRST_MESSAGE_SUMMON_GRACE_SECONDS})`;
 
@@ -183,9 +183,10 @@ async function markFirstMessageSummoned(tx: DatabaseTransaction, channelId: stri
 
 /** The Channel's first message, from a Human or Agent, unedited and still shown. */
 async function firstMessage(tx: DatabaseTransaction, spaceId: string, channelId: string, messageId: string) {
-  return (await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_source_v2", text: `SELECT author_kind,author_id,sent_at,body_hash
+  return (await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_source_v3", text: `SELECT author_kind,author_id,sent_at,body_hash
     FROM data.messages WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 AND timeline_sequence=1
-      AND author_kind IN ('user','agent') AND edited_at IS NULL AND recalled_at IS NULL AND deleted_at IS NULL`,
+      AND author_kind IN ('user','agent') AND edited_at IS NULL AND recalled_at IS NULL AND deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM data.automation_occurrences occurrence WHERE occurrence.message_id=$3)`,
   values: [spaceId, channelId, messageId], maxRows: 1 }))[0];
 }
 
@@ -216,7 +217,7 @@ async function insertChoice(tx: DatabaseTransaction, spaceId: string, channelId:
 
 /** Some registration of this harness in the Space has an active grant, an
  * enabled policy, an owner who is still a member, and routing left on. */
-async function requireRoutableHarness(tx: DatabaseTransaction, spaceId: string, chosen: string) {
+export async function requireRoutableHarness(tx: DatabaseTransaction, spaceId: string, chosen: string) {
   const rows = await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_routable_harness_v1", text: `SELECT 1
     FROM data.space_agent_registrations r
     JOIN data.space_members m ON m.space_id=r.space_id AND m.user_id=r.owner_user_id

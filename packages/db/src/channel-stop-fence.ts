@@ -29,6 +29,18 @@ export async function fenceChannelRunsForStop(tx: DatabaseTransaction, input: {
 }): Promise<number> {
   const stopRequest = { sourceMessageId: input.sourceMessageId, actorUserId: input.actorUserId,
     requestedAt: input.at };
+  // Explicit Ask choices may be committed before their summon reaches
+  // admission. A stop of the Channel cancels those intents even with no Run.
+  // The append and Ask claim hold the Channel lock, so a later deliberate pick
+  // is new intent, while a delayed dispatch cannot pass this source recheck.
+  if (input.scope.kind === "channel") await tx.query({ name: "channel_stop_pending_asks_v1", text: `UPDATE data.first_message_launch_choices choice
+    SET failure_code='message_ask_stopped',updated_at=clock_timestamp()
+    FROM data.channels c WHERE choice.space_id=$1 AND choice.channel_id=$2
+      AND c.space_id=choice.space_id AND c.channel_id=choice.channel_id
+      AND choice.source_input_version IS NOT NULL AND choice.summoned_at IS NULL AND choice.failure_code IS NULL
+      AND ${channelCapabilityPredicate({ capability: "runtime_terminalize", channelAlias: "c",
+        principalKindSql: "'user'", principalIdSql: "$3::text" })}`,
+  values: [input.spaceId, input.channelId, input.actorUserId], maxRows: 0 });
   const fenced = await tx.query<QueryResultRow>({ name: "channel_stop_fence_v4", text: `WITH authorized AS (
       SELECT c.channel_id FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$2
         AND ${channelCapabilityPredicate({ capability: "runtime_terminalize", channelAlias: "c",

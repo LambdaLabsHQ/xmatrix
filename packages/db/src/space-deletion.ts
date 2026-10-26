@@ -297,7 +297,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.channel_metadata_revisions",
     "data.channel_access", "data.channel_content_counters", "data.channel_message_sequences",
     "data.content_gc_candidates", "data.content_objects",
-    "data.content_refs", "data.cross_space_read_notices", "data.delivery_cursors", "data.first_message_launch_choices",
+    "data.content_refs", "data.cross_space_read_notices", "data.delivery_cursors", "data.first_message_launch_choices", "data.message_asks",
     "data.message_annotations",
     "data.message_attachment_refs", "data.message_attachments", "data.message_attention",
     "data.message_attention_revisions", "data.message_mutations", "data.message_reactions",

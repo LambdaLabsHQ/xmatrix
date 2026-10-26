@@ -28,7 +28,7 @@ test('composite dispatch persists sanitized rejection through current source and
     if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel', space_id: 'space', shard_id: 'shard', placement_epoch: 1, entity_version: 1 }];
     if (query.name === 'space_placement_resolve_v1') return [{ space_id: 'space', shard_id: 'shard', placement_epoch: 1, state: 'active', target_shard_id: null, plan_class: 'single' }];
     if (query.name === 'channel_capability_runtime_new_work_v3') return allowed ? [{ channel_id: 'channel', space_id: 'space', mode: 'open', archived_at: null, space_role: 'member' }] : [];
-    if (query.name === 'runtime_initial_message_source_v4') return [{ entity_version: 1, body_hash: bodyHash, timeline_sequence: 12 }];
+    if (query.name === 'runtime_initial_message_source_v5') return [{ entity_version: 1, body_hash: bodyHash, timeline_sequence: 12 }];
     if (query.name === 'routing_command_lock_v1' || query.name === 'runtime_replay_read_v1') return [];
     if (query.name === 'runtime_replay_write_v1') { writes.push(JSON.parse(query.values[4])); return []; }
     throw new Error(`unexpected ${query.name}`);
