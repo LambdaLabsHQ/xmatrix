@@ -9,6 +9,7 @@ import {
   parseHumanChannelCatalogChangedMessage,
   parseHumanTraceAccessServerMessage,
   parseHumanWorkspaceResourceChangedMessage,
+  WORKSPACE_RESOURCE_KINDS,
 } from "@xmatrix/protocol/connections/human";
 import { utf8ByteLength } from "@xmatrix/protocol";
 import type { Env } from "./types";
@@ -562,6 +563,21 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     return relayRuntimeOwnerCellName(ownerUserId) === this.ownerCell ? "admitted" : "foreign_cell";
   }
 
+  /** Static rejection evidence travels back to the publisher's existing error report.
+   * Never include the event, Space, Channel or recipient ids in that report. */
+  private rejectWorkspaceResourceEvent(
+    reason: "message" | "envelope" | "channel" | "revision" | "recipients",
+    event: unknown,
+  ): Response {
+    const resource = plainObject(event)?.resource;
+    return Response.json({
+      reason,
+      resource: WORKSPACE_RESOURCE_KINDS.find((kind) => kind === resource) ?? "unknown",
+      receiverVersion: analyticsWorkerVersion(this.env),
+      error: "Invalid workspace resource committed event",
+    }, { status: 400 });
+  }
+
   private async deliverCommittedEvent(request: Request): Promise<Response> {
     const encoded = await request.arrayBuffer();
     if (encoded.byteLength === 0 || encoded.byteLength > MAX_COMMITTED_EVENT_BYTES) {
@@ -597,10 +613,11 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       return Response.json({ error: "Invalid Channel catalog committed event" }, { status: 400 });
     }
     if (claimedWorkspaceResourceChangedEvent && !workspaceResourceChangedEvent) {
-      return Response.json({ error: "Invalid workspace resource committed event" }, { status: 400 });
+      return this.rejectWorkspaceResourceEvent("message", payload.event);
     }
     const recipientPrincipalIds = this.boundedRecipientSet(payload.recipientPrincipalIds);
     if (recipientPrincipalIds === null) {
+      if (workspaceResourceChangedEvent) return this.rejectWorkspaceResourceEvent("recipients", payload.event);
       return Response.json({ error: "Invalid committed event recipients" }, { status: 400 });
     }
     if (channelCatalogChangedEvent) {
@@ -623,10 +640,15 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       const exactEnvelope = isExactObject(payload, [
         "channelId", "changeSeq", "event", "recipientPrincipalIds",
       ]);
-      if (!exactEnvelope || channelId !== WORKSPACE_RESOURCE_COMMITTED_EVENT_CHANNEL ||
-          payload.changeSeq !== workspaceResourceChangedEvent.revision ||
-          !recipientPrincipalIds || recipientPrincipalIds.size === 0) {
-        return Response.json({ error: "Invalid workspace resource committed event" }, { status: 400 });
+      if (!exactEnvelope) return this.rejectWorkspaceResourceEvent("envelope", payload.event);
+      if (channelId !== WORKSPACE_RESOURCE_COMMITTED_EVENT_CHANNEL) {
+        return this.rejectWorkspaceResourceEvent("channel", payload.event);
+      }
+      if (payload.changeSeq !== workspaceResourceChangedEvent.revision) {
+        return this.rejectWorkspaceResourceEvent("revision", payload.event);
+      }
+      if (!recipientPrincipalIds || recipientPrincipalIds.size === 0) {
+        return this.rejectWorkspaceResourceEvent("recipients", payload.event);
       }
       if (!this.productAdapter) return runtimeTransportUnavailable("Human");
       const result = this.productAdapter.publishHumanWorkspaceResourceChanged(

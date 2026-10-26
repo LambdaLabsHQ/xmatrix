@@ -5,6 +5,7 @@ import { RelayRuntimeLive } from "../src/relay-runtime.ts";
 import { RelayPostgresAgentLaunchChannel } from "../src/postgres-agent-launch-channel-do.ts";
 import { RelayPageSession } from "../src/page-session-do.ts";
 import { RelayXUploadExecutor } from "../src/connectors/x-upload-executor-do.ts";
+import { notifyWorkspaceResource } from "../src/workspace-resource-notification.ts";
 import { publishChannelLiveDelivery } from "../src/channel-messages.ts";
 import { relayChannelCatalogPublishCommittedChanges } from "../src/relay-channel-catalog-notification-delivery.ts";
 import { RelayRuntimeProductCallbackAdapter } from "../src/runtime-transport/relay-runtime-product-adapter.ts";
@@ -24,6 +25,7 @@ import {
   runtimeDeliveryPlan,
   runtimeJsonRequest,
   RUNTIME_CHANNEL_MESSAGE_URL,
+  RUNTIME_COMMITTED_EVENT_URL,
   RUNTIME_DELIVERY_INVOCATION_BUDGET,
 } from "../src/runtime-transport/runtime-principal-delivery.ts";
 import { createProductionRelayRuntimeProductPortFactory } from "../src/runtime-transport/production-product-port-factory.ts";
@@ -130,6 +132,46 @@ test("a Space's catalog change reaches a person who is viewing no Channel, in th
   assert.deepEqual(reader.socket.sent, [{ type: "space_channel_catalog_changed", spaceId: "space-1", revision: 7 }]);
   assert.deepEqual(outsider.socket.sent, []);
   assert.deepEqual(calls.map((call) => call.cell), ["user-reader"]);
+});
+
+test("repository catalog refresh crosses the committed-event boundary and reaches only its recipient", async (t) => {
+  const reader = humanCell("reader");
+  const outsider = humanCell("outsider");
+  const { env, calls } = runtimeEnv(new Map([["user-reader", runtimeCell(reader.human)], ["user-outsider", runtimeCell(outsider.human)]]));
+  const errors = [];
+  t.mock.method(console, "error", (...args) => errors.push(args));
+  await notifyWorkspaceResource(env, { spaceId: "space-1", resource: "launch_targets", recipientUserIds: ["reader"] });
+  assert.deepEqual(errors, []);
+  assert.equal(reader.socket.sent.length, 1);
+  assert.equal(reader.socket.sent[0].resource, "launch_targets");
+  assert.equal(reader.socket.sent[0].spaceId, "space-1");
+  assert.deepEqual(outsider.socket.sent, []);
+  assert.deepEqual(calls.map((call) => call.cell), ["user-reader"]);
+});
+
+test("workspace rejection reports a fixed stage and receiver build without echoing private input", async () => {
+  const cell = runtimeCell();
+  cell.env = { CF_VERSION_METADATA: { id: "12345678-1234-1234-1234-123456789012" } };
+  const event = { type: "workspace_resource_changed", spaceId: "private-space",
+    resource: "launch_targets", revision: 7 };
+  const envelope = { channelId: "workspace-resource", changeSeq: 7, event, recipientPrincipalIds: ["private-owner"] };
+  const cases = [
+    ["message", { event: { ...event, revision: 0 } }, "launch_targets"],
+    ["message", { event: { ...event, resource: "private-resource" } }, "unknown"],
+    ["envelope", { privateField: "private-value" }, "launch_targets"],
+    ["channel", { channelId: "private-channel" }, "launch_targets"],
+    ["revision", { changeSeq: 8 }, "launch_targets"],
+    ["recipients", { recipientPrincipalIds: [] }, "launch_targets"],
+  ];
+  for (const [reason, overrides, resource] of cases) {
+    const response = await cell.fetch(runtimeJsonRequest(RUNTIME_COMMITTED_EVENT_URL, { ...envelope, ...overrides }));
+    assert.equal(response.status, 400);
+    const body = await response.text();
+    assert.deepEqual(JSON.parse(body), { reason, resource, receiverVersion: "12345678-1234-1234-1234-123456789012",
+      error: "Invalid workspace resource committed event" });
+    assert.ok(body.length <= 200, "the publisher retains at most 200 response characters");
+    assert.ok(!body.includes("private-"));
+  }
 });
 
 test("a message published in a reader's own cell reaches them there, without a call into that cell", async () => {
