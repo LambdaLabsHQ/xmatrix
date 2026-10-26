@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Registration quota reads recover a lost database response
+
+Channel quota projections and owner quota refreshes use one independent
+`single_read` rather than opening a transaction for their lock-free SELECT.
+A lost response retries once on a fresh connection; a second failure still
+surfaces. This closes HUB-AQ's recovery gap without attributing the underlying
+transport stall. Authorization, quota freshness and observation writes are
+unchanged. No migration or client update is needed. Recovery is a CI-validated
+beta Hub release reverting the change.
+
 ## Unreleased: Migration regressions execute in the PostgreSQL release gate
 
 The Hub release suite now runs the index drift, Machine query plan and online

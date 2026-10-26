@@ -24,6 +24,10 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Registration quota projections and owner refreshes use independent single reads
+with one fresh-connection recovery after a lost response, without BEGIN/COMMIT.
+See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Turn-failure cards expose the original cause before Details, including unknown
 and historical errors. Hub-classified exhausted provider accounts have distinct
 quota-reset or handoff guidance; known reset timestamps display in UTC. The
