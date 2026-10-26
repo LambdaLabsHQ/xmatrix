@@ -8,6 +8,9 @@ const migratedAuthorities = [
   "message-control.ts",
   "message-agent-targets.ts",
   "message-attention-targets.ts",
+  // Ask observation/choice uses runtime_new_work; its history projection is
+  // called by the authorized runtime reader and rechecks action eligibility.
+  "message-asks.ts",
   "runtime-control.ts",
   "space-secret-control.ts",
   "app-control.ts",
