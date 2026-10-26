@@ -232,7 +232,8 @@ and attempt diagnostics as fixed labels, without cell or recipient identities.
 Agent turn failures share one reconnect-safe lifecycle reporter across native,
 ACP, stream and headless adapters. Channel notices retain credential-redacted
 HTTP, upstream, WebSocket and process evidence when exposed, and explicitly mark
-missing HTTP evidence. See [Agent turn failures](../operations/agent-turn-failures.md).
+missing HTTP evidence. A later message from that Agent settles the card. See
+[Agent turn failures](../operations/agent-turn-failures.md).
 Daemon catch-up retires lost socket bindings and attempts to release all unsent
 leases, preserving sent leases, successor connections and Authority epoch fences.
 Orphan terminal reports recover exact identities only from a matching retained
