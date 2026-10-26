@@ -1,18 +1,12 @@
 import assert from "node:assert/strict";
 import { Client } from "pg";
-import { createAuthorityDatabase, PostgresAutomationRepository, PostgresChannelCatalogRepository,
+import { createAuthorityDatabase, PostgresAutomationRepository, PostgresBillingRepository, PostgresChannelCatalogRepository,
   PostgresPageRepository } from "../dist/index.js";
 import { integration, connectionString } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
 import { describePageConversations } from "../dist/page-conversations.js";
 
-// The existing catalog privacy tests use healthy connections. Exercise the
-// repository through the real client and SQL when a read response disappears,
-// including a later access check: recovery must still redact private events.
-integration("catalogs and page activity recover lost SELECTs without losing access checks (XMATRIX-HUB-96/8P/99)", async () => {
-  const f = await spaceSecretFixture();
-  const automationId = crypto.randomUUID();
-  let fault;
+function recoveringDatabase(readFault) {
   const clients = [];
   const database = createAuthorityDatabase({ connectionString, shardId: "shard-0",
     clientFactory(config) {
@@ -25,6 +19,7 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
         const text = typeof input === "string" ? input : input.text;
         entry.queries.push(text);
         const result = await query(input);
+        const fault = readFault();
         if (fault?.matches.test(text) && fault.remaining > 0) {
           fault.remaining -= 1;
           fault.checkouts.push(entry);
@@ -37,6 +32,17 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
       return client;
     },
   });
+  return { database, clients };
+}
+
+// The existing catalog privacy tests use healthy connections. Exercise the
+// repository through the real client and SQL when a read response disappears,
+// including a later access check: recovery must still redact private events.
+integration("catalogs and page activity recover lost SELECTs without losing access checks (XMATRIX-HUB-96/8P/99)", async () => {
+  const f = await spaceSecretFixture();
+  const automationId = crypto.randomUUID();
+  let fault;
+  const { database, clients } = recoveringDatabase(() => fault);
   const repository = new PostgresAutomationRepository(database);
   const input = { requestId: crypto.randomUUID(), spaceId: f.ids.space,
     principal: { kind: "user", id: f.ids.owner } };
@@ -151,4 +157,40 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
     await f.client.query("DELETE FROM data.automations WHERE automation_id=$1", [automationId]);
     await f.close();
   }
+});
+
+// Generic retry tests cannot catch a billing caller retaining its unnecessary
+// BEGIN. Use actual SQL and membership rows, then lose a response at each stage.
+integration("billing reads recover lost responses and retain membership checks (XMATRIX-HUB-AM)", async () => {
+  const f = await spaceSecretFixture();
+  let fault;
+  const { database, clients } = recoveringDatabase(() => fault);
+  const billing = new PostgresBillingRepository(database, "shard-0");
+  const read = () => billing.readSpaceBilling({ requestId: crypto.randomUUID(),
+    spaceId: f.ids.space, actorUserId: f.ids.owner });
+  try {
+    const expected = await read();
+    assert.equal(expected.billing.plan, "free");
+    assert.deepEqual(expected.billing.seats, { used: 2, limit: 3 });
+    for (const matches of [/SELECT role FROM data\.space_members/u, /SELECT COUNT\(\*\) AS count/u]) {
+      const before = clients.length;
+      fault = { matches, remaining: 1, error: new Error("Query read timeout"), checkouts: [] };
+      assert.deepEqual(await read(), expected);
+      assert.equal(fault.checkouts.length, 1);
+      assert.ok(fault.checkouts[0].ended, "a stalled connection is destroyed");
+      assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1);
+      assert.ok(clients.slice(before).every(client => client.ended), "request sessions are closed");
+    }
+    fault = { matches: /SELECT role FROM data\.space_members/u, remaining: 3,
+      error: new Error("Query read timeout"), checkouts: [] };
+    await assert.rejects(read(), /Query read timeout/u);
+    assert.equal(fault.checkouts.length, 2, "two failed reads exhaust recovery");
+    await f.client.query("DELETE FROM data.space_members WHERE space_id=$1 AND user_id=$2",
+      [f.ids.space, f.ids.owner]);
+    fault = { matches: /SELECT role FROM data\.space_members/u, remaining: 1,
+      error: new Error("Query read timeout"), checkouts: [] };
+    await assert.rejects(read(), { code: "forbidden" });
+    assert.equal(fault.checkouts.length, 1, "membership is checked after recovery");
+    assert.ok(clients.every(client => client.ended));
+  } finally { await f.close(); }
 });

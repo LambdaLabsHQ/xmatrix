@@ -10,6 +10,7 @@ import { PostgresEntitySpaceDirectory } from "./entity-directory.js";
 import { WritableSpacePlacements, type SpacePlacement } from "./placement.js";
 import { commandFields } from "./command-fields.js";
 import { readSpaceCommandReplay, storeSpaceCommandReplay } from "./command-replay.js";
+import { singleReadStatements } from "./single-read-statements.js";
 
 
 const IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -230,8 +231,16 @@ export class PostgresBillingRepository {
 
   async readSpaceBilling(input: { requestId: string; spaceId: string; actorUserId: string }) {
     const { requestId, spaceId, actorUserId } = ownerRequest(input);
-    return this.spaces.transaction(requestId, "billing.read", spaceId,
-      async (tx) => ({ billing: await summary(tx, spaceId, actorUserId) }));
+    const placement = await this.spaces.resolve(requestId, "billing.read", spaceId);
+    const session = this.database.openSession();
+    try {
+      // READ COMMITTED already takes a snapshot per SELECT. These independent
+      // reads need no BEGIN/COMMIT; each retains its fence and bounded recovery.
+      const tx = singleReadStatements(session, { requestId, operation: "billing.read", placement });
+      return { billing: await summary(tx, spaceId, actorUserId) };
+    } finally {
+      await session.close();
+    }
   }
 
   async portalReference(input: { requestId: string; spaceId: string; actorUserId: string }) {
