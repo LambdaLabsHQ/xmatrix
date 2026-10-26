@@ -14,13 +14,16 @@ export function commentTaker<Agent extends CommentTaker>(onPage: readonly Agent[
 }
 
 /**
- * A comment as its discussion's first message. An Agent it mentions starts on it at once. One that mentions nobody
+ * A comment as its discussion's first message. A live Instance it names (`@claude:2`, one of `live`) takes it as
+ * the Agent at work on the page does; another Agent it mentions starts on it at once. One that mentions nobody
  * goes to the Agent at work on the page (`taker`), which `commentCall` tells in its own conversation, where its
  * Instance lives; it answers in the discussion. With none there, xMatrix gives it to one.
  */
-export function commentBody<Agent extends CommentTaker>(text: string, agents: readonly string[], taker?: Agent):
-  { body: string; taker?: Agent } {
+export function commentBody<Agent extends CommentTaker>(text: string, agents: readonly string[], taker?: Agent,
+  live: readonly Agent[] = []): { body: string; taker?: Agent } {
   for (const match of text.matchAll(MENTION)) {
+    const named = live.find((agent) => agent.name.toLowerCase() === match[2]!.toLowerCase());
+    if (named) return { body: text, taker: named };
     if (!agents.includes(match[2]!.split(":")[0]!)) continue;
     const end = match.index! + match[0].length;
     return { body: `${text.slice(0, end)} launch:force${text.slice(end)}` };

@@ -357,7 +357,9 @@ fact is about.
   passage is no longer selected; a comment closed unsent comes back when the
   same passage is selected again.
   - A comment is a discussion of the passage (§4.3) whose first message is
-    the comment. An Agent the comment mentions takes it at once. One that
+    the comment. A live Instance it names (`@claude:2`, at work on any of the
+    Space's pages) takes it as the Agent at work on the page does, below; any
+    other Agent the comment mentions starts on it at once. One that
     names nobody goes to the Agent already at work on the page, nearest the
     passage first, among those in conversations the reader can write in: its
     Instance card stands under the box, as under a conversation's composer,
@@ -383,7 +385,12 @@ fact is about.
   in the text, like everything picked, and calls the Agent into co-writing
   as the face tap does, except that its one message is only
   `@<name> launch:force page:<id>#<section>`: nothing tells it what to write
-  (decided by Daniel 2026-10-21). `#` opening a paragraph is the heading being typed.
+  (decided by Daniel 2026-10-21). The menu lists first the live Instances
+  already at work on the Space's pages (`claude:2`, this page's first, beside
+  where each works): picking one starts no conversation or Instance; its own
+  conversation is linked to the page and co-writes it, and it is told there
+  `@claude:2 page:<id>#<section>` (decided by Daniel 2026-10-26). The harnesses
+  follow, each a new Instance. `#` opening a paragraph is the heading being typed.
 - **Co-writing is live, as with a person** (decided 2026-10-15). A person
   starts an Agent writing the page from the page itself, typing nothing: one
   tap on the face of the Agent to write with. The Agent is then on the page

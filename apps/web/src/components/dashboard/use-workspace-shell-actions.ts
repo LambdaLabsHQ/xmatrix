@@ -1508,6 +1508,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     return { channel, created };
   }
 
+  /** A message sent as the composer sends it: shown at once, and kept to send again if it fails. */
+  const sendInConversation = (channel: ChannelSnapshot, body: string) => deliverOutgoingMessage(channel,
+    { body, attachments: [], appMentions: parseAppMentions(body, APP_CONNECTORS) });
+
   const { openPage, closePage, internalPageLink, startPageConversation, openPageConversation,
     closePageConversation } = pageShellActions({
     token: s.token, user: s.user, view: s.view, beginConversation, selectedPageId: s.selectedPageId, selectedChannelId: s.selectedChannelId, currentSpaceId: s.currentSpaceId, spaces: s.spaces, setView,
@@ -1515,8 +1519,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     focusComposer: () => setComposerAutoFocusRequest((current) => current + 1),
     seedComposer,
     jumpToMessage: queueMessageJump,
-    deliver: (channel, body) => deliverOutgoingMessage(channel,
-      { body, attachments: [], appMentions: parseAppMentions(body, APP_CONNECTORS) }),
+    deliver: sendInConversation,
   });
 
   function seedQuote(conversationId: string, quote: DiscussionQuote) {
@@ -2933,6 +2936,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     navigateToChannel,
     copyChannelLink,
     startPageConversation,
+    sendInConversation,
     openPage,
     closePage,
     openPageConversation,
