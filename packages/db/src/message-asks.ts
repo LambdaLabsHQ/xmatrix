@@ -1,4 +1,4 @@
-import { digestCanonicalCloneCborV1, parseMessageInteraction, type SerializedMessageAsk } from "@xmatrix/protocol";
+import { digestCanonicalCloneCborV1, parseConnectorInvocation, parseMessageInteraction, type SerializedMessageAsk } from "@xmatrix/protocol";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
@@ -11,7 +11,7 @@ import type { QueryResultRow } from "pg";
  * never becomes a new launch. In particular this does not resume stopped Agents. */
 function messageCanOfferAsk(body: string): boolean {
   const plan = parseMessageInteraction(body);
-  return !plan.refused && !plan.stop && !plan.controls.length &&
+  return !parseConnectorInvocation(body) && !plan.refused && !plan.stop && !plan.controls.length &&
     !plan.reborn.length && !plan.handoff.length && !plan.launches.length && !plan.mentions.length;
 }
 
@@ -37,6 +37,30 @@ const DECISION_OWNS_SQL = `EXISTS (SELECT 1 FROM data.first_message_launch_choic
     AND NOT EXISTS (SELECT 1 FROM data.first_message_launch_choices failed
       WHERE failed.channel_id=m.channel_id AND failed.message_id=m.message_id AND failed.failure_code IS NOT NULL))`;
 
+/** Caller owns the canonical Human append and Channel lock in this transaction.
+ * Evidence commits atomically with the publication; post-commit cannot invent it.
+ * An absent witness or an older uncertified row remains unknown. */
+export async function recordMessageAskAtAppend(tx: DatabaseTransaction, input: {
+  spaceId: string; channelId: string; messageId: string; actorUserId: string; body: string;
+}): Promise<void> {
+  if (!messageCanOfferAsk(input.body)) return;
+  const hash = await digestCanonicalCloneCborV1(input.body);
+  await tx.query({
+      name: "message_ask_append_witness_v1", text: `INSERT INTO data.message_asks
+        (space_id,channel_id,message_id,author_user_id,input_version,body_hash,commit_certified)
+        SELECT m.space_id,m.channel_id,m.message_id,m.author_id,COALESCE(m.invocation_input_version,m.entity_version),m.body_hash,TRUE
+        FROM data.messages m JOIN data.channels c USING (space_id,channel_id)
+        WHERE m.space_id=$1 AND m.channel_id=$2 AND m.message_id=$3 AND m.author_kind='user' AND m.author_id=$4
+          AND m.message_kind='xmatrix.message.text' AND m.body_hash=$5
+          AND ($6::boolean OR COALESCE(jsonb_array_length(m.attachments_json),0)>0)
+          AND m.edited_at IS NULL AND m.recalled_at IS NULL AND m.deleted_at IS NULL
+          AND m.sent_at>clock_timestamp()-interval '1 minute'
+          AND NOT (${RECEIVER_SQL})
+        ON CONFLICT (channel_id,message_id) DO NOTHING`,
+      values: [input.spaceId, input.channelId, input.messageId, input.actorUserId, hash, !!input.body.trim()], maxRows: 0,
+  });
+}
+
 export class PostgresMessageAskRepository {
   constructor(private readonly database: AuthorityDatabase, private readonly placement: DatabasePlacementContext) {}
 
@@ -50,27 +74,6 @@ export class PostgresMessageAskRepository {
     });
   }
 
-  /** Record only positive evidence, only for the current publication. No
-   * history backfill, timer inference, or client-supplied recipient facts. */
-  async observe(input: { requestId: string; channelId: string; messageId: string; actorUserId: string; body: string }): Promise<void> {
-    if (!messageCanOfferAsk(input.body)) return;
-    const hash = await digestCanonicalCloneCborV1(input.body);
-    await this.transaction(input.requestId, "message-ask.observe", input.channelId, input.actorUserId, tx => tx.query({
-      name: "message_ask_observe_v1", text: `INSERT INTO data.message_asks
-        (space_id,channel_id,message_id,author_user_id,input_version,body_hash)
-        SELECT m.space_id,m.channel_id,m.message_id,m.author_id,COALESCE(m.invocation_input_version,m.entity_version),m.body_hash
-        FROM data.messages m JOIN data.channels c USING (space_id,channel_id)
-        WHERE m.space_id=$1 AND m.channel_id=$2 AND m.message_id=$3 AND m.author_kind='user' AND m.author_id=$4
-          AND m.message_kind='xmatrix.message.text' AND m.body_hash=$5
-          AND ($6::boolean OR COALESCE(jsonb_array_length(m.attachments_json),0)>0)
-          AND m.edited_at IS NULL AND m.recalled_at IS NULL AND m.deleted_at IS NULL
-          AND m.sent_at>clock_timestamp()-interval '1 minute'
-          AND NOT (${RECEIVER_SQL}) AND NOT (${DECISION_OWNS_SQL})
-        ON CONFLICT (channel_id,message_id) DO NOTHING`,
-      values: [this.placement.spaceId, input.channelId, input.messageId, input.actorUserId, hash, !!input.body.trim()], maxRows: 0,
-    }));
-  }
-
   /** An explicit Human selection claims the SAME per-message decision as Jev.
    * The Channel lock, source lock and unique decision serialize edits, grant
    * changes, two devices, and a delayed first-message reader. */
@@ -79,10 +82,10 @@ export class PostgresMessageAskRepository {
     if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(input.harness)) throw new RegistrationAccessError("invalid_launch_choice", 400);
     const hash = await digestCanonicalCloneCborV1(input.body);
     await this.transaction(input.requestId, "message-ask.claim", input.channelId, input.actorUserId, async tx => {
-      const [source] = await tx.query<QueryResultRow>({ name: "message_ask_claim_source_v1", text: `SELECT ask.input_version
+      const [source] = await tx.query<QueryResultRow>({ name: "message_ask_claim_source_v2", text: `SELECT ask.input_version
         FROM data.message_asks ask JOIN data.messages m USING (space_id,channel_id,message_id)
         JOIN data.channels c USING (space_id,channel_id)
-        WHERE ask.space_id=$1 AND ask.channel_id=$2 AND ask.message_id=$3 AND ask.author_user_id=$4
+        WHERE ask.space_id=$1 AND ask.channel_id=$2 AND ask.message_id=$3 AND ask.author_user_id=$4 AND ask.commit_certified IS TRUE
           AND m.author_kind='user' AND m.author_id=$4 AND m.body_hash=$5 AND ask.body_hash=m.body_hash
           AND ask.input_version=COALESCE(m.invocation_input_version,m.entity_version)
           AND m.recalled_at IS NULL AND m.deleted_at IS NULL AND m.edited_at IS NULL
@@ -111,11 +114,11 @@ export class PostgresMessageAskRepository {
   }
 
   private async replay(tx: DatabaseTransaction, input: { channelId: string; messageId: string; actorUserId: string; harness: string }, hash: string) {
-    const rows = await tx.query({ name: "message_ask_choice_replay_v1", text: `SELECT 1 FROM data.first_message_launch_choices choice
+    const rows = await tx.query({ name: "message_ask_choice_replay_v2", text: `SELECT 1 FROM data.first_message_launch_choices choice
       JOIN data.message_asks ask USING (space_id,channel_id,message_id)
       JOIN data.messages m USING (space_id,channel_id,message_id)
       WHERE choice.space_id=$1 AND choice.channel_id=$2 AND choice.message_id=$3 AND choice.author_user_id=$4
-        AND choice.choice='start' AND choice.chosen_by='author' AND choice.chosen_harness=$5 AND choice.failure_code IS NULL
+        AND ask.commit_certified IS TRUE AND choice.choice='start' AND choice.chosen_by='author' AND choice.chosen_harness=$5 AND choice.failure_code IS NULL
         AND m.author_kind='user' AND m.author_id=$4 AND m.body_hash=$6 AND ask.body_hash=m.body_hash
         AND ask.input_version=COALESCE(m.invocation_input_version,m.entity_version)
         AND m.edited_at IS NULL AND m.recalled_at IS NULL AND m.deleted_at IS NULL FOR SHARE OF m`,
@@ -128,12 +131,12 @@ export class PostgresMessageAskRepository {
  * an action, and a later recipient or settled decision removes it. */
 export async function readMessageAsks(tx: DatabaseTransaction, channelId: string, messageIds: readonly string[], actorUserId: string): Promise<SerializedMessageAsk[]> {
   if (!messageIds.length) return [];
-  const rows = await tx.query<QueryResultRow>({ name: "message_ask_read_v1", text: `SELECT ask.message_id,
+  const rows = await tx.query<QueryResultRow>({ name: "message_ask_read_v2", text: `SELECT ask.message_id,
       NOT (${RECEIVER_SQL}) AND NOT (${DECISION_OWNS_SQL}) AND
       ${channelCapabilityPredicate({ capability: "runtime_new_work", channelAlias: "c", principalKindSql: "'user'", principalIdSql: "$3" })}
       AS can_ask FROM data.message_asks ask
     JOIN data.messages m USING (space_id,channel_id,message_id) JOIN data.channels c USING (space_id,channel_id)
-    WHERE ask.channel_id=$1 AND ask.message_id=ANY($2::text[]) AND ask.author_user_id=$3
+    WHERE ask.channel_id=$1 AND ask.message_id=ANY($2::text[]) AND ask.author_user_id=$3 AND ask.commit_certified IS TRUE
       AND m.author_kind='user' AND m.author_id=$3 AND ask.body_hash=m.body_hash
       AND ask.input_version=COALESCE(m.invocation_input_version,m.entity_version)
       AND m.edited_at IS NULL AND m.recalled_at IS NULL AND m.deleted_at IS NULL

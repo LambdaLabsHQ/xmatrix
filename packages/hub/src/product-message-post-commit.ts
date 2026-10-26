@@ -252,8 +252,9 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // Nobody was summoned by the first message of a conversation: Jev reads
     // whether its author wants an Agent to start (an unnamed one or a discussion).
     if (input.sequence === 1) await (dispatch.newConversation ?? startNewConversation)(input);
-    // Only a successful interpretation may certify nobody received it. Failed
-    // dispatch, untracked history, Automation and non-speech stay unknown.
+    // The append already certified recipient absence, in its commit transaction.
+    // Successful interpretation only pushes its current projection; it never
+    // creates evidence from a recipient that exited after publication.
     if (input.senderKind === "user" && !connectorForCommand(input.body)) {
       await messageAskAction(input);
     }

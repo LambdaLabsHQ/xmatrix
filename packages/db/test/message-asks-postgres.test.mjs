@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import { createAuthorityDatabase, PostgresMessageAskRepository, PostgresFirstMessageLaunchChoiceRepository,
   readMessageAsks, readDueFirstMessageSummons } from "../dist/index.js";
+import { recordMessageAskAtAppend } from "../dist/message-asks.js";
 import { messageAuthoredForActor } from "../dist/message-invocation-selections.js";
 import { fenceChannelRunsForStop } from "../dist/channel-stop-fence.js";
 import { integration, isolatedPostgres, seedMessageSpace } from "./postgres-database.fixture.mjs";
@@ -20,7 +21,7 @@ integration("unaddressed publications require one current author choice and neve
     actorUserId: "owner", body, ...extra });
   const tx = callback => database.transaction({ requestId: crypto.randomUUID(), operation: "ask.test", placement }, callback);
   const read = id => tx(transaction => readMessageAsks(transaction, id, [id], "owner"));
-  const observe = id => asks.observe(request(id));
+  const observe = (id, extra = {}) => tx(transaction => recordMessageAskAtAppend(transaction, { spaceId: "space", ...request(id, extra) }));
   const pick = (id, harness = "codex", extra = {}) => asks.claim(request(id, { harness, ...extra }));
   const channel = async (id, { metadata = {}, sequence = 2, age = 0, text = body, author = "owner", kind = "xmatrix.message.text" } = {}) => {
     await f.run(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,metadata_json,created_at,updated_at)
@@ -61,16 +62,22 @@ integration("unaddressed publications require one current author choice and neve
     });
     await t.test("untracked history, controls, platform cards and active first-message decisions are never called unaddressed", async () => {
       for (const [id, settings] of [["old", { age: 120 }], ["untracked", {}], ["control", { text: "/stop all" }],
-        ["card", { kind: "xmatrix.onboarding" }], ["first", { sequence: 1, metadata: { autoName: true } }]]) {
+        ["connector", { text: "@github:comment:LambdaLabsHQ/xmatrix#1 hello" }], ["card", { kind: "xmatrix.onboarding" }], ["first", { sequence: 1, metadata: { autoName: true } }]]) {
         await channel(id, settings);
-        if (id !== "untracked") await asks.observe(request(id, { body: settings.text ?? body }));
-        assert.deepEqual(await read(id), []);
+        if (id !== "untracked") await observe(id, { body: settings.text ?? body });
+        assert.ok((await read(id)).every(ask => !ask.canAsk));
       }
       await choices.open({ requestId: "open", channelId: "first", messageId: "first", authorUserId: "owner" });
-      await observe("first"); assert.deepEqual(await read("first"), []);
+      await observe("first"); assert.equal((await read("first"))[0].canAsk, false);
       await choices.claim({ ...request("first"), by: "author" });
-      await observe("first"); assert.deepEqual(await read("first"), [], "Don't start is never reopened");
+      await observe("first"); assert.equal((await read("first"))[0].canAsk, false, "Don't start is never reopened");
       await assert.rejects(pick("untracked"), error => error.code === "message_ask_unavailable");
+    });
+    await t.test("uncertified pre-cutover observations stay unknown and cannot authorize a new choice", async () => {
+      await channel("uncertified"); await observe("uncertified");
+      await f.run("UPDATE data.message_asks SET commit_certified=NULL WHERE message_id='uncertified'");
+      assert.deepEqual(await read("uncertified"), []);
+      await assert.rejects(pick("uncertified"), error => error.code === "message_ask_unavailable");
     });
     await t.test("a delayed first-message reader and the explicit action share one atomic decision", async () => {
       await channel("race", { sequence: 1 }); await observe("race");
@@ -86,8 +93,8 @@ integration("unaddressed publications require one current author choice and neve
     await t.test("an attachment without a caption can be asked explicitly, while an empty publication has no action", async () => {
       for (const id of ["attachment", "empty"]) await channel(id, { text: "" });
       await f.run(`UPDATE data.messages SET attachments_json='[{"attachmentId":"photo"}]' WHERE message_id='attachment'`);
-      await asks.observe(request("attachment", { body: "" }));
-      await asks.observe(request("empty", { body: "" }));
+      await observe("attachment", { body: "" });
+      await observe("empty", { body: "" });
       assert.equal((await read("attachment"))[0].canAsk, true);
       assert.deepEqual(await read("empty"), []);
       await pick("attachment", "codex", { body: "" });

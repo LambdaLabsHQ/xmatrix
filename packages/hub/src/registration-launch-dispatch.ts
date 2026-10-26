@@ -121,13 +121,13 @@ export async function claimFirstMessageLaunch(input: { database: AuthorityDataba
  * placement, beside the first-message decision they share. */
 export async function messageAskAction(input: { env: Env; channelId: string; messageId: string;
   actorUserId: string; body: string; harness?: string }): Promise<void> {
-  const { database, directory } = runtimePlacement(input.env);
-  const requestId = `message-ask:${crypto.randomUUID()}`;
-  const { placement } = await channelLaunchRepository({ database, directory, commandId: requestId, channelId: input.channelId });
-  const asks = new PostgresMessageAskRepository(database, { spaceId: placement.spaceId,
-    shardId: placement.shardId, placementEpoch: placement.placementEpoch });
-  if (input.harness) await asks.claim({ requestId, ...input, harness: input.harness });
-  else await asks.observe({ requestId, ...input });
+  if (input.harness) {
+    const { database, directory } = runtimePlacement(input.env);
+    const requestId = `message-ask:${crypto.randomUUID()}`;
+    const { placement } = await channelLaunchRepository({ database, directory, commandId: requestId, channelId: input.channelId });
+    await new PostgresMessageAskRepository(database, { spaceId: placement.spaceId,
+      shardId: placement.shardId, placementEpoch: placement.placementEpoch }).claim({ requestId, ...input, harness: input.harness });
+  }
   await publishChannelInvocationsChanged(input.env, input.channelId);
 }
 

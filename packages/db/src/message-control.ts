@@ -1,3 +1,4 @@
+import { recordMessageAskAtAppend } from "./message-asks.js";
 import { authorizeDingTalkEffect, finishDingTalkEffect, type DingTalkEffectAuthority } from "./dingtalk-effect-authority.js";
 import { lockAgentRunChannels, requireAgentChannelAccess } from "./agent-channel-access.js";
 import type { QueryResultRow } from "pg";
@@ -123,6 +124,8 @@ export interface AppendPostgresMessage {
   /** Legacy trusted resolver input. New PostgreSQL writes resolve attention atomically from attentionBody. */
   attentionTargets?: Array<{ subjectId: string; kind: "mention" | "broadcast" }>;
   attentionBody?: string;
+  /** Hub-certified ordinary publication; imported history must never acquire an Ask action. */
+  certifyMessageAsk?: boolean;
   /** The sender declares it is waiting on the people and Agents this message mentions. */
   awaitsResponse?: boolean;
   /** People a card waits on though it mentions nobody. Set by the Hub for its own cards, never by a caller. */
@@ -1753,6 +1756,10 @@ export class PostgresMessageRepository {
       // The sender went on after someone else spoke: the waits it declared before that are over.
       if (spoke) await releaseDeclaredWaits(transaction, {
         spaceId, channelId, authorKind: senderKind, authorIds: [senderId], at: sentAt, movedOnAt: sequence });
+      if (input.certifyMessageAsk === true && senderKind === "user" && messageKind === "xmatrix.message.text" &&
+          authorizedPrincipal.kind === "user" && authorizedPrincipal.id === senderId && typeof input.attentionBody === "string") {
+        await recordMessageAskAtAppend(transaction, { spaceId, channelId, messageId, actorUserId: senderId, body: input.attentionBody });
+      }
       const result = {
         messageId, channelId, spaceId, sequence, entityVersion: 1,
         ...(agentSendFingerprint ? { agentSendFingerprint } : {}),
