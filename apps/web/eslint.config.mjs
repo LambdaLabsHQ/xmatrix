@@ -2,6 +2,7 @@ import { FlatCompat } from "@eslint/eslintrc";
 import js from "@eslint/js";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import noPageIdDisplay from "./eslint-rules/no-page-id-display.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -26,7 +27,9 @@ const config = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
     files: ["src/**/*.{ts,tsx}"],
+    plugins: { xmatrix: { rules: { "no-page-id-display": noPageIdDisplay } } },
     rules: {
+      "xmatrix/no-page-id-display": "error",
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
       "react/no-unstable-nested-components": [

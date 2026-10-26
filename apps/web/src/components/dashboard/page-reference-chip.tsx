@@ -151,13 +151,16 @@ export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, t
   );
 }
 
-function RawReference({ text }: { text: string }) {
-  return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.92em]">{text}</code>;
+function UnavailableReference({ kind }: { kind: "page" | "channel" }) {
+  return <span className="app-page-reference-chip app-page-reference-chip-unavailable">
+    <span className="app-page-reference-chip-icon" aria-hidden="true"><Lock /></span>
+    <span className="app-page-reference-chip-label">{kind === "page" ? "Page" : "Channel"}</span>
+  </span>;
 }
 
 const ChannelReferenceChip = memo(function ChannelReferenceChip({ span }: { span: ChannelReferenceSpan }) {
   const catalog = useMessageReferenceCatalog();
-  if (!catalog) return <RawReference text={span.text} />;
+  if (!catalog) return <UnavailableReference kind="channel" />;
   const channel = catalog.channels.find((candidate) => candidate.id === span.channelId);
   // A channel this reader cannot see says so, and names nothing about it.
   if (!channel) {
@@ -199,7 +202,7 @@ export const PageReferenceChip = memo(function PageReferenceChip({ span }: { spa
   const section = useMemo(() => {
     if (!span.blockId) return null;
     const block = page.data ? pageBlocks(page.data.body).find((candidate) => candidate.id === span.blockId) : undefined;
-    return { title: block?.title.trim() || span.blockId, body: block && page.data
+    return { title: block?.title.trim() || "Section", body: block && page.data
       ? page.data.body.slice(block.start, block.end).split("\n").slice(1).join(" ").replace(/\s+/gu, " ").trim()
       : "" };
   }, [page.data, span.blockId]);
@@ -210,7 +213,7 @@ export const PageReferenceChip = memo(function PageReferenceChip({ span }: { spa
   const heading = section ? `${title} › ${section.title}` : title;
   const label = revisionLabel ? `${heading} · ${revisionLabel}` : heading;
 
-  if (!scope) return <RawReference text={span.text} />;
+  if (!scope) return <UnavailableReference kind="page" />;
 
   return (
     <ReferenceChip

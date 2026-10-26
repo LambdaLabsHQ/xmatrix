@@ -76,11 +76,10 @@ const ICONS = {
     + '<line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
 } as const;
 
-/** What the chip says: null for a target this reader cannot see, which stays as typed. */
-function referenceLabel(span: MessageReferenceSpan, targets: PageReferenceTargets): string | null {
-  if (span.kind === "channel") return targets.channelName(span.channelId);
-  const title = targets.pageTitle(span.pageId);
-  if (title === null) return null;
+/** Missing targets still hide their locator; editing the source remains an explicit caret action. */
+function referenceLabel(span: MessageReferenceSpan, targets: PageReferenceTargets): string {
+  if (span.kind === "channel") return targets.channelName(span.channelId) || "Channel";
+  const title = targets.pageTitle(span.pageId) || "Page";
   const heading = span.blockId ? `${title} › ${span.blockId}` : title;
   return span.revision === null ? heading : `${heading} · r${span.revision}`;
 }
@@ -90,20 +89,25 @@ function referenceChip(span: MessageReferenceSpan, label: string, targets: PageR
   // A span, not a <button>: a button is always an atomic inline box, so a label that wraps
   // (a narrow table column) became one tall pill instead of a capsule per line.
   const chip = document.createElement("span");
-  chip.setAttribute("role", "button");
-  chip.tabIndex = 0;
-  chip.className = "app-page-reference-chip";
+  const available = span.kind === "page" ? targets.pageTitle(span.pageId) !== null
+    : targets.channelName(span.channelId) !== null;
+  if (available) {
+    chip.setAttribute("role", "button");
+    chip.tabIndex = 0;
+  }
+  chip.className = available ? "app-page-reference-chip" : "app-page-reference-chip app-page-reference-chip-unavailable";
   chip.contentEditable = "false";
   chip.dataset.testid = `${span.kind}-reference-chip`;
   if (span.kind === "page") chip.dataset.pageId = span.pageId;
   else chip.dataset.channelId = span.channelId;
-  chip.setAttribute("aria-label", `Open ${span.kind} ${label}`);
+  chip.setAttribute("aria-label", available ? `Open ${span.kind} ${label}` : label);
   chip.innerHTML = '<span class="app-page-reference-chip-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" '
     + `stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[span.kind]}</svg></span>`;
   const text = document.createElement("span");
   text.className = "app-page-reference-chip-label";
   text.textContent = label;
   chip.append(text);
+  if (!available) return chip;
   // The click opens the target and leaves the editor's selection where it was.
   chip.addEventListener("mousedown", (event) => event.preventDefault());
   const open = (event: Event) => {
@@ -162,10 +166,8 @@ function textChips(value: string, targets: PageReferenceTargets): TextChip[] {
   const chips: TextChip[] = [];
   for (const span of messageReferenceSpans(value)) {
     const label = referenceLabel(span, targets);
-    if (label !== null) {
-      chips.push({ start: span.start, end: span.end, key: `reference:${span.text}:${label}`,
-        draw: () => referenceChip(span, label, targets) });
-    }
+    chips.push({ start: span.start, end: span.end, key: `reference:${span.text}:${label}`,
+      draw: () => referenceChip(span, label, targets) });
   }
   const mentions = targets.mentions;
   if (mentions && /[@＠]/u.test(value)) {

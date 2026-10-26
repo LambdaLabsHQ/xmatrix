@@ -262,6 +262,16 @@ it belongs in the repository.**
   old messages. A reference grants nothing: a channel the reader cannot see
   renders as "private channel", and a page they cannot read does not load.
   A page reference also links the page to the conversation.
+  Compact previews (conversation rows, page margin cards and hover previews)
+  resolve references against the reader's current Space catalog, rendering
+  plain titles inside the surrounding clickable surface. Unavailable references,
+  missing context and truncated preview locators use generic Page/Channel labels,
+  never an ID fallback. Message chips without a readable section heading say Section.
+  Web lint rejects direct Page IDs in visible JSX text/labels and DOM text writes,
+  including local aliases and string formatting. This bounded static check does
+  not prove arbitrary message contents safe; the shared preview/reference
+  renderers own those dynamic strings. IDs remain in routing, data attributes,
+  editor source and Agent/CLI instructions.
 - **Typing references.** In the composer, `#` lists the Space's channels and
   `[[` (or `【【` from a Chinese input method) lists its pages;
   `[[page#section` lists that page's sections. The draft shows `#name` or
