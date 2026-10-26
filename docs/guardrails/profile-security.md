@@ -13,6 +13,11 @@ Part of the descriptive project profile. Not policy. The index is `project-profi
 
 ### Sign-in sessions and device approval
 
+The Hub admits at most 64 KiB of actual body bytes on `/api/auth/*`, before
+JSON decoding or schema validation. Oversized input is cancelled and returns
+HTTP 413 `request_too_large`; Content-Length cannot widen the bound. General
+requests and streamed attachment uploads retain their existing limits.
+
 Signing out ends the session at the Hub, not only on the device: the web and
 native apps call Better Auth's sign-out while they still hold the token, the
 native-session route revokes its refresh token through `POST

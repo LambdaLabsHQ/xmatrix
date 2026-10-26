@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Authentication request bodies are bounded before validation
+
+The Hub refuses authentication bodies larger than 64 KiB with HTTP 413 and
+`request_too_large`, before JSON decoding or Better Auth schema validation.
+It counts actual streamed bytes and cancels oversized input, even with a
+misleading Content-Length. Login, passkey and OAuth requests within that bound
+keep their existing formats; attachment uploads retain their separate limit.
+This mitigates oversized unbounded collections in the current authentication
+schemas; a Zod version bump alone does not bound those collections.
+Rollback is a beta release of a CI-validated revision reverting this limit;
+it reopens the larger validation-input boundary and needs no data migration.
+
 ## Unreleased: CLI resource limits compile across supported Rust versions
 
 The acknowledged Page-output queue and live trace-read limit share a checked
