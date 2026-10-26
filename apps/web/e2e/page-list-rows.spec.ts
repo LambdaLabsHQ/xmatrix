@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, fixtureJson, installPageTreeStubs } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, fixtureJson, fixtureRequestBodies, installPageTreeStubs } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -106,3 +106,33 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
     });
   });
 }
+
+test("dragging a page onto the lower half of another places it immediately after that page", async ({ page }) => {
+  await installPageTreeStubs(page, ["Alpha", "Beta", "Gamma"]);
+  await fixtureJson(page, "page-move", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-gamma$/u, {
+    page: {
+      pageId: "p-gamma", parentPageId: null, title: "Gamma", position: "VV", accessMode: "open", headRevision: 1,
+      agentSuggestOnly: false, canEdit: true, updatedAt: E2E_NOW, publishedAt: null, governance: false,
+    },
+  }, { method: "PATCH" });
+
+  await page.goto("/app", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const gamma = page.locator(".app-page-row", { hasText: "Gamma" }).getByRole("button", { name: "Gamma" });
+  const alpha = page.locator(".app-page-row", { hasText: "Alpha" });
+  await expect(gamma).toBeVisible({ timeout: 30_000 });
+  const from = await gamma.boundingBox();
+  const onto = await alpha.boundingBox();
+  if (!from || !onto) throw new Error("page rows have no box");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(onto.x + onto.width / 2, onto.y + onto.height * 0.8, { steps: 12 });
+  await expect(alpha).toHaveAttribute("data-page-drop", "below");
+  expect(await alpha.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none");
+  await page.mouse.up();
+
+  await expect.poll(async () => fixtureRequestBodies(page, "page-move")).toEqual([
+    { parentPageId: null, afterPageId: "p-alpha" },
+  ]);
+  await expect(page.locator(".app-page-row .app-page-row-title")).toHaveText(["Alpha", "Gamma", "Beta"]);
+});

@@ -8011,6 +8011,20 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   padding-right: var(--app-list-row-end);
 }
 
+/* Where a dragged page will land: a line on that edge. The wood list clears
+   box-shadow, so the line has to win against that recipe. */
+.xmatrix-app .app-page-row[data-page-dragging] {
+  opacity: 0.45;
+}
+
+html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-page-row.app-list-row[data-page-drop="above"] {
+  box-shadow: inset 0 2px 0 var(--primary) !important;
+}
+
+html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-page-row.app-list-row[data-page-drop="below"] {
+  box-shadow: inset 0 -2px 0 var(--primary) !important;
+}
+
 @media (max-width: 767px) {
   .xmatrix-app .app-mobile-chat-pane :is(.app-page-row, .app-page-tree-note) {
     --page-row-start: var(--app-list-row-start);

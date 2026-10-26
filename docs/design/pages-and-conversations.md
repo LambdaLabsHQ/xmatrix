@@ -193,6 +193,10 @@ it belongs in the repository.**
 
 1. **Pages**, at the top. This is the page tree, and the Space root page is the
    landing page.
+   A row that can be edited is dragged with the mouse and dropped on another
+   row. The lower half places it immediately after that page, as the same kind
+   of sibling; the upper half places it immediately before. The page store
+   keeps that order. A touch still scrolls the list and long-presses a row.
    A page row's summary or latest discussion reply renders inline bold,
    italic, code, and strikethrough using the conversation preview renderer.
    It stays on one line with an ellipsis; links and images show their labels,

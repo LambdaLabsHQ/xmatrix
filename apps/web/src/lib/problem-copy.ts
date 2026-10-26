@@ -18,7 +18,6 @@ function relativeTime(locale: OnboardingLocale, at: string | undefined, now: num
 const en = {
   stepsLabel: "To fix it",
   detailsLabel: "Details",
-  originalError: (message: string) => `Original error: ${message}`,
   quotaResets: (at: string) => `Quota resets: ${at}`,
   noProviderDetail: "The program did not report a specific error.",
   errorCode: (code: string) => `Error code: ${code}`,
@@ -125,7 +124,6 @@ export type ProblemCopy = typeof en;
 const zh: ProblemCopy = {
   stepsLabel: "怎么修复",
   detailsLabel: "详情",
-  originalError: (message) => `原始错误：${message}`,
   quotaResets: (at) => `额度重置时间：${at}`,
   noProviderDetail: "运行程序没有提供具体错误。",
   errorCode: (code) => `错误码：${code}`,

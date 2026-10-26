@@ -434,6 +434,12 @@ integration("pages: members co-edit with a freshness gate, structure is human, a
     const ordered = (await call("tree", { principal: owner })).pages
       .filter((page) => page.parentPageId === company.pageId).map((page) => page.title);
     assert.equal(ordered.indexOf("Payroll"), ordered.indexOf("Project") + 1, "afterPageId places a page right after its sibling");
+    await call("update", { principal: owner, pageId: payroll.pageId, parentPageId: company.pageId, beforePageId: project.pageId });
+    const leading = (await call("tree", { principal: owner })).pages
+      .filter((page) => page.parentPageId === company.pageId).map((page) => page.title);
+    assert.equal(leading.indexOf("Payroll") + 1, leading.indexOf("Project"), "beforePageId places a page immediately before its sibling");
+    await assert.rejects(call("update", { principal: owner, pageId: payroll.pageId, beforePageId: project.pageId, afterPageId: project.pageId }),
+      code("invalid_request"));
 
     // Purge redacts every revision in place.
     await call("edit", { principal: owner, pageId: project.pageId, baseRevision: accepted.page.headRevision,

@@ -509,6 +509,7 @@ export type {
 export {
   PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,
 } from "./pages.js";
+export { pagePositionBetween, PagePositionError } from "./page-position.js";
 
 export { externalAppSource, messageExternalAppSource } from "./external-app-source.js";
 export type { ExternalAppSource } from "./external-app-source.js";
