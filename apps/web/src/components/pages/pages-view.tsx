@@ -50,7 +50,7 @@ import { takeCoWriteRequest } from "@/lib/pages/co-write-request";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { usePageWriters } from "./page-writers";
 import {
-  listedAgents, marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation,
+  anchorTop, listedAgents, marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation,
 } from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
@@ -1589,7 +1589,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }) : [];
   const marginView = ((): { top: number; height: number } | null => {
     const base = columnTop();
-    return marginOn && drawn && viewport.height && base !== null ? { top: viewport.top - base, height: viewport.height } : null;
+    const article = articleElement.current;
+    if (!marginOn || !drawn || !viewport.height || base === null || !article) return null;
+    // Sticky margin navigation starts inside the article's top padding; its bottom must still fit the scrollport.
+    const inset = parseFloat(getComputedStyle(article).paddingTop) || 0;
+    return { top: viewport.top - base + inset, height: Math.max(0, viewport.height - inset) };
   })();
   // Where the page ends without the margin: its text's end, or the window's bottom on a page shorter than the window.
   const marginEnd = ((): number | null => {
@@ -1623,16 +1627,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       return top === undefined ? null : (base + top) / height;
     };
     const marks: PageScrollMark[] = [];
-    const push = (mark: Omit<PageScrollMark, "fraction">, anchor: string) => {
+    const push = (mark: Omit<PageScrollMark, "fraction" | "top">, anchor: string) => {
       const fraction = at(anchor);
-      if (fraction !== null) marks.push({ ...mark, fraction });
+      if (fraction !== null) marks.push({ ...mark, fraction, top: fraction * height });
     };
     for (const person of people) {
       push({ key: `person:${person.key}`, kind: "person", color: person.color,
         title: `${person.name} · ${person.detail}` }, person.anchor);
     }
-    for (const item of discussions) push({ key: `discussion:${item.linkId}`, kind: "discussion", title: item.name },
-      `text:${item.linkId}`);
+    for (const item of marginCards.filter((card) => card.live && !card.resolved)) {
+      const top = base + anchorTop(anchorTops, item);
+      marks.push({ key: `conversation:${item.conversationId}`, kind: "discussion", top, fraction: top / height,
+        unread: item.unread, title: `${item.name ?? "Conversation"}${item.unread ? ` · ${item.unread} unread` : ""}` });
+    }
     return marks;
   })();
   const listSection = dialog && typeof dialog === "object" && dialog.kind === "conversations" ? dialog : null;
@@ -1667,6 +1674,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       {/* What only a made page has: its conversations, history and sharing. A new page gets them on its first write. */}
       {!pending && (
         <>
+          <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "conversations", blockId: null })}
+            aria-label={`All conversations, ${conversations.length}`} title="All conversations about this page">
+            <MessageSquare /> {conversations.length}
+            {conversations.some((item) => item.unread > 0) && <span aria-label="Unread conversations" className="size-1.5 rounded-full bg-destructive" />}
+          </Button>
           <Button variant="ghost" size="sm" aria-pressed={mode === "history"} title={lastEdit ?? "Version history"}
             aria-label={`Version history${unseen ? ", changed since you last looked" : ""}`}
             onClick={() => (mode === "history" ? setMode("page") : openHistory())} className="relative">
@@ -1718,7 +1730,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           </div>
         )}
         <div className="relative flex min-h-0 min-w-0 flex-1">
-          <PageScrollMarks marks={scrollMarks} />
+          <PageScrollMarks marks={scrollMarks} onJump={scrollToContent}
+            viewport={{ start: viewport.top / (articleElement.current?.scrollHeight || 1),
+              size: viewport.height / (articleElement.current?.scrollHeight || 1) }} />
           {(["above", "below"] as const).map((side) => edgeOffscreen[side].length > 0 && (
             <div key={side} className={cn("pointer-events-none absolute right-6 z-20 w-[min(18rem,calc(100%-3rem))] lg:right-12",
               side === "above" ? "top-2" : "bottom-3")}>

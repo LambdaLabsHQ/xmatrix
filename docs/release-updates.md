@@ -61,6 +61,17 @@ an unnecessary transaction opening.
 No migration or client update is needed. Recovery is a CI-validated beta
 release reverting this change.
 
+## Unreleased: Page conversations are easier to find
+
+The page margin uses one quiet line at each edge for conversations above and
+below, with an explicit unread count. Its cards stay clear of those lines.
+The position rail marks live conversations at their document anchors, turns
+unread marks red and outlines the current viewport; clicking a mark jumps
+to that passage. The toolbar comment count opens the existing conversation
+list with All / Open / Resolved filters, including on phones. This is a Web
+change with no data migration. Recovery is a CI-validated beta Web release
+reverting the change.
+
 ## Unreleased: Page references stay readable in compact previews
 
 Co-writing notices in page margin cards, conversation rows and other compact

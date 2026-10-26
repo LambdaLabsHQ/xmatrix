@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Check, Maximize2, PenLine, X } from "lucide-react";
-import type { FaceOf } from "@xmatrix/protocol";
+import { ArrowDown, ArrowUp, Check, Maximize2, X } from "lucide-react";
 import { Face } from "@/components/dashboard/face";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { cn } from "@/lib/utils";
@@ -15,8 +14,8 @@ import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 
 /** A card's height before it is measured. */
 const ESTIMATED_CARD_HEIGHT = 76;
-/** Room the card at the margin's top or bottom edge covers: what is under it counts as out of view. */
-const EDGE_ROOM = 48;
+/** A quiet navigation line at each viewport edge, clear of the conversation cards. */
+const EDGE_ROOM = 32;
 /** Marks what the margin draws, so a paragraph's writers show beside it only where nothing stands. */
 export const MARGIN_ITEM = "[data-page-margin-item]";
 /** An Agent's pill and the line under it, before they are measured. */
@@ -324,12 +323,7 @@ export interface OffscreenEntry {
   person?: PresentPerson;
 }
 
-/**
- * What is beside the page above or below what the reader sees (§3.2, §4.4), told as the margin tells it: the
- * conversations out of view by their comment icon, and who works or edits there as a card's working line says
- * it. Only what the margin draws and who is editing count; someone only reading, or an Agent at rest, is not
- * work to scroll to. A press goes to the nearest.
- */
+/** A single line on paper, taking the reader to the nearest conversation or editor out of view. */
 export function PageOffscreenCard({ side, entries, onJump }: {
   side: "above" | "below"; entries: readonly OffscreenEntry[]; onJump: (top: number) => void;
 }) {
@@ -338,42 +332,28 @@ export function PageOffscreenCard({ side, entries, onJump }: {
   const conversations = [...new Map(entries.flatMap((entry) => entry.conversation
     ? [[entry.conversation.conversationId, entry.conversation] as const] : [])).values()];
   const unread = conversations.reduce((sum, conversation) => sum + conversation.unread, 0);
-  // Each Agent at work once, by name, with its face.
-  const working = [...new Map<string, FaceOf>([
-    ...entries.flatMap((entry) => entry.person?.agent ? [[entry.person.name, entry.person.face] as const] : []),
+  const working = [...new Set([
+    ...entries.flatMap((entry) => entry.person?.agent ? [entry.person.name] : []),
     ...conversations.flatMap((conversation) => conversation.agents.filter((agent) => agent.status === "busy")
-      .map((agent) => [agent.name, agent.face] as const)),
+      .map((agent) => agent.name)),
   ])];
   const editing = [...new Set(entries.flatMap((entry) => entry.person && !entry.person.agent ? [entry.person.name] : []))];
   const said = [
-    conversations.length > 0 ? `${conversations.length} ${conversations.length === 1 ? "conversation" : "conversations"}` : null,
-    working.length > 0 ? `${working.map(([name]) => name).join(", ")} working` : null,
-    editing.length > 0 ? `${editing.join(", ")} editing` : null,
-  ].filter(Boolean).join(", ");
+    conversations.length > 0 ? `${conversations.length} ${conversations.length === 1 ? "conversation" : "conversations"} ${side}` : null,
+    working.length > 0 ? `${working.join(", ")} working` : null,
+    editing.length > 0 ? `${editing.join(", ")} · Editing` : null,
+  ].filter(Boolean).join(" · ");
+  const label = `${said}${unread > 0 ? ` · ${unread} unread` : ""}`;
   const Arrow = side === "above" ? ArrowUp : ArrowDown;
   return (
     <button type="button" onClick={() => onJump(nearest.top)} data-testid={`page-offscreen-${side}`}
-      aria-label={`${said} ${side}`}
-      className="page-margin-card page-margin-edge pointer-events-auto flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left">
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        {conversations.length > 0 && (
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="grid h-5 w-6 shrink-0 place-items-center"><CommentIcon /></span>
-            <span className="truncate text-[13px] font-semibold leading-5 text-foreground">
-              {conversations.length} {conversations.length === 1 ? "conversation" : "conversations"} {side}
-            </span>
-            <UnreadBadge unread={unread} />
-          </span>
-        )}
-        <WorkingLine agents={working.map(([name, face]) => ({ instanceId: name, name, status: "busy" as const, face }))} />
-        {editing.length > 0 && (
-          <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
-            <PenLine className="size-3 shrink-0 text-primary" aria-hidden="true" />
-            <span className="truncate">{editing.join(", ")} · Editing</span>
-          </span>
-        )}
-      </span>
-      <Arrow className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      aria-label={`${label}${conversations.length === 0 ? ` ${side}` : ""}`} title={label}
+      className="page-margin-edge pointer-events-auto flex h-8 w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary">
+      <Arrow className="size-3 shrink-0" aria-hidden="true" />
+      <span className="min-w-0 truncate">{said}</span>
+      {unread > 0 && <span className="flex shrink-0 items-center gap-1.5">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-destructive" />{unread} unread
+      </span>}
     </button>
   );
 }
@@ -505,7 +485,7 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
   );
   const place = (id: string, child: ReactNode) => (
     <div key={id} className={cn("absolute inset-x-0 transition-[top] duration-150", !positions.has(id) && "invisible")}
-      style={{ top: positions.get(id) ?? 0 }} data-page-margin-item={positions.has(id) ? "" : undefined}
+      style={{ top: positions.get(id) ?? 0, scrollMarginBlock: EDGE_ROOM + 16 }} data-page-margin-item={positions.has(id) ? "" : undefined}
       ref={(node) => { if (node) nodes.current.set(id, node); else nodes.current.delete(id); }}>
       {child}
     </div>
@@ -517,7 +497,7 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
     const below: OffscreenEntry[] = [];
     if (!view || !onJump) return { above, below };
     const sort = (entry: OffscreenEntry, height: number) => {
-      if (entry.top + height < view.top + EDGE_ROOM / 2) above.push(entry);
+      if (entry.top + height < view.top + EDGE_ROOM) above.push(entry);
       else if (entry.top > view.top + view.height - EDGE_ROOM) below.push(entry);
     };
     for (const item of shown) {
@@ -541,15 +521,17 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
         <div className="pointer-events-none sticky top-0 z-20 h-0">
           <div className="relative" style={{ height: view.height }}>
             {offscreen.above.length > 0 && (
-              <div className="absolute inset-x-0 top-2" data-page-margin-item=""><PageOffscreenCard side="above" entries={offscreen.above} onJump={onJump} /></div>
+              <div className="absolute inset-x-0 top-0" data-page-margin-item=""><PageOffscreenCard side="above" entries={offscreen.above} onJump={onJump} /></div>
             )}
             {offscreen.below.length > 0 && (
-              <div className="absolute inset-x-0 bottom-3" data-page-margin-item=""><PageOffscreenCard side="below" entries={offscreen.below} onJump={onJump} /></div>
+              <div className="absolute inset-x-0 bottom-0" data-page-margin-item=""><PageOffscreenCard side="below" entries={offscreen.below} onJump={onJump} /></div>
             )}
           </div>
         </div>
       )}
-      <div className="relative" style={{ minHeight: bottom }} data-testid="page-margin" aria-label="Conversations on this page">
+      <div className="relative" style={{ minHeight: bottom,
+        ...(view && onJump ? { clipPath: `inset(${Math.max(0, view.top + (offscreen.above.length ? EDGE_ROOM : 0))}px 0 ${Math.max(0, bottom - view.top - view.height + (offscreen.below.length ? EDGE_ROOM : 0))}px 0)` } : {}),
+      }} data-testid="page-margin" aria-label="Conversations on this page">
         {head && place(HEAD, head)}
         {cards.map((card) => place(card.conversationId, card.conversationId === openId && renderOpen ? openCard(card, false) : (
           <ConversationCard conversation={card} writer={inCard.get(card.conversationId)}

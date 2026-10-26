@@ -36,6 +36,11 @@ route publication and notices remain outside that database-only boundary;
 unknown COMMIT results retain receipt reconciliation. See
 [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
 
+Page conversation navigation uses quiet lines at both margin edges with explicit
+unread counts, a clickable position rail showing the current viewport, and a
+toolbar count opening the existing All / Open / Resolved conversation list.
+See [live documents](../design/pages-live-document.md#44-conversations-beside-the-page).
+
 Linear exposes bounded task/project collaboration through typed Channel/MCP
 actions, including search, assignments, workflow transitions, cycles, labels,
 documents, milestones and dependencies. Workspace discovery identifies the

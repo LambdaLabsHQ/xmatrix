@@ -269,12 +269,11 @@
 }
 /* A conversation about the page is a comment: its card, and the line under an Agent at work, start with its icon. */
 .page-comment-icon { flex: none; fill: #f2b632; }
-/* What the margin holds out of view, at its top or bottom edge: a card in the cards' tint, floating over the ones
-   under it as the card being read is lifted, so the cards scroll under it. */
-.page-margin-edge,
-.page-margin-edge:hover {
-  background: var(--card);
-  box-shadow: 0 1px 3px oklch(0.3 0.02 60 / 0.18), 0 2px 8px 2px oklch(0.3 0.02 60 / 0.1);
+/* Edge navigation is one quiet line on the page; the cards are clipped clear of it. */
+.page-margin-edge { background: transparent; }
+.page-scroll-viewport {
+  border: 1px solid color-mix(in oklab, var(--foreground) 22%, transparent);
+  background: color-mix(in oklab, var(--foreground) 3%, transparent);
 }
 .page-margin-open {
   background: var(--card);

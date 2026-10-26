@@ -212,14 +212,14 @@ fact is about.
   under the Agent's awareness id, which is how the editor knows whose text it
   is.
 - **The top and bottom of the margin** tell what it holds out of view above
-  or below (decided 2026-10-21: one source with the margin, in its style).
+  or below. Each is one quiet line on paper, with an arrow, conversation count
+  and explicitly labelled unread-message count plus a red dot (Daniel approved
+  2026-10-26). Cards stay clear of these lines; neither line is a floating card.
   Only what the margin draws and who is editing count, by where each card and
-  pill is drawn: a card in the cards' style says "2 conversations below", its
-  working line "claude:2 · Working", and "Ada · Editing" for a person editing
-  there. Someone only reading is not drawn, and an Agent
-  at rest is its card's "Idle" line; neither is told at the edges. Without a
-  margin, the same card at the right edge tells of people editing out of view,
-  since each Agent is its own face there. Clicking scrolls to the nearest.
+  pill is drawn. Working Agents and editing people are named on the same line;
+  readers and idle Agents do not add an edge notification. Without a margin,
+  the same line at the right edge tells of people editing out of view, since
+  each Agent is its own face there. Clicking scrolls to the nearest.
 - **Beside a wide page, an Agent at work stands in the margin** (decided
   2026-10-19): its pill, solid in its colour with its face, its name and what
   it is doing (its dots, or *thinking 12s*), level with the line it writes and
@@ -257,7 +257,10 @@ fact is about.
   when and in which conversation (parent §4.2).
 - **Margin**: the conversations about the page, each beside what it is about
   (§4.4).
-- **The scrollbar** marks where others are and where discussions are.
+- **The scrollbar** marks where others and live, unresolved conversations are
+  anchored in the document. Unread conversations have red marks; the current
+  viewport is outlined. Each mark is a keyboard-accessible button that scrolls
+  to its document anchor, independently of displaced margin cards.
 - **What changed since this person last read the page** is offered to them,
   not shown: the page always opens as it is now, and the first card in the
   margin, a card of paper, (above the page where there is no margin) says how many changes there
@@ -677,9 +680,11 @@ or joining one never leaves the page.
   work dock work there; per-message tags and actions, attachments and the
   full header stay in *Open in Conversations*, which gives it the whole
   window.
-- **The conversation list.** A heading's count opens the list of every
-  conversation linked to the page, grouped by section, including resolved
-  discussions and sunk conversations; open discussions resolve from it too.
+- **The conversation list.** The page toolbar's comment icon and total count,
+  or a heading's count, opens every conversation linked to the page, grouped
+  by section. All / Open / Resolved filters include quiet conversations and
+  resolved discussions; open discussions resolve from it too. The toolbar dot
+  indicates unread conversations. This entry is available on phones too.
 - **Starting one.** A comment on a selection (§4.2) creates the conversation
   already linked there with the comment as its first message, and the page
   stays in front of the reader.
