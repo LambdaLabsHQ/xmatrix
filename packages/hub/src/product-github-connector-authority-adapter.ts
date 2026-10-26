@@ -159,12 +159,12 @@ async function runGitHubConnectorStatement(
 
   const listed = await usableAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
   if (!listed) {
-    input.status(`GitHub ${action} blocked; ${CONNECTED_APPS_NEED_MEMBER}.`);
+    input.status(`GitHub ${action}: blocked; ${CONNECTED_APPS_NEED_MEMBER}.`);
     return;
   }
   const connection = listed.map(connectionView).find((candidate) => candidate?.providerId === "github");
   if (!connection || connection.status !== "configured") {
-    input.status("GitHub subscription blocked; connect GitHub to this Space first.");
+    input.status("GitHub subscription: blocked; connect GitHub to this Space first.");
     return;
   }
 

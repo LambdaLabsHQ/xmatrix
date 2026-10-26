@@ -2,11 +2,6 @@ import { isOperationalMentionStart, nonOperationalMentionRanges } from "./operat
 import { matchInteractionGrammar } from "./message-interaction-grammar.js";
 import { APP_CONNECTOR_PROVIDER_MANIFESTS, type AppConnectorProviderManifest } from "./app-connector-manifests.js";
 
-/** Both modes record the invocation; only private results stay caller-only. */
-export type ConnectorResultVisibility = "public" | "private";
-
-export const PRIVATE_CONNECTOR_RESULT = "Result: [hidden — private call]";
-
 export interface ParsedConnectorActionCommand {
   actionId: string;
   statement: { target: string; text: string };
