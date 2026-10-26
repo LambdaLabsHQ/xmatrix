@@ -50,6 +50,7 @@ test("a summon refused because its computer is offline says how to bring it back
   await expect(card).toContainText("xmatrix setup daemon");
   await expect(card).toContainText("Still offline · last seen 2 hours ago");
   await expect(card.getByRole("button", { name: "Send again" })).toBeDisabled();
+  await expect(card.getByRole("button", { name: "Send again" })).toHaveCSS("border-radius", "0px");
   await page.locator('[id="message:summon"]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("machine-offline-after.png") });
   // The machine comes back: the card says so and the author's summon goes again, exactly as written.
@@ -57,6 +58,9 @@ test("a summon refused because its computer is offline says how to bring it back
     { capabilities: [], registrations: registrations(true) });
   await expect(card).toContainText("studio is back online", { timeout: 20_000 });
   await page.screenshot({ path: test.info().outputPath("machine-offline-back-online.png") });
+  // Paper has no rounded corners: the card and what is on it are square.
+  await expect(card).toHaveCSS("border-radius", "0px");
+  await expect(card.getByRole("button", { name: "Send again" })).toHaveCSS("border-radius", "0px");
   await card.getByRole("button", { name: "Send again" }).click();
   await expect(card).toContainText("Your message went to it again.");
   await expect.poll(() => fixtureRequestBodies(page, "launch-anyway"))

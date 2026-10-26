@@ -42,7 +42,7 @@ export function ProblemCard({ icon, title, explanation, stepsLabel, steps, statu
       </div> : null}
       {status ? <p role="status" className="app-problem-card-status mt-3 flex items-center gap-1.5 text-[13px] font-bold"
         data-resolved={status.resolved ? "true" : "false"}>
-        <span className="app-problem-card-dot size-2 shrink-0 rounded-full" aria-hidden="true" />
+        <span className="app-problem-card-dot size-2 shrink-0" aria-hidden="true" />
         {status.label}
       </p> : null}
       {actions ? <div className="mt-3 flex flex-wrap items-center gap-2">{actions}</div> : null}
@@ -59,8 +59,8 @@ export function ProblemCommand({ command, copyLabel, copiedLabel }: { command: s
   const [copied, setCopied] = useState(false);
   return (
     <span className="inline-flex max-w-full items-center gap-1 align-middle">
-      <code className="app-problem-card-command min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-[13px]">{command}</code>
-      <button type="button" className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+      <code className="app-problem-card-command min-w-0 truncate px-1.5 py-0.5 font-mono text-[13px]">{command}</code>
+      <button type="button" className="inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
         aria-label={copied ? copiedLabel : copyLabel} title={copied ? copiedLabel : copyLabel}
         onClick={() => void navigator.clipboard?.writeText(command).then(() => setCopied(true), () => undefined)}>
         {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
