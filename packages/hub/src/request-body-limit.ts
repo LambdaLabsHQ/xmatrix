@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { RELAY_R2_UPLOAD_PREFIX } from "./relay-r2-upload-private-api";
+import { readBoundedRequestBody } from "./request-body";
 import type { Env } from "./types";
 
 /**
@@ -11,6 +12,10 @@ import type { Env } from "./types";
  */
 export const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 
+// Authentication carries credentials, passkey assertions and OAuth client metadata,
+// not uploads. Bound input before JSON parsing and schema issue accumulation.
+const MAX_AUTH_REQUEST_BODY_BYTES = 64 * 1024;
+
 export function registerRequestBodyLimit(app: Hono<{ Bindings: Env }>): void {
   const limit = bodyLimit({
     maxSize: MAX_REQUEST_BODY_BYTES,
@@ -18,6 +23,14 @@ export function registerRequestBodyLimit(app: Hono<{ Bindings: Env }>): void {
   });
   app.use("*", async (c, next) => {
     if (c.req.method === "PUT" && c.req.path.startsWith(`${RELAY_R2_UPLOAD_PREFIX}/`)) return next();
+    if (c.req.path.startsWith("/api/auth/") && c.req.raw.body) {
+      const body = await readBoundedRequestBody(c.req.raw, MAX_AUTH_REQUEST_BODY_BYTES);
+      if (body === null) {
+        return c.json({ error: "Request body is too large", code: "request_too_large", retryable: false }, 413);
+      }
+      c.req.raw = new Request(c.req.raw, { method: c.req.method, body });
+      return next();
+    }
     return limit(c, next);
   });
 }
