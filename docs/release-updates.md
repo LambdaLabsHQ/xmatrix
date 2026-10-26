@@ -1,21 +1,5 @@
 # Release Updates
 
-## Unreleased: Unaddressed messages have an explicit Agent choice
-
-Human speech that the Hub positively confirms has no recipient gets a choice
-under its original message, including named conversations, later messages and
-the welcome conversation. Connecting a computer or reopening the UI does not
-launch it. The author explicitly selects an Agent; this claims the existing
-per-message launch decision and durable summon lane. Missing tracking remains
-unknown. Existing execution failures retain their current notices.
-
-Expand migration 0221 adds unaddressed publication evidence and optional source
-snapshots to launch choices. Source edit/recall/delete, current permissions and
-Channel stop fence late admission. The invocation response adds optional `asks`;
-older clients ignore it and keep the legacy connection reply. No native update
-is required. Rollback uses a CI-validated beta Hub/Web release reverting the
-code; additive schema can remain. See [message asks](architecture/message-asks.md).
-
 ## Unreleased: Migration regressions execute in the PostgreSQL release gate
 
 The Hub release suite now runs the index drift, Machine query plan and online
@@ -63,6 +47,22 @@ prose-only reset hints remain as written. HTTP rate limiting stays distinct,
 and the existing quota hold and automatic handoff are unchanged.
 This needs a beta Hub/Web release, no native update or data migration. Older
 clients ignore the added field. Recovery is a CI-validated beta reverting the change.
+
+## Unreleased: Unaddressed messages have an explicit Agent choice
+
+Human speech that the Hub positively confirms has no recipient gets a choice
+under its original message, including named conversations, later messages and
+the welcome conversation. Connecting a computer or reopening the UI does not
+launch it. The author explicitly selects an Agent; this claims the existing
+per-message launch decision and durable summon lane. Missing tracking remains
+unknown. Existing execution failures retain their current notices.
+
+Expand migration 0221 adds unaddressed publication evidence and optional source
+snapshots to launch choices. Source edit/recall/delete, current permissions and
+Channel stop fence late admission. The invocation response adds optional `asks`;
+older clients ignore it and keep the legacy connection reply. No native update
+is required. Rollback uses a CI-validated beta Hub/Web release reverting the
+code; additive schema can remain. See [message asks](architecture/message-asks.md).
 
 ## Unreleased: Machine reports and enrollment recover a lost database response
 

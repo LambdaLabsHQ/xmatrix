@@ -24,12 +24,6 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
-Unaddressed Human speech has positive, publication-bound evidence and an
-explicit author choice under its original message. It shares the first-message
-launch decision and durable summon coordinator. Missing tracking stays unknown;
-connecting a computer starts no unselected request. See
-[message asks](../architecture/message-asks.md).
-
 Turn-failure cards use the original error as their title for every cause,
 including unknown and historical errors. Hub classifications supply next steps
 without replacing that error. Exhausted provider accounts get reset or handoff
@@ -82,6 +76,12 @@ Page discussions and conversations started from selected message passages use
 the ordinary first-message automatic summon and author choice window. Passage
 discussions are named after the first message's text rather than its quote;
 section discussions keep the section name. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
+
+Unaddressed Human speech has positive, publication-bound evidence and an
+explicit author choice under its original message. It shares the first-message
+launch decision and durable summon coordinator. Missing tracking stays unknown;
+connecting a computer starts no unselected request. See
+[message asks](../architecture/message-asks.md).
 
 Human Space owners/admins can confirm Channel deletion in its actions or
 details. Active work prompts a second confirmation to stop the Channel's
