@@ -9,20 +9,24 @@ import { ProblemCard } from "./problem-card";
 
 /* A turn its Agent could not finish: what the evidence says happened, what to
    do next, and the notice as written folded into Details. */
-export function TurnFailureNotice({ evidence, agent, body, spaceId, token, userId }: {
+export function TurnFailureNotice({ evidence, agent, body, continued = false, spaceId, token, userId }: {
   evidence: AgentFailureEvidence;
   /** The Agent as the Channel names it. */
   agent: string;
   body: string;
+  /** That Agent posted its own later message, so this turn is no longer waiting on a reply. */
+  continued?: boolean;
   spaceId: string | null; token: string | null; userId: string;
 }) {
   const copy = PROBLEM_COPY[useOnboardingLocale(spaceId, token, userId)];
-  const problem = copy.turn[turnProblem(evidence)];
+  const problemKey = turnProblem(evidence);
+  const problem = copy.turn[problemKey];
   return (
     <ProblemCard icon={<AlertTriangle className="size-[18px]" />}
       title={problem.title(agent)}
       explanation={problem.explanation || undefined}
-      stepsLabel={copy.stepsLabel} steps={problem.steps}
+      {...(continued ? { status: { resolved: true, label: copy.turn.continued(agent) } }
+        : { stepsLabel: problemKey === "no_status" ? copy.turn.continueLabel : copy.stepsLabel, steps: problem.steps })}
       detailsLabel={copy.detailsLabel}
       details={<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{body}</pre>} />
   );
