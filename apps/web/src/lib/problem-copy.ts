@@ -70,6 +70,37 @@ const en = {
       ],
     },
   },
+  /* An Agent's turn did not finish (turn-failure-notice.tsx turnProblem). */
+  turn: {
+    rate_limited: {
+      title: (agent: string) => `${agent} was rate limited by its provider`,
+      explanation: "The provider turned down more requests for now (HTTP 429), so this turn didn't finish.",
+      steps: ["Wait a few minutes, then reply to it to continue.",
+        "If its subscription quota is used up, it can continue once the quota resets; in a hurry, hand the work to another agent."],
+    },
+    provider_refused: {
+      title: (agent: string) => `The provider refused ${agent}'s request`,
+      explanation: "The provider answered 401 or 403: usually an expired sign-in, a restricted account, or a network that blocks it.",
+      steps: ["Sign it in again on the computer it runs on.",
+        "If that computer uses a proxy or a company network, make sure it can reach the provider.",
+        "Then reply to it to continue."],
+    },
+    unreachable: {
+      title: (agent: string) => `${agent} couldn't reach its provider`,
+      explanation: "The network between the computer it runs on and its provider failed (a timeout or a dropped connection).",
+      steps: ["Check that computer's network and proxy.", "Then reply to it to continue."],
+    },
+    process_exited: {
+      title: (agent: string) => `${agent}'s program stopped in the middle of the turn`,
+      explanation: "The program running it exited unexpectedly, so this turn didn't finish.",
+      steps: ["Reply to it to try again.", "If it keeps happening, update it on the computer it runs on."],
+    },
+    unknown: {
+      title: (agent: string) => `${agent} couldn't finish this turn`,
+      explanation: "",
+      steps: ["Reply to it to try again."],
+    },
+  },
   relativeTime: (at: string | undefined, now: number) => relativeTime("en", at, now),
 };
 
@@ -127,6 +158,33 @@ const zh: ProblemCopy = {
         "点「重试」，第二次一般就能起来。",
         "如果反复出现，重启电脑后再打开 xMatrix。",
       ],
+    },
+  },
+  turn: {
+    rate_limited: {
+      title: (agent) => `${agent} 被服务商限流了`,
+      explanation: "服务商暂时拒绝了更多请求（HTTP 429），这一轮没有做完。",
+      steps: ["等几分钟，再回复它让它接着做。", "如果是订阅额度用完了，要等额度重置；着急的话换一个 Agent 接手。"],
+    },
+    provider_refused: {
+      title: (agent) => `服务商拒绝了 ${agent} 的请求`,
+      explanation: "服务商返回了 401 或 403：通常是登录过期、账号受限，或者所在的网络被拦截。",
+      steps: ["在运行它的电脑上重新登录。", "如果那台电脑用了代理或公司网络，确认它能访问服务商。", "然后回复它让它接着做。"],
+    },
+    unreachable: {
+      title: (agent) => `${agent} 连不上服务商`,
+      explanation: "运行它的电脑和服务商之间的网络出了问题（超时或连接被断开）。",
+      steps: ["检查那台电脑的网络和代理。", "恢复后回复它让它接着做。"],
+    },
+    process_exited: {
+      title: (agent) => `${agent} 的程序中途退出了`,
+      explanation: "运行它的程序意外退出，这一轮没有做完。",
+      steps: ["回复它重试。", "如果反复出现，在运行它的电脑上更新它。"],
+    },
+    unknown: {
+      title: (agent) => `${agent} 这一轮没有做完`,
+      explanation: "",
+      steps: ["回复它重试。"],
     },
   },
   relativeTime: (at, now) => relativeTime("zh", at, now),

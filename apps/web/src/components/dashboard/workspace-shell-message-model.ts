@@ -102,6 +102,9 @@ export function systemNoticeTone(body: string | undefined): SystemNoticeTone {
   // Launch refusals (machine offline, harness too old or signed out) start
   // nothing and queue nothing.
   if (/^Agent launch failed:/i.test(text)) return "error";
+  // A turn that did not finish draws its own problem card; its Agent did
+  // start, so it is never "couldn't start", whatever its detail says.
+  if (/^xMatrix could not complete this /iu.test(text)) return "fact";
   if (/management overlay unavailable/i.test(text) || /usage limit/i.test(text)) {
     return "error";
   }

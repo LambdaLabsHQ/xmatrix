@@ -288,6 +288,8 @@ import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboa
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
 import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
+import { TurnFailureNotice } from "@/components/dashboard/turn-failure-notice";
+import { turnFailureEvidenceOf } from "@/components/dashboard/turn-failure";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -1833,6 +1835,7 @@ export const MessageRow = memo(function MessageRow({
   const onboardingStage = onboardingStageOf(message.metadata);
   const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
   const offlineNotice = signedOutNotice ? null : machineOfflineNoticeOf(message.metadata);
+  const turnFailure = signedOutNotice ? null : turnFailureEvidenceOf(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
@@ -2656,6 +2659,9 @@ export const MessageRow = memo(function MessageRow({
                 spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
                 onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
                   ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
+            ) : turnFailure ? (
+              <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody}
+                spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
             ) : (

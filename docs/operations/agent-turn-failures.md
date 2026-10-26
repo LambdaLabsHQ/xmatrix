@@ -31,6 +31,16 @@ second notice for the same failure. Background-task interruption and signed-out
 cards retain their existing distinct semantics. Successful turns clear the
 pending failure; intentional cancellation is not converted into failure.
 
+The Web draws a notice that carries `xmatrixFailureEvidence` as a problem card
+(`turn-failure.ts`): HTTP 429 is "rate limited by its provider", 401/403 is
+"the provider refused", a timeout, DNS, TLS or connection category is "couldn't
+reach its provider", a process category is "its program stopped", and anything
+else is "couldn't finish this turn". Only the recorded evidence decides, never
+the prose. Each names what to do next in English or Chinese, and the notice as
+written is folded under Details. A notice without evidence reads as written.
+Because the Agent did start, a turn failure is never badged "couldn't start",
+even when its detail mentions a usage limit.
+
 This is an additive presentation and metadata change, with no new lifecycle wire
 fields or database migration. Old hosts receive the common Hub presentation and
 can expose statuses already present in their error text. Updated native adapters
