@@ -102,7 +102,7 @@ test("an open page re-checks each viewer's access without reading its text, and 
     spaceId: "space", pageId: "page", rehydrated: Promise.resolve(),
     env: { RELAY_POSTGRES_SHARD_ID: "test", RELAY_POSTGRES: { connectionString: "postgresql://localhost/unused" } },
     ctx: { getWebSockets: () => sockets, storage: {
-      get: async () => undefined, getAlarm: async () => null, setAlarm: async () => undefined,
+      get: async () => undefined, delete: async () => false, getAlarm: async () => null, setAlarm: async () => undefined,
     } },
   });
   object.session = object.newSession();
