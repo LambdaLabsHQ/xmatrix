@@ -264,6 +264,8 @@ export class PageLiveSession {
   /** The page; null while it is a new page nobody has written on yet, which exists only here. */
   pageId: string | null;
   private making: Promise<string> | null = null;
+  /** The creation snapshot has not yet received the rest of this document over sync. */
+  private madeHandoffPending = false;
   private retryAt = 0;
   private reached = false;
   /** Left while being made: it closes once what was written since has reached the made page. */
@@ -354,6 +356,7 @@ export class PageLiveSession {
     if (!this.making) {
       this.making = this.input.make!(Y.encodeStateAsUpdate(this.doc)).then(({ pageId, seeded }) => {
         this.pageId = pageId;
+        this.madeHandoffPending = seeded;
         if (this.destroyed) return pageId;
         if (!this.leaving) this.emit({ type: "made", pageId, seeded });
         if (seeded) this.connection.start();
@@ -427,6 +430,7 @@ export class PageLiveSession {
       }
       if (reply) this.send(reply);
       // Its answer to the session's first sync message carries what was written here since the page was made.
+      if (kind === syncProtocol.messageYjsSyncStep1) this.madeHandoffPending = false;
       if (this.leaving && kind === syncProtocol.messageYjsSyncStep1) this.close();
     } else if (type === MESSAGE_AWARENESS) {
       awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
@@ -439,9 +443,10 @@ export class PageLiveSession {
   }
 
   destroy(): void {
-    // A new page left while it is being made still takes what was written after its first write.
-    const making = this.pageId === null ? this.making : null;
-    if (making && !this.leaving) {
+    // Leaving after creation but before its first sync must hand over the later edits too.
+    const making = this.pageId === null || this.madeHandoffPending ? this.making : null;
+    if (making) {
+      if (this.leaving) return;
       this.leaving = true;
       setTimeout(() => this.close(), PAGE_LEAVE_FLUSH_MS);
       making.catch(() => this.close());
