@@ -97,6 +97,9 @@ export function systemNoticeTone(body: string | undefined): SystemNoticeTone {
       ? "warning"
       : "error";
   }
+  // Launch refusals (machine offline, harness too old or signed out) start
+  // nothing and queue nothing.
+  if (/^Agent launch failed:/i.test(text)) return "error";
   if (/management overlay unavailable/i.test(text) || /usage limit/i.test(text)) {
     return "error";
   }
