@@ -22,14 +22,14 @@ function resource(field: string, fields: string, kind: "id" | "team" = "id"): Co
     } };
 }
 
-function listing(field: string, fields: string, options: { filterType?: string; teamField?: string; kind?: "all" | "teamOrAll" } = {}): ConnectorAction {
+function listing(field: string, fields: string, options: { filterType?: string; teamField?: "accessibleTeams"; kind?: "all" | "teamOrAll" } = {}): ConnectorAction {
   return { effect: "read", requires: ["apiKey|oauthToken"],
     parse: statement => linearStatement(statement, options.kind ?? "teamOrAll", LINEAR_PAGE_FIELDS, [], true),
     async execute({ credentials }, input) {
       const data = JSON.parse(input.data!) as Record<string, unknown>;
       const team = { [LINEAR_ID.test(input.target!) ? "id" : "key"]: { eq: input.target } };
-      const filter = input.target === "*" ? {} : options.teamField === "teams"
-        ? { teams: { some: team } } : field === "issueLabels"
+      const filter = input.target === "*" ? {} : options.teamField
+        ? { [options.teamField]: { some: team } } : field === "issueLabels"
           ? { or: [{ team }, { team: { null: true } }] } : { team };
       const result = await linear(credentials, `query($first: Int!, $after: String, $archived: Boolean${options.filterType ? `, $filter: ${options.filterType}` : ""}) {
         ${field}(first: $first, after: $after, includeArchived: $archived${options.filterType ? ", filter: $filter" : ""}) {
@@ -95,7 +95,7 @@ export const LINEAR_RESOURCE_ACTIONS: Record<string, ConnectorAction> = {
   list_labels: listing("issueLabels", "id name description color isGroup team { id key }", { filterType: "IssueLabelFilter" }),
   list_cycles: listing("cycles", "id name number startsAt endsAt completedAt team { id key }", { filterType: "CycleFilter" }),
   read_cycle: resource("cycle", "id name number description startsAt endsAt completedAt progress team { id key }"),
-  list_projects: listing("projects", LINEAR_PROJECT_FIELDS, { filterType: "ProjectFilter", teamField: "teams" }),
+  list_projects: listing("projects", LINEAR_PROJECT_FIELDS, { filterType: "ProjectFilter", teamField: "accessibleTeams" }),
   list_project_statuses: listing("projectStatuses", "id name type team { id key }", { kind: "all" }),
   read_project: resource("project", `${LINEAR_PROJECT_FIELDS} content`),
   search_issues: issueList(),
