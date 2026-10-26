@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Workspace refresh rejections identify the receiving build
+
+Rejected workspace refreshes retain a fixed validation stage, a known resource
+kind and the receiving Worker version in the publisher's existing error report.
+They never echo event contents or identities. This distinguishes protocol
+rejection from envelope, watermark and recipient failures for HUB-AK; its
+original rejection is not reproduced and remains under investigation. Valid
+refresh delivery and rejection behavior are unchanged. Recovery is a
+CI-validated beta release reverting these diagnostics; no migration is needed.
+
 ## Unreleased: Escape closes the focused attachment preview
 
 Markdown and video previews close on Escape even when their own controls have
