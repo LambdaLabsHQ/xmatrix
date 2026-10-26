@@ -115,6 +115,9 @@ try {
     "packages/db/test/agent-registration-revocation-postgres.test.mjs",
     "packages/db/test/first-message-launch-choice-postgres.test.mjs",
     "packages/db/test/legacy-hostname-retirement-postgres.test.mjs",
+    // Schema drift, Machine query plans and online migration recovery need real PostgreSQL.
+    "packages/db/test/migration-index-drift-postgres.test.mjs",
+    "packages/db/test/release-migrations-postgres.test.mjs",
     "packages/db/test/machine-harness-inventory-postgres.test.mjs",
     "packages/db/test/agent-registration-control-postgres.test.mjs",
     "packages/db/test/secret-request-postgres.test.mjs",
