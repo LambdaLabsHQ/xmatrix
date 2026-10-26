@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { readChannelInvocations } from "@/components/dashboard/channel-invocations";
 import { InvocationAccessError } from "@/components/dashboard/mention-invocation-query";
 import {
-  InvocationPopoverGroup, MentionInvocationChip, MentionInvocationRejectionChip, MentionSummonSent,
+  InvocationPopoverGroup, MentionInstanceCallChip, MentionInvocationChip, MentionInvocationRejectionChip, MentionSummonSent,
 } from "@/components/dashboard/mention-invocation-chip";
 import { widgetPortals } from "./page-widget-portals";
 import type { PageSummon } from "./page-summon-store";
@@ -44,6 +44,11 @@ function SummonChip({ summon, token }: { summon: PageSummon; token: string }) {
     retry: false,
     queryFn: ({ signal }) => readChannelInvocations(conversationId!, token, [messageId!], signal),
   });
+  // A live Instance called by name starts nothing: its chip is whether it took the message.
+  if (summon.instance) {
+    return <MentionInstanceCallChip name={summon.harness} harness={summon.harness.split(":")[0]!}
+      execution={records.data?.executions?.[0]} failure={summon.failure} />;
+  }
   const launch = records.data?.launches[0];
   if (launch) {
     return <MentionInvocationChip label={summon.harness} launch={launch} shared={false}

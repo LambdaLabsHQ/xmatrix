@@ -43,6 +43,7 @@ import {
 } from "./page-editor-setup";
 import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
 import type { WriteAgent } from "./page-write-with";
+import type { PageInstance } from "./page-instances";
 import {
   currentSuggestionTop, leaveSuggestion, pageSuggestions, showSuggestions, stepSuggestion, suggestionsKey,
   takeSuggestion, type PageSuggestion, type SuggestionsReport,
@@ -155,6 +156,8 @@ export interface PageCompletion {
   pages: readonly PageSummary[];
   channels: readonly ChannelReference[];
   agents: readonly WriteAgent[];
+  /** The live Instances already at work on the Space's pages, which an `@` calls by name instead of starting one. */
+  instances: readonly PageInstance[];
   /** A page's title and markdown, for its sections after `[[page#`. */
   readPage: (pageId: string) => Promise<{ pageId: string; title: string; body: string }>;
   /**
@@ -162,6 +165,8 @@ export interface PageCompletion {
    * where the `@` is, as a Yjs relative position, so the `@` can show how the call goes.
    */
   summonAgent: (harness: string, blockId: string, at: unknown) => void;
+  /** `@` picked a live Instance: it is told in its own conversation to co-write the page from where it was mentioned. */
+  summonInstance: (instance: PageInstance, blockId: string, at: unknown) => void;
 }
 
 /** What takes down the chip drawn into a summoned `@`'s widget. */
@@ -206,10 +211,23 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
       .map((candidate) => referenceItem(trigger, candidate)) : [];
   }
   const wanted = trigger.query.toLowerCase();
-  return completion.agents.filter((agent) => agent.harness.toLowerCase().includes(wanted))
-    .sort((a, b) => Number(!a.harness.toLowerCase().startsWith(wanted)) - Number(!b.harness.toLowerCase().startsWith(wanted)))
-    .map((agent) => ({
-      key: agent.harness, label: agent.harness, hint: "Agent",
+  const matching = <Item,>(items: readonly Item[], name: (item: Item) => string) =>
+    items.filter((item) => name(item).toLowerCase().includes(wanted))
+      .sort((a, b) => Number(!name(a).toLowerCase().startsWith(wanted)) - Number(!name(b).toLowerCase().startsWith(wanted)));
+  // An Instance already at work comes first: calling it keeps its context, where a harness starts a new one.
+  const instances = matching(completion.instances, (instance) => instance.name).map((instance): MenuItem => ({
+    key: `instance:${instance.name}`, label: instance.name, hint: instance.where,
+    icon: <Face of={{ kind: "agent", name: instance.name, harness: instance.harness }} size="xs" shape="circle" glass={false}
+      className="pointer-events-none rounded-full" />,
+    run: (view) => {
+      const blockId = pageDocBlockAt(view.state.doc, trigger.from);
+      insertReference(trigger, `@${instance.name}`)(view.state, view.dispatch, view);
+      completion.summonInstance(instance, blockId, sharedPosition(view.state, fragment, trigger.from));
+    },
+  }));
+  return [...instances, ...matching(completion.agents, (agent) => agent.harness)
+    .map((agent): MenuItem => ({
+      key: agent.harness, label: agent.harness, hint: completion.instances.length ? "New Instance" : "Agent",
       icon: <Face of={{ kind: "agent", name: agent.harness, harness: agent.harness }} size="xs" shape="circle" glass={false}
         className="pointer-events-none rounded-full" />,
       // The mention stays in the page, and calls the Agent to co-write from there.
@@ -218,7 +236,7 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
         insertReference(trigger, `@${agent.harness}`)(view.state, view.dispatch, view);
         completion.summonAgent(agent.harness, blockId, sharedPosition(view.state, fragment, trigger.from));
       },
-    }));
+    }))];
 }
 
 /** The page `[[page#` names: the best match for what was typed before the `#`. */

@@ -62,6 +62,7 @@ import {
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { commentBody, commentCall, commentTaker } from "./page-comment";
+import { instanceCall, pageInstances, type PageInstance } from "./page-instances";
 import type { ConversationCall } from "@/components/dashboard/page-shell-actions";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
@@ -540,7 +541,7 @@ type PageDialogState =
 
 const NO_MEMBERS: readonly SpaceMember[] = [];
 
-export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
+export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, onSend, activeConversationId = null,
   renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation,
   onConversationIntent, onDiscuss, canMigrate, layout = "desktop", focusSection = null, onReturnToMessage,
   creation, members = NO_MEMBERS }: {
@@ -556,6 +557,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onPageDeleted: () => void;
   /** What this client knows live about a conversation: the channel it holds, when it holds it. */
   conversation: (conversationId: string) => ChannelSnapshot | null;
+  /** Sends a message in a conversation as its composer does; answers its stored id, or null when it was not confirmed. */
+  onSend: (channel: ChannelSnapshot, body: string) => Promise<string | null>;
   /** The conversation open beside the page: in the margin at what it is about, or docked when there is no room. */
   activeConversationId?: string | null;
   /** The open conversation itself, the product's one conversation surface, for where the page shows it. */
@@ -1213,14 +1216,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
   const coWriteRef = useRef<((harness: string, blockId: string | null, summon?: PageSummon) => Promise<void>) | null>(null);
+  const callInstanceRef = useRef<((instance: PageInstance, blockId: string | null, summon: PageSummon) => Promise<void>) | null>(null);
   // The `@`s this reader called Agents with on the page, each showing how its call goes.
   const { summons, add: addSummon, update: updateSummon } = usePageSummons();
   const pageSummons = useMemo<PageSummons>(() => ({ list: summons.filter((summon) => summon.pageId === page?.pageId), token }),
     [page?.pageId, summons, token]);
   // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` calls the Agent to the page.
   const referenceCatalog = useMessageReferenceCatalog();
+  // The Instances already at work on the Space's pages, which an `@` calls by name rather than starting another.
+  const instances = useMemo(() => pageInstances(pageAgents.data?.agents ?? new Map(), page?.pageId ?? null,
+    (id) => tree.data?.find((item) => item.pageId === id)?.title ?? null, (id) => Boolean(conversation(id))),
+  [conversation, page?.pageId, pageAgents.data, tree.data]);
   const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
-    spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents,
+    spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents, instances,
     readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
     summonAgent: (harness, blockId, at) => {
       if (!page) return;
@@ -1229,7 +1237,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       addSummon(summon);
       void coWriteRef.current?.(harness, blockId || null, summon);
     },
-  } : undefined, [addSummon, page, queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId, writers.agents]);
+    summonInstance: (instance, blockId, at) => {
+      if (!page) return;
+      const summon: PageSummon = { id: crypto.randomUUID(), pageId: page.pageId, harness: instance.name, at,
+        conversationId: instance.conversationId, messageId: null, failure: null, instance: true };
+      addSummon(summon);
+      void callInstanceRef.current?.(instance, blockId || null, summon);
+    },
+  } : undefined, [addSummon, instances, page, queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId,
+    writers.agents]);
   useEffect(() => {
     if (!page || !canEdit || !coWriteRef.current) return;
     const harness = takeCoWriteRequest(page.pageId);
@@ -1354,6 +1370,32 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     }
   };
   coWriteRef.current = coWrite;
+  // An `@` naming a live Instance calls that very Instance: its conversation co-writes the page, as a new one would,
+  // and it is told there, by name, where it was mentioned. No conversation or Instance is started for it.
+  const callInstance = async (instance: PageInstance, blockId: string | null, summon: PageSummon) => {
+    const home = conversation(instance.conversationId);
+    if (!page || !spaceId || !home) {
+      updateSummon(summon.id, { failure: "Its conversation is no longer open to you. Mention the Agent again." });
+      return;
+    }
+    coWriting();
+    try {
+      const writing = pending && session ? await session.make() : page.pageId;
+      if (writing !== summon.pageId) updateSummon(summon.id, { pageId: writing });
+      await pageApi.link(spaceId, token, { conversationId: instance.conversationId, pageId: writing,
+        ...(blockId ? { blockId } : {}) });
+      await pageApi.startCoWriting(spaceId, writing, token, instance.conversationId);
+      const messageId = await onSend(home, instanceCall(instance, pageReferenceToken(writing, blockId)));
+      updateSummon(summon.id, messageId ? { messageId }
+        : { failure: "The call was not sent. Its conversation can send it again." });
+      if (messageId) setCalled({ pageId: writing, harness: instance.name, conversationId: instance.conversationId, blockId,
+        at: Date.now() });
+      void links.refetch();
+    } catch (cause) {
+      updateSummon(summon.id, { failure: userErrorMessage(cause, "Couldn't start the Agent") ?? "Couldn't start the Agent" });
+    }
+  };
+  callInstanceRef.current = callInstance;
   const openHistory = () => {
     reading.current?.seeAll();
     if (headRevision !== null) markSeen(headRevision, null);

@@ -389,6 +389,27 @@ export function MentionSummonSent({ name, failure }: { name: string; failure: st
     subtitle={failure ? "No new process was started" : "Selected machine"} view={view} />;
 }
 
+/**
+ * An `@` that called a live Instance by name, in its own conversation: nothing starts, so the chip says whether the
+ * Instance took the message, from its execution of it.
+ */
+export function MentionInstanceCallChip({ name, harness, execution, failure }: {
+  name: string; harness: string; execution?: SerializedAgentMessageExecution; failure: string | null;
+}) {
+  const failed = failure ?? (execution && (execution.state === "failed" || execution.state === "interrupted")
+    ? "Its turn on this did not finish. Its conversation says why." : null);
+  const view: InvocationView = failed
+    ? { ...invocationChipStatus("Failed", failed), terminal: true,
+      steps: [{ label: "Message sent", state: failure ? "failed" : "done" }] }
+    : execution
+      ? { ...invocationChipStatus("Started", `${name} took it in its conversation.`), terminal: true,
+        steps: [{ label: "Message sent", state: "done" }, { label: "Taken by the Instance", state: "done", at: execution.startedAt }] }
+      : { ...invocationChipStatus("Starting", `Telling ${name} in its conversation.`, true), terminal: false,
+        steps: [{ label: "Message sent", status: "Sending", state: "current" }] };
+  return <InvocationChip label={name} name={name} face={{ kind: "agent", name, harness }} sourceAddress={`@${name}`}
+    subtitle="Live Instance" view={view} />;
+}
+
 function InvocationChip({ label, labelContent, announcement, name, instanceOrdinal, destinationName, face, sourceAddress, subtitle, invocationId, errorCode,
   diagnosticId, view, lead, context, details, onRetry, variant, jev }: {
   /** A handoff draws both Agents in its label, so it has no leading avatar. */

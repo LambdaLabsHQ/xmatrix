@@ -383,7 +383,12 @@ fact is about.
   in the text, like everything picked, and calls the Agent into co-writing
   as the face tap does, except that its one message is only
   `@<name> launch:force page:<id>#<section>`: nothing tells it what to write
-  (decided by Daniel 2026-10-21). `#` opening a paragraph is the heading being typed.
+  (decided by Daniel 2026-10-21). The menu lists first the live Instances
+  already at work on the Space's pages (`claude:2`, this page's first, beside
+  where each works): picking one starts no conversation or Instance; its own
+  conversation is linked to the page and co-writes it, and it is told there
+  `@claude:2 page:<id>#<section>` (decided by Daniel 2026-10-26). The harnesses
+  follow, each a new Instance. `#` opening a paragraph is the heading being typed.
 - **Co-writing is live, as with a person** (decided 2026-10-15). A person
   starts an Agent writing the page from the page itself, typing nothing: one
   tap on the face of the Agent to write with. The Agent is then on the page

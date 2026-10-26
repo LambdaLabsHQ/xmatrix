@@ -308,6 +308,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     navigateToChannel,
     copyChannelLink,
     startPageConversation,
+    sendInConversation,
     openPage,
     closePage,
     openPageConversation,
@@ -1314,7 +1315,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const pagesViewSurface = (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId} creation={pageCreation}
       members={currentSpace?.members}
-      onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}
+      onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} onSend={sendInConversation} focusSection={pageSectionRequest}
       onReturnToMessage={(from) => navigateToChannel(from.channelId, from.messageId)}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>

@@ -18,6 +18,8 @@ export interface PageSummon {
   messageId: string | null;
   /** Why the call did not go out. */
   failure: string | null;
+  /** It called a live Instance by name, in its own conversation, rather than starting one. */
+  instance?: boolean;
 }
 
 const STORAGE_KEY = "xmatrix.page-summons";
