@@ -100,7 +100,7 @@ export function githubPullRequestEventMessage(input: {
     // A GitHub App login (`name[bot]`) restates the merge receipt in GitHub's
     // notification voice. The receipt already named the action; this line uses
     // that voice and adds the title. A person is still named.
-    const headline = /\[bot\]$/u.test(actor)
+    const headline = actor.endsWith("[bot]")
       ? `${verb === "merged" ? "Merged" : "Closed"} ${link}`
       : `${actor} ${verb} pull request ${link}`;
     return title ? `${headline}: ${title}` : headline;
