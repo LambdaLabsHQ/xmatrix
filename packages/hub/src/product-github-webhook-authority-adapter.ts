@@ -49,24 +49,18 @@ function errorText(error: unknown): string {
  */
 async function readSettledCheckVerdict(read: () => Promise<GitHubCommitCheckVerdict>,
   delivery: string): Promise<GitHubCommitCheckVerdict | undefined> {
-  try {
-    return await read();
-  } catch (error) {
-    if (!githubApiOutage(error)) {
-      console.error("GitHub check verdict failed", { delivery, error: errorText(error) });
-      return undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      if (!githubApiOutage(error)) {
+        console.error("GitHub check verdict failed", { delivery, error: errorText(error) });
+        return undefined;
+      }
     }
   }
-  try {
-    return await read();
-  } catch (error) {
-    if (!githubApiOutage(error)) {
-      console.error("GitHub check verdict failed", { delivery, error: errorText(error) });
-      return undefined;
-    }
-    throw new ServiceUnavailable("github_check_verdict_unavailable",
-      "GitHub could not be read; the delivery will be retried");
-  }
+  throw new ServiceUnavailable("github_check_verdict_unavailable",
+    "GitHub could not be read; the delivery will be retried");
 }
 
 export interface ProductGitHubWebhookDependencies {
