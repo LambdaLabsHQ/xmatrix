@@ -83,7 +83,10 @@ test("activity folds per run, anyone else's entry breaks the run, and talk stays
   // finding after stay whole; its pull request starts a new run that codex:2 ends.
   await expect(folds.nth(0)).toContainText("claude:1");
   await expect(folds.nth(0)).toContainText("✓ e2e regression 191/191");
-  await expect(folds.nth(1)).toContainText("↗ LambdaLabsHQ/xmatrix#3043");
+  await expect(folds.nth(1).getByRole("link", { name: "LambdaLabsHQ/xmatrix#3043" }))
+    .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/xmatrix/pull/3043");
+  // A lone pull request says everything on its line, so it has nothing to open.
+  await expect(folds.nth(1).getByRole("button")).toHaveCount(0);
   await expect(folds.nth(2)).toContainText("codex:2");
   await expect(folds.nth(3)).toContainText("→ Web");
   await expect(page.getByText("The two db cross-space failures fail on main too")).toBeVisible();
