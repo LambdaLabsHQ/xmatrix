@@ -5,7 +5,8 @@
 Co-writing notices in page margin cards, conversation rows and other compact
 previews display current Page titles instead of `page:<id>` locators. Missing
 context, unavailable references and truncated locators use generic labels;
-message reference chips also stop falling back to raw IDs. A Web lint rule
+message reference chips also stop falling back to raw IDs. References to an
+unnamed Channel use a generic label rather than a fragment of its ID. A Web lint rule
 rejects direct Page ID text/labels and DOM text assignments, including local
 aliases and string formatting. Dynamic preview contents pass through the shared
 reference renderer. Routing, stored messages and Agent instructions are unchanged.

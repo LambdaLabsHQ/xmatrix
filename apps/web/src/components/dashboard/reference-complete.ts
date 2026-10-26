@@ -106,7 +106,7 @@ export function sectionReferenceCandidates(page: { pageId: string; title: string
 }
 
 export function channelLabel(channel: Pick<ChannelSnapshot, "name" | "id">): string {
-  return (channel.name || channel.id.slice(0, 10)).replace(/^#/u, "");
+  return channel.name?.replace(/^#/u, "").trim() || "Channel";
 }
 
 /** What the draft shows for a picked reference, and the token the message carries for it. */
