@@ -56,3 +56,29 @@ test("attachments restored from the durable tail cache after a restart still loa
   assert.equal(identity({ ...live, objectKey: `objects/${"b".repeat(64)}` }), undefined);
   assert.equal(identity({ ...live, contentHash: undefined, objectKey: undefined }), undefined);
 });
+
+// Receiver hydration already retained its Blob. This exercises the sender's
+// actual upload result against the same reader, with the browser's CSP boundary.
+test("a just-uploaded Markdown file opens without fetching its object URL", async () => {
+  const { evaluateExtractedSource } = require("./workspace-shell-source-fixture.cjs");
+  const modules = loadWorkspaceShellModuleMap(__dirname);
+  const uploadSource = extractFunctionFromShellModules(modules, "uploadChannelAttachment").source;
+  const readSource = extractFunctionFromShellModules(modules, "loadAttachmentBlob").source;
+  const { uploadChannelAttachment, loadAttachmentBlob } = evaluateExtractedSource(
+    `${uploadSource}\n${readSource}`,
+    {
+      attachmentMimeTypeForFile: file => file.type,
+      channelAttachmentKindForFile: () => "markdown",
+      prepareMessageAttachmentUpload: async () => ({ attachmentId: "qa-upload", name: "qa.md" }),
+      attachmentFetchHref: attachment => attachment.url,
+      xmatrixRawResponse: async () => { throw new TypeError("CSP blocks blob: fetch"); },
+    },
+  );
+  const file = new File(["# QA upload\n\nImmediate preview."], "qa.md", { type: "text/markdown" });
+  const attachment = await uploadChannelAttachment("space-qa", "token-qa", file);
+  try {
+    assert.equal(await (await loadAttachmentBlob(attachment)).text(), await file.text());
+  } finally {
+    URL.revokeObjectURL(attachment.url);
+  }
+});

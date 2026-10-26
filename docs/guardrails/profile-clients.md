@@ -74,6 +74,10 @@ coverage is in `apps/web/src/lib/markdown-plugins.test.cjs`.
 Attachment commits share one completion for new and reused owner references,
 including concurrent uploads and directory repair. See [blob reference commits](../operations/blob-ref-commit.md).
 
+Uploaded files and pending message previews retain their browser-local Blob,
+so Markdown and clipboard readers do not fetch a CSP-blocked object URL.
+Wire bindings and the durable tail cache exclude these local bytes.
+
 The shared timeline plays video and audio attachments using native HTML media
 controls, backed by Chromium in Electron. Generic MIME attachments use known
 media filename extensions for presentation; specific MIME metadata takes

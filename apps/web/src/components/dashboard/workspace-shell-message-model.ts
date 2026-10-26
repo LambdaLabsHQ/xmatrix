@@ -45,6 +45,8 @@ export type ComposerSendSnapshot = {
 /** Channel attachment with optional in-flight Relay V2 upload binding. */
 export type ComposerChannelAttachment = ChannelAttachment & {
   relayV2Upload?: PreparedMessageAttachmentUpload;
+  /** Bytes behind the local object URL; CSP disallows fetching that URL. */
+  localMediaBlob?: Blob;
   /** Browser-local source retained while this draft can switch upload quality. */
   sourceMedia?: { file: File; original: boolean };
 };
@@ -320,4 +322,3 @@ export function replyPreviewSequence(sequence: number | undefined): { sequence?:
     ? { sequence }
     : {};
 }
-
