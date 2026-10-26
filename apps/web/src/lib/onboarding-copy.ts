@@ -18,7 +18,7 @@ const en = {
   agentToInstall: "Agent to install",
   bringAgents: "Bring your agents into xMatrix. They keep running on your own computer, and xMatrix connects them to your conversations and pages.",
   /** Above Bring them in, in reply to a first message no agent could answer. */
-  unanswered: "No agent can answer this yet. Bring one in from your computer, then ask it under your message.",
+  unanswered: "No agent can answer this yet. Bring one in from your computer, then mention it with your question.",
   nobodyAsked: "No Agent was asked",
   askAgent: "Ask an Agent",
   noAvailableAgent: "Your Agents aren't available for new work. Open Agents to check their setup.",
@@ -168,7 +168,7 @@ const zh: OnboardingCopy = {
   period: "。",
   agentToInstall: "要安装的 Agent",
   bringAgents: "把你的 Agent 带进 xMatrix。它们照常在你自己的电脑上运行，xMatrix 把它们接到你的对话和页面里。",
-  unanswered: "这条消息还没有 Agent 能回。先把电脑上的 Agent 带进来，再在原消息下选择它。",
+  unanswered: "这条消息还没有 Agent 能回。先把电脑上的 Agent 带进来，再用 @ 点名它并带上问题。",
   nobodyAsked: "这条消息还没有问 Agent",
   askAgent: "问一个 Agent",
   noAvailableAgent: "你的 Agent 暂时无法接新任务。打开 Agents 查看它们的配置。",
