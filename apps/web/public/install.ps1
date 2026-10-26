@@ -105,6 +105,36 @@ function Stop-XMatrixDaemonProcesses {
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+# A running xmatrix.exe (an Agent's CLI, or a daemon that is still exiting)
+# cannot be overwritten or deleted, but it can be renamed. Move it aside to a
+# unique name, put the new binary in place, and delete aside copies once
+# nothing runs them: on this install if possible, otherwise on a later one.
+function Install-XMatrixBinary {
+  param(
+    [string]$SourcePath,
+    [string]$InstallPath
+  )
+
+  $asidePrefix = (Split-Path -Leaf $InstallPath) + ".old-"
+  Get-ChildItem -LiteralPath (Split-Path -Parent $InstallPath) -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name.StartsWith($asidePrefix, [System.StringComparison]::OrdinalIgnoreCase) } |
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+
+  if (-not (Test-Path -LiteralPath $InstallPath)) {
+    [System.IO.File]::Move($SourcePath, $InstallPath)
+    return
+  }
+  $asidePath = $InstallPath + ".old-" + [System.Guid]::NewGuid().ToString("N")
+  [System.IO.File]::Move($InstallPath, $asidePath)
+  try {
+    [System.IO.File]::Move($SourcePath, $InstallPath)
+  } catch {
+    [System.IO.File]::Move($asidePath, $InstallPath)
+    throw
+  }
+  Remove-Item -LiteralPath $asidePath -Force -ErrorAction SilentlyContinue
+}
+
 function Test-DaemonTaskStartup {
   param(
     [string]$DaemonPath,
@@ -363,13 +393,7 @@ try {
   Stop-ScheduledTask -TaskName "xmatrix-daemon" -ErrorAction SilentlyContinue
   Stop-ScheduledTask -TaskName "xMatrix Daemon" -ErrorAction SilentlyContinue
   Stop-XMatrixDaemonProcesses
-  if (Test-Path -LiteralPath $InstallPath) {
-    $installBackupPath = $InstallPath + ".bak-" + [System.Guid]::NewGuid().ToString("N")
-    [System.IO.File]::Replace($TempBinary, $InstallPath, $installBackupPath, $true)
-    Remove-Item -Force -LiteralPath $installBackupPath -ErrorAction SilentlyContinue
-  } else {
-    [System.IO.File]::Move($TempBinary, $InstallPath)
-  }
+  Install-XMatrixBinary -SourcePath $TempBinary -InstallPath $InstallPath
   $ShimPath = Install-PowerShellShim -InstallDir $InstallDir -BinName $BinName
   Mark-Done 1
 
