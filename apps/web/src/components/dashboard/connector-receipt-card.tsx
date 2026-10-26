@@ -5,6 +5,7 @@ import { Ban, CircleCheck, CircleMinus, CircleX, Clock, Lock } from "lucide-reac
 import type { ConnectorReceiptEntry, ConnectorReceiptStatus } from "@xmatrix/protocol";
 import { statusInkClass, type StatusTone } from "@/components/ui/status-tone";
 import { RichMessageContent } from "./workspace-shell-rich-message";
+import { PrivateConnectorResult } from "./private-connector-result";
 
 const OUTCOMES: Record<ConnectorReceiptStatus, { label: string; tone: StatusTone; Icon: typeof CircleCheck }> = {
   completed: { label: "Completed", tone: "settled", Icon: CircleCheck },
@@ -17,11 +18,12 @@ const OUTCOMES: Record<ConnectorReceiptStatus, { label: string; tone: StatusTone
 
 /**
  * What an App answered a connector command with, drawn as a tool call's result rather than as prose: per
- * statement, what ran and how it ended, then what it returned. A private call's result went only to its caller,
- * so the card says that instead of showing a mask.
+ * statement, what ran and how it ended, then what it returned. Private results have a separate owner view;
+ * a legacy call with no retained original stays caller-only.
  */
-export function ConnectorReceiptCard({ entries, collapsed = false, components }: {
+export function ConnectorReceiptCard({ entries, collapsed = false, components, privateResult }: {
   entries: readonly ConnectorReceiptEntry[];
+  privateResult?: { channelId: string; messageId: string; ownerUserId: string; token: string | null };
   /** A long receipt folds its results, as a long message folds its text, under the row's "Show more". */
   collapsed?: boolean;
   components: Components;
@@ -39,7 +41,7 @@ export function ConnectorReceiptCard({ entries, collapsed = false, components }:
                 {outcome && <span className={statusInkClass(outcome.tone, "app-connector-receipt-status")}>{outcome.label}</span>}
               </p>
             )}
-            {entry.private ? (
+            {entry.private && privateResult ? <PrivateConnectorResult {...privateResult} /> : entry.private ? (
               <p className="app-connector-receipt-private">
                 <Lock aria-hidden="true" />
                 Private result: only the caller received it

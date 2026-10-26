@@ -58,7 +58,7 @@ use the connector registry. The later sections define provider-specific bounds.
 | --- | --- | --- |
 | Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and default policies are shared with clients |
 | Executor | `ConnectorProvider` and `platform-providers.ts` | Provider-owned parse/prepare/execute, authenticated Check and bounded outbound HTTP |
-| Commands | `connector-commands.ts`, `connectors/usage.ts` | Channel commands publish their receipts; `xmatrix call --public` records normal read results; `--private` keeps the invocation visible and masks only the Channel/history result, returning the original to its caller. Discover actions with `xmatrix connector list` |
+| Commands | `connector-commands.ts`, `connectors/usage.ts` | Channel commands publish their receipts; `xmatrix call --public` records normal read results; `--private` keeps the invocation visible and masks only the Channel/history result, returning the original to its caller and retaining a protected 30-day Web view for its Human owner. Discover actions with `xmatrix connector list` |
 | Policy and approval | Scoped connector repositories and approval routes | Channel allow/ask/disallow, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
 | Credentials | Encrypted connector credential repository | Per-Space provider grants; company app secrets remain Hub-held, and OAuth refresh failures do not become wider grants |
 | Inbound | Generic event ingress plus provider-specific native routes | Authenticated deliveries normalize to typed source/event identities and route through explicit subscriptions |
@@ -496,7 +496,28 @@ results, URLs and failure details are replaced with a fixed `[hidden — private
 call]` mask **before** either Channel publication or execution-history writes.
 There is no hidden original in message metadata, attachments or the execution
 record. The original result or provider error returns directly to the caller.
+Its Human owner also sees the protected original in the Web by default; other
+Channel members, administrators and Agent Runs continue to see the mask.
 Synchronous receipts do not wake the caller a second time.
+
+Owner views use the existing restricted immutable content boundary: a
+`connector_result` ref belongs to the receipt message in the authenticated Run
+owner’s `channel-user:` scope. Shared metadata names only that owner, never the
+original, an object key or a download capability. The dedicated Human-only
+`GET /api/channels/:channelId/messages/:messageId/connector-result` reader proves
+current Channel access, the original scope owner, the live App receipt, and the
+30-day read window at the content authority. It verifies the immutable bytes
+and repeats authorization before returning them. A recalled/deleted receipt or
+revoked Channel access stops new reads. Other Agent Runs, including the owner’s,
+cannot collect an original through this endpoint or generic blob routes.
+
+Retention reuses the Space’s existing private-record clock and fenced content
+collector. The new purpose and ref kind participate in its 30-day logical expiry,
+31-day GC/PITR safety windows, abandoned-upload recovery and Space/Channel
+cleanup. Uploads and business refs remain server-authored. Values are rendered
+as text outside shared quote/passage actions and Markdown media; they never
+replace the shared message model or search/preview body. No historical
+backfill is possible for older calls whose originals were never stored.
 
 `POST /api/connectors/call` accepts `{ command, resultVisibility: "public" |
 "private" }`. The Run token owns the Channel, Instance and author; the owning

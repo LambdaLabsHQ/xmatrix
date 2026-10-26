@@ -25,7 +25,8 @@ test("execution submission cannot supply Machine authority or broaden its comman
 
 test("execution acknowledgement uses PostgreSQL without requiring a new connection epoch or mutating Run state", async () => {
   const calls = [];
-  const database = { cacheMode: "disabled", async transaction(_context, callback) {
+  const database = { cacheMode: "disabled", openSession() { return this; }, async close() {},
+    async transaction(_context, callback) {
     return callback({ async query(query) {
       calls.push(query);
       if (query.name === "channel_space_directory_resolve_v2") return [{ channel_id: "channel", space_id: "space",

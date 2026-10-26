@@ -1,6 +1,7 @@
 import { storeScopedCommandReplay } from "./command-replay.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import type { QueryResultRow } from "pg";
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import {
   ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
@@ -359,7 +360,7 @@ export class PostgresMachineControlRepository {
     const ownerEmail = text(input.ownerEmail, "ownerEmail", 320);
     const machineId = text(input.machineId, "machineId", 160);
     const observation = input.hostname ?? input.hostId;
-    let hostId = observation === undefined || observation === "" ? "" : text(observation, "hostname", 160);
+    const observedHostId = observation === undefined || observation === "" ? "" : text(observation, "hostname", 160);
     const daemonId = text(input.daemonId, "daemonId", 700);
     const principal = record(input.principal, "principal");
     const hostDerived = HOST_DERIVED_MACHINE_ID.test(machineId);
@@ -382,8 +383,10 @@ export class PostgresMachineControlRepository {
     const at = new Date().toISOString();
     const replayable = storesReplay(action, input, payload);
     const requestDigest = replayable ? await digest(input) : "";
-    return this.database.transaction({ requestId: commandId,
+    // All effects here are transactional; socket wakes happen after this returns.
+    return retryTransactionBeforeCommit(this.database, { requestId: commandId,
       operation: `machine-control.${action}` }, async (tx) => {
+      let hostId = observedHostId;
       await tx.query({ name: "machine_control_scope_lock_v2",
         text: "SELECT pg_advisory_xact_lock(hashtextextended('machine-control:'||$1||':'||$2,0))",
         values: [ownerUserId, machineId], maxRows: 1 });

@@ -5,7 +5,7 @@ import type { CliCommand } from "./cli-commands";
 export const CONNECTOR_CALL_COMMAND: CliCommand = {
   path: ["call"], about: "Call a connected app read action with public or private results",
   positionals: [{ name: "command", help: 'A quoted connector command, e.g. "@gmail:read:<message id>". The invocation and parameters are visible in the Channel in both modes.' }],
-  options: [{ name: "private", kind: "flag", help: "Mask the Channel result; only this caller receives its original value" },
+  options: [{ name: "private", kind: "flag", help: "Mask the shared result; the calling Agent and its Human owner can read the original" },
     { name: "public", kind: "flag", help: "Publish the result normally in the Channel" },
     { name: "json", kind: "flag", help: "Print the caller's original result as JSON" }],
   async run(call, { positionals, options }) {

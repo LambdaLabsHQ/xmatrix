@@ -25,6 +25,7 @@ import { commitRuntime, RuntimeControlError } from "./runtime-control.js";
 import { resumableChannelRun, runEndRestState, type InstanceRestState } from "./instance-rest-state.js";
 import { releaseDeclaredWaits } from "./channel-stop-fence.js";
 import { commandFields } from "./command-fields.js";
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 
 /** A Run's name is its Space registration's display name. */
 const registrationNameJoinSql = (spaceParam: string) => `LEFT JOIN data.run_agent_registrations binding
@@ -265,12 +266,13 @@ export class PostgresMachineLifecycleRepository {
     const at = new Date().toISOString();
     const requestDigest = await digest(input);
     const placement = await this.placement(commandId, channelId);
-    if (eventType === "machine_execution_report") return this.database.transaction({ requestId: commandId,
+    if (eventType === "machine_execution_report") return retryTransactionBeforeCommit(this.database, { requestId: commandId,
       operation: "runtime.execution-report", placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch } }, tx => acknowledgeMachineExecution(tx, {
       spaceId: placement.spaceId, channelId, ownerUserId, machineId, hostId, payload, at,
     }));
-    const value = await this.database.transaction({ requestId: commandId,
+    // Route publication and notices stay outside this database-only replay boundary.
+    const value = await retryTransactionBeforeCommit(this.database, { requestId: commandId,
       operation: `runtime.machine-lifecycle.${eventType}`,
       placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch } }, async (tx) => {
