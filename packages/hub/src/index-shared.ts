@@ -420,7 +420,7 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && path === HUB_ROUTES.run_secrets) return true;
   // Ask a Space admin, on a card in its Channel, for a secret it may not read yet.
   if (request.method === "POST" && path === HUB_ROUTES.secret_requests) return true;
-  // Its Channel's connected apps and their commands; acting is sending one.
+  // Its Channel's connected apps and their commands.
   if (request.method === "GET" && path === HUB_ROUTES.connector_usage) return true;
   // Private connector reads are scoped to the live requesting Run's own Channel.
   if (request.method === "POST" && path === HUB_ROUTES.connector_call) return true;

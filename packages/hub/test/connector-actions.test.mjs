@@ -249,6 +249,12 @@ test("connector usage lists each connected provider's Channel commands, and noth
     "policy and subscriptions are not actions");
   assert.ok(commands.every((command) => !command.startsWith("@notion:")), "an unconnected provider is not listed");
   assert.deepEqual(usageOf(new Set()), []);
+  const privateReads = usageOf(new Set(["gmail", "github"]));
+  assert.ok(privateReads.find(provider => provider.provider === "gmail").actions
+    .find(action => action.command.startsWith("@gmail:read:")).description.includes("xmatrix call"));
+  assert.ok(!privateReads.find(provider => provider.provider === "github").actions
+    .find(action => action.command.startsWith("@github:subscribe:")).description.includes("xmatrix call"),
+    "subscription setup cannot be advertised as a private read");
 });
 
 test("Channel action admission requires a declared own executor with the declared effect", () => {

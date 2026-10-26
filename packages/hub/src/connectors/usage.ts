@@ -3,6 +3,8 @@ import { listAppConnections } from "../apps";
 import { getChannel } from "../spaces";
 import type { Env } from "../types";
 import { record } from "./command-support";
+import { connectorActionCatalog } from "./action-catalog";
+import { connectorProvider } from "./registry";
 
 /*
  * What an Agent Run may act on in its Channel's connected apps
@@ -32,9 +34,10 @@ export async function connectorUsage(env: Env, caller: { ownerUserId: string; ch
 /** The connected providers' declared actions, in catalog order; one with none is left out. */
 export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) => {
+    const executable = connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions);
     const actions = manifest.actions.flatMap((action) => action.effect ? [{
       command: `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`,
-      effect: action.effect, description: action.description + (action.effect === "read"
+      effect: action.effect, description: action.description + (action.effect === "read" && executable.has(action.id)
         ? ` For a caller-only result, run xmatrix call "@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}".` : ""),
     }] : []);
     return actions.length > 0 ? [{ provider: manifest.id, name: manifest.name, actions }] : [];
