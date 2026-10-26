@@ -94,7 +94,8 @@ unknown. Existing execution failures retain their current notices.
 Expand migration 0221 adds unaddressed publication evidence and optional source
 snapshots to launch choices. Source edit/recall/delete, current permissions and
 Channel stop fence late admission. The invocation response adds optional `asks`;
-older clients ignore it and keep the legacy connection reply. No native update
+older clients ignore it and keep the legacy connection reply, whose instructions
+mention the Agent with the question so untracked history also has a working path. No native update
 is required. Rollback uses a CI-validated beta Hub/Web release reverting the
 code; additive schema can remain. See [message asks](architecture/message-asks.md).
 

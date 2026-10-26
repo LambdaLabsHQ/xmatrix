@@ -27,7 +27,7 @@ const WELCOME = {
     agentsIn: (handles: string[]) => `${handles.join(", ")} ${handles.length === 1 ? "is" : "are"} in. ` +
       `Mention ${handles.length === 1 ? "it" : "one"} here to give ${handles.length === 1 ? "it" : "them"} work.`,
     connectAgents: "No agent can answer here yet: agents run on your own computer. Open xmatrix.sh there, " +
-      "sign in and run the one command it shows, or download the desktop app. Then send your message again.",
+      "sign in and run the one command it shows, or download the desktop app. Once an Agent is in, mention it with your question.",
   },
   zh: {
     name: "欢迎来到 xMatrix",
@@ -35,7 +35,7 @@ const WELCOME = {
       "登录后运行页面上的那条命令，或者下载桌面 App。",
     agentsIn: (handles: string[]) => `${handles.join("、")} 已接入。在这里 @ ${handles.length === 1 ? "它" : "其中一个"}就能派活。`,
     connectAgents: "这里还没有 Agent 能回复：Agent 运行在你自己的电脑上。在那台电脑上打开 xmatrix.sh，" +
-      "登录后运行页面上的那条命令，或者下载桌面 App。接好后再发一次这条消息。",
+      "登录后运行页面上的那条命令，或者下载桌面 App。接好后，用 @ 点名 Agent 并带上你的问题。",
   },
 } satisfies Record<OnboardingLocale, { name: string; bringAgents: string; agentsIn: (handles: string[]) => string;
   connectAgents: string }>;
