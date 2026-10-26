@@ -30,6 +30,12 @@ launch decision and durable summon coordinator. Missing tracking stays unknown;
 connecting a computer starts no unselected request. See
 [message asks](../architecture/message-asks.md).
 
+Turn-failure cards expose the original cause before Details, including unknown
+and historical errors. Hub-classified exhausted provider accounts have distinct
+quota-reset or handoff guidance; known reset timestamps display in UTC. The
+existing quota hold and handoff authority is unchanged. See
+[turn failures](../operations/agent-turn-failures.md).
+
 Machine daemon commands and Run lifecycle/execution report mutations replay
 once in a fresh PostgreSQL session after transport loss before COMMIT. Wakes,
 route publication and notices remain outside that database-only boundary;
@@ -238,7 +244,8 @@ and attempt diagnostics as fixed labels, without cell or recipient identities.
 Agent turn failures share one reconnect-safe lifecycle reporter across native,
 ACP, stream and headless adapters. Channel notices retain credential-redacted
 HTTP, upstream, WebSocket and process evidence when exposed, and explicitly mark
-missing HTTP evidence. See [Agent turn failures](../operations/agent-turn-failures.md).
+missing HTTP evidence. A later message from that Agent settles the card. See
+[Agent turn failures](../operations/agent-turn-failures.md).
 Daemon catch-up retires lost socket bindings and attempts to release all unsent
 leases, preserving sent leases, successor connections and Authority epoch fences.
 Orphan terminal reports recover exact identities only from a matching retained

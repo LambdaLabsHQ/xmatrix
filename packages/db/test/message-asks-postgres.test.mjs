@@ -16,7 +16,6 @@ integration("unaddressed publications require one current author choice and neve
   const asks = new PostgresMessageAskRepository(database, placement);
   const choices = new PostgresFirstMessageLaunchChoiceRepository(database, placement);
   const body = "Find why the login test flakes";
-  const hash = await digestCanonicalCloneCborV1(body);
   const request = (id, extra = {}) => ({ requestId: crypto.randomUUID(), channelId: id, messageId: id,
     actorUserId: "owner", body, ...extra });
   const tx = callback => database.transaction({ requestId: crypto.randomUUID(), operation: "ask.test", placement }, callback);

@@ -168,6 +168,7 @@ test("a named conversation offers its unanswered publication only after server e
   await expect(line.locator(".launch-choice-count")).toHaveCount(0);
   await expect(line.getByRole("button", { name: "Ask an Agent: codex", exact: true })).toBeEnabled();
   expect(await fixtureRequestBodies(page, "ask-pick")).toEqual([]);
+  await shot(page, "message-ask-unaddressed");
   await page.reload();
   await expect(line).toBeVisible();
   expect(await fixtureRequestBodies(page, "ask-pick")).toEqual([]);

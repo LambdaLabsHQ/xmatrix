@@ -18,6 +18,9 @@ function relativeTime(locale: OnboardingLocale, at: string | undefined, now: num
 const en = {
   stepsLabel: "To fix it",
   detailsLabel: "Details",
+  originalError: (message: string) => `Original error: ${message}`,
+  quotaResets: (at: string) => `Quota resets: ${at}`,
+  noProviderDetail: "The program did not report a specific error.",
   errorCode: (code: string) => `Error code: ${code}`,
   copy: "Copy",
   copied: "Copied",
@@ -72,6 +75,12 @@ const en = {
   },
   /* An Agent's turn did not finish (turn-failure-notice.tsx turnProblem). */
   turn: {
+    usage_limited: {
+      title: (agent: string) => `${agent}'s provider quota is used up`,
+      explanation: "Its provider account has no usage left, so this turn could not finish.",
+      steps: ["Wait for the provider quota to reset before asking this agent to continue.",
+        "To continue sooner, hand the work to another agent with available quota."],
+    },
     rate_limited: {
       title: (agent: string) => `${agent} was rate limited by its provider`,
       explanation: "The provider turned down more requests for now (HTTP 429), so this turn didn't finish.",
@@ -95,11 +104,18 @@ const en = {
       explanation: "The program running it exited unexpectedly, so this turn didn't finish.",
       steps: ["Reply to it to try again.", "If it keeps happening, update it on the computer it runs on."],
     },
+    no_status: {
+      title: (agent: string) => `${agent} couldn't finish this turn`,
+      explanation: "This turn stopped without an HTTP status or an error code from the provider.",
+      steps: ["Reply to it to continue."],
+    },
     unknown: {
       title: (agent: string) => `${agent} couldn't finish this turn`,
       explanation: "",
       steps: ["Reply to it to try again."],
     },
+    continueLabel: "To continue",
+    continued: (agent: string) => `${agent} continued afterward`,
   },
   relativeTime: (at: string | undefined, now: number) => relativeTime("en", at, now),
 };
@@ -109,6 +125,9 @@ export type ProblemCopy = typeof en;
 const zh: ProblemCopy = {
   stepsLabel: "怎么修复",
   detailsLabel: "详情",
+  originalError: (message) => `原始错误：${message}`,
+  quotaResets: (at) => `额度重置时间：${at}`,
+  noProviderDetail: "运行程序没有提供具体错误。",
   errorCode: (code) => `错误码：${code}`,
   copy: "复制",
   copied: "已复制",
@@ -161,6 +180,11 @@ const zh: ProblemCopy = {
     },
   },
   turn: {
+    usage_limited: {
+      title: (agent) => `${agent} 的服务商额度已用尽`,
+      explanation: "它使用的服务商账号没有剩余额度，这一轮无法继续。",
+      steps: ["等服务商额度重置后，再让这个 Agent 继续。", "需要尽快继续的话，交给还有额度的其他 Agent 接手。"],
+    },
     rate_limited: {
       title: (agent) => `${agent} 被服务商限流了`,
       explanation: "服务商暂时拒绝了更多请求（HTTP 429），这一轮没有做完。",
@@ -181,11 +205,18 @@ const zh: ProblemCopy = {
       explanation: "运行它的程序意外退出，这一轮没有做完。",
       steps: ["回复它重试。", "如果反复出现，在运行它的电脑上更新它。"],
     },
+    no_status: {
+      title: (agent) => `${agent} 这一轮没有做完`,
+      explanation: "服务商没有返回 HTTP 状态或错误码，这一轮停在了当时的位置。",
+      steps: ["回复它，让它接着做。"],
+    },
     unknown: {
       title: (agent) => `${agent} 这一轮没有做完`,
       explanation: "",
       steps: ["回复它重试。"],
     },
+    continueLabel: "接着做",
+    continued: (agent) => `${agent} 后来继续了`,
   },
   relativeTime: (at, now) => relativeTime("zh", at, now),
 };

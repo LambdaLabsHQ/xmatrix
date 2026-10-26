@@ -291,7 +291,7 @@ import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
 import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
 import { TurnFailureNotice } from "@/components/dashboard/turn-failure-notice";
-import { turnFailureEvidenceOf } from "@/components/dashboard/turn-failure";
+import { turnFailureEvidenceOf, turnFailuresContinuedByLaterSpeech } from "@/components/dashboard/turn-failure";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -712,6 +712,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   const rows = useMemo(() => (heldRowsRef.current = shareByKey(heldRowsRef.current,
     buildConversationRows(timeline.filter(message => !(onboardingStageOf(message.metadata) === "connect-agents" &&
       message.replyTo && asksByMessage.has(message.replyTo.messageId)))), (row) => row.id)), [timeline, asksByMessage]);
+  const continuedTurnFailures = useMemo(() => turnFailuresContinuedByLaterSpeech(timeline), [timeline]);
   const [expandedFolds, setExpandedFolds] = useState<{ channelId?: string; ids: ReadonlySet<string> }>(
     () => ({ ids: new Set() }),
   );
@@ -1160,6 +1161,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
                   foldsDiscussionHead={foldsDiscussionHead}
+                  turnContinued={continuedTurnFailures.has(message.id)}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
                   token={token}
@@ -1719,6 +1721,7 @@ export const MessageRow = memo(function MessageRow({
   contextOnly = false,
   initiallyExpanded = false,
   foldsDiscussionHead = false,
+  turnContinued = false,
   currentUserIdentityId,
   channel,
   token,
@@ -1773,6 +1776,8 @@ export const MessageRow = memo(function MessageRow({
   initiallyExpanded?: boolean;
   /** Its thread's head already shows a page discussion's passage. */
   foldsDiscussionHead?: boolean;
+  /** This row's turn-failure notice was followed by that Agent's own later message. */
+  turnContinued?: boolean;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
   onOpenHumanProfile: (userId: string) => void;
 } & MessageRowProps) {
@@ -2689,7 +2694,7 @@ export const MessageRow = memo(function MessageRow({
                 onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
                   ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
             ) : turnFailure ? (
-              <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody}
+              <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody} continued={turnContinued}
                 spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
             ) : connectorReceipt ? (
               <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>

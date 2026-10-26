@@ -34,12 +34,30 @@ pending failure; intentional cancellation is not converted into failure.
 The Web draws a notice that carries `xmatrixFailureEvidence` as a problem card
 (`turn-failure.ts`): HTTP 429 is "rate limited by its provider", 401/403 is
 "the provider refused", a timeout, DNS, TLS or connection category is "couldn't
-reach its provider", a process category is "its program stopped", and anything
-else is "couldn't finish this turn". Only the recorded evidence decides, never
-the prose. Each names what to do next in English or Chinese, and the notice as
-written is folded under Details. A notice without evidence reads as written.
+reach its provider", a process category is "its program stopped", a provider
+category with no HTTP status, error code, socket close, or exit code says the
+turn stopped there, and anything else is "couldn't finish this turn". Only the recorded evidence decides, never
+the prose. A Hub-classified used-up account carries the additive `usageLimit`
+field in its evidence and takes precedence over HTTP 429: its card says that
+the quota is used up and suggests waiting for reset or handing work to another
+Agent. A structured provider reset is shown in UTC; a reset hint present only
+in the provider's words stays as written, without guessing its date.
+
+Each card names what to do next in English or Chinese. The original cause line
+is always visible, including on older notices and unknown failures, so opening
+Details is not necessary to discover the actual error. Full diagnostics and
+correlation identifiers remain under Details. A notice without evidence reads as written.
+Once that same Agent posts a later message of its own, the card settles: its
+rail goes quiet, it says the Agent continued, and it no longer asks for a reply.
+The notice stays in the Channel. A human reply, another failure, or a system
+notice leaves it asking.
 Because the Agent did start, a turn failure is never badged "couldn't start",
 even when its detail mentions a usage limit.
+
+The optional usage-limit evidence is presentation only; the existing Hub
+classification, quota hold and automatic handoff retain their own authority.
+Older Web clients ignore the new evidence field. Historical notices do not gain
+a new quota classification, but expose their original cause in the updated Web.
 
 This is an additive presentation and metadata change, with no new lifecycle wire
 fields or database migration. Old hosts receive the common Hub presentation and

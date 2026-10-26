@@ -8,6 +8,8 @@ export interface AgentFailureEvidence {
   requestIds: string[];
   websocketCloseCodes: number[];
   exitCodes: number[];
+  /** Hub's usage-limit classification; absence leaves the cause unknown. */
+  usageLimit?: { resetsAt?: string };
 }
 
 export function safeAgentFailureDetail(detail: string | undefined | null): string {
