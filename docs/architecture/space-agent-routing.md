@@ -396,6 +396,16 @@ When the daemon went offline is the Hub's own record of the offline transition;
 a repeated unregister or failed delivery does not move it. After the grace a
 summon is refused as `registration_daemon_offline`, as before.
 
+The refusal names the offline Machines (`offline`: id and the owner's name for
+it, at most eight) on the stored rejection and on its Channel notice, whose
+metadata kind is `xmatrix.machine-offline.v1` with the refused summon. The Web
+draws that notice as a problem card: which computer is offline, how its owner
+brings it back (the desktop app, or `xmatrix setup daemon` on macOS and Linux),
+whether it is back yet from the reader's registration catalog, and, for the
+summon's author, Send again once it is. The catalog's online state is display
+only; sending again is an ordinary launch that the Hub admits or refuses anew.
+A notice from an older Hub without `offline` reads as written.
+
 The daemon samples machine resources about every 30 seconds with its run
 snapshot: logical CPU count and usage, memory, swap, the 1/5/15-minute load
 average (not on Windows, where none exists), and total/available space on the

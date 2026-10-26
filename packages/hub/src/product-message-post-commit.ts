@@ -3,7 +3,7 @@ import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
-  REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, preparationRejectionMessage } from "@xmatrix/protocol";
+  REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage } from "@xmatrix/protocol";
 import { nameDiscussionByFirstMessage, startChannelAbout } from "./channel-about";
 import {
   dispatchProductAgentMentionsAfterAuthorityMessage,
@@ -228,12 +228,14 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
       const known = REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code);
       const code = known ? item.code : "registration_launch_rejected";
       const signedOut = code === "registration_harness_signed_out" ? item.signedOut : undefined;
-      // What is too old, or signed out, is named; any other code is its own sentence.
-      const reason = known ? preparationRejectionMessage(code, signedOut ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
+      const offline = code === "registration_daemon_offline" && item.offline?.length ? item.offline : undefined;
+      // What is too old, signed out or offline is named; any other code is its own sentence.
+      const reason = known ? preparationRejectionMessage(code, signedOut ?? offline ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
         : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
       const body = `Agent launch failed: ${reason} (${code})`;
-      if (!notices.has(body)) notices.set(body, signedOut && item.sourceMention
-        ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: item.sourceMention } : undefined);
+      if (!notices.has(body)) notices.set(body, !item.sourceMention ? undefined
+        : signedOut ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: item.sourceMention }
+        : offline ? { kind: MACHINE_OFFLINE_NOTICE_KIND, offline, sourceMention: item.sourceMention } : undefined);
     }
     for (const [body, metadata] of notices) {
       // xMatrix's first-message summon is a system message, which is not a

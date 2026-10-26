@@ -11,7 +11,7 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { harnessSignedOutNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
+import { harnessSignedOutNoticeOf, machineOfflineNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { sameValue, shareByKey } from "../../lib/same-value";
 
@@ -287,6 +287,7 @@ import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
+import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
@@ -629,12 +630,14 @@ export const MessageTimeline = memo(function MessageTimeline({
   // author's own launch, once that program is signed in from the notice.
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
-  const resendSignedOutSummon = useCallback(async (sourceMessageId: string, sourceMention: string) => {
+  const resendRefusedSummon = useCallback(async (sourceMessageId: string, sourceMention: string) => {
     const source = timelineRef.current.find((item) => item.messageId === sourceMessageId);
     if (!source?.own) return false;
     await launchAnyway(sourceMessageId, source.body, sourceMention);
     return true;
   }, [launchAnyway]);
+  const ownsRefusedSummon = useCallback((sourceMessageId: string) =>
+    timelineRef.current.find((item) => item.messageId === sourceMessageId)?.own === true, []);
   // The channel's media store, kept among the recent ones when the view moves
   // on so reopening the channel shows its media at once. Ordinary message
   // progress and token refresh are excluded from the dependency list so they
@@ -1129,7 +1132,8 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchStatusUnavailable={agentLaunchQuery.isError}
                   onRetryAgentLaunch={retryAgentLaunch}
                   onLaunchAnyway={launchAnyway}
-                  onResendSignedOutSummon={resendSignedOutSummon}
+                  onResendRefusedSummon={resendRefusedSummon}
+                  ownsRefusedSummon={ownsRefusedSummon}
                   launchWindow={launchWindowsByMessage.get(message.messageId || message.id)}
                   launchChoiceOffered={offersLaunchChoice(message, channel)}
                   launchOptions={launchOptions}
@@ -1682,7 +1686,8 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable,
   onRetryAgentLaunch,
   onLaunchAnyway,
-  onResendSignedOutSummon,
+  onResendRefusedSummon,
+  ownsRefusedSummon,
   launchWindow,
   launchChoiceOffered = false,
   launchOptions = NO_LAUNCH_OPTIONS,
@@ -1723,8 +1728,10 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable?: boolean;
   onRetryAgentLaunch: (launch: SerializedAgentLaunch) => Promise<void>;
   onLaunchAnyway?: (messageId: string, body: string, sourceMention: string) => Promise<void>;
-  /** Sends a signed-out notice's summon again once its program is signed in; false when the viewer cannot. */
-  onResendSignedOutSummon?: (sourceMessageId: string, sourceMention: string) => Promise<boolean>;
+  /** Sends a refused summon again (signed out, machine offline) once the cause is fixed; false when the viewer cannot. */
+  onResendRefusedSummon?: (sourceMessageId: string, sourceMention: string) => Promise<boolean>;
+  /** Whether the viewer wrote that refused summon, so the notice can offer to send it again. */
+  ownsRefusedSummon?: (sourceMessageId: string) => boolean;
   /** A new conversation's first message: which Agent starts, chosen for a few seconds. */
   launchWindow?: InteractionDecisionWindow;
   /** The author's own fresh first message, offered before the Hub's record arrives. */
@@ -1825,6 +1832,7 @@ export const MessageRow = memo(function MessageRow({
   const questionnaire = questionnaireMetadata(message.metadata);
   const onboardingStage = onboardingStageOf(message.metadata);
   const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
+  const offlineNotice = signedOutNotice ? null : machineOfflineNoticeOf(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
@@ -2640,9 +2648,14 @@ export const MessageRow = memo(function MessageRow({
             ) : signedOutNotice ? (
               <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} spaceId={channel?.spaceId ?? null} token={token}
                 userId={currentUserIdentityId.replace(/^user:/, "")}
-                onSignedIn={signedOutNotice.summon && onResendSignedOutSummon && (() => onResendSignedOutSummon(
+                onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
                   signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
                 notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
+            ) : offlineNotice ? (
+              <MachineOfflineNotice offline={offlineNotice.offline} sourceMention={offlineNotice.summon?.sourceMention}
+                spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
+                onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
+                  ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
             ) : (

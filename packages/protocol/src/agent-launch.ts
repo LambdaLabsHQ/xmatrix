@@ -1,4 +1,4 @@
-import type { HarnessSignedOut } from "./invocation-failure.js";
+import type { HarnessSignedOut, OfflineMachine } from "./invocation-failure.js";
 
 export const AGENT_LAUNCH_STATES = [
   "prepared",
@@ -87,6 +87,8 @@ export interface SerializedAgentInvocationRejection {
   routingDecision?: RoutingDecisionEvidence;
   /** For `registration_harness_signed_out`: the program to sign in, and where. */
   signedOut?: HarnessSignedOut;
+  /** For `registration_daemon_offline`: the machines to bring back online. */
+  offline?: OfflineMachine[];
   rejectedAt: string;
   evidenceExpiresAt: string;
 }

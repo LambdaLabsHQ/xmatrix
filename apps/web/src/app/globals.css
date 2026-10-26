@@ -8383,6 +8383,51 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   background: var(--app-ask-tint);
 }
 
+/* A problem the reader can fix is a sheet of the paper, with the alert ink
+   on its rail and its icon: it says something stopped, and the rest of the
+   card is plain instructions. Paper has no rounded corners (user 2026-10-26:
+   纸面风格就是没有圆角), so neither the sheet nor anything on it is rounded.
+   Once the problem is gone (the machine is back) the rail and the dot settle
+   to the resting ink. */
+.xmatrix-app .app-problem-card {
+  --app-problem-ink: var(--m-ink-alert, var(--destructive));
+  padding: 14px 16px 16px;
+  border-radius: 0 !important;
+  background: color-mix(in oklch, var(--foreground) 4%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+  box-shadow: inset 3px 0 0 var(--app-problem-ink);
+}
+
+.xmatrix-app .app-problem-card[data-problem-card="resolved"] {
+  --app-problem-ink: var(--m-ink-settled, var(--muted-foreground));
+}
+
+.xmatrix-app .app-problem-card-icon,
+.xmatrix-app .app-problem-card-status {
+  color: var(--app-problem-ink);
+}
+
+.xmatrix-app .app-problem-card-status[data-resolved="true"] {
+  color: var(--foreground);
+}
+
+.xmatrix-app .app-problem-card-dot {
+  background: var(--app-problem-ink);
+}
+
+.xmatrix-app .app-problem-card-status[data-resolved="true"] .app-problem-card-dot {
+  background: var(--foreground);
+}
+
+.xmatrix-app .app-problem-card-command {
+  background: color-mix(in oklch, var(--foreground) 7%, transparent);
+}
+
+/* Outranks the paper card's own button and field radius, whose selectors
+   stack up to eight classes. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-problem-card.app-problem-card.app-problem-card.app-problem-card.app-problem-card :is(button, code) {
+  border-radius: 0 !important;
+}
+
 /* A choice xMatrix offers in a message (the welcome's first tasks, bringing
    work in) is a piece of the same tinted paper as an ask, a little deeper
    under the pointer: no rule, no rim, no shadow. */

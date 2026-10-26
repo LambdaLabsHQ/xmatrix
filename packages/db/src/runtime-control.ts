@@ -11,7 +11,7 @@ import { readInvocationProgress } from "./runtime-invocation-progress.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
 import { queryMessageAgentTargets } from "./message-agent-targets.js";
 import { queryMessageExecutions, selectRunExecutionSources } from "./runtime-message-executions.js";
-import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut,
+import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut, parseOfflineMachines,
   parsePresentedRoutingDecision, rebornFailureReason, isAgentStatus,
   isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, agentPresetById, type HarnessSignedOut, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
   type RuntimeOperationFailure, type SerializedAgentContinuation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop, type AgentStopPhase, type AgentInvocationQueryPage, type AgentLaunchActivity, type InvocationDiagnosticsReport } from "@xmatrix/protocol";
@@ -378,8 +378,11 @@ function serializeInvocationRejections(row: QueryResultRow): SerializedAgentInvo
       ...(routingDecisionView(value.routingDecision) ? { routingDecision: routingDecisionView(value.routingDecision) } : {}),
       ...(code === "registration_harness_signed_out" && parseHarnessSignedOut(value.signedOut)
         ? { signedOut: parseHarnessSignedOut(value.signedOut)! } : {}),
+      ...(code === "registration_daemon_offline" && parseOfflineMachines(value.offline)
+        ? { offline: parseOfflineMachines(value.offline)! } : {}),
       message: known ? preparationRejectionMessage(code, code === "registration_harness_outdated" ? value.tooOld
-        : code === "registration_harness_signed_out" ? value.signedOut : value.answerFailure)!
+        : code === "registration_harness_signed_out" ? value.signedOut
+        : code === "registration_daemon_offline" ? value.offline : value.answerFailure)!
         : "This invocation could not be prepared. Review its address and Agent configuration.",
       rejectedAt: iso(row.created_at)!, evidenceExpiresAt: iso(row.expires_at)! }];
   });
@@ -526,7 +529,7 @@ export class PostgresRuntimeRepository {
   /** Bounded historical outcomes only. They neither reserve capacity nor authorize a launch. */
   async recordRoutingRejections(input: { channelId: string; sourceMessageId: string; actorUserId: string;
     rejected: Array<{ sourceMention: string; code: string; routingDecision?: unknown;
-      answerFailure?: unknown; tooOld?: unknown; signedOut?: unknown }> }) {
+      answerFailure?: unknown; tooOld?: unknown; signedOut?: unknown; offline?: unknown }> }) {
     const channelId = text(input.channelId, "channelId", 300);
     const sourceMessageId = text(input.sourceMessageId, "sourceMessageId", 160);
     const commandId = `routing-preflight:${sourceMessageId}`;
@@ -543,8 +546,10 @@ export class PostgresRuntimeRepository {
         ? parseDecisionAnswerFailure(item.answerFailure) : undefined;
       const tooOld = item.code === "registration_harness_outdated" ? parseHarnessTooOld(item.tooOld) : undefined;
       const signedOut = item.code === "registration_harness_signed_out" ? parseHarnessSignedOut(item.signedOut) : undefined;
+      const offline = item.code === "registration_daemon_offline" ? parseOfflineMachines(item.offline) : undefined;
       return { sourceMention, targetRef: "auto", code: item.code,
         ...(answerFailure ? { answerFailure } : {}), ...(tooOld ? { tooOld } : {}), ...(signedOut ? { signedOut } : {}),
+        ...(offline ? { offline } : {}),
         ...(item.routingDecision ? { routingDecision: routingDecisionView(item.routingDecision) } : {}) };
     });
     const placement = await this.channelPlacement(commandId, channelId,
