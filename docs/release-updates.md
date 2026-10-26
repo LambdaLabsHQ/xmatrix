@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Channel detail reads recover lost database responses
+
+Channel details, including the access check for connector approval lists, now
+use independent single reads for the authorized Channel, Instance presence and
+visible Human members. Each statement keeps its placement fence and retries a
+lost response once on a fresh connection; answered failures still propagate.
+This removes the unnecessary BEGIN/COMMIT that exposed HUB-AR to a transaction
+opening timeout. As in the catalog, these reads have individual snapshots;
+mutations retain their transaction contracts. The real PostgreSQL regression
+suite now runs the existing catalog read recovery file as well.
+No migration or client update is needed. Recovery is a CI-validated beta Hub
+release reverting the change; the underlying transport stall remains unassigned.
+
 ## Unreleased: Registration quota reads recover a lost database response
 
 Channel quota projections and owner quota refreshes use one independent

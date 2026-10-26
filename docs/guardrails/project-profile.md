@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Channel details, including the connector approval list's access check, use
+independent single reads with placement fencing and bounded lost-response
+recovery, matching the Channel catalog. See
+[PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Registration quota projections and owner refreshes use independent single reads
 with one fresh-connection recovery after a lost response, without BEGIN/COMMIT.
 See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).

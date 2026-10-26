@@ -12,6 +12,7 @@ import { commandDigest as digest } from "./command-digest.js";
 import { readSpaceCommandReplay, storeSpaceCommandReplay } from "./command-replay.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import { singleReadStatements } from "./single-read-statements.js";
 import { DatabaseContractError } from "./errors.js";
 import { loadChannelAgentPresence, loadVisibleLiveAgentPresence } from "./channel-agent-presence.js";
 import { insertSpaceMember, spaceMemberRole } from "./space-members.js";
@@ -1749,7 +1750,13 @@ export class PostgresSpaceControlRepository {
   }): Promise<Record<string, unknown>> {
     const { requestId, spaceId, principalId } = principalScope(input);
     const channelId = bounded(input.channelId, "channelId");
-    return this.inSpace(requestId, input.operation ?? "channel.get", spaceId, async (transaction) => {
+    const operation = input.operation ?? "channel.get";
+    const placement = await this.placement(requestId, operation, spaceId);
+    const session = this.database.openSession();
+    try {
+      // Like the catalog, this is a sequence of lock-free reads. Each statement
+      // retains its placement fence and can recover a lost response once.
+      const transaction = singleReadStatements(session, { requestId, operation, placement });
       // The shared predicate checks current Space membership and Channel grants
       // in the same statement as the row, without a list cursor or catalog head.
       const rows = await transaction.query<ChannelRow>({
@@ -1780,7 +1787,9 @@ export class PostgresSpaceControlRepository {
       }) : [];
       return { channel, openChannelHumanMemberIdsBySpace: members.length
         ? { [spaceId]: members.map((member) => `user:${member.user_id}`) } : {} };
-    });
+    } finally {
+      await session.close();
+    }
   }
 
   async metadataHistory(input: { requestId: string; spaceId: string; channelId: string;
