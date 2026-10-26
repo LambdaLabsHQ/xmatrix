@@ -1288,7 +1288,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return agent && listedAgents([agent])[0];
   };
   const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) => {
-    const { body, taker } = commentBody(text, writers.agents.map((agent) => agent.harness), takerOf(blockId));
+    const live = [...pageAgents.data?.agents.values() ?? []].flat().filter((agent) => conversation(agent.conversationId));
+    const { body, taker } = commentBody(text, writers.agents.map((agent) => agent.harness), takerOf(blockId), live);
     const home = taker && conversation(taker.conversationId);
     startDiscussion(blockId, anchor, { body,
       ...(taker && home ? { call: { channel: home, body: (discussionId) => commentCall(taker, discussionId) } } : {}) });

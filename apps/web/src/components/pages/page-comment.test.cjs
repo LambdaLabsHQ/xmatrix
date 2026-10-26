@@ -31,3 +31,9 @@ test("the taker is the Agent nearest the passage, among those the reader can wri
   assert.equal(commentTaker([CLAUDE, CODEX], "plan", (id) => id !== "review"), CLAUDE);
   assert.equal(commentTaker([], "plan", all), undefined);
 });
+
+test("a live Instance the comment names takes it in its own conversation, rather than a new one starting", () => {
+  assert.deepEqual(commentBody("@Claude:3 shorter", AGENTS, CODEX, [CLAUDE, CODEX]), { body: "@Claude:3 shorter", taker: CLAUDE });
+  assert.deepEqual(commentBody("@claude:2 shorter", AGENTS, CODEX, [CLAUDE]), { body: "@claude:2 launch:force shorter" },
+    "one not live starts as before");
+});

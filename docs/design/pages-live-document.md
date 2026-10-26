@@ -357,7 +357,9 @@ fact is about.
   passage is no longer selected; a comment closed unsent comes back when the
   same passage is selected again.
   - A comment is a discussion of the passage (§4.3) whose first message is
-    the comment. An Agent the comment mentions takes it at once. One that
+    the comment. A live Instance it names (`@claude:2`, at work on any of the
+    Space's pages) takes it as the Agent at work on the page does, below; any
+    other Agent the comment mentions starts on it at once. One that
     names nobody goes to the Agent already at work on the page, nearest the
     passage first, among those in conversations the reader can write in: its
     Instance card stands under the box, as under a conversation's composer,
