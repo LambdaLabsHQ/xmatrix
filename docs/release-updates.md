@@ -1326,3 +1326,15 @@ Secret recovery remains separate; this release neither generates nor rotates key
 - A user-initiated update failure remains user-visible through an actionable recovery dialog and application-menu manual download entry. In particular, preserve the manual-update context until Squirrel.Mac completes its asynchronous post-download signature validation; do not turn that failure into a silent return to “Check for Updates.”
 
 When changing release behavior, update the relevant workflow, script, and this document together.
+
+## Unreleased: Leaving a newly made Page preserves its first edits
+
+A new Page's creation snapshot can contain only its first character. Leaving
+once creation returns, before the first live sync, now keeps that session
+alive for the same bounded 15-second handoff already used while creation is
+pending. Its response to the server's state vector includes the rest of the
+local document before closing; repeated disposal cannot cut that handoff
+short. Ordinary established sessions and unseeded creation keep their existing
+behavior. No schema or native change is needed. Recovery uses a CI-validated
+beta Web release reverting the change. Browser/process termination or a sync
+that cannot complete within that bound retains its existing limitation.
