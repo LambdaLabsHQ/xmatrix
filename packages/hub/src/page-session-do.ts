@@ -37,14 +37,6 @@ const TICKET_TTL_MS = 60_000;
 const COMMIT_IDLE_MS = 5_000;
 const REVALIDATE_MS = 60_000;
 const MAX_CONNECTIONS = 64;
-/**
- * The people gone from the page this long, its Agents co-writing live leave it too (pages-live-document.md §4.2).
- * Long enough for a reload or a dropped connection to come back first.
- */
-export const PAGE_CO_WRITING_PEOPLE_GONE_MS = 2 * 60_000;
-
-/** When the last person left the page, while its co-writing waits to end. */
-type PeopleLeft = { at: number; spaceId: string; pageId: string };
 
 interface Attachment {
   connectionId: string;
@@ -102,6 +94,10 @@ export class RelayPageSession extends DurableObject<Env> {
   private pageId: string | null = null;
   private rehydrated: Promise<void> | null = null;
   private summaryStarting: Promise<void> | null = null;
+  /** Co-writers already told to join, until their socket is here. One tell, not one per keystroke. */
+  private readonly waking = new Set<string>();
+  private wakeAgain = false;
+  private wakeRunning = false;
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
@@ -165,6 +161,7 @@ export class RelayPageSession extends DurableObject<Env> {
           try { socket.send(data); } catch { /* closed */ }
         }
       },
+      wakeCoWriters: () => this.onPeopleTyped(),
     };
     return new PageSession(ports);
   }
@@ -373,7 +370,7 @@ export class RelayPageSession extends DurableObject<Env> {
       ...(ticket.acknowledged ? { acknowledged: true } : {}) };
     server.serializeAttachment(attachment);
     this.ctx.acceptWebSocket(server);
-    if (isPerson(attachment)) await this.ctx.storage.delete("peopleLeft");
+    if (attachment.coWriter && attachment.principal.conversationId) this.waking.delete(attachment.principal.conversationId);
     this.session.connect({ id: attachment.connectionId, principal: attachment.principal, canEdit: attachment.canEdit,
       coWriter: attachment.coWriter === true, streams: attachment.streams === true,
       acknowledged: attachment.acknowledged === true, initialInput: ticket.initialInput });
@@ -400,11 +397,6 @@ export class RelayPageSession extends DurableObject<Env> {
     const attachment = socket.deserializeAttachment() as Attachment | null;
     await this.ready();
     if (attachment) this.session.disconnect(attachment.connectionId);
-    if (attachment && isPerson(attachment) && !this.people(socket)) {
-      await this.ctx.storage.put("peopleLeft", { at: Date.now(), spaceId: attachment.spaceId,
-        pageId: attachment.pageId } satisfies PeopleLeft);
-      await this.scheduleAlarm(PAGE_CO_WRITING_PEOPLE_GONE_MS);
-    }
     await this.settle();
     // The last person leaving is when a page they edited gets its summary.
     this.later(this.summaryDue(socket));
@@ -455,28 +447,68 @@ export class RelayPageSession extends DurableObject<Env> {
   }
 
   /**
-   * Once the people have been gone a while, ends the page's live co-writing and tells each Agent to leave; a
-   * person back on the page in time keeps it. Until then the alarm stays set for it.
+   * A person typed. Co-writing stays until they stop it (pages-live-document.md §4.2). An Agent that is
+   * not on the page — asleep, or told to leave by an older Hub — is woken, once, until its socket arrives.
    */
-  private async coWritingDue(): Promise<void> {
-    const left = await this.ctx.storage.get<PeopleLeft>("peopleLeft");
-    if (!left) return;
-    if (this.people()) {
-      await this.ctx.storage.delete("peopleLeft");
+  private onPeopleTyped(): void {
+    this.wakeAgain = true;
+    if (this.wakeRunning) return;
+    this.wakeRunning = true;
+    this.later(this.drainWake());
+  }
+
+  private async drainWake(): Promise<void> {
+    try {
+      while (this.wakeAgain) {
+        this.wakeAgain = false;
+        await this.wakeMissing();
+      }
+    } finally {
+      this.wakeRunning = false;
+      if (this.wakeAgain) this.onPeopleTyped();
+    }
+  }
+
+  private connectedCoWriters(): Set<string> {
+    const present = new Set<string>();
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as Attachment | null;
+      const conversationId = attachment?.coWriter ? attachment.principal.conversationId : undefined;
+      if (conversationId) present.add(conversationId);
+    }
+    return present;
+  }
+
+  private async wakeMissing(): Promise<void> {
+    if (!this.spaceId || !this.pageId) return;
+    const present = this.connectedCoWriters();
+    for (const id of present) this.waking.delete(id);
+    let due: Array<{ conversationId: string; startedByUserId: string; ended: boolean }>;
+    try {
+      due = await pages(this.env).coWritersToWake({ requestId: crypto.randomUUID(), spaceId: this.spaceId,
+        pageId: this.pageId });
+    } catch (error) {
+      console.error("Page co-writers were not listed to wake", { pageId: this.pageId,
+        error: error instanceof Error ? error.message : String(error) });
       return;
     }
-    const remaining = left.at + PAGE_CO_WRITING_PEOPLE_GONE_MS - Date.now();
-    if (remaining > 0) {
-      await this.scheduleAlarm(remaining);
-      return;
-    }
-    const ended = await pages(this.env).endCoWritingOnPage({ requestId: crypto.randomUUID(), spaceId: left.spaceId,
-      pageId: left.pageId });
-    await this.ctx.storage.delete("peopleLeft");
-    for (const co of ended) {
-      await tellPageCoWriter(this.env, { spaceId: left.spaceId, pageId: left.pageId, conversationId: co.conversationId,
-        userId: co.startedByUserId, active: false }).catch((error: unknown) => console.error("Page co-writer was not told to leave",
-        { pageId: left.pageId, conversationId: co.conversationId, error: error instanceof Error ? error.message : String(error) }));
+    for (const co of due) {
+      if (present.has(co.conversationId) || this.waking.has(co.conversationId)) continue;
+      // Reserved before the await: the socket can arrive while the tell is in flight, and that arrival
+      // clears the reservation. Adding it afterwards would hide a co-writer that had already joined.
+      this.waking.add(co.conversationId);
+      try {
+        if (co.ended) await pages(this.env).reopenCoWriting({ requestId: crypto.randomUUID(), spaceId: this.spaceId,
+          pageId: this.pageId, conversationId: co.conversationId });
+        await tellPageCoWriter(this.env, { spaceId: this.spaceId, pageId: this.pageId, conversationId: co.conversationId,
+          userId: co.startedByUserId, active: true });
+      } catch (error) {
+        this.waking.delete(co.conversationId);
+        console.error("Page co-writer was not woken", { pageId: this.pageId, conversationId: co.conversationId,
+          error: error instanceof Error ? error.message : String(error) });
+        continue;
+      }
+      if (this.connectedCoWriters().has(co.conversationId)) this.waking.delete(co.conversationId);
     }
   }
 
@@ -489,10 +521,9 @@ export class RelayPageSession extends DurableObject<Env> {
   private async settle(): Promise<void> {
     if (this.ctx.getWebSockets().length) return;
     await this.commitPending();
-    // Co-writing waiting to end when the people have been gone a while keeps its alarm.
-    if (!this.session.hasPendingEdits && !await this.ctx.storage.get<PeopleLeft>("peopleLeft")) {
-      await this.ctx.storage.deleteAlarm();
-    }
+    // A Hub that used to end co-writing when people left may still have that alarm stored.
+    await this.ctx.storage.delete("peopleLeft");
+    if (!this.session.hasPendingEdits) await this.ctx.storage.deleteAlarm();
   }
 
   /**
@@ -547,7 +578,7 @@ export class RelayPageSession extends DurableObject<Env> {
     }
     await this.ready();
     await this.commitPending();
-    await this.coWritingDue();
+    await this.ctx.storage.delete("peopleLeft");
     // Access changes reach open connections: re-authorize each distinct principal.
     // Access is the read check without the page's text, which a verdict never needs.
     const repository = pages(this.env);

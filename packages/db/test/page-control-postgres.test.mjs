@@ -263,6 +263,16 @@ integration("co-writing: a person starts it from a linked conversation, and the 
       "a review never runs past the page's last revision");
     assert.deepEqual(await waiting(), []);
     assert.deepEqual(await call("endCoWriting", { principal: member, pageId, conversationId: ids.open }), { ended: true });
+    assert.equal((await client.query("SELECT stopped FROM data.page_co_writing WHERE space_id=$1 AND conversation_id=$2",
+      [ids.space, ids.open])).rows[0].stopped, true);
+    assert.deepEqual(await call("coWritersToWake", { pageId }), [], "a stop is not woken by typing");
+    // An end from before stops were recorded, as the old leave timer wrote them.
+    await client.query("UPDATE data.page_co_writing SET stopped=NULL, ended_at=now() WHERE space_id=$1 AND conversation_id=$2",
+      [ids.space, ids.open]);
+    assert.deepEqual((await call("coWritersToWake", { pageId })).map((row) => row.conversationId), [ids.open]);
+    assert.deepEqual(await call("reopenCoWriting", { pageId, conversationId: ids.open }), { reopened: true });
+    assert.equal((await client.query("SELECT ended_at FROM data.page_co_writing WHERE space_id=$1 AND conversation_id=$2",
+      [ids.space, ids.open])).rows[0].ended_at, null);
 
     await call("remove", { principal: owner, pageId });
     const { rows } = await client.query("SELECT 1 FROM data.page_co_writing WHERE space_id=$1", [ids.space]);

@@ -12,9 +12,9 @@ import type { Env } from "./types";
 export const INSTANCE_IDLE_SLEEP_MS = 30 * 60 * 1000;
 
 /**
- * A Run whose conversation co-writes a page live stays awake, however long people pause, while they are on
- * the page: asleep, it would drop off the page and not be there when they type again. Co-writing ends once
- * they have left (page-session-do.ts); this bounds it for a page left open for days.
+ * A Run whose conversation co-writes a page live stays awake, however long people pause. Leaving the page
+ * does not end co-writing. This bounds a page left open for days; when people type after it sleeps, the
+ * page wakes the Run (page-session-do.ts).
  */
 export const CO_WRITING_AWAKE_HOURS = 24;
 

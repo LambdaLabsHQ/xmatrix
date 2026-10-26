@@ -68,6 +68,11 @@ const RECENT_CHANGES = 3;
 const MAX_RECENT_CHANGES = 10;
 const RECENT_CHANGE_SPARES = 4;
 const MAX_LINKS = 500;
+/**
+ * An end from before `stopped` was stored cannot be told from a person pressing stop. Typing wakes
+ * one only when it ended within this many days. A stop recorded from now on is never woken.
+ */
+const CO_WRITING_WAKE_ENDED_DAYS = 7;
 const MAX_CONVERSATION_PAGES = 20;
 /** The messages one read of their page edits may name, as a timeline shows them. */
 const MAX_PAGE_EDIT_MESSAGES = 100;
@@ -870,9 +875,8 @@ export class PostgresPageRepository {
   }
 
   /**
-   * Starts co-writing a page from a conversation linked to it (pages-live-document.md §4.2): until it
-   * ends or lapses, an Agent's edits to the page from that conversation are suggestions. A person who
-   * may edit the page starts it; the suggestions wait on them.
+   * Starts co-writing a page from a conversation linked to it (pages-live-document.md §4.2). It stays
+   * until the person stops it. A person who may edit the page starts it.
    */
   async startCoWriting(input: CoWritingInput): Promise<{ startedAt: string }> {
     return this.coWriting(input, "page.co_writing_start", async (tx, { spaceId, pageId, conversationId, actor }) => {
@@ -881,44 +885,65 @@ export class PostgresPageRepository {
         values: [spaceId, pageId, conversationId], maxRows: 1 });
       if (!linked.length) throw new PageControlError("page_link_not_found", 404, "Link the conversation to the page first");
       const started = (await tx.query<QueryResultRow & { started_at: Date | string }>({ name: "page_co_writing_start_v1",
-        text: `INSERT INTO data.page_co_writing (space_id,page_id,conversation_id,started_by_user_id,started_at)
-          VALUES ($1,$2,$3,$4,now())
+        text: `INSERT INTO data.page_co_writing (space_id,page_id,conversation_id,started_by_user_id,started_at,stopped)
+          VALUES ($1,$2,$3,$4,now(),false)
           ON CONFLICT (space_id,page_id,conversation_id) DO UPDATE
-            SET started_by_user_id=EXCLUDED.started_by_user_id, started_at=EXCLUDED.started_at, ended_at=NULL
+            SET started_by_user_id=EXCLUDED.started_by_user_id, started_at=EXCLUDED.started_at,
+              ended_at=NULL, stopped=false
           RETURNING started_at`,
         values: [spaceId, pageId, conversationId, actor.userId], maxRows: 1 }))[0]!;
       return { startedAt: new Date(started.started_at).toISOString() };
     });
   }
 
-  /** Ends co-writing from a conversation: its Agent's later edits to the page are edits again. */
+  /** The person stopped co-writing. Typing on the page does not start it again. */
   async endCoWriting(input: CoWritingInput): Promise<{ ended: boolean }> {
     return this.coWriting(input, "page.co_writing_end", async (tx, { spaceId, pageId, conversationId }) => {
       const ended = await tx.query({ name: "page_co_writing_end_v1",
-        text: `UPDATE data.page_co_writing SET ended_at=now()
-          WHERE space_id=$1 AND page_id=$2 AND conversation_id=$3 AND ended_at IS NULL RETURNING 1`,
+        text: `UPDATE data.page_co_writing SET ended_at=COALESCE(ended_at, now()), stopped=true
+          WHERE space_id=$1 AND page_id=$2 AND conversation_id=$3 AND stopped IS NOT TRUE RETURNING 1`,
         values: [spaceId, pageId, conversationId], maxRows: 1 });
       return { ended: ended.length === 1 };
     });
   }
 
   /**
-   * Ends every live co-writing on a page once the people have left it (pages-live-document.md §4.2): its
-   * Agents are on the page like colleagues until stopped or the people leave. The page's live session
-   * decides it, for nobody in particular; each ended conversation is returned with who started it, whose
-   * authority tells its Agent to leave.
+   * Co-writers a person's typing should wake (pages-live-document.md §4.2). Open ones, and ones ended
+   * before a stop was recorded, if that end is recent: those ends were the old "people left" timer,
+   * which cannot be told from a stop that predates `stopped`. A recorded stop is never woken.
    */
-  async endCoWritingOnPage(input: { requestId: string; spaceId: string; pageId: string }):
-    Promise<Array<{ conversationId: string; startedByUserId: string }>> {
+  async coWritersToWake(input: { requestId: string; spaceId: string; pageId: string }):
+    Promise<Array<{ conversationId: string; startedByUserId: string; ended: boolean }>> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.co_writing_end_on_page", spaceId, async (tx) => {
-      const ended = await tx.query<QueryResultRow & { conversation_id: string; started_by_user_id: string }>({
-        name: "page_co_writing_end_on_page_v1",
-        text: `UPDATE data.page_co_writing SET ended_at=now()
-          WHERE space_id=$1 AND page_id=$2 AND ended_at IS NULL RETURNING conversation_id,started_by_user_id`,
-        values: [spaceId, pageId], maxRows: MAX_LINKS });
-      return ended.map((row) => ({ conversationId: row.conversation_id, startedByUserId: row.started_by_user_id }));
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.co_writing_wake", spaceId, async (tx) => {
+      const rows = await tx.query<QueryResultRow & { conversation_id: string; started_by_user_id: string; ended: boolean }>({
+        name: "page_co_writing_wake_v1",
+        text: `SELECT conversation_id, started_by_user_id, (ended_at IS NOT NULL) AS ended
+          FROM data.page_co_writing
+          WHERE space_id=$1 AND page_id=$2 AND stopped IS NOT TRUE
+            AND (ended_at IS NULL OR ended_at > clock_timestamp() - make_interval(days => $3))
+          ORDER BY started_at LIMIT ${MAX_LINKS}`,
+        values: [spaceId, pageId, CO_WRITING_WAKE_ENDED_DAYS], maxRows: MAX_LINKS,
+      });
+      return rows.map((row) => ({ conversationId: row.conversation_id, startedByUserId: row.started_by_user_id,
+        ended: row.ended === true }));
+    });
+  }
+
+  /** Opens a co-writing the old leave timer had ended, so a person's typing can wake its Agent. */
+  async reopenCoWriting(input: { requestId: string; spaceId: string; pageId: string; conversationId: string }):
+    Promise<{ reopened: boolean }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    const conversationId = bounded(input.conversationId, "conversationId");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.co_writing_reopen", spaceId, async (tx) => {
+      const reopened = await tx.query({ name: "page_co_writing_reopen_v1",
+        text: `UPDATE data.page_co_writing SET ended_at=NULL
+          WHERE space_id=$1 AND page_id=$2 AND conversation_id=$3
+            AND stopped IS NOT TRUE AND ended_at IS NOT NULL RETURNING 1`,
+        values: [spaceId, pageId, conversationId], maxRows: 1 });
+      return { reopened: reopened.length === 1 };
     });
   }
 

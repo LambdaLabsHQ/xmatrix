@@ -395,12 +395,14 @@ fact is about.
 - **Co-writing is live, as with a person** (decided 2026-10-15). A person
   starts an Agent writing the page from the page itself, typing nothing: one
   tap on the face of the Agent to write with. The Agent is then on the page
-  like a colleague in a shared document, until it is stopped or the people
-  leave (two minutes after the last person's connection closes, the page's
-  session ends its co-writing and tells its Agent so; its Run then rests and
-  sleeps as any other): its caret in its colour with what it is doing
-  (watching, thinking, writing, waiting), and its words arriving as its harness
-  writes them.
+  like a colleague in a shared document, until the person stops it (decided
+  by Daniel 2026-10-26). A dropped connection does not end it, and neither
+  does the person leaving. When people type and that Agent is not on the page
+  — it slept, or an older Hub had ended co-writing because they seemed to
+  have left — the page wakes it, and it reads the page as it joins. Its Run
+  may still rest after a day of quiet; the next typing wakes it. Its caret
+  stays in its colour with what it is doing (watching, thinking, writing,
+  waiting), and its words arrive as its harness writes them.
   - **Selection feedback.** A call disables another while its request is
     pending. Launch results and the conversation stay in
     the existing margin card (or the page's conversation list in a narrow
