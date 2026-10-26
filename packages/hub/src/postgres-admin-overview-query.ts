@@ -1,8 +1,7 @@
-import { POSTGRES_ADMIN_MESSAGE_FACTS_QUERY } from "./postgres-admin-message-facts";
-
-/** One metadata-only scan and one SQL round trip per physical shard. */
+/** Covering metadata scan; indexed latest activity avoids decoding every sender preview. */
 export const POSTGRES_ADMIN_OVERVIEW_QUERY = `WITH admin_message_facts AS MATERIALIZED (
-  ${POSTGRES_ADMIN_MESSAGE_FACTS_QUERY}
+  SELECT space_id, author_id, author_kind, created_at
+    FROM data.messages WHERE deleted_at IS NULL
 ),
 totals AS (
 WITH space_totals AS (
@@ -69,16 +68,32 @@ WITH membership_users AS (
           SELECT owner_user_id AS user_id, COUNT(*) AS agent_registrations
            FROM data.space_agent_registrations GROUP BY owner_user_id
         ), message_counts AS (
-          SELECT activity_user_id AS user_id,
-            COUNT(*) FILTER (WHERE author_kind = 'user') AS messages,
-            MAX(created_at) AS last_message_at
-           FROM admin_message_facts WHERE activity_user_id IS NOT NULL GROUP BY activity_user_id
+          SELECT author_id AS user_id, COUNT(*) AS messages, MAX(created_at) AS last_message_at
+           FROM admin_message_facts WHERE author_kind = 'user' GROUP BY author_id
+        ), legacy_agent_activity AS (
+          SELECT binding.owner_user_id AS user_id, MAX(message.created_at) AS last_message_at
+          FROM data.messages message
+          JOIN data.instances instance ON instance.instance_id = message.author_id
+          JOIN data.run_agent_registrations binding ON binding.run_id = instance.run_id
+            AND binding.space_id = message.space_id
+          WHERE message.deleted_at IS NULL AND message.author_kind = 'agent' AND message.preview_json IS NULL
+          GROUP BY binding.owner_user_id
         )
        SELECT membership_users.*, COALESCE(agent_counts.agent_registrations, 0) AS agent_registrations,
-        COALESCE(message_counts.messages, 0) AS messages, message_counts.last_message_at,
+        COALESCE(message_counts.messages, 0) AS messages,
+        GREATEST(message_counts.last_message_at, agent_activity.last_message_at,
+          legacy_agent_activity.last_message_at) AS last_message_at,
         COUNT(*) OVER () AS total_count
        FROM membership_users LEFT JOIN agent_counts USING (user_id)
        LEFT JOIN message_counts USING (user_id)
+       LEFT JOIN legacy_agent_activity USING (user_id)
+       LEFT JOIN LATERAL (
+         SELECT created_at AS last_message_at FROM data.messages
+         WHERE author_kind = 'agent' AND deleted_at IS NULL
+           AND preview_json#>>'{senderSnapshot,userId}' = membership_users.user_id
+           AND membership_users.user_id <> ''
+         ORDER BY created_at DESC LIMIT 1
+       ) agent_activity ON true
        ORDER BY spaces DESC, first_seen_at, user_id
        LIMIT 10000
 ),

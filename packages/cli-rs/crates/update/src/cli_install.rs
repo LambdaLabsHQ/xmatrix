@@ -115,11 +115,77 @@ fn retry_busy_seed_start<T>(mut start: impl FnMut() -> std::io::Result<T>) -> st
     unreachable!("last attempt always returns")
 }
 
+/// Windows cannot overwrite or delete an executable that is running (the
+/// login daemon runs the installed `xmatrix.exe` itself), but it can rename
+/// one. When the destination cannot be replaced in place, it is moved aside
+/// to a unique name in the same directory, the new copy takes its place, and
+/// the aside copy is deleted once nothing runs it — on this install if
+/// possible, otherwise on a later one.
 #[cfg(windows)]
 fn publish(temporary: &Path, destination: &Path) -> error::Result<()> {
-    std::fs::copy(temporary, destination)?;
-    let _ = std::fs::remove_file(temporary);
+    remove_stale_aside_copies(destination);
+    let in_place = match std::fs::rename(temporary, destination) {
+        Ok(()) => return Ok(()),
+        Err(error) if !destination.exists() => return Err(error.into()),
+        Err(error) => error,
+    };
+    let aside = aside_path(destination);
+    std::fs::rename(destination, &aside).map_err(|error| {
+        CliError::Launch(format!(
+            "could not replace {} ({in_place}) or move it aside: {error}",
+            destination.display()
+        ))
+    })?;
+    if let Err(error) = std::fs::rename(temporary, destination) {
+        let _ = std::fs::rename(&aside, destination);
+        return Err(error.into());
+    }
+    let _ = std::fs::remove_file(&aside);
     Ok(())
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+const ASIDE_MARKER: &str = ".old-";
+
+/// A unique same-directory name for a replaced binary that may still run.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn aside_path(destination: &Path) -> PathBuf {
+    let mut name = destination.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(
+        "{ASIDE_MARKER}{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+    destination.with_file_name(name)
+}
+
+/// Best effort: deletes copies an earlier install moved aside. One still
+/// running stays until a later install; only exact aside names of this
+/// destination are touched.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn remove_stale_aside_copies(destination: &Path) {
+    let (Some(directory), Some(binary)) = (
+        destination.parent(),
+        destination.file_name().and_then(|name| name.to_str()),
+    ) else {
+        return;
+    };
+    let prefix = format!("{binary}{ASIDE_MARKER}");
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let is_aside = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(&prefix));
+        if is_aside && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -190,7 +256,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     fn temp_root(label: &str) -> PathBuf {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nonce = SystemTime::now()
@@ -252,6 +317,84 @@ mod tests {
             b"previous install"
         );
         assert_install_cleanup(&root, &into);
+    }
+
+    fn directory_names(directory: &Path) -> Vec<String> {
+        let mut names: Vec<_> = std::fs::read_dir(directory)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn stale_aside_cleanup_removes_only_this_binarys_aside_copies() {
+        let root = temp_root("aside");
+        let destination = root.join("xmatrix.exe");
+        std::fs::write(&destination, b"current").unwrap();
+        std::fs::write(aside_path(&destination), b"replaced").unwrap();
+        std::fs::write(root.join("xmatrix.exe.tmp-1-2"), b"in flight").unwrap();
+        std::fs::write(root.join("other.exe.old-1-2"), b"not ours").unwrap();
+        std::fs::create_dir(root.join("xmatrix.exe.old-dir")).unwrap();
+
+        remove_stale_aside_copies(&destination);
+
+        assert_eq!(
+            directory_names(&root),
+            [
+                "other.exe.old-1-2",
+                "xmatrix.exe",
+                "xmatrix.exe.old-dir",
+                "xmatrix.exe.tmp-1-2"
+            ]
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess helper for the running-install replacement regression"]
+    fn running_install_helper() {
+        if std::env::var("XMATRIX_TEST_RUNNING_INSTALL_HELPER").as_deref() == Ok("1") {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+    }
+
+    // The login daemon runs the installed xmatrix.exe, so the Desktop seed
+    // install must replace an executable that is running (os error 32/33).
+    #[cfg(windows)]
+    #[test]
+    fn installing_over_a_running_executable_replaces_it() {
+        let root = temp_root("running");
+        let destination = root.join(CLI_BINARY_NAME);
+        std::fs::copy(std::env::current_exe().unwrap(), &destination).unwrap();
+        let mut running = Command::new(&destination)
+            .args([
+                "--exact",
+                "cli_install::tests::running_install_helper",
+                "--ignored",
+            ])
+            .env("XMATRIX_TEST_RUNNING_INSTALL_HELPER", "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let temporary = xmatrix_cli_core::config::unique_temporary_path(&destination);
+        std::fs::write(&temporary, b"new install").unwrap();
+
+        let published = publish(&temporary, &destination);
+        let names = directory_names(&root);
+        let _ = running.kill();
+        let _ = running.wait();
+        published.unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new install");
+        assert_eq!(names.len(), 2, "the running copy waits aside: {names:?}");
+
+        remove_stale_aside_copies(&destination);
+        assert_eq!(directory_names(&root), [CLI_BINARY_NAME]);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

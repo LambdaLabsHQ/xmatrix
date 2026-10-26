@@ -367,11 +367,19 @@ fn powershell_single_quoted(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+/// Runs a generated setup script with Windows PowerShell and returns its
+/// failure text when it exits unsuccessfully.
+///
+/// The failure text must reach the CLI as UTF-8 in every Windows locale.
+/// Left alone, Windows PowerShell writes through the OEM code page (CP936 on
+/// Chinese Windows), so an error such as `拒绝访问。` arrives as U+FFFD. The
+/// prelude switches the console output encoding to UTF-8, and the catch
+/// writes through `[Console]::Error`, which .NET recreates with that
+/// encoding, rather than through the host's own error formatter.
 #[cfg(windows)]
-fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonServiceInstall> {
+fn run_windows_setup_script(body: &str) -> error::Result<Result<(), String>> {
     use std::process::{Command, Stdio};
 
-    let script = windows_daemon_scheduled_task_script(binary, std::process::id());
     let script_path = std::env::temp_dir().join(format!(
         "xmatrix-setup-daemon-{}-{}.ps1",
         std::process::id(),
@@ -380,7 +388,17 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
             .map(|duration| duration.as_nanos())
             .unwrap_or(0)
     ));
-    std::fs::write(&script_path, script.as_bytes())?;
+    // Windows PowerShell reads a BOM-less script in the ANSI code page, which
+    // would garble a non-ASCII install path such as a Chinese user name.
+    let script = format!(
+        "\u{feff}$OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n\
+         try {{ [Console]::OutputEncoding = $OutputEncoding }} catch {{ }}\n\
+         try {{\n{body}\n}} catch {{\n\
+           [Console]::Error.WriteLine(($_ | Out-String -Width 4096).Trim())\n\
+           exit 1\n\
+         }}\n"
+    );
+    std::fs::write(&script_path, script)?;
     let mut command = Command::new("powershell");
     {
         use std::os::windows::process::CommandExt;
@@ -403,13 +421,22 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
             "powershell is required to install the xMatrix daemon Scheduled Task: {error}"
         ))
     })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = [stderr.trim(), stdout.trim()]
-            .into_iter()
-            .find(|part| !part.is_empty())
-            .unwrap_or("no output");
+    if output.status.success() {
+        return Ok(Ok(()));
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(Err([stderr.trim(), stdout.trim()]
+        .into_iter()
+        .find(|part| !part.is_empty())
+        .unwrap_or("no output")
+        .to_string()))
+}
+
+#[cfg(windows)]
+fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonServiceInstall> {
+    let script = windows_daemon_scheduled_task_script(binary, std::process::id());
+    if let Err(detail) = run_windows_setup_script(&script)? {
         return Err(CliError::Launch(format!(
             "Registering Scheduled Task {WINDOWS_DAEMON_TASK_NAME} failed: {detail}"
         )));
@@ -572,6 +599,32 @@ mod tests {
         assert!(
             !script.contains(r"\sdaemon(\s|$)"),
             "loose daemon substring must not remain; it matches `setup daemon`"
+        );
+    }
+
+    // The failure text a Chinese-locale PowerShell reports (`拒绝访问。`) must
+    // reach the caller readable, not as OEM-code-page bytes decoded as U+FFFD.
+    #[cfg(windows)]
+    #[test]
+    fn windows_setup_script_failures_reach_the_caller_as_utf8() {
+        let detail = run_windows_setup_script(
+            "$path = 'C:\\Users\\张三\\.local\\bin\\xmatrix.exe'\nthrow \"拒绝访问。 $path\"",
+        )
+        .unwrap()
+        .unwrap_err();
+        assert!(
+            detail.contains(r"拒绝访问。 C:\Users\张三\.local\bin\xmatrix.exe"),
+            "{detail}"
+        );
+        assert!(!detail.contains('\u{fffd}'), "{detail}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_successful_windows_setup_script_reports_no_failure() {
+        assert_eq!(
+            run_windows_setup_script("Write-Output 'ok'").unwrap(),
+            Ok(())
         );
     }
 

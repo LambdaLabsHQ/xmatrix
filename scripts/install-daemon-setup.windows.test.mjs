@@ -96,3 +96,30 @@ test("installer rejects changed bytes before running the candidate", windowsOnly
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A running xmatrix.exe (an Agent's CLI, a daemon still exiting) cannot be
+// overwritten; the installer must still put the new binary in place.
+test("installer replaces an xmatrix.exe that is still running", windowsOnly, async () => {
+  const { spawn } = await import("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmatrix-running-install-"));
+  const installPath = path.join(dir, "xmatrix.exe");
+  fs.copyFileSync(process.execPath, installPath);
+  const running = spawn(installPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  try {
+    await new Promise((resolve, reject) => {
+      running.once("spawn", resolve);
+      running.once("error", reject);
+    });
+    const candidate = path.join(dir, "candidate.exe");
+    const script = path.join(dir, "install.ps1");
+    fs.writeFileSync(candidate, "new install");
+    fs.writeFileSync(script, `﻿${installPrelude}\n$ErrorActionPreference = 'Stop'\nInstall-XMatrixBinary -SourcePath ${powerShellLiteral(candidate)} -InstallPath ${powerShellLiteral(installPath)}\n`, "utf8");
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readFileSync(installPath, "utf8"), "new install");
+  } finally {
+    running.kill();
+    await new Promise((resolve) => (running.exitCode === null && running.signalCode === null ? running.once("exit", resolve) : resolve()));
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
