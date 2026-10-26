@@ -17,7 +17,7 @@ import { connectorActionPolicyRepository, connectorActionRequestRepository, conn
 import { ProviderRequestError } from "./http";
 import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
-import type { ConnectorAction, ConnectorActionContext, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
+import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
 import { runSubscriptionStatement } from "./subscription-command";
 import { xActionCapability } from "./x-api";
 import { upstreamMeter } from "../usage-cost-metering";
@@ -90,6 +90,41 @@ export function connectorCommands(providerId: string,
       await publishCommandStatus(manifest, input, lines);
     },
   };
+}
+
+/** A synchronous private read: no Channel message, execution excerpt, approval
+ * payload or resumable result is written. Only the authenticated HTTP caller
+ * receives its parameters' outcome. Channel commands keep their public receipts. */
+export async function callConnectorRead(providerId: string, input: ConnectorCommandInput, actionId: string,
+  action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0],
+  authorizeCaller: () => Promise<void>): Promise<ConnectorActionResult> {
+  const manifest = getAppConnectorProvider(providerId);
+  const entry = connectorActionCatalog(providerId, { [actionId]: action }).get(actionId);
+  if (!manifest || !entry || action.effect !== "read") {
+    throw new ProviderRequestError(403, "Private calls support declared read actions only; use a Channel command for writes");
+  }
+  const parsed = action.parse(statement);
+  if (typeof parsed === "string") throw new ProviderRequestError(400, parsed);
+  const scope = await commandScope(manifest, input);
+  if (typeof scope === "string") throw new ProviderRequestError(403, scope);
+  const authorize = async () => {
+    await authorizeCaller();
+    const live = await commandScope(manifest, input);
+    if (typeof live === "string" || live.spaceId !== scope.spaceId || live.connectionId !== scope.connectionId) {
+      throw new ProviderRequestError(403, "Connector access changed during the private call");
+    }
+    const refusal = actionRefusal({ actionId, mode: await channelActionPolicy(input.env, {
+      connectionId: scope.connectionId, channelId: input.channelId, actionId, defaultPolicy: entry.definition.defaultPolicy }) });
+    if (refusal) throw new ProviderRequestError(403, refusal);
+  };
+  await authorize();
+  const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorize,
+    `private:${input.messageId}`);
+  if (typeof context === "string") throw new ProviderRequestError(403, context);
+  const result = await action.execute(context, parsed);
+  // A stopped Run or revoked grant cannot collect a response that was in flight.
+  await authorize();
+  return result;
 }
 
 export async function runPolicy(providerId: string, input: ConnectorCommandInput,

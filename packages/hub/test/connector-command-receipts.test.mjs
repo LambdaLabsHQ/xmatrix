@@ -15,7 +15,7 @@ const id = "18f2a9c0d1e2b3a4";
 const mailText = "Subject: App Review, code SYNTHETIC-ALPHA9";
 const gmail = data => ({ body: { status: 200, data } });
 
-// A command runs only from a Channel message, and everyone in the Channel,
+// A public command runs from a Channel message, and everyone in the Channel,
 // its sender included, reads the result in the receipt that replies to it.
 async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), composioApiKey: "fixture-key" }) {
   const persisted = [], receipts = [];

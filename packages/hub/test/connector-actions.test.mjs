@@ -249,6 +249,12 @@ test("connector usage lists each connected provider's Channel commands, and noth
     "policy and subscriptions are not actions");
   assert.ok(commands.every((command) => !command.startsWith("@notion:")), "an unconnected provider is not listed");
   assert.deepEqual(usageOf(new Set()), []);
+  const privateReads = usageOf(new Set(["gmail", "github"]));
+  assert.ok(privateReads.find(provider => provider.provider === "gmail").actions
+    .find(action => action.command.startsWith("@gmail:read:")).description.includes("xmatrix call"));
+  assert.ok(!privateReads.find(provider => provider.provider === "github").actions
+    .find(action => action.command.startsWith("@github:subscribe:")).description.includes("xmatrix call"),
+    "subscription setup cannot be advertised as a private read");
 });
 
 test("Channel action admission requires a declared own executor with the declared effect", () => {
@@ -287,6 +293,8 @@ test("an Agent Run reads its connector usage, but not a read-only Channel About 
   assert.equal(agentRunHttpRouteAllowed(request("GET"), run), true);
   assert.equal(agentRunHttpRouteAllowed(request("POST"), run), false);
   assert.equal(agentRunHttpRouteAllowed(request("POST", "/api/connectors/mcp"), run), false);
+  assert.equal(agentRunHttpRouteAllowed(request("POST", "/api/connectors/call"), run), true);
+  assert.equal(agentRunHttpRouteAllowed(request("GET", "/api/connectors/call"), run), false);
 });
 
 test("OpenConnector runs one runtime action with JSON input and shields its result", async () => {
