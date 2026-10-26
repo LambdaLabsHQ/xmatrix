@@ -111,6 +111,8 @@ export interface PageSessionPorts {
   persist(state: PageSessionState): Promise<void>;
   send(connectionId: string, data: Uint8Array): void;
   broadcast(data: Uint8Array, exceptConnectionId?: string): void;
+  /** A person typed. Wake co-writers that are not on the page; do not wait on it. */
+  wakeCoWriters?(): void;
 }
 
 /** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
@@ -267,6 +269,7 @@ export class PageSession {
       }
       const human = typeof origin === "string" && this.connections.get(origin)?.principal.kind === "user";
       for (const [id, writer] of this.coWriters) if (origin !== id) writer.othersEdited(human);
+      if (human) this.ports.wakeCoWriters?.();
       void this.persist();
     });
     this.awareness.on("update", ({ added, updated, removed }: {
