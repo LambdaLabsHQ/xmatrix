@@ -32,21 +32,23 @@ cards retain their existing distinct semantics. Successful turns clear the
 pending failure; intentional cancellation is not converted into failure.
 
 The Web draws a notice that carries `xmatrixFailureEvidence` as a problem card
-(`turn-failure.ts`): HTTP 429 is "rate limited by its provider", 401/403 is
-"the provider refused", a timeout, DNS, TLS or connection category is "couldn't
-reach its provider", a process category is "its program stopped", a provider
-category with no HTTP status, error code, socket close, or exit code says the
-turn stopped there, and anything else is "couldn't finish this turn". Only the recorded evidence decides, never
-the prose. A Hub-classified used-up account carries the additive `usageLimit`
-field in its evidence and takes precedence over HTTP 429: its card says that
-the quota is used up and suggests waiting for reset or handing work to another
-Agent. A structured provider reset is shown in UTC; a reset hint present only
-in the provider's words stays as written, without guessing its date.
+(`turn-failure.ts`). The original cause line is its title for every error,
+including unknown failures and historical notices. It passes through the
+program's words without requiring a recognised category, translating the cause,
+or replacing it with a generic failure title. Full diagnostics and correlation
+identifiers remain under Details. A notice without evidence reads as written.
 
-Each card names what to do next in English or Chinese. The original cause line
-is always visible, including on older notices and unknown failures, so opening
-Details is not necessary to discover the actual error. Full diagnostics and
-correlation identifiers remain under Details. A notice without evidence reads as written.
+Recorded evidence supplies the next steps in English or Chinese: HTTP 429
+suggests waiting, 401/403 suggests checking sign-in/access, connection evidence
+suggests checking the network, and a stopped process suggests retry/update.
+A Hub-classified exhausted account carries additive `usageLimit` evidence and
+suggests waiting for quota reset or handing work to another Agent, ahead of
+ordinary rate limiting. A structured provider reset displays in UTC; prose-only
+reset hints remain as written in the original error, without guessing a date.
+If no original detail is available, the card falls back to the evidence-based
+heading and explicitly describes missing detail. Evidence never creates a
+specific diagnosis that the program did not supply.
+
 Once that same Agent posts a later message of its own, the card settles: its
 rail goes quiet, it says the Agent continued, and it no longer asks for a reply.
 The notice stays in the Channel. A human reply, another failure, or a system

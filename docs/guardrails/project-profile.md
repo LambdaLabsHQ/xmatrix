@@ -30,9 +30,10 @@ launch decision and durable summon coordinator. Missing tracking stays unknown;
 connecting a computer starts no unselected request. See
 [message asks](../architecture/message-asks.md).
 
-Turn-failure cards expose the original cause before Details, including unknown
-and historical errors. Hub-classified exhausted provider accounts have distinct
-quota-reset or handoff guidance; known reset timestamps display in UTC. The
+Turn-failure cards use the original error as their title for every cause,
+including unknown and historical errors. Hub classifications supply next steps
+without replacing that error. Exhausted provider accounts get reset or handoff
+guidance; known reset timestamps display in UTC. The
 existing quota hold and handoff authority is unchanged. See
 [turn failures](../operations/agent-turn-failures.md).
 
@@ -41,6 +42,11 @@ once in a fresh PostgreSQL session after transport loss before COMMIT. Wakes,
 route publication and notices remain outside that database-only boundary;
 unknown COMMIT results retain receipt reconciliation. See
 [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
+Page conversation navigation uses quiet lines at both margin edges with explicit
+unread counts, a clickable position rail showing the current viewport, and a
+toolbar count opening the existing All / Open / Resolved conversation list.
+See [live documents](../design/pages-live-document.md#44-conversations-beside-the-page).
 
 Linear exposes bounded task/project collaboration through typed Channel/MCP
 actions, including search, assignments, workflow transitions, cycles, labels,
