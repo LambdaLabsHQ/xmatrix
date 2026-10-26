@@ -30,6 +30,8 @@ integration("a refused first-message summon posts one receipt and finishes acros
       (space_id,user_id,role,version,email,display_name,created_at,updated_at)
       VALUES ($1,$2,'owner',1,'owner@example.test','Owner',now(),now())`, [space, actorUserId]);
     await append(env, channelId, { commandId: "first", messageId: first, channelId, principal, body: "Fix the build" });
+    assert.deepEqual(await f.run("SELECT commit_certified FROM data.message_asks WHERE message_id=$1", [first]),
+      [{ commit_certified: true }], "non-delivery evidence commits with the Human publication, before any post-commit work");
     await choices.open({ requestId: "open", channelId, messageId: first, authorUserId: actorUserId });
     await f.run(`UPDATE data.first_message_launch_choices SET deadline_at=clock_timestamp()-interval '1 second'
       WHERE channel_id=$1`, [channelId]);
@@ -71,5 +73,25 @@ integration("a refused first-message summon posts one receipt and finishes acros
       notice => dispatchProductAgentSystemNotice({ ...notice, append }));
     const after = await postgresMessageHistory(env, { channelId, principal, limit: 20 }, dependencies);
     assert.equal(after.messages.find(message => message.body.includes("registration_daemon_offline")).messageResidual.replyToMessageId, first);
+    // A live recipient can exit between publication and post-commit. Its old
+    // message must never acquire an unaddressed action from that later state.
+    const race = "exit-race";
+    await f.run(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,metadata_json,created_at,updated_at)
+      VALUES($1,$2,'Exit race',$1,'open',$1,1,'{}',now(),now())`, [race, space]);
+    await f.run("INSERT INTO control.channel_space_directory(channel_id,space_id,updated_at) VALUES($1,$2,now())", [race, space]);
+    await f.run(`INSERT INTO data.runs(run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
+      VALUES('exit-race:1#1',$1,$2,'running',1,'{}',now(),now())`, [actorUserId, race]);
+    await f.run(`INSERT INTO data.instances(instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
+      VALUES('exit-race:1','exit-race:1#1',$1,1,'busy',1,now(),now())`, [race]);
+    const raceBody = "Check the log";
+    await postgresMessageAppend(env, race, { commandId: race, messageId: race, channelId: race, principal, body: raceBody }, dependencies);
+    await f.run("UPDATE data.runs SET status='stopped' WHERE channel_id=$1", [race]);
+    await f.run("UPDATE data.instances SET status='offline',rest_state='stopped' WHERE channel_id=$1", [race]);
+    await dispatchProductMessageLaunches({ env, channelId: race, messageId: race, body: raceBody, actorUserId,
+      senderKind: "user", senderId: actorUserId, sequence: 1 }, {
+      registration: async () => ({ selectionCount: 0, prepared: [], rejected: [] }), newConversation: async () => {},
+    });
+    assert.deepEqual(await f.run("SELECT message_id FROM data.message_asks WHERE channel_id=$1", [race]), [],
+      "an exited delivery recipient does not become failed-delivery evidence during post-commit");
   } finally { await f.close(); }
 });

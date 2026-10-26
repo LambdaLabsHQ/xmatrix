@@ -71,6 +71,17 @@ and the existing quota hold and automatic handoff are unchanged.
 This needs a beta Hub/Web release, no native update or data migration. Older
 clients ignore the added field. Recovery is a CI-validated beta reverting the change.
 
+## Unreleased: Unaddressed evidence commits with its publication
+
+The Human message append now records recipient absence inside its existing
+transaction and Channel lock. Post-commit only publishes state: an Agent that
+exits after receiving the message cannot turn that delivery into an unaddressed
+action. A lost post-commit no longer loses a named/later message's witness.
+Expand migration 0222 adds a nullable commit witness flag; prior observations
+stay unknown and cannot authorize new choices. Imported history is excluded.
+No Web or native update is needed. Recovery uses a CI-validated beta Hub release;
+keep the additive flag and never backfill it from current Instance state.
+
 ## Unreleased: Unaddressed messages have an explicit Agent choice
 
 Human speech that the Hub positively confirms has no recipient gets a choice

@@ -96,8 +96,12 @@ travels with Space shard moves and is deleted with its Channel or Space. Moving
 a Channel to another Space invalidates its unaddressed evidence rather than
 carrying an action into a new authority scope.
 
-The Hub records this evidence only for a fresh, unchanged, non-platform Human
-publication after successful interpretation. It uses the unified interaction
+The canonical append records this evidence in the SAME transaction as a fresh,
+unchanged, non-platform Human publication, while holding its Channel lock.
+Post-commit only pushes the current projection; it cannot certify absence from
+a recipient that exited after publication. Imported history does not acquire
+evidence. Rows predating this commit witness remain unknown (`commit_certified`
+is not backfilled). It uses the unified interaction
 plan, persisted picker/Instance targets, Human attention recipients, existing
 Run/Instance ownership and the persisted Automation occurrence. Controls,
 connector commands and Automation messages never become unaddressed speech.
