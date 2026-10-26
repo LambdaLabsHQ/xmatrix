@@ -6,6 +6,7 @@ import { relayRuntimeSingleCell } from "./relay-authority-locator";
 import { failureResponse, transientFailure } from "./error-contract";
 import { analyticsWorkerVersion } from "./analytics-sampling";
 import { HarnessReleaseWatchFailure, type HarnessReleaseWatchEvidence } from "./harness-release-watch-failure";
+import { observeHarnessWatch, type HarnessWatchObservationEnv } from "./harness-release-watch-observation";
 import type { Env } from "./types";
 
 /** The Runtime cell route that runs one release pass beside PostgreSQL. */
@@ -77,6 +78,7 @@ export interface HarnessReleaseWatchDependencies {
  */
 export async function watchHarnessReleases(env: Env, dependencies: HarnessReleaseWatchDependencies = {}):
   Promise<{ issued: number }> {
+  const started = Date.now();
   const database: AuthorityDatabaseSession | undefined = dependencies.targets ? undefined
     : postgresAuthorityDatabase(env, "Machine", "xmatrix-hub-harness-release").openSession();
   const targets = dependencies.targets ?? (releases => readHarnessReleaseTargets(database!,
@@ -86,13 +88,17 @@ export async function watchHarnessReleases(env: Env, dependencies: HarnessReleas
   try {
     const watched = (dependencies.presets ?? AGENT_PRESETS)
       .flatMap(preset => preset.management?.latest ? [{ preset, latest: preset.management.latest }] : []);
+    observeHarnessWatch(env, "runtime", "registry_read", started);
     const versions = await Promise.all(watched.map(({ latest }) => latestOf(latest)));
     const releases = watched.flatMap(({ preset }, index) => {
       const version = versions[index];
       return version ? [{ presetId: preset.id, version }] : [];
     });
     if (releases.length === 0) return { issued };
-    for (const target of await targets(releases)) {
+    observeHarnessWatch(env, "runtime", "target_read", started);
+    const found = await targets(releases);
+    observeHarnessWatch(env, "runtime", "notice_issue", started);
+    for (const target of found) {
       const requestId = `harness:${crypto.randomUUID()}`;
       try {
         await (dependencies.issue ?? (command => machineDaemonCommand(env, command)))({
@@ -109,6 +115,7 @@ export async function watchHarnessReleases(env: Env, dependencies: HarnessReleas
       }
     }
   } finally {
+    observeHarnessWatch(env, "runtime", "close", started, issued);
     await database?.close();
   }
   return { issued };
@@ -124,9 +131,10 @@ export async function watchHarnessReleases(env: Env, dependencies: HarnessReleas
  * the database, so each notice holds the lock for milliseconds.
  */
 export async function watchHarnessReleasesBesidePostgres(
-  env: Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT" | "CF_VERSION_METADATA">,
+  env: Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT"> & HarnessWatchObservationEnv,
 ): Promise<{ issued: number }> {
   const started = Date.now();
+  observeHarnessWatch(env, "cron", "started", started);
   let phase: HarnessReleaseWatchEvidence["phase"] = "runtime_fetch";
   let responseStatus = 0;
   try {
@@ -136,9 +144,15 @@ export async function watchHarnessReleasesBesidePostgres(
     phase = "response_body";
     const body = await response.json<Record<string, unknown>>();
     phase = "response_contract";
-    if (response.ok && typeof body.issued === "number") return { issued: body.issued };
+    if (response.ok && typeof body.issued === "number") {
+      observeHarnessWatch(env, "cron", "completed", started, body.issued);
+      return { issued: body.issued };
+    }
     // The cell already logged an outage; a defect it threw rejects the fetch instead.
-    if (body.retryable === true) return { issued: 0 };
+    if (body.retryable === true) {
+      observeHarnessWatch(env, "cron", "deferred", started);
+      return { issued: 0 };
+    }
     // A deploy reaches this Worker before the cell restarts on it, and a cell
     // still on an earlier release has no such route (XMATRIX-HUB-7M). Its 404
     // names that release, so only a rollout in progress waits for the next pass;
@@ -147,10 +161,12 @@ export async function watchHarnessReleasesBesidePostgres(
         body.workerVersion !== analyticsWorkerVersion(env)) {
       console.warn("Harness release watch reached a Runtime cell on another release", {
         cellVersion: body.workerVersion, workerVersion: analyticsWorkerVersion(env) });
+      observeHarnessWatch(env, "cron", "deferred", started);
       return { issued: 0 };
     }
     throw new Error(`Harness release watch answered ${response.status}: ${String(body.error ?? "no error")}`);
   } catch (error) {
+    observeHarnessWatch(env, "cron", "failed", started);
     // Commands may already have committed. Never replay the whole pass just
     // because the response was lost; the next scheduled pass re-reads targets.
     throw new HarnessReleaseWatchFailure(error, phase, started, responseStatus);
@@ -162,10 +178,16 @@ export async function answerHarnessReleaseWatch(
   env: Env,
   watch: (env: Env) => Promise<{ issued: number }> = watchHarnessReleases,
 ): Promise<Response> {
+  const started = Date.now();
+  observeHarnessWatch(env, "runtime", "started", started);
   try {
-    return Response.json(await watch(env), { headers: { "cache-control": "no-store" } });
+    const result = await watch(env);
+    const response = Response.json(result, { headers: { "cache-control": "no-store" } });
+    observeHarnessWatch(env, "runtime", "completed", started, result.issued);
+    return response;
   } catch (error) {
     const failure = transientFailure(error);
+    observeHarnessWatch(env, "runtime", failure ? "deferred" : "failed", started);
     if (failure) return failureResponse(failure, { "cache-control": "no-store" });
     throw error;
   }
