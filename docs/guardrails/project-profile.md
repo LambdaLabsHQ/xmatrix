@@ -24,6 +24,12 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Linear exposes bounded task/project collaboration through typed Channel/MCP
+actions, including search, assignments, workflow transitions, cycles, labels,
+documents, milestones and dependencies. Workspace discovery identifies the
+current grant; lifecycle writes default to approval and mutations require
+explicit provider confirmation. See [Linear connector](../connectors/linear.md).
+
 Repository launch candidates preload once on entering a Space and are shared
 by its composers without polling. GitHub connection changes and signed catalog
 events invalidate the affected Space's query and version its edge-cache key;

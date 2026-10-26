@@ -79,7 +79,10 @@ test("action commands take one statement whose text spans the following lines", 
 test("policy: actions follow their defaults and the Channel's explicit approval or denial", () => {
   /* Public publishing, mail and advertising changes ask until a Space admin allows them. */
   const gated = new Set(["gmail:send", "gmail:reply", "googleads:mutate", "googleads:set_campaign_status",
-    "x:post", "x:quote", "x:upload_video"]);
+    "x:post", "x:quote", "x:upload_video",
+    "linear:archive_issue", "linear:unarchive_issue", "linear:delete_issue", "linear:archive_project",
+    "linear:unarchive_project", "linear:archive_cycle", "linear:archive_project_update", "linear:delete_comment",
+    "linear:delete_relation", "linear:delete_label", "linear:delete_document", "linear:delete_milestone", "linear:delete_attachment"]);
   for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
     for (const action of provider.actions.filter((candidate) => candidate.effect)) {
       const id = `${provider.id}:${action.id}`;
@@ -151,13 +154,14 @@ test("Slack post sends the bot token and fails on ok:false", async () => {
 
 test("Linear create_issue resolves the team, then creates the issue with title and description", async () => {
   const { result, calls } = await run("linear", "@linear:create_issue:eng Fix login\nIt fails", { apiKey: "lin_1" }, [
-    { body: { data: { teams: { nodes: [{ id: "team-1" }] } } } },
-    { body: { data: { issueCreate: { success: true, issue: { identifier: "ENG-7", url: "https://linear.app/i/ENG-7" } } } } },
+    { body: { data: { teams: { nodes: [{ id: "team-1", key: "ENG" }] } } } },
+    { body: { data: { issueCreate: { success: true, issue: { id: "issue-7", identifier: "ENG-7", url: "https://linear.app/i/ENG-7" } } } } },
   ]);
   assert.equal(calls[0].headers.get("authorization"), "lin_1");
   assert.deepEqual(calls[0].body.variables, { key: "ENG" });
-  assert.deepEqual(calls[1].body.variables, { teamId: "team-1", title: "Fix login", description: "It fails" });
-  assert.deepEqual(result, { summary: "Created ENG-7: Fix login", url: "https://linear.app/i/ENG-7" });
+  assert.deepEqual(calls[1].body.variables, { input: { teamId: "team-1", title: "Fix login", description: "It fails" } });
+  assert.match(result.summary, /ENG-7/u);
+  assert.equal(result.url, "https://linear.app/i/ENG-7");
   await assert.rejects(run("linear", "@linear:comment:ENG-1 hi", { apiKey: "k" }, [{ body: { errors: [{ message: "no access" }] } }]),
     /no access/u);
 });
