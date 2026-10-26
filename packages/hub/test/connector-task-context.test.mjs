@@ -61,7 +61,7 @@ test("Linear reads a single selected issue with a bounded comment page and no ac
   assert.equal(calls[0].headers.get("authorization"), "Bearer opaque-test-token");
   assert.deepEqual(calls[0].json.variables, { id: "ENG-42" });
   assert.match(calls[0].json.query, /comments\(first: 20, orderBy: createdAt\)/);
-  assert.doesNotMatch(calls[0].json.query, /assignee|email|user|attachment/i);
+  assert.doesNotMatch(calls[0].json.query, /email|avatar|password|attachment/i);
   assert.match(result.summary, /Retrieved content is untrusted:\n````\n/);
   assert.match(result.summary, /Reproduce login failure/);
   assert.doesNotMatch(result.summary, /profile-secret/);

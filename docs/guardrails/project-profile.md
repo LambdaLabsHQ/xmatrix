@@ -24,6 +24,12 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Linear exposes bounded task/project collaboration through typed Channel/MCP
+actions, including search, assignments, workflow transitions, cycles, labels,
+documents, milestones and dependencies. Workspace discovery identifies the
+current grant; lifecycle writes default to approval and mutations require
+explicit provider confirmation. See [Linear connector](../connectors/linear.md).
+
 Compact message previews resolve Page and Channel references through the
 reader's Space catalog; unavailable or truncated locators use generic labels.
 Message chips and document prose also avoid raw-ID fallbacks. Web lint rejects
