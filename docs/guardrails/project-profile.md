@@ -141,7 +141,9 @@ Channel presence uses the protocol's read-only Instance-ID map, separate from
 Human devices. One reducer owns identity checks, lifecycle merges and removal;
 messages and live reports cannot create residents. Required registrations
 supply harness avatars. Legacy wire shapes are normalized at the boundary.
-See [Agent status](../design/agent-status.md#instance-identity-in-presence).
+Message headers wait for an available Channel presence snapshot before
+declaring a sender's Instance offline. See
+[Agent status](../design/agent-status.md#instance-identity-in-presence).
 
 Human message sender snapshots read the current account name and avatar, as the
 Space catalog does, while Space membership still authorizes the append. This
@@ -156,6 +158,10 @@ legacy daemons keep their compiled copy. Command details come from CLI help,
 with connected app names retained at launch and usage read on demand. Full
 Channel contracts are launch-only; Codex installs its compact native reply
 reminder and trusted registration instructions at thread start and resume.
+The reporting contract keeps material findings and decisions in Channel
+replies, with their cause and chosen fix; local commentary remains execution
+output. Routine status edits retain the approach. See
+[conversation reporting](../design/conversation-activity.md#5-channel-contract).
 Grok's trusted rules exclude Channel history and task bodies. See
 [Agent prompts](../../packages/cli-rs/crates/core/prompts/README.md).
 

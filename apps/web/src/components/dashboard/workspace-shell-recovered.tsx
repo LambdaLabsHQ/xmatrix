@@ -926,7 +926,9 @@ export function buildTimeline(
               : instance.channelInstanceId === senderChannelInstanceId
         )
       : undefined;
-    const senderInstanceStale =
+    // History can arrive before the Channel's presence snapshot. Missing
+    // presence says nothing about whether this exact Instance has left.
+    const senderInstanceStale = Boolean(channel?.presence) &&
       message.from.kind === "agent" && senderHasInstanceIdentity && !matchedInstance && !linkedSender;
     const humanPresenceStatus =
       kindMatchedPresence?.kind === "user" ? kindMatchedPresence.status : undefined;
@@ -934,7 +936,7 @@ export function buildTimeline(
       message.from.kind === "agent"
         ? senderInstanceStale
           ? "offline"
-          : linkedSender && !matchedInstance
+          : !matchedInstance
             ? undefined
             : agentInstanceDisplayStatus({
               agentId: senderIdentityId,

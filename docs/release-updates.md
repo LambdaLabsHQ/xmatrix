@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: Channel replies explain the work and wait for presence
+
+The shared Agent reporting contract keeps material findings and decisions in
+separate Channel replies, explaining the cause and chosen fix. Routine status
+edits keep the approach visible; Codex's compact reminder explicitly says
+local commentary does not reach the Channel. This is guidance for new Runs,
+not automatic publication of runtime output or a guarantee of model compliance.
+Hub deployment supplies the updated text; existing Runs retain their launch
+instructions and older daemons retain their compiled fallback.
+
+Message headers no longer declare an Instance offline while the Channel's
+presence snapshot is unavailable. An authoritative empty snapshot still
+marks a departed sender offline. This is a hosted Web fix with no schema or
+native migration. Recovery is a CI-validated beta Hub/Web release reverting
+these changes.
+
 ## Unreleased: Machine reports and enrollment recover a lost database response
 
 Machine daemon commands, Run lifecycle mutations and execution report storage
