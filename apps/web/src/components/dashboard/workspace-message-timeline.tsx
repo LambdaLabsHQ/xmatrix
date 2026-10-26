@@ -31,6 +31,7 @@ import {
 } from "./workspace-shell-message-model";
 
 import { RealtimeMessageAvatar } from "./realtime-message-avatar";
+import { ConnectorReceiptCard } from "./connector-receipt-card";
 import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
 import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
@@ -218,7 +219,7 @@ import { PageEditCards, useMessagePageEdits } from "@/components/dashboard/page-
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow, PageMessageEdit,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation, parseConnectorReceipt } from "@xmatrix/protocol";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
@@ -1831,6 +1832,9 @@ export const MessageRow = memo(function MessageRow({
     ...(message.sequence ? { sequence: message.sequence } : {}),
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
   }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, connectorInvocation, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
+  // Only the Hub writes an App's system fact, so only there does a receipt's text read as one.
+  const connectorReceipt = useMemo(() => message.senderKind === "app" && message.provenance === "system_fact"
+    ? parseConnectorReceipt(message.body) : undefined, [message.senderKind, message.provenance, message.body]);
   const questionnaire = questionnaireMetadata(message.metadata);
   const onboardingStage = onboardingStageOf(message.metadata);
   const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
@@ -2532,7 +2536,7 @@ export const MessageRow = memo(function MessageRow({
             </span>
           )}
           {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice. */}
-          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && (
+          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && !connectorReceipt && (
             <span
               className={provenanceBadgeClass(message.provenance, message.body)}
               title={provenanceTitle(message.provenance, message.body)}
@@ -2662,6 +2666,10 @@ export const MessageRow = memo(function MessageRow({
             ) : turnFailure ? (
               <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody}
                 spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+            ) : connectorReceipt ? (
+              <div {...(message.messageId ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
+                <ConnectorReceiptCard entries={connectorReceipt} components={markdownComponents} />
+              </div>
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
             ) : (

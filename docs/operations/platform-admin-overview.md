@@ -139,12 +139,18 @@ back in.
 ## Cost and bounds
 
 The PostgreSQL overview executes one metadata-only SQL statement per physical
-shard; shards are read concurrently. A materialized CTE reads the live message
-metadata (`space_id`, `author_id`, `author_kind`, `created_at`) once and shares
-it between totals, per-Space, per-user, and daily aggregates. It does not read
-message content. This avoids four base-table scans and six serial SQL round
-trips on the directory shard (five on other shards). All aggregates in a shard
-also share one statement snapshot.
+shard; shards are read concurrently. A materialized CTE reads live message
+metadata (`space_id`, `author_id`, `author_kind`, `created_at`) through a covering
+index and shares it between totals, per-Space, human-user and daily aggregates.
+User activity takes the latest send-time Agent owner from an indexed timestamp
+lookup per user; only legacy messages without a sender preview join persisted
+Instance/Run bindings, through a separate partial index. It no longer decodes
+every Agent preview or joins every message to Instances/Runs just to find each
+user's latest activity. Counts, deletion filtering and ownership semantics are
+unchanged. The indexes build concurrently through the ordinary expand migration
+path while ordinary message writes continue. No message content is returned.
+All aggregates in a shard still share one statement snapshot and one SQL round
+trip.
 
 After operator authorization and the required audit write, the auth directory
 inventory and physical-shard aggregates run concurrently. Each read still

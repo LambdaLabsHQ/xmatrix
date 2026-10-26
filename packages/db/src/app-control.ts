@@ -438,12 +438,19 @@ export class PostgresAppRepository {
       const recorded = [...new Set(input.installationIds)].filter((id) => linked.includes(id));
       await tx.query({ name: "app_github_links_prune_v1", text: `DELETE FROM data.app_github_installation_links
         WHERE connection_id=$1 AND NOT (installation_id=ANY($2::text[]))`, values: [connectionId, linked], maxRows: 0 });
-      if (recorded.length > 0) await tx.query({ name: "app_github_links_record_v1", text: `INSERT INTO
-        data.app_github_installation_links (connection_id,space_id,installation_id,github_user_id,linked_by,linked_at)
-        SELECT $1,$2,installation_id,$4,$5,$6 FROM unnest($3::text[]) AS installation_id
-        ON CONFLICT (connection_id,installation_id) DO UPDATE SET github_user_id=EXCLUDED.github_user_id,
-          linked_by=EXCLUDED.linked_by,linked_at=EXCLUDED.linked_at`,
-      values: [connectionId, spaceId, recorded, input.githubUserId, actorUserId, at], maxRows: 0 });
+      if (recorded.length > 0) {
+        await tx.query({ name: "app_github_links_record_v1", text: `INSERT INTO
+          data.app_github_installation_links (connection_id,space_id,installation_id,github_user_id,linked_by,linked_at)
+          SELECT $1,$2,installation_id,$4,$5,$6 FROM unnest($3::text[]) AS installation_id
+          ON CONFLICT (connection_id,installation_id) DO UPDATE SET github_user_id=EXCLUDED.github_user_id,
+            linked_by=EXCLUDED.linked_by,linked_at=EXCLUDED.linked_at`,
+        values: [connectionId, spaceId, recorded, input.githubUserId, actorUserId, at], maxRows: 0 });
+        // Confirmation is also an explicit request for fresh provider evidence,
+        // even when the linking user and installation ids stayed the same.
+        await tx.query({ name: "app_github_links_catalog_invalidate_v1", text: `UPDATE
+          data.app_connector_connections SET version=version+1 WHERE connection_id=$1`,
+        values: [connectionId], maxRows: 0 });
+      }
       return { recorded };
     });
   }

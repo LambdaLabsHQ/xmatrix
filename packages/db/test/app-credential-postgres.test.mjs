@@ -1165,13 +1165,21 @@ integration("only an admin's GitHub Connect records who linked an installation, 
     await upsert({ status: "configured", authMode: "oauth", metadata: { installationIds: ["111", "222"] } });
     const record = (actorUserId, installationIds, githubUserId = 77) => apps.recordGitHubInstallationLinks({
       requestId: crypto.randomUUID(), spaceId: space, actorUserId, githubUserId, installationIds, at });
-    const links = async () => (await apps.getConnection({ requestId: crypto.randomUUID(),
-      connectionId: `${space}:github`, actorUserId: "member" })).connection.githubLinks;
+    const current = async () => (await apps.getConnection({ requestId: crypto.randomUUID(),
+      connectionId: `${space}:github`, actorUserId: "member" })).connection;
+    const links = async () => (await current()).githubLinks;
     try {
       await assert.rejects(record("member", ["111"]), (error) => error.code === "space_not_found");
       assert.deepEqual(await links(), []);
       assert.deepEqual((await record("owner", ["111", "333"])).recorded, ["111"], "an installation not linked here is not recorded");
       assert.deepEqual(await links(), [{ installationId: "111", githubUserId: 77 }]);
+      const confirmed = await current();
+      await record("owner", ["111"]);
+      assert.equal((await current()).version, confirmed.version + 1,
+        "reconfirming the same linker must fence cached catalog answers before notifying clients");
+      const renewed = await current();
+      await record("owner", ["333"]);
+      assert.equal((await current()).version, renewed.version, "an unlinked installation changes no catalog generation");
       await upsert({ metadata: { installationIds: ["222"] } });
       assert.deepEqual((await record("owner", ["222"], 88)).recorded, ["222"]);
       assert.deepEqual(await links(), [{ installationId: "222", githubUserId: 88 }], "the unlinked one's record is gone");

@@ -12,6 +12,7 @@ import {
 } from "./agent-mention-spawn.fixture.mjs";
 import { createAuthorityDatabase, PostgresSpaceControlRepository } from "../../db/dist/index.js";
 import { Client } from "pg";
+import { POSTGRES_ADMIN_OVERVIEW_QUERY } from "../src/postgres-admin-overview-query.ts";
 
 const ADMIN_EMAIL = "platform-admin-e2e@example.com";
 const OPERATOR_TOKEN = `operator-${"0123456789abcdef".repeat(4)}`;
@@ -150,6 +151,36 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     assert.equal(serialized.includes("same-display-name"), false);
     assert.equal(serialized.includes("private-admin-machine-host"), false);
     assert.equal(serialized.includes("must-not-appear"), false);
+
+    // Protect the admin read's cost at the real SQL boundary. A wide history
+    // must use the metadata/activity indexes rather than read every preview.
+    const profile = new Client({ connectionString: worker.postgresUrl });
+    await profile.connect();
+    try {
+      await profile.query(`INSERT INTO data.messages SELECT (jsonb_populate_record(
+        NULL::data.messages, to_jsonb(source) || jsonb_build_object(
+          'message_id', 'admin-cost:' || n, 'author_kind', 'agent',
+          'author_id', 'instance:admin-cost', 'timeline_sequence', 20000 + n,
+          'search_rank_sequence', 'admin-cost:' || n,
+          'preview_json', jsonb_build_object('bodyPreview', repeat(md5(n::text), 128),
+            'senderSnapshot', jsonb_build_object('userId', $2::text))))).*
+        FROM (SELECT * FROM data.messages WHERE channel_id = $1 AND author_kind = 'user' LIMIT 1) source
+        CROSS JOIN generate_series(1, 20000) n`, [channel.id, userId]);
+      await profile.query('VACUUM ANALYZE data.messages');
+      const now = new Date();
+      const since = new Date(now); since.setUTCDate(since.getUTCDate() - 6); since.setUTCHours(0, 0, 0, 0);
+      const before = new Date(now); before.setUTCDate(before.getUTCDate() + 1); before.setUTCHours(0, 0, 0, 0);
+      const result = await profile.query(`EXPLAIN (ANALYZE, FORMAT JSON) ${POSTGRES_ADMIN_OVERVIEW_QUERY}`,
+        [new Date(+now - 86400000), new Date(+now - 7 * 86400000), 201, since, before, true]);
+      const scans = [];
+      function inspect(plan) {
+        if (plan['Relation Name'] === 'messages') scans.push(plan['Node Type']);
+        for (const child of plan.Plans ?? []) inspect(child);
+      }
+      inspect(result.rows[0]['QUERY PLAN'][0].Plan);
+      assert.ok(scans.length > 0);
+      assert.ok(scans.every(type => type.includes('Index')), `history must stay on indexes: ${scans}`);
+    } finally { await profile.end(); }
   } finally {
     await worker.stop();
   }
