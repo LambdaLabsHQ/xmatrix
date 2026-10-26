@@ -188,9 +188,12 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 
 ### 4.1 Web timeline
 
-- **Activity rows.** An activity entry renders as one compact line: time,
-  sender, and the entry's own glyphs (`✓` completed, `→` in progress,
-  `↗` pull request). No avatar and no identity tags.
+- **Activity rows.** An activity entry renders as one compact line in a
+  message head's order: sender, time, then the entry itself (`✓` completed,
+  `→` in progress, "Opened" and the pull request as the same underlined
+  link the GitHub App's messages carry). No avatar and no identity tags; the
+  avatar column holds the fold's disclosure, or the pull request mark when a
+  lone pull request leaves nothing to open.
 - **Folding.** Consecutive activity entries from the same Instance merge into
   one row with a time range and a count; the newest items are shown inline.
   Any entry from anyone else, or any message, ends the fold, so interleaving
