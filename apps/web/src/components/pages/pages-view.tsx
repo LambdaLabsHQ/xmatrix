@@ -1223,10 +1223,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     [page?.pageId, summons, token]);
   // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` calls the Agent to the page.
   const referenceCatalog = useMessageReferenceCatalog();
-  // The Instances already at work on the Space's pages, which an `@` calls by name rather than starting another.
-  const instances = useMemo(() => pageInstances(pageAgents.data?.agents ?? new Map(), page?.pageId ?? null,
-    (id) => tree.data?.find((item) => item.pageId === id)?.title ?? null, (id) => Boolean(conversation(id))),
-  [conversation, page?.pageId, pageAgents.data, tree.data]);
+  // The Instances live in this page's conversations, which an `@` calls by name rather than starting another.
+  const instances = useMemo(() => pageInstances(liveOnPage, (id) => Boolean(conversation(id))), [conversation, liveOnPage]);
   const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
     spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents, instances,
     readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
@@ -1288,7 +1286,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return agent && listedAgents([agent])[0];
   };
   const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) => {
-    const live = [...pageAgents.data?.agents.values() ?? []].flat().filter((agent) => conversation(agent.conversationId));
+    const live = liveOnPage.filter((agent) => conversation(agent.conversationId));
     const { body, taker } = commentBody(text, writers.agents.map((agent) => agent.harness), takerOf(blockId), live);
     const home = taker && conversation(taker.conversationId);
     startDiscussion(blockId, anchor, { body,

@@ -156,7 +156,7 @@ export interface PageCompletion {
   pages: readonly PageSummary[];
   channels: readonly ChannelReference[];
   agents: readonly WriteAgent[];
-  /** The live Instances already at work on the Space's pages, which an `@` calls by name instead of starting one. */
+  /** The live Instances in this page's conversations, which an `@` calls by name instead of starting one. */
   instances: readonly PageInstance[];
   /** A page's title and markdown, for its sections after `[[page#`. */
   readPage: (pageId: string) => Promise<{ pageId: string; title: string; body: string }>;
