@@ -146,7 +146,7 @@ export const LINEAR_MUTATION_ACTIONS: Record<string, ConnectorAction> = {
     target: "team", required: ["name"], create: true, teamField: "teamIds" }),
   update_project: mutation({ operation: "projectUpdate", inputType: "ProjectUpdateInput", resource: "project",
     selection: LINEAR_PROJECT_FIELDS, fields: PROJECT_FIELDS, target: "id" }),
-  archive_project: lifecycle("projectArchive"),
+  delete_project: lifecycle("projectDelete"),
   unarchive_project: lifecycle("projectUnarchive"),
   update_cycle: mutation({ operation: "cycleUpdate", inputType: "CycleUpdateInput", resource: "cycle",
     selection: "id name number startsAt endsAt team { id key }", fields: CYCLE_FIELDS, target: "id" }),

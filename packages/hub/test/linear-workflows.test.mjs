@@ -90,10 +90,10 @@ test("search is scoped, bounded, cursor-paged and never interpolates text into G
   const query = 'login") { users { email } }';
   const result = await run("search_issues", "eng", { query, stateId: ID, assigneeId: OTHER, projectId: ID,
     cycleId: ID, labelId: OTHER, priority: 0, limit: 2, after: "cursor-1" },
-  [reply({ issueSearch: page([issue], true, "cursor-2") })]);
+  [reply({ searchIssues: page([issue], true, "cursor-2") })]);
   assert.equal(result.calls.length, 1);
   const vars = result.calls[0].body.variables;
-  assert.equal(vars.query, query);
+  assert.equal(vars.term, query);
   assert.equal(vars.first, 2);
   assert.equal(vars.after, "cursor-1");
   assert.deepEqual(vars.filter, { team: { key: { eq: "ENG" } }, state: { id: { eq: ID } },
@@ -107,8 +107,13 @@ test("search is scoped, bounded, cursor-paged and never interpolates text into G
 test("invalid resource pages fail closed rather than advertise a complete list", async () => {
   for (const value of [{ nodes: [issue] }, page(Array.from({ length: 3 }, () => issue)),
     page([{}]), page([issue], true, null)]) {
-    await assert.rejects(run("list_issues", "*", { limit: 2 }, [reply({ issueSearch: value })]), /invalid resource page/u);
+    await assert.rejects(run("list_issues", "*", { limit: 2 }, [reply({ issues: value })]), /invalid resource page/u);
   }
+  const listed = await run("list_issues", "ENG", { limit: 1, after: "cursor" },
+    [reply({ issues: page([issue], false, "last") })]);
+  assert.equal(listed.calls[0].body.variables.after, "cursor");
+  assert.equal(listed.calls[0].body.variables.first, 1);
+  assert.equal(listed.result.summary.includes("ENG-42"), true);
 });
 
 test("metadata exposes usable IDs, includes workspace labels and avoids profile fields", async () => {
@@ -161,6 +166,9 @@ test("archive, restore and deletion require provider success and never request p
   const result = await run("delete_issue", ID, undefined, [reply({ issueDelete: { success: true } })]);
   assert.deepEqual(result.calls[0].body.variables, { id: ID });
   assert.doesNotMatch(result.calls[0].body.query, /permanentlyDelete/u);
+  const project = await run("delete_project", ID, undefined, [reply({ projectDelete: { success: true } })]);
+  assert.deepEqual(project.calls[0].body.variables, { id: ID });
+  assert.match(project.result.summary, /projectDelete/u);
   await assert.rejects(run("archive_cycle", ID, undefined, [reply({ cycleArchive: { success: false } })]), /did not confirm/u);
 });
 

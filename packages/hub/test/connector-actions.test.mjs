@@ -82,7 +82,7 @@ test("policy: actions follow their defaults and the Channel's explicit approval 
   /* Public publishing, mail and advertising changes ask until a Space admin allows them. */
   const gated = new Set(["gmail:send", "gmail:reply", "googleads:mutate", "googleads:set_campaign_status",
     "x:post", "x:quote", "x:upload_video",
-    "linear:archive_issue", "linear:unarchive_issue", "linear:delete_issue", "linear:archive_project",
+    "linear:archive_issue", "linear:unarchive_issue", "linear:delete_issue", "linear:delete_project",
     "linear:unarchive_project", "linear:archive_cycle", "linear:archive_project_update", "linear:delete_comment",
     "linear:delete_relation", "linear:delete_label", "linear:delete_document", "linear:delete_milestone", "linear:delete_attachment"]);
   for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
