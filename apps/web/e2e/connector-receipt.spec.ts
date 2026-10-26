@@ -37,3 +37,22 @@ test("a connector receipt is drawn as its action, outcome and result", async ({ 
   await expect(page.getByText("Google Search Console: Query search performance · Failed")).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("connector-receipts.png") });
 });
+
+// A long result folds like a long message: its text fades out above "Show more" instead of running under it.
+test("a long connector result folds under Show more", async ({ page }) => {
+  const frames = Array.from({ length: 60 }, (_, index) => `Generated frame: app:///index.js · line ${68_200 + index} · column 9`);
+  await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1,
+    historyHeadSequence: 1, updatedAt: E2E_NOW }, [
+    { ...receipt(1, `Google Search Console inspect_url: completed; ${frames.join("\n\n")}\n\nRequest data omitted`),
+      replyToMessageId: undefined },
+  ]);
+  const card = page.getByTestId("connector-receipt");
+  const more = page.getByRole("button", { name: "Show more" });
+  await expect(more).toBeVisible({ timeout: 20_000 });
+  await expect(card.locator(".rich-message-collapsed")).toHaveCount(1);
+  await expect(card).not.toContainText("Request data omitted");
+  await page.screenshot({ path: test.info().outputPath("connector-receipt-collapsed.png") });
+  await more.click();
+  await expect(card.locator(".rich-message-collapsed")).toHaveCount(0);
+  await expect(card).toContainText("Request data omitted");
+});

@@ -20,8 +20,11 @@ const OUTCOMES: Record<ConnectorReceiptStatus, { label: string; tone: StatusTone
  * statement, what ran and how it ended, then what it returned. A private call's result went only to its caller,
  * so the card says that instead of showing a mask.
  */
-export function ConnectorReceiptCard({ entries, components }: {
-  entries: readonly ConnectorReceiptEntry[]; components: Components;
+export function ConnectorReceiptCard({ entries, collapsed = false, components }: {
+  entries: readonly ConnectorReceiptEntry[];
+  /** A long receipt folds its results, as a long message folds its text, under the row's "Show more". */
+  collapsed?: boolean;
+  components: Components;
 }) {
   return (
     <div className="app-connector-receipt" data-testid="connector-receipt">
@@ -43,7 +46,7 @@ export function ConnectorReceiptCard({ entries, components }: {
               </p>
             ) : entry.detail ? (
               <div className="app-connector-receipt-detail">
-                <RichMessageContent body={entry.detail} components={components} />
+                <RichMessageContent body={entry.detail} collapsed={collapsed} components={components} />
               </div>
             ) : null}
           </div>

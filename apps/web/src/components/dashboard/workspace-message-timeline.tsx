@@ -2668,7 +2668,7 @@ export const MessageRow = memo(function MessageRow({
                 spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
             ) : connectorReceipt ? (
               <div {...(message.messageId ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                <ConnectorReceiptCard entries={connectorReceipt} components={markdownComponents} />
+                <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents} />
               </div>
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
