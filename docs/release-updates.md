@@ -4,9 +4,10 @@
 
 Typing `@` already shows the first sentence of what a harness is for. The Agent
 list now says that text can be written, and each harness has a control that
-opens its When to pick it editor with the caret in the text. This is a Web
-change with no schema or client migration. Recovery is a CI-validated beta
-Web release reverting the change.
+opens its When to pick it editor with the caret in the text. Those words
+follow the person's language, English or Chinese. This is a Web change with
+no schema or client migration. Recovery is a CI-validated beta Web release
+reverting the change.
 
 ## Unreleased: Channel detail reads recover lost database responses
 

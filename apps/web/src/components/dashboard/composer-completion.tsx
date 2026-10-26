@@ -44,6 +44,8 @@ import { Face } from "@/components/dashboard/face";
 import { MentionCategoryLabel } from "./mention-category-label";
 import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
+import { HARNESS_PROFILE_COPY } from "@/lib/harness-profile-copy";
+import { useOnboardingLocale } from "@/lib/onboarding-locale";
 import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonStartCandidates } from "./auto-launch-completion";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -195,6 +197,7 @@ export function useComposerCompletion({
   onEditHarnessProfile,
 }: ComposerCompletionInput): ComposerCompletionApi {
   const { user } = useAuth();
+  const profileCopy = HARNESS_PROFILE_COPY[useOnboardingLocale(space?.id, token, user?.id)];
   const profileHintId = useId();
   const referenceCatalog = useMessageReferenceCatalog();
   const mentionListRef = useRef<HTMLDivElement | null>(null);
@@ -969,7 +972,7 @@ export function useComposerCompletion({
                   {onEditHarnessProfile && section.kind === "agent" &&
                     section.candidates.some((candidate) => candidate.invocationTarget?.kind === "capability") ? (
                     <p id={profileHintId} className="app-mention-profile-hint">
-                      What an agent is good at can be written.
+                      {profileCopy.hint}
                     </p>
                   ) : null}
                   {section.candidates.map((candidate, sectionIndex) => {
@@ -1081,7 +1084,7 @@ export function useComposerCompletion({
                         <button
                           type="button"
                           className="app-mention-profile-edit"
-                          aria-label={`Click to edit what ${candidate.name} is good at`}
+                          aria-label={profileCopy.editNamed(candidate.name)}
                           aria-describedby={profileHintId}
                           onPointerDown={(event) => {
                             if (event.pointerType === "mouse") event.preventDefault();
@@ -1092,8 +1095,8 @@ export function useComposerCompletion({
                             onEditHarnessProfile(profileHarness);
                           }}
                         >
-                          <span className="hidden sm:inline">Click to edit what it&apos;s good at</span>
-                          <span className="sm:hidden">Click to edit</span>
+                          <span className="hidden sm:inline">{profileCopy.editLong}</span>
+                          <span className="sm:hidden">{profileCopy.edit}</span>
                         </button>
                       </div>
                     );
