@@ -123,8 +123,11 @@ test("actions use an OAuth token when one is stored", async () => {
     } finally { fetch.restore(); }
   };
   const linear = await run("linear", "@linear:comment:ENG-1 hi", { oauthToken: "lt" },
-    [{ body: { data: { commentCreate: { success: true } } } }]);
-  assert.equal(linear[0].headers.get("authorization"), "Bearer lt");
+    [{ body: { data: { issue: { id: "11111111-1111-4111-8111-111111111111", identifier: "ENG-1" } } } },
+      { body: { data: { commentCreate: { success: true,
+        comment: { id: "22222222-2222-4222-8222-222222222222", url: "https://linear.app/test/issue/ENG-1/task#comment-2222" } } } } }]);
+  assert.equal(linear.length, 2);
+  for (const request of linear) assert.equal(request.headers.get("authorization"), "Bearer lt");
   const gitlab = await run("gitlab", "@gitlab:comment:g/p!1 hi", { oauthToken: "gt" }, []);
   assert.equal(gitlab[0].headers.get("authorization"), "Bearer gt");
   assert.equal(gitlab[0].headers.get("private-token"), null);

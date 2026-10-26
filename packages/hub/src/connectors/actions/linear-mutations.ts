@@ -41,6 +41,16 @@ async function issueIdentity(credentials: Readonly<Record<string, string>>, targ
   return issue.id;
 }
 
+async function issueReferences(credentials: Readonly<Record<string, string>>, data: Record<string, unknown>) {
+  for (const field of ["relatedIssueId", "parentId"]) {
+    const reference = data[field];
+    if (typeof reference === "string" && !LINEAR_ID.test(reference)) {
+      data[field] = await issueIdentity(credentials, reference.toUpperCase());
+    }
+  }
+  return data;
+}
+
 function mutation(spec: MutationSpec): ConnectorAction {
   return { effect: "write", requires: ["apiKey|oauthToken"],
     parse(statement) {
@@ -59,11 +69,13 @@ function mutation(spec: MutationSpec): ConnectorAction {
       return parsed;
     },
     async prepare({ credentials }, input) {
-      return { ...input, ...(spec.target === "issue" ? { resolvedTarget: await issueIdentity(credentials, input.target!) } : {}),
+      const data = await issueReferences(credentials, JSON.parse(input.data!));
+      return { ...input, data: JSON.stringify(data),
+        ...(spec.target === "issue" ? { resolvedTarget: await issueIdentity(credentials, input.target!) } : {}),
         ...(spec.teamField && input.target !== "*" ? { resolvedTeam: await linearTeamId(credentials, input.target!) } : {}) };
     },
     async execute(context, input) {
-      const data = JSON.parse(input.data!) as Record<string, unknown>;
+      const data = await issueReferences(context.credentials, JSON.parse(input.data!));
       const target = input.resolvedTarget ?? (spec.target === "issue"
         ? await issueIdentity(context.credentials, input.target!) : input.target);
       if (spec.teamField && input.target !== "*") {
