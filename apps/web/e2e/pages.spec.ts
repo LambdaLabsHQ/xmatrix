@@ -1416,21 +1416,21 @@ test("a page's conversations sit beside what they are about, and one opens there
 
 test("a co-writing margin card displays a Page title instead of the system notice's locator", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
-  const referencedId = "1d183157-be5d-4d07-9c31-203fe5688245";
+  const referencedId = "01234567-89ab-4cde-8fab-0123456789ab";
   const bodyPreview = `Co-writing page:${referencedId} live.`;
   const recent = new Date().toISOString();
   await stubPages(browser, [page("p-relay", null, "Relay", "V"),
-    page(referencedId, null, "巴厘岛旅居计划", "W")]);
+    page(referencedId, null, "发布计划", "W")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
     links: [{ linkId: "l-writing", conversationId: E2E_CHANNEL.id, pageId: "p-relay", blockId: "status", source: "manual",
       createdAt: recent, lastSeenAt: recent }],
-    conversations: [{ conversationId: E2E_CHANNEL.id, name: "Co-writing › 巴厘岛旅居计划", activityAt: recent,
+    conversations: [{ conversationId: E2E_CHANNEL.id, name: "Co-writing › 发布计划", activityAt: recent,
       headSequence: 1, readSequence: 1, agents: [],
       lastMessage: { from: { kind: "system", label: "xMatrix" }, bodyPreview, sentAt: recent } }],
   });
   await openLivePage(browser);
   const card = browser.getByTestId("page-margin").getByTestId("page-margin-card");
-  await expect(card).toContainText("Co-writing 巴厘岛旅居计划 live.");
+  await expect(card).toContainText("Co-writing 发布计划 live.");
   await expect(card).not.toContainText(referencedId);
   // The preview is text inside the card's own button, with no nested reference buttons.
   await expect(card.getByRole("button")).toHaveCount(0);

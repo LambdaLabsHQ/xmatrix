@@ -91,18 +91,18 @@ test("the row renders the author's text plain and the body's inline marks", () =
 // The screenshot's system message went through this compact renderer, bypassing message chips.
 // Test the actual rendered preview so raw IDs cannot leak via its Markdown marks or missing context.
 test("previews show current reference titles and never fall back to Page locators", () => {
-  const pageId = "1d183157-be5d-4d07-9c31-203fe5688245";
+  const pageId = "01234567-89ab-4cde-8fab-0123456789ab";
   const channelId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
   const preview = (bodyPreview, catalog) => renderPreview({
     lastMessage: { from: { label: "xMatrix" }, bodyPreview },
   }, catalog);
-  const catalog = { pages: [{ pageId, title: "巴厘岛旅居计划" }], channels: [
+  const catalog = { pages: [{ pageId, title: "发布计划" }], channels: [
     { id: channelId, name: "Planning" },
   ] };
-  assert.equal(preview(`Co-writing page:${pageId} live.`, catalog), "xMatrix: Co-writing 巴厘岛旅居计划 live.");
+  assert.equal(preview(`Co-writing page:${pageId} live.`, catalog), "xMatrix: Co-writing 发布计划 live.");
   assert.equal(preview(`Co-writing page:${pageId} ended.`), "xMatrix: Co-writing Page ended.");
   assert.equal(preview(`**page:${pageId}#plan (r4)** and \`channel:${channelId}\``, catalog),
-    "xMatrix: <strong>巴厘岛旅居计划 › Section (r4)</strong> and <code>Planning</code>");
+    "xMatrix: <strong>发布计划 › Section (r4)</strong> and <code>Planning</code>");
   assert.equal(preview(`page:${pageId} and channel:${channelId}`, { pages: [], channels: [] }), "xMatrix: Page and Channel");
   assert.equal(preview(`channel:${channelId}`, { channels: [{ id: channelId, name: "" }] }), "xMatrix: Channel");
   assert.equal(preview(`\`page:${pageId.slice(0, 19)}...`), "xMatrix: `Page");
