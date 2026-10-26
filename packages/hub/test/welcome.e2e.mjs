@@ -212,7 +212,41 @@ test("a first message no agent can answer is answered with how to bring one in",
     assert.equal(guide.metadata.kind, "xmatrix.onboarding.v1");
     assert.equal(guide.from?.label, "xMatrix");
     assert.match(guide.body, /^No agent can answer here yet/u);
+    assert.match(guide.body, /answer this message/u);
     if (firstId) assert.equal(guide.replyToMessageId ?? guide.replyTo?.messageId, firstId);
+  }));
+
+test("bringing an agent in decides the unanswered first message again, once", () =>
+  withOwnerWorker("Barbara Liskov", async ({ worker, token, call }) => {
+    const space = await personal(call);
+    const created = await call("/api/channels", { method: "POST", body: { spaceId: space.id, mode: "open",
+      name: "fix the flaky login test", metadata: { createdBy: "web", autoName: true }, access: [] } });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    const channelId = created.body.channel.id;
+    const sent = await call(`/api/channels/${encodeURIComponent(channelId)}/messages`, { method: "POST",
+      body: { body: "fix the flaky login test" } });
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    let guide;
+    for (let waited = 0; !guide; waited += 100) {
+      const { body } = await call(`/api/channels/${encodeURIComponent(channelId)}/history?limit=20`);
+      guide = body.messages.find((message) => message.metadata?.stage === "connect-agents");
+      if (guide) break;
+      assert.ok(waited < 20_000, `no reply to an agentless first message: ${JSON.stringify(body.messages)}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const firstId = guide.replyToMessageId ?? guide.replyTo?.messageId;
+    const reopen = (body = { reopen: true }) => call(`/api/channels/${encodeURIComponent(channelId)}/messages/` +
+      `${encodeURIComponent(firstId)}/launch-choice`, { method: "POST", body });
+    assert.equal((await reopen({ reopen: true, harness: "codex" })).status, 400);
+    await withWelcomeAgent(worker, token, space.id, async () => {
+      const first = await reopen();
+      assert.equal(first.status, 202, JSON.stringify(first.body));
+      assert.deepEqual(first.body, { reopened: true });
+      // Another tab, or a reload, asks again: the message is already being decided.
+      const again = await reopen();
+      assert.equal(again.status, 200, JSON.stringify(again.body));
+      assert.deepEqual(again.body, { reopened: false });
+    });
   }));
 
 test("only a person's own personal Space gets a welcome", () =>

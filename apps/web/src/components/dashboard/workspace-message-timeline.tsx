@@ -2623,7 +2623,8 @@ export const MessageRow = memo(function MessageRow({
             )}
             {onboardingStage ? (
               <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} />
+                userId={currentUserIdentityId.replace(/^user:/, "")}
+                unanswered={channel?.id && message.replyTo ? { channelId: channel.id, messageId: message.replyTo.messageId } : undefined} />
             ) : crossSpaceRead ? (
               <CrossSpaceReadCard
                 request={crossSpaceRead}

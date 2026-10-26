@@ -6,6 +6,9 @@ import type { DatabasePlacementContext } from "./context.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
 import { messageAuthoredForActor } from "./message-invocation-selections.js";
 
+/** A first message that found no agent is reopened for this long after it was decided. */
+const FIRST_MESSAGE_REOPEN_LIMIT_SECONDS = 24 * 60 * 60;
+
 /** Who decided a first message's launch: its author within the window, or Jev after it. */
 export type FirstMessageLaunchChooser = "author" | "jev";
 
@@ -130,6 +133,26 @@ export class PostgresFirstMessageLaunchChoiceRepository {
   async summoned(input: { requestId: string; channelId: string; messageId: string }): Promise<void> {
     await this.transaction(input.requestId, "first-message-launch.summoned",
       tx => markFirstMessageSummoned(tx, input.channelId, input.messageId));
+  }
+
+  /**
+   * The author brought an agent in after their first message found none
+   * (`registration_not_found`): that message is decided again, as if just sent.
+   * Only that failure reopens, only for its author, only while nothing was
+   * decided, so a message never starts two Agents, and only within a day:
+   * an older message is not started by merely opening its conversation.
+   */
+  async reopenAgentless(input: { requestId: string; channelId: string; messageId: string; authorUserId: string }): Promise<boolean> {
+    return this.transaction(input.requestId, "first-message-launch.reopen", async tx => (await tx.query({
+      name: "first_message_launch_reopen_agentless_v1", text: `UPDATE data.first_message_launch_choices
+        SET failure_code=NULL,recommendation=NULL,recommended_harness=NULL,
+          deadline_at=clock_timestamp()+make_interval(secs => $4::double precision/1000),
+          created_at=clock_timestamp(),updated_at=clock_timestamp()
+        WHERE channel_id=$1 AND message_id=$2 AND author_user_id=$3 AND choice IS NULL
+          AND failure_code='registration_not_found'
+          AND created_at>clock_timestamp()-make_interval(secs => ${FIRST_MESSAGE_REOPEN_LIMIT_SECONDS})
+        RETURNING message_id`,
+      values: [input.channelId, input.messageId, input.authorUserId, FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS], maxRows: 1 })).length > 0);
   }
 
   /** Jev could not read the message: nothing will be decided, and the message says why. */

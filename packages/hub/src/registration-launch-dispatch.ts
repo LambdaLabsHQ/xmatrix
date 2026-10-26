@@ -117,6 +117,16 @@ export async function claimFirstMessageLaunch(input: { database: AuthorityDataba
     by: "author", actorUserId: input.actorUserId, body: input.body, ...(input.harness ? { harness: input.harness } : {}) });
 }
 
+/** Reopen the author's first message that found no agent; false when it is not one. */
+export async function reopenAgentlessFirstMessage(input: { database: AuthorityDatabase; directory: AuthorityDatabase;
+  commandId: string; actorUserId: string; channelId: string; messageId: string }): Promise<boolean> {
+  const { placement } = await channelLaunchRepository(input);
+  return new PostgresFirstMessageLaunchChoiceRepository(input.database, {
+    spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch,
+  }).reopenAgentless({ requestId: input.commandId, channelId: input.channelId, messageId: input.messageId,
+    authorUserId: input.actorUserId });
+}
+
 /** What decided a first message: `harness` absent is "start nothing". */
 export interface FirstMessageDecision { claimed: boolean; harness?: string }
 

@@ -18,7 +18,7 @@ const en = {
   agentToInstall: "Agent to install",
   bringAgents: "Bring your agents into xMatrix. They keep running on your own computer, and xMatrix connects them to your conversations and pages.",
   /** Above Bring them in, in reply to a first message no agent could answer. */
-  unanswered: "No agent can answer this yet. Bring one in from your computer, then send your message again.",
+  unanswered: "No agent can answer this yet. Bring one in from your computer and it will answer this message.",
   worksWith: (names: string, all: boolean) => all ? `Works with ${names}` : `Works with ${names} and `,
   more: (count: number) => `${count} more`,
   runCommand: "Run this on your computer",
@@ -165,7 +165,7 @@ const zh: OnboardingCopy = {
   period: "。",
   agentToInstall: "要安装的 Agent",
   bringAgents: "把你的 Agent 带进 xMatrix。它们照常在你自己的电脑上运行，xMatrix 把它们接到你的对话和页面里。",
-  unanswered: "这条消息还没有 Agent 能回。先把电脑上的 Agent 带进来，再发一次。",
+  unanswered: "这条消息还没有 Agent 能回。把电脑上的 Agent 带进来，它就会回这条消息。",
   worksWith: (names, all) => all ? `支持 ${names}` : `支持 ${names}，还有`,
   more: (count) => `另外 ${count} 个`,
   runCommand: "在你的电脑上运行这条命令",

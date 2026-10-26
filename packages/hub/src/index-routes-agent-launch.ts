@@ -6,9 +6,10 @@ import { registerAgentRegistrationRoutes } from "./index-routes-agent-registrati
 import { registerAgentRoutingRoutes } from "./index-routes-agent-routing";
 import { registerSummonIntentRoutes } from "./index-routes-summon-intent";
 import { actorUserId, requireAuth, requireHumanAuth, jsonErrors } from "./index-shared";
-import { claimFirstMessageLaunch, dispatchRegistrationLaunchAnyway, showFirstMessageLaunch } from "./registration-launch-dispatch";
+import { claimFirstMessageLaunch, dispatchRegistrationLaunchAnyway, readFirstMessageBody, reopenAgentlessFirstMessage,
+  showFirstMessageLaunch } from "./registration-launch-dispatch";
 import { runtimePlacement, runtimeRepository } from "./runtime";
-import { summonFirstMessageHarness } from "./product-message-post-commit";
+import { startNewConversation, summonFirstMessageHarness } from "./product-message-post-commit";
 import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
 
 const NO_STORE = { "cache-control": "private, no-store" };
@@ -95,7 +96,25 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
      message's one decision first, so Jev's reading can never summon a second Agent. */
   app.post("/api/channels/:channelId/messages/:messageId/launch-choice", (c) => jsonErrors(c, async () => {
     const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
-    const input = await c.req.json().catch(() => null) as { body?: unknown; harness?: unknown; shown?: unknown } | null;
+    const input = await c.req.json().catch(() => null) as { body?: unknown; harness?: unknown; shown?: unknown;
+      reopen?: unknown } | null;
+    if (input?.reopen !== undefined) {
+      // The author has brought an agent in since this message found none: it
+      // is decided again as it was sent, so they need not send it again.
+      if (input.reopen !== true || Object.keys(input).length !== 1) return c.json({ error: "reopen takes no other field" }, 400);
+      const channelId = c.req.param("channelId"), messageId = c.req.param("messageId"), actor = actorUserId(authUser);
+      const reopened = await reopenAgentlessFirstMessage({ ...runtimePlacement(c.env),
+        commandId: `first-message-reopen:${messageId}`.slice(0, 200), channelId, messageId, actorUserId: actor });
+      if (!reopened) return c.json({ reopened: false }, 200, NO_STORE);
+      const decide = (async () => {
+        const first = await readFirstMessageBody(c.env, { channelId, messageId, authorUserId: actor });
+        if (first?.authorKind !== "user") return;
+        await startNewConversation({ env: c.env, channelId, messageId, body: first.body, actorUserId: actor, senderKind: "user" });
+      })().catch(error => console.error("Reopened first message decision failed", { channelId, messageId,
+        error: error instanceof Error ? error.message : String(error) }));
+      try { c.executionCtx.waitUntil(decide); } catch { await decide; }
+      return c.json({ reopened: true }, 202, NO_STORE);
+    }
     if (!input || typeof input.body !== "string" || !input.body.trim() || input.body.length > 200_000 ||
         (input.shown !== undefined && (input.shown !== true || input.harness !== undefined)) ||
         (input.harness !== undefined && (typeof input.harness !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(input.harness)))) {

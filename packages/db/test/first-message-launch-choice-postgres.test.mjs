@@ -363,3 +363,54 @@ integration("a first message no request finished summoning stays due for its coo
     await client.end();
   }
 });
+
+integration("a first message that found no agent is decided again once its author brings one in", async () => {
+  const { space, channel, client, database, placement, choices } = await firstLaunchFixture();
+  const read = async ids => database.transaction({ requestId: "read", operation: "test.read", placement },
+    tx => readFirstMessageLaunchChoices(tx, channel, ids));
+  const reopen = (messageId, authorUserId = "author") =>
+    choices.reopenAgentless({ requestId: `reopen:${messageId}:${authorUserId}`, channelId: channel, messageId, authorUserId });
+  try {
+    await client.query(`INSERT INTO control.space_placement
+      (space_id,shard_id,placement_epoch,state,target_shard_id,plan_class,created_at,updated_at)
+      VALUES ($1,'shard-0',1,'active',NULL,'test',now(),now())`, [space]);
+    // Sent long before: bringing an agent in takes minutes.
+    await client.query(`INSERT INTO data.messages
+      (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,message_kind,content_hash,
+       payload_kind,payload_ref,sent_at,updated_at,created_at,search_rank_sequence)
+      VALUES ($1,$2,'m',1,1,'user','author','message','hash','inline','ref',now()-interval '20 minutes',now(),now(),'m')`,
+    [space, channel]);
+    await choices.open({ requestId: "open", channelId: channel, messageId: "m", authorUserId: "author" });
+    await choices.fail({ requestId: "fail", channelId: channel, messageId: "m", failureCode: "registration_not_found" });
+    assert.equal((await read(["m"]))[0].failureCode, "registration_not_found");
+
+    assert.equal(await reopen("m", "someone-else"), false, "only its author reopens it");
+    const before = Date.now();
+    assert.equal(await reopen("m"), true);
+    const [reopened] = await read(["m"]);
+    assert.equal(reopened.failureCode, undefined);
+    assert.equal(reopened.open, true, "the author's window starts again");
+    assert.ok(Date.parse(reopened.deadlineAt) >= before + 25_000);
+    assert.equal(await reopen("m"), false, "a reopened decision is not reopened again");
+
+    // Jev decides it like a new message; a decided message never reopens.
+    await client.query("UPDATE data.first_message_launch_choices SET deadline_at=now() WHERE channel_id=$1", [channel]);
+    assert.deepEqual(await choices.claim({ requestId: "jev", channelId: channel, messageId: "m", by: "jev",
+      actorUserId: "author" }), { claimed: true });
+    await client.query("UPDATE data.first_message_launch_choices SET failure_code='registration_not_found' WHERE channel_id=$1", [channel]);
+    assert.equal(await reopen("m"), false);
+
+    // Any other failure is not "no agent yet", so bringing one in changes nothing.
+    await client.query("UPDATE data.first_message_launch_choices SET choice=NULL,failure_code='launch_choice_unavailable' WHERE channel_id=$1", [channel]);
+    assert.equal(await reopen("m"), false);
+
+    // A day-old message is not started by opening its conversation.
+    await client.query("UPDATE data.first_message_launch_choices SET failure_code='registration_not_found',created_at=now()-interval '25 hours' WHERE channel_id=$1", [channel]);
+    assert.equal(await reopen("m"), false);
+    await client.query("UPDATE data.first_message_launch_choices SET created_at=now()-interval '23 hours' WHERE channel_id=$1", [channel]);
+    assert.equal(await reopen("m"), true);
+  } finally {
+    await removeSpace(client, space);
+    await client.end();
+  }
+});
