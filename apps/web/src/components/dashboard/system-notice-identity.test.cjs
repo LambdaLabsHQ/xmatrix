@@ -111,6 +111,12 @@ test("queued start notices are waiting, not ordinary system facts", () => {
     "error",
   );
   assert.equal(
+    systemNoticeTone(
+      "Agent launch failed: This machine is offline, so nothing was launched. It can be used again when it reconnects. No launch was allocated. (registration_daemon_offline)",
+    ),
+    "error",
+  );
+  assert.equal(
     systemNoticeTone("Stopped @codex-legend on Devs-MacBook-Pro.local."),
     "fact",
   );
