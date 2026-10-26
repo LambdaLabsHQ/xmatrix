@@ -84,7 +84,8 @@ function batchDatabase(epochForLock = () => 1) {
       spaceId: "space-1", runId: `run-${index}`, instanceId: `instance-${index}`,
       executionKey: `execution-${index}`, channelId: "channel-1" },
   }));
-  const database = { cacheMode: "disabled", async transaction(_context, callback) {
+  const database = { cacheMode: "disabled", openSession() { return this; }, async close() {},
+    async transaction(_context, callback) {
     return callback({ async query(query) {
       if (query.name === "machine_control_daemon_update_v3") updates.push(query);
       if (query.name === "machine_control_daemon_lock_v1") locks.push(query);

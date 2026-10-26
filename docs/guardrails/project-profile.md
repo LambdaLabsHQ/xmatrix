@@ -24,6 +24,12 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Machine daemon commands and Run lifecycle/execution report mutations replay
+once in a fresh PostgreSQL session after transport loss before COMMIT. Wakes,
+route publication and notices remain outside that database-only boundary;
+unknown COMMIT results retain receipt reconciliation. See
+[PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Linear exposes bounded task/project collaboration through typed Channel/MCP
 actions, including search, assignments, workflow transitions, cycles, labels,
 documents, milestones and dependencies. Workspace discovery identifies the

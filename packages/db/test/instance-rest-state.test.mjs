@@ -34,7 +34,8 @@ test("a Run's end decides its Instance's rest", () => {
 
 function lifecycleDatabase(run) {
   const calls = [];
-  return { calls, cacheMode: "disabled", async transaction(_context, callback) {
+  return { calls, cacheMode: "disabled", openSession() { return this; }, async close() {},
+    async transaction(_context, callback) {
     return callback({ async query(query) {
       calls.push(query);
       if (query.name === "channel_space_directory_resolve_v2") return [{ channel_id: "channel-1",

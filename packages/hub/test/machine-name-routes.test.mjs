@@ -80,7 +80,8 @@ test("the serving Hub enforces chosen naming even if a caller sends a false gate
   const env = { MACHINE_NAME_REQUIRED: "true",
     RELAY_POSTGRES: { connectionString: "postgres://unused" }, RELAY_POSTGRES_SHARD_ID: "shard" };
   const queries = [];
-  const database = { cacheMode: "disabled", transaction: async (_context, callback) => callback({
+  const database = { cacheMode: "disabled", openSession() { return this; }, async close() {},
+    transaction: async (_context, callback) => callback({
     query: async query => { queries.push(query); return []; },
   }) };
   await assert.rejects(machineDaemonCommand(env, { action: "enroll", commandId: "enroll",

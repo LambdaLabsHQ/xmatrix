@@ -98,11 +98,16 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
         describe: (tx, userId, links) => describePageConversations(tx, f.ids.space, userId,
           links.map(link => link.conversationId)) }),
     ];
-    for (const read of activityReads) {
+    const readCases = activityReads.map(read => ({ read, evidence: f.ids.instance,
+      matches: [/SELECT role FROM data\.space_members/u, /FROM data\.page_links/u,
+        /SELECT c\.channel_id, c\.name, c\.activity_at/u], failureMatch: /FROM data\.page_links/u }));
+    readCases.push({ read: () => pages.search({ ...input, query: "Recovery" }), evidence: page.pageId,
+      matches: [/SELECT role FROM data\.space_members/u, /data\.page_name\(r.body\) AS title, r.body/u],
+      failureMatch: /data\.page_name\(r.body\) AS title, r.body/u });
+    for (const { read, evidence, matches: stages, failureMatch } of readCases) {
       const expected = await read();
-      assert.ok(JSON.stringify(expected).includes(f.ids.instance), "live activity is returned");
-      for (const matches of [/SELECT role FROM data\.space_members/u, /FROM data\.page_links/u,
-        /SELECT c\.channel_id, c\.name, c\.activity_at/u]) {
+      assert.ok(JSON.stringify(expected).includes(evidence), "the accessible page or live activity is returned");
+      for (const matches of stages) {
         const before = clients.length;
         fault = { matches, remaining: 1, error: new Error("Query read timeout"), checkouts: [] };
         assert.deepEqual(await read(), expected);
@@ -111,13 +116,13 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
         assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1);
         assert.ok(clients.slice(before).every(entry => entry.ended), "request sessions close after recovery");
         assert.ok(clients.slice(before).every(entry => !entry.queries.some(sql => sql.startsWith("BEGIN"))),
-          "activity reads never wait for an unnecessary transaction opening");
+          "lock-free page reads never wait for an unnecessary transaction opening");
       }
-      fault = { matches: /FROM data\.page_links/u, remaining: 3,
+      fault = { matches: failureMatch, remaining: 3,
         error: new Error("Query read timeout"), checkouts: [] };
       await assert.rejects(read(), /Query read timeout/u);
       assert.equal(fault.checkouts.length, 2, "repeated loss is bounded");
-      fault = { matches: /FROM data\.page_links/u, remaining: 3,
+      fault = { matches: failureMatch, remaining: 3,
         error: Object.assign(new Error("statement timeout"), { code: "57014" }), checkouts: [] };
       await assert.rejects(read(), /statement timeout/u);
       assert.equal(fault.checkouts.length, 1, "answered errors are not replayed");

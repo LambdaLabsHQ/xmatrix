@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ConnectivityBreaker, createAuthorityDatabase, databaseFailureEvidence, DatabaseCircuitOpenError,
+import { ConnectivityBreaker, databaseFailureEvidence, DatabaseCircuitOpenError,
   DatabaseCommitUnknownError, PostgresGmailRoutingRepository, PostgresSentryEventRepository,
   PostgresGoogleChatRoomRepository, PostgresFeishuRoomRepository, PostgresTelegramRoomRepository,
   PostgresTeamsRoomRepository } from "../dist/index.js";
+
+import { wireRecoveryDatabase } from "./wire-recovery.fixture.mjs";
 
 const operations = {
   "Gmail cleanup": database => new PostgresGmailRoutingRepository(database, "fixture-key").cleanup(),
@@ -18,31 +20,11 @@ for (const Repository of [PostgresGoogleChatRoomRepository, PostgresFeishuRoomRe
 
 /** Wire failures exercise the real transaction owner, including its commit-unknown boundary. */
 function fixture(stage, failures, breaker = new ConnectivityBreaker("fixture")) {
-  const pools = [];
-  const database = createAuthorityDatabase({ connectionString: "postgres://fixture", shardId: "fixture",
-    connectivityBreaker: breaker, poolFactory: () => {
-      const index = pools.length;
-      const pool = { ended: false, queries: [], releases: [],
-        async connect() {
-          if (index > 0) assert.equal(pools[index - 1].ended, true, "close before taking a fresh checkout");
-          if (stage === "checkout" && failures[index]) throw failures[index];
-          return { async query(input) {
-            const text = typeof input === "string" ? input : input.text;
-            pool.queries.push(text);
-            const phase = text.startsWith("BEGIN;") ? "begin" : text === "COMMIT" ? "commit" :
-              /DELETE FROM data\.app_\w+_room_lifecycle/u.test(text) ? "second-delete" : "sql";
-            if (phase === stage && failures[index]) { const error = failures[index]; failures[index] = undefined; throw error; }
-            const rows = /SELECT count\(\*\)/u.test(text) ? [{ count: "0" }] :
-              text.startsWith("SELECT pg_try_advisory_xact_lock") ? [{ acquired: true }] : [];
-            return { rows, rowCount: rows.length };
-          }, release(destroy) { pool.releases.push(destroy); } };
-        },
-        async end() { pool.ended = true; },
-      };
-      pools.push(pool);
-      return pool;
-    } });
-  return { database, pools };
+  return wireRecoveryDatabase(stage, failures, { breaker,
+    phaseForQuery: text => /DELETE FROM data\.app_\w+_room_lifecycle/u.test(text) ? "second-delete" : "sql",
+    rowsForQuery: text => /SELECT count\(\*\)/u.test(text) ? [{ count: "0" }] :
+      text.startsWith("SELECT pg_try_advisory_xact_lock") ? [{ acquired: true }] : [],
+  });
 }
 
 for (const [name, run] of Object.entries(operations)) {
