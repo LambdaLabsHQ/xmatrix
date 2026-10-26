@@ -11,6 +11,7 @@ import { buildGitHubAppInstallUrl, describeGitHubInstallation, githubConnectionI
 import { githubConnectAuthorizeUrl, githubConnectReturnUrl, githubGrant, githubGrantInstallationIds } from "./github-connect-authorization";
 import { startChannelAbout, type ChannelAboutStart } from "./channel-about";
 import { dispatchProductGitHubWebhook } from "./product-github-webhook-authority-adapter";
+import { githubCatalogChanged } from "./github-catalog-events";
 import { fireGitHubAutomationTriggers } from "./automation-triggers";
 import { onPullRequestNamingBlocks } from "./github-pull-request-blocks";
 import { MAX_INVITE_EMAILS_PER_REQUEST, InviteEmailRequest, AdminInviteEmailRequest, normalizeInviteEmails, signGitHubAppState, verifyGitHubAppState, sendSpaceInviteEmails, requireAuth, requireHumanAuth, requireAdmin, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
@@ -287,6 +288,7 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return c.json({ error: "Invalid GitHub webhook payload" }, 400);
     }
+    await githubCatalogChanged(c.env, event, payload as Record<string, unknown>);
     if (event === "pull_request") {
       // What a pull request naming page blocks starts (pre-review, contributor promotion); a
       // failure here must not lose the delivery to subscribed conversations.

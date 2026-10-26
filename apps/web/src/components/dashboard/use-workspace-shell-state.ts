@@ -208,6 +208,7 @@ import { readCountsFromHub } from "./channel-read-sync";
 import { useChannelReadSync } from "./use-channel-read-sync";
 import { createRealtimeFrameBatcher, humanFrameBatchKey } from "./realtime-frame-batcher";
 import { patchChannelsRegistrationQuota } from "./registration-quota-patch";
+import { spaceLaunchTargetsQuery } from "./space-launch-targets-query";
 
 /* How long a report of an Instance its Channel does not hold yet waits for
    the Channel the Hub sends right behind it before the Channel is read again. */
@@ -1809,6 +1810,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         case "space_updated":
         case "space_member_upserted":
         case "space_member_removed": {
+          // A cached candidate list must follow current Space membership too.
+          if (message.type !== "space_updated") void queryClient.resetQueries({
+            queryKey: xmatrixQueryKeys.domain({ userId }, "space-launch-targets", [message.space.id]), exact: true });
           const affectedChannelIds = channelsRef.current
             .filter((channel) => channel.spaceId === message.space.id)
             .map((channel) => channel.id);
@@ -2220,6 +2224,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   }, [selectedChannelCreating, selectedChannelId, view]);
 
   const workspaceQueriesEnabled = Boolean(token && authenticatedUserId && !mobileListFixture);
+  useQuery(spaceLaunchTargetsQuery(authenticatedUserId, token, resolvedSpaceId, workspaceQueriesEnabled));
   const workspaceRefetchInterval = () => document.hidden ||
       (relayPushConnectedRef.current && workspaceErrorRef.current === null)
     ? false

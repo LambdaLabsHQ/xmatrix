@@ -638,6 +638,16 @@ need these GitHub App settings:
 
 Also configure `GITHUB_APP_SLUG` as the public GitHub App slug for the install URL. The current executor exchanges the GitHub App private key for a one-hour installation access token at runtime, uses it for issue/PR reads and issue-comment backfill, and never persists that short-lived token.
 
+Repository pickers refresh through GitHub webhooks rather than polling. Keep
+`repository`, `push` and `member` subscribed, plus `membership` and `organization`
+where the App's organization permission permits them. GitHub's installation
+lifecycle and `installation_repositories` deliveries also invalidate the linked
+Spaces' catalogs. The signature-verified handler advances each affected
+connection's cache version and sends a content-free Space refresh. Missing
+subscriptions or deliveries may leave candidates stale until reconnect or Retry;
+repository credentials still check current administration independently. See
+[launch target caching](../design/launch-target-authorization.md).
+
 ## Space Connection Setup
 
 In the xMatrix Apps view, configure GitHub for each space that should use it:

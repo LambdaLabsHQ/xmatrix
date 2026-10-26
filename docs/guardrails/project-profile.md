@@ -24,6 +24,12 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Repository launch candidates preload once on entering a Space and are shared
+by its composers without polling. GitHub connection changes and signed catalog
+events invalidate the affected Space's query and version its edge-cache key;
+reconnect repairs missed notifications. Candidate caches never authorize a
+repository credential. See [launch targets](../design/launch-target-authorization.md).
+
 The tagged Hub release owns an exact-host `/mcp` Browser Integrity Check
 exception and verifies that anonymous Python-style clients reach the OAuth
 challenge. It uses the existing protected deployment credential, preserves

@@ -386,6 +386,29 @@ export class PostgresAppRepository {
     });
   }
 
+  /** A signature-verified GitHub event invalidates selection caches, never grants
+   * access. The connection version fences old edge-cache writes in every region. */
+  async invalidateGitHubRepositoryCatalog(input: { requestId: string; installationId: string; limit: number }) {
+    const requestId = text(input.requestId, "requestId", 200);
+    const installationId = text(input.installationId, "installationId", 20);
+    if (!/^[1-9][0-9]{0,19}$/u.test(installationId) || !Number.isSafeInteger(input.limit) ||
+        input.limit < 1 || input.limit > 1000) throw new AppControlError("invalid_app_request", 400,
+      "Invalid GitHub catalog invalidation");
+    return this.database.transaction({ requestId, operation: "app.github-catalog.invalidate" }, async tx => {
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_catalog_connections_v1", text: `SELECT
+        c.connection_id,c.space_id FROM data.app_connector_connections c
+        WHERE c.provider_id='github' AND c.status='configured' AND ${GITHUB_INSTALLATION_LINKED_SQL}
+        ORDER BY c.connection_id LIMIT $2 FOR UPDATE`, values: [installationId, input.limit + 1],
+      maxRows: input.limit + 1 });
+      if (rows.length > input.limit) throw new AppControlError("app_catalog_limit", 503,
+        "GitHub catalog invalidation exceeds its bound", true);
+      if (rows.length) await tx.query({ name: "app_github_catalog_invalidate_v1", text: `UPDATE
+        data.app_connector_connections SET version=version+1 WHERE connection_id=ANY($1::text[])`,
+      values: [rows.map(row => String(row.connection_id))], maxRows: 0 });
+      return rows.map(row => String(row.space_id));
+    });
+  }
+
   /**
    * Record who handed these GitHub installations to the Space: the GitHub user
    * the Hub's own Connect completion read from `/user` after confirming they
