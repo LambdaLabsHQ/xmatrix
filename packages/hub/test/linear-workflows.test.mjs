@@ -26,15 +26,16 @@ test("issue edits retain explicit assignments and null clears, and authorize imm
     cycleId: null, priority: 2, parentId: "ENG-9", projectMilestoneId: null, dueDate: "2026-12-01",
     estimate: 3, addedLabelIds: [OTHER], removedLabelIds: [ID] };
   let authorized = false;
-  const result = await withProviderResponses([reply({ issue: { id: ID, identifier: "ENG-42" } }),
+  const result = await withProviderResponses([reply({ issue: { id: ID, identifier: "ENG-9" } }),
+    reply({ issue: { id: ID, identifier: "ENG-42" } }),
     reply({ issueUpdate: { success: true, issue } })], async calls => {
     return LINEAR_ACTIONS.update_issue.execute({ credentials, authorizeWrite: async () => {
-      assert.equal(calls.length, 1, "resolution has finished and mutation has not started"); authorized = true;
+      assert.equal(calls.length, 2, "reference/destination resolution has finished and mutation has not started"); authorized = true;
     } }, input("update_issue", "eng-42", fields));
   });
   assert.ok(authorized);
-  assert.deepEqual(result.calls[1].body.variables, { id: ID, input: fields });
-  assert.equal(result.calls[1].headers.get("authorization"), "Bearer test-oauth-credential");
+  assert.deepEqual(result.calls[2].body.variables, { id: ID, input: { ...fields, parentId: ID } });
+  assert.equal(result.calls[2].headers.get("authorization"), "Bearer test-oauth-credential");
   assert.equal(result.result.url, issue.url);
   assert.match(result.result.summary, /ENG-42/u);
 });
@@ -53,6 +54,12 @@ test("approval preparation freezes issue identity even when the displayed identi
     () => LINEAR_ACTIONS.update_issue.execute({ credentials }, prepared.result));
   assert.equal(result.calls.length, 1);
   assert.equal(result.calls[0].body.variables.id, ID);
+  const relation = await withProviderResponses([reply({ issue: { id: OTHER, identifier: "ENG-43" } })],
+    () => LINEAR_ACTIONS.create_relation.prepare({ credentials }, input("create_relation", ID,
+      { relatedIssueId: "eng-43", type: "blocks" })));
+  const linked = await withProviderResponses([reply({ issueRelationCreate: { success: true, issueRelation: { id: OTHER } } })],
+    () => LINEAR_ACTIONS.create_relation.execute({ credentials }, relation.result));
+  assert.deepEqual(linked.calls[0].body.variables.input, { issueId: ID, relatedIssueId: OTHER, type: "blocks" });
 });
 
 test("uncertain, false, partial and mismatched mutation replies never claim success or retry", async () => {
@@ -111,6 +118,9 @@ test("metadata exposes usable IDs, includes workspace labels and avoids profile 
   const members = await run("list_users", "*", { limit: 1 }, [reply({ users: page([{ id: ID, name: "Tester", active: true }]) })]);
   assert.match(members.result.summary, /Tester/u);
   assert.doesNotMatch(members.calls[0].body.query, /email|avatar|profile|password/u);
+  // Linear's ProjectFilter scopes accessible teams; it does not have a `teams` field.
+  const projects = await run("list_projects", "eng", undefined, [reply({ projects: page([{ id: ID, name: "Project" }]) })]);
+  assert.deepEqual(projects.calls[0].body.variables.filter, { accessibleTeams: { some: { key: { eq: "ENG" } } } });
 });
 
 test("resource reads and issue UUID reads verify identity and retain bounded untrusted content", async () => {

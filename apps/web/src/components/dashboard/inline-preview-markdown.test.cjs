@@ -104,6 +104,7 @@ test("previews show current reference titles and never fall back to Page locator
   assert.equal(preview(`**page:${pageId}#plan (r4)** and \`channel:${channelId}\``, catalog),
     "xMatrix: <strong>巴厘岛旅居计划 › Section (r4)</strong> and <code>Planning</code>");
   assert.equal(preview(`page:${pageId} and channel:${channelId}`, { pages: [], channels: [] }), "xMatrix: Page and Channel");
+  assert.equal(preview(`channel:${channelId}`, { channels: [{ id: channelId, name: "" }] }), "xMatrix: Channel");
   assert.equal(preview(`\`page:${pageId.slice(0, 19)}...`), "xMatrix: `Page");
   assert.equal(preview(`page:${pageId}`, { ...catalog, pages: [{ pageId, title: "**Renamed** <script>" }] }),
     "xMatrix: **Renamed** &lt;script&gt;");
