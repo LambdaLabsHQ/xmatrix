@@ -4,7 +4,8 @@ import { teamsActionCapability } from "./teams-native";
 import { dingtalkActionCapability } from "./dingtalk-native";
 import { telegramActionCapability } from "./telegram-native";
 import { wecomActionCapability } from "./wecom-native";
-import { connectorActionPolicy, sha256Hex, type ConnectorActionPolicy, type AppConnectorProviderManifest } from "@xmatrix/protocol";
+import { connectorActionPolicy, PRIVATE_CONNECTOR_RESULT, sha256Hex, utf8ByteLength, type ConnectorResultVisibility,
+  type ConnectorActionPolicy, type AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "../app-connectors";
 import { parseActionCommand, parsePolicyCommand } from "./action-parse";
 import { connectorActionCatalog } from "./action-catalog";
@@ -92,12 +93,11 @@ export function connectorCommands(providerId: string,
   };
 }
 
-/** A synchronous private read: no Channel message, execution excerpt, approval
- * payload or resumable result is written. Only the authenticated HTTP caller
- * receives its parameters' outcome. Channel commands keep their public receipts. */
+/** A synchronous read returns the original result to its caller. Recorded
+ * private calls give execution history a fixed mask rather than an excerpt. */
 export async function callConnectorRead(providerId: string, input: ConnectorCommandInput, actionId: string,
   action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0],
-  authorizeCaller: () => Promise<void>): Promise<ConnectorActionResult> {
+  authorizeCaller: () => Promise<void>, resultVisibility: ConnectorResultVisibility): Promise<ConnectorActionResult> {
   const manifest = getAppConnectorProvider(providerId);
   const entry = connectorActionCatalog(providerId, { [actionId]: action }).get(actionId);
   if (!manifest || !entry || action.effect !== "read") {
@@ -117,13 +117,33 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
       connectionId: scope.connectionId, channelId: input.channelId, actionId, defaultPolicy: entry.definition.defaultPolicy }) });
     if (refusal) throw new ProviderRequestError(403, refusal);
   };
-  await authorize();
-  const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorize,
-    `private:${input.messageId}`);
-  if (typeof context === "string") throw new ProviderRequestError(403, context);
-  const result = await action.execute(context, parsed);
-  // A stopped Run or revoked grant cannot collect a response that was in flight.
-  await authorize();
+  const execute = async () => {
+    await authorize();
+    const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorize,
+      `call:${input.messageId}`);
+    if (typeof context === "string") throw new ProviderRequestError(403, context);
+    const result = await action.execute(context, parsed);
+    // A stopped Run or revoked grant cannot collect a response that was in flight.
+    await authorize();
+    if (utf8ByteLength(JSON.stringify(result)) > 256 * 1024) {
+      throw new ProviderRequestError(413, "Connector result is too large; narrow the request");
+    }
+    return result;
+  };
+  let result: ConnectorActionResult | undefined, failure: unknown;
+  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "" }, async () => {
+    try {
+      result = await execute();
+      return { status: "completed", summary: resultVisibility === "private" ? PRIVATE_CONNECTOR_RESULT
+        : `${result.summary}${result.url ? ` — ${result.url}` : ""}` };
+    } catch (error) {
+      failure = error;
+      return { status: error instanceof ProviderRequestError && error.status === 403 ? "blocked" : "failed",
+        summary: resultVisibility === "private" ? PRIVATE_CONNECTOR_RESULT
+          : error instanceof ProviderRequestError ? error.message : "The connector call failed" };
+    }
+  });
+  if (!result) throw failure;
   return result;
 }
 

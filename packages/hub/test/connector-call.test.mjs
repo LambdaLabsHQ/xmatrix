@@ -18,6 +18,7 @@ import { withProviderResponses as fetched } from "./support/fetch-responses.mjs"
 
 const loadRoute = await compileCommonJsSourceModule(new URL("../src/index-routes-connector-call.ts", import.meta.url));
 const loadExecutor = await compileCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url));
+const loadSupport = await compileCommonJsSourceModule(new URL("../src/connectors/command-support.ts", import.meta.url));
 const id = "18f2a9c0d1e2b3a4";
 const privateText = "private mail code 654321 https://example.test/verify?token=fixture-private";
 const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text/plain",
@@ -25,26 +26,35 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 
 // This boundary runs the actual Gmail executor. Authorities are explicit ports:
 // their own PostgreSQL tests own membership, registration and grant validation.
-// Here we protect private delivery, policy admission, and never persisting or
-// logging request/response data, which public Channel-command tests cannot see.
+// Here we protect private response delivery, policy admission, and masking
+// before result persistence, which public Channel-command tests cannot see.
 function fixture({ mode = null, failAtAuthorization, otherMailbox = false, changeConnection = false } = {}) {
-  const checks = [], reports = [], policies = [];
+  const checks = [], reports = [], policies = [], appends = [], persisted = [];
   let scopes = 0;
-  const run = { runId: "run-alpha", instanceId: "instance-alpha", channelId: "channel-alpha",
+  const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
     ownerUserId: "member", spaceId: "space", executionKey: "execution-alpha" };
   const credentials = { composioApiKey: "fixture-key", mailboxes: JSON.stringify([
     { account: "ca_fixture", address: "me@example.com", owner: otherMailbox ? "user:other" : "user:member" },
   ]) };
+  const append = async (_env, channelId, command) => {
+    assert.equal(channelId, run.channelId); appends.push(command); return Response.json({});
+  };
+  const support = loadSupport(name => ({
+    "@xmatrix/protocol": protocol,
+    "../apps": { appCommand: async (_env, kind, input) => { persisted.push({ kind, input }); },
+      usableAppConnections: async (_env, input) => {
+        assert.equal(input.channelId, run.channelId); assert.equal(input.actorUserId, run.ownerUserId);
+        return [{ providerId: "gmail", status: "configured", id: changeConnection && ++scopes >= 3 ? "replaced" : "connection" }];
+      } },
+    "../spaces": { getChannel: async () => ({ channel: { spaceId: "space" } }) },
+    "../product-message-append": { dispatchProductMessageAppend: append },
+  })[name]);
   const executor = loadExecutor(name => ({
     "@xmatrix/protocol": protocol,
     "./action-catalog": { connectorActionCatalog },
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "member", machineId: "machine", harness: "codex" }) },
     "../app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
-    "./command-support": { commandScope: async (_manifest, input) => {
-      assert.equal(input.channelId, run.channelId); assert.equal(input.actorUserId, run.ownerUserId);
-      return { spaceId: "space", connectionId: changeConnection && ++scopes >= 3 ? "replaced" : "connection" };
-    }, withExecution: () => assert.fail("private data must never enter execution history"),
-    publishCommandStatus: () => assert.fail("private calls must never post a Channel receipt") },
+    "./command-support": support,
     "./credentials": { connectorActionPolicyRepository: () => ({ mode: async input => { policies.push(input); return mode; } }) },
     "./connection-credentials": { connectionCredentials: async () => credentials },
     "./http": { ProviderRequestError },
@@ -67,34 +77,76 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, chang
     "./connectors/registry": { connectorForCommand },
     "./connectors/connector-commands": executor,
     "./connectors/http": { ProviderRequestError },
+    "./connectors/command-support": support,
+    "./product-message-append": { dispatchProductMessageAppend: append },
+    "./app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
   })[name]).registerConnectorCallRoutes(app);
-  return { checks, reports, policies, request: (body, token = "agent") => app.request(protocol.HUB_ROUTES.connector_call,
+  return { checks, reports, policies, appends, persisted, request: (body, token = "agent") => app.request(protocol.HUB_ROUTES.connector_call,
     { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: typeof body === "string" ? body : JSON.stringify(body) }, {}) };
+      body: typeof body === "string" ? body : JSON.stringify({ resultVisibility: "private", ...body }) }, {}) };
 }
-
-test("private read returns mail only to the authenticated response, with no Channel or execution-history writes", async () => {
-  const f = fixture();
-  const { result, calls } = await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}` }));
-  assert.equal(result.status, 200, await result.clone().text());
-  assert.equal(result.headers.get("cache-control"), "private, no-store");
-  const payload = await result.json();
-  assert.match(payload.summary, /654321/);
-  assert.match(payload.summary, /fixture-private/);
-  assert.equal(calls.length, 1);
-  assert.equal(f.checks.length, 3, "exact Run checked at entry, before provider I/O and before returning data");
-  assert.deepEqual(f.reports, []);
-  assert.ok(f.policies.every(policy => policy.channelId === "channel-alpha"));
-});
 
 test("private CLI call sends arguments directly and prints only its own result", async () => {
   const calls = [];
   const call = async (...args) => { calls.push(args); return { summary: privateText }; };
-  const output = await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", `@gmail:read:${id}`, "--json"], call);
-  assert.deepEqual(calls, [["POST", protocol.HUB_ROUTES.connector_call, { command: `@gmail:read:${id}` }]]);
+  const output = await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", `@gmail:read:${id}`, "--private", "--json"], call);
+  assert.deepEqual(calls, [["POST", protocol.HUB_ROUTES.connector_call, { command: `@gmail:read:${id}`, resultVisibility: "private" }]]);
   assert.equal(JSON.parse(output.stdout).summary, privateText);
   assert.match((await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", "--help"], call)).stdout, /only this caller/);
   assert.equal(calls.length, 1, "help never runs an action");
+  for (const flags of [[], ["--private", "--public"]]) {
+    const invalid = await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", `@gmail:read:${id}`, ...flags], call);
+    assert.equal(invalid.exitCode, 2);
+  }
+  assert.equal(calls.length, 1, "old bare calls cannot silently start publishing parameters or results");
+});
+
+test("normal and private calls record the same invocation; only the private Channel/history result is masked", async () => {
+  for (const visibility of ["public", "private"]) {
+    const f = fixture();
+    const command = `@gmail:read:${id}`;
+    const { result } = await fetched([gmail(privateText)], () => f.request({ command, resultVisibility: visibility }));
+    assert.equal(result.status, 200, await result.clone().text());
+    assert.match((await result.json()).summary, /654321.*fixture-private/);
+    assert.equal(f.checks.length, 3, "Run authorization is checked at entry, before provider I/O and before return");
+    assert.equal(result.headers.get("cache-control"), "private, no-store");
+    assert.equal(f.appends.length, 2);
+    assert.equal(f.appends[0].body, command);
+    assert.deepEqual(f.appends[0].principal, { kind: "agent", id: "agent-alpha", agentSpaceId: "space" });
+    assert.equal(f.appends[0].agentRunProof.runId, "run-alpha");
+    const receipt = f.appends[1];
+    assert.equal(receipt.residual.replyToMessageId, f.appends[0].messageId);
+    assert.equal(receipt.residual.appMetadata.xmatrixConnectorRequesterInstanceId, undefined,
+      "a synchronous return must not resume the caller a second time");
+    const history = f.persisted.find(row => row.kind === "finalize-execution").input;
+    assert.equal(history.status, "completed");
+    for (const output of [receipt.body, JSON.stringify(f.persisted)]) {
+      if (visibility === "private") {
+        assert.match(output, /Result: \[hidden — private call\]/);
+        assert.doesNotMatch(output, /654321|fixture-private|example\.test\/verify/);
+      } else assert.match(output, /654321.*fixture-private/);
+    }
+  }
+});
+
+test("private failure details reach the caller while Channel and execution history retain a masked failure", async () => {
+  const f = fixture();
+  const { result } = await fetched([{ body: { status: 403, data: { error: { message: privateText } } } }],
+    () => f.request({ command: `@gmail:read:${id}`, resultVisibility: "private" }));
+  assert.equal(result.status, 403);
+  assert.match(await result.text(), /654321/);
+  assert.equal(f.appends.length, 2);
+  assert.match(f.appends[1].body, /blocked; Result: \[hidden — private call\]/);
+  assert.doesNotMatch(JSON.stringify([f.appends, f.persisted, f.reports]), /654321|fixture-private/);
+  assert.equal(f.persisted.find(row => row.kind === "finalize-execution").input.status, "blocked");
+});
+
+test("result visibility is strictly typed and cannot be coerced into a public result", async () => {
+  for (const resultVisibility of [["private"], null, true, "invalid", undefined]) {
+    const f = fixture();
+    const { result, calls } = await fetched([], () => f.request({ command: `@gmail:read:${id}`, resultVisibility }));
+    assert.equal(result.status, 400); assert.equal(calls.length, 0); assert.deepEqual(f.appends, []);
+  }
 });
 
 test("private reads cannot bypass ask/disallow, perform writes, or read another member's mailbox", async () => {
