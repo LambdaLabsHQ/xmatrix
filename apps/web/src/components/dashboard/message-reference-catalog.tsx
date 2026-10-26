@@ -14,6 +14,7 @@ export type ChannelReference = Pick<ChannelSnapshot, "id" | "spaceId" | "name" |
 
 export type MessageReferenceCatalog = {
   channels: readonly ChannelReference[];
+  pages?: readonly { pageId: string; title: string }[];
   onOpenChannel: (channelId: string) => void;
 };
 

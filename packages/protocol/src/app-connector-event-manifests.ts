@@ -1,3 +1,4 @@
+import { LINEAR_ACTION_MANIFESTS } from "./linear-action-manifests.js";
 import type { AppConnectorProviderId, AppConnectorProviderKind } from "./authority.js";
 import type { AppConnectorProviderManifest } from "./app-connector-manifests.js";
 
@@ -433,11 +434,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       { id: "project", label: "Projects", description: "Project, project update, and cycle changes." },
     ],
     defaultFeatures: ["issue", "comment"],
-    actions: [
-      readAction("read_issue", "Read issue", "Read one issue's description, state and a bounded comment excerpt.", "<ENG-42>"),
-      writeAction("comment", "Comment on issue", "Add a comment to a Linear issue.", "<ENG-42> <text>"),
-      writeAction("create_issue", "Create issue", "Create a Linear issue in a team; the first line is the title.", "<team key> <title>\n<description>"),
-    ],
+    actions: LINEAR_ACTION_MANIFESTS,
   }),
   eventConnector({
     id: "appstoreconnect",

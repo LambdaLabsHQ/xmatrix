@@ -4,6 +4,11 @@ App connectors route app context into xMatrix channels through typed provider ma
 
 ## Current Providers
 
+- Linear provides task search/editing, assignments, states, labels, projects,
+  cycles, dependencies, documents, milestones, updates and linked attachments.
+  Scope discovery, Channel policy and native acceptance are documented in
+  [Linear connector](../connectors/linear.md).
+
 - X connects company and personal accounts through independent OAuth 2.0
   authorizations to one company application. Apps lists the connected handles;
   each grant is usable only by its connecting member and their Agents.
