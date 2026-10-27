@@ -76,6 +76,42 @@ test("due Automation commits one canonical message with App metadata and no dupl
   }
 });
 
+test("a reminder is delivered once, waits on its author, and stops at the time it ran", async () => {
+  const unique = randomUUID();
+  const userId = `scheduled-reminder-${unique}`;
+  const worker = await startPgHubWorker({
+    vars: {
+      XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN,
+      XMATRIX_MOCK_AUTH_USER_ID: userId,
+      XMATRIX_MOCK_AUTH_EMAIL: "scheduled-reminder@example.com",
+      XMATRIX_MOCK_AUTH_NAME: "Scheduled Reminder",
+      RELAY_AUTOMATION_EXECUTION_ENABLED: "true",
+    },
+  });
+  try {
+    const { space } = await createSpaceAndChannel(worker, unique);
+    const at = new Date(Date.now() + 3_000).toISOString();
+    const task = await createTask(worker, { spaceId: space.id, name: "Call the hotel",
+      message: { body: `Call Allende Canggu ${unique}` }, at });
+    assert.equal(task.once, true);
+    const done = await waitForTask(worker, task.id,
+      (candidate) => candidate.deliveryCount === 1 && candidate.enabled === false);
+    assert.equal(done.nextRunAt, at, "it keeps the time it ran at");
+    const delivered = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, done.lastChannelId,
+      (message) => message.body.includes(`Call Allende Canggu ${unique}`), "reminder message", 15_000);
+    const attention = await inWorkerTransaction(worker, tx => tx.query({ text: `SELECT subject_id,kind,
+      awaiting_response FROM data.message_attention WHERE channel_id=$1 AND message_id=$2`,
+    values: [done.lastChannelId, delivered.messageId] }));
+    assert.deepEqual(attention, [{ subject_id: `user:${userId}`, kind: "mention", awaiting_response: true }],
+      "it waits on its author, so it is in their Needs you");
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal((await channelHistory(worker, done.lastChannelId))
+      .filter((message) => message.body.includes(unique)).length, 1, "it is delivered once");
+  } finally {
+    await worker.stop();
+  }
+});
+
 test("scheduled tagged Auto uses the shared post-commit dispatcher without a launch lifetime option", async () => {
   const unique = randomUUID();
   const userId = `scheduled-message-once-${unique}`;
