@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Page section awareness recovers lost database reads
+
+Page section awareness and the adjacent blame reader use independent
+`single_read` statements for access checks, revision metadata and bodies. A
+lost response retries once on a fresh connection; repeated loss and answered
+database errors still propagate. This closes HUB-AS's unnecessary BEGIN
+timeout path without attributing the underlying transport stall. Placement
+fences, page access checks, comparison outside the checkout, and purge-safe
+transactional cache writes remain in force. No migration or client update is
+needed. Recovery is a CI-validated beta Hub release reverting this change.
+
 ## Unreleased: A GitHub App merge no longer speaks its bot login
 
 A pull request subscription tells its conversation when someone else merges

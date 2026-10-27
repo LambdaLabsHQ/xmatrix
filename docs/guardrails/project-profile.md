@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Page section awareness and blame use independent single reads with placement
+fencing and bounded lost-response recovery. Derivation still runs outside the
+read session, and its purge-safe cache writes keep their separate transactions.
+See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Channel details, including the connector approval list's access check, use
 independent single reads with placement fencing and bounded lost-response
 recovery, matching the Channel catalog. See

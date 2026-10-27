@@ -1046,7 +1046,7 @@ export class PostgresPageRepository {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     const requestId = bounded(input.requestId, "requestId");
-    const { rows, headRevision } = await this.inSpace(requestId, "page.block-updates", spaceId, async (tx) => {
+    const { rows, headRevision } = await this.readInSpace(requestId, "page.block-updates", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const headRevision = Number(row.head_revision);
@@ -1063,12 +1063,11 @@ export class PostgresPageRepository {
       });
       return { headRevision, rows };
     });
-    // Document parsing must not hold a checkout or exhaust the transaction
-    // (XMATRIX-HUB-82); bodies a derivation still needs are read in a
-    // transaction of their own.
+    // Document parsing must not hold a checkout (XMATRIX-HUB-82); bodies a
+    // derivation still needs use independent reads with lost-response recovery.
     const order = pageBlocks(rows[0]?.newest_body ?? "").map((block) => block.id);
     const { updates: changedBy, derived, bodies } = await walkSectionChanges(rows, order, (revisions) =>
-      this.inSpace(requestId, "page.block-updates.bodies", spaceId, (tx) =>
+      this.readInSpace(requestId, "page.block-updates.bodies", spaceId, (tx) =>
         readRevisionBodies(tx, spaceId, pageId, revisions)));
     // What this read derived is kept for the next one; a reader is answered whether or not it could be.
     if (derived.length > 0) {
@@ -1092,7 +1091,7 @@ export class PostgresPageRepository {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     const requestId = bounded(input.requestId, "requestId");
-    const { rows, userId } = await this.inSpace(requestId, "page.blame", spaceId, async (tx) => {
+    const { rows, userId } = await this.readInSpace(requestId, "page.blame", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       // The page's line, from its newest revision whose blame is kept, or from its first.
@@ -1108,13 +1107,13 @@ export class PostgresPageRepository {
       return { rows, userId: actor.userId };
     });
     const head = await walkBlame(rows, (revisions) =>
-      this.inSpace(requestId, "page.blame.bodies", spaceId, (tx) => readRevisionBodies(tx, spaceId, pageId, revisions)),
+      this.readInSpace(requestId, "page.blame.bodies", spaceId, (tx) => readRevisionBodies(tx, spaceId, pageId, revisions)),
       (derived) => this.inSpace(requestId, "page.blame.keep", spaceId, (tx) => keepBlames(tx, spaceId, pageId, derived)));
     if (!head) throw new PageControlError("page_not_found", 404);
     const named = new Set<number>();
     for (let index = 1; index < head.runs.length; index += 2) named.add(head.runs[index]!);
     const { revisions, conversations } = named.size === 0 ? { revisions: [], conversations: [] }
-      : await this.inSpace(requestId, "page.blame.revisions", spaceId, async (tx) => {
+      : await this.readInSpace(requestId, "page.blame.revisions", spaceId, async (tx) => {
         const revisions = (await tx.query<RevisionRow>({
           name: "page_blame_revisions_v1",
           text: `SELECT revision,kind,authors_json,conversation_ids,based_on_revision,created_at
