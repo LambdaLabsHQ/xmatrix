@@ -1157,15 +1157,37 @@ html:has(.site-page) {
   max-width: 44rem;
 }
 
-/* Why xMatrix: hairlines on the paper, the wood's own line on the plank. */
+/* Why xMatrix: one hairline per row, across the page and the sheet. */
 .site-why :is(.site-why-row, h3, p) {
   border-color: oklch(0 0 0 / 0.08);
 }
 
 .site-why .site-why-ours {
-  border-color: var(--site-wood-line);
   font-weight: 500;
-  color: var(--site-wood-ink, var(--foreground));
+  color: var(--site-ink);
+}
+
+/* Each xMatrix line is inked onto its sheet, left to right, as it scrolls
+   into view; without scroll-driven animations it is simply there. */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .site-why p.site-why-ours {
+      animation: site-why-ink linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 100%;
+    }
+  }
+}
+
+@keyframes site-why-ink {
+  from {
+    opacity: 0.2;
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
 }
 
 .site-faq summary::-webkit-details-marker {

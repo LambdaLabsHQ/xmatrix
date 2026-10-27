@@ -1,13 +1,14 @@
+import Image from "next/image";
 import { Check, Minus } from "lucide-react";
-import { WoodPanel } from "@/components/ui/material-surfaces";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 
 
 /**
  * xMatrix beside juggling agent tools, row by row. On a wide screen the
- * xMatrix column is one wood plank from its name to the last row, so the
- * column itself says which side is which; on a phone each topic stacks both
- * answers under one hairline.
+ * xMatrix column is one sheet of paper from its name to the last row, so the
+ * column itself says which side is which, and its lines are written in as the
+ * table scrolls into view; on a phone each topic stacks both answers under
+ * one hairline.
  */
 export function Why({ locale = "en" }: { locale?: Locale }) {
   const copy = landingCopy[locale].why;
@@ -18,8 +19,10 @@ export function Why({ locale = "en" }: { locale?: Locale }) {
           {copy.title}
         </h2>
         <div className="site-why mx-auto mt-14 flex max-w-5xl flex-col md:grid md:grid-cols-[11rem_minmax(0,1fr)_minmax(0,1fr)] md:grid-rows-[repeat(7,auto)]">
-          <WoodPanel aria-hidden className="hidden md:col-start-2 md:row-span-full md:block" />
-          <p className="hidden px-7 pt-7 pb-5 text-lg font-semibold text-foreground md:col-start-2 md:row-start-1 md:block">xMatrix</p>
+          <div aria-hidden className="site-paper-sheet hidden md:col-start-2 md:row-span-full md:block" />
+          <p className="hidden items-center gap-2.5 px-7 pt-7 pb-5 text-lg font-semibold text-foreground md:col-start-2 md:row-start-1 md:flex">
+            <Image src="/brand/xmatrix-icon-transparent-128.png" alt="" width={24} height={24} />xMatrix
+          </p>
           <p className="hidden px-7 pt-7 pb-5 text-lg font-semibold text-muted-foreground md:col-start-3 md:row-start-1 md:block">{copy.others}</p>
           {copy.rows.map(([topic, ours, theirs], index) => {
             const row = { gridRow: index + 2 };
