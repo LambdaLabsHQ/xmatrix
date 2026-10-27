@@ -1300,81 +1300,8 @@ html:has(.site-page) {
   }
 }
 
-.why-page-title {
-  margin-bottom: 6px !important;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.why-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-inline: -6px !important;
-  padding: 3px 6px;
-  overflow: hidden;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-
-.why-item {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Where an owner's work is: a chip in its colour, a live dot while it runs,
    solid once it is done. */
-.why-status-slot {
-  justify-items: end;
-}
-
-.why-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--why-c) 12%, transparent);
-  color: var(--why-c);
-  font-size: 10.5px;
-  font-weight: 600;
-}
-
-.why-status-done {
-  background: var(--why-c);
-  color: oklch(1 0 0);
-}
-
-.why-live {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.why-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--why-c);
-}
-
-.why-swap {
-  display: inline-grid;
-}
-
-.why-swap > * {
-  grid-area: 1 / 1;
-}
-
-.why-strong {
-  font-weight: 600;
-  color: var(--why-c, var(--site-ink));
-}
-
 .why-face {
   display: inline-flex;
   flex: none;
@@ -1680,13 +1607,6 @@ html:has(.site-page) {
   background: var(--site-paper);
 }
 
-.why-mine {
-  border-radius: 4px;
-  background: color-mix(in oklch, var(--why-c) 16%, transparent);
-  color: var(--why-c);
-  font-weight: 600;
-}
-
 .why-waits {
   display: flex;
   align-items: center;
@@ -1709,34 +1629,26 @@ html:has(.site-page) {
     animation: why-flow 1.2s linear infinite;
   }
 
-  .why-live {
-    animation: why-blink 1s ease-in-out infinite alternate;
-  }
 
   .site-why-scene [data-in="1"] { animation-name: why-in-1; }
   .site-why-scene [data-out="1"] { animation-name: why-out-1; }
   .site-why-scene [data-pulse="1"] { animation-name: why-ring-1; }
-  .site-why-scene .why-line[data-pulse="1"] { animation-name: why-glow-1; }
   .site-why-scene [data-fly="1"] { animation-name: why-fly-1; }
   .site-why-scene [data-in="2"] { animation-name: why-in-2; }
   .site-why-scene [data-out="2"] { animation-name: why-out-2; }
   .site-why-scene [data-pulse="2"] { animation-name: why-ring-2; }
-  .site-why-scene .why-line[data-pulse="2"] { animation-name: why-glow-2; }
   .site-why-scene [data-fly="2"] { animation-name: why-fly-2; }
   .site-why-scene [data-in="3"] { animation-name: why-in-3; }
   .site-why-scene [data-out="3"] { animation-name: why-out-3; }
   .site-why-scene [data-pulse="3"] { animation-name: why-ring-3; }
-  .site-why-scene .why-line[data-pulse="3"] { animation-name: why-glow-3; }
   .site-why-scene [data-fly="3"] { animation-name: why-fly-3; }
   .site-why-scene [data-in="4"] { animation-name: why-in-4; }
   .site-why-scene [data-out="4"] { animation-name: why-out-4; }
   .site-why-scene [data-pulse="4"] { animation-name: why-ring-4; }
-  .site-why-scene .why-line[data-pulse="4"] { animation-name: why-glow-4; }
   .site-why-scene [data-fly="4"] { animation-name: why-fly-4; }
   .site-why-scene [data-in="5"] { animation-name: why-in-5; }
   .site-why-scene [data-out="5"] { animation-name: why-out-5; }
   .site-why-scene [data-pulse="5"] { animation-name: why-ring-5; }
-  .site-why-scene .why-line[data-pulse="5"] { animation-name: why-glow-5; }
   .site-why-scene [data-fly="5"] { animation-name: why-fly-5; }
   .site-why-scene [data-third="1"] { animation-name: why-third-1; }
   .site-why-scene .why-win[data-third="1"] { animation-name: why-front-1; }
@@ -1757,12 +1669,6 @@ html:has(.site-page) {
   }
 }
 
-@keyframes why-blink {
-  to {
-    opacity: 0.25;
-  }
-}
-
 @keyframes why-flow {
   to {
     stroke-dashoffset: -18;
@@ -1779,11 +1685,6 @@ html:has(.site-page) {
   0%, 10% { opacity: 1; }
   14%, 96% { opacity: 0; }
   100% { opacity: 1; }
-}
-
-@keyframes why-glow-1 {
-  0%, 10%, 28%, 100% { background-color: transparent; }
-  13%, 20% { background-color: color-mix(in oklch, var(--why-c) 18%, transparent); }
 }
 
 @keyframes why-ring-1 {
@@ -1810,11 +1711,6 @@ html:has(.site-page) {
   100% { opacity: 1; }
 }
 
-@keyframes why-glow-2 {
-  0%, 24%, 42%, 100% { background-color: transparent; }
-  27%, 34% { background-color: color-mix(in oklch, var(--why-c) 18%, transparent); }
-}
-
 @keyframes why-ring-2 {
   0%, 24%, 42%, 100% { box-shadow: 0 0 0 0 transparent; }
   27%, 34% { box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--why-c, var(--site-ink)) 45%, transparent); }
@@ -1837,11 +1733,6 @@ html:has(.site-page) {
   0%, 38% { opacity: 1; }
   42%, 96% { opacity: 0; }
   100% { opacity: 1; }
-}
-
-@keyframes why-glow-3 {
-  0%, 38%, 56%, 100% { background-color: transparent; }
-  41%, 48% { background-color: color-mix(in oklch, var(--why-c) 18%, transparent); }
 }
 
 @keyframes why-ring-3 {
@@ -1868,11 +1759,6 @@ html:has(.site-page) {
   100% { opacity: 1; }
 }
 
-@keyframes why-glow-4 {
-  0%, 52%, 70%, 100% { background-color: transparent; }
-  55%, 62% { background-color: color-mix(in oklch, var(--why-c) 18%, transparent); }
-}
-
 @keyframes why-ring-4 {
   0%, 52%, 70%, 100% { box-shadow: 0 0 0 0 transparent; }
   55%, 62% { box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--why-c, var(--site-ink)) 45%, transparent); }
@@ -1895,11 +1781,6 @@ html:has(.site-page) {
   0%, 66% { opacity: 1; }
   70%, 96% { opacity: 0; }
   100% { opacity: 1; }
-}
-
-@keyframes why-glow-5 {
-  0%, 66%, 84%, 100% { background-color: transparent; }
-  69%, 76% { background-color: color-mix(in oklch, var(--why-c) 18%, transparent); }
 }
 
 @keyframes why-ring-5 {
