@@ -49,8 +49,11 @@ reuses only results the full tier earned and still blocks on every gate its
 scope and channel select. The train's jobs belong to Production Release
 Request, and that run records them: the recorder accepts the request only from
 this repository's default branch, and only for a commit that dispatch SHA may
-ship (itself, its beta stamp, or a stable stamp of a source it contains). The
-stamp proof is the same release-commit check the gate runs before checkout.
+ship (itself, its beta stamp, or a stable stamp of a source it contains). It
+identifies the request by its workflow path. The request's run-name replaces
+`workflow_run.name` with the train title, so the workflow title is not the
+event name. The stamp proof is the same release-commit check the gate runs
+before checkout.
 Public Snapshot CI stays unrecorded.
 
 ## Hosted runners
