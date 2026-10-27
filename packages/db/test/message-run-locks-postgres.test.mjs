@@ -3,6 +3,7 @@ import { Client } from "pg";
 import { PostgresMessageRepository } from "../dist/message-control.js";
 import { requireAgentChannelAccess } from "../dist/agent-channel-access.js";
 import { PostgresRuntimeRepository } from "../dist/runtime-control.js";
+import { PostgresRegistrationRevocationRepository } from "../dist/agent-registration-revocation.js";
 import { setTimeout } from "node:timers/promises";
 import { boundedPostgresTransaction, integration, isolatedPostgres, postgresDatabase, seedTestSpacePlacement } from "./postgres-database.fixture.mjs";
 
@@ -207,6 +208,28 @@ integration("Run and message operations order behind Channel stops and recheck c
         assert.equal((await sql("SELECT status FROM data.instances WHERE instance_id='a:1'")).rows[0].status, "offline");
       }
       await sql("UPDATE data.space_agent_registration_access SET grant_state='active'");
+    });
+
+    await t.test("a stop can finish a Run while its withdrawal coordinator waits for the Channel", async () => {
+      await sql("UPDATE data.runs SET status='running' WHERE run_id='a:1#1'");
+      await sql("UPDATE data.space_agent_registration_access SET grant_state='revoked'");
+      await writer.query("BEGIN");
+      await writer.query("SELECT 1 FROM data.channels WHERE channel_id='a' FOR UPDATE");
+      const pending = new PostgresRegistrationRevocationRepository(database).prepare("a")
+        .then(value => ({ value }), error => ({ error }));
+      let outcome;
+      try {
+        await waitForChannel();
+        await writer.query("UPDATE data.runs SET status='stopped' WHERE run_id='a:1#1'");
+        await writer.query("COMMIT");
+      } finally {
+        await writer.query("ROLLBACK");
+        outcome = await pending;
+        await sql("UPDATE data.space_agent_registration_access SET grant_state='active'");
+      }
+      assert.ifError(outcome.error);
+      assert.equal(outcome.value, 1);
+      assert.equal((await sql("SELECT status FROM data.runs WHERE run_id='a:1#1'")).rows[0].status, "stopped");
     });
 
     await t.test("preparation cannot authorize a later append after the registration is revoked", async () => {

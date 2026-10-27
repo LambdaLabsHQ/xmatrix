@@ -241,8 +241,9 @@ after preparation still refuse publication.
 Instance connection claims discover their owning Channel without holding the
 Run, take its exclusive lifecycle lock, then re-read and lock the current
 Run/Instance before registration admission. A changed Channel refuses the
-claim. Capacity-retry control takes the same Channel lock before its Run lock.
-Both paths therefore order behind stop messages and appends, including initial
+claim. Capacity-retry control and registration withdrawal preparation take the
+same Channel lock before locking their Runs. These paths therefore order
+behind stop messages and appends, including initial
 admission, without upgrading a shared Channel lock while holding the Run.
 Stops and registration withdrawals committed during the wait remain effective
 (HUB-AW); reconnect cannot revive the stopped execution.
