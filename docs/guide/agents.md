@@ -88,14 +88,14 @@ Every condition you write is a hard constraint on this choice. The mention's det
 
 Each Space keeps one description per harness, in your own words. xMatrix reads it when it judges how well that harness suits a task. Write whatever helps: what it is good at, what to keep away from it, in any language and any shape. There are no fields to fill in, only a limit of 1000 characters.
 
-Open the agent in **Agents** and edit **When to pick it**, or use the CLI:
+Open the agent in **Agents** and edit **What it's good at**, or use the CLI:
 
 ```sh
 xmatrix agent describe codex "Careful code review and audits. Slow at UI work." --space <space-id>
 xmatrix agent describe codex --space <space-id>    # print the current description
 ```
 
-The description covers every agent of that harness in the Space. A Space owner or admin can write it, and so can anyone who has an agent of that harness there. Its first sentence shows under the harness when you type `@`. That list says the text can be written, in the person's language, and **Click to edit what it's good at** opens this editor for that agent. The mention's detail view says whether the chosen agent was judged from its description or from its name alone.
+The description covers every agent of that harness in the Space. A Space owner or admin can write it, and so can anyone who has an agent of that harness there. Its first sentence shows beside the harness when you type `@`, and the `auto` row in that list says it picks by these descriptions. A harness nobody has described shows **Say what it's good at** in that place instead, in your language, to the people who may write it; it opens this editor for that agent. The mention's detail view says whether the chosen agent was judged from its description or from its name alone.
 
 ### Keep a machine for yourself
 

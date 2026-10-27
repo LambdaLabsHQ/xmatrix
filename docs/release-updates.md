@@ -1,15 +1,21 @@
 # Release Updates
 
-## Unreleased: The Agent picker invites only undescribed Agents
+## Unreleased: The @ menu says once what each row does
 
-In the `@` menu, an Agent whose strengths the Space has already written no
-longer carries an edit prompt. Agents still undescribed keep it, now set in the
-same grey type as the row's own description instead of an underlined link, and
-the section's one-line hint appears only while such an Agent is listed. The
-prompt now names what the text is for: “Say when to pick it” in English, and in
-Chinese 适合交给它的事 replaces the stiff 优势劣势 wording across the menu and
-the editor. Editor permissions are unchanged. No migration or native update is
-needed; recovery is a CI-validated beta Web release reverting the change.
+Every row of the `@` menu now says one thing: what choosing it does. `auto`
+is written as it is typed and says it picks an Agent by what each is good at,
+which is where those descriptions are used, so the separate hint line above
+the Agents is gone. An Agent with a description shows it; one without
+shows **Say what it's good at** in the same place and grey, only to people
+who may write it, instead of a second "Choose automatically" that collided
+with `auto`. Badges that repeated the section or the row's own name (human,
+app, repo, model and the like) are removed; live presence and "offline" stay.
+`@co` no longer lists every App, because kind words and descriptions match
+from three letters. Conditions after a summon no longer offer `auto`, use the
+condition icon, and an Agent condition wears its face. Instance actions say
+plainly what they do, and the Agents editor uses the same words in English and
+Chinese. No migration or native update is needed; recovery is a CI-validated
+beta Web release reverting the change.
 
 ## Unreleased: A release train records the gates it passed
 

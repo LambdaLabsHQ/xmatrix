@@ -82,8 +82,8 @@ export type MentionCandidate = {
   appId?: string;
   appActionId?: string;
   description?: string;
-  /** A capability row whose description the Space wrote; it needs no invitation to write one. */
-  profileWritten?: boolean;
+  /** A capability row with no description yet, which the reader may write. */
+  profileInvite?: boolean;
   /** Shown, but not selectable. The text is why, for example "Offline". */
   unavailable?: string;
   completionSuffix?: CommandCompletionDelimiter;
@@ -432,7 +432,8 @@ function channelTargetEntries(
       status: app.status === "available" ? "online" : "offline",
       mention: appMention,
       appId: app.id,
-      description: app.status === "available" ? "App connector" : "Planned app connector",
+      // The App section already names the kind; only a planned App says more.
+      ...(app.status === "available" ? {} : { description: "Planned" }),
       completionSuffix: ":",
     }, connectorInteractionTarget(appMention, (app.actions ?? []).map(action => action.id)));
   }
@@ -572,7 +573,7 @@ export function resolveMentionCompletion(
         active,
         candidates: filterMentionCandidates(candidates, segmentQuery),
         stage: "agent-reference",
-        stageLabel: `${agent.name} target`,
+        stageLabel: `${agent.name} instances`,
       };
     }
   }
@@ -1114,7 +1115,6 @@ function agentReferenceCandidates(
       ...instanceIdentity,
       mention,
       local: isLocalAgentCandidate(localMachineKeys, member, instance),
-      description: `Use @${mention}`,
       completionSuffix: " ",
       schemaNodeId: "agent-reference:instance",
     });
@@ -1126,8 +1126,8 @@ function agentReferenceCandidates(
       local: isLocalAgentCandidate(localMachineKeys, member, instance),
       description:
         instance.status === "offline"
-          ? `Restart @${mention} in its channel slot with prior context`
-          : `Kill live @${mention}, then reborn in its channel slot with prior context`,
+          ? `Start @${mention} again, keeping its context`
+          : `Stop @${mention} and start it again, keeping its context`,
       completionSuffix: " ",
       schemaNodeId: "agent-reference:reborn",
     });
@@ -1140,8 +1140,8 @@ function agentReferenceCandidates(
       action: "handoff-instance",
       description:
         instance.status === "offline"
-          ? `Transfer @${mention}'s retained checkout to a new same-machine instance`
-          : `Stop @${mention} and transfer its checkout to a new same-machine instance`,
+          ? `Move @${mention}'s checkout to a new instance on the same machine`
+          : `Stop @${mention} and move its checkout to a new instance on the same machine`,
       completionSuffix: AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA.next?.delimiter || ":",
       schemaNodeId: AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA.id,
     });
@@ -1260,15 +1260,18 @@ export function filterMentionCandidates(
             mention.startsWith(normalized)
           );
         }
+        // Kind words and descriptions are a second way in, from three letters:
+        // `@co` is the start of a name, not every App's "connector".
+        const described = normalized.length >= 3;
         return (
           name.startsWith(normalized) ||
           name.includes(normalized) ||
           mention.includes(normalized) ||
           email.includes(normalized) ||
           action.includes(normalized) ||
-          app.includes(normalized) ||
-          description.includes(normalized) ||
-          local.includes(normalized)
+          described && app.includes(normalized) ||
+          described && description.includes(normalized) ||
+          described && local.includes(normalized)
         );
       })
     : candidates;

@@ -32,9 +32,9 @@ export function registrationMentionCandidates(existing: readonly MentionCandidat
     return { id: `capability:${group.harness}`, name: group.harness,
       kind: "agent", status: "offline", mention: group.harness, completionSuffix: " ",
       face: { kind: "agent", name: group.harness, harness: group.harness },
-      // What the Space says the harness is for, when it says so; otherwise how to address it.
-      description: profile || `Choose automatically · @${group.harness}/ to choose a location`,
-      profileWritten: Boolean(profile),
+      // The row says what the Space wrote the harness is good at, and nothing in its place.
+      ...(profile ? { description: profile } : {}),
+      profileInvite: !profile && group.locations.some(location => location.canDescribe === true),
       invocationTarget: { kind: "capability", harness: group.harness } };
   }),
   ...existing.filter(candidate => !(candidate.kind === "agent" && !candidate.action && candidate.completionSuffix === ":"))];

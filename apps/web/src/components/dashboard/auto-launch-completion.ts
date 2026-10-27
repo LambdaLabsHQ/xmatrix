@@ -78,9 +78,11 @@ export const AUTO_LAUNCH_FIELD_LABEL: Record<AutoLaunchField, string> = {
 
 /** Suggestions use visible catalog facts. Selecting a label never grants access. */
 export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undefined,
-  selected: AutoLaunchTags = {}, registrations: readonly AgentRegistrationSummary[] = []): MentionCandidate[] {
-  const result: MentionCandidate[] = [{ id: "launch:auto", name: "Auto", kind: "launch", status: "offline",
-    description: "Choose an Agent automatically", launchTags: {} }];
+  selected: AutoLaunchTags = {}, registrations: readonly AgentRegistrationSummary[] = [],
+  autoDescription = "Picks an Agent by what each is good at"): MentionCandidate[] {
+  // Named as it is typed, like every Agent beside it.
+  const result: MentionCandidate[] = [{ id: "launch:auto", name: "auto", kind: "launch", status: "offline",
+    description: autoDescription, launchTags: {} }];
   const seen = new Set<string>();
   const onlineMachines = new Set<string>();
   const offlineMachines = new Set<string>();
@@ -154,7 +156,7 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
 }
 
 /**
- * A fresh `@` names who to summon, so it offers only runtimes (and Auto), listed
+ * A fresh `@` names who to summon, so it offers only runtimes (and auto), listed
  * with the other Agents. Repository, directory, machine, model and effort are
  * conditions on a summon: they are offered once the summon exists, typed after it.
  */

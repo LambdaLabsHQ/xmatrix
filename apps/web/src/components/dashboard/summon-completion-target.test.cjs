@@ -95,7 +95,7 @@ test("new field syntax searches exact fields as well as ordinary @ text", () => 
 
 test("a fresh @ offers only runtimes; conditions wait for the summon", () => {
   const start = summonStartCandidates(autoLaunchCandidates(targets, {}, registrations));
-  assert.deepEqual(start.map(candidate => candidate.name), ["Auto", "@codex"]);
+  assert.deepEqual(start.map(candidate => candidate.name), ["auto", "@codex"]);
   assert.ok(start.every(candidate => candidate.kind === "agent"));
   const continued = autoLaunchCandidates(targets, { harness: "codex" }, registrations);
   for (const field of ["repo", "pwd", "machine", "model", "effort"]) {
