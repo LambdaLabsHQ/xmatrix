@@ -122,7 +122,7 @@ export type MentionCompletionResult = {
 
 export type MentionCandidateSection = {
   kind: MentionCandidate["kind"] | "instance";
-  label: "Instance" | "Condition" | "AI service" | "Agent" | "Human" | "App";
+  label: "In this conversation" | "Condition" | "AI service" | "Agent" | "Human" | "App";
   candidates: MentionCandidate[];
   startIndex: number;
   totalCount: number;
@@ -573,7 +573,7 @@ export function resolveMentionCompletion(
         active,
         candidates: filterMentionCandidates(candidates, segmentQuery),
         stage: "agent-reference",
-        stageLabel: `${agent.name} instances`,
+        stageLabel: `${agent.name} in this conversation`,
       };
     }
   }
@@ -635,7 +635,7 @@ function resolveHandoffSuccessorCompletion(
     face: { kind: "agent", name: harness, harness },
     mention: `${sourceMention}:handoff:@${harness}`,
     action: "handoff-instance",
-    description: `Hand off @${sourceMention} to a new @${harness} instance`,
+    description: `Hand off @${sourceMention} to a new @${harness}`,
     completionSuffix: " ",
     schemaNodeId: "handoff-successor-profiles",
   }));
@@ -1140,8 +1140,8 @@ function agentReferenceCandidates(
       action: "handoff-instance",
       description:
         instance.status === "offline"
-          ? `Move @${mention}'s checkout to a new instance on the same machine`
-          : `Stop @${mention} and move its checkout to a new instance on the same machine`,
+          ? `Move @${mention}'s checkout to a new Agent on the same machine`
+          : `Stop @${mention} and move its checkout to a new Agent on the same machine`,
       completionSuffix: AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA.next?.delimiter || ":",
       schemaNodeId: AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA.id,
     });
@@ -1305,7 +1305,9 @@ export function groupedMentionCandidates(
     typeof options === "number" || !options.openKinds ? null : new Set(options.openKinds);
   let startIndex = 0;
   return ([
-    { kind: "instance", label: "Instance" },
+    // Only this conversation's live Agents are listed here, and early screens
+    // name no Run, Instance or Harness.
+    { kind: "instance", label: "In this conversation" },
     { kind: "launch", label: "Condition" },
     { kind: "service", label: "AI service" },
     { kind: "agent", label: "Agent" },

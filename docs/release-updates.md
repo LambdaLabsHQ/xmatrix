@@ -12,10 +12,13 @@ with `auto`. Badges that repeated the section or the row's own name (human,
 app, repo, model and the like) are removed; live presence and "offline" stay.
 `@co` no longer lists every App, because kind words and descriptions match
 from three letters. Conditions after a summon no longer offer `auto`, use the
-condition icon, and an Agent condition wears its face. Instance actions say
-plainly what they do, and the Agents editor uses the same words in English and
-Chinese. No migration or native update is needed; recovery is a CI-validated
-beta Web release reverting the change.
+condition icon, and an Agent condition wears its face. Following the rule that
+early screens name no Run, Instance or Harness, the live Agents section is
+"In this conversation", the Agent condition reads "Agent", and instance
+actions say plainly what they do. `auto` wears the Agent mark rather than a
+lightning bolt. The Agents editor uses the same words in English and Chinese.
+No migration or native update is needed; recovery is a CI-validated beta Web
+release reverting the change.
 
 ## Unreleased: Binary-only installation and Agent setup boundaries
 

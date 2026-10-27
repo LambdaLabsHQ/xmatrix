@@ -71,7 +71,7 @@ export const AUTO_LAUNCH_FIELD_LABEL: Record<AutoLaunchField, string> = {
   machine: "Machine",
   model: "Model",
   effort: "Reasoning effort",
-  harness: "Harness",
+  harness: "Agent",
   launch: "Launch",
   parameters: "Harness parameter",
 };

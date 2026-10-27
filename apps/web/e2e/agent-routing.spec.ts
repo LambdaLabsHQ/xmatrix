@@ -52,7 +52,7 @@ for (const mobile of [false, true]) {
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
   const draft = page.locator(".composer-textarea").first();
   await draft.fill("@");
-  await expect(page.getByRole("listbox").getByText("Instance", { exact: true })).toBeVisible();
+  await expect(page.getByRole("listbox").getByText("In this conversation", { exact: true })).toBeVisible();
   const instance = page.getByRole("option", { name: /^codex:1\s/u });
   await expect(instance).toBeVisible();
   await expect.poll(() => page.locator(".app-composer-box").first()
