@@ -1157,26 +1157,67 @@ html:has(.site-page) {
   max-width: 44rem;
 }
 
-/* Why xMatrix: one hairline per row, across the page and the sheet. */
-.site-why :is(.site-why-row, h3, p) {
-  border-color: oklch(0 0 0 / 0.08);
+/* Why xMatrix: two pieces of tinted paper, as in the app's asks and
+   choices. xMatrix is the warm piece in ink, juggling agent tools the plain
+   one in faded ink; a row deepens on both under the pointer. */
+.site-why {
+  --site-why-ours-tint: color-mix(in oklch, var(--app-wood-panel-base) 35%, var(--background));
+  --site-why-ours-deep: color-mix(in oklch, var(--app-wood-panel-base) 55%, var(--background));
+  --site-why-ours-ink: var(--site-ink);
+  --site-why-theirs-tint: color-mix(in oklch, var(--site-ink) 5%, var(--background));
+  --site-why-theirs-deep: color-mix(in oklch, var(--site-ink) 9%, var(--background));
 }
 
 .site-why .site-why-ours {
-  font-weight: 500;
-  color: var(--site-ink);
+  background: var(--site-why-ours-tint);
+  color: var(--site-why-ours-ink);
 }
 
-/* Each xMatrix line is inked onto its sheet, left to right, as it scrolls
-   into view; without scroll-driven animations it is simply there. */
+.site-why .site-why-theirs {
+  background: var(--site-why-theirs-tint);
+  color: var(--site-ink-muted);
+}
+
+.site-why .site-why-cell.site-why-ours {
+  font-weight: 500;
+}
+
+.site-why .site-why-sheet {
+  border-radius: var(--site-surface-radius);
+}
+
+@media (min-width: 768px) {
+  .site-why :is(.site-why-cell, .site-why-name) {
+    background: transparent;
+    transition: background-color 160ms ease;
+  }
+
+  .site-why .site-why-row:hover .site-why-cell.site-why-ours {
+    background: var(--site-why-ours-deep);
+  }
+
+  .site-why .site-why-row:hover .site-why-cell.site-why-theirs {
+    background: var(--site-why-theirs-deep);
+  }
+}
+
+/* Each xMatrix line is inked on, left to right, as it scrolls into view;
+   without scroll-driven animations it is simply there. */
 @media (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
-    .site-why p.site-why-ours {
+    .site-why-ink {
       animation: site-why-ink linear both;
       animation-timeline: view();
       animation-range: entry 0% entry 100%;
     }
   }
+}
+
+/* Variant for review only: xMatrix in solid ink. */
+.site-why[data-variant="ink"] {
+  --site-why-ours-tint: var(--site-ink);
+  --site-why-ours-deep: color-mix(in oklch, var(--site-paper) 12%, var(--site-ink));
+  --site-why-ours-ink: var(--site-paper);
 }
 
 @keyframes site-why-ink {
