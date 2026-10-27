@@ -24,6 +24,12 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+PostgreSQL failures retain bounded numeric session progress with each attempt,
+readable through the Sentry connector. This distinguishes a failed round trip
+from earlier checkout, BEGIN or SQL work without SQL, parameters or identities;
+recovery remains bounded to the existing attempt. See
+[PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Independent Auth public-key, directory, profile, session, handle and OAuth
 application reads use `single_read`: a lost database response retries once on a
 fresh connection, while answered and exhausted failures propagate. JWT checks

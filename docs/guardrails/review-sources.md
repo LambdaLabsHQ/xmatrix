@@ -1,5 +1,14 @@
 # Guardrail Review Sources
 
+- 2026-10-27 HUB-AV session evidence: reviewed Feishu cleanup's exhausted
+  pre-COMMIT replay and the client-owned timings. Failure snapshots expose only
+  bounded numeric session stages and progress through the existing Sentry
+  projection; legacy events remain readable. Wire-fault reporting coverage
+  fails before the change and protects separate SQL/BEGIN attempts, one event,
+  destruction of both checkouts and no third retry. Connector tests reject
+  unknown or malformed nested fields. Recovery and release authority are
+  unchanged; see [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 - 2026-10-21 Web per release channel (P0#4 text): maintainer direction (Daniel)
   that beta and stable are told apart by version for the Web too, not only for
   clients. Every beta now deploys the beta Web (`beta.xmatrix.sh`); a stable

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Exhausted database recovery retains session progress
+
+Feishu lifecycle cleanup already retries a lost pre-COMMIT response once on a
+fresh session. HUB-AV lost the cleanup SQL response and then the new BEGIN
+response; its event could not show the rest of either session's progress.
+Failures now retain bounded stage durations and attempted query/round-trip
+counts, and Sentry issue reads display them beside the failure. Old events
+remain readable. No SQL, parameters, identities or driver messages are added,
+and no extra queries, retries or COMMIT replays are introduced. This diagnoses
+repeated loss; it does not establish or fix its underlying transport cause.
+No migration or client update is needed. Recovery uses a CI-validated beta Hub
+release reverting the change.
+
 ## Unreleased: Auth public-key reads recover a lost database response
 
 JWT verification loads public keys with one independent `single_read`, avoiding
