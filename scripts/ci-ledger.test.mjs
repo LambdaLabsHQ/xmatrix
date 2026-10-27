@@ -284,7 +284,12 @@ test("the recorder runs for every workflow whose runs it accepts", () => {
   assert.deepEqual(names, ["CI", "Public Snapshot CI", "Production Release Request"]);
   // The write-token workflow must not admit events its proof verifier rejects.
   assert.match(recorder, /github\.event\.workflow_run\.event == 'push' \|\| github\.event\.workflow_run\.event == 'pull_request'/u);
-  assert.match(recorder, /github\.event\.workflow_run\.name == 'Production Release Request'/u);
+  // workflow_run.name is the run-name. This request's run-name is the train
+  // title, so matching the workflow title skips a real train.
+  const request = readFileSync(new URL("../.github/workflows/production-release-request.yml", import.meta.url), "utf8");
+  assert.notEqual(request.match(/^name: (.+)$/mu)[1], request.match(/^run-name: (.+)$/mu)[1]);
+  assert.match(recorder, /github\.event\.workflow_run\.path == '\.github\/workflows\/production-release-request\.yml'/u);
+  assert.doesNotMatch(recorder, /workflow_run\.name ==/u);
   assert.match(recorder, /github\.event\.workflow_run\.event == 'workflow_dispatch'/u);
   assert.match(recorder, /github\.event\.workflow_run\.head_branch == github\.event\.repository\.default_branch/u);
   assert.match(recorder, new RegExp(`workflows: \\[${names.join(", ")}\\]`, "u"));

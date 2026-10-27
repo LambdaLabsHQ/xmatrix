@@ -25,12 +25,14 @@ jobs:
   record:
     # Manual snapshot dispatches are diagnostic runs, not ledger proof. The
     # recorder verifies push heads, pull request merge commits, and a
-    # default-branch Production Release Request. The request's subject is
-    # proved again in scripts/ci-ledger.mjs before anything is written.
+    # default-branch Production Release Request. workflow_run.name is the
+    # run-name, which this request sets to the train title, so the gate matches
+    # the workflow path. The request's subject is proved again in
+    # scripts/ci-ledger.mjs before anything is written.
     if: >-
       github.event.workflow_run.head_repository.full_name == github.repository &&
       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'pull_request' ||
-        (github.event.workflow_run.name == 'Production Release Request' &&
+        (github.event.workflow_run.path == '.github/workflows/production-release-request.yml' &&
           github.event.workflow_run.event == 'workflow_dispatch' &&
           github.event.workflow_run.head_branch == github.event.repository.default_branch))
     runs-on: ubuntu-24.04
