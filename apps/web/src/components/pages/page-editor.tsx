@@ -43,7 +43,7 @@ import {
 } from "./page-editor-setup";
 import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
 import type { WriteAgent } from "./page-write-with";
-import type { PageInstance } from "./page-instances";
+import { instanceMention, type PageInstance } from "./page-instances";
 import {
   currentSuggestionTop, leaveSuggestion, pageSuggestions, showSuggestions, stepSuggestion, suggestionsKey,
   takeSuggestion, type PageSuggestion, type SuggestionsReport,
@@ -173,7 +173,11 @@ export interface PageCompletion {
 const summonChips = new WeakMap<HTMLElement, () => void>();
 
 /** One row of the menu typing opened. */
-interface MenuItem { key: string; label: string; hint: string; icon: ReactNode; run: (view: EditorView) => void }
+interface MenuItem {
+  key: string; label: string; hint: string; icon: ReactNode; run: (view: EditorView) => void;
+  /** A word after the label on what the item is doing now, as a busy Instance's "Busy". */
+  note?: string;
+}
 
 type PageSections = { pageId: string; title: string; blocks: ReturnType<typeof pageBlocks> };
 
@@ -214,14 +218,19 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
   const matching = <Item,>(items: readonly Item[], name: (item: Item) => string) =>
     items.filter((item) => name(item).toLowerCase().includes(wanted))
       .sort((a, b) => Number(!name(a).toLowerCase().startsWith(wanted)) - Number(!name(b).toLowerCase().startsWith(wanted)));
-  // An Instance already at work comes first: calling it keeps its context, where a harness starts a new one.
-  const instances = matching(completion.instances, (instance) => instance.name).map((instance): MenuItem => ({
-    key: `instance:${instance.name}`, label: instance.name, hint: instance.where,
-    icon: <Face of={{ kind: "agent", name: instance.name, harness: instance.harness }} size="xs" shape="circle" glass={false}
-      className="pointer-events-none rounded-full" />,
+  // An Instance already at work comes first: calling it keeps its context, where a harness starts a new one. Each
+  // says its conversation, since names repeat across conversations, and whether it is free: a busy one answers only
+  // after what it is doing, so the free ones come first.
+  const free = (instance: PageInstance) => Number(instance.status === "busy");
+  const instances = matching(completion.instances, (instance) => instance.name)
+    .sort((a, b) => free(a) - free(b)).map((instance): MenuItem => ({
+    key: `instance:${instance.conversationId}:${instance.name}`, label: instance.name, hint: `# ${instance.conversation}`,
+    ...(instance.status === "busy" ? { note: "Busy" } : {}),
+    icon: <Face of={{ kind: "agent", name: instance.name, harness: instance.harness }} status={instance.status} size="xs"
+      shape="circle" glass={false} className="pointer-events-none rounded-full" />,
     run: (view) => {
       const blockId = pageDocBlockAt(view.state.doc, trigger.from);
-      insertReference(trigger, `@${instance.name}`)(view.state, view.dispatch, view);
+      insertReference(trigger, instanceMention(instance))(view.state, view.dispatch, view);
       completion.summonInstance(instance, blockId, sharedPosition(view.state, fragment, trigger.from));
     },
   }));
@@ -975,7 +984,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm [&_svg]:size-4
                 [&_svg]:shrink-0 [&_svg]:text-muted-foreground`}>
               {item.icon}
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              <span className="min-w-0 flex-1 truncate">{item.label}
+                {item.note && <span className="ml-1.5 text-xs text-muted-foreground">{item.note}</span>}</span>
               <span className="max-w-[45%] truncate text-xs text-muted-foreground">{item.hint}</span>
             </button>
           ))}

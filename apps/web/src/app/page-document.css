@@ -510,6 +510,24 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 /* A `page:<id>` or `channel:<id>` drawn as a chip: the id it stands for shows only where the caret is. */
 .page-document .page-reference-source { display: none; }
 
+/* An `@` that called a live Instance: one chip, its face with whether it is free, its name, and the conversation it
+   was called in, quieter than the name. */
+.xmatrix-app .app-mention-chip-status {
+  position: absolute;
+  right: -0.12em;
+  top: -0.12em;
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1.5px var(--background);
+}
+.xmatrix-app .app-mention-chip-conversation {
+  margin-left: 0.35em;
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+.xmatrix-app .app-mention-chip-instance[role="button"] { cursor: pointer; }
+
 /* A page's Automation (§6.1): its reference reads as a chip with its live state beside it. */
 .page-automation-chip {
   padding: 1px 6px;
