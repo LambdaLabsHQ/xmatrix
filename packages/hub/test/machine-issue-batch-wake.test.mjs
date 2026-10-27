@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sessionAuthorityDatabase } from "./support/postgres-database.mjs";
 
 import { machineDaemonCommand } from "../src/machines.ts";
 
@@ -84,9 +85,7 @@ function batchDatabase(epochForLock = () => 1) {
       spaceId: "space-1", runId: `run-${index}`, instanceId: `instance-${index}`,
       executionKey: `execution-${index}`, channelId: "channel-1" },
   }));
-  const database = { cacheMode: "disabled", openSession() { return this; }, async close() {},
-    async transaction(_context, callback) {
-    return callback({ async query(query) {
+  const database = sessionAuthorityDatabase(async query => {
       if (query.name === "machine_control_daemon_update_v3") updates.push(query);
       if (query.name === "machine_control_daemon_lock_v1") locks.push(query);
       if (query.name === "machine_control_daemon_lock_v1" ||
@@ -108,7 +107,6 @@ function batchDatabase(epochForLock = () => 1) {
         return commandRows.map((row) => ({ run_id: row.payload_json.runId }));
       }
       return [];
-    } });
-  } };
+  });
   return { database, updates, locks };
 }

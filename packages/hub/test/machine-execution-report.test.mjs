@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sessionAuthorityDatabase } from "./support/postgres-database.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import {
   executionReportCommand,
@@ -25,9 +26,7 @@ test("execution submission cannot supply Machine authority or broaden its comman
 
 test("execution acknowledgement uses PostgreSQL without requiring a new connection epoch or mutating Run state", async () => {
   const calls = [];
-  const database = { cacheMode: "disabled", openSession() { return this; }, async close() {},
-    async transaction(_context, callback) {
-    return callback({ async query(query) {
+  const database = sessionAuthorityDatabase(async query => {
       calls.push(query);
       if (query.name === "channel_space_directory_resolve_v2") return [{ channel_id: "channel", space_id: "space",
         shard_id: "shard-1", placement_epoch: 1, entity_version: 1 }];
@@ -37,8 +36,7 @@ test("execution acknowledgement uses PostgreSQL without requiring a new connecti
         metadata_json: { executionKey: "execution-key" }, channel_instance_id: 1 }];
       if (["runtime_message_execution_prior_v1", "runtime_message_execution_upsert_v2", "runtime_execution_report_receipt_v1"].includes(query.name)) return [];
       throw new Error(`Unexpected query ${query.name}`);
-    } });
-  } };
+  });
   const command = executionReportCommand(principal, body);
   const receipt = await machineRunLifecycleReport({}, command, { database });
   assert.equal(receipt.requestId, body.requestId);
