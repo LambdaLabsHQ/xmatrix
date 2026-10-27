@@ -1,4 +1,4 @@
-import { AGENT_PRESETS, type AgentPreset } from "@xmatrix/protocol";
+import { AGENT_PRESETS, readBoundedStream, type AgentPreset } from "@xmatrix/protocol";
 import { readHarnessReleaseTargets, type AuthorityDatabaseSession, type HarnessReleaseTarget } from "@xmatrix/db";
 import { postgresAuthorityDatabase } from "./postgres-authority-http";
 import { machineDaemonCommand } from "./machines";
@@ -40,22 +40,11 @@ export async function fetchLatestVersion(latest: Latest, fetcher: typeof fetch =
   const url = latestVersionUrl(latest);
   if (!url) return undefined;
   try {
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
     const response = await fetcher(url, { headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      signal });
     if (!response.ok || !response.body) return undefined;
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_BODY_BYTES) { await reader.cancel(); return undefined; }
-      chunks.push(value);
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const bytes = await readBoundedStream(response.body, MAX_BODY_BYTES, () => new Error("Registry response is too large"), signal);
     return latestVersionFromBody(latest.kind, JSON.parse(new TextDecoder().decode(bytes)));
   } catch {
     return undefined;

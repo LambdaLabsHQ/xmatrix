@@ -18,6 +18,15 @@ JSON decoding or schema validation. Oversized input is cancelled and returns
 HTTP 413 `request_too_large`; Content-Length cannot widen the bound. General
 requests and streamed attachment uploads retain their existing limits.
 
+Authentication and other bounded request reads, connector JSON, harness registry
+reads and Apple subscription responses share protocol's `readBoundedStream`.
+Callers supply byte limits, domain errors and their existing abort signal. The
+collector counts actual bytes, cancels on overflow without waiting for upstream
+cleanup, and releases its reader on every exit. In particular, a cloned/tee
+body cannot hold an oversized request open until its other reader finishes.
+Parsing and authorization stay with each caller; attachment media streams keep
+their separate streaming lifecycle.
+
 Signing out ends the session at the Hub, not only on the device: the web and
 native apps call Better Auth's sign-out while they still hold the token, the
 native-session route revokes its refresh token through `POST

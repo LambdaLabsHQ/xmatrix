@@ -1,5 +1,15 @@
 # Guardrail Review Sources
 
+- 2026-10-27 bounded stream audit: reviewed the request/authentication,
+  connector, harness registry and Apple JSON collectors against protocol's
+  existing reader. Their repeated collection loops also waited for upstream
+  cancellation, which a native tee holds until its other branch finishes.
+  These callers now provide limits, errors and existing signals to one shared
+  collector; overflow cancels without awaiting cleanup and always releases the
+  reader. Native tee regressions failed on the previous shared reader and
+  authentication boundary. Domain parsing, authorization and streaming media
+  ownership remain separate. See [security profile](profile-security.md).
+
 - 2026-10-27 HUB-AV session evidence: reviewed Feishu cleanup's exhausted
   pre-COMMIT replay and the client-owned timings. Failure snapshots expose only
   bounded numeric session stages and progress through the existing Sentry
