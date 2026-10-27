@@ -248,6 +248,9 @@ fn native_acp_commands_replace_doc_inventories_even_when_empty() {
     for runtime in ["grok", "kimi", "cursor"] {
         let adapter = super::agent_presentation::agent_presentation_adapter_for_acp_runtime(runtime);
         let mut facts = super::agent_presentation::AgentPresentationFacts::default();
+        let before = adapter.present(&facts, &[]).commands.unwrap_or_default();
+        assert!(before.iter().all(|command| command.mode.as_deref() != Some("passthrough")),
+            "native commands are unknown before discovery: {runtime}: {before:?}");
         adapter.observe_acp(&serde_json::json!({"availableCommands":[
             {"name":"future-command", "description":"Native command"}
         ]}), &mut facts);

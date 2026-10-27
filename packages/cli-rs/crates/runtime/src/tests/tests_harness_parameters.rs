@@ -602,6 +602,9 @@ async fn claude_parameters_with_process_recovery() {
                 None,
             );
             assert!(session.presentation().models.is_empty());
+            let startup = session.presentation().commands.unwrap_or_default();
+            assert!(startup.iter().all(|command| command.mode.as_deref() != Some("passthrough")),
+                "startup must not manufacture native commands: {startup:?}");
             assert!(session.select_effort("ultracode").await.is_err());
             session.discover_parameters().await.unwrap();
             session.select_effort("future-effort").await.unwrap();

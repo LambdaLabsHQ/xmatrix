@@ -125,10 +125,14 @@ impl AgentPresentationAdapter for BuiltinAgentPresentationAdapter {
         }
     }
 
-    /// Claude's `system/init.slash_commands` lists everything its headless
-    /// session runs; interactive-only commands answer "isn't available".
+    /// Claude stream and ACP enumerate their native passthrough commands.
+    /// Until that inventory arrives, documentation is metadata, not evidence
+    /// that an installed runtime offers a command.
     fn overlay_is_complete(&self) -> bool {
-        matches!(self, Self::Claude)
+        matches!(
+            self,
+            Self::Claude | Self::Grok | Self::Kimi | Self::GenericAcp { .. }
+        )
     }
 }
 
@@ -206,8 +210,7 @@ pub(crate) fn agent_commands_for_runtime(
     has_efforts: bool,
     _supports_goal: bool,
 ) -> Option<Vec<protocol::AgentInstanceCommand>> {
-    let raw = agent_command_catalog_json_for_runtime(runtime)?;
-    commands_from_catalog_json(raw, has_models, has_efforts)
+    agent_commands_for_runtime_with_overlay(runtime, has_models, has_efforts, &[])
 }
 
 fn commands_from_catalog_json(
@@ -361,10 +364,16 @@ pub(crate) fn agent_commands_for_runtime_with_overlay(
     has_efforts: bool,
     overlay_tokens: &[String],
 ) -> Option<Vec<protocol::AgentInstanceCommand>> {
-    let base =
-        agent_commands_for_runtime(runtime, has_models, has_efforts, true).unwrap_or_default();
-    let merged = merge_commands_with_token_overlay(base, overlay_tokens);
-    (!merged.is_empty()).then_some(merged)
+    let adapter = agent_presentation_adapter_for_runtime(runtime);
+    let commands = commands_for_inventory(
+        agent_command_catalog_json_for_runtime(runtime),
+        has_models,
+        has_efforts,
+        &[],
+        overlay_tokens,
+        adapter.overlay_is_complete(),
+    );
+    (!commands.is_empty()).then_some(commands)
 }
 
 /// Resolve a requested model against a catalog, or say why it cannot be.
@@ -530,22 +539,23 @@ fn meter_tags_from_usage(
     tags
 }
 
-fn normalized_presentation(
-    source: &str,
+/// One catalog/native merge for session command controls and every presence
+/// frame. Callers cannot bypass native precedence with a docs-derived list.
+fn commands_for_inventory(
     catalog_json: Option<&str>,
-    facts: &AgentPresentationFacts,
+    has_models: bool,
+    has_efforts: bool,
+    reported_commands: &[protocol::AgentInstanceCommand],
     command_overlay: &[String],
-    overlay_is_complete: bool,
-) -> AgentPresentationSnapshot {
-    let has_models = !facts.models.is_empty();
-    let has_efforts = facts.effort.is_some() || models_support_efforts(&facts.models);
+    native_is_authoritative: bool,
+) -> Vec<protocol::AgentInstanceCommand> {
     let mut catalog_commands = catalog_json
         .and_then(|raw| commands_from_catalog_json(raw, has_models, has_efforts))
         .unwrap_or_default();
-    if overlay_is_complete || facts.commands_reported {
+    if native_is_authoritative {
         let live: HashSet<String> = command_overlay
             .iter()
-            .chain(facts.commands.iter().map(|command| &command.token))
+            .chain(reported_commands.iter().map(|command| &command.token))
             .filter_map(|raw| normalize_slash_command_token(raw))
             .map(|token| token.to_ascii_lowercase())
             .collect();
@@ -559,9 +569,28 @@ fn normalized_presentation(
     catalog_commands.extend(catalog_controls(has_models, has_efforts));
     // Live commands are authoritative for their own tokens; the docs catalog
     // supplies typed controls and commands the provider cannot enumerate.
-    let mut commands = merge_commands_with_token_overlay(
-        merge_command_lists(facts.commands.clone(), catalog_commands),
+    merge_commands_with_token_overlay(
+        merge_command_lists(reported_commands.to_vec(), catalog_commands),
         command_overlay,
+    )
+}
+
+fn normalized_presentation(
+    source: &str,
+    catalog_json: Option<&str>,
+    facts: &AgentPresentationFacts,
+    command_overlay: &[String],
+    overlay_is_complete: bool,
+) -> AgentPresentationSnapshot {
+    let has_models = !facts.models.is_empty();
+    let has_efforts = facts.effort.is_some() || models_support_efforts(&facts.models);
+    let mut commands = commands_for_inventory(
+        catalog_json,
+        has_models,
+        has_efforts,
+        &facts.commands,
+        command_overlay,
+        overlay_is_complete || facts.commands_reported,
     );
     if let Some(parameters) = facts.parameters.as_deref() {
         crate::harness_parameters::add_commands(&mut commands, parameters);

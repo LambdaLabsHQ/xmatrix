@@ -144,7 +144,10 @@ using the same declared grammar. The same catalog drives display and live
 selection. `auto` and toggle subarguments are not invented as effort levels.
 
 Native command inventories also override documentation catalogs, including
-explicit empty ACP inventories and empty Claude overlays. Documentation still
+explicit empty ACP inventories and empty Claude overlays. Claude and ACP
+also keep native passthrough commands unavailable before initial discovery.
+Session controls and presence share one inventory merge, so a session helper
+cannot relabel a documentation list as native evidence. Documentation still
 supplies metadata and reviewed bindings; it cannot restore unreported native
 passthrough commands. See the [capability audit](../operations/provider-capability-audit.md)
 for source ownership, inspected consumers and compatibility limits.
