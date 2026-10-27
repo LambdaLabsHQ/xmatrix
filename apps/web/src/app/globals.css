@@ -1137,7 +1137,9 @@
     border-radius: 999px;
   }
 
-  .xmatrix-app :is(input:not([type="file"]), textarea, pre, code) {
+  /* Not pre: a bare pre is often a scroll box (overflow: auto), and a radius there clips its first glyph
+     (user 2026-10-27: 莫名其妙的遮罩 on a private connector result). A framed pre declares its own corners. */
+  .xmatrix-app :is(input:not([type="file"]), textarea, code) {
     border-radius: 1.25rem;
   }
 
