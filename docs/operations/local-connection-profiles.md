@@ -7,6 +7,11 @@ Agent, Space, Machine, Run, or authorization identity.
 
 ## Inspect and create Profiles
 
+Installation Profiles and DaemonHost setup are Human operations. Agent Runs
+retain their admitted Profile and cannot create or switch installation
+Profiles, start the host, or register it through `setup daemon` or
+`setup install --daemon`.
+
 ```bash
 xmatrix profile list
 xmatrix profile list --json
@@ -126,3 +131,39 @@ for clearing sessions across every registered state root.
 
 The installation-level control and ready files are operational evidence, not a
 manual API. Do not copy capability values into scripts or logs.
+
+## Production QA on an always-on server
+
+Keep a dedicated QA Profile separate from everyday Runs. The owner creates
+the Profile in their own terminal, without changing the default:
+
+```bash
+xmatrix profile create qa-usage --hub-url https://xmatrix-hub.xmatrix.sh --disabled
+```
+
+Sign into the dedicated QA account in an isolated browser, open its empty
+Space and use that page's setup command with `xmatrix --profile qa-usage login
+--connect <setup-id>`. Complete approval on the same page, enable the Profile
+with `xmatrix profile enable qa-usage`, and inspect its `daemon profile-status`.
+The existing DaemonHost can serve this isolated Profile. The owner completes
+any required provider sign-in, then enables a discovered Agent through
+Bring them in. Test its first reply and its first Page from that QA Space;
+an Agent already registered in an internal Space is not equivalent evidence.
+Do not copy credentials or remove an existing Run's Profile lineage to set
+this up. This local procedure does not authorize another account's credentials
+or membership changes.
+
+To validate a release binary in a temporary directory without touching shell
+PATH, login, daemon services, tasks or processes, use the installer's explicit
+binary-only mode:
+
+```bash
+XMATRIX_INSTALL_DIR=/tmp/xmatrix-qa-cli bash install.sh --binary-only
+```
+
+PowerShell accepts `-BinaryOnly`; both scripts also accept
+`XMATRIX_INSTALL_BINARY_ONLY=1`. This mode cannot be combined with a setup
+connection. It still verifies the exact published asset's size and SHA-256.
+`XMATRIX_SKIP_DAEMON_AUTOSTART` only controls startup inside the CLI and does
+not skip installation or service registration. Binary-only installation alone
+does not validate a connected QA Machine or its first Agent task.

@@ -1,4 +1,5 @@
 import { assert, spawnSync, fs, os, path, test, rootDir, finishDaemonHarness, assertExistingDaemonLogin } from "./script-test-fixture.mjs";
+import { createHash } from "node:crypto";
 const installScript = fs.readFileSync(
   path.join(rootDir, "apps/web/public/install.sh"),
   "utf8",
@@ -282,6 +283,48 @@ test("installer binds digest to the exact asset and rejects changed bytes", unix
     assert.notEqual(run('verify_release_asset "$1" invalid 3').status, 0);
     fs.writeFileSync(file, "abd");
     assert.notEqual(run('verify_release_asset "$1" "$2" 3').status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("binary-only installs verified bytes without changing shell or daemon state", unixOnly, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmatrix-binary-only-"));
+  try {
+    const bin = path.join(dir, "tools");
+    fs.mkdirSync(bin);
+    const candidate = path.join(dir, "candidate");
+    const bytes = '#!/bin/sh\necho "$@" >> "$QA_CALLS"\n[ "$1" = "--version" ] && echo "xmatrix 1.0.0"\nexit 0\n';
+    fs.writeFileSync(candidate, bytes);
+    fs.writeFileSync(path.join(dir, ".bashrc"), "# existing shell config\n");
+    fs.writeFileSync(path.join(bin, "curl"), '#!/bin/sh\ncase "$*" in\n*fsSLI*) exit 0;;\nesac\nwhile [ "$#" -gt 0 ]; do\nif [ "$1" = "-o" ]; then cp "$QA_CANDIDATE" "$2"; exit; fi\nshift\ndone\ncat "$QA_MANIFEST"\n', { mode: 0o755 });
+    const platform = process.platform === "darwin" ? "macos" : "linux";
+    const arch = process.arch === "arm64" ? "arm64" : "x64";
+    const manifest = path.join(dir, "manifest.json");
+    fs.writeFileSync(manifest, JSON.stringify({ assets: [{
+      name: `xmatrix-${platform}-${arch}`, browser_download_url: "https://example.invalid/candidate",
+      size: Buffer.byteLength(bytes), sha256: createHash("sha256").update(bytes).digest("hex"),
+    }] }));
+    const env = { ...process.env, HOME: dir, SHELL: "/bin/bash", PATH: `${bin}:${process.env.PATH}`,
+      XMATRIX_INSTALL_DIR: path.join(dir, "installed"), XMATRIX_RELEASE_API_URL: "https://example.invalid/manifest",
+      XMATRIX_CONNECT: "", QA_CANDIDATE: candidate, QA_MANIFEST: manifest, QA_CALLS: path.join(dir, "calls") };
+    for (const args of [["--binary-only"], []]) {
+      const result = spawnSync("bash", [path.join(rootDir, "apps/web/public/install.sh"), ...args], {
+        env: { ...env, XMATRIX_INSTALL_BINARY_ONLY: args.length ? "0" : "1" }, encoding: "utf8", timeout: 30000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(fs.readFileSync(path.join(dir, "installed/xmatrix"), "utf8"), bytes);
+      assert.equal(fs.readFileSync(path.join(dir, ".bashrc"), "utf8"), "# existing shell config\n");
+      assert.deepEqual(fs.readFileSync(env.QA_CALLS, "utf8").trim().split("\n"), ["--help", "--version"]);
+      fs.unlinkSync(env.QA_CALLS);
+      assert.equal(fs.existsSync(path.join(dir, ".config")), false);
+    }
+    const conflict = spawnSync("bash", [path.join(rootDir, "apps/web/public/install.sh"), "--binary-only", "--connect", "qa-test"], {
+      env, encoding: "utf8", timeout: 30000,
+    });
+    assert.notEqual(conflict.status, 0);
+    assert.match(conflict.stdout, /cannot be combined/);
+    assert.equal(fs.existsSync(env.QA_CALLS), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

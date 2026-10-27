@@ -1,4 +1,12 @@
+param([switch]$BinaryOnly)
+
 $ErrorActionPreference = "Stop"
+
+# Matches install.sh --binary-only: no login, shell shim or daemon changes.
+$BinaryOnly = $BinaryOnly -or $env:XMATRIX_INSTALL_BINARY_ONLY -eq "1"
+if ($BinaryOnly -and $env:XMATRIX_CONNECT) {
+  throw "-BinaryOnly cannot be combined with XMATRIX_CONNECT"
+}
 
 # ── Force UTF-8 for PowerShell/native-process boundaries ─────────────
 try {
@@ -390,11 +398,15 @@ try {
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 
   $InstallPath = Join-Path $InstallDir "$BinName.exe"
-  Stop-ScheduledTask -TaskName "xmatrix-daemon" -ErrorAction SilentlyContinue
-  Stop-ScheduledTask -TaskName "xMatrix Daemon" -ErrorAction SilentlyContinue
-  Stop-XMatrixDaemonProcesses
+  if (-not $BinaryOnly) {
+    Stop-ScheduledTask -TaskName "xmatrix-daemon" -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName "xMatrix Daemon" -ErrorAction SilentlyContinue
+    Stop-XMatrixDaemonProcesses
+  }
   Install-XMatrixBinary -SourcePath $TempBinary -InstallPath $InstallPath
-  $ShimPath = Install-PowerShellShim -InstallDir $InstallDir -BinName $BinName
+  if (-not $BinaryOnly) {
+    $ShimPath = Install-PowerShellShim -InstallDir $InstallDir -BinName $BinName
+  }
   Mark-Done 1
 
   # ── Version ──
@@ -414,18 +426,22 @@ try {
   }
 
   Write-Dim "Location: $InstallPath"
-  Write-Dim "PowerShell shim: $ShimPath"
+  if (-not $BinaryOnly) { Write-Dim "PowerShell shim: $ShimPath" }
   Write-Host ""
 
   # ── PATH check ──
   $pathDirs = $env:PATH -split ";"
-  if ($pathDirs -notcontains $InstallDir) {
+  if (-not $BinaryOnly -and $pathDirs -notcontains $InstallDir) {
     Write-Info "Add to PATH: ${BOLD}${YELLOW}${InstallDir}${RESET}"
     Write-Dim "Run: [Environment]::SetEnvironmentVariable('PATH', `$env:PATH + ';$InstallDir', 'User')"
     Write-Host ""
   }
 
-  Start-DaemonSetup -InstallPath $InstallPath
+  if ($BinaryOnly) {
+    Write-Info "Binary-only install: PATH, sign-in and daemon setup were skipped"
+  } else {
+    Start-DaemonSetup -InstallPath $InstallPath
+  }
   Write-Info "Run ${BOLD}${GREEN}${BinName} --help${RESET} to get started"
   Write-Host ""
 

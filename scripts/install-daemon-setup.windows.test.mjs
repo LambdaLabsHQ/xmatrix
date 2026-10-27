@@ -1,4 +1,5 @@
 import { assert, spawnSync, fs, os, path, test, rootDir, finishDaemonHarness, assertExistingDaemonLogin } from "./script-test-fixture.mjs";
+import { createHash } from "node:crypto";
 const installScript = fs.readFileSync(
   path.join(rootDir, "apps/web/public/install.ps1"),
   "utf8",
@@ -121,5 +122,37 @@ test("installer replaces an xmatrix.exe that is still running", windowsOnly, asy
     running.kill();
     await new Promise((resolve) => (running.exitCode === null && running.signalCode === null ? running.once("exit", resolve) : resolve()));
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test("binary-only leaves Windows daemon tasks, processes and shell shims alone", windowsOnly, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmatrix-binary-only-"));
+  try {
+    const bytes = fs.readFileSync(process.execPath);
+    const script = path.join(dir, "binary-only.ps1");
+    const installDir = path.join(dir, "installed");
+    const metadata = { name: "xmatrix-windows-x64.exe", browser_download_url: "https://example.invalid/candidate",
+      size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+    const mocks = `
+function Get-ArchName { return 'x64' }
+function Invoke-RestMethod { return @{ assets = @((ConvertFrom-Json ${powerShellLiteral(JSON.stringify(metadata))})) } }
+function Invoke-DownloadWithProgress { param($Url, $OutFile) Copy-Item -LiteralPath ${powerShellLiteral(process.execPath)} -Destination $OutFile }
+function Stop-ScheduledTask { throw 'binary-only touched a daemon task' }
+function Stop-XMatrixDaemonProcesses { throw 'binary-only stopped a daemon process' }
+function Install-PowerShellShim { throw 'binary-only wrote a shell shim' }
+function Start-DaemonSetup { throw 'binary-only entered sign-in or daemon setup' }
+`;
+    fs.writeFileSync(script, `\uFEFF${installPrelude}\n${mocks}\n${installScript.slice(mainMarkerIndex)}`, "utf8");
+    for (const args of [["-BinaryOnly"], []]) {
+      const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, ...args], {
+        env: { ...process.env, XMATRIX_INSTALL_DIR: installDir, XMATRIX_CONNECT: "",
+          XMATRIX_INSTALL_BINARY_ONLY: args.length ? "0" : "1" }, encoding: "utf8", timeout: 30000,
+      });
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.equal(createHash("sha256").update(fs.readFileSync(path.join(installDir, "xmatrix.exe"))).digest("hex"), metadata.sha256);
+      assert.deepEqual(fs.readdirSync(installDir), ["xmatrix.exe"]);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
