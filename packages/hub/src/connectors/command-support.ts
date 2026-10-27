@@ -41,6 +41,8 @@ export async function commandScope(manifest: AppConnectorProviderManifest, input
   if (!listed) return CONNECTED_APPS_NEED_MEMBER;
   const connection = listed.map(record).find((candidate) => candidate.providerId === manifest.id);
   if (!connection || connection.status !== "configured" || typeof connection.id !== "string") {
+    if (connection?.status === "disconnected") return `${manifest.name} is disconnected in this Space; reconnect it in Apps → ${manifest.name}`;
+    if (connection?.status === "error") return `${manifest.name} needs attention in this Space; check it in Apps → ${manifest.name}`;
     return `connect ${manifest.name} to this Space first`;
   }
   return { principal, spaceId, connectionId: connection.id };
