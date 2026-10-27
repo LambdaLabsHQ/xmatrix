@@ -20,7 +20,7 @@ Fixtures and marketing/demo samples were distinguished from runtime claims.
 | Claude workflow modes | The built-in effort command's native finite `name [on\|off]` argument branches. The parser reads mode names generically; model rows without reasoning support remain without effort controls. `auto`, `on` and `off` are not added as reasoning levels. |
 | Codex and ZCode models/efforts | `model/list` response parsing in `runtime_codex_app_session.rs`; defaults come from native reports or the user's configuration. No product-side fixed model/effort inventory was found. ZCode's absent catalogs stay absent. |
 | Grok, Kimi and all generic ACP harnesses | Native model metadata and `configOptions`, observed by `agent_presentation.rs` and applied by `runtime_acp_session.rs`. Effort and parameter options come from the native schema, including future values. |
-| Native command inventories | Claude's complete slash overlay and ACP's `availableCommands`/`available_commands`. Fixed the shared merge so native reports suppress absent documentation passthrough entries, including an empty replacement. |
+| Native command inventories | Claude's complete slash overlay and ACP's `availableCommands`/`available_commands`. The shared session/presence merge suppresses unreported documentation passthrough entries before initial discovery and after an empty native replacement. |
 | Documentation command catalogs | The five JSON catalogs under `packages/protocol/src/agent-command-catalogs` retain source URL, source kind, revision and the existing refresh script. They describe metadata and reviewed control bindings; their passthrough inventory cannot override a native inventory. For transports without native enumeration, these remain the explicit source-backed catalog. |
 | Parameter controls | Codex native JSON schemas/service tiers, ACP typed config options and Claude native initialize facts. Boolean domains and known wire field mappings are protocol bindings; selectable enum values are provider data. |
 | Hub and Web | Hub sanitizes and persists reported catalogs; routing and control validation consume them. Web model/effort/parameter completion consumes those observations. No independent fixed provider model/effort list was found. Native shells delegate these surfaces to the Web. |
@@ -46,8 +46,10 @@ The session regression exercises discovery, visible options, live selection
 and process recovery. It failed on the previous implementation. Native parser
 cases cover an unseen workflow name, absent/custom/unrelated command hints,
 unchanged model-specific levels, unsupported models and duplicate options.
-Shared presentation regressions cover replacement and removal of native
-commands for Claude, Grok, Kimi and generic ACP.
+Session and shared presentation regressions cover commands before first
+discovery, native replacement and removal for Claude, Grok, Kimi and generic
+ACP. The pre-discovery cases failed on the earlier implementation; command
+construction now has one shared owner rather than a separate session helper.
 
 Only locally installed Claude was directly probed; the other provider families
 were inspected and exercised through their existing wire fixtures. This audit

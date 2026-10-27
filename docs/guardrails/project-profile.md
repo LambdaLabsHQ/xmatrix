@@ -26,8 +26,10 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 Provider capability catalogs are derived from native model/effort/parameter
 and command observations. Claude has no static model or effort fallback;
-workflow modes use its native effort argument grammar, and explicit empty
-command observations cannot restore documentation inventories. See the
+workflow modes use its native effort argument grammar. Claude and ACP
+command inventories remain unavailable before discovery, and explicit empty
+observations cannot restore documentation inventories; session controls and
+presence share the same merge. See the
 [capability audit](../operations/provider-capability-audit.md) for source
 ownership and rollout limits.
 

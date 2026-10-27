@@ -26,7 +26,9 @@ The static alias/effort fallback is removed. Missing discovery leaves controls
 unavailable while ordinary work may continue; explicit parameter requests
 still fail. Native command inventories, including empty ACP inventories and
 Claude overlays, also prevent documentation lists from restoring absent
-passthrough commands. Fixed protocol bindings remain separate from choices.
+passthrough commands. That precedence applies before the first discovery as
+well, through one shared merge for session controls and presence. Fixed
+protocol bindings remain separate from choices.
 
 This needs a CLI/daemon release and restart or reborn of existing Instances;
 no Hub, Web or data migration is needed. Older harnesses without native
