@@ -999,6 +999,10 @@ export function useComposerCompletion({
                       (candidate.mention && candidate.mention !== candidate.name ? `@${candidate.mention}` : "");
                     const profileHarness = onEditHarnessProfile && candidate.invocationTarget?.kind === "capability"
                       ? candidate.invocationTarget.harness : null;
+                    const profileEditLabel = profileHarness ? <>
+                      <span className="hidden sm:inline">{profileCopy.editLong}</span>
+                      <span className="sm:hidden">{profileCopy.edit}</span>
+                    </> : null;
 
                     const option = (
                       <CompletionOptionButton
@@ -1075,6 +1079,9 @@ export function useComposerCompletion({
                             </span>
                           )}
                         </span>
+                        {profileHarness && <span className="app-mention-profile-space" aria-hidden="true">
+                          {profileEditLabel}
+                        </span>}
                       </CompletionOptionButton>
                     );
                     if (!profileHarness || !onEditHarnessProfile) return option;
@@ -1095,8 +1102,7 @@ export function useComposerCompletion({
                             onEditHarnessProfile(profileHarness);
                           }}
                         >
-                          <span className="hidden sm:inline">{profileCopy.editLong}</span>
-                          <span className="sm:hidden">{profileCopy.edit}</span>
+                          {profileEditLabel}
                         </button>
                       </div>
                     );
