@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Binary-only installation and Agent setup boundaries
+
+The Unix and PowerShell installers can install an integrity-verified binary
+without changing shell PATH, sign-in, daemon services, tasks or processes.
+Use `--binary-only`, `-BinaryOnly` or `XMATRIX_INSTALL_BINARY_ONLY=1`; connection
+setup is rejected in this mode. Default interactive installation is unchanged.
+
+Agent Runs now refuse `setup daemon` and `setup install --daemon` before
+Profile admission or installation, matching the existing Human-only Profile
+registry and DaemonHost-start boundary. The owner completes connection setup
+in their terminal; a Run cannot use installation setup to change its own
+identity. No schema migration is needed. Recovery uses a CI-validated beta
+reverting this change. See [local connection Profiles](operations/local-connection-profiles.md).
+
 ## Unreleased: A page's @ to a live Instance says which one and how the call goes
 
 Calling a live Instance with `@` on a page now writes the conversation it was
