@@ -30,7 +30,54 @@ pub(crate) fn settings_request(
         "request":{"subtype":"apply_flag_settings", "settings":settings}})
 }
 
+/// Native effort hints distinguish workflow modes (`name [on|off]`) from
+/// ordinary per-model levels and `auto`. Only that finite, replayable mode
+/// grammar supplements model rows; option names are provider data.
+fn effort_workflow_modes(value: &Value) -> Vec<String> {
+    let Some(hint) = value
+        .get("commands")
+        .and_then(Value::as_array)
+        .filter(|commands| commands.len() <= 1000)
+        .and_then(|commands| {
+            commands.iter().find(|command| {
+                command.get("name").and_then(Value::as_str) == Some("effort")
+                    && command.get("builtin").and_then(Value::as_bool) == Some(true)
+            })
+        })
+        .and_then(|command| command.get("argumentHint"))
+        .and_then(Value::as_str)
+        .filter(|hint| hint.len() <= 4096)
+        .and_then(|hint| hint.strip_prefix('<')?.strip_suffix('>'))
+    else {
+        return Vec::new();
+    };
+    let mut depth = 0_usize;
+    hint.split(|c| match c {
+        '[' => {
+            depth += 1;
+            false
+        }
+        ']' => {
+            depth = depth.saturating_sub(1);
+            false
+        }
+        '|' => depth == 0,
+        _ => false,
+    })
+    .filter_map(|branch| branch.trim().strip_suffix(" [on|off]"))
+    .filter(|name| {
+        !name.is_empty()
+            && name.len() <= 64
+            && name
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+    })
+    .map(str::to_string)
+    .collect()
+}
+
 pub(crate) fn initialize_facts(value: &Value, model: Option<&str>) -> Facts {
+    let workflow_modes = effort_workflow_modes(value);
     let rows = value.get("models").and_then(Value::as_array);
     let models = rows.filter(|rows| rows.len() <= 100).map(|rows| {
         rows.iter()
@@ -63,15 +110,15 @@ pub(crate) fn initialize_facts(value: &Value, model: Option<&str>) -> Facts {
                         .get("supportedEffortLevels")
                         .and_then(Value::as_array)
                         .and_then(|values| {
-                            choice(
-                                "effort",
-                                "Effort",
-                                values
-                                    .iter()
-                                    .filter_map(|v| v.as_str().map(str::to_string))
-                                    .collect(),
-                                None,
-                            )
+                            let mut options: Vec<_> = values
+                                .iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect();
+                            if options.is_empty() {
+                                return None;
+                            }
+                            options.extend(workflow_modes.iter().cloned());
+                            choice("effort", "Effort", options, None)
                         })
                         .map(|p| {
                             p.options

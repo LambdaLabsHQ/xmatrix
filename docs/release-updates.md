@@ -1,5 +1,22 @@
 # Release Updates
 
+## Unreleased: Agent controls follow native capability data
+
+Claude controls now derive models and effort choices only from native
+initialize data. Discovery merges the built-in effort command's declared
+workflow modes with each model's own reasoning levels, so Ultracode and
+future modes using that grammar are selectable without a per-name patch.
+The static alias/effort fallback is removed. Missing discovery leaves controls
+unavailable while ordinary work may continue; explicit parameter requests
+still fail. Native command inventories, including empty ACP inventories and
+Claude overlays, also prevent documentation lists from restoring absent
+passthrough commands. Fixed protocol bindings remain separate from choices.
+
+This needs a CLI/daemon release and restart or reborn of existing Instances;
+no Hub, Web or data migration is needed. Older harnesses without native
+catalogs lose guessed controls. Recovery uses a CI-validated CLI beta
+reverting the change. See the [capability audit](operations/provider-capability-audit.md).
+
 ## Unreleased: A release train records the gates it passed
 
 Production Release Request now writes the full-tier CI jobs it passed into

@@ -24,6 +24,13 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Provider capability catalogs are derived from native model/effort/parameter
+and command observations. Claude has no static model or effort fallback;
+workflow modes use its native effort argument grammar, and explicit empty
+command observations cannot restore documentation inventories. See the
+[capability audit](../operations/provider-capability-audit.md) for source
+ownership and rollout limits.
+
 Instance connection, capacity-retry control and registration withdrawal acquire
 the Channel lifecycle lock before Run locks, then recheck current state and registration authority.
 Concurrent stops can commit without a lock-order deadlock, and reconnect cannot

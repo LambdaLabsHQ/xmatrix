@@ -9,6 +9,8 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
   const request = value.request;
   let response = {};
   if (request.subtype === "initialize") response = {
+    commands: [{ name: "effort", builtin: true,
+      argumentHint: "<low|future-effort|auto|ultracode [on|off]|future-workflow [on|off]>" }],
     models: [{ value: "default", resolvedModel: "native-model", supportsFastMode: true,
       supportedEffortLevels: ["low", "future-effort"] }],
     fast_mode_state: fast && !blocked ? (cooldown ? "cooldown" : "on") : "off",

@@ -508,6 +508,71 @@ fn claude_parameters_require_native_observation_and_survive_process_recovery() {
         .block_on(claude_parameters_with_process_recovery());
 }
 
+#[test]
+fn claude_ultracode_requires_a_builtin_declaration_and_keeps_model_limits() {
+    for (commands, declared) in [
+        (serde_json::json!([]), false),
+        (
+            serde_json::json!([{"name":"effort", "builtin":false,
+            "argumentHint":"<low|ultracode>"}]),
+            false,
+        ),
+        (
+            serde_json::json!([{"name":"other", "builtin":true,
+            "argumentHint":"<low|ultracode>"}]),
+            false,
+        ),
+        (
+            serde_json::json!([{"name":"effort", "builtin":true,
+            "argumentHint":"<low|ultracode-preview>"}]),
+            false,
+        ),
+        (
+            serde_json::json!([{"name":"effort", "builtin":true,
+            "argumentHint":"<low|ultracode [on|off]|future-workflow [on|off]>"}]),
+            true,
+        ),
+    ] {
+        let facts = crate::claude_parameters::initialize_facts(
+            &serde_json::json!({
+                "commands": commands,
+                "models": [
+                    {"value":"default", "supportedEffortLevels":["low", "future-effort"]},
+                    {"value":"plain"},
+                    {"value":"empty", "supportedEffortLevels":[]},
+                    {"value":"native", "supportedEffortLevels":["high", "ultracode"]}
+                ]
+            }),
+            None,
+        );
+        let models = facts.models.unwrap();
+        let efforts = models[0].supported_reasoning_efforts.as_ref().unwrap();
+        assert_eq!(efforts[0].reasoning_effort, "low");
+        assert_eq!(efforts[1].reasoning_effort, "future-effort");
+        assert_eq!(
+            efforts
+                .iter()
+                .filter(|e| e.reasoning_effort == "ultracode")
+                .count(),
+            usize::from(declared),
+            "{commands}"
+        );
+        assert_eq!(efforts.iter().any(|e| e.reasoning_effort == "future-workflow"), declared);
+        assert!(models[1].supported_reasoning_efforts.is_none());
+        assert!(models[2].supported_reasoning_efforts.is_none());
+        assert_eq!(
+            models[3]
+                .supported_reasoning_efforts
+                .as_ref()
+                .unwrap()
+                .iter()
+                .filter(|e| e.reasoning_effort == "ultracode")
+                .count(),
+            1
+        );
+    }
+}
+
 async fn claude_parameters_with_process_recovery() {
     for mode in ["enabled", "blocked", "cooldown"] {
         let blocked = mode == "blocked";
@@ -536,8 +601,16 @@ async fn claude_parameters_with_process_recovery() {
                 agent,
                 None,
             );
+            assert!(session.presentation().models.is_empty());
+            assert!(session.select_effort("ultracode").await.is_err());
             session.discover_parameters().await.unwrap();
             session.select_effort("future-effort").await.unwrap();
+            assert!(session.presentation().parameters.iter().any(|p| p.id == "effort"
+                && p.options.contains(&"ultracode".into())
+                && p.options.contains(&"future-workflow".into())
+                && !p.options.contains(&"auto".into())));
+            session.select_effort("ultracode").await.unwrap();
+            assert_eq!(session.presentation().current_effort.as_deref(), Some("ultracode"));
             assert!(
                 session
                     .presentation()
@@ -574,6 +647,7 @@ async fn claude_parameters_with_process_recovery() {
                     .unwrap();
                 session.shutdown().await;
                 session.discover_parameters().await.unwrap();
+                assert_eq!(session.presentation().current_effort.as_deref(), Some("ultracode"));
                 let observed = session.presentation().parameters;
                 assert!(
                     observed

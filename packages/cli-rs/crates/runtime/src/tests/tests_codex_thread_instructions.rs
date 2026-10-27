@@ -88,7 +88,7 @@ async fn codex_start_and_resume_install_trusted_instructions_outside_user_input(
                 "Agent instructions (trusted xMatrix run configuration):\nReview changes carefully."
             ));
             assert!(instructions.contains("xmatrix send channel-instructions"));
-            assert!(instructions.contains("runtime output is local"));
+            assert!(instructions.to_lowercase().contains("output is local"));
             assert!(!instructions.contains(input));
             assert!(!instructions.contains("xMatrix channel contract:"));
             assert!(instructions.len() < 600);

@@ -53,7 +53,7 @@ async fn serve_secret_hub(
 /// A Run auth broker that issues a new token per request, or refuses every
 /// request from `revoke_after` on.
 async fn serve_rotating_auth_broker(listener: tokio::net::TcpListener, revoke_after: usize) {
-    for issued in 1.. {
+    for issued in 1..=usize::MAX {
         let (mut stream, _) = listener.accept().await.unwrap();
         let _ = super::read_daemon_local_http_request(&mut stream).await;
         if issued > revoke_after {

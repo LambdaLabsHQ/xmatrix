@@ -2,6 +2,8 @@ Part of the descriptive project profile. Not policy. The index is `project-profi
 
 ## Architecture Boundaries
 
+- Provider capability source ownership and native-over-catalog precedence are described in the [capability audit](../operations/provider-capability-audit.md). Runtime choices, Hub validation/routing and Web completion consume observations rather than maintain independent inventories.
+
 - Auto/harness summons and Hub-authored management assignment records remain context
   for existing Instances during live delivery and catch-up; their selected Run
   receives the task through its initial input. These summons do not wake resting
