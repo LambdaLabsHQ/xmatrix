@@ -10,14 +10,15 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Bot,
   ChevronRight,
   FileText,
   Hash,
   Pin,
   PlugZap,
   SlidersHorizontal,
+  Sparkles,
   Wrench,
-  Zap,
 } from "lucide-react";
 import {
   WEB_PROXY_ROUTES,
@@ -1030,8 +1031,11 @@ export function useComposerCompletion({
                               <Wrench className="size-4" />
                             ) : isLaunch && candidate.launchField ? (
                               <SlidersHorizontal className="size-4" />
-                            ) : isAiService || isLaunch ? (
-                              <Zap className="size-4" />
+                            ) : isLaunch ? (
+                              // auto is an Agent chosen for you: it wears the Agent mark.
+                              <Bot className="size-4" />
+                            ) : isAiService ? (
+                              <Sparkles className="size-4" />
                             ) : (
                               <PlugZap className="size-4" />
                             )}
