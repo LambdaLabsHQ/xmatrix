@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: A page's @ to a live Instance says which one and how the call goes
+
+Calling a live Instance with `@` on a page now writes the conversation it was
+called in beside its name, so another Instance of the same name (each
+conversation has its own `grok:1`) no longer takes it as its own and answers
+twice. The `@` menu names each Instance's conversation and marks busy ones,
+listing free ones first. On the page the call is one chip, `@grok:1 # Daily
+costs`, with the Instance's live presence for every reader. The caller's chip
+follows the call: Sent, Queued while the Instance finishes something else,
+Working with its time, then Replied (opening the reply), Done or Failed. The
+Agent bootstrap says an `@` naming another conversation is not addressed to it.
+
+This is a Web change plus a CLI bootstrap line; older CLIs still receive the
+call correctly but lack the hint. No Hub or data migration. Recovery is a
+CI-validated beta Web and CLI release reverting the change.
+
 ## Unreleased: Agent controls follow native capability data
 
 Claude controls now derive models and effort choices only from native
