@@ -585,6 +585,7 @@ async function createPostgresSessionForUser(env: Env, user: AuthUser, label?: st
       });
       return rows[0];
     },
+    { statement: "single_read" },
   );
   const sessionUser = exchangedSessionUser(user, existingUser);
   if (sessionUser.id !== user.id) throw new Error(SESSION_EXCHANGE_USER_MISMATCH);
@@ -689,7 +690,7 @@ export async function accessTokenSessionAlive(env: Env, verifiedToken: string): 
         name: "auth_session_alive_v1",
         text: "SELECT id FROM control.auth_sessions WHERE id = $1 AND expires_at > now() LIMIT 1",
         values: [sessionId], maxRows: 1,
-      }));
+      }), { statement: "single_read" });
     return rows.length > 0;
   }
   const row = await requireAuthD1(env).prepare('SELECT "id" FROM "session" WHERE "id" = ? AND "expiresAt" > ?')

@@ -152,7 +152,7 @@ export async function authDirectoryEmails(
       if (row.id && row.email) emails.set(row.id, row.email);
     }
     return emails;
-  });
+  }, { statement: "single_read" });
 }
 
 /** The user who linked this GitHub account (by GitHub's numeric user id), if anyone did. */
@@ -171,7 +171,7 @@ export async function authUserByGitHubId(env: Env, githubUserId: string): Promis
       values: [githubUserId], maxRows: 1,
     });
     return rows[0]?.user_id ?? null;
-  });
+  }, { statement: "single_read" });
 }
 
 /** Whether this person has linked a GitHub account, the identity an open project requires. */
@@ -187,7 +187,7 @@ export async function authHasGitHubAccount(env: Env, userId: string): Promise<bo
     name: "auth_directory_github_linked_v1",
     text: "SELECT 1 FROM control.auth_accounts WHERE provider_id = 'github' AND user_id = $1 LIMIT 1",
     values: [userId], maxRows: 1,
-  })).length > 0);
+  })).length > 0, { statement: "single_read" });
 }
 
 interface AdminAuthUserRow {
@@ -304,7 +304,7 @@ async function readPostgresAdminUsers(
       throw new Error("Auth admin user inventory bound was reached");
     }
     return [...rows];
-  });
+  }, { statement: "single_read" });
 }
 
 interface AdminAuthSessionRow {

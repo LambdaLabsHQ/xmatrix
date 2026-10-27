@@ -28,3 +28,8 @@ export function activePlacementRow(shardId = "shard-0", spaceId = "space-1") {
   return { space_id: spaceId, shard_id: shardId, placement_epoch: 1, state: "active", target_shard_id: null,
     plan_class: "shared" };
 }
+
+/** A request-owned session whose statements the test answers. */
+export function sessionAuthorityDatabase(respond) {
+  return { ...authorityDatabase(respond), openSession() { return this; }, async close() {} };
+}

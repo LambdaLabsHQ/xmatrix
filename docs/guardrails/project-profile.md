@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Independent Auth public-key, directory, profile, session, handle and OAuth
+application reads use `single_read`: a lost database response retries once on a
+fresh connection, while answered and exhausted failures propagate. JWT checks
+and write/multi-query transaction boundaries stay in force.
+
 Page section awareness and blame use independent single reads with placement
 fencing and bounded lost-response recovery. Derivation still runs outside the
 read session, and its purge-safe cache writes keep their separate transactions.

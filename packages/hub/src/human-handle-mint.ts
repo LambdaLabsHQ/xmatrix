@@ -209,7 +209,7 @@ async function postgresAccount(env: Env, userId: string): Promise<MintableAccoun
       values: [userId], maxRows: 1,
     });
     return rows[0] ? pgMintableAccount(rows[0]) : null;
-  });
+  }, { statement: "single_read" });
 }
 
 async function postgresAccountsWithoutHandle(env: Env, limit: number): Promise<MintableAccount[]> {
@@ -223,7 +223,7 @@ async function postgresAccountsWithoutHandle(env: Env, limit: number): Promise<M
       values: [limit], maxRows: limit,
     });
     return rows.map(pgMintableAccount);
-  });
+  }, { statement: "single_read" });
 }
 
 async function postgresMintHandleForAccount(
@@ -278,7 +278,7 @@ async function postgresMissingHandleCount(env: Env): Promise<number> {
       maxRows: 1,
     });
     return Number(rows[0]?.count ?? 0);
-  });
+  }, { statement: "single_read" });
 }
 
 /** Write the account row, then publish it. Order matters; see `syncHumanProfile`. */

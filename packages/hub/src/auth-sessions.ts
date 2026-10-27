@@ -73,7 +73,7 @@ export async function listSignedInSessions(env: Env, userId: string, currentSess
         current: row.id === currentSessionId,
       })),
     };
-  });
+  }, { statement: "single_read" });
 }
 
 /** Ends one of the person's own sessions; false when it is not theirs or already gone. */

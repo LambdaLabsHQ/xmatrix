@@ -167,7 +167,7 @@ export function mcpServer(env: Env, caller: McpCaller, dispatch: (request: Reque
       if (!client) throw new McpToolError("The application's registration is no longer available");
       const name = (client.name ?? "").replace(/[\p{Cc}\p{Cf}]/gu, "").trim().slice(0, 80) || "AI app";
       return { clientId: caller.clientId, name };
-    });
+    }, { statement: "single_read" });
     const response = await asInternalCaller({ ...caller.user, mcpApplication: application }, (headers) => dispatch(new Request(
       new URL(path, hubAuthBaseUrl(env)), { method, headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify(body) })));
