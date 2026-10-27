@@ -1369,3 +1369,14 @@ short. Ordinary established sessions and unseeded creation keep their existing
 behavior. No schema or native change is needed. Recovery uses a CI-validated
 beta Web release reverting the change. Browser/process termination or a sync
 that cannot complete within that bound retains its existing limitation.
+
+## Unreleased: The Agent picker keeps one complete selection
+
+The strengths editor control stays independently clickable while the Agent
+choice keeps its full inset selection surface. A hidden, inaccessible copy of
+the same responsive label reserves its width; the actual control is a sibling,
+so buttons are never nested. Hovering that control uses the row's existing
+selection fill. This restores the established mention geometry contract without
+changing keyboard selection, routing or profile permissions. No migration or
+native update is needed; recovery is a CI-validated beta Web release reverting
+the change.
