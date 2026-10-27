@@ -6,7 +6,9 @@ In the `@` menu, an Agent whose strengths the Space has already written no
 longer carries an edit prompt. Agents still undescribed keep it, now set in the
 same grey type as the row's own description instead of an underlined link, and
 the section's one-line hint appears only while such an Agent is listed. The
-editor and its permissions are unchanged. No migration or native update is
+prompt now names what the text is for: “Say when to pick it” in English, and in
+Chinese 适合交给它的事 replaces the stiff 优势劣势 wording across the menu and
+the editor. Editor permissions are unchanged. No migration or native update is
 needed; recovery is a CI-validated beta Web release reverting the change.
 
 ## Unreleased: A release train records the gates it passed

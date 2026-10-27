@@ -6,10 +6,10 @@ import type { OnboardingLocale } from "@xmatrix/protocol";
    browser's language. */
 
 const en = {
-  hint: "What an agent is good at can be written.",
-  edit: "Click to edit",
-  editLong: "Click to edit what it's good at",
-  editNamed: (name: string) => `Click to edit what ${name} is good at`,
+  hint: "Say when to pick each Agent. Auto uses it to choose.",
+  edit: "Describe",
+  editLong: "Say when to pick it",
+  editNamed: (name: string) => `Say when to pick ${name}`,
   title: "When to pick it",
   field: (harness: string) => `When to pick ${harness}`,
   placeholder: (harness: string) =>
@@ -23,15 +23,15 @@ const en = {
 };
 
 const zh: typeof en = {
-  hint: "Agent 擅长什么、不擅长什么，都可以写。",
-  edit: "点击修改",
-  editLong: "点击此处修改它的优势劣势",
-  editNamed: (name) => `点击此处修改 ${name} 的优势劣势`,
-  title: "擅长什么",
-  field: (harness) => `${harness} 擅长什么`,
-  placeholder: (harness) => `写 ${harness} 在这里擅长什么、什么别交给它。怎么写都行。`,
-  applies: (harness) => `自动派活时会读这段。这个 Space 里每台跑 ${harness} 的机器都适用。`,
-  empty: (harness) => `还没有说明。Space 的所有者或管理员，或者这里有 ${harness} 的人，可以写一段。`,
+  hint: "写下适合交给各个 Agent 的事，自动分配时会参考。",
+  edit: "写说明",
+  editLong: "写下适合交给它的事",
+  editNamed: (name) => `写下适合交给 ${name} 的事`,
+  title: "适合交给它的事",
+  field: (harness) => `适合交给 ${harness} 的事`,
+  placeholder: (harness) => `哪些事适合交给 ${harness}，哪些别交给它，怎么写都行。`,
+  applies: (harness) => `自动分配时会参考这段。这个 Space 里所有运行 ${harness} 的机器都适用。`,
+  empty: (harness) => `还没有说明。Space 的所有者或管理员，或在这里有 ${harness} 的人，可以写一段。`,
   save: "保存",
   cancel: "取消",
 };

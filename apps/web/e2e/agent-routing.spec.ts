@@ -130,8 +130,8 @@ for (const mobile of [false, true]) {
       await page.goto("/app/personal-sspaceperso/channels/channel-general");
       const draft = page.locator(".composer-textarea").first();
       await draft.fill("@");
-      await expect(page.getByText("What an agent is good at can be written.")).toBeVisible();
-      await page.getByRole("button", { name: "Click to edit what codex is good at" }).click();
+      await expect(page.getByText("Say when to pick each Agent. Auto uses it to choose.")).toBeVisible();
+      await page.getByRole("button", { name: "Say when to pick codex" }).click();
       await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
       const text = page.getByLabel("When to pick codex");
       await expect(text).toHaveValue("");
@@ -153,8 +153,8 @@ test("a harness the Space has described invites no edit", async ({ page }) => {
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
   await page.locator(".composer-textarea").first().fill("@");
   await expect(page.getByRole("option", { name: /codex.*Careful code review/u })).toBeVisible();
-  await expect(page.getByText("What an agent is good at can be written.")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Click to edit what codex is good at" })).toHaveCount(0);
+  await expect(page.getByText("Say when to pick each Agent. Auto uses it to choose.")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Say when to pick codex" })).toHaveCount(0);
 });
 
 test.describe("what an agent is good at, in Chinese", () => {
@@ -172,10 +172,10 @@ test.describe("what an agent is good at, in Chinese", () => {
     await page.goto("/app/personal-sspaceperso/channels/channel-general");
     const draft = page.locator(".composer-textarea").first();
     await draft.fill("@");
-    await expect(page.getByText("Agent 擅长什么、不擅长什么，都可以写。")).toBeVisible();
-    await page.getByRole("button", { name: "点击此处修改 codex 的优势劣势" }).click();
+    await expect(page.getByText("写下适合交给各个 Agent 的事，自动分配时会参考。")).toBeVisible();
+    await page.getByRole("button", { name: "写下适合交给 codex 的事" }).click();
     await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
-    const text = page.getByLabel("codex 擅长什么");
+    const text = page.getByLabel("适合交给 codex 的事");
     await expect(text).toHaveValue("");
     await expect(text).toBeFocused();
   });
