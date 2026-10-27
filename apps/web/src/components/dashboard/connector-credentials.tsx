@@ -39,6 +39,18 @@ export function connectorWritableCredentials(connector: AppConnectorManifest) {
   return (connector.credentials ?? []).filter((field) => !field.generated && !field.managed);
 }
 
+/**
+ * A disconnected app whose typed credentials are all still saved connects again
+ * by a check alone; Disconnect keeps them (only OAuth grants are forgotten).
+ */
+export function connectorReconnectsWithSavedCredentials(connector: AppConnectorManifest,
+  connection: { status: string; credentialFields?: string[] } | undefined): boolean {
+  const writable = connectorWritableCredentials(connector);
+  const saved = new Set(connection?.credentialFields ?? []);
+  return connection?.status === "disconnected" && writable.some((field) => saved.has(field.id))
+    && writable.every((field) => !field.required || saved.has(field.id));
+}
+
 /** Whether the Hub mints values (an ingress URL or a secret) for this app. */
 export function connectorGeneratesCredentials(connector: AppConnectorManifest): boolean {
   return Boolean(takesIngress(connector) || connector.credentials?.some((field) => field.generated && !field.managed));
