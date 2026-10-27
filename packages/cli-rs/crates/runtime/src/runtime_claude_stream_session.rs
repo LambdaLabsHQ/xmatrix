@@ -32,11 +32,9 @@ use crate::runtime_claude_stream_io::{
     write_claude_control_line,
 };
 use crate::runtime_claude_turn::claude_apply_effort_control_request;
-use crate::runtime_claude_turn::claude_effort_catalog;
 use crate::runtime_claude_turn::claude_initial_effort_from_args;
 use crate::runtime_claude_turn::claude_initial_model_from_args;
 use crate::runtime_claude_turn::claude_interrupt_control_request;
-use crate::runtime_claude_turn::claude_model_catalog;
 use crate::runtime_claude_turn::claude_permission_response;
 use crate::runtime_claude_turn::claude_reborn_resume_refusal;
 use crate::runtime_claude_turn::claude_set_model_control_request;
@@ -554,8 +552,6 @@ pub(crate) struct ClaudeStreamSession {
     /// Additive slash tokens from system/init.slash_commands (names without /).
     slash_command_overlay: Arc<Mutex<Vec<String>>>,
     transcript: ClaudeTranscriptWatcher,
-    /// The switchable model catalog advertised in presence updates.
-    models: Vec<protocol::AgentModelInfo>,
     controls: Arc<ClaudeSessionControls>,
 }
 
@@ -578,7 +574,7 @@ impl ClaudeStreamSession {
     /// enumerated in `system/init` (skills, custom commands) are part of it.
     pub(crate) fn presentation(&self) -> SessionPresentation {
         let facts = self.controls.parameter_facts();
-        let models = facts.models.unwrap_or_else(|| self.models.clone());
+        let models = facts.models.unwrap_or_default();
         let has_models = !models.is_empty();
         let mut parameters = crate::harness_parameters::model_parameters(
             &models,
@@ -620,24 +616,20 @@ impl ClaudeStreamSession {
     /// unrecognized `effortLevel` without complaint — so an unknown level is
     /// refused here rather than sent and silently dropped.
     pub(crate) async fn select_effort(&mut self, requested: &str) -> Result<String, String> {
-        let facts = self.controls.parameter_facts();
-        let efforts = if facts.models.is_some() {
-            self.presentation()
-                .models
-                .iter()
-                .find(|m| {
-                    self.controls
-                        .current()
-                        .as_deref()
-                        .map_or(m.is_default == Some(true), |current| {
-                            m.model == current || m.id == current
-                        })
-                })
-                .and_then(|m| m.supported_reasoning_efforts.clone())
-                .unwrap_or_default()
-        } else {
-            claude_effort_catalog()
-        };
+        let efforts = self
+            .presentation()
+            .models
+            .into_iter()
+            .find(|m| {
+                self.controls
+                    .current()
+                    .as_deref()
+                    .map_or(m.is_default == Some(true), |current| {
+                        m.model == current || m.id == current
+                    })
+            })
+            .and_then(|m| m.supported_reasoning_efforts)
+            .unwrap_or_default();
         let selected = efforts
             .into_iter()
             .find(|candidate| candidate.reasoning_effort.eq_ignore_ascii_case(requested))
@@ -712,7 +704,6 @@ impl ClaudeStreamSession {
             goal_supported: Arc::new(Mutex::new(None)),
             slash_command_overlay: Arc::new(Mutex::new(Vec::new())),
             transcript: ClaudeTranscriptWatcher::new(cwd, initial_goal),
-            models: claude_model_catalog(),
             controls: Arc::new(ClaudeSessionControls::new(initial_model, initial_effort)),
         }
     }

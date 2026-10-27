@@ -238,8 +238,29 @@ fn claude_offers_only_the_catalog_commands_its_session_reported() {
         !live.contains(&"/context".to_string()),
         "unreported docs entries go"
     );
-    // Before system/init arrives the docs catalog is all there is.
-    assert!(tokens(&[]).contains(&"/context".to_string()));
+    assert!(!tokens(&[]).contains(&"/context".to_string()),
+        "empty or unavailable native commands must not restore a docs inventory");
+}
+
+#[test]
+fn native_acp_commands_replace_doc_inventories_even_when_empty() {
+    use super::agent_presentation::AgentPresentationAdapter;
+    for runtime in ["grok", "kimi", "cursor"] {
+        let adapter = super::agent_presentation::agent_presentation_adapter_for_acp_runtime(runtime);
+        let mut facts = super::agent_presentation::AgentPresentationFacts::default();
+        adapter.observe_acp(&serde_json::json!({"availableCommands":[
+            {"name":"future-command", "description":"Native command"}
+        ]}), &mut facts);
+        let presentation = adapter.present(&facts, &[]);
+        let passthrough: Vec<_> = presentation.commands.unwrap_or_default().into_iter()
+            .filter(|command| command.mode.as_deref() == Some("passthrough"))
+            .map(|command| command.token).collect();
+        assert_eq!(passthrough, ["/future-command"], "{runtime}");
+        adapter.observe_acp(&serde_json::json!({"availableCommands":[]}), &mut facts);
+        let cleared = adapter.present(&facts, &[]).commands.expect("explicit replacement");
+        assert!(cleared.iter().all(|command| command.mode.as_deref() != Some("passthrough")),
+            "{runtime}: {cleared:?}");
+    }
 }
 
 /// `session/new` and `available_commands_update` captured from real ACP

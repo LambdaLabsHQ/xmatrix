@@ -129,6 +129,26 @@ assistant frame, the reader retries transcript polling every 20ms for at most
 unknown model/effort values remain absent. Late initialize responses retain these
 observed values, and goal transcript updates keep their turn-boundary owner.
 
+Claude model and effort choices come only from native `initialize`; no static
+alias or effort inventory fills a missing catalog. Startup performs bounded
+native discovery before publishing controls. If discovery is unavailable,
+ordinary work can still run, while explicit parameter requests fail and
+unknown controls remain unavailable.
+
+Native model `supportedEffortLevels` supplies per-model reasoning levels.
+The built-in effort command additionally declares workflow modes using the
+finite `name [on|off]` argument grammar. Discovery reads those names from the
+native hint and supplements only models with a nonempty effort catalog. This
+includes Ultracode without a name-based special case and admits future modes
+using the same declared grammar. The same catalog drives display and live
+selection. `auto` and toggle subarguments are not invented as effort levels.
+
+Native command inventories also override documentation catalogs, including
+explicit empty ACP inventories and empty Claude overlays. Documentation still
+supplies metadata and reviewed bindings; it cannot restore unreported native
+passthrough commands. See the [capability audit](../operations/provider-capability-audit.md)
+for source ownership, inspected consumers and compatibility limits.
+
 ## Types
 
 The contract carries finite choices only. Each parameter is one of:

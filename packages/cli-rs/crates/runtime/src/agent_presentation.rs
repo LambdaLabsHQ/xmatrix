@@ -19,6 +19,7 @@ pub(crate) struct AgentPresentationFacts {
     pub(crate) parameter_revision: u64,
     pub supported_efforts: Vec<protocol::AgentModelReasoningEffort>,
     pub commands: Vec<protocol::AgentInstanceCommand>,
+    pub(crate) commands_reported: bool,
     pub status_chips: Vec<protocol::AgentStatusChip>,
     pub(crate) usage: Option<protocol::LlmUsage>,
 }
@@ -275,10 +276,7 @@ fn commands_from_catalog_json(
     (!commands.is_empty()).then_some(commands)
 }
 
-fn catalog_controls(
-    has_models: bool,
-    has_efforts: bool,
-) -> Vec<protocol::AgentInstanceCommand> {
+fn catalog_controls(has_models: bool, has_efforts: bool) -> Vec<protocol::AgentInstanceCommand> {
     [
         ("/model", "Switch model", "agent-models", has_models),
         ("/effort", "Switch effort", "agent-efforts", has_efforts),
@@ -544,9 +542,10 @@ fn normalized_presentation(
     let mut catalog_commands = catalog_json
         .and_then(|raw| commands_from_catalog_json(raw, has_models, has_efforts))
         .unwrap_or_default();
-    if overlay_is_complete && !command_overlay.is_empty() {
+    if overlay_is_complete || facts.commands_reported {
         let live: HashSet<String> = command_overlay
             .iter()
+            .chain(facts.commands.iter().map(|command| &command.token))
             .filter_map(|raw| normalize_slash_command_token(raw))
             .map(|token| token.to_ascii_lowercase())
             .collect();
@@ -597,7 +596,8 @@ fn normalized_presentation(
         model,
         models: facts.models_reported.then(|| facts.models.clone()),
         effort: facts.effort.clone(),
-        commands: (facts.parameters.is_some() || !commands.is_empty()).then_some(commands),
+        commands: (facts.commands_reported || facts.parameters.is_some() || !commands.is_empty())
+            .then_some(commands),
         parameters: facts.parameters.clone(),
         status_chips: (!chips.is_empty()).then_some(chips),
         usage: facts.usage.clone(),
@@ -1003,15 +1003,10 @@ fn usage_from_acp_update(map: &serde_json::Map<String, Value>) -> Option<protoco
     .then_some(usage)
 }
 
-fn observe_acp_presentation(
-    value: &Value,
-    facts: &mut AgentPresentationFacts,
-    source: &str,
-) {
+fn observe_acp_presentation(value: &Value, facts: &mut AgentPresentationFacts, source: &str) {
     let model = facts.model.clone();
     let revision = facts.parameter_revision;
-    facts.usage =
-        super::merge_llm_usage(facts.usage.clone(), super::extract_llm_usage(value));
+    facts.usage = super::merge_llm_usage(facts.usage.clone(), super::extract_llm_usage(value));
     observe_acp_node(value, facts, source, 0);
     if revision != facts.parameter_revision {
         // session/new and session/load can also carry a model inventory.
@@ -1043,8 +1038,10 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
     if let Some(commands) = map
         .get("availableCommands")
         .or_else(|| map.get("available_commands"))
+        .filter(|value| value.is_array())
     {
         facts.commands = commands_from_acp_value(commands);
+        facts.commands_reported = true;
     }
     if map.get("availableModels").is_some()
         || map.get("available_models").is_some()
@@ -1065,9 +1062,10 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
                 .models
                 .iter()
                 .find(|item| item.id.eq_ignore_ascii_case(&model))
-                && selected.default_reasoning_effort.is_some() {
-                    facts.effort = selected.default_reasoning_effort.clone();
-                }
+                && selected.default_reasoning_effort.is_some()
+            {
+                facts.effort = selected.default_reasoning_effort.clone();
+            }
         }
     } else if let Some(model) = clean_string(
         map.get("currentModelId")
