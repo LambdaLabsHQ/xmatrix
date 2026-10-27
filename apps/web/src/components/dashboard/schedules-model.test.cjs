@@ -112,3 +112,16 @@ test("a section's slug stands in for its title until the page is read", () => {
   assert.equal(sectionFallbackTitle("release-checklist"), "Release checklist");
   assert.equal(sectionFallbackTitle(""), "Top of the page");
 });
+
+test("a reminder that has reminded is done, not paused; one paused before its time is paused", () => {
+  const { scheduleDone } = require("./schedules-model.ts");
+  const { formatAutomationCadence } = require("../pages/page-automation-format.ts");
+  const reminder = automation({ once: true, intervalMinutes: 43200 });
+  assert.equal(formatAutomationCadence(reminder), "once");
+  assert.equal(formatAutomationCadence(automation({ intervalMinutes: 720 })), "every 12 h");
+  assert.equal(scheduleDone(reminder), false, "it has not run yet");
+  assert.equal(scheduleDone({ ...reminder, enabled: false }), false, "paused before its time");
+  assert.equal(scheduleDone({ ...reminder, enabled: false, lastRunAt: "2026-09-28T12:00:01.000Z" }), true);
+  assert.equal(scheduleDone(automation({ enabled: false, lastRunAt: "2026-09-28T12:00:01.000Z" })), false,
+    "a paused cadence is not done");
+});

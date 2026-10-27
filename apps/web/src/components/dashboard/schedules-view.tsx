@@ -27,7 +27,7 @@ import { useAuth } from "@/lib/auth-context";
 import { ListSkeleton } from "./content-skeleton";
 import { nextRunPhrase, useScheduleWhere } from "./schedule-list-groups";
 import {
-  scheduleAttention, scheduleRunning, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
+  scheduleAttention, scheduleDone, scheduleRunning, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
   SCHEDULE_STATES, type ScheduleCounts, type SchedulePageNode, type ScheduleState,
 } from "./schedules-model";
 import { spaceMemberCanCreate } from "./space-member-permissions";
@@ -171,8 +171,8 @@ export function SchedulesView({
     return (
       <ScheduleRow key={automation.id} automation={automation} depth={depth} state={state}
         selected={automation.id === selectedId} onSelect={() => select(automation.id)}
-        end={state === "paused" ? undefined : whenOf(automation)}
-        subtitle={scheduleAttention(automation, executionEnabled) ?? formatAutomationCadence(automation.intervalMinutes)} />
+        end={state !== "paused" ? whenOf(automation) : scheduleDone(automation) ? "done" : undefined}
+        subtitle={scheduleAttention(automation, executionEnabled) ?? formatAutomationCadence(automation)} />
     );
   };
   const list = (
@@ -478,8 +478,8 @@ function ScheduleDetail({
       status={
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {STATE_ICON[state]}
-          <span className="text-foreground">{automation.detachedAt ? "Detached" : running ? "Running" : "Paused"}</span>
-          <span>· {formatAutomationCadence(automation.intervalMinutes)}</span>
+          <span className="text-foreground">{automation.detachedAt ? "Detached" : running ? "Running" : scheduleDone(automation) ? "Done" : "Paused"}</span>
+          <span>· {formatAutomationCadence(automation)}</span>
           {running && <span title={formatDateTime(automation.nextRunAt)}>· {formatAutomationNext(automation.nextRunAt)}</span>}
           <span>· {lastRan ? `ran ${lastRan}` : "not run yet"}</span>
         </span>
@@ -547,7 +547,7 @@ function ScheduleDetail({
 
       <ToolDetailSection title="When it runs">
         <ToolFacts>
-          <ToolFact label="Cadence">{formatAutomationCadence(automation.intervalMinutes)}</ToolFact>
+          <ToolFact label="Cadence">{formatAutomationCadence(automation)}</ToolFact>
           {running && <ToolFact label="Next">{formatDateTime(automation.nextRunAt)}</ToolFact>}
           {triggers.length > 0 && (
             <ToolFact label="Also">{triggers.map(formatAutomationTrigger).join("; ")}</ToolFact>
@@ -587,24 +587,28 @@ function ScheduleEditor({ automation, busy, replacesOthers, memberMayCreate, spa
   const saving = busy === `edit:${automation.id}`;
   // Saving someone else's Automation makes one of your own in its place, which the Space's policy governs.
   const allowed = !replacesOthers || memberMayCreate;
+  // A reminder has no cadence: its time is set on its page.
   const canSave = allowed && !busy && name.trim().length > 0 && instruction.trim().length > 0 &&
-    isAutomationIntervalMinutes(intervalMinutes);
+    (automation.once || isAutomationIntervalMinutes(intervalMinutes));
   return (
     <form className="space-y-3" onSubmit={(event) => {
       event.preventDefault();
-      if (canSave) onSave({ name: name.trim(), expression: automationExpressionFromText(instruction), intervalMinutes });
+      if (canSave) onSave({ name: name.trim(), expression: automationExpressionFromText(instruction),
+        ...(automation.once ? {} : { intervalMinutes }) });
     }}>
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
         <label className="block text-xs font-bold text-muted-foreground">
           Name
           <Input value={name} onChange={(event) => setName(event.target.value)} className="mt-1" />
         </label>
-        <label className="block text-xs font-bold text-muted-foreground">
-          Every (minutes)
-          <Input type="number" min={AUTOMATION_MIN_INTERVAL_MINUTES} max={AUTOMATION_MAX_INTERVAL_MINUTES}
-            step={15} inputMode="numeric" value={intervalMinutes}
-            onChange={(event) => setIntervalMinutes(Number(event.target.value))} className="mt-1" />
-        </label>
+        {!automation.once && (
+          <label className="block text-xs font-bold text-muted-foreground">
+            Every (minutes)
+            <Input type="number" min={AUTOMATION_MIN_INTERVAL_MINUTES} max={AUTOMATION_MAX_INTERVAL_MINUTES}
+              step={15} inputMode="numeric" value={intervalMinutes}
+              onChange={(event) => setIntervalMinutes(Number(event.target.value))} className="mt-1" />
+          </label>
+        )}
       </div>
       <label className="block text-xs font-bold text-muted-foreground">
         What it does each time

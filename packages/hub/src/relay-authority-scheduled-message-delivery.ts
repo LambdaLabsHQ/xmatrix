@@ -3,6 +3,7 @@
  * transition. It depends only on message append and post-commit capabilities;
  * it does not receive RelayAuthority or the schedule lifecycle collaborator.
  */
+import { automationRunsOnce } from "@xmatrix/protocol";
 import type { AppendMessageCommand } from "./product-message-command";
 import type {
   AuthoritySqlRow,
@@ -123,6 +124,8 @@ export async function dispatchScheduledMessageOccurrence(
     body,
     principal: { kind: senderKind, id: senderId },
     authorityRootUserId,
+    // A reminder is for its author: it waits on them in Needs you, and so reaches their devices.
+    ...(automationRunsOnce(payload) ? { waitsOnUserIds: [authorityRootUserId] } : {}),
     residual: {
       appMetadata: {
         xmatrixProvenance: "scheduled_automation",

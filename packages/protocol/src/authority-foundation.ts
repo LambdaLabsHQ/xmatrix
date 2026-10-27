@@ -998,6 +998,8 @@ export interface SerializedAutomation {
   /** @deprecated Compatibility projection for payloadVersion 2 clients. */
   message: AutomationMessage;
   intervalMinutes: number;
+  /** A reminder: it runs once at nextRunAt, waits on its author, then stops. */
+  once?: true;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;

@@ -43,6 +43,11 @@ export function scheduleRunning(automation: SerializedAutomation): boolean {
   return automation.enabled && !automation.detachedAt;
 }
 
+/** A reminder that has reminded: it rests until it is given a new time. */
+export function scheduleDone(automation: SerializedAutomation): boolean {
+  return automation.once === true && !automation.enabled && Boolean(automation.lastRunAt);
+}
+
 export function scheduleState(automation: SerializedAutomation, executionEnabled: boolean | null): ScheduleState {
   return scheduleAttention(automation, executionEnabled) ? "attention" : scheduleRunning(automation) ? "running" : "paused";
 }
