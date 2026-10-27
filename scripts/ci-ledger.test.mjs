@@ -25,6 +25,18 @@ import { stampVersionText, versionedPaths } from "./version.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+function runRecorder(stub, env = {}) {
+  return spawnSync(process.execPath, [
+    "--import", `data:text/javascript,${encodeURIComponent(stub)}`,
+    "scripts/ci-ledger.mjs", "record-run", "123",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 30_000,
+    env: { ...process.env, GITHUB_TOKEN: "test-token", GITHUB_REPOSITORY: "owner/repo", ...env },
+  });
+}
+
 // The recorder must recover a transient jobs-list failure before deciding
 // what can be recorded. Pure proof/key tests never exercise that HTTP boundary.
 test("the recorder recovers a GitHub 502 while reading CI jobs", () => {
@@ -42,13 +54,7 @@ test("the recorder recovers a GitHub 502 while reading CI jobs", () => {
     };
     process.on('exit', () => console.log('jobs reads: ' + jobsReads));
   `;
-  const result = spawnSync(process.execPath, [
-    "--import", `data:text/javascript,${encodeURIComponent(stub)}`,
-    "scripts/ci-ledger.mjs", "record-run", "123",
-  ], {
-    cwd: repoRoot, encoding: "utf8", timeout: 30_000,
-    env: { ...process.env, GITHUB_TOKEN: "test-token", GITHUB_REPOSITORY: "owner/repo" },
-  });
+  const result = runRecorder(stub);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /jobs reads: 2/u);
   assert.match(result.stderr, /passed no ledgered job; nothing recorded/u);
@@ -78,13 +84,7 @@ test("the recorder reads every job page before a matrix can vouch", () => {
     };
     process.on('exit', () => console.log('job pages: ' + pages));
   `;
-  const result = spawnSync(process.execPath, [
-    "--import", `data:text/javascript,${encodeURIComponent(stub)}`,
-    "scripts/ci-ledger.mjs", "record-run", "123",
-  ], {
-    cwd: repoRoot, encoding: "utf8", timeout: 30_000,
-    env: { ...process.env, GITHUB_TOKEN: "test-token", GITHUB_REPOSITORY: "owner/repo", DEFAULT_BRANCH: "main" },
-  });
+  const result = runRecorder(stub, { DEFAULT_BRANCH: "main" });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /job pages: 2/u);
   assert.match(result.stderr, /passed no ledgered job; nothing recorded/u);
