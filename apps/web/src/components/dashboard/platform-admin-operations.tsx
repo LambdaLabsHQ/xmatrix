@@ -113,10 +113,8 @@ function OperationsBody({ operations }: { operations: AdminOperations }) {
           <p className="mt-3 text-xs text-muted-foreground">By status: {adminStatusLine(runs.byStatus)}</p>
         )}
         <div className="mt-4">
-          <AdminDailyBars label="Runs started per day" points={runs.daily.map((day) => ({
-            date: day.date,
-            messages: day.started,
-            title: `${day.date}: ${day.started} started, ${day.failed} failed`,
+          <AdminDailyBars label="Runs started per day" unit="Runs started" points={runs.daily.map((day) => ({
+            date: day.date, messages: day.started,
           }))} />
         </div>
       </ToolDetailSection>

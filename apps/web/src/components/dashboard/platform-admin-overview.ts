@@ -6,7 +6,6 @@
  */
 
 import type {
-  AdminActivityPoint,
   AdminPlatformTotals,
   AdminUserSummary,
 } from "@xmatrix/protocol";
@@ -18,12 +17,6 @@ export interface AdminStatTile {
   label: string;
   value: string;
   hint?: string;
-}
-
-export interface AdminActivityBar extends AdminActivityPoint {
-  /** 0-1 height relative to the busiest day in the window. */
-  ratio: number;
-  label: string;
 }
 
 export function formatAdminCount(value: number): string {
@@ -62,8 +55,9 @@ export function formatAdminAge(value: string | undefined, nowMs: number): string
   return formatRelativeAge(value, nowMs) ?? "";
 }
 
-export function platformAdminStatTiles(totals: AdminPlatformTotals): AdminStatTile[] {
-  return [
+/** Platform totals; storage only where the deployment measures it, rather than a zero it never counted. */
+export function platformAdminStatTiles(totals: AdminPlatformTotals, storageMeasured = true): AdminStatTile[] {
+  const tiles: AdminStatTile[] = [
     {
       key: "users",
       label: "Users",
@@ -107,22 +101,7 @@ export function platformAdminStatTiles(totals: AdminPlatformTotals): AdminStatTi
       hint: `${formatAdminBytes(totals.archivedSegmentBytes)} archived`,
     },
   ];
-}
-
-/** Share of messages authored by agents, 0-1. */
-export function agentMessageShare(totals: AdminPlatformTotals): number {
-  const attributed = totals.humanMessages + totals.agentMessages;
-  if (attributed <= 0) return 0;
-  return totals.agentMessages / attributed;
-}
-
-export function adminActivityBars(points: AdminActivityPoint[]): AdminActivityBar[] {
-  const peak = points.reduce((max, point) => Math.max(max, point.messages), 0);
-  return points.map((point) => ({
-    ...point,
-    ratio: peak > 0 ? point.messages / peak : 0,
-    label: point.date.slice(5),
-  }));
+  return storageMeasured ? tiles : tiles.filter((tile) => tile.key !== "storage");
 }
 
 export function adminUserLabel(

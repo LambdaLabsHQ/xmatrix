@@ -12,7 +12,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ADMIN_AUDIT_WEB_ROUTE,
   ADMIN_OPERATIONS_WEB_ROUTE,
-  ADMIN_OVERVIEW_DEFAULT_ACTIVITY_DAYS,
   ADMIN_OVERVIEW_WEB_ROUTE,
   adminSpaceDetailWebRoute,
   adminUserDetailWebRoute,
@@ -27,6 +26,7 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, XMatrixApiError } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { parseAppLocation, pushBrowserPath, replaceBrowserPath } from "./workspace-shell-navigation";
+import { ADMIN_OVERVIEW_SERIES_DAYS } from "./platform-admin-analytics";
 
 const PARAM_EVENT = "xmatrix:admin-param";
 
@@ -91,14 +91,19 @@ export function isForbidden(error: unknown): boolean {
   return error instanceof XMatrixApiError && error.status === 403;
 }
 
-export function usePlatformOverview(token: string | undefined, activityDays = ADMIN_OVERVIEW_DEFAULT_ACTIVITY_DAYS) {
+/**
+ * The overview every list shares: Overview, Users and Spaces read the same
+ * year of daily activity, so moving between them or changing the range never
+ * waits on the Hub again.
+ */
+export function usePlatformOverview(token: string | undefined) {
   const { user } = useAuth();
-  const queryKey = xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "platform-overview", [activityDays]);
   return useQuery<AdminPlatformOverview | null>({
-    queryKey,
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "platform-overview",
+      [ADMIN_OVERVIEW_SERIES_DAYS]),
     queryFn: ({ signal }) => {
       const params = new URLSearchParams({
-        activityDays: String(activityDays), spaceLimit: "200", userLimit: "10000",
+        activityDays: String(ADMIN_OVERVIEW_SERIES_DAYS), spaceLimit: "200", userLimit: "10000",
       });
       return xmatrixApiRequest<{ overview?: AdminPlatformOverview }>({
         url: `${ADMIN_OVERVIEW_WEB_ROUTE}?${params}`, token, signal,
@@ -106,11 +111,6 @@ export function usePlatformOverview(token: string | undefined, activityDays = AD
     },
     enabled: Boolean(token && user?.id),
     staleTime: 60_000,
-    // Keep the current operator's data while another activity range loads.
-    // Never carry placeholder data across an account or Hub change.
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === queryKey[1] && previousQuery.queryKey[2] === queryKey[2]
-        ? previous : undefined,
   });
 }
 
