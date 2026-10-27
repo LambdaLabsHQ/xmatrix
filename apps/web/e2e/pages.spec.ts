@@ -454,6 +454,60 @@ for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
   });
 }
 
+test("an `@` calling a live Instance names its conversation, since Instance names repeat across conversations", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1440, height: 900 });
+  // grok:1 works on this page from two conversations; each is a different Instance under the same name.
+  const plans = { ...E2E_CHANNEL, id: "11111111-1111-4111-8111-111111111111", name: "Surf lessons" };
+  const costs = { ...E2E_CHANNEL, id: "22222222-2222-4222-8222-222222222222", name: "Daily costs" };
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, plans, costs]);
+  await stubWriters(browser, ["grok"]);
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+    links: [plans, costs].map((channel) => ({ linkId: `l-${channel.id}`, conversationId: channel.id, pageId: "p-relay",
+      blockId: "status", source: "edit", createdAt: NOW, lastSeenAt: recent, anchor: null, resolvedAt: null })),
+    conversations: [plans, costs].map((channel) => ({ conversationId: channel.id, name: channel.name, activityAt: recent,
+      headSequence: 0, readSequence: 0, lastMessage: null,
+      agents: [{ instanceId: `i-grok-${channel.name}`, name: "grok:1", harness: "grok", status: "idle" }] })),
+  });
+  await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+    pages: [{ pageId: "p-relay", agents: [plans, costs].map((channel) => ({ instanceId: `i-grok-${channel.name}`,
+      name: "grok:1", harness: "grok", status: "idle", conversationId: channel.id, section: "Status" })),
+    discussions: { open: 0, unread: 0, latest: null } }],
+  });
+  await fixtureJson(browser, "link-create", /\/api\/xmatrix\/spaces\/[^/]+\/page-links$/u, { link: {} }, { method: "POST" });
+  await fixtureJson(browser, "co-writing", /\/pages\/p-relay\/co-writing$/u, { startedAt: NOW }, { method: "POST" });
+  await fixtureJson(browser, "call-message", new RegExp(`/api/xmatrix/channels/${costs.id}/messages$`, "u"), { message: {
+    messageId: "call-grok", channelId: costs.id, sequence: 1, body: "@grok:1 page:p-relay#status", sentAt: recent,
+    reactions: [], annotations: [], attachments: [], from: E2E_USER_SENDER } }, { method: "POST" });
+  // The Instance took the call and has answered it.
+  await fixtureJson(browser, "call-invocations", `**/api/xmatrix/channels/${costs.id}/agent-launches/query`, { launches: [],
+    rejections: [], executions: [{ id: "x-grok", executionId: "x-grok", revision: 2, sourceMessageId: "call-grok",
+      sourceEntityVersion: 1, sourceInputVersion: 1, sourceBodyHash: "a".repeat(64), channelId: costs.id, runId: "r-grok",
+      instanceId: "i-grok-Daily costs", state: "completed", inputDisposition: "submitted", startedAt: recent, updatedAt: recent,
+      observedAt: recent, finishedAt: recent, runStatus: "idle", finalReply: { messageId: "grok-reply", committedAt: recent } }] });
+  const editor = await openLivePage(browser);
+  await editor.getByText("In progress").click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.type(" @gro");
+
+  // The menu tells the two grok:1 apart by their conversations' names.
+  const menu = browser.getByTestId("page-agent-menu");
+  await expect(menu.getByRole("option", { name: /grok:1/u })).toHaveCount(2);
+  await expect(menu.getByRole("option", { name: /grok:1.*Surf lessons/u })).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("instance-menu.png") });
+  await menu.getByRole("option", { name: /grok:1.*Daily costs/u }).click();
+
+  // The call goes to that conversation only, and the page keeps which conversation it was, drawn by its name.
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "call-message"))[0]?.body)
+    .toMatch(/^@grok:1 page:p-relay/u);
+  await editor.getByText("none").click();
+  await expect(editor.getByText("Daily costs")).toBeVisible();
+  await expect(editor.getByText(costs.id)).toBeHidden();
+  // Once it has answered, its `@` says so: there is no conversation under the page to show the reply.
+  await expect(editor.getByRole("button", { name: /^@grok:1: Replied/u })).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("instance-called.png") });
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
 
