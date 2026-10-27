@@ -299,9 +299,10 @@ test("a reminder runs once at the time it was given with its offset, and a new t
     await refused(await call(`${automations}/${reminder.id}`, "PATCH",
       { expectedVersion: reminder.version, intervalMinutes: 60 }), 400, "invalid_request");
 
-    // Delivered, it stops; a new time arms it again.
+    // Delivered, it stops at the time it ran (as finishMessage leaves it); a new time arms it again.
     await inTestTransaction(tx => tx.query({ text: `UPDATE data.automations SET enabled=false,
-      last_run_at=now(),version=version+1 WHERE automation_id=$1`, values: [reminder.id] }));
+      next_run_at=now()-interval '1 minute',last_run_at=now(),version=version+1 WHERE automation_id=$1`,
+    values: [reminder.id] }));
     const [done] = (await ok(await call(automations))).automations;
     assert.equal(done.enabled, false);
     await refused(await call(`${automations}/${reminder.id}/resume`, "POST", { expectedVersion: done.version }),
