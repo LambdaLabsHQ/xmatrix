@@ -93,7 +93,7 @@ async function loadBetterAuthPublicKey(
         values: [kid], maxRows: 1,
       });
       return rows[0] ?? null;
-    });
+    }, { statement: "single_read" });
   }
   if (!row) return null;
   return importJWK(JSON.parse(row.publicKey) as JsonWebKey, "ES256");

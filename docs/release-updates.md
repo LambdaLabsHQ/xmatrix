@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Auth public-key reads recover a lost database response
+
+JWT verification loads public keys with one independent `single_read`, avoiding
+the unnecessary BEGIN that failed for HUB-AT. A lost response retries once on
+a fresh connection; repeated loss and answered database errors still surface
+as failures, distinct from unknown keys. Adjacent independent Auth directory,
+profile, session, handle and OAuth application reads use the same recovery.
+Signature, issuer, audience, expiry and revocation checks remain in force;
+Auth writes and the multi-query admin detail retain their transactions.
+No migration or client update is needed. Recovery is a CI-validated beta Hub
+release reverting this change; the underlying transport stall is unassigned.
+
 ## Unreleased: Page section awareness recovers lost database reads
 
 Page section awareness and the adjacent blame reader use independent

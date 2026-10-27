@@ -44,7 +44,7 @@ export async function readStoredProfile(env: Env, userId: string): Promise<Store
       values: [userId], maxRows: 1,
     });
     return rows[0] ?? null;
-  });
+  }, { statement: "single_read" });
 }
 
 export async function updateStoredAvatar(
