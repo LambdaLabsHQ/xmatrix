@@ -9,8 +9,9 @@ export type InvocationTone = "active" | "waiting" | "error" | "success" | "neutr
  *  raises — did it start reasoning — so a new runtime phase maps onto an
  *  existing answer instead of introducing another word; a stop and a model or
  *  effort switch answer theirs the same way. Runtime detail belongs in
- *  `detail` and the steps. */
-export type InvocationChip = "Starting" | "Started" | "Failed" | "Stopped" | "Stopping" | "Unconfirmed" |
+ *  `detail` and the steps. A page's `@` is the one exception: the page shows
+ *  no conversation beneath it, so its chip also says when the turn Replied. */
+export type InvocationChip = "Starting" | "Started" | "Replied" | "Failed" | "Stopped" | "Stopping" | "Unconfirmed" |
   "Switching" | "Switched" | "Options" | "Not found" | "Not stopped";
 export type InvocationStep = { label: string; at?: string; state: "done" | "current" | "unknown" | "failed";
   /** A short fact about how the step resolved, shown beside its label. */
@@ -23,7 +24,7 @@ export type InvocationView = {
 };
 
 const CHIP_TONE: Record<InvocationChip, InvocationTone> = {
-  Starting: "active", Started: "success", Failed: "error", Stopped: "neutral",
+  Starting: "active", Started: "success", Replied: "success", Failed: "error", Stopped: "neutral",
   Stopping: "active", Unconfirmed: "waiting",
   Switching: "active", Switched: "success", Options: "neutral", "Not found": "error", "Not stopped": "neutral",
 };

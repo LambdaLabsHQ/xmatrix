@@ -1249,7 +1249,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` calls the Agent to the page.
   const referenceCatalog = useMessageReferenceCatalog();
   // The Instances live in this page's conversations, which an `@` calls by name rather than starting another.
-  const instances = useMemo(() => pageInstances(liveOnPage, (id) => Boolean(conversation(id))), [conversation, liveOnPage]);
+  const instances = useMemo(() => pageInstances(liveOnPage, (id) => conversation(id)?.name ?? null), [conversation, liveOnPage]);
   const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
     spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents, instances,
     readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),

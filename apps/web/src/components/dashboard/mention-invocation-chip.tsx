@@ -401,6 +401,10 @@ export function MentionInstanceCallChip({ name, harness, sent, execution, failur
   const view: InvocationView = failed
     ? { ...invocationChipStatus("Failed", failed), terminal: true,
       steps: [{ label: "Message sent", state: failure ? "failed" : "done" }] }
+    : execution?.finalReply
+      ? { ...invocationChipStatus("Replied", `${name} replied in its conversation.`), terminal: true,
+        steps: [{ label: "Message sent", state: "done" }, { label: "Taken by the Instance", state: "done", at: execution.startedAt },
+          { label: "Replied", state: "done", at: execution.finalReply.committedAt }] }
     : execution
       ? { ...invocationChipStatus("Started", `${name} took it in its conversation.`), terminal: true,
         steps: [{ label: "Message sent", state: "done" }, { label: "Taken by the Instance", state: "done", at: execution.startedAt }] }

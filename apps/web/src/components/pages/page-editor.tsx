@@ -43,7 +43,7 @@ import {
 } from "./page-editor-setup";
 import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
 import type { WriteAgent } from "./page-write-with";
-import type { PageInstance } from "./page-instances";
+import { instanceMention, type PageInstance } from "./page-instances";
 import {
   currentSuggestionTop, leaveSuggestion, pageSuggestions, showSuggestions, stepSuggestion, suggestionsKey,
   takeSuggestion, type PageSuggestion, type SuggestionsReport,
@@ -216,12 +216,12 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
       .sort((a, b) => Number(!name(a).toLowerCase().startsWith(wanted)) - Number(!name(b).toLowerCase().startsWith(wanted)));
   // An Instance already at work comes first: calling it keeps its context, where a harness starts a new one.
   const instances = matching(completion.instances, (instance) => instance.name).map((instance): MenuItem => ({
-    key: `instance:${instance.name}`, label: instance.name, hint: instance.where,
+    key: `instance:${instance.conversationId}:${instance.name}`, label: instance.name, hint: instance.conversation,
     icon: <Face of={{ kind: "agent", name: instance.name, harness: instance.harness }} size="xs" shape="circle" glass={false}
       className="pointer-events-none rounded-full" />,
     run: (view) => {
       const blockId = pageDocBlockAt(view.state.doc, trigger.from);
-      insertReference(trigger, `@${instance.name}`)(view.state, view.dispatch, view);
+      insertReference(trigger, instanceMention(instance))(view.state, view.dispatch, view);
       completion.summonInstance(instance, blockId, sharedPosition(view.state, fragment, trigger.from));
     },
   }));
