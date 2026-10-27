@@ -1,3 +1,5 @@
+import { readBoundedStream } from "@xmatrix/protocol";
+
 /*
  * Outbound provider calls for connector actions. Bounded in time and size,
  * HTTPS only, and never to an address literal, so a configured base URL cannot
@@ -49,24 +51,11 @@ export async function providerJson(url: URL | string, init: RequestInit & { json
   if (json !== undefined) headers.set("content-type", "application/json");
   headers.set("accept", headers.get("accept") ?? "application/json");
   headers.set("user-agent", "xMatrix-Connectors");
+  const signal = rest.signal ? AbortSignal.any([rest.signal, timeout]) : timeout;
   const response = await fetch(url, { ...rest, headers, redirect: "manual",
-    ...(json !== undefined ? { body: JSON.stringify(json) } : {}), signal: rest.signal ? AbortSignal.any([rest.signal, timeout]) : timeout });
-  const reader = response.body?.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (reader) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel();
-      throw new ProviderRequestError(502, "Provider response is too large");
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    ...(json !== undefined ? { body: JSON.stringify(json) } : {}), signal });
+  const bytes = await readBoundedStream(response.body, limit,
+    () => new ProviderRequestError(502, "Provider response is too large"), signal);
   const textBody = new TextDecoder().decode(bytes);
   let parsed: unknown = {};
   try { parsed = textBody ? JSON.parse(textBody) : {}; } catch { parsed = {}; }

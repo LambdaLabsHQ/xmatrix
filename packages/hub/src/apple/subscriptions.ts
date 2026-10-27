@@ -1,4 +1,4 @@
-import { parseAppleSubscriptionConfig, type AppleSubscriptionConfig } from "@xmatrix/protocol";
+import { parseAppleSubscriptionConfig, readBoundedStream, type AppleSubscriptionConfig } from "@xmatrix/protocol";
 import { Buffer } from "node:buffer";
 import type { JWSTransactionDecodedPayload } from "@apple/app-store-server-library";
 import { importPKCS8, SignJWT } from "jose";
@@ -50,25 +50,11 @@ export async function verifyAppleNotification(config: AppleSubscriptionConfig, s
   throw new AppleBillingError("invalid_apple_notification", "Apple notification verification failed");
 }
 
-async function boundedJson(response: Response): Promise<unknown> {
-  const reader = response.body?.getReader();
-  if (!reader) throw new AppleBillingError("apple_response_invalid", "Apple response is invalid", true);
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+async function boundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
   try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > 1_048_576) { await reader.cancel(); throw new Error(); }
-      chunks.push(value);
-    }
-    const bytes = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+    const bytes = await readBoundedStream(response.body, 1_048_576, () => new Error("Apple response is too large"), signal);
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch { throw new AppleBillingError("apple_response_invalid", "Apple response is invalid", true); }
-  finally { reader.releaseLock(); }
 }
 
 export interface VerifiedAppleSubscription {
@@ -109,14 +95,15 @@ export async function appleOrganizationGroup(config: AppleSubscriptionConfig, re
   fetchImpl: typeof fetch = fetch): Promise<string | null> {
   if (!/^[0-9]{1,100}$/.test(transactionId)) return null;
   const token = await serverToken(config);
+  const signal = AbortSignal.timeout(10_000);
   let response: Response;
   try {
     response = await fetchImpl(`${storeKitHost(realm)}/groups/v1/currentGroups/${transactionId}`, {
-      headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(10_000) });
+      headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal });
   } catch { return null; }
-  if (!response.ok) { await response.body?.cancel(); return null; }
+  if (!response.ok) { void response.body?.cancel().catch(() => undefined); return null; }
   let body: unknown;
-  try { body = await boundedJson(response); } catch { return null; }
+  try { body = await boundedJson(response, signal); } catch { return null; }
   const groups = body && typeof body === "object" && Array.isArray((body as { groups?: unknown }).groups) ? (body as { groups: unknown[] }).groups : [];
   for (const group of groups.slice(0, 20)) {
     const entry = group && typeof group === "object" ? group as { groupId?: unknown; groupType?: unknown } : {};
@@ -132,13 +119,14 @@ export async function retrieveAppleSubscription(config: AppleSubscriptionConfig,
   const host = storeKitHost(realm);
   let response: Response;
   const token = await serverToken(config);
+  const signal = AbortSignal.timeout(10_000);
   try {
     response = await fetchImpl(`${host}/inApps/v1/subscriptions/${transactionId}`, {
-      headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(10_000),
+      headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal,
     });
   } catch { throw new AppleBillingError("apple_request_failed", "Apple subscription verification is temporarily unavailable", true); }
-  if (!response.ok) { await response.body?.cancel(); throw new AppleBillingError("apple_request_failed", "Apple subscription could not be verified", response.status >= 500 || response.status === 429); }
-  const body = await boundedJson(response);
+  if (!response.ok) { void response.body?.cancel().catch(() => undefined); throw new AppleBillingError("apple_request_failed", "Apple subscription could not be verified", response.status >= 500 || response.status === 429); }
+  const body = await boundedJson(response, signal);
   if (!body || typeof body !== "object") throw new AppleBillingError("apple_response_invalid", "Invalid Apple subscription response");
   const data = body as { bundleId?: string; environment?: string; data?: { lastTransactions?: { status?: number; signedTransactionInfo?: string; signedRenewalInfo?: string }[] }[] };
   if (data.bundleId !== APPLE_BUNDLE_ID || data.environment !== realm || !Array.isArray(data.data) || data.data.length > 20) throw new AppleBillingError("apple_response_invalid", "Invalid Apple subscription response");

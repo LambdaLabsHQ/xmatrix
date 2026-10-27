@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Bounded body reads reject without waiting for cleanup
+
+Oversized authentication and connector bodies no longer wait for upstream
+cancellation to finish before returning their existing error. A cloned stream
+can otherwise wait for another reader indefinitely. Authentication/request,
+connector, harness registry and Apple JSON readers now use the same protocol
+collector; limits and domain errors remain with their owners, and existing
+request/deadline signals also cover body reads. Reader locks always release.
+No schema, client or UI change is required. Recovery is a CI-validated beta Hub
+release reverting the change.
+
 ## Unreleased: Exhausted database recovery retains session progress
 
 Feishu lifecycle cleanup already retries a lost pre-COMMIT response once on a
