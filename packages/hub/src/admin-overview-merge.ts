@@ -13,15 +13,117 @@ const UTC_DAY_MS = 24 * 60 * 60 * 1_000;
 export function adminActivityUtcWindow(
   nowMs: number,
   days: number,
-): { since: string; before: string } {
+): { since: string; before: string; firstDay: string; lastDay: string } {
   if (!Number.isFinite(nowMs) || !Number.isSafeInteger(days) || days < 1) {
     throw new Error("admin activity window is invalid");
   }
   const now = new Date(nowMs);
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const since = new Date(today - (days - 1) * UTC_DAY_MS).toISOString();
   return {
-    since: new Date(today - (days - 1) * UTC_DAY_MS).toISOString(),
+    since,
     before: new Date(today + UTC_DAY_MS).toISOString(),
+    firstDay: since.slice(0, 10),
+    lastDay: new Date(today).toISOString().slice(0, 10),
+  };
+}
+
+/** The UTC days one person sent a message of their own, as days since 1970-01-01. */
+export interface AdminUserDays {
+  userId: string;
+  days: readonly number[];
+}
+
+/** The UTC date after a `YYYY-MM-DD` date. */
+export function adminDayAfter(date: string): string {
+  return new Date((adminDayNumber(date) + 1) * UTC_DAY_MS).toISOString().slice(0, 10);
+}
+
+/** Days since 1970-01-01 of a `YYYY-MM-DD` UTC date. */
+export function adminDayNumber(date: string): number {
+  const ms = Date.parse(`${date}T00:00:00.000Z`);
+  if (!Number.isFinite(ms)) throw new Error("admin activity date is invalid");
+  return Math.round(ms / UTC_DAY_MS);
+}
+
+/**
+ * Distinct people active on each day of the series and in the 7 and 30 days
+ * ending on it, counted across shards; each person's active days in the
+ * series go on their user row. Someone active but in no Space any more is
+ * still a user who was active, so they join the list.
+ */
+export function withActiveUsers(
+  overview: AdminPlatformOverview,
+  userDays: readonly AdminUserDays[],
+): AdminPlatformOverview {
+  const first = overview.activity[0];
+  if (!first) return overview;
+  const start = adminDayNumber(first.date);
+  const length = overview.activity.length;
+  const daily = new Array<number>(length).fill(0);
+  const weekly = new Array<number>(length).fill(0);
+  const monthly = new Array<number>(length).fill(0);
+  const byUser = new Map<string, Set<number>>();
+  for (const entry of userDays) {
+    const days = byUser.get(entry.userId) ?? new Set<number>();
+    for (const day of entry.days) days.add(day);
+    byUser.set(entry.userId, days);
+  }
+  // Each person adds one to every day their trailing window reaches, once.
+  const cover = (counts: number[], sorted: readonly number[], span: number) => {
+    let next = start;
+    for (const day of sorted) {
+      for (let at = Math.max(day, next); at < day + span && at < start + length; at++) {
+        if (at >= start) counts[at - start]! += 1;
+      }
+      next = Math.max(next, day + span);
+    }
+  };
+  const activeDays = new Map<string, number[]>();
+  for (const [userId, days] of byUser) {
+    const sorted = [...days].sort((left, right) => left - right);
+    cover(daily, sorted, 1);
+    cover(weekly, sorted, 7);
+    cover(monthly, sorted, 30);
+    const inSeries = sorted.filter((day) => day >= start && day < start + length);
+    if (inSeries.length) activeDays.set(userId, inSeries);
+  }
+  const listed = new Set(overview.users.map((user) => user.userId));
+  const unlisted = [...activeDays].filter(([userId]) => !listed.has(userId));
+  return {
+    ...overview,
+    totals: { ...overview.totals, users: overview.totals.users + unlisted.length },
+    activity: overview.activity.map((point, index) => ({
+      ...point,
+      activeUsers: daily[index]!,
+      activeUsers7d: weekly[index]!,
+      activeUsers30d: monthly[index]!,
+    })),
+    users: [
+      ...overview.users.map((user) => activeDays.has(user.userId)
+        ? { ...user, activeDays: activeDays.get(user.userId)! } : user),
+      ...unlisted.map(([userId, days]) => ({
+        userId, spaces: 0, ownedSpaces: 0, agentRegistrations: 0, machines: 0, messages: 0, activeDays: days,
+      })),
+    ],
+  };
+}
+
+/**
+ * Accounts registered on each day of the series, from the registered-user
+ * inventory. Left out when that inventory is incomplete, rather than undercounted.
+ */
+export function withSignups(overview: AdminPlatformOverview): AdminPlatformOverview {
+  if (!overview.userAccess || overview.truncated.users || overview.activity.length === 0) return overview;
+  const byDate = new Map<string, number>();
+  for (const user of overview.users) {
+    if (!user.registeredAt) continue;
+    const date = new Date(user.registeredAt).toISOString().slice(0, 10);
+    byDate.set(date, (byDate.get(date) ?? 0) + 1);
+  }
+  return {
+    ...overview,
+    activity: overview.activity.map((point) => ({ ...point, signups: byDate.get(point.date) ?? 0 })),
   };
 }
 
@@ -87,10 +189,15 @@ export function mergeAdminOverviewPartitions(
   for (const point of partitions.flatMap((overview) => overview.activity)) {
     const current = activityByDate.get(point.date) ?? {
       date: point.date, messages: 0, humanMessages: 0, agentMessages: 0,
+      ownMessages: 0, activeSpaces: 0, runsStarted: 0,
     };
     current.messages += point.messages;
     current.humanMessages += point.humanMessages;
     current.agentMessages += point.agentMessages;
+    // A Space and its Runs live on one shard, so these add across shards.
+    current.ownMessages! += point.ownMessages ?? 0;
+    current.activeSpaces! += point.activeSpaces ?? 0;
+    current.runsStarted! += point.runsStarted ?? 0;
     activityByDate.set(point.date, current);
   }
   const storageByCategory = new Map<string, AdminPlatformOverview["storage"][number]>();

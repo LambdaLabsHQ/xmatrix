@@ -62,6 +62,8 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "space_members",
   "space_secrets",
   "space_storage_usage",
+  // A Space's rolled-up activity moves with its messages, which keep their arrival time.
+  "admin_activity_days",
   "spaces",
   "user_space_channel_view_preferences",
   "user_space_locale_preferences",
@@ -122,6 +124,8 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
 ]);
 
 export const GLOBAL_DATA_TABLES = Object.freeze([
+  // How far this shard's own arrivals are rolled up.
+  "admin_activity_rollup",
   // Identity admission fences stay on every physical shard, independent of Spaces.
   "account_deletion_fences",
   // Application-wide signed retirement survives removal of all Space bindings.
