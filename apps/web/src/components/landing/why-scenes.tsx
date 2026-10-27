@@ -37,10 +37,13 @@ function Page({ title, children }: { title: string; children: ReactNode }) {
 function StatusLine({ label, who, step, from, to }: { label: string; who: Who; step: number; from: string; to: string }) {
   return (
     <p className="why-line" style={tint(who)} data-pulse={step}>
-      <span className="why-dot" />{label} ·{" "}
-      <span className="why-swap">
-        <span data-out={step}>{from}</span>
-        <span data-in={step} className="why-strong">{to}</span>
+      <span className="why-dot" />
+      <span>
+        {label} ·{" "}
+        <span className="why-swap">
+          <span data-out={step}>{from}</span>
+          <span data-in={step} className="why-strong">{to}</span>
+        </span>
       </span>
     </p>
   );
@@ -54,9 +57,9 @@ export const WHY_SCENES: readonly (readonly [Scene, Scene])[] = [
   [
     (c) => (
       <Page title={c.page}>
-        <StatusLine label={c.web} who="claude" step={1} from={c.inProgress} to={c.merged} />
-        <StatusLine label={c.mobile} who="codex" step={2} from={c.inProgress} to={c.merged} />
-        <StatusLine label={c.docs} who="daniel" step={3} from={c.inProgress} to={c.merged} />
+        <StatusLine label={c.web} who="claude" step={1} from={c.progress[0]} to={c.merged} />
+        <StatusLine label={c.mobile} who="codex" step={2} from={c.progress[1]} to={c.merged} />
+        <StatusLine label={c.docs} who="daniel" step={3} from={c.progress[2]} to={c.merged} />
       </Page>
     ),
     (c) => (
@@ -75,8 +78,8 @@ export const WHY_SCENES: readonly (readonly [Scene, Scene])[] = [
     (c) => (
       <div className="why-split">
         <Page title={c.page}>
-          <StatusLine label={c.web} who="claude" step={1} from={c.inProgress} to={c.merged} />
-          <StatusLine label={c.mobile} who="codex" step={3} from={c.inProgress} to={c.merged} />
+          <StatusLine label={c.web} who="claude" step={1} from={c.progress[0]} to={c.merged} />
+          <StatusLine label={c.mobile} who="codex" step={3} from={c.progress[1]} to={c.merged} />
         </Page>
         <p className="why-quiet"><BellOff className="size-3" />{c.quiet}</p>
       </div>

@@ -13,7 +13,7 @@ type Row = readonly [string, string, string];
 /** The words inside Why xMatrix's animated examples, one example per row. */
 export interface WhyScenes {
   terminal: string; thread: string; terminalLine: string; threadLine: string; prLine: string;
-  page: string; web: string; mobile: string; docs: string; inProgress: string; merged: string;
+  page: string; web: string; mobile: string; docs: string; progress: readonly [string, string, string]; merged: string;
   pings: readonly [string, string, string]; quiet: string;
   copied: string; paste: string; waiting: string;
   machines: readonly [string, string, string]; thisMachineOnly: string;
@@ -94,7 +94,7 @@ const en: LandingCopy = {
     ],
     scenes: {
       terminal: "Terminal", thread: "Thread", terminalLine: "claude › fixing auth…", threadLine: "codex: which branch?", prLine: "Changes requested",
-      page: "Launch", web: "Web · Claude", mobile: "Mobile · Codex", docs: "Docs · Daniel", inProgress: "in progress", merged: "merged ✓",
+      page: "Launch", web: "Web · Claude", mobile: "Mobile · Codex", docs: "Docs · Daniel", progress: ["login fix, 3/5 checks", "build 2.4 at 60%", "2 of 4 pages drafted"], merged: "merged ✓",
       pings: ["Claude needs your input", "Codex: which branch?", "Cursor is waiting for you"], quiet: "No pings",
       copied: "Copied the API from Claude", paste: "Paste it into Codex", waiting: "Cursor waits for both",
       machines: ["Mac Studio", "Linux server", "Windows"], thisMachineOnly: "this machine only",
@@ -180,7 +180,7 @@ const zh: LandingCopy = {
     ],
     scenes: {
       terminal: "终端", thread: "聊天", terminalLine: "claude › 正在修登录…", threadLine: "codex：用哪个分支？", prLine: "需要修改",
-      page: "发布", web: "网页 · Claude", mobile: "手机 · Codex", docs: "文档 · Daniel", inProgress: "进行中", merged: "已合并 ✓",
+      page: "发布", web: "网页 · Claude", mobile: "手机 · Codex", docs: "文档 · Daniel", progress: ["修登录，检查 3/5", "2.4 版构建 60%", "4 页写了 2 页"], merged: "已合并 ✓",
       pings: ["Claude 需要你回复", "Codex：用哪个分支？", "Cursor 在等你"], quiet: "没有打扰",
       copied: "从 Claude 复制了接口", paste: "再粘贴给 Codex", waiting: "Cursor 等着两边",
       machines: ["Mac Studio", "Linux 服务器", "Windows"], thisMachineOnly: "只看得到本机",
