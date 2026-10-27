@@ -2,7 +2,7 @@ import { registrationKeyFromRow } from "./agent-registration-rows.js";
 import type { QueryResultRow } from "pg";
 import type { AgentRegistrationKey, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
-import { channelCapabilityPredicate } from "./channel-capability-policy.js";
+import { channelCapabilityPredicate, lockChannelLifecycle } from "./channel-capability-policy.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
 import { commitRuntime } from "./runtime-control.js";
@@ -67,6 +67,9 @@ export class PostgresRegistrationRevocationRepository {
       key.machineId === String(row.machine_id) && key.harness === String(row.harness));
     const batch = await this.database.transaction({ requestId: `registration-revoke:${crypto.randomUUID()}`,
       operation: "registration.revocation.prepare" }, async tx => {
+      // Admission can take the Channel lock again below, including UPDATE for
+      // a starting Run. Order it before candidate Run locks as stops do.
+      await lockChannelLifecycle(tx, { channelId, capability: "runtime_new_work" });
       const candidates = await tx.query({ name: "registration_revocation_candidates_v7", text: `SELECT
         r.run_id,r.channel_id,r.owner_user_id,r.status,r.version,r.metadata_json,COALESCE(i.instance_id,l.instance_id) AS instance_id,
         b.space_id,b.machine_id,b.harness,b.allocation_id

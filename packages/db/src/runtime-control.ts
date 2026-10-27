@@ -21,6 +21,7 @@ import { commandDigest as digest } from "./command-digest.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { writeOutbox } from "./outbox.js";
 import {
+  lockChannelLifecycle,
   requireChannelCapability,
   type ChannelCapability,
   type ChannelCapabilityGrant,
@@ -460,6 +461,9 @@ export class PostgresRuntimeRepository {
     const placement = await this.channelPlacement(input.requestId, input.channelId,
       "runtime.retry.locate", "runtime.retry.placement");
     return this.spaces.transaction(input.requestId, "runtime.retry.control", placement, async tx => {
+      // Stops and message appends take the Channel before touching a Run.
+      // Take the strongest admission lock now, before reading a starting Run.
+      await lockChannelLifecycle(tx, { channelId: input.channelId, capability: "runtime_new_work" });
       const rows = await tx.query<QueryResultRow>({ name: "runtime_capacity_retry_run_lock_v1", text: `SELECT
         r.*,i.instance_id,i.status AS instance_status FROM data.runs r LEFT JOIN data.instances i ON i.run_id=r.run_id
         WHERE r.run_id=$1 AND r.channel_id=$2 AND r.owner_user_id=$3 FOR UPDATE OF r`,
@@ -943,6 +947,15 @@ export class PostgresRuntimeRepository {
   private async connectInstance(tx: DatabaseTransaction, input: Record<string, unknown>,
     actorUserId: string, at: string) {
     const instanceId = text(input.instanceId, "instanceId", 300);
+    const discovered = ownedInstanceRow(await tx.query<QueryResultRow>({
+      name: "runtime_instance_connect_channel_v1", text: `SELECT run.channel_id,run.owner_user_id
+        FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
+        WHERE instance.instance_id=$1`, values: [instanceId], maxRows: 1,
+    }), actorUserId);
+    // Discover without holding the Run, then order behind the Channel exactly
+    // as stops and appends do. Admission may need UPDATE even if discovery saw
+    // a running predecessor, so never upgrade a shared lock after locking it.
+    await lockChannelLifecycle(tx, { channelId: String(discovered.channel_id), capability: "runtime_new_work" });
     const rows = await tx.query<QueryResultRow>({ name: "runtime_instance_connect_lock_v2", text: `SELECT
       instance.status AS instance_status,instance.version AS instance_version,run.run_id,run.channel_id,
       run.owner_user_id,run.status AS run_status,run.version AS run_version,run.metadata_json,
@@ -952,6 +965,8 @@ export class PostgresRuntimeRepository {
         AND launch.run_id=run.run_id
       WHERE instance.instance_id=$1 FOR UPDATE OF instance,run`, values: [instanceId], maxRows: 1 });
     const current = ownedInstanceRow(rows, actorUserId);
+    if (current.channel_id !== discovered.channel_id) throw new RuntimeControlError(
+      "conflict", 409, "Instance Channel changed before connection claim");
     const currentVersion = Number(current.instance_version);
     if (input.expectedVersion !== undefined &&
         integer(input.expectedVersion, "expectedVersion", 1) !== currentVersion) {

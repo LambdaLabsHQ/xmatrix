@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Instance connection, capacity-retry control and registration withdrawal acquire
+the Channel lifecycle lock before Run locks, then recheck current state and registration authority.
+Concurrent stops can commit without a lock-order deadlock, and reconnect cannot
+revive the stopped execution. See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 PostgreSQL failures retain bounded numeric session progress with each attempt,
 readable through the Sentry connector. This distinguishes a failed round trip
 from earlier checkout, BEGIN or SQL work without SQL, parameters or identities;

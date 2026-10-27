@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { Client } from "pg";
 import { PostgresMessageRepository } from "../dist/message-control.js";
 import { requireAgentChannelAccess } from "../dist/agent-channel-access.js";
+import { PostgresRuntimeRepository } from "../dist/runtime-control.js";
+import { PostgresRegistrationRevocationRepository } from "../dist/agent-registration-revocation.js";
+import { setTimeout } from "node:timers/promises";
 import { boundedPostgresTransaction, integration, isolatedPostgres, postgresDatabase, seedTestSpacePlacement } from "./postgres-database.fixture.mjs";
 
-integration("Agent message reads do not block stops; appends recheck the Run after taking Channel locks", async t => {
+integration("Run and message operations order behind Channel stops and recheck current authority", async t => {
   const fixture = await isolatedPostgres("message_run_locks");
   const writer = new Client({ connectionString: fixture.url.toString() });
   const reader = new Client({ connectionString: fixture.url.toString() });
@@ -41,6 +44,7 @@ integration("Agent message reads do not block stops; appends recheck the Run aft
       VALUES ('space','owner','owner',1,now(),now())`);
     await sql(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,created_at,updated_at)
       VALUES ('a','space','A','a','open','a',1,now(),now()),('b','space','B','b','open','b',1,now(),now())`);
+    await sql(`INSERT INTO control.channel_space_directory(channel_id,space_id,updated_at) VALUES ('a','space',now())`);
     await sql(`INSERT INTO data.agent_registrations VALUES ('owner','machine','codex',1,now(),now())`);
     await sql(`INSERT INTO data.space_agent_registrations
       VALUES ('space','owner','machine','codex','codex','{}',1,now(),now())`);
@@ -137,6 +141,95 @@ integration("Agent message reads do not block stops; appends recheck the Run aft
         await reader.query("UPDATE data.channels SET activity_at=now() WHERE channel_id='a'");
         await reader.query("COMMIT");
       } finally { await Promise.all([reader.query("ROLLBACK"), writer.query("ROLLBACK")]); }
+    });
+
+    const runtime = new PostgresRuntimeRepository(database);
+    // Observe actual blocking, independent of the query names or lock layout.
+    const waitForChannel = async () => {
+      const deadline = Date.now() + 2_000;
+      while (!(await sql("SELECT $1::int=ANY(pg_blocking_pids($2)) AS waiting",
+        [writer.processID, reader.processID])).rows[0].waiting) {
+        assert.ok(Date.now() < deadline, "runtime command did not wait for the Channel");
+        await setTimeout(10);
+      }
+    };
+    const connect = commandId => runtime.mutate({ kind: "instance_connect", instanceId: "a:1",
+      actorUserId: "owner", commandId, at: new Date().toISOString() });
+    const retry = (commandId, work = async (_tx, _run, mayContinue) => mayContinue) => runtime.capacityRetryTransaction({
+      requestId: commandId, runId: "a:1#1", channelId: "a", actorUserId: "owner",
+    }, work);
+    await reader.query("SET lock_timeout = '3s'");
+
+    await t.test("stops commit ahead of queued Instance admission, reconnect and capacity recovery", async () => {
+      for (const status of ["starting", "running"]) {
+        for (const operation of ["connect", "retry"]) {
+          await sql("UPDATE data.runs SET status=$1 WHERE run_id='a:1#1'", [status]);
+          await writer.query("BEGIN");
+          await writer.query("SELECT 1 FROM data.channels WHERE channel_id='a' FOR UPDATE");
+          const pending = (operation === "connect" ? connect(`stop-${status}`) : retry(`stop-${status}`))
+            .then(value => ({ value }), error => ({ error }));
+          let outcome;
+          try {
+            await waitForChannel();
+            await writer.query("UPDATE data.runs SET status='stopping' WHERE run_id='a:1#1'");
+            await writer.query("UPDATE data.instances SET status='offline' WHERE instance_id='a:1'");
+            await writer.query("COMMIT");
+          } finally {
+            await writer.query("ROLLBACK");
+            outcome = await pending;
+          }
+          if (operation === "connect") assert.equal(outcome.error?.code, "conflict");
+          else { assert.ifError(outcome.error); assert.equal(outcome.value, false); }
+          assert.deepEqual((await sql(`SELECT r.status AS run,i.status AS instance FROM data.runs r
+            JOIN data.instances i ON i.run_id=r.run_id WHERE r.run_id='a:1#1'`)).rows[0],
+          { run: "stopping", instance: "offline" });
+        }
+      }
+    });
+
+    await t.test("queued reconnect and capacity recovery recheck a registration revoked while waiting", async () => {
+      for (const operation of ["connect", "retry"]) {
+        await sql("UPDATE data.runs SET status='running' WHERE run_id='a:1#1'");
+        await sql("UPDATE data.instances SET status='offline' WHERE instance_id='a:1'");
+        await sql("UPDATE data.space_agent_registration_access SET grant_state='active'");
+        await writer.query("BEGIN");
+        await writer.query("SELECT 1 FROM data.channels WHERE channel_id='a' FOR UPDATE");
+        const pending = operation === "connect"
+          ? assert.rejects(connect("revoked"), error => error.code === "registration_revoked")
+          : retry("revoked").then(mayContinue => assert.equal(mayContinue, false));
+        try {
+          await waitForChannel();
+          await writer.query("UPDATE data.space_agent_registration_access SET grant_state='revoked'");
+          await writer.query("COMMIT");
+        } finally {
+          await writer.query("ROLLBACK");
+          await pending;
+        }
+        assert.equal((await sql("SELECT status FROM data.instances WHERE instance_id='a:1'")).rows[0].status, "offline");
+      }
+      await sql("UPDATE data.space_agent_registration_access SET grant_state='active'");
+    });
+
+    await t.test("a stop can finish a Run while its withdrawal coordinator waits for the Channel", async () => {
+      await sql("UPDATE data.runs SET status='running' WHERE run_id='a:1#1'");
+      await sql("UPDATE data.space_agent_registration_access SET grant_state='revoked'");
+      await writer.query("BEGIN");
+      await writer.query("SELECT 1 FROM data.channels WHERE channel_id='a' FOR UPDATE");
+      const pending = new PostgresRegistrationRevocationRepository(database).prepare("a")
+        .then(value => ({ value }), error => ({ error }));
+      let outcome;
+      try {
+        await waitForChannel();
+        await writer.query("UPDATE data.runs SET status='stopped' WHERE run_id='a:1#1'");
+        await writer.query("COMMIT");
+      } finally {
+        await writer.query("ROLLBACK");
+        outcome = await pending;
+        await sql("UPDATE data.space_agent_registration_access SET grant_state='active'");
+      }
+      assert.ifError(outcome.error);
+      assert.equal(outcome.value, 1);
+      assert.equal((await sql("SELECT status FROM data.runs WHERE run_id='a:1#1'")).rows[0].status, "stopped");
     });
 
     await t.test("preparation cannot authorize a later append after the registration is revoked", async () => {
