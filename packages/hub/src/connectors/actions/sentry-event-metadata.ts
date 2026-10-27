@@ -64,6 +64,10 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       for (const [index, failure] of parseDatabaseFailureEvidence(JSON.parse(attempts)).entries()) {
         lines.push(`Database failure ${index + 1}: ${failure.operation} · ${failure.shardId} · ${failure.statement} · ` +
           `${failure.phase} · ${failure.queryName} · ${failure.code} · ${failure.durationMs} ms`);
+        const session = failure.session;
+        if (session) lines.push(`Database session ${index + 1}: wall=${session.wallMs} ms · queue=${session.queueMs} ms · ` +
+          `checkout=${session.checkoutMs} ms · begin=${session.beginMs} ms · sql=${session.sqlMs} ms · ` +
+          `max_sql=${session.sqlMaxMs} ms · commit=${session.commitMs} ms · round_trips=${session.roundTrips} · queries=${session.queries}`);
       }
     } catch { /* Malformed optional diagnostics do not fail the issue read. */ }
   }

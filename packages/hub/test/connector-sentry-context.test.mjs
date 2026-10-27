@@ -350,18 +350,25 @@ test("an issue list Sentry answered but that cannot be read is refused, never re
 test("scheduled failures expose bounded retry phases and keep unrelated event extras private", async () => {
   const failure = { operation: "app.gmail-routing.finish", shardId: "shard-0", statement: "transaction",
     phase: "begin", queryName: "database_phase_begin_v1", code: "QUERY_READ_TIMEOUT", durationMs: 5000 };
+  const session = { wallMs: 5012, queueMs: 0, checkoutMs: 12, beginMs: 5000, sqlMs: 0,
+    sqlMaxMs: 0, commitMs: 0, roundTrips: 1, queries: 0 };
   const { result } = await run([{ body: issue }, { body: { ...event,
     tags: [{ key: "operation", value: "scheduled: Gmail notification recovery and renewal" }],
-    context: { database_failure_attempts: JSON.stringify([failure, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
+    context: { database_failure_attempts: JSON.stringify([{ ...failure, session }, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
       user: "private-user", sql: "private-sql", arguments: ["private-argument"] },
   } }], undefined, "123");
   assert.match(result.summary, /Scheduled task: Gmail notification recovery and renewal/);
   assert.match(result.summary, /Database failure 1: app.gmail-routing.finish · shard-0 · transaction · begin · database_phase_begin_v1 · QUERY_READ_TIMEOUT · 5000 ms/);
   assert.match(result.summary, /Database failure 2: .* · commit · database_phase_commit_v1/);
+  assert.match(result.summary, /Database session 1: wall=5012 ms .*checkout=12 ms .*round_trips=1 · queries=0/);
+  assert.doesNotMatch(result.summary, /Database session 2:/, "historical events need no session snapshot");
   assert.doesNotMatch(result.summary, /private-/);
   for (const invalid of ["private-invalid-json", JSON.stringify(Array(5).fill(failure)),
     JSON.stringify([{ ...failure, sql: "private-sql" }]), JSON.stringify([{ ...failure, code: "private-code" }]),
-    JSON.stringify([{ ...failure, durationMs: Infinity }]), JSON.stringify([{ ...failure, phase: "private-phase" }])]) {
+    JSON.stringify([{ ...failure, durationMs: Infinity }]), JSON.stringify([{ ...failure, phase: "private-phase" }]),
+    ...[null, { ...session, sql: "private-sql" }, { ...session, wallMs: -1 }, { ...session, checkoutMs: 120001 },
+      { ...session, queries: 1.5 }, { ...session, beginMs: "private-duration" }, { wallMs: 12 }]
+      .map(session => JSON.stringify([{ ...failure, session }]))]) {
     const { result: malformed } = await run([{ body: issue }, { body: { ...event,
       tags: [{ key: "operation", value: "scheduled: private-task" }], context: { database_failure_attempts: invalid },
     } }], undefined, "123");

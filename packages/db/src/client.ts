@@ -25,7 +25,7 @@ import type { SpacePlacementHints } from "./placement.js";
 import { dingtalkPreparation, dingtalkDecision, dingtalkPreparedPlan, registerDingTalkPreparedPort, registerDingTalkPreparedTransaction,
   type DingTalkPreparedPlan, type DingTalkPreparedDecision } from "./dingtalk-prepared-port.js";
 
-import { recordDatabaseFailure, linkDatabaseFailures } from "./database-failure-evidence.js";
+import { recordDatabaseFailure, linkDatabaseFailures, type DatabaseFailureEvidence } from "./database-failure-evidence.js";
 
 const MAX_QUERY_NAME_BYTES = 160;
 const MAX_QUERY_BYTES = 64 * 1024;
@@ -302,6 +302,12 @@ class SessionStats {
     this.connectivity.failed(code, operation, queryName);
   }
 
+  failureSession(): DatabaseFailureEvidence["session"] {
+    const { queueMs, checkoutMs, beginMs, sqlMs, sqlMaxMs, commitMs, roundTrips, queries } = this.totals;
+    return { wallMs: performance.now() - this.startedAt, queueMs, checkoutMs, beginMs,
+      sqlMs, sqlMaxMs, commitMs, roundTrips, queries };
+  }
+
   observation(shardId: string, endedAt: number): DatabaseSessionObservation {
     return {
       operation: this.operation ?? "unknown",
@@ -358,7 +364,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
         this.stats.fail(errorCode(error), this.context.operation, query.name);
         recordDatabaseFailure(error, { operation: this.context.operation, shardId: this.options.shardId,
           statement: this.context.statement ?? "transaction", phase: "sql", queryName: query.name,
-          code: errorCode(error), durationMs });
+          code: errorCode(error), durationMs, session: this.stats.failureSession() });
         observe(this.options.observer, this.observation(
           query.name,
           durationMs,
@@ -642,7 +648,7 @@ function observePhase(
     stats.fail(errorCode(error), context.operation, `database_phase_${phase}_v1`);
     recordDatabaseFailure(error, { operation: context.operation, shardId: options.shardId,
       statement: context.statement ?? "transaction", phase, queryName: `database_phase_${phase}_v1`,
-      code: errorCode(error), durationMs });
+      code: errorCode(error), durationMs, session: stats.failureSession() });
   }
   // A checkout through a reachable Hyperdrive can still stall on the origin,
   // so only a completed statement, never the checkout, closes the breaker.

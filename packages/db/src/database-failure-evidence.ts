@@ -7,10 +7,15 @@ export interface DatabaseFailureEvidence {
   queryName: string;
   code: string;
   durationMs: number;
+  /** Cumulative session progress at this failure, before rollback or retry. */
+  session?: Readonly<Record<"wallMs" | "queueMs" | "checkoutMs" | "beginMs" | "sqlMs" |
+    "sqlMaxMs" | "commitMs" | "roundTrips" | "queries", number>>;
 }
 const failures = new WeakMap<object, readonly DatabaseFailureEvidence[]>();
 const LIMIT = 4;
 const FIELDS = ["operation", "shardId", "statement", "phase", "queryName", "code", "durationMs"];
+const SESSION_FIELDS = ["wallMs", "queueMs", "checkoutMs", "beginMs", "sqlMs", "sqlMaxMs",
+  "commitMs", "roundTrips", "queries"] as const;
 const CODES = new Set(["QUERY_READ_TIMEOUT", "CONNECTION_TERMINATED", "CONNECTION_UNUSABLE", "CONNECT_TIMEOUT",
   "ECONNRESET", "EHOSTUNREACH", "ENETDOWN", "ENETUNREACH", "EPIPE", "ETIMEDOUT", "DATABASE_CIRCUIT_OPEN",
   "DATABASE_CONTRACT_ERROR", "DATABASE_ERROR"]);
@@ -20,8 +25,8 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
   if (!Array.isArray(value) || value.length > LIMIT) return [];
   const result: DatabaseFailureEvidence[] = [];
   for (const item of value) {
-    if (!item || typeof item !== "object" || Object.keys(item).length !== FIELDS.length ||
-        Object.keys(item).some(key => !FIELDS.includes(key)) ||
+    if (!item || typeof item !== "object" || Object.keys(item).length !== FIELDS.length + ("session" in item ? 1 : 0) ||
+        Object.keys(item).some(key => key !== "session" && !FIELDS.includes(key)) ||
         typeof item.operation !== "string" || !/^[a-z][a-z0-9_.:-]{0,119}$/u.test(item.operation) ||
         typeof item.shardId !== "string" || !/^[a-z0-9][a-z0-9_.:-]{0,79}$/u.test(item.shardId) ||
         !["single_read", "transaction"].includes(item.statement) ||
@@ -29,10 +34,21 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
         typeof item.queryName !== "string" || !/^[a-z][a-z0-9_]{0,159}$/u.test(item.queryName) ||
         typeof item.code !== "string" || !(CODES.has(item.code) || /^[0-9A-Z]{5}$/u.test(item.code)) ||
         !Number.isSafeInteger(item.durationMs) || item.durationMs < 0 || item.durationMs > 120_000) return [];
+    const session = "session" in item ? parseSession(item.session) : undefined;
+    if (session === null) return [];
     result.push(Object.freeze({ operation: item.operation, shardId: item.shardId, statement: item.statement,
-      phase: item.phase, queryName: item.queryName, code: item.code, durationMs: item.durationMs }));
+      phase: item.phase, queryName: item.queryName, code: item.code, durationMs: item.durationMs,
+      ...(session ? { session } : {}) }));
   }
   return Object.freeze(result);
+}
+
+function parseSession(value: unknown): DatabaseFailureEvidence["session"] | null {
+  if (!value || typeof value !== "object" || Object.keys(value).length !== SESSION_FIELDS.length ||
+      Object.keys(value).some(key => !SESSION_FIELDS.includes(key as typeof SESSION_FIELDS[number]))) return null;
+  const session = value as NonNullable<DatabaseFailureEvidence["session"]>;
+  if (SESSION_FIELDS.some(key => !Number.isSafeInteger(session[key]) || session[key] < 0 || session[key] > 120_000)) return null;
+  return Object.freeze({ ...session });
 }
 
 export function recordDatabaseFailure(error: unknown, evidence: DatabaseFailureEvidence): void {
@@ -40,7 +56,9 @@ export function recordDatabaseFailure(error: unknown, evidence: DatabaseFailureE
   const code = evidence.code.toUpperCase();
   const safe = parseDatabaseFailureEvidence([{ ...evidence,
     code: CODES.has(code) || /^[0-9A-Z]{5}$/u.test(code) ? code : "DATABASE_ERROR",
-    durationMs: Math.min(120_000, Math.max(0, Math.round(evidence.durationMs))) }]);
+    durationMs: Math.min(120_000, Math.max(0, Math.round(evidence.durationMs))),
+    ...(evidence.session ? { session: Object.fromEntries(SESSION_FIELDS.map(key =>
+      [key, Math.min(120_000, Math.max(0, Math.round(evidence.session![key]))) ])) } : {}) }]);
   if (safe.length) failures.set(error, safe);
 }
 
