@@ -1157,10 +1157,15 @@ html:has(.site-page) {
   max-width: 44rem;
 }
 
-.site-why-ours {
-  border-bottom: 1px solid oklch(0 0 0 / 0.1);
+/* Why xMatrix: hairlines on the paper, the wood's own line on the plank. */
+.site-why :is(.site-why-row, h3, p) {
+  border-color: oklch(0 0 0 / 0.08);
+}
+
+.site-why .site-why-ours {
+  border-color: var(--site-wood-line);
   font-weight: 500;
-  color: var(--foreground);
+  color: var(--site-wood-ink, var(--foreground));
 }
 
 .site-faq summary::-webkit-details-marker {
