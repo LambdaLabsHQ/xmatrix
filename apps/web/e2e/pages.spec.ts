@@ -456,7 +456,8 @@ for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
 
 test("an `@` calling a live Instance names its conversation, since Instance names repeat across conversations", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1440, height: 900 });
-  // grok:1 works on this page from two conversations; each is a different Instance under the same name.
+  // grok:1 works on this page from two conversations; each is a different Instance under the same name. The one in
+  // "Daily costs" is busy finishing something else.
   const plans = { ...E2E_CHANNEL, id: "11111111-1111-4111-8111-111111111111", name: "Surf lessons" };
   const costs = { ...E2E_CHANNEL, id: "22222222-2222-4222-8222-222222222222", name: "Daily costs" };
   await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, plans, costs]);
@@ -467,11 +468,13 @@ test("an `@` calling a live Instance names its conversation, since Instance name
       blockId: "status", source: "edit", createdAt: NOW, lastSeenAt: recent, anchor: null, resolvedAt: null })),
     conversations: [plans, costs].map((channel) => ({ conversationId: channel.id, name: channel.name, activityAt: recent,
       headSequence: 0, readSequence: 0, lastMessage: null,
-      agents: [{ instanceId: `i-grok-${channel.name}`, name: "grok:1", harness: "grok", status: "idle" }] })),
+      agents: [{ instanceId: `i-grok-${channel.name}`, name: "grok:1", harness: "grok",
+        status: channel === costs ? "busy" : "idle" }] })),
   });
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
     pages: [{ pageId: "p-relay", agents: [plans, costs].map((channel) => ({ instanceId: `i-grok-${channel.name}`,
-      name: "grok:1", harness: "grok", status: "idle", conversationId: channel.id, section: "Status" })),
+      name: "grok:1", harness: "grok", status: channel === costs ? "busy" : "idle", conversationId: channel.id,
+      section: "Status" })),
     discussions: { open: 0, unread: 0, latest: null } }],
   });
   await fixtureJson(browser, "link-create", /\/api\/xmatrix\/spaces\/[^/]+\/page-links$/u, { link: {} }, { method: "POST" });
@@ -490,22 +493,38 @@ test("an `@` calling a live Instance names its conversation, since Instance name
   await browser.keyboard.press("End");
   await browser.keyboard.type(" @gro");
 
-  // The menu tells the two grok:1 apart by their conversations, named as a channel is: `#` and its name.
+  // The menu tells the two grok:1 apart by their conversations, named as a channel is: `#` and its name, and says
+  // which is busy; the free one comes first, since it answers sooner.
   const menu = browser.getByTestId("page-agent-menu");
-  await expect(menu.getByRole("option", { name: /grok:1/u })).toHaveCount(2);
-  await expect(menu.getByRole("option", { name: /grok:1.*# Surf lessons/u })).toBeVisible();
+  const options = menu.getByRole("option", { name: /grok:1/u });
+  await expect(options).toHaveCount(2);
+  await expect(options.nth(0)).toHaveText(/^grok:1# Surf lessons$/u);
+  await expect(options.nth(1)).toHaveText(/^grok:1Busy# Daily costs$/u);
   await browser.screenshot({ path: test.info().outputPath("instance-menu.png") });
   await menu.getByRole("option", { name: /grok:1.*Daily costs/u }).click();
 
-  // The call goes to that conversation only, and the page keeps which conversation it was, drawn by its name.
+  // The call goes to that conversation only, and the page keeps which conversation it was: one chip, the Instance and
+  // its conversation by name, never its id.
   await expect.poll(async () => (await fixtureRequestBodies(browser, "call-message"))[0]?.body)
     .toMatch(/^@grok:1 page:p-relay/u);
   await editor.getByText("none").click();
-  await expect(editor.getByText("Daily costs")).toBeVisible();
+  const call = editor.getByRole("button", { name: /^@grok:1: Replied/u });
+  await expect(call).toHaveText(/^@grok:1# Daily costs·Replied$/u);
+  await expect(editor.getByTestId("channel-reference-chip")).toHaveCount(0);
   await expect(editor.getByText(costs.id)).toBeHidden();
-  // Once it has answered, its `@` says so: there is no conversation under the page to show the reply.
-  await expect(editor.getByRole("button", { name: /^@grok:1: Replied/u })).toBeVisible();
+  // Once it has answered, its `@` says so, and opens the reply: there is no conversation under the page to show it.
+  await call.click();
+  await expect(browser.getByRole("button", { name: "Open the reply" })).toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("instance-called.png") });
+
+  // Someone else reading the page, or this reader elsewhere, sees the same chip, with whether the Instance is free.
+  await browser.evaluate(() => window.localStorage.removeItem("xmatrix.page-summons"));
+  await browser.reload({ waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const read = editor.getByTestId("page-instance-chip");
+  await expect(read).toHaveText(/^@grok:1# Daily costs$/u);
+  await expect(read).toHaveAttribute("aria-label", "Open @grok:1 in # Daily costs");
+  await expect(read.locator(".app-mention-chip-status")).toHaveClass(/bg-amber-500/u);
 });
 
 test.describe("on a phone", () => {

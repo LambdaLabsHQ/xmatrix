@@ -4,15 +4,15 @@ require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
 
 const { instanceCall, instanceMention, pageInstances } = require("./page-instances.ts");
 
-const CLAUDE = { instanceId: "i-claude", name: "claude:2", harness: "claude", conversationId: "co-writing", section: "Plan" };
-const CODEX = { instanceId: "i-codex", name: "codex:1", conversationId: "review" };
+const CLAUDE = { instanceId: "i-claude", name: "claude:2", harness: "claude", conversationId: "co-writing", status: "busy" };
+const CODEX = { instanceId: "i-codex", name: "codex:1", conversationId: "review", status: "idle" };
 const NAMES = { "co-writing": "Plan the trip", review: "Review" };
 const all = (id) => NAMES[id] ?? null;
 
-test("an `@` offers the live Instances in this page's conversations, each once", () => {
+test("an `@` offers the live Instances in this page's conversations, each once, with whether it is free", () => {
   assert.deepEqual(pageInstances([CLAUDE, CODEX, CLAUDE], all), [
-    { name: "claude:2", harness: "claude", conversationId: "co-writing", conversation: "Plan the trip", where: "Plan" },
-    { name: "codex:1", harness: "codex", conversationId: "review", conversation: "Review", where: "This page" },
+    { name: "claude:2", harness: "claude", conversationId: "co-writing", conversation: "Plan the trip", status: "busy" },
+    { name: "codex:1", harness: "codex", conversationId: "review", conversation: "Review", status: "idle" },
   ]);
 });
 

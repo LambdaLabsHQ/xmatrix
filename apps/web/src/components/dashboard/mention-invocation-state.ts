@@ -9,9 +9,11 @@ export type InvocationTone = "active" | "waiting" | "error" | "success" | "neutr
  *  raises — did it start reasoning — so a new runtime phase maps onto an
  *  existing answer instead of introducing another word; a stop and a model or
  *  effort switch answer theirs the same way. Runtime detail belongs in
- *  `detail` and the steps. A page's `@` is the one exception: the page shows
- *  no conversation beneath it, so its chip also says when the turn Replied. */
-export type InvocationChip = "Starting" | "Started" | "Replied" | "Failed" | "Stopped" | "Stopping" | "Unconfirmed" |
+ *  `detail` and the steps. A page's `@` calling a live Instance is the one
+ *  exception: the page shows no conversation beneath it, so its chip follows
+ *  the call to its end — Sent, Queued behind what the Instance is doing,
+ *  Working, then Replied or Done. */
+export type InvocationChip = "Starting" | "Started" | "Sent" | "Queued" | "Working" | "Replied" | "Done" | "Failed" | "Stopped" | "Stopping" | "Unconfirmed" |
   "Switching" | "Switched" | "Options" | "Not found" | "Not stopped";
 export type InvocationStep = { label: string; at?: string; state: "done" | "current" | "unknown" | "failed";
   /** A short fact about how the step resolved, shown beside its label. */
@@ -24,14 +26,64 @@ export type InvocationView = {
 };
 
 const CHIP_TONE: Record<InvocationChip, InvocationTone> = {
-  Starting: "active", Started: "success", Replied: "success", Failed: "error", Stopped: "neutral",
+  Starting: "active", Started: "success", Sent: "waiting", Queued: "waiting", Working: "active", Replied: "success",
+  Done: "success", Failed: "error", Stopped: "neutral",
   Stopping: "active", Unconfirmed: "waiting",
   Switching: "active", Switched: "success", Options: "neutral", "Not found": "error", "Not stopped": "neutral",
 };
-/** Only a startup, a stop or a switch still in progress may spin. */
+/** Only a startup, a stop, a switch or a page call's turn still in progress may spin. */
 export function invocationChipStatus(label: InvocationChip, detail: string, animate = false) {
   return { label, tone: CHIP_TONE[label], detail,
-    animate: animate && (label === "Starting" || label === "Stopping" || label === "Switching") };
+    animate: animate && (label === "Starting" || label === "Stopping" || label === "Switching" || label === "Working") };
+}
+
+/** How long a turn has run, as a page's Agent says it has been thinking. */
+export function workingFor(startedAt: string, now: number): string {
+  const seconds = Math.max(0, Math.round((now - Date.parse(startedAt)) / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`;
+}
+
+/**
+ * A page's `@` that called a live Instance in its conversation, followed to its end. Nothing starts, so each word is
+ * what the Instance is doing with the message: not yet taken (Sent, or Queued while it finishes something else),
+ * Working on it, and Replied — or Done when its turn ended without a reply.
+ */
+export function instanceCallView(input: {
+  name: string; busy: boolean; sent: boolean; failure: string | null; now: number;
+  execution?: SerializedAgentMessageExecution;
+}): InvocationView {
+  const { name, busy, sent, failure, now, execution } = input;
+  const sentStep: InvocationStep = { label: "Message sent", state: "done" };
+  const taken = execution && { label: "Taken by the Instance", state: "done" as const, at: execution.startedAt };
+  const failed = failure ?? (execution && (execution.state === "failed" || execution.state === "interrupted")
+    ? "Its turn on this did not finish. Its conversation says why." : null);
+  if (failed) {
+    return { ...invocationChipStatus("Failed", failed), terminal: true,
+      steps: [{ label: "Message sent", state: failure ? "failed" : "done" }, ...(taken ? [taken] : [])] };
+  }
+  if (execution?.finalReply) {
+    return { ...invocationChipStatus("Replied", `${name} replied in its conversation.`), terminal: true,
+      steps: [sentStep, taken!, { label: "Replied", state: "done", at: execution.finalReply.committedAt }] };
+  }
+  if (execution && execution.state !== "accepted" && execution.state !== "running") {
+    return { ...invocationChipStatus("Done", `${name} finished its turn on this without a reply.`), terminal: true,
+      steps: [sentStep, taken!, { label: "Turn ended", state: "done", at: execution.finishedAt ?? execution.updatedAt }] };
+  }
+  if (execution) {
+    const elapsed = workingFor(execution.startedAt, now);
+    return { ...invocationChipStatus("Working", `${name} is working on it.`, true), terminal: false,
+      steps: [sentStep, taken!, { label: "Reply", status: `Working ${elapsed}`, state: "current" }] };
+  }
+  if (sent && busy) {
+    return { ...invocationChipStatus("Queued", `${name} is finishing something else; it takes this next.`),
+      terminal: false, steps: [sentStep, { label: "Taken by the Instance", status: "Queued", state: "current" }] };
+  }
+  if (sent) {
+    return { ...invocationChipStatus("Sent", `Sent to ${name}; it has not taken it yet.`), terminal: false,
+      steps: [sentStep, { label: "Taken by the Instance", status: "Sent", state: "current" }] };
+  }
+  return { ...invocationChipStatus("Starting", `Telling ${name} in its conversation.`, true), terminal: false,
+    steps: [{ label: "Message sent", status: "Sending", state: "current" }] };
 }
 
 const REASONING_PHASES = new Set(["turn_running", "turn_retrying", "turn_completed", "turn_failed",

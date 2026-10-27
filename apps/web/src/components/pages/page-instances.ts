@@ -1,4 +1,4 @@
-import { channelReferenceToken } from "@xmatrix/protocol";
+import { channelReferenceToken, type LiveAgentStatus } from "@xmatrix/protocol";
 
 /** An Agent's live Instance working on the Space's pages, as the page's Agent listing gives it. */
 export interface PageInstanceSource {
@@ -6,7 +6,7 @@ export interface PageInstanceSource {
   name: string;
   harness?: string;
   conversationId: string;
-  section?: string;
+  status: LiveAgentStatus;
 }
 
 /** A live Instance an `@` on a page can call by name, in its own conversation, instead of starting another. */
@@ -16,8 +16,8 @@ export interface PageInstance {
   conversationId: string;
   /** The name of its conversation, which a person reads to tell one same-named Instance from another. */
   conversation: string;
-  /** Where on the page it is at work: the section it last touched, or the page. */
-  where: string;
+  /** Whether it is free now: a busy one takes the call only after what it is doing. */
+  status: LiveAgentStatus;
 }
 
 /**
@@ -33,7 +33,7 @@ export function pageInstances(onPage: readonly PageInstanceSource[],
     if (seen.has(agent.instanceId) || conversation === null) continue;
     seen.add(agent.instanceId);
     instances.push({ name: agent.name, harness: agent.harness ?? agent.name.split(":")[0]!,
-      conversationId: agent.conversationId, conversation, where: agent.section || "This page" });
+      conversationId: agent.conversationId, conversation, status: agent.status });
   }
   return instances;
 }
