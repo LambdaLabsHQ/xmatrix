@@ -7477,6 +7477,9 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-invocation-code { margin: 8px 0 0; color: var(--muted-foreground); font-size: 11px; overflow-wrap: anywhere; }
 .app-invocation-retry { border: 0; padding: 9px 12px; margin-top: 12px; border-radius: 8px; background: var(--primary); color: var(--primary-foreground); font-weight: 600; cursor: pointer; }
 .app-invocation-retry:disabled { opacity: .6; cursor: wait; }
+/* A page call's way to its conversation: a quiet line under the steps, not a second action. */
+.app-invocation-open { display: block; border: 0; padding: 0; margin-top: 12px; background: none; color: var(--primary); font-weight: 600; cursor: pointer; }
+.app-invocation-open:hover { text-decoration: underline; }
 .app-invocation-reply-recovery { margin-top: 4px; padding-top: 8px; display: grid; gap: 8px; }
 .app-invocation-reply-recovery .app-invocation-description { margin: 0; }
 .app-invocation-reply-recovery .app-invocation-retry { margin-top: 0; width: 100%; }

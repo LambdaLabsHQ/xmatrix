@@ -17,6 +17,39 @@ plainly what they do, and the Agents editor uses the same words in English and
 Chinese. No migration or native update is needed; recovery is a CI-validated
 beta Web release reverting the change.
 
+## Unreleased: A page's @ to a live Instance says which one and how the call goes
+
+Calling a live Instance with `@` on a page now writes the conversation it was
+called in beside its name, so another Instance of the same name (each
+conversation has its own `grok:1`) no longer takes it as its own and answers
+twice. The `@` menu names each Instance's conversation and marks busy ones,
+listing free ones first. On the page the call is one chip, `@grok:1 # Daily
+costs`, with the Instance's live presence for every reader. The caller's chip
+follows the call: Sent, Queued while the Instance finishes something else,
+Working with its time, then Replied (opening the reply), Done or Failed. The
+Agent bootstrap says an `@` naming another conversation is not addressed to it.
+
+This is a Web change plus a CLI bootstrap line; older CLIs still receive the
+call correctly but lack the hint. No Hub or data migration. Recovery is a
+CI-validated beta Web and CLI release reverting the change.
+
+## Unreleased: Agent controls follow native capability data
+
+Claude controls now derive models and effort choices only from native
+initialize data. Discovery merges the built-in effort command's declared
+workflow modes with each model's own reasoning levels, so Ultracode and
+future modes using that grammar are selectable without a per-name patch.
+The static alias/effort fallback is removed. Missing discovery leaves controls
+unavailable while ordinary work may continue; explicit parameter requests
+still fail. Native command inventories, including empty ACP inventories and
+Claude overlays, also prevent documentation lists from restoring absent
+passthrough commands. Fixed protocol bindings remain separate from choices.
+
+This needs a CLI/daemon release and restart or reborn of existing Instances;
+no Hub, Web or data migration is needed. Older harnesses without native
+catalogs lose guessed controls. Recovery uses a CI-validated CLI beta
+reverting the change. See the [capability audit](operations/provider-capability-audit.md).
+
 ## Unreleased: A release train records the gates it passed
 
 Production Release Request now writes the full-tier CI jobs it passed into

@@ -412,23 +412,21 @@ pub(crate) async fn run_claude_print_external(run: ExternalRun<'_>) -> error::Re
         read_initial_spawn_context_from_env().and_then(|context| context.goal),
     );
     session.runtime_state = crate::AgentRuntimeStateTracker::for_current_run("claude_code");
-    if let Some(effort) =
-        read_initial_spawn_context_from_env().and_then(|context| context.requested_effort)
-    {
-        session
-            .discover_parameters()
-            .await
-            .map_err(CliError::Launch)?;
+    let requested_effort =
+        read_initial_spawn_context_from_env().and_then(|context| context.requested_effort);
+    if let Err(error) = session.discover_parameters().await {
+        if requested_effort.is_some() || !requested_parameters.is_empty() {
+            return Err(CliError::Launch(error));
+        }
+        eprintln!("Claude parameter discovery unavailable: {error}");
+    }
+    if let Some(effort) = requested_effort {
         session
             .select_effort(&effort)
             .await
             .map_err(CliError::Launch)?;
     }
     if !requested_parameters.is_empty() {
-        session
-            .discover_parameters()
-            .await
-            .map_err(CliError::Launch)?;
         for (id, value) in &requested_parameters {
             if matches!(id.as_str(), "model" | "effort") {
                 return Err(CliError::Launch(
@@ -453,9 +451,9 @@ pub(crate) async fn run_claude_print_external(run: ExternalRun<'_>) -> error::Re
         spawn_goal_inbox_poller(inbox, relay.local_event_sender());
     }
 
-    // Advertise the switchable model catalog (and docs-driven command catalog)
-    // before the first turn so Composer completion works from the moment the
-    // instance appears. Live init.slash_commands are merged additively later.
+    // Advertise only the catalog the native process actually returned.
+    // Missing discovery leaves controls unavailable instead of inventing
+    // model aliases or reasoning levels before the first turn.
     let startup = session.presentation();
     if let Some(model) = startup.current_model.as_deref() {
         write_current_run_model(Some(model));

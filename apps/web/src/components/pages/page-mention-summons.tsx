@@ -11,8 +11,16 @@ import {
 import { widgetPortals } from "./page-widget-portals";
 import type { PageSummon } from "./page-summon-store";
 
-/** The summons the page's `@`s are drawn with, and how their records are read. */
-export interface PageSummons { list: readonly PageSummon[]; token: string }
+/** The summons the page's `@`s are drawn with, how their records are read, and the conversations they were made in. */
+export interface PageSummons {
+  list: readonly PageSummon[];
+  token: string;
+  /** A conversation's name, while this reader can open it. */
+  conversationName: (conversationId: string) => string | null;
+  /** Whether the Instance `name` live in a conversation is free or busy now. */
+  instanceStatus: (conversationId: string, name: string) => string | null;
+  openConversation: (conversationId: string) => void;
+}
 
 const chips = widgetPortals<{ summonId: string }>("page-summon");
 
@@ -28,14 +36,15 @@ export function PageMentionSummons({ summons }: { summons: PageSummons }) {
     <InvocationPopoverGroup>
       {current.map(({ element, key, summonId }) => {
         const summon = summons.list.find((item) => item.id === summonId);
-        return summon ? createPortal(<SummonChip summon={summon} token={summons.token} />, element, key) : null;
+        return summon ? createPortal(<SummonChip summon={summon} summons={summons} />, element, key) : null;
       })}
     </InvocationPopoverGroup>
   );
 }
 
-function SummonChip({ summon, token }: { summon: PageSummon; token: string }) {
+function SummonChip({ summon, summons }: { summon: PageSummon; summons: PageSummons }) {
   const { user } = useAuth();
+  const { token } = summons;
   const { conversationId, messageId } = summon;
   // Keyed under the conversation's invocations, so the Hub's `channel_invocations_changed` reads it again.
   const records = useQuery({
@@ -45,9 +54,12 @@ function SummonChip({ summon, token }: { summon: PageSummon; token: string }) {
     queryFn: ({ signal }) => readChannelInvocations(conversationId!, token, [messageId!], signal),
   });
   // A live Instance called by name starts nothing: its chip is whether it took the message.
-  if (summon.instance) {
+  if (summon.instance && conversationId) {
     return <MentionInstanceCallChip name={summon.harness} harness={summon.harness.split(":")[0]!}
-      sent={Boolean(messageId)} execution={records.data?.executions?.[0]} failure={summon.failure} />;
+      conversation={summons.conversationName(conversationId)}
+      busy={summons.instanceStatus(conversationId, summon.harness) === "busy"}
+      sent={Boolean(messageId)} execution={records.data?.executions?.[0]} failure={summon.failure}
+      onOpenConversation={() => summons.openConversation(conversationId)} />;
   }
   const launch = records.data?.launches[0];
   if (launch) {

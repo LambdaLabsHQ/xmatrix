@@ -1,4 +1,4 @@
-// One Claude turn: resume-session bookkeeping, the model catalog and the
+// One Claude turn: resume-session bookkeeping and the
 // control requests used to switch model, interrupt, and probe liveness.
 
 use colored::Colorize;
@@ -537,87 +537,6 @@ pub(crate) fn save_claude_resume_session_id(
     session_id: Option<&str>,
 ) -> error::Result<()> {
     crate::save_resume_session_id("claude-resume", "Claude", key, session_id)
-}
-
-/// Claude Code has no runtime API for enumerating models (`supported_models`
-/// is not a recognized control request as of 2.1.206), so the catalog is the
-/// stable set of model aliases the CLI resolves itself — accepted both by
-/// `--model` and by the `set_model` control request (verified empirically).
-/// Aliases always track the latest build of each tier, so this catalog does
-/// not go stale when new model ids ship.
-pub fn claude_model_catalog() -> Vec<protocol::AgentModelInfo> {
-    fn entry(id: &str, display_name: &str, description: &str) -> protocol::AgentModelInfo {
-        protocol::AgentModelInfo {
-            id: id.to_string(),
-            model: id.to_string(),
-            display_name: Some(display_name.to_string()),
-            description: Some(description.to_string()),
-            hidden: None,
-            is_default: None,
-            // Claude caps effort per model, but nothing in the stream-json
-            // transport reports that cap, so every alias advertises the same
-            // levels rather than a guessed per-model subset.
-            default_reasoning_effort: None,
-            supported_reasoning_efforts: Some(claude_effort_catalog()),
-            input_modalities: None,
-            supports_personality: None,
-            upgrade: None,
-        }
-    }
-    let mut default = entry(
-        "default",
-        "Default",
-        "The account's configured default model",
-    );
-    default.is_default = Some(true);
-    vec![
-        default,
-        entry("fable", "Fable", "Latest Fable model"),
-        entry("opus", "Opus", "Latest Opus model"),
-        entry("sonnet", "Sonnet", "Latest Sonnet model"),
-        entry(
-            "sonnet[1m]",
-            "Sonnet 1M",
-            "Latest Sonnet model with the 1M-token context window",
-        ),
-        entry("haiku", "Haiku", "Latest Haiku model"),
-        entry(
-            "opusplan",
-            "Opus Plan",
-            "Opus for plan mode, Sonnet for execution",
-        ),
-    ]
-}
-
-/// The reasoning-effort levels Claude Code accepts, with the CLI's own
-/// descriptions. Checked against 2.1.310: `--effort` takes each of these at
-/// launch, `apply_flag_settings` switches a live process to and from each,
-/// and `/effort <bad>` answers
-/// `Valid options are: low, medium, high, xhigh, max, ultracode, auto`.
-///
-/// `ultracode` runs at xhigh with dynamic workflows on every task; the
-/// transcript marks it with `ultra_effort_enter`/`ultra_effort_exit`
-/// attachments, which is how the watcher keeps reporting it. `auto` (return
-/// to the model default) is left out: it has no `--effort` spelling, so a
-/// selection would not survive the next respawn.
-pub fn claude_effort_catalog() -> Vec<protocol::AgentModelReasoningEffort> {
-    fn level(reasoning_effort: &str, description: &str) -> protocol::AgentModelReasoningEffort {
-        protocol::AgentModelReasoningEffort {
-            reasoning_effort: reasoning_effort.to_string(),
-            description: Some(description.to_string()),
-        }
-    }
-    vec![
-        level("low", "Quick, straightforward implementation"),
-        level("medium", "Balanced approach with standard testing"),
-        level(
-            "high",
-            "Comprehensive implementation with extensive testing",
-        ),
-        level("xhigh", "Extended reasoning with thorough analysis"),
-        level("max", "Maximum capability with deepest reasoning"),
-        level("ultracode", "xhigh with dynamic workflows on every task"),
-    ]
 }
 
 /// The reasoning effort in force at launch, if anything pinned one.

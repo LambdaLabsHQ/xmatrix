@@ -488,6 +488,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       writeAction("upload_screenshot", "Upload screenshot", "Reserve an image in the app's asset library; the receipt lists where to send the bytes.", "<com.example.app> <home-6.9.png> <size in bytes>"),
       writeAction("set_screenshots", "Set screenshots", "Make one language and placement group of a version show exactly the named library images, in order.", '<com.example.app> <1.2.0> {"locale":"en-US","group":"<group>","images":["<image id>"]}'),
       writeAction("declare_encryption", "Declare export compliance", "Declare whether a build uses non-exempt encryption, so the version does not wait for export compliance.", "<com.example.app> <1.2.0> <build number> exempt|non_exempt"),
+      readAction("subscriptions", "List subscriptions", "The app's auto-renewable subscriptions by group, with product id, period, level and review state.", "<com.example.app>"),
+      writeAction("submit_subscriptions", "Submit subscriptions", "Submit subscriptions for App Review: the named product ids, or every one ready to submit. An app's first subscriptions go with its next version submission.", "<com.example.app> [<product id> …]"),
       readAction("testflight", "TestFlight status", "The app's tester groups and the internal and external testing state of its newest builds.", "<com.example.app>"),
       readAction("feedback", "Tester feedback", "The 10 newest TestFlight screenshot comments, or crash reports, with device, OS and build.", "<com.example.app> [crashes]"),
       readAction("crash_log", "Crash log", "The crash log behind one TestFlight crash report.", "<feedback id>"),

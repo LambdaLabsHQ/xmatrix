@@ -467,10 +467,13 @@ test("a delivered message stops a one-time Automation and leaves a cadence runni
   await new PostgresAutomationRepository(db).finishMessage({ requestId: "finish-1", occurrenceId: "occurrence-1",
     leaseOwner: "worker-1", taskId: "task-1", messageId: "scheduled-message:1", channelId: "occurrence-channel",
     now: "2026-10-29T10:00:01.000Z" });
-  const finished = db.calls.find((call) => call.name === "scheduled_message_task_finish_v4");
+  const finished = db.calls.find((call) => call.name === "scheduled_message_task_finish_v5");
   assert.ok(finished);
   assert.match(finished.text, /enabled=CASE WHEN payload_json->>'once'='true' THEN false ELSE enabled END/u);
-  assert.deepEqual(finished.values, ["2026-10-29T10:00:01.000Z", "scheduled-message:1", "task-1", "occurrence-channel"]);
+  // Its time becomes the one it ran at: resuming it alone cannot arm it a cadence later.
+  assert.match(finished.text, /next_run_at=CASE WHEN payload_json->>'once'='true' THEN COALESCE\(\(SELECT o\.scheduled_for/u);
+  assert.deepEqual(finished.values, ["2026-10-29T10:00:01.000Z", "scheduled-message:1", "task-1", "occurrence-channel",
+    "occurrence-1"]);
 });
 
 test("scheduled occurrence claim returns the exact fenced lease", async () => {

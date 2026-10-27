@@ -11,6 +11,14 @@ function send(value) {
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (stdinLog) fs.appendFileSync(stdinLog, `${line}\n`);
   const message = JSON.parse(line);
+  if (message.type === "control_request" && message.request?.subtype === "initialize") {
+    send({type: "control_response", response: {subtype: "success",
+      request_id: message.request_id, response: {
+        models: [{value: "default", resolvedModel: "mock-claude-model",
+          supportedEffortLevels: ["high"]}]
+      }}});
+    return;
+  }
   if (message.type === "user") {
     userTurns += 1;
     send({

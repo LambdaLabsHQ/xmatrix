@@ -115,6 +115,8 @@ try {
     "packages/db/test/agent-registration-launch-postgres.test.mjs", "packages/db/test/agent-lifecycle-cleanup.test.mjs",
     // Withdrawn, ended and retired registration Runs get exact stop obligations.
     "packages/db/test/agent-registration-revocation-postgres.test.mjs",
+    // Connection, retry and revocation must not lock Runs ahead of Channel writers.
+    "packages/db/test/message-run-locks-postgres.test.mjs",
     "packages/db/test/first-message-launch-choice-postgres.test.mjs",
     "packages/db/test/message-asks-postgres.test.mjs",
     "packages/db/test/legacy-hostname-retirement-postgres.test.mjs",
