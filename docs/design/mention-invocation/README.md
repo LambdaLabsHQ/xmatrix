@@ -10,6 +10,15 @@ follows its `@` by Yjs relative position through everyone's edits. It is the cal
 their last 100 page calls, so the `@` keeps its status when they open the page again; other readers see the plain
 mention.
 
+An `@` on a page that calls a live Instance by name writes `@name:slot channel:<id>`: Instance names repeat across
+conversations, so the conversation is what says which one was called, to every reader and every Agent reading the
+page. The `@` menu names each Instance's conversation (`# name`) with its presence dot, says Busy for a busy one and
+lists free ones first. On the page the name and its conversation read as one chip, `@grok:1 # Daily costs`, which
+every reader sees with the Instance's live presence dot and which opens the conversation. The caller's chip is the
+one place a settled chip follows the turn past its start, because the page shows no conversation beneath it: Sent
+while the Instance has not taken the message, Queued when it is busy finishing something else, Working with how
+long it has run, then Replied (its popover opens the reply), Done when the turn ended without one, or Failed.
+
 These screenshots use local synthetic fixtures and the repository theme, not production data.
 
 The Web composer's root `@` list includes the current Channel's live Instances
