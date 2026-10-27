@@ -7,7 +7,7 @@ import { usePageTree } from "@/components/pages/pages-view";
 import { formatAutomationCadence, formatAutomationNext } from "@/components/pages/page-automation-format";
 
 import { channelTitle } from "./channel-links";
-import { groupSchedules, scheduleAttention, scheduleRunning, type ScheduleState } from "./schedules-model";
+import { groupSchedules, scheduleAttention, scheduleDone, scheduleRunning, type ScheduleState } from "./schedules-model";
 import { ToolListGroup, ToolListRow } from "./tool-split";
 
 export const SCHEDULE_GROUP_TITLES: Record<ScheduleState, string> = {
@@ -57,9 +57,9 @@ export function ScheduleListGroups({ automations, executionEnabled, where, now, 
           selected={automation.id === selectedId}
           onSelect={() => onSelect(automation.id)}
           title={automation.name}
-          end={group.state === "paused" ? undefined : whenOf(automation)}
+          end={group.state !== "paused" ? whenOf(automation) : scheduleDone(automation) ? "done" : undefined}
           subtitle={group.state === "attention" ? scheduleAttention(automation, executionEnabled)
-            : `${where(automation)} · ${formatAutomationCadence(automation.intervalMinutes)}`} />
+            : `${where(automation)} · ${formatAutomationCadence(automation)}`} />
       ))}
     </ToolListGroup>
   ));

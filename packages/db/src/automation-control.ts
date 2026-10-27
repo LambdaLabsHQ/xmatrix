@@ -1348,8 +1348,10 @@ export class PostgresAutomationRepository {
         text(input.messageId, "messageId", 300)], maxRows: 1 });
       if (!rows[0]) throw new AutomationControlError(
         "scheduled_occurrence_lease_lost", 409, "Scheduled message occurrence lost its dispatch lease");
-      await tx.query({ name: "scheduled_message_task_finish_v3", text: `UPDATE data.automations
+      // A one-time Automation (a reminder) has said what it had to: it stops here.
+      await tx.query({ name: "scheduled_message_task_finish_v4", text: `UPDATE data.automations
         SET run_count=run_count+1,last_run_at=$1,last_run_id=$2,last_channel_id=$4,last_error=NULL,
+          enabled=CASE WHEN payload_json->>'once'='true' THEN false ELSE enabled END,
           version=version+1,updated_at=$1 WHERE automation_id=$3`, values: [now, input.messageId,
         text(input.taskId, "taskId", 300), text(input.channelId, "channelId", 300)], maxRows: 0 });
     });

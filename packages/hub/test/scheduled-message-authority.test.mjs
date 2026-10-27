@@ -70,3 +70,29 @@ test("each occurrence is one owner-authored append in a conversation opened for 
     ["prepared"], ["dispatched", "occurrence-conversation"],
   ]);
 });
+
+test("a reminder's message waits on its author, so it reaches Needs you and their devices; a cadence's does not", async () => {
+  const deliver = async (payload) => {
+    const appended = [];
+    await dispatchScheduledMessageOccurrence(
+      { async appendMessage(command) { appended.push(command); }, schedulePostCommit() {},
+        async openConversation() { return "occurrence-conversation"; } },
+      { id: "occurrence-once", task_id: "task-once", task_version: 1, status: "leased",
+        scheduled_for: "2026-10-29T10:00:00.000Z", delivery_kind: "message", message_id: "message-once",
+        lease_owner: "worker-once" },
+      { id: "task-once", owner_user_id: "owner-1", channel_id: "channel-once" },
+      payload,
+      { async requireEvaluationAuthority() {}, async markPrepared() {}, async finishMessage() {} },
+    );
+    return appended[0];
+  };
+  const input = { datum: { kind: "text", language: "natural-language", ref: "automation:task-once",
+    text: "Call Allende Canggu about the extension" },
+  envRef: { root: { kind: "channel", id: "channel-once" }, actor: { kind: "user", id: "owner-1" },
+    authorityRootUserId: "owner-1" } };
+  const reminder = await deliver({ payloadVersion: 3, intervalMinutes: 43200, once: true, input });
+  assert.deepEqual(reminder.waitsOnUserIds, ["owner-1"]);
+  assert.equal(reminder.body, "Call Allende Canggu about the extension");
+  const cadence = await deliver({ payloadVersion: 3, intervalMinutes: 720, input });
+  assert.equal(cadence.waitsOnUserIds, undefined);
+});

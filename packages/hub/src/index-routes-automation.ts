@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { automationRef, HUB_ROUTES } from "@xmatrix/protocol";
+import { automationRef, automationRunsOnce, HUB_ROUTES } from "@xmatrix/protocol";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
 import type { Env } from "./types";
 import {
@@ -214,6 +214,13 @@ async function mutateAutomation(boundary: AutomationRouteBoundary, input: {
   if (version === undefined || version !== input.automation.version) {
     return Response.json({ error: "expectedVersion must match the current Automation version" }, { status: 409 });
   }
+  const once = automationRunsOnce(input.automation);
+  if (once && input.action === "update" && input.body.intervalMinutes !== undefined) {
+    return Response.json({ error: "A one-time Automation has no cadence; change its time on its page" }, { status: 400 });
+  }
+  if (once && input.action === "resume" && !(Date.parse(input.automation.nextRunAt) > Date.now())) {
+    return Response.json({ error: "Its time has passed; give it a new time on its page" }, { status: 409 });
+  }
   const parsed = expressionPayload(boundary, input.automation, input.action === "update" ? input.body : {});
   if (!parsed) return Response.json({
     error: `expression.text is required and intervalMinutes must be between ${boundary.AUTOMATION_MIN_INTERVAL_MINUTES} and ${boundary.AUTOMATION_MAX_INTERVAL_MINUTES}`,
@@ -235,7 +242,8 @@ async function mutateAutomation(boundary: AutomationRouteBoundary, input: {
   const nextEnabled = input.action === "pause" ? false : input.action === "resume" ? true : input.automation.enabled;
   // Retiming restarts the clock: a shortened cadence must not wait out the old
   // interval, and a lengthened one must not keep a run that was already due.
-  const nextRunAt = input.action === "resume"
+  // A reminder resumes at its own time.
+  const nextRunAt = input.action === "resume" && !once
     ? new Date(Date.now() + intervalMinutes * 60_000).toISOString()
     : input.automation.nextRunAt;
   await boundary.commitAutomation(input.env, {

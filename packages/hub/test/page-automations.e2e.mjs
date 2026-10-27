@@ -257,3 +257,63 @@ test("an Agent Run manages a private page's Automations from its own authorized 
     assert.equal(cleaned.body.includes(reference(created.id)), false, "deletion removes the private page's reference");
   });
 });
+
+test("a reminder runs once at the time it was given with its offset, and a new time arms it again", async () => {
+  const unique = randomUUID();
+  const ownerToken = `page-reminder-owner-${unique}`;
+  const worker = await startPgHubWorker({ vars: {
+    XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN,
+    XMATRIX_MOCK_AUTH_USERS: JSON.stringify({
+      [ownerToken]: { id: `page-reminder-user-${unique}`, email: `reminder-${unique}@example.com`, name: "Traveller" },
+    }),
+  } });
+  const call = (path, method = "GET", body) => worker.fetch(path, { method,
+    headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const refused = async (response, status, code) => {
+    assert.equal(response.status, status, await response.clone().text());
+    assert.equal((await response.json()).code, code);
+  };
+  try {
+    const space = (await ok(await call("/api/spaces", "POST", { name: `Trip ${unique}` }))).space;
+    const pages = `/api/spaces/${encodeURIComponent(space.id)}/pages`;
+    const page = (await ok(await call(pages, "POST", { title: "Bali",
+      body: "# Bali\n\n## Stays\n\nAllende Canggu until 10/30.\n" }))).page;
+    const automations = `${pages}/${encodeURIComponent(page.pageId)}/automations`;
+    // 18:00 in Bali (UTC+8), two days ahead, written as the traveller would.
+    const local = new Date(Date.now() + 2 * 86_400_000 + 8 * 3_600_000);
+    const at = `${local.toISOString().slice(0, 16)}+08:00`;
+    const create = (body) => call(automations, "POST", { name: "Decide on the stay", blockId: "stays",
+      instruction: "Decide whether to extend at Allende Canggu", ...body });
+
+    await refused(await create({ at: at.slice(0, 16) }), 400, "invalid_at");
+    await refused(await create({ at: new Date(Date.now() - 60_000).toISOString() }), 400, "invalid_at");
+    await refused(await create({ at: new Date(Date.now() + 400 * 86_400_000).toISOString() }), 400, "invalid_at");
+    await refused(await create({ at, intervalMinutes: 60 }), 400, "invalid_request");
+
+    const reminder = (await ok(await create({ at }), 201)).automation;
+    assert.equal(reminder.once, true);
+    assert.equal(reminder.enabled, true, "its reference on the page armed it");
+    assert.equal(reminder.nextRunAt, new Date(Date.parse(at)).toISOString(), "it runs at the time given, read with its offset");
+    assert.equal(reminder.blockId, "stays");
+    await refused(await call(`${automations}/${reminder.id}`, "PATCH",
+      { expectedVersion: reminder.version, intervalMinutes: 60 }), 400, "invalid_request");
+
+    // Delivered, it stops; a new time arms it again.
+    await inTestTransaction(tx => tx.query({ text: `UPDATE data.automations SET enabled=false,
+      last_run_at=now(),version=version+1 WHERE automation_id=$1`, values: [reminder.id] }));
+    const [done] = (await ok(await call(automations))).automations;
+    assert.equal(done.enabled, false);
+    await refused(await call(`${automations}/${reminder.id}/resume`, "POST", { expectedVersion: done.version }),
+      409, "automation_time_passed");
+    const later = new Date(Date.now() + 20 * 86_400_000).toISOString();
+    const armed = (await ok(await call(`${automations}/${reminder.id}`, "PATCH",
+      { expectedVersion: done.version, at: later }))).automation;
+    assert.equal(armed.id, reminder.id);
+    assert.equal(armed.enabled, true);
+    assert.equal(armed.once, true);
+    assert.equal(armed.nextRunAt, later);
+  } finally {
+    await worker.stop();
+  }
+});

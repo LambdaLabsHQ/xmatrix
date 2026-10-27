@@ -18,6 +18,21 @@ export function isAutomationIntervalMinutes(value: number): boolean {
     && value <= AUTOMATION_MAX_INTERVAL_MINUTES;
 }
 
+/**
+ * Furthest ahead a one-time Automation (a reminder) may be set: a year, so a
+ * renewal or an expiry can be noted when it is written down.
+ */
+export const AUTOMATION_MAX_ONCE_LEAD_MINUTES = 366 * 24 * 60;
+
+/**
+ * Whether a stored Automation runs once: a reminder. It runs at its time,
+ * waits on its author, and stops once its message is delivered. It stores the
+ * longest cadence, so it is due again only if that delivery never happened.
+ */
+export function automationRunsOnce(payload: Readonly<Record<string, unknown>> | null | undefined): boolean {
+  return payload?.once === true;
+}
+
 export interface AutomationRunIdentity {
   automationId?: string;
   automationName?: string;
