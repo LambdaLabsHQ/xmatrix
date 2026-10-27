@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: The Agent picker invites only undescribed Agents
+
+In the `@` menu, an Agent whose strengths the Space has already written no
+longer carries an edit prompt. Agents still undescribed keep it, now set in the
+same grey type as the row's own description instead of an underlined link, and
+the section's one-line hint appears only while such an Agent is listed. The
+editor and its permissions are unchanged. No migration or native update is
+needed; recovery is a CI-validated beta Web release reverting the change.
+
 ## Unreleased: A release train records the gates it passed
 
 Production Release Request now writes the full-tier CI jobs it passed into

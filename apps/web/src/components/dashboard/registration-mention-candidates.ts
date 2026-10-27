@@ -27,12 +27,15 @@ export function registrationMentionCandidates(existing: readonly MentionCandidat
   }
   const groups = capabilities.filter(group => group.harness.toLowerCase().includes(query.toLowerCase()) &&
     group.locations.some(location => location.state === "enabled" && location.routingReady));
-  return [...groups.map<MentionCandidate>(group => ({ id: `capability:${group.harness}`, name: group.harness,
-    kind: "agent", status: "offline", mention: group.harness, completionSuffix: " ",
-    face: { kind: "agent", name: group.harness, harness: group.harness },
-    // What the Space says the harness is for, when it says so; otherwise how to address it.
-    description: harnessProfileSummary(group.locations.find(location => location.profile?.description)?.profile?.description ?? "")
-      || `Choose automatically · @${group.harness}/ to choose a location`,
-    invocationTarget: { kind: "capability", harness: group.harness } })),
+  return [...groups.map<MentionCandidate>(group => {
+    const profile = harnessProfileSummary(group.locations.find(location => location.profile?.description)?.profile?.description ?? "");
+    return { id: `capability:${group.harness}`, name: group.harness,
+      kind: "agent", status: "offline", mention: group.harness, completionSuffix: " ",
+      face: { kind: "agent", name: group.harness, harness: group.harness },
+      // What the Space says the harness is for, when it says so; otherwise how to address it.
+      description: profile || `Choose automatically · @${group.harness}/ to choose a location`,
+      profileWritten: Boolean(profile),
+      invocationTarget: { kind: "capability", harness: group.harness } };
+  }),
   ...existing.filter(candidate => !(candidate.kind === "agent" && !candidate.action && candidate.completionSuffix === ":"))];
 }

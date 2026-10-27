@@ -117,12 +117,12 @@ for (const mobile of [false, true]) {
   test.describe(`what an agent is good at, from the mention menu, on ${mobile ? "mobile" : "desktop"}`, () => {
     test.use({ viewport: mobile ? { width: 393, height: 852 } : { width: 1280, height: 900 },
       isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 });
-    test("says that text can be written and opens the editor", async ({ page }) => {
+    test("an undescribed harness says text can be written and opens the editor", async ({ page }) => {
       const locations = ["Workstation", "MacBook"].map((machineName, index) => ({
         key: { spaceId: E2E_SPACE.id, ownerUserId: `owner-${index}`, machineId: `machine-${index}`, harness: "codex" },
         displayName: "codex", ownerName: `Owner ${index + 1}`, machineName, version: 1, state: "enabled",
         models: ["same-model"], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false,
-        canRemoveFromSpace: false, canDescribe: true, profile: { description: "Careful code review.", revision: 2 },
+        canRemoveFromSpace: false, canDescribe: true, profile: { description: "", revision: 0 },
       }));
       await fixtureJson(page, "registration-catalog", /\/agent-registrations(?:\?[^#]*)?$/u, {
         registrations: locations, capabilities: [{ harness: "codex", models: ["same-model"], locations }],
@@ -134,11 +134,28 @@ for (const mobile of [false, true]) {
       await page.getByRole("button", { name: "Click to edit what codex is good at" }).click();
       await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
       const text = page.getByLabel("When to pick codex");
-      await expect(text).toHaveValue("Careful code review.");
+      await expect(text).toHaveValue("");
       await expect(text).toBeFocused();
     });
   });
 }
+
+test("a harness the Space has described invites no edit", async ({ page }) => {
+  const locations = [{
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "owner-0", machineId: "machine-0", harness: "codex" },
+    displayName: "codex", ownerName: "Owner 1", machineName: "Workstation", version: 1, state: "enabled",
+    models: ["same-model"], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false,
+    canRemoveFromSpace: false, canDescribe: true, profile: { description: "Careful code review.", revision: 2 },
+  }];
+  await fixtureJson(page, "registration-catalog", /\/agent-registrations(?:\?[^#]*)?$/u, {
+    registrations: locations, capabilities: [{ harness: "codex", models: ["same-model"], locations }],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/channel-general");
+  await page.locator(".composer-textarea").first().fill("@");
+  await expect(page.getByRole("option", { name: /codex.*Careful code review/u })).toBeVisible();
+  await expect(page.getByText("What an agent is good at can be written.")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Click to edit what codex is good at" })).toHaveCount(0);
+});
 
 test.describe("what an agent is good at, in Chinese", () => {
   test.use({ locale: "zh-CN", viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
@@ -147,7 +164,7 @@ test.describe("what an agent is good at, in Chinese", () => {
       key: { spaceId: E2E_SPACE.id, ownerUserId: `owner-${index}`, machineId: `machine-${index}`, harness: "codex" },
       displayName: "codex", ownerName: `Owner ${index + 1}`, machineName, version: 1, state: "enabled",
       models: ["same-model"], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false,
-      canRemoveFromSpace: false, canDescribe: true, profile: { description: "Careful code review.", revision: 2 },
+      canRemoveFromSpace: false, canDescribe: true, profile: { description: "", revision: 0 },
     }));
     await fixtureJson(page, "registration-catalog", /\/agent-registrations(?:\?[^#]*)?$/u, {
       registrations: locations, capabilities: [{ harness: "codex", models: ["same-model"], locations }],
@@ -159,7 +176,7 @@ test.describe("what an agent is good at, in Chinese", () => {
     await page.getByRole("button", { name: "点击此处修改 codex 的优势劣势" }).click();
     await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
     const text = page.getByLabel("codex 擅长什么");
-    await expect(text).toHaveValue("Careful code review.");
+    await expect(text).toHaveValue("");
     await expect(text).toBeFocused();
   });
 });

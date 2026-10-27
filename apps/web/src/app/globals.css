@@ -7395,8 +7395,8 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    opens the editor without taking the row's click, which still summons. */
 .app-mention-profile-hint {
   margin: 0 18px 4px;
-  color: var(--muted-foreground);
-  font-size: 11px;
+  color: color-mix(in oklch, var(--foreground) 50%, transparent);
+  font-size: 12px;
   line-height: 1.35;
 }
 .xmatrix-app .app-mention-suggestions .app-mention-capability {
@@ -7415,7 +7415,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   max-width: 46%;
   margin: 0;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.3;
   text-align: right;
 }
@@ -7428,9 +7428,8 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   transform: translateY(-50%);
   border: 0;
   background: transparent;
-  color: var(--muted-foreground);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  /* Reads as the row's own grey detail text, not as a link. */
+  color: color-mix(in oklch, var(--foreground) 50%, transparent);
   cursor: pointer;
 }
 .app-mention-profile-edit:hover { color: var(--foreground); }

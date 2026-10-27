@@ -970,7 +970,7 @@ export function useComposerCompletion({
                     </div>
                   ) : null}
                   {onEditHarnessProfile && section.kind === "agent" &&
-                    section.candidates.some((candidate) => candidate.invocationTarget?.kind === "capability") ? (
+                    section.candidates.some((candidate) => candidate.invocationTarget?.kind === "capability" && !candidate.profileWritten) ? (
                     <p id={profileHintId} className="app-mention-profile-hint">
                       {profileCopy.hint}
                     </p>
@@ -997,8 +997,9 @@ export function useComposerCompletion({
                       (candidate.completionSuffix === ":" || Boolean(candidate.invocationTarget || candidate.launchTags));
                     const detail = candidate.description ||
                       (candidate.mention && candidate.mention !== candidate.name ? `@${candidate.mention}` : "");
-                    const profileHarness = onEditHarnessProfile && candidate.invocationTarget?.kind === "capability"
-                      ? candidate.invocationTarget.harness : null;
+                    // Only a harness the Space has not described yet invites a description.
+                    const profileHarness = onEditHarnessProfile && candidate.invocationTarget?.kind === "capability" &&
+                      !candidate.profileWritten ? candidate.invocationTarget.harness : null;
                     const profileEditLabel = profileHarness ? <>
                       <span className="hidden sm:inline">{profileCopy.editLong}</span>
                       <span className="sm:hidden">{profileCopy.edit}</span>

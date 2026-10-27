@@ -82,6 +82,8 @@ export type MentionCandidate = {
   appId?: string;
   appActionId?: string;
   description?: string;
+  /** A capability row whose description the Space wrote; it needs no invitation to write one. */
+  profileWritten?: boolean;
   /** Shown, but not selectable. The text is why, for example "Offline". */
   unavailable?: string;
   completionSuffix?: CommandCompletionDelimiter;
