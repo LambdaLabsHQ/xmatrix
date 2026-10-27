@@ -490,10 +490,10 @@ test("an `@` calling a live Instance names its conversation, since Instance name
   await browser.keyboard.press("End");
   await browser.keyboard.type(" @gro");
 
-  // The menu tells the two grok:1 apart by their conversations' names.
+  // The menu tells the two grok:1 apart by their conversations, named as a channel is: `#` and its name.
   const menu = browser.getByTestId("page-agent-menu");
   await expect(menu.getByRole("option", { name: /grok:1/u })).toHaveCount(2);
-  await expect(menu.getByRole("option", { name: /grok:1.*Surf lessons/u })).toBeVisible();
+  await expect(menu.getByRole("option", { name: /grok:1.*# Surf lessons/u })).toBeVisible();
   await browser.screenshot({ path: test.info().outputPath("instance-menu.png") });
   await menu.getByRole("option", { name: /grok:1.*Daily costs/u }).click();
 

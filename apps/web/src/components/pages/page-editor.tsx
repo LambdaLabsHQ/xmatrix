@@ -216,7 +216,7 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
       .sort((a, b) => Number(!name(a).toLowerCase().startsWith(wanted)) - Number(!name(b).toLowerCase().startsWith(wanted)));
   // An Instance already at work comes first: calling it keeps its context, where a harness starts a new one.
   const instances = matching(completion.instances, (instance) => instance.name).map((instance): MenuItem => ({
-    key: `instance:${instance.conversationId}:${instance.name}`, label: instance.name, hint: instance.conversation,
+    key: `instance:${instance.conversationId}:${instance.name}`, label: instance.name, hint: `# ${instance.conversation}`,
     icon: <Face of={{ kind: "agent", name: instance.name, harness: instance.harness }} size="xs" shape="circle" glass={false}
       className="pointer-events-none rounded-full" />,
     run: (view) => {
