@@ -293,7 +293,7 @@ export type {
   MachineHandoffExport, MachineHandoffExportResult,
 } from "./handoff-export.js";
 export {
-  AUTOMATION_MAX_INTERVAL_MINUTES, AUTOMATION_MIN_INTERVAL_MINUTES, automationRef, automationRunIdentity, canonicalAutomationCommand, isAutomationIntervalMinutes, legacyAutomationCommandKind, legacyAutomationCommandView,
+  AUTOMATION_MAX_INTERVAL_MINUTES, AUTOMATION_MAX_ONCE_LEAD_MINUTES, AUTOMATION_MIN_INTERVAL_MINUTES, automationRef, automationRunsOnce, automationRunIdentity, canonicalAutomationCommand, isAutomationIntervalMinutes, legacyAutomationCommandKind, legacyAutomationCommandView,
 } from "./automation-stored-values.js";
 export type {
   AutomationRunIdentity,

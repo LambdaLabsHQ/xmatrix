@@ -1,6 +1,7 @@
 import { PostgresAutomationRepository, PostgresPageRepository } from "@xmatrix/db";
 import {
-  automationReferences, automationTriggersFrom, insertAutomationReference, type AutomationTrigger, removeAutomationReference, replaceAutomationReference, type PageDocument,
+  AUTOMATION_MAX_ONCE_LEAD_MINUTES, automationReferences, automationRunsOnce, automationTriggersFrom, insertAutomationReference,
+  type AutomationTrigger, removeAutomationReference, replaceAutomationReference, type PageDocument,
 } from "@xmatrix/protocol";
 import type { Context, Hono } from "hono";
 import type { AuthUser } from "./auth";
@@ -132,7 +133,7 @@ function initialNextRunAt(env: Env, intervalMinutes: number): string {
 
 /** The authoring fields: an instruction is the natural-language text posted each time. */
 function authoring(body: Record<string, unknown>): Record<string, unknown> {
-  const { instruction, nextRunAt: _nextRunAt, ...rest } = body;
+  const { instruction, nextRunAt: _nextRunAt, at: _at, ...rest } = body;
   return typeof instruction === "string"
     ? { ...rest, expression: { kind: "text", language: "natural-language", text: instruction } } : rest;
 }
@@ -148,6 +149,24 @@ function requestedNextRunAt(body: Record<string, unknown>): string | undefined {
   const ahead = at - Date.now();
   if (!(ahead > 0 && ahead <= hubBoundary.AUTOMATION_MAX_INTERVAL_MINUTES * 60_000)) {
     refuse(400, "invalid_next_run", "nextRunAt must be a time ahead, within the longest cadence");
+  }
+  return new Date(at).toISOString();
+}
+
+/**
+ * When a one-time Automation (a reminder) runs: `at`, a time ahead within a
+ * year, written with its offset so a local time is never read as UTC.
+ */
+function onceAt(body: Record<string, unknown>): string | undefined {
+  if (body.at === undefined) return undefined;
+  const written = typeof body.at === "string" ? body.at.trim() : "";
+  const at = /(?:Z|[+-]\d{2}:?\d{2})$/iu.test(written) ? Date.parse(written) : Number.NaN;
+  if (!Number.isFinite(at)) {
+    refuse(400, "invalid_at", "at must be a time with its offset, such as 2026-10-29T18:00+08:00 or 2026-10-29T10:00Z");
+  }
+  const ahead = at - Date.now();
+  if (!(ahead > 0 && ahead <= AUTOMATION_MAX_ONCE_LEAD_MINUTES * 60_000)) {
+    refuse(400, "invalid_at", "at must be a time ahead, within a year");
   }
   return new Date(at).toISOString();
 }
@@ -205,8 +224,15 @@ export async function createPageAutomation(env: Env, request: Request, authUser:
   const userId = humanOf(authUser);
   const name = typeof body.name === "string" ? body.name.trim().slice(0, 200) : "";
   if (!name) refuse(400, "invalid_request", "name is required");
-  const parsed = expressionPayload(hubBoundary, undefined, { ...authoring(body), name });
+  const at = onceAt(body);
+  if (at !== undefined && (body.intervalMinutes !== undefined || body.triggers !== undefined)) {
+    refuse(400, "invalid_request", "A one-time Automation takes at alone, without intervalMinutes or triggers");
+  }
+  // A reminder stores the longest cadence: it is due again only if its message never landed.
+  const parsed = expressionPayload(hubBoundary, undefined, { ...authoring(body), name,
+    ...(at !== undefined ? { intervalMinutes: hubBoundary.AUTOMATION_MAX_INTERVAL_MINUTES } : {}) });
   if (!parsed) invalidAuthoring();
+  if (at !== undefined) parsed.payload.once = true;
   const triggers = await resolvedTriggers(env, spaceId, userId, body.triggers);
   if (triggers.length) parsed.payload.triggers = triggers;
   const automationId = crypto.randomUUID();
@@ -226,7 +252,7 @@ export async function createPageAutomation(env: Env, request: Request, authUser:
     // An Agent Run acts as its owner, but never with a Human admin's creation exception.
     viaAgentRun: Boolean(authUser.agentRun), automationId,
     expectedVersion: 0, channelId, pageId, detached: true, enabled: false,
-    nextRunAt: initialNextRunAt(env, parsed.intervalMinutes),
+    nextRunAt: at ?? initialNextRunAt(env, parsed.intervalMinutes),
     payload: commandPayload(hubBoundary, parsed, undefined, channelId, { kind: "user", id: userId }, userId,
       automationId),
     automationAction: "create",
@@ -270,10 +296,21 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
       : action === "run" && !current.enabled ? "This Automation is paused; resume it to run it"
       : `This Automation cannot ${action} now`);
   }
+  const once = automationRunsOnce(current);
+  if (action === "update" && (once ? body.intervalMinutes !== undefined || body.nextRunAt !== undefined
+    || body.triggers !== undefined : body.at !== undefined)) {
+    refuse(400, "invalid_request", once
+      ? "A one-time Automation changes its time with at; it has no cadence or triggers"
+      : "at is for a one-time Automation; change this one's next run with nextRunAt");
+  }
   const parsed = expressionPayload(hubBoundary, current, action === "update" ? authoring(body) : {});
   const binding = automationEvaluatorBinding(current);
   if (!parsed || !binding) invalidAuthoring();
-  const requestedNext = action === "update" ? requestedNextRunAt(body) : undefined;
+  const requestedNext = action === "update" ? once ? onceAt(body) : requestedNextRunAt(body) : undefined;
+  // A reminder resumes at its own time, which must still be ahead.
+  if (once && action === "resume" && !(Date.parse(current.nextRunAt) > Date.now())) {
+    refuse(409, "automation_time_passed", "Its time has passed; give it a new time with at");
+  }
   if (action === "update" && body.triggers !== undefined) {
     const triggers = await resolvedTriggers(env, spaceId, userId, body.triggers);
     if (triggers.length) parsed.payload.triggers = triggers;
@@ -287,7 +324,8 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
     viaAgentRun: Boolean(authUser.agentRun),
       automationId: replacementId, expectedVersion: 0, channelId: current.channelId, pageId,
       // It resumes when the page's reference points at it, as the original did.
-      detached: current.enabled || Boolean(current.detachedAt), enabled: false,
+      // A reminder given a new time is armed again the same way.
+      detached: current.enabled || Boolean(current.detachedAt) || once && requestedNext !== undefined, enabled: false,
       nextRunAt: requestedNext ?? current.nextRunAt,
       payload: commandPayload(hubBoundary, parsed, undefined, current.channelId, { kind: "user", id: userId }, userId,
         replacementId),
@@ -299,7 +337,7 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
     await notifyPageAutomations(env, spaceId);
     return replaced;
   }
-  const retimed = action === "resume" || parsed.intervalMinutes !== current.intervalMinutes;
+  const retimed = !once && (action === "resume" || parsed.intervalMinutes !== current.intervalMinutes);
   await command(env, request, `page-automation:${current.id}:${action}:${version}`, {
     actorUserId: userId, principal: { kind: "user", id: userId }, kind: "automation_put",
     // An Agent Run acts as its owner, but never with a Human admin's creation exception.
@@ -307,7 +345,9 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
     expectedVersion: version, channelId: current.channelId,
     nextRunAt: action === "run" ? new Date().toISOString() : requestedNext
       ?? (retimed ? new Date(Date.now() + parsed.intervalMinutes * 60_000).toISOString() : current.nextRunAt),
-    enabled: action === "pause" ? false : action === "resume" ? true : current.enabled,
+    // A new time arms a reminder again, also one that has already reminded.
+    enabled: action === "pause" ? false : action === "resume" || once && requestedNext !== undefined && !current.detachedAt
+      ? true : current.enabled,
     payload: commandPayload(hubBoundary, parsed, current, current.channelId, binding.actor,
       binding.authorityRootUserId, current.id),
     automationAction: action,

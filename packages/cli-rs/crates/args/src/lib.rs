@@ -2119,7 +2119,9 @@ pub enum PageAutomationCommand {
     /// Create an Automation in a section; it runs as your owner, each occurrence in a fresh conversation.
     ///
     /// Use `@auto repo:<owner/repo>` to address an Agent each time.
-    /// `--every` controls cadence. Use `pwd:"<registered-path>"` instead of
+    /// `--every` controls cadence; `--at` makes a reminder instead: it runs
+    /// once at that time, waits on your owner in Needs you (pushed to their
+    /// devices), then stops. Use `pwd:"<registered-path>"` instead of
     /// `repo:` for a registered directory. Each occurrence's conversation is new,
     /// so an exact `@agent:N` finds no live instance there;
     /// other live Agents receive context.
@@ -2134,8 +2136,12 @@ pub enum PageAutomationCommand {
         #[arg(long)]
         name: String,
         /// How often it runs: minutes, or a number with m, h or d (e.g. 12h)
-        #[arg(long)]
-        every: String,
+        #[arg(long, required_unless_present = "at", conflicts_with = "at")]
+        every: Option<String>,
+        /// Run once, as a reminder, at this time with its offset, within a year
+        /// (e.g. 2026-10-29T18:00+08:00 for 18:00 in Bali, or 2026-10-29T10:00Z)
+        #[arg(long, conflicts_with = "triggers")]
+        at: Option<String>,
         /// Also run on an event (repeatable): merged:owner/repo[@branch][:path,…],
         /// ci-failed:owner/repo[@branch][:workflow], or a connector event
         /// <connector>:<event|*>[:<source>] (e.g. sentry:issue.created:web)
@@ -2170,8 +2176,11 @@ pub enum PageAutomationCommand {
         #[arg(long)]
         every: Option<String>,
         /// When its next occurrence runs, as a UTC time such as 2026-10-11T02:00:00Z; its cadence counts from there
-        #[arg(long)]
+        #[arg(long, conflicts_with = "at")]
         next: Option<String>,
+        /// A reminder's new time, with its offset (e.g. 2026-10-29T18:00+08:00); arms it again if it has run
+        #[arg(long, conflicts_with = "every")]
+        at: Option<String>,
         /// Replace its event triggers (repeatable; see `create --help`)
         #[arg(long = "on", conflicts_with = "no_triggers")]
         triggers: Vec<String>,

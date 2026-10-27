@@ -806,7 +806,7 @@ section it keeps true, and it is written there:
 ### 6.2 Triggers
 
 Every Automation has a cadence, and a page's Automation may add event
-triggers. Whoever can manage it can also run a running Automation now
+triggers, or instead run once: a reminder. Whoever can manage it can also run a running Automation now
 (Schedules' *Run now*, `xmatrix page automation run`): its next occurrence is
 due at once, as its author, and its cadence continues from that run. A trigger never queues work; it makes the next occurrence due now.
 A GitHub trigger records the installation of the Space's GitHub connection
@@ -819,6 +819,14 @@ while the Space is still connected to it.
 | `merged <owner/repo>[@branch] [paths…]` | A pull request is merged into the branch (default: the default branch), touching one of the paths if any are given |
 | `ci-failed <owner/repo>[@branch] [workflow]` | A workflow run on the branch concludes with failure |
 | `<app>:<event>[:<source>]` | A connected app delivers that event (`connector-platform.md` §3.4) |
+
+A reminder (`xmatrix page automation create --at <time with its offset>`)
+is for a dated commitment the page records: a booking, a deadline, a renewal.
+It runs once at its time, within a year, in its own conversation like any
+occurrence; its message waits on its author, so it lands in their Needs you
+and is pushed to their devices. Once delivered it stops and its section shows
+it done; giving it a new time (`edit --at`) arms it again. It has no cadence
+or triggers, and resuming it keeps its time, which must still be ahead.
 
 Events coalesce: an occurrence takes every event recorded before it (the last
 ten), and events that arrive while one is pending or running wait for a

@@ -1935,7 +1935,7 @@ export const ChannelDetails = memo(function ChannelDetails({
                             )}
                           </div>
                           <p className="truncate text-[11px] text-muted-foreground">
-                            {formatAutomationCadence(automation.intervalMinutes)} · next {formatDateTime(automation.nextRunAt)}
+                            {formatAutomationCadence(automation)} · next {formatDateTime(automation.nextRunAt)}
                           </p>
                           <p className="truncate text-[11px] text-muted-foreground">
                             {evaluationBindingLabel(automation.input)}
@@ -1997,18 +1997,20 @@ export const ChannelDetails = memo(function ChannelDetails({
                               Saving replaces this schedule with your own copy, which runs as you.
                             </p>
                           )}
-                          <label className="block text-[11px] font-bold text-muted-foreground">
-                            Resume every (minutes)
-                            <Input
-                              type="number"
-                              min={AUTOMATION_MIN_INTERVAL_MINUTES}
-                              max={AUTOMATION_MAX_INTERVAL_MINUTES}
-                              step={15}
-                              value={automationIntervalDraft}
-                              onChange={(event) => setAutomationIntervalDraft(Number(event.target.value))}
-                              className="mt-1 h-8"
-                            />
-                          </label>
+                          {!automation.once && (
+                            <label className="block text-[11px] font-bold text-muted-foreground">
+                              Resume every (minutes)
+                              <Input
+                                type="number"
+                                min={AUTOMATION_MIN_INTERVAL_MINUTES}
+                                max={AUTOMATION_MAX_INTERVAL_MINUTES}
+                                step={15}
+                                value={automationIntervalDraft}
+                                onChange={(event) => setAutomationIntervalDraft(Number(event.target.value))}
+                                className="mt-1 h-8"
+                              />
+                            </label>
+                          )}
                           <label className="block text-[11px] font-bold text-muted-foreground">
                             Expression data
                             <Textarea
@@ -2039,12 +2041,12 @@ export const ChannelDetails = memo(function ChannelDetails({
                                 disabled={
                                   Boolean(automationBusy) ||
                                   automationMessageDraft.trim().length === 0 ||
-                                  !isAutomationIntervalMinutes(automationIntervalDraft)
+                                  (!automation.once && !isAutomationIntervalMinutes(automationIntervalDraft))
                                 }
                                 onClick={() => {
                                   onUpdateAutomation(automation.id, {
                                     expression: automationExpressionFromText(automationMessageDraft),
-                                    intervalMinutes: automationIntervalDraft,
+                                    ...(automation.once ? {} : { intervalMinutes: automationIntervalDraft }),
                                   });
                                   setEditingAutomationId(null);
                                 }}

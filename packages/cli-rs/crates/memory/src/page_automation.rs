@@ -23,6 +23,9 @@ pub(crate) struct PageAutomation {
     pub version: u64,
     pub name: String,
     pub interval_minutes: u64,
+    /// A reminder: it runs once at `next_run_at`, then stops.
+    #[serde(default)]
+    pub once: bool,
     pub enabled: bool,
     /// The section its reference is in; absent while detached.
     #[serde(default)]
@@ -75,6 +78,8 @@ pub(crate) fn render_page_automation(automation: &PageAutomation) -> String {
     };
     let state = if automation.detached_at.is_some() {
         "detached: put its reference back to resume it".to_string()
+    } else if automation.once && !automation.enabled && automation.last_run_at.is_some() {
+        "done: give it a new time with --at to remind again".to_string()
     } else if !automation.enabled {
         "paused".to_string()
     } else {
@@ -106,7 +111,11 @@ pub(crate) fn render_page_automation(automation: &PageAutomation) -> String {
         automation.id,
         automation.version,
         automation.name,
-        render_cadence(automation.interval_minutes),
+        if automation.once {
+            "once".to_string()
+        } else {
+            render_cadence(automation.interval_minutes)
+        },
         automation.channel_id
     )
 }
@@ -378,6 +387,7 @@ pub(crate) async fn cmd_page_automation(
             block,
             name,
             every,
+            at,
             triggers,
             instruction,
             file,
@@ -392,9 +402,16 @@ pub(crate) async fn cmd_page_automation(
                 CliError::Launch("give what to do each time with -m, -f or --stdin".into())
             })?;
             let space = resolve_space(hub_url, token, space).await?;
-            let mut body = json!({
-                "name": name, "instruction": instruction, "intervalMinutes": parse_every(&every)?,
-            });
+            let mut body = json!({ "name": name, "instruction": instruction });
+            match (every, at) {
+                (_, Some(at)) => body["at"] = json!(at.trim()),
+                (Some(every), None) => body["intervalMinutes"] = json!(parse_every(&every)?),
+                (None, None) => {
+                    return Err(CliError::Launch(
+                        "give how often with --every, or one time with --at".into(),
+                    ));
+                }
+            }
             if let Some(block) = block {
                 body["blockId"] = json!(block);
             }
@@ -419,6 +436,7 @@ pub(crate) async fn cmd_page_automation(
             name,
             every,
             next,
+            at,
             triggers,
             no_triggers,
             instruction,
@@ -429,6 +447,9 @@ pub(crate) async fn cmd_page_automation(
             let mut body = Map::new();
             if let Some(next) = next {
                 body.insert("nextRunAt".into(), json!(next.trim()));
+            }
+            if let Some(at) = at {
+                body.insert("at".into(), json!(at.trim()));
             }
             if no_triggers || !triggers.is_empty() {
                 let triggers = triggers
@@ -584,6 +605,7 @@ mod tests {
             version: 3,
             name: "Code audit".into(),
             interval_minutes: 720,
+            once: false,
             enabled,
             block_id: block.map(str::to_string),
             detached_at: detached.then(|| "2026-09-27T00:00:00.000Z".into()),
@@ -606,5 +628,21 @@ mod tests {
         let header = render_page_automations_header(&[automation(Some(""), true, false)]);
         assert!(header.starts_with("automations:\n  - a-1 v3 · Code audit · (top of page)"));
         assert!(!header.contains("audit\n    "));
+        let reminder = PageAutomation {
+            once: true,
+            ..automation(Some("plans"), true, false)
+        };
+        assert!(
+            render_page_automation(&reminder)
+                .contains(" · #plans · once · next 2026-09-28T06:00:00.000Z ·")
+        );
+        let reminded = PageAutomation {
+            enabled: false,
+            last_run_at: Some("2026-09-28T06:00:01.000Z".into()),
+            ..reminder
+        };
+        assert!(
+            render_page_automation(&reminded).contains(" · done: give it a new time with --at")
+        );
     }
 }

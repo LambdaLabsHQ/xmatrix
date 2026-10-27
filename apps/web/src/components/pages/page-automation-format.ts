@@ -1,7 +1,9 @@
 import type { AutomationTrigger } from "@xmatrix/protocol";
 
-/** How often an Automation runs, in words. */
-export function formatAutomationCadence(minutes: number): string {
+/** How often an Automation runs, in words; a reminder runs once. */
+export function formatAutomationCadence(automation: { intervalMinutes: number; once?: boolean }): string {
+  if (automation.once) return "once";
+  const minutes = automation.intervalMinutes;
   if (minutes % 1440 === 0) return minutes === 1440 ? "daily" : `every ${minutes / 1440} days`;
   if (minutes % 60 === 0) return minutes === 60 ? "hourly" : `every ${minutes / 60} h`;
   return `every ${minutes} min`;
