@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: A GitHub App merge no longer speaks its bot login
+
+A pull request subscription tells its conversation when someone else merges
+or closes it. The GitHub App's own bot used to post
+`xmatrix-connector[bot] merged pull request <link>: <title>` directly under
+the merge receipt, restating that card in GitHub's notification voice. That
+line is now `Merged <link>: <title>`, or `Closed <link>: <title>` when it was
+not merged. A person's merge still names them. No migration or client update.
+Recovery is a CI-validated beta Hub release reverting the change.
+
 ## Unreleased: The mention menu says an agent's strengths can be written
 
 Typing `@` already shows the first sentence of what a harness is for. The Agent

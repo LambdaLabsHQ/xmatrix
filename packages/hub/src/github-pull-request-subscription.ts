@@ -96,7 +96,14 @@ export function githubPullRequestEventMessage(input: {
   const own = author !== "" && sender === author;
   if (event === "pull_request") {
     if (payload.action !== "closed" || own) return undefined;
-    return `${actor} ${subject.merged === true ? "merged" : "closed"} pull request ${link}${title ? `: ${title}` : ""}`;
+    const verb = subject.merged === true ? "merged" : "closed";
+    // A GitHub App login (`name[bot]`) restates the merge receipt in GitHub's
+    // notification voice. The receipt already named the action; this line uses
+    // that voice and adds the title. A person is still named.
+    const headline = actor.endsWith("[bot]")
+      ? `${verb === "merged" ? "Merged" : "Closed"} ${link}`
+      : `${actor} ${verb} pull request ${link}`;
+    return title ? `${headline}: ${title}` : headline;
   }
   if (event === "pull_request_review") {
     const review = record(payload.review);

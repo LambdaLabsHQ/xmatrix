@@ -163,6 +163,10 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   success is not acknowledged without the verdict. Two suites reporting the
   same settling post one message; a rerun that settles again posts a new one.
   The author's own pushes, comments, reviews and merge are not said: the Agent did them.
+  A GitHub App's own bot is not named either. Its merge or close reads
+  `Merged <link>: <title>` or `Closed <link>: <title>`, the same voice as the
+  connector receipt, with the title the receipt does not carry. A person is
+  still named (`<login> merged pull request <link>: <title>`).
   Queued GitHub Actions suites hold the verdict before their first job exists;
   empty suites for other installed apps remain placeholders. Reads are shared
   across routes for each pull request. Incomplete inventories or unknown check
