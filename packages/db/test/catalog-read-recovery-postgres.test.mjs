@@ -170,6 +170,78 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
   }
 });
 
+// Healthy awareness/blame tests and generic client retry tests cannot catch
+// these repositories opening BEGIN or losing a later history/body response.
+integration("page awareness and blame recover lost reads with access and placement fences (XMATRIX-HUB-AS)", async () => {
+  const f = await spaceSecretFixture();
+  let fault;
+  const { database, clients } = recoveringDatabase(() => fault);
+  const pages = new PostgresPageRepository(database);
+  const input = { requestId: crypto.randomUUID(), spaceId: f.ids.space,
+    principal: { kind: "user", id: f.ids.owner } };
+  const accessRead = /SELECT p\.page_id,p\.parent_page_id/u;
+  const bodyRead = /SELECT revision, body FROM data\.page_revisions/u;
+  try {
+    const { page } = await pages.create({ ...input, title: "Recovery", body: "# Recovery\n\nBefore\n" });
+    await pages.edit({ ...input, pageId: page.pageId, baseRevision: 1, body: "# Recovery\n\nAfter\n",
+      conversationIds: [f.ids.channel] });
+    const clearDerived = () => f.client.query(`UPDATE data.page_revisions SET changed_blocks=NULL, blame=NULL
+      WHERE space_id=$1 AND page_id=$2`, [f.ids.space, page.pageId]);
+    for (const [method, historyRead, extraReads] of [
+      ["blockUpdates", /SELECT revision,kind,authors_json,conversation_ids,based_on_revision,created_at,changed_blocks/u, []],
+      ["blame", /WITH line AS/u, [/SELECT revision,kind,authors_json,conversation_ids,based_on_revision,created_at\s+FROM/u,
+        /SELECT c\.channel_id, c\.name FROM data\.channels c/u]],
+    ]) {
+      const read = () => pages[method]({ ...input, pageId: page.pageId });
+      const expected = await read();
+      assert.equal(method === "blockUpdates" ? expected.updates.get("recovery").revision : expected.revision, 2);
+      for (const matches of [/SELECT role FROM data\.space_members/u, accessRead, historyRead, ...extraReads]) {
+        await assertReadRecovery(read, expected, clients, () =>
+          fault = { matches, remaining: 1, error: new Error("Query read timeout"), checkouts: [] });
+      }
+      await clearDerived();
+      fault = { matches: bodyRead, remaining: 1, error: new Error("Query read timeout"), checkouts: [] };
+      assert.deepEqual(await read(), expected, "underived revision bodies recover too");
+      assert.equal(fault.checkouts.length, 1);
+      const stalled = fault.checkouts[0];
+      assert.ok(stalled.ended && clients.indexOf(stalled) < clients.length - 1);
+      assert.ok(!stalled.queries.some(sql => /^(BEGIN|COMMIT)/u.test(sql)), "body reads have no transaction");
+      assert.ok(clients.every(entry => entry.ended), "derivation writes and read sessions close");
+      for (const matches of [historyRead, bodyRead]) {
+        for (const [error, attempts] of [[new Error("Query read timeout"), 2],
+          [Object.assign(new Error("statement timeout"), { code: "57014" }), 1]]) {
+          await clearDerived();
+          fault = { matches, remaining: 3, error, checkouts: [] };
+          await assert.rejects(read(), error);
+          assert.equal(fault.checkouts.length, attempts, "recovery is bounded to lost responses");
+        }
+      }
+      fault = { matches: historyRead, remaining: 1, error: new Error("Query read timeout"), checkouts: [],
+        beforeThrow: () => f.client.query("UPDATE control.space_placement SET placement_epoch=2 WHERE space_id=$1",
+          [f.ids.space]) };
+      await assert.rejects(read(), /local Space placement fence is stale/u);
+      assert.equal(fault.checkouts.length, 1);
+      await f.client.query("UPDATE control.space_placement SET placement_epoch=1 WHERE space_id=$1", [f.ids.space]);
+      await f.client.query(`INSERT INTO data.page_access
+        (space_id,page_id,subject_kind,subject_id,access,created_at)
+        VALUES($1,$2,'user',$3,'read',now())`, [f.ids.space, page.pageId, f.ids.owner]);
+      fault = { matches: accessRead, remaining: 1, error: new Error("Query read timeout"), checkouts: [],
+        beforeThrow: () => f.client.query("DELETE FROM data.page_access WHERE space_id=$1 AND page_id=$2",
+          [f.ids.space, page.pageId]) };
+      await f.client.query("UPDATE data.pages SET access_mode='restricted' WHERE space_id=$1 AND page_id=$2",
+        [f.ids.space, page.pageId]);
+      await assert.rejects(read(), { code: "page_not_found" });
+      assert.equal(fault.checkouts.length, 1, "retried access SELECT sees the revoked grant");
+      await f.client.query("UPDATE data.pages SET access_mode='open' WHERE space_id=$1 AND page_id=$2",
+        [f.ids.space, page.pageId]);
+      fault = undefined;
+    }
+  } finally {
+    await f.client.query("DELETE FROM data.page_links WHERE space_id=$1", [f.ids.space]);
+    await f.close();
+  }
+});
+
 // Healthy catalog tests cover authorization and presence, and the generic
 // client tests cover retry. Neither catches a detail read opening BEGIN or
 // losing a later presence/member response through the actual repository SQL.

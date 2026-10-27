@@ -178,6 +178,14 @@ and grants again if its response is lost. There is no enclosing BEGIN/COMMIT
 or cross-statement snapshot guarantee. A second lost response or an answered
 SQL/domain error still propagates.
 
+Page section awareness and blame use the same independent reads for membership,
+page access, revision metadata and bodies (HUB-AS). Each lost response can recover
+once on a fresh connection, with the placement fence and any retried access query
+checked again. Document comparison runs after the read session closes. Derived
+section changes and blame still use separate best-effort transactions: their
+share locks and body hashes protect against a concurrent purge. These cache
+writes do not become `single_read` statements.
+
 Sentry recovery claims try the same transaction advisory capacity lock that
 webhook admission takes exclusively. A busy app returns no jobs for that pass,
 without changing attempts, leases or receipt cleanup; the minute recovery wake
