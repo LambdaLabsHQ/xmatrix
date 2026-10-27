@@ -20,7 +20,8 @@ import { inflateRawSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { releaseCommitProblemAt } from "./release-commit.mjs";
+import { releaseCommitProblemAt, verifyRelease, verifyReleaseCommit } from "./release-commit.mjs";
+import { releaseChannel } from "./release-version-order.mjs";
 import { githubRead } from "./github-read.mjs";
 
 // The complete Hub suite, recorded under a name that never held a single
@@ -174,13 +175,30 @@ function lookup(jobs) {
 /**
  * Pure: whether `subject` is a commit this run could have tested. A push run
  * tests its head; a pull request run tests GitHub's merge of the PR head, so
- * the merge's second parent must be that head. Anything else is refused.
+ * the merge's second parent must be that head. A release train
+ * (`production-release-request.yml`, dispatched on the default branch) may
+ * name its head or a single-parent child; the recorder still has to prove that
+ * child with `verifyRelease` before it can vouch. Any other dispatch, including
+ * Public Snapshot CI, is refused.
  */
 export function subjectMatchesRun(run, subject, parents) {
   if (!/^[0-9a-f]{40}$/u.test(subject)) return false;
   if (run.event === "push") return subject === run.head_sha;
   if (run.event === "pull_request") return parents.length === 2 && parents[1] === run.head_sha;
+  if (run.event === "workflow_dispatch" && run.path === ".github/workflows/production-release-request.yml") {
+    if (!run.default_branch || run.head_branch !== run.default_branch) return false;
+    if (subject === run.head_sha) return true;
+    return parents.length === 1 && /^[0-9a-f]{40}$/u.test(parents[0] ?? "");
+  }
   return false;
+}
+
+/**
+ * Pure: GitHub's compare of `source...head` reports `ahead` when the source is
+ * an ancestor of the head, and `identical` when they are the same commit.
+ */
+export function sourceContainedInHead(status) {
+  return status === "ahead" || status === "identical";
 }
 
 /** Pure: the single file stored in a GitHub artifact zip. */
@@ -199,8 +217,65 @@ export function unzipSingleFile(zip) {
   throw new Error(`unsupported artifact compression method ${method}`);
 }
 
-/** Pull request CI, and the push CI that calls it on the public main. */
-export const RECORDED_WORKFLOWS = new Set([".github/workflows/ci.yml", ".github/workflows/public-ci.yml"]);
+/**
+ * Pull request CI, the public snapshot that calls it, and the release train
+ * whose nested CI jobs are part of the request run rather than a CI run.
+ * Public Snapshot CI is listed so a manual dispatch is recognized and then
+ * refused; only the request workflow's default-branch dispatch can vouch.
+ */
+export const RECORDED_WORKFLOWS = new Set([
+  ".github/workflows/ci.yml",
+  ".github/workflows/public-ci.yml",
+  ".github/workflows/production-release-request.yml",
+]);
+
+const JOB_PAGE = 100;
+const MAX_JOB_PAGES = 20;
+
+/** Every job in the run. A partial page must not vouch for a matrix it did not see. */
+async function listRunJobs(repo, runId, token) {
+  const jobs = [];
+  for (let page = 1; page <= MAX_JOB_PAGES; page += 1) {
+    const query = `filter=latest&per_page=${JOB_PAGE}${page === 1 ? "" : `&page=${page}`}`;
+    const body = await githubRead(`/repos/${repo}/actions/runs/${runId}/jobs?${query}`, token);
+    const batch = body.jobs ?? [];
+    jobs.push(...batch);
+    const total = body.total_count ?? jobs.length;
+    if (batch.length < JOB_PAGE || jobs.length >= total) {
+      if (jobs.length < total) throw new Error(`Run ${runId} job list ended after ${jobs.length} of ${total}`);
+      return jobs;
+    }
+  }
+  throw new Error(`Run ${runId} has too many jobs to record`);
+}
+
+/**
+ * The train's artifact SHA has to be a commit its main SHA may ship. A beta
+ * is that SHA or its stamp. A stable is the stamp of a source that SHA
+ * contains; ancestry comes from GitHub's compare because this checkout is
+ * shallow, and the stamp itself is still the local release-commit proof.
+ */
+async function assertReleaseTrainSubject(repo, token, headSha, subject) {
+  if (subject === headSha) {
+    verifyRelease(process.cwd(), subject, headSha);
+    return;
+  }
+  const version = JSON.parse(git(["show", `${subject}:version.json`])).version;
+  if (releaseChannel(version) !== "stable") {
+    verifyRelease(process.cwd(), subject, headSha);
+    return;
+  }
+  const parents = git(["rev-list", "--parents", "-n", "1", subject]).trim().split(" ").slice(1);
+  const parent = parents[0];
+  if (parents.length !== 1 || !/^[0-9a-f]{40}$/u.test(parent ?? "")) {
+    throw new Error(`${subject} is not a single-parent release commit`);
+  }
+  const compared = await githubRead(`/repos/${repo}/compare/${parent}...${headSha}`, token);
+  if (!sourceContainedInHead(compared.status)) {
+    throw new Error(`${subject} was cut from ${parent}, which ${headSha} does not contain`);
+  }
+  verifyReleaseCommit(process.cwd(), subject, parent);
+}
 
 /**
  * Record the ledgered jobs one CI run passed. Runs from the default branch in
@@ -217,7 +292,7 @@ async function recordRun(runId) {
     console.error(`Run ${runId} is not this repository's CI; nothing recorded.`);
     return;
   }
-  const { jobs } = await githubRead(`/repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, token);
+  const jobs = await listRunJobs(repo, runId, token);
   const passed = passedLedgerJobs(jobs);
   if (passed.length === 0) {
     console.error(`Run ${runId} passed no ledgered job; nothing recorded.`);
@@ -234,9 +309,13 @@ async function recordRun(runId) {
   const subject = String(JSON.parse(unzipSingleFile(zip).toString("utf8")).sha ?? "");
   git(["fetch", "--no-tags", "--depth=2", "origin", subject]);
   const parents = git(["rev-list", "--parents", "-n", "1", subject]).trim().split(" ").slice(1);
-  if (!subjectMatchesRun(run, subject, parents)) {
+  const checked = { ...run, default_branch: process.env.DEFAULT_BRANCH };
+  if (!subjectMatchesRun(checked, subject, parents)) {
     throw new Error(`Run ${runId} (${run.event} ${run.head_sha}) did not test ${subject}`);
   }
+  // Push and pull request runs are bound by their head. A train's child commit
+  // still has to be the release stamp that head may ship.
+  if (run.event === "workflow_dispatch") await assertReleaseTrainSubject(repo, token, run.head_sha, subject);
   const key = currentLedgerKey(subject);
   // One round trip to list what is already recorded and one push for the
   // rest: each call reaches GitHub from the runner's network, so a per-job
