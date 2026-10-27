@@ -1,52 +1,52 @@
 import type { CSSProperties, ReactNode } from "react";
 import { BellOff } from "lucide-react";
+import { agentFaceUrl } from "@xmatrix/protocol";
+import { ScenePage, type SceneWriter } from "@/components/landing/why-scene-page";
 import type { WhyScenes } from "@/lib/landing-copy";
 
-/* Why xMatrix's examples: one small scene per row and side, drawn in HTML
-   and played on one 8-second loop (site.css, "Why xMatrix scenes"). An
+/* Why xMatrix's examples: one small scene per row and side, played on one
+   8-second loop (site.css, "Why xMatrix scenes"). A page in them is real
+   markdown drawn by the app's own renderer (why-scene-page.tsx); the rest is
+   HTML. An
    element marked data-in="n" arrives at step n and stays until the loop
    restarts; data-out="n" leaves at step n; data-pulse="n" lights in its
    colour at step n; data-third="n" shows only in that third of the loop.
    Under reduced motion every scene rests on its last step. */
 
+// The same writers and colours as the live page above (live-page-preview.tsx).
 const AGENT = {
-  claude: { name: "Claude", initial: "C", color: "#b85a3b" },
-  codex: { name: "Codex", initial: "X", color: "#2f6f5e" },
-  cursor: { name: "Cursor", initial: "U", color: "#7a5389" },
-  daniel: { name: "Daniel", initial: "D", color: "#4b6382" },
+  claude: { name: "Claude", initial: "C", color: "#b85a3b", harness: "claude" },
+  codex: { name: "Codex", initial: "X", color: "#2f6f5e", harness: "codex" },
+  cursor: { name: "Cursor", initial: "U", color: "#7a5389", harness: "cursor" },
+  daniel: { name: "Daniel", initial: "D", color: "#4b6382", harness: null },
 } as const;
 type Who = keyof typeof AGENT;
 const AGENTS: readonly Who[] = ["claude", "codex", "cursor"];
 
 const tint = (who: Who) => ({ "--why-c": AGENT[who].color }) as CSSProperties;
 
-function Face({ who, className = "" }: { who: Who; className?: string }) {
-  return <span className={`why-face ${className}`} style={tint(who)}>{AGENT[who].initial}</span>;
+/** An Agent's face is the app's, its vendor's mark (agentFaceUrl); a person without a picture is their initial. */
+function Face({ who }: { who: Who }) {
+  const { harness, initial } = AGENT[who];
+  const mark = agentFaceUrl(harness);
+  if (!mark) return <span className="why-face" style={tint(who)}>{initial}</span>;
+  // eslint-disable-next-line @next/next/no-img-element -- a 16px static mark, as the app's own faces draw it
+  return <img src={mark} alt="" className="why-face why-face-mark" />;
 }
 
-function Page({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="why-page">
-      <p className="why-page-title">{title}</p>
-      {children}
-    </div>
-  );
+const writer = (who: Who): SceneWriter => ({ name: AGENT[who].name, harness: AGENT[who].harness, color: AGENT[who].color });
+
+/** A workstream as a page holds it in markdown: a task, its name in bold, its owner by @, where it stands. */
+function task(done: boolean, label: string, who: Who, text: string): string {
+  return `- [${done ? "x" : " "}] **${label}** · @${who} — ${text}`;
 }
 
-/** A page line whose status turns from one word to another at a step, lit in its owner's colour. */
-function StatusLine({ label, who, step, from, to }: { label: string; who: Who; step: number; from: string; to: string }) {
-  return (
-    <p className="why-line" style={tint(who)} data-pulse={step}>
-      <span className="why-dot" />
-      <span>
-        {label} ·{" "}
-        <span className="why-swap">
-          <span data-out={step}>{from}</span>
-          <span data-in={step} className="why-strong">{to}</span>
-        </span>
-      </span>
-    </p>
-  );
+const page = (title: string, ...lines: string[]) => [`## ${title}`, "", ...lines].join("\n");
+
+/** The launch page's three workstreams, as they stand after `done` of them are finished. */
+function workstreams(c: WhyScenes, done: number, count = 3): string[] {
+  return ([["web", "claude"], ["mobile", "codex"], ["docs", "cursor"]] as const).slice(0, count)
+    .map(([key, who], index) => task(index < done, c[key], who, index < done ? c.done[index]! : c.progress[index]!));
 }
 
 type Scene = (copy: WhyScenes) => ReactNode;
@@ -56,11 +56,8 @@ export const WHY_SCENES: readonly (readonly [Scene, Scene])[] = [
   // Where things stand: one page whose lines move ↔ windows taking turns on top.
   [
     (c) => (
-      <Page title={c.page}>
-        <StatusLine label={c.web} who="claude" step={1} from={c.progress[0]} to={c.merged} />
-        <StatusLine label={c.mobile} who="codex" step={2} from={c.progress[1]} to={c.merged} />
-        <StatusLine label={c.docs} who="daniel" step={3} from={c.progress[2]} to={c.merged} />
-      </Page>
+      <ScenePage frames={[0, 1, 2, 3].map((done) => page(c.page, ...workstreams(c, done)))}
+        writers={[null, writer("claude"), writer("codex"), writer("cursor")]} />
     ),
     (c) => (
       <div className="why-stack">
@@ -77,10 +74,8 @@ export const WHY_SCENES: readonly (readonly [Scene, Scene])[] = [
   [
     (c) => (
       <div className="why-split">
-        <Page title={c.page}>
-          <StatusLine label={c.web} who="claude" step={1} from={c.progress[0]} to={c.merged} />
-          <StatusLine label={c.mobile} who="codex" step={3} from={c.progress[1]} to={c.merged} />
-        </Page>
+        <ScenePage frames={[0, 1, 1, 2].map((done) => page(c.page, ...workstreams(c, done, 2)))}
+          writers={[null, writer("claude"), null, writer("codex")]} />
         <p className="why-quiet"><BellOff className="size-3" />{c.quiet}</p>
       </div>
     ),
@@ -107,13 +102,8 @@ export const WHY_SCENES: readonly (readonly [Scene, Scene])[] = [
             </p>
           ))}
         </div>
-        <Page title={c.page}>
-          {[c.web, c.mobile, c.docs].map((label, index) => (
-            <p key={label} className="why-line" data-in={index + 1} style={tint(AGENTS[index]!)}>
-              <span className="why-dot" />{label.split(" · ")[0]} · <span className="why-strong">{c.merged}</span>
-            </p>
-          ))}
-        </Page>
+        <ScenePage frames={[0, 1, 2, 3].map((count) => page(c.page, ...workstreams(c, 3, count)))}
+          writers={[null, writer("claude"), writer("codex"), writer("cursor")]} />
       </div>
     ),
     (c) => (
@@ -164,9 +154,7 @@ export const WHY_SCENES: readonly (readonly [Scene, Scene])[] = [
   [
     (c) => (
       <div className="why-split">
-        <Page title={c.decided}>
-          <p className="why-line" data-in={1} style={tint("daniel")}><span className="why-dot" />{c.decision}</p>
-        </Page>
+        <ScenePage frames={[page(c.decided), page(c.decided, `> ${c.decision}`)]} writers={[null, writer("daniel")]} />
         <div className="why-readers">
           {AGENTS.map((who, index) => (
             <p key={who} className="why-reader" data-in={index + 2}><Face who={who} />{c.read} ✓</p>
@@ -188,17 +176,14 @@ export const WHY_SCENES: readonly (readonly [Scene, Scene])[] = [
   // You in the loop: your edit lands, the agent waits ↔ stop, explain, start over.
   [
     (c) => (
-      <Page title={c.page}>
-        <p className="why-para">
-          <span data-in={1}>{c.draft[0]}</span>
-          <span className="why-swap">
-            <span data-out={3}><span data-in={2}>{c.draft[1]}</span></span>
-            <span data-in={3} className="why-mine" style={tint("daniel")}>{c.edited}</span>
-          </span>
-          <span data-in={5}>{c.draft[2]}</span>
-        </p>
-        <p className="why-waits" data-in={3}><Face who="claude" />{AGENT.claude.name} {c.agentWaits}</p>
-      </Page>
+      <div className="why-split">
+        <ScenePage frames={[
+          page(c.page), page(c.page, c.draft[0]), page(c.page, c.draft[0] + c.draft[1]),
+          page(c.page, `${c.draft[0]}**${c.edited}**`), page(c.page, `${c.draft[0]}**${c.edited}**`),
+          page(c.page, `${c.draft[0]}**${c.edited}**${c.draft[2]}`),
+        ]} writers={[null, writer("claude"), writer("claude"), writer("daniel"), null, writer("claude")]} />
+        <p className="why-waits" data-out={5}><span data-in={3} className="why-waits-in"><Face who="claude" />{AGENT.claude.name} {c.agentWaits}</span></p>
+      </div>
     ),
     (c) => (
       <div className="why-chat">

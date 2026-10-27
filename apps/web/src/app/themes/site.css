@@ -1147,6 +1147,16 @@ html:has(.site-page) {
     0 6px 16px oklch(0.25 0.03 60 / 0.1);
 }
 
+/* The live page and the Why xMatrix pages are drawn by the app's own page (`.xmatrix-app`, for its chips and
+   pens), on the site's warm paper rather than the app's white. */
+.site-live-page-window > .site-live-page.xmatrix-app.xmatrix-app {
+  background: transparent;
+}
+
+.site-why .why-page.xmatrix-app.xmatrix-app {
+  background: var(--site-paper);
+}
+
 .site-live-page {
   padding: 3rem 3.5rem 3.5rem;
   pointer-events: none;
@@ -1225,10 +1235,69 @@ html:has(.site-page) {
 }
 
 .why-page {
+  position: relative;
   height: 100%;
+  overflow: hidden;
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--site-paper);
+}
+
+/* The app's page, at the size of an example. */
+.why-page-zoom {
+  position: relative;
+  zoom: 0.74;
+}
+
+.why-page .page-document {
+  padding-bottom: 0;
+  white-space: normal;
+}
+
+.why-page .page-document h2 {
+  font-size: 1.15em;
+}
+
+.why-page .page-document :is(li, p, blockquote) > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.why-page .page-document :is(p, blockquote) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* What a writer just changed arrives in its colour and fades, as on a live page. */
+.why-page .why-fresh-block {
+  border-radius: 6px;
+  animation: why-fresh 1.8s ease-out both;
+}
+
+/* The writer's own pill stands at the right edge, level with what it changed. */
+.why-page-pen {
+  position: absolute;
+  right: 0;
+  margin-top: -2px;
+  animation: why-pen-in 160ms ease-out both;
+}
+
+@keyframes why-fresh {
+  from {
+    background-color: color-mix(in oklch, var(--why-c) 22%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes why-pen-in {
+  from {
+    opacity: 0;
+    translate: 4px 0;
+  }
 }
 
 .why-page-title {
@@ -1240,12 +1309,49 @@ html:has(.site-page) {
 .why-line {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-inline: -6px !important;
-  padding: 2px 6px;
+  padding: 3px 6px;
   overflow: hidden;
   border-radius: 6px;
   white-space: nowrap;
+}
+
+.why-item {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Where an owner's work is: a chip in its colour, a live dot while it runs,
+   solid once it is done. */
+.why-status-slot {
+  justify-items: end;
+}
+
+.why-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--why-c) 12%, transparent);
+  color: var(--why-c);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.why-status-done {
+  background: var(--why-c);
+  color: oklch(1 0 0);
+}
+
+.why-live {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .why-dot {
@@ -1281,6 +1387,13 @@ html:has(.site-page) {
   color: oklch(1 0 0);
   font-size: 9px;
   font-weight: 700;
+}
+
+.why-face-mark {
+  padding: 2px;
+  background: var(--site-paper);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--site-ink) 10%, transparent);
+  object-fit: contain;
 }
 
 .why-split {
@@ -1596,6 +1709,10 @@ html:has(.site-page) {
     animation: why-flow 1.2s linear infinite;
   }
 
+  .why-live {
+    animation: why-blink 1s ease-in-out infinite alternate;
+  }
+
   .site-why-scene [data-in="1"] { animation-name: why-in-1; }
   .site-why-scene [data-out="1"] { animation-name: why-out-1; }
   .site-why-scene [data-pulse="1"] { animation-name: why-ring-1; }
@@ -1637,6 +1754,12 @@ html:has(.site-page) {
   .site-why-scene :is([data-out], [data-fly]),
   .site-why-scene .why-tab-pane:not([data-third="1"]) {
     opacity: 0;
+  }
+}
+
+@keyframes why-blink {
+  to {
+    opacity: 0.25;
   }
 }
 
