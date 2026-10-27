@@ -46,7 +46,12 @@ its pull requests checked it and the release builds it (`scripts/ci-areas.mjs`,
 `releaseOutputs`). Merging runs nothing more.
 Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so a release
 reuses only results the full tier earned and still blocks on every gate its
-scope and channel select.
+scope and channel select. The train's jobs belong to Production Release
+Request, and that run records them: the recorder accepts the request only from
+this repository's default branch, and only for a commit that dispatch SHA may
+ship (itself, its beta stamp, or a stable stamp of a source it contains). The
+stamp proof is the same release-commit check the gate runs before checkout.
+Public Snapshot CI stays unrecorded.
 
 ## Hosted runners
 

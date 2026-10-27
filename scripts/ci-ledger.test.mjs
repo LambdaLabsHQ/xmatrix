@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import { parse } from "yaml";
 
@@ -16,12 +17,25 @@ import {
   ledgerRef,
   passedLedgerJobs,
   remoteCommits,
+  sourceContainedInHead,
   subjectMatchesRun,
   unzipSingleFile,
 } from "./ci-ledger.mjs";
 import { stampVersionText, versionedPaths } from "./version.mjs";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function runRecorder(stub, env = {}) {
+  return spawnSync(process.execPath, [
+    "--import", `data:text/javascript,${encodeURIComponent(stub)}`,
+    "scripts/ci-ledger.mjs", "record-run", "123",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 30_000,
+    env: { ...process.env, GITHUB_TOKEN: "test-token", GITHUB_REPOSITORY: "owner/repo", ...env },
+  });
+}
 
 // The recorder must recover a transient jobs-list failure before deciding
 // what can be recorded. Pure proof/key tests never exercise that HTTP boundary.
@@ -40,15 +54,39 @@ test("the recorder recovers a GitHub 502 while reading CI jobs", () => {
     };
     process.on('exit', () => console.log('jobs reads: ' + jobsReads));
   `;
-  const result = spawnSync(process.execPath, [
-    "--import", `data:text/javascript,${encodeURIComponent(stub)}`,
-    "scripts/ci-ledger.mjs", "record-run", "123",
-  ], {
-    cwd: repoRoot, encoding: "utf8", timeout: 30_000,
-    env: { ...process.env, GITHUB_TOKEN: "test-token", GITHUB_REPOSITORY: "owner/repo" },
-  });
+  const result = runRecorder(stub);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /jobs reads: 2/u);
+  assert.match(result.stderr, /passed no ledgered job; nothing recorded/u);
+});
+
+test("the recorder reads every job page before a matrix can vouch", () => {
+  const stub = `
+    let pages = 0;
+    globalThis.fetch = async (url) => {
+      if (url.endsWith('/actions/runs/123')) return Response.json({
+        path: '.github/workflows/production-release-request.yml',
+        event: 'workflow_dispatch',
+        head_repository: { full_name: 'owner/repo' },
+        head_branch: 'main',
+        head_sha: '${"a".repeat(40)}'
+      });
+      if (url.includes('/jobs?filter=latest&per_page=100&page=2')) {
+        pages += 1;
+        return Response.json({ total_count: 101, jobs: [{ name: 'ci / hub (2/4)', conclusion: 'failure' }] });
+      }
+      if (url.endsWith('/jobs?filter=latest&per_page=100')) {
+        pages += 1;
+        const jobs = Array.from({ length: 100 }, () => ({ name: 'ci / hub (1/4)', conclusion: 'success' }));
+        return Response.json({ total_count: 101, jobs });
+      }
+      throw new Error('unexpected request: ' + url);
+    };
+    process.on('exit', () => console.log('job pages: ' + pages));
+  `;
+  const result = runRecorder(stub, { DEFAULT_BRANCH: "main" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /job pages: 2/u);
   assert.match(result.stderr, /passed no ledgered job; nothing recorded/u);
 });
 
@@ -105,6 +143,39 @@ test("a run vouches only for the commit it could have tested", () => {
   assert.ok(!subjectMatchesRun({ event: "pull_request", head_sha: head }, merge, [head, base]));
   assert.ok(!subjectMatchesRun({ event: "pull_request", head_sha: head }, "not-a-sha", [base, head]));
   assert.ok(!subjectMatchesRun({ event: "workflow_dispatch", head_sha: head }, head, [base]));
+  const train = {
+    event: "workflow_dispatch",
+    path: ".github/workflows/production-release-request.yml",
+    head_sha: head,
+    head_branch: "main",
+    default_branch: "main",
+  };
+  // The shape admits the head or one parent. The stamp proof is verifyRelease,
+  // which the recorder runs before it derives the ledger key.
+  assert.ok(subjectMatchesRun(train, head, [base]));
+  assert.ok(subjectMatchesRun(train, merge, [head]));
+  assert.ok(!subjectMatchesRun(train, merge, [base, head]));
+  assert.ok(!subjectMatchesRun(train, merge, ["short"]));
+  assert.ok(!subjectMatchesRun({ ...train, head_branch: "topic" }, head, [base]));
+  assert.ok(!subjectMatchesRun({ ...train, default_branch: undefined }, head, [base]));
+  assert.ok(!subjectMatchesRun({ ...train, path: ".github/workflows/public-ci.yml" }, head, [base]));
+  assert.ok(!subjectMatchesRun({ ...train, path: ".github/workflows/ci.yml" }, head, [base]));
+});
+
+test("a train subject is proved before its ledger key is derived", () => {
+  const source = readFileSync(new URL("./ci-ledger.mjs", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("async function recordRun"));
+  const proof = body.indexOf("await assertReleaseTrainSubject(");
+  const key = body.indexOf("const key = currentLedgerKey(subject)");
+  assert.ok(proof > 0 && proof < key);
+});
+
+test("a compare status contains the source only when the head has it", () => {
+  assert.equal(sourceContainedInHead("ahead"), true);
+  assert.equal(sourceContainedInHead("identical"), true);
+  assert.equal(sourceContainedInHead("behind"), false);
+  assert.equal(sourceContainedInHead("diverged"), false);
+  assert.equal(sourceContainedInHead(undefined), false);
 });
 
 test("artifact zips are read whether stored or deflated", () => {
@@ -210,11 +281,15 @@ test("the recorder runs for every workflow whose runs it accepts", () => {
   const recorder = readFileSync(new URL("../.github/workflows/ci-ledger.yml", import.meta.url), "utf8");
   const names = [...RECORDED_WORKFLOWS].map((file) =>
     readFileSync(new URL(`../${file}`, import.meta.url), "utf8").match(/^name: (.+)$/mu)[1]);
-  assert.deepEqual(names, ["CI", "Public Snapshot CI"]);
+  assert.deepEqual(names, ["CI", "Public Snapshot CI", "Production Release Request"]);
   // The write-token workflow must not admit events its proof verifier rejects.
   assert.match(recorder, /github\.event\.workflow_run\.event == 'push' \|\| github\.event\.workflow_run\.event == 'pull_request'/u);
+  assert.match(recorder, /github\.event\.workflow_run\.name == 'Production Release Request'/u);
+  assert.match(recorder, /github\.event\.workflow_run\.event == 'workflow_dispatch'/u);
+  assert.match(recorder, /github\.event\.workflow_run\.head_branch == github\.event\.repository\.default_branch/u);
   assert.match(recorder, new RegExp(`workflows: \\[${names.join(", ")}\\]`, "u"));
   assert.match(recorder, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/u);
+  assert.match(recorder, /DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/u);
   assert.match(recorder, /run: node scripts\/ci-ledger\.mjs record-run "\$RUN_ID"/u);
 });
 
@@ -279,6 +354,21 @@ test("a job split over a matrix is recorded only when every entry passed", () =>
   // The public snapshot calls CI as its `validate` job.
   assert.equal(ledgerJobOf("validate / web (browser 1/4)"), "web");
   assert.equal(ledgerJobOf("validate / hub (3/6)"), HUB_SUITE_LEDGER_JOB);
+  // The release train calls CI as its `ci` job, so the request run wears that prefix.
+  assert.equal(ledgerJobOf("ci / hub (4/4)"), HUB_SUITE_LEDGER_JOB);
+  assert.equal(ledgerJobOf("ci / node-checks (duplicates)"), "node-checks");
+  assert.deepEqual(
+    passedLedgerJobs([
+      "ci / hub (static)",
+      ...[1, 2, 3, 4].map((shard) => `ci / hub (${shard}/4)`),
+      "ci / node-checks",
+      "ci / node-checks (duplicates)",
+    ].map((name) => job(name))).sort(),
+    [HUB_SUITE_LEDGER_JOB, "node-checks"].sort(),
+  );
+  assert.deepEqual(passedLedgerJobs([
+    job("ci / hub (1/4)"), job("ci / hub (2/4)"), job("ci / hub (3/4)"), job("ci / hub (4/4)", "failure"),
+  ]), []);
   assert.deepEqual(
     passedLedgerJobs(["rust-cli (clippy)", "rust-cli (test)"].map((name) => job(`validate / ${name}`))),
     ["rust-cli"],

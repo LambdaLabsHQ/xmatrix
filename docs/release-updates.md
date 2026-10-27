@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: A release train records the gates it passed
+
+Production Release Request now writes the full-tier CI jobs it passed into
+the content ledger, under the tree those jobs tested. The recorder accepts
+that workflow only from the default branch, and only a commit the dispatch
+SHA may ship: the SHA itself, its beta version stamp, or a stable stamp of a
+source that SHA contains. The stamp check is the same one the gate runs
+before it checks the release commit out. Manual Public Snapshot CI still
+does not record. A later train of the same tree skips gates this run already
+passed; if the ledger is missing, those gates run in full.
+
 ## Unreleased: Bounded body reads reject without waiting for cleanup
 
 Oversized authentication and connector bodies no longer wait for upstream
