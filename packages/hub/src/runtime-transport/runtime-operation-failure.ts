@@ -6,6 +6,7 @@ import { transientDurableObjectFailure } from "../durable-object-failure";
 import { postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONFLICT } from "../postgres-error-classification";
 import { safeServerDiagnosticId } from "../server-error-diagnostic";
 import { reportRuntimeDatabaseFailure } from "./runtime-database-failure";
+import { reportMachineRegistryCausalityFailure } from "./machine-registry-causality";
 
 import type { RuntimeOperationFailure } from "@xmatrix/protocol";
 export type { RuntimeOperationFailure } from "@xmatrix/protocol";
@@ -121,6 +122,7 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
   // Typed credential and database reports own their event and fixed diagnosis.
   // A second console capture would discard those fields and duplicate it.
   const reported = reportMachineDaemonCredentialFailure(error, failure.diagnosticId) ||
+    reportMachineRegistryCausalityFailure(error, failure.diagnosticId) ||
     reportRuntimeDatabaseFailure(error, failure.diagnosticId);
   (reported ? console.warn : console.error)("xMatrix runtime session failure", { ...failure, ...runtimeFailureOrigin(error) });
   return failure;
