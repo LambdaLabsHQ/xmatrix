@@ -6,7 +6,7 @@ The Apps list put category headings (Code & CI, Chat…) beside Connected, mixin
 a state with what an app does, and connected rows carried no state mark. Sections are
 now connection states only: Needs attention, Connected, Disconnected, Not
 connected and Coming soon. Categories are subheadings inside Not connected, and
-each connected row ends in a plugged-in mark. Unit and browser coverage check the sections,
+each connected row ends in a green plugged-in mark. Unit and browser coverage check the sections,
 the subheadings and the mark. Beta Web only, no API, schema or native change;
 recovery is a CI-validated beta Web release reverting the change.
 

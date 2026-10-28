@@ -1398,7 +1398,7 @@ export function AppsView({
         leading={<Icon className="size-7" />}
         title={connector.name}
         trailing={StateIcon ? <span role="img" aria-label={stateLabel} title={stateLabel}
-          className="app-tool-state-icon flex shrink-0" data-state={needsAttention ? "attention" : "running"}>
+          className="app-tool-state-icon flex shrink-0" data-state={needsAttention ? "attention" : "connected"}>
           <StateIcon className="size-4" /></span> : null}
         state={needsAttention ? "attention" : connected ? "running" : "paused"}
         subtitle={needsAttention ? connection?.error || "The connection needs to be authorized again" : undefined} />
