@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: An App's page leads with the one thing to do
+
+Every App's page is rebuilt around one lead. Its name, what it does and one
+status line come first. When the reader has something to do (connect,
+reconnect, fix a broken connection) that one step is a tinted sheet with the
+page's only solid action; a credentials-only app shows its form there instead
+of below twenty command descriptions. A working app shows no call to action.
+Below come what it reaches (accounts, mailboxes, logins, groups), the command
+that subscribes a channel, recent activity, permissions (its defaults in one
+sentence, then each channel rule), settings, the command reference folded,
+and Disconnect last. Every part uses the same rows, quiet actions and "add"
+row. The Apps list groups what needs attention, what is connected and what
+was disconnected, then every other app once under its category.
+
 ## Unreleased: Native scrolling stays free while older history settles
 
 After an older history page loads, a layout callback no longer consumes a

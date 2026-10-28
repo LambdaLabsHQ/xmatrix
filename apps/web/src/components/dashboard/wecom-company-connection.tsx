@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { Button } from "@/components/ui/button";
+import { ConnectorLinkActions, ConnectorRow, ConnectorRows } from "./connector-page";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 type Installation = { corpId: string; agentId: number; recipients: { memberId: string; recipientRef: string; sourceRef: string }[] };
-export function WeComCompanyConnection({ spaceId, token, beforeLink, afterRefresh }: {
-  spaceId: string; token: string; beforeLink: () => Promise<void>; afterRefresh: () => Promise<void>;
+export function WeComCompanyConnection({ spaceId, token, beforeLink, afterRefresh, lead = false }: {
+  spaceId: string; token: string; beforeLink: () => Promise<void>; afterRefresh: () => Promise<void>; lead?: boolean;
 }) {
   const [test, setTest] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [installation, setInstallation] = useState<Installation | null>(null);
@@ -38,20 +38,14 @@ export function WeComCompanyConnection({ spaceId, token, beforeLink, afterRefres
     } catch { if (current()) setError("WeCom company connection could not be confirmed. Check the company authorization and start again."); }
     finally { if (current()) setBusy(false); }
   }
-  return <div className="space-y-3">
-    <p className="text-sm text-muted-foreground">Authorize the company application with explicit member visibility. Confirm up to 20 members to receive message notifications and allow replies under each Channel’s action policy. Native message contents stay in WeCom.</p>
-    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={test} disabled={busy} onChange={event => setTest(event.target.checked)} />Use the company test application</label>
-    <div className="flex flex-wrap gap-2">
-      <Button id="wecom-install-start" size="sm" disabled={busy} onClick={() => void run(true)}>{busy ? "Working…" : "Authorize company"}</Button>
-      <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(false)}>Refresh connection</Button>
-    </div>
-    {installation && <div role="status" className="space-y-2 text-sm">
-      <p>Company <code>{installation.corpId}</code> · Application <code>{installation.agentId}</code></p>
-      {installation.recipients.map(value => <div key={value.recipientRef} className="break-all">
-        <p>Member <code>{value.memberId}</code></p><p>Channel subscription: <code>{value.sourceRef}</code></p>
-        <p>Send recipient: <code>{value.recipientRef}</code></p>
-      </div>)}
-    </div>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+  return <div className="space-y-4">
+    {installation && <ConnectorRows>
+      <ConnectorRow title={<>Company <code>{installation.corpId}</code></>} meta={<>Application <code>{installation.agentId}</code></>} />
+      {installation.recipients.map(value => <ConnectorRow key={value.recipientRef} title={<>Member <code>{value.memberId}</code></>}
+        meta={<>Channel subscription <code className="break-all">{value.sourceRef}</code> · send recipient <code className="break-all">{value.recipientRef}</code></>} />)}
+    </ConnectorRows>}
+    <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={test} disabled={busy} onChange={event => setTest(event.target.checked)} />Use the company test application</label>
+    <ConnectorLinkActions lead={lead} busy={busy} startLabel="Authorize company" startId="wecom-install-start"
+      onStart={() => void run(true)} onRefresh={() => void run(false)} error={error} />
   </div>;
 }

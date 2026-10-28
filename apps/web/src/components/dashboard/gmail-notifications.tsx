@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { Button } from "@/components/ui/button";
+import { actionClass } from "@/components/ui/action-tone";
+import { ConnectorAction, ConnectorEmpty, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
@@ -36,27 +37,28 @@ export function GmailNotifications({spaceId,token,userId,mailboxes}:{
   }
   // Only a mailbox's own member turns its notifications on; delivery follows each conversation's subscription.
   const owned=mailboxes.filter(mailbox=>mailbox.owner===`user:${userId}`);
-  if(state.isLoading)return <p className="text-xs text-muted-foreground">Loading notification settings…</p>;
-  return <div className="space-y-3 border-t border-border/60 pt-3">
-    <p className="text-sm font-bold">New mail notifications</p>
-    <p className="text-xs leading-5 text-muted-foreground">Turn notifications on for your mailboxes once. A conversation
-      receives them after it subscribes, like any app&apos;s events: <code>@gmail:subscribe:you@gmail.com</code>.
-      Inbox counts are checked every minute, with a separate check every 15 minutes, so notifications may be delayed.</p>
-    {state.error || update.error?<p role="alert" className="text-sm text-destructive">{(state.error ?? update.error)?.message}</p>:null}
-    {!state.data?.available?<p className="text-xs text-muted-foreground">Notifications are not yet available on this Hub.
+  const status=(item:Notification|undefined)=>!item?"Off":item.error==="paused"?"Retries paused — waiting for a new signal or renewal"
+    :item.error==="retry"?"Delivery delayed — retrying":item.error?"Needs attention — turn on again"
+    :item.expiresAt && Date.parse(item.expiresAt)<=Date.now()?"Listening expired — renewal pending"
+    :item.enabled?item.lastSignalAt?"On":"On — waiting for the first new mail":"Authorization incomplete — turn on again";
+  return <ConnectorSection title="New mail notifications" testId="gmail-notifications"
+    note={<>A conversation receives them once it subscribes, like any app&apos;s events: <code>@gmail:subscribe:you@gmail.com</code>.
+      Inboxes are checked every minute, so a notification may arrive a little late.</>}>
+    {state.isLoading?<p className="py-2.5 text-[13px] text-muted-foreground">Loading notification settings…</p>
+    :!state.data?.available?<p className="py-2.5 text-[13px] text-muted-foreground">Notifications are not yet available on this Hub.
       Your connected mailboxes can still search, read and reply.</p>
-    :owned.length===0?<p className="text-xs text-muted-foreground">None of the connected mailboxes is yours.</p>
-    :<ul className="space-y-2 text-xs">{owned.map(({address})=>{
-      const item=latest.get(address);
-      return <li key={address} className="flex items-center justify-between gap-2">
-        <div><p className="font-medium">{address}</p><p className="text-muted-foreground">
-          {!item?"Off":item.error==="paused"?"Retries paused — waiting for a new signal or renewal":item.error==="retry"?"Delivery delayed — retrying":item.error?"Needs attention — turn on again":item.expiresAt && Date.parse(item.expiresAt)<=Date.now()?"Listening expired — renewal pending":item.enabled?item.lastSignalAt?"On":"On — waiting for the first new mail":"Authorization incomplete — turn on again"}
-          {item?.lastSignalAt?` · Last signal ${new Date(item.lastSignalAt).toLocaleString()}`:""}</p></div>
-        {item?.enabled
-          ?<Button size="xs" variant="ghost" disabled={update.isPending} onClick={()=>update.mutate({action:"stop",id:item.id})}>Stop</Button>
-          :<Button size="xs" disabled={update.isPending || completing} onClick={()=>update.mutate({action:"start",address})}>
-            {completing?"Completing…":"Turn on"}</Button>}
-      </li>;
-    })}</ul>}
-  </div>;
+    :<ConnectorRows>
+      {owned.map(({address})=>{
+        const item=latest.get(address);
+        return <ConnectorRow key={address} title={address}
+          meta={<>{status(item)}{item?.lastSignalAt?` · Last signal ${new Date(item.lastSignalAt).toLocaleString()}`:""}</>}
+          trailing={item?.enabled
+            ?<ConnectorAction disabled={update.isPending} onClick={()=>update.mutate({action:"stop",id:item.id})}>Stop</ConnectorAction>
+            :<button type="button" className={actionClass({variant:"secondary",size:"sm"})} disabled={update.isPending || completing}
+              onClick={()=>update.mutate({action:"start",address})}>{completing?"Completing…":"Turn on"}</button>}/>;
+      })}
+      {owned.length===0?<ConnectorEmpty>None of the connected mailboxes is yours.</ConnectorEmpty>:null}
+    </ConnectorRows>}
+    {state.error || update.error?<p role="alert" className="mt-1 text-[13px] text-destructive">{(state.error ?? update.error)?.message}</p>:null}
+  </ConnectorSection>;
 }

@@ -1,15 +1,14 @@
 "use client";
 import { GmailNotifications } from "./gmail-notifications";
 
-import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { WEB_PROXY_ROUTES, type SpaceMember } from "@xmatrix/protocol";
-import { Button } from "@/components/ui/button";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
+import { ConnectorAction, ConnectorAddRow, ConnectorEmpty, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
 
 /* The Gmail connection's mailboxes and who each belongs to: one member (and
    their Agents' Runs) or one Agent registration. Only the owner may use a
@@ -50,34 +49,34 @@ export function GmailMailboxes({ spaceId, token, userId, members, adding, onAdd 
   ];
   const ownerOptions = (current: string) => owners.some((option) => option.value === current)
     ? owners : [...owners, { value: current, label: "No longer in this Space" }];
-  const selectClassName = "h-9 w-full rounded-md border border-border bg-background px-3 text-sm";
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs leading-5 text-muted-foreground">
-        Each mailbox is used only by the member it belongs to and their Agents, or by the one Agent it belongs to.
-      </p>
-      {write.error || mailboxes.error ? (
-        <p className="text-sm font-medium text-destructive">{(write.error ?? mailboxes.error)?.message}</p>
-      ) : null}
-      <ul className="divide-y divide-border/60 text-sm">
-        {(mailboxes.data ?? []).map((row) => (
-          <li key={row.address} className="grid items-center gap-2 py-2 sm:grid-cols-[1fr_1fr_auto]">
-            <span className="truncate font-bold">{row.address}</span>
-            <GlassSelect className={selectClassName} value={row.owner} aria-label={`Owner of ${row.address}`}
-              onChange={(owner) => write.mutate({ address: row.address, owner })} options={ownerOptions(row.owner)} />
-            <Button size="xs" variant="ghost" aria-label={`Remove ${row.address}`} disabled={write.isPending}
-              onClick={() => write.mutate({ address: row.address, owner: null })}>
-              <Trash2 />
-            </Button>
-          </li>
-        ))}
-        {mailboxes.data?.length === 0 ? <li className="py-2 text-muted-foreground">No mailbox is connected.</li> : null}
-      </ul>
+    <>
+      <ConnectorSection title="Mailboxes" testId="gmail-mailboxes"
+        note="Each mailbox is used only by its owner: one member and their Agents, or one Agent.">
+        <ConnectorRows>
+          {(mailboxes.data ?? []).map((row) => (
+            <ConnectorRow key={row.address} title={row.address}
+              trailing={(
+                <ConnectorAction aria-label={`Remove ${row.address}`} disabled={write.isPending}
+                  onClick={() => write.mutate({ address: row.address, owner: null })}>
+                  <Trash2 className="size-3.5" /> Remove
+                </ConnectorAction>
+              )}>
+              <div className="mt-1.5 max-w-xs">
+                <GlassSelect value={row.owner} aria-label={`Owner of ${row.address}`}
+                  onChange={(owner) => write.mutate({ address: row.address, owner })} options={ownerOptions(row.owner)} />
+              </div>
+            </ConnectorRow>
+          ))}
+          {mailboxes.data?.length === 0 ? <ConnectorEmpty>No mailbox is connected.</ConnectorEmpty> : null}
+          <ConnectorAddRow label="Add mailbox" onClick={onAdd} busy={adding} />
+        </ConnectorRows>
+        {write.error || mailboxes.error ? (
+          <p role="alert" className="mt-1 text-[13px] font-medium text-destructive">{(write.error ?? mailboxes.error)?.message}</p>
+        ) : null}
+      </ConnectorSection>
       <GmailNotifications spaceId={spaceId} token={token} userId={userId} mailboxes={mailboxes.data ?? []} />
-      <Button size="sm" type="button" disabled={adding} onClick={onAdd}>
-        {adding ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add mailbox
-      </Button>
-    </div>
+    </>
   );
 }
