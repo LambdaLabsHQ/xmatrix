@@ -366,17 +366,17 @@ export class PostgresMachineLifecycleRepository {
             (stopRequest as { sourceMessageId: string }).sourceMessageId);
           const startupFailed = context!.status === "failed" && context!.startup_failed === true &&
             runMetadata.executionCancellation === undefined;
-          // A channel stop's confirmation is the chip on the command that
-          // asked for it. Startup-failure cleanup still has to say why the
-          // process never started, and a stop that did not come from a
-          // channel command still posts, because nothing else would.
+          const cause = !channelStop ? stopCause(context!, runMetadata) : {};
+          // Routine confirmations are already visible in Instance/invocation
+          // state, including stops from UI controls with no Channel command.
+          // Failures and external causes still explain what happened.
           if (automationRunIdentity(runMetadata).automationOccurrenceId === undefined &&
-              !(payload.ok === true && channelStop && !startupFailed)) Object.assign(value, {
+              (payload.ok !== true || startupFailed || cause.stopCause !== undefined)) Object.assign(value, {
             stopResultNoticeContext: { ...notice, ok: payload.ok === true,
               // A channel stop answers on its command, not as another message.
               ...(channelStop ? { sourceMessageId: (stopRequest as { sourceMessageId: string }).sourceMessageId } : {}),
               ...(startupFailed ? { startupFailed: true } : {}),
-              ...(!channelStop ? stopCause(context!, runMetadata) : {}),
+              ...cause,
               controlKey: typeof payload.requestId === "string" && payload.requestId ? payload.requestId.slice(0, 200) : notice.runId,
               ...(typeof payload.error === "string" && payload.error.trim() ? { detail: payload.error.trim().slice(0, 2_000) } : {}) },
           });

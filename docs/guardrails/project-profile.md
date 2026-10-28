@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Routine successful stops appear in Instance and invocation state without a
+separate Channel notice; the Web also hides historical typed confirmations.
+Failures and external stop causes retain their explanations. See
+[invocation status](../design/mention-invocation/README.md).
+
 Saved resources do not inherit fixed cardinality quotas from query bounds.
 Space secrets, Channel pins, push registrations, memory entries, GitHub links,
 Page Automation reconciliation and Sentry/Discord installation bindings retain

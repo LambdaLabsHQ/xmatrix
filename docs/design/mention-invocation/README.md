@@ -27,6 +27,12 @@ category before Agent summons. Its fold is independent of the harness catalog. O
 remain in the colon reference picker. A new thread draft offers no Instances
 from its parent Channel.
 
+Routine successful stops update Instance and invocation state without posting a
+separate Channel message, including stops from UI controls without a source
+command. Historical typed stop-success notices are hidden in the timeline.
+Stop failures, failed-startup cleanup and stops caused by access changes or
+Instance deletion retain their explanations. Stored history is not erased.
+
 Mention categories are named by the lists' coloured section label (icon, name, count; one hue per category), one-line choices (name,
 then its description truncated in the remaining width), inset rounded selections
 and plain expansion rows inside the composer's single Liquid Glass surface.
