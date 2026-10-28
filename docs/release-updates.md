@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: History anchoring regressions fail on the first attempt
+
+The history-prepend reading-position spec overrides shared CI retries and runs
+each case once. A measured jump can no longer become a successful stable gate
+by passing a retry. Assertions and CPU throttling are unchanged; unrelated Web
+specs retain their existing retry policy. This tightens the existing test gate
+without changing deployment, signing or publication authority. A known reading
+regression is repaired on main and verified in a new beta before another stable
+request; runner setup failures retain the existing failed-job recovery path.
+
 ## Unreleased: Archive the nested Desktop publisher
 
 Archive Release Assets recognizes the exact historical and nested Desktop

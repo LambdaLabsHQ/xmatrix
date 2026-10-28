@@ -9,6 +9,9 @@ import {
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
+// A measured reading-position jump must block release on its first attempt,
+// rather than becoming a successful stable gate after a retry.
+test.describe.configure({ retries: 0 });
 
 /* Rows of uneven height, three hours apart. The prepended page is measured
    rather than estimated, the old first row loses its day divider once its
