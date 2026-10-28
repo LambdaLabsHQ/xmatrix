@@ -2209,6 +2209,69 @@ test("typing fast at the top of a busy page while an Agent writes keeps every ke
   await expect(editor).toContainText("none yet 6");
 });
 
+for (const width of [1280, 393]) test.describe(`page links at ${width}px`, () => {
+  test.use({ viewport: { width, height: 852 }, isMobile: width === 393, hasTouch: width === 393 });
+
+  // The formatting case below only checks the anchor exists. It cannot catch an editor swallowing its click.
+  test("plain URLs and Markdown links open directly while the page is editable", async ({ page: browser }) => {
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await browser.context().route("https://example.com/**", (route) => route.fulfill({ body: "Linked page" }));
+    const document = pageDocument("# Relay\n\nhttps://example.com/plain\n\n[Markdown guide](https://example.com/markdown)\n\n" +
+      "[**Formatted guide**](https://example.com/formatted)\n\nKeep editing here.\n");
+    const editor = width === 393 ? await openRelayOnPhone(browser, document) : await openLivePage(browser, document);
+    await expect(editor.locator(".page-document")).toHaveAttribute("contenteditable", "true");
+    for (const path of ["plain", "markdown", "formatted"]) {
+      const link = editor.locator(`a[href="https://example.com/${path}"]`);
+      const opened = browser.waitForEvent("popup", { timeout: 5_000 });
+      if (width === 393) await link.tap();
+      else await link.click();
+      const destination = await opened;
+      await expect(destination).toHaveURL(`https://example.com/${path}`);
+      await destination.close();
+    }
+    await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
+    await editor.getByText("Keep editing here.").click();
+    await browser.keyboard.press("End");
+    await browser.keyboard.type(" Still editable.");
+    await expect(editor).toContainText("Keep editing here. Still editable.");
+  });
+});
+
+test("link text can still be selected and its address edited, and unsafe links never open", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const editor = await openLivePage(browser,
+    "# Relay\n\n[A guide to the rollout](https://example.com/guide)\n\n" +
+    "[Unsafe script](javascript:alert%281%29)\n\n[Unsafe data](data:text/html,blocked)\n\nKeep editing here.\n");
+  const opened: Page[] = [];
+  browser.on("popup", (popup) => opened.push(popup));
+  const guide = editor.getByRole("link", { name: "A guide to the rollout" });
+  const bounds = (await guide.boundingBox())!;
+  await browser.mouse.move(bounds.x + 3, bounds.y + bounds.height / 2);
+  await browser.mouse.down();
+  await browser.mouse.move(bounds.x + bounds.width - 3, bounds.y + bounds.height / 2, { steps: 8 });
+  await browser.mouse.up();
+  await expect(browser.getByRole("textbox", { name: "Comment", exact: true })).toBeFocused();
+  expect(opened).toHaveLength(0);
+  await browser.keyboard.press("Escape");
+
+  // Enter the link with the keyboard so its Markdown destination is shown without following it.
+  await editor.getByText("Keep editing here.").click();
+  await browser.keyboard.press("ControlOrMeta+Home");
+  await browser.keyboard.press("ArrowDown");
+  await browser.keyboard.press("ArrowRight");
+  await editor.locator('[data-edit-link="https://example.com/guide"]').click();
+  await expect(browser.getByRole("textbox", { name: "Link address" })).toHaveValue("https://example.com/guide");
+  await browser.keyboard.press("Escape");
+  for (const name of ["Unsafe script", "Unsafe data"]) await editor.getByRole("link", { name }).click();
+  await editor.getByText("Keep editing here.").click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.type(" Safe.");
+  await expect(editor).toContainText("Keep editing here. Safe.");
+  expect(opened).toHaveLength(0);
+});
+
 test("everyday editing works as in Google Docs: rename the page, grow a table, links from typed URLs", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1280, height: 800 });
   // A page is named by the heading its document opens with; one that opens without a name reads "Untitled"
