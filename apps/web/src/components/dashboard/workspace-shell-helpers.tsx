@@ -503,7 +503,11 @@ export function followTimelineBottom(
   endMarker: HTMLDivElement | null
 ) {
   const landed = scrollContainer ? timelineBottomLandings.get(scrollContainer) : undefined;
-  if (!scrollContainer || !landed || landed.clientHeight !== scrollContainer.clientHeight) {
+  // A slow opening can outlast the bottom-stick grace. Its tail already draws
+  // the rows in place while the hidden list measures; gliding that list would
+  // expose its unfinished animation when it takes those rows over.
+  if (!scrollContainer || !landed || landed.clientHeight !== scrollContainer.clientHeight ||
+      scrollContainer.querySelector(".app-message-timeline-opening-tail")) {
     scrollTimelineToBottom(scrollContainer, endMarker);
     return;
   }

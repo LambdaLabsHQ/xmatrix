@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Slow Channel opens keep their messages in place
+
+A Channel's hidden virtual list could finish measuring after the 1.2-second
+bottom-stick grace. Its growth then started the ordinary bottom-follow glide
+behind the opening rows; taking them over mid-animation moved the messages
+down and back. Bottom following now lands directly while the opening tail
+exists, retaining the existing glide once the conversation is open. Browser
+coverage crosses the wall-clock grace during a populated Channel switch and
+checks every painted frame. Beta Web only, no schema or native change;
+recovery is a CI-validated beta Web release reverting the change.
+
 ## Unreleased: Choose to wait when provider quota blocks every Agent
 
 Usage exhaustion still attempts the ordinary automatic handoff first. When no
