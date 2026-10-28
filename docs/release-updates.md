@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Query observers follow the signed-in identity
+
+Changing the signed-in identity already creates a fresh QueryClient, but its
+mounted query observers could still belong to the previous client. A screen
+could therefore show an existing pin while its action read an empty current
+cache and pinned it again. Key the QueryClientProvider subtree by identity so
+observers and mutations move together; an unchanged identity keeps its client
+and mounted state. The existing unpin browser case now changes sessions first,
+then checks the empty saved pin list. Pending old-session Done responses and
+rapid pin/unpin remain covered. No API, schema or native change is needed;
+recovery is a CI-validated beta Web reverting this change.
+
 ## Unreleased: Channel catalog tests advance on a committed revision
 
 The catalog-notification browser fixture no longer changes its rows after a

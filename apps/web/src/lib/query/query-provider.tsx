@@ -51,5 +51,7 @@ export function XMatrixQueryProvider(props: { userId: string | null; children: R
     return () => client.clear();
   }, [client]);
 
-  return <QueryClientProvider client={client}>{props.children}</QueryClientProvider>;
+  // Query observers retain their creating client. Remount them with the identity
+  // instead of letting old observations drive writes through a new empty cache.
+  return <QueryClientProvider key={props.userId ?? "anonymous"} client={client}>{props.children}</QueryClientProvider>;
 }
