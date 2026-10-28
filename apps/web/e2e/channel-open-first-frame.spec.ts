@@ -131,6 +131,36 @@ test.describe("desktop", () => {
     await expectNewestMessageInEveryOpenFrame(page);
   });
 
+  test("a populated conversation still opening after the scroll grace keeps its rows in place", async ({ page }) => {
+    let clock = Date.now();
+    await page.clock.setFixedTime(new Date(clock));
+    const history = unevenHistory(60);
+    await openWorkspace(page, "/app/personal-sspaceperso/channels/general-cchannelgen", history);
+    await fixtureJson(page, "populated-other", "**/api/xmatrix/channels/channel-quiet/history**", {
+      messages: unevenHistory(40).map((message) => ({ ...message,
+        channelId: "channel-quiet", messageId: `other-${message.sequence}` })),
+      hasMore: false,
+    });
+    await expect(page.locator('[id="message:uneven-60"]')).toBeVisible();
+    await conversationOpened(page);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+    for (let visit = 0; visit < 3; visit += 1) {
+      await openQuietConversation(page);
+      await expect(page.locator('[id="message:other-40"]')).toBeVisible();
+      await conversationOpened(page);
+      await recordPaintedTimelineFrames(page, GENERAL_ROW_ACTIVE);
+      await clickConversationRow(page, "channel-general");
+      // A slow opening can outlast the wall-clock bottom-stick grace. Let
+      // that deadline pass while the virtualizer is still measuring behind
+      // the opening rows, without delaying its frame clock or animations.
+      await expect(page.locator(".app-message-timeline-opening-tail")).toHaveCount(1);
+      clock += 60_000;
+      await page.clock.setFixedTime(new Date(clock));
+      await expectNewestMessageInEveryOpenFrame(page, "message:uneven-60");
+    }
+  });
+
   /* The list takes the opening rows over only once it has measured its own.
      It used to take them the moment it had landed, drew the rows above them
      for the first time in that commit, and moved everything by the error of
