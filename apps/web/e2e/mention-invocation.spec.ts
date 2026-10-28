@@ -157,12 +157,11 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await page.screenshot({ path: "test-results/mention-invocation-desktop.png", fullPage: true });
   await page.keyboard.press("Escape");
   await expect(detail).toBeHidden();
-  await chips.nth(1).focus();
-  await page.keyboard.press("Enter");
+  await chips.nth(1).press("Enter");
   await expect(page.getByRole("dialog").locator("li", { hasText: "Reasoning started" })).toHaveAttribute("data-state", "done");
-  // The open popover can cover the next line, so switch by keyboard.
-  await chips.nth(2).focus();
-  await page.keyboard.press("Enter");
+  // Initial popup focus is queued in a frame. Address Enter to its trigger
+  // instead of sending a global key after an independently scheduled focus.
+  await chips.nth(2).press("Enter");
   await expect(page.getByRole("dialog")).toHaveCount(1);
   await expect(page.getByRole("dialog")).toContainText("No new process was started");
   await page.keyboard.press("Escape");
