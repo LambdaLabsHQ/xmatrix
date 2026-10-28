@@ -76,6 +76,46 @@ test("repository baseline remains in finished invocation details with UTC and un
   await expect(dialog).not.toContainText("recorded base is outside");
 });
 
+test("keyboard activation keeps mention details open past a pending hover close", async ({ page }) => {
+  await page.clock.install({ time: new Date(E2E_NOW) });
+  await installInvocationFixture(page, [codex, claude]);
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const chip = page.locator(".app-mention-invocation").nth(2);
+  const dialog = page.getByRole("dialog");
+  await expect(chip).toContainText("Failed");
+  // Freeze only after bootstrap; then put Enter inside the leave-delay window.
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1_000));
+  await chip.hover();
+  await page.clock.runFor(300);
+  await expect(dialog).toContainText("No new process was started");
+  await page.mouse.move(10, 10);
+  await page.clock.runFor(80);
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await page.clock.runFor(300);
+  await expect(dialog).toContainText("No new process was started");
+  await page.keyboard.press("Escape");
+  await page.clock.runFor(300);
+  await expect(dialog).toBeHidden();
+
+  // Explicit activation still closes on an outside press.
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await page.clock.runFor(300);
+  await expect(dialog).toBeVisible();
+  await page.locator(".app-message-timeline").click({ position: { x: 10, y: 10 } });
+  await page.clock.runFor(300);
+  await expect(dialog).toBeHidden();
+
+  // A hover-only card keeps its normal leave behavior after being unpinned.
+  await chip.hover();
+  await page.clock.runFor(300);
+  await expect(dialog).toBeVisible();
+  await page.mouse.move(10, 10);
+  await page.clock.runFor(300);
+  await expect(dialog).toBeHidden();
+});
+
 test("each mention has independent live progress and a keyboard-accessible timeline", async ({ page }) => {
   await page.clock.install({ time: new Date(E2E_NOW) });
   const push = await installInvocationFixture(page, [codex, claude]);
@@ -117,12 +157,11 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await page.screenshot({ path: "test-results/mention-invocation-desktop.png", fullPage: true });
   await page.keyboard.press("Escape");
   await expect(detail).toBeHidden();
-  await chips.nth(1).focus();
-  await page.keyboard.press("Enter");
+  await chips.nth(1).press("Enter");
   await expect(page.getByRole("dialog").locator("li", { hasText: "Reasoning started" })).toHaveAttribute("data-state", "done");
-  // The open popover can cover the next line, so switch by keyboard.
-  await chips.nth(2).focus();
-  await page.keyboard.press("Enter");
+  // Initial popup focus is queued in a frame. Address Enter to its trigger
+  // instead of sending a global key after an independently scheduled focus.
+  await chips.nth(2).press("Enter");
   await expect(page.getByRole("dialog")).toHaveCount(1);
   await expect(page.getByRole("dialog")).toContainText("No new process was started");
   await page.keyboard.press("Escape");

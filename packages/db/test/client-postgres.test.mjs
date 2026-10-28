@@ -1,8 +1,10 @@
-import { connectionString, integration } from "./postgres-database.fixture.mjs";
+import { connectionString, integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
-import { Pool } from "pg";
+import { Client, Pool } from "pg";
+import { randomUUID } from "node:crypto";
 
-import { createAuthorityDatabase } from "../dist/index.js";
+import { createAuthorityDatabase, databaseFailureEvidence } from "../dist/index.js";
+import { lockAgentRunChannels } from "../dist/agent-channel-access.js";
 
 
 integration("a real driver read timeout destroys its pooled connection without a rollback deadline", async () => {
@@ -43,4 +45,137 @@ integration("one opening message begins the transaction with every setting intac
       current_setting('lock_timeout') AS lock_timeout`, maxRows: 1 }));
   assert.deepEqual(rows, [{ request_id: requestId, operation: "client.opening",
     isolation: "serializable", lock_timeout: "2s" }]);
+});
+
+// HUB-AY: a lock timeout erases pg_blocking_pids' wait edge. Existing driver
+// recovery tests cannot prove the diagnostic was taken while the SQL was waiting.
+integration("execution-owner lock failures retain the live blocker without identities or SQL", async () => {
+  const isolated = await isolatedPostgres("execution_lock", { migrate: false, runtimeRole: false });
+  const connectionString = isolated.url.toString();
+  const placement = { spaceId: "space", shardId: "lock-diagnostic", placementEpoch: 1 };
+  const holder = isolated.client;
+  const table = `execution_wait_${randomUUID().replaceAll("-", "")}`;
+  try {
+    await holder.query(`CREATE SCHEMA control;
+      CREATE TABLE control.space_placement (space_id text,shard_id text,placement_epoch int,state text,target_shard_id text);
+      INSERT INTO control.space_placement VALUES ('space','lock-diagnostic',1,'active',NULL)`);
+    await holder.query(`CREATE TABLE ${table} (id int PRIMARY KEY, private_value text)`);
+    await holder.query(`INSERT INTO ${table} VALUES (1,'private-report')`);
+    await holder.query("BEGIN; SET LOCAL application_name='xmatrix-execution-report'");
+    await holder.query(`SELECT * FROM ${table} FOR UPDATE`);
+    for (const mode of ["available", "unavailable", "disconnect"]) {
+      let diagnosticConnections = 0;
+      const database = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic",
+        lockTimeoutMs: 1500, clientFactory: config => {
+          // A real driver owns the command. Only the independent diagnostic
+          // connection is unavailable in the negative case.
+          if (config.application_name === "xmatrix-lock-diagnostic") {
+            diagnosticConnections++;
+            if (mode === "unavailable") throw new Error("private-diagnostic-failure");
+            if (mode === "disconnect") {
+              const client = new Client(config);
+              return { on: client.on.bind(client), connect: client.connect.bind(client),
+                query: () => client.query("SELECT pg_terminate_backend(pg_backend_pid())"), end: client.end.bind(client) };
+            }
+          }
+          return new Client(config);
+        } });
+      await assert.rejects(database.transaction({ requestId: "private-request",
+        operation: "runtime.execution-report", placement }, tx => tx.query({ name: "runtime_execution_report_owner_v4",
+        text: `SELECT private_value FROM ${table} WHERE id=$1 FOR UPDATE`, values: [1], maxRows: 1 })), error => {
+        assert.equal(error.code, "55P03", "the original failure remains authoritative");
+        const [evidence] = databaseFailureEvidence(error);
+        assert.equal(evidence.lockWait?.status, mode === "available" ? "sampled" : "unavailable");
+        if (mode === "available") {
+          assert.equal(evidence.lockWait.waiter.owner, "execution-report");
+          assert.equal(evidence.lockWait.waiter.wait, "Lock");
+          assert.equal(evidence.lockWait.blockers.length, 1);
+          assert.equal(evidence.lockWait.blockers[0].owner, "execution-report");
+          assert.equal(evidence.lockWait.blockers[0].state, "idle in transaction");
+          assert.ok(evidence.lockWait.blockers[0].ageMs >= 1);
+        }
+        assert.doesNotMatch(JSON.stringify(evidence), /private-|execution_wait_|backend_pid|SELECT|password/u);
+        return true;
+      });
+      assert.equal(diagnosticConnections, 1);
+    }
+    let samples = 0;
+    const concurrent = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic",
+      lockTimeoutMs: 1500, clientFactory: config => {
+        const client = new Client(config);
+        if (config.application_name !== "xmatrix-lock-diagnostic") return client;
+        samples++;
+        return { async connect() {
+          await client.connect();
+          await client.query("SELECT pg_sleep(0.15)");
+        }, query: client.query.bind(client), end: client.end.bind(client) };
+      } });
+    let readyCount = 0, releaseReady;
+    const ready = new Promise(resolve => { releaseReady = resolve; });
+    const failures = await Promise.allSettled([1, 2].map(index => concurrent.transaction({
+      requestId: `concurrent-${index}`, operation: "runtime.execution-report", placement,
+    }, async tx => {
+      if (++readyCount === 2) releaseReady();
+      await ready;
+      return tx.query({ name: "runtime_execution_report_owner_v4", text: `SELECT id FROM ${table} FOR UPDATE`, maxRows: 1 });
+    })));
+    assert.ok(failures.every(result => result.status === "rejected" && result.reason.code === "55P03"));
+    assert.deepEqual(failures.map(result => databaseFailureEvidence(result.reason)[0].lockWait.status).sort(), ["busy", "sampled"]);
+    assert.equal(samples, 1, "concurrent waiting reports share the isolate's one diagnostic slot");
+    await holder.query("ROLLBACK");
+    const database = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic",
+      clientFactory: config => {
+        assert.notEqual(config.application_name, "xmatrix-lock-diagnostic", "a fast query opens no diagnostic connection");
+        return new Client(config);
+      } });
+    assert.deepEqual(await database.transaction({ requestId: "fast", operation: "runtime.execution-report", placement },
+      tx => tx.query({ name: "runtime_execution_report_owner_v4", text: "SELECT 1 AS ok", maxRows: 1 })), [{ ok: 1 }]);
+  } finally {
+    try { await holder.query("ROLLBACK"); }
+    finally { await isolated.close(); }
+  }
+});
+
+// HUB-AZ waits on the Channel before locking a Run. The execution-owner test
+// never enters this shared lifecycle lock, so it missed this diagnostic gap.
+integration("Agent message Channel lock failures retain either Channel's live blocker", async () => {
+  const isolated = await isolatedPostgres("channel_lock", { migrate: false, runtimeRole: false });
+  const holder = isolated.client;
+  let samples = 0;
+  const database = createAuthorityDatabase({ connectionString: isolated.url.toString(), shardId: "shard-0",
+    applicationName: "xmatrix-hub-message-authority", lockTimeoutMs: 1500,
+    clientFactory: config => {
+      if (config.application_name === "xmatrix-lock-diagnostic") samples++;
+      return new Client(config);
+    } });
+  try {
+    await holder.query("CREATE SCHEMA data; CREATE TABLE data.channels (channel_id text PRIMARY KEY)");
+    await holder.query("INSERT INTO data.channels VALUES ('private-a'),('private-b')");
+    for (const channel of ["private-a", "private-b"]) {
+      await holder.query("BEGIN; SET LOCAL application_name='xmatrix-agent-launch-coordinator'");
+      await holder.query("SELECT 1 FROM data.channels WHERE channel_id=$1 FOR UPDATE", [channel]);
+      await assert.rejects(database.transaction({ requestId: "private-request", operation: "message.append" },
+        tx => lockAgentRunChannels(tx, "private-b", "private-a")), error => {
+        assert.equal(error.code, "55P03");
+        const [evidence] = databaseFailureEvidence(error);
+        assert.equal(evidence.queryName, "channel_lifecycle_lock_runtime_new_work_v1");
+        assert.equal(evidence.lockWait?.status, "sampled");
+        assert.equal(evidence.lockWait.waiter.owner, "message");
+        assert.equal(evidence.lockWait.waiter.wait, "Lock");
+        assert.equal(evidence.lockWait.blockers[0].owner, "launch");
+        assert.equal(evidence.lockWait.blockers[0].state, "idle in transaction");
+        assert.ok(evidence.lockWait.blockers[0].ageMs >= 1);
+        assert.doesNotMatch(JSON.stringify(evidence), /private-|SELECT|postgres:\/\//u);
+        return true;
+      });
+      await holder.query("ROLLBACK");
+    }
+    assert.equal(samples, 2, "each failed Channel wait samples once");
+    await database.transaction({ requestId: "fast", operation: "message.append" },
+      tx => lockAgentRunChannels(tx, "private-b", "private-a"));
+    assert.equal(samples, 2, "uncontended Channel locks open no diagnostic connection");
+  } finally {
+    await holder.query("ROLLBACK").catch(() => {});
+    await isolated.close();
+  }
 });

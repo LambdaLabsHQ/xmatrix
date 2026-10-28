@@ -60,8 +60,6 @@ export type MentionReadMessageScope = {
   /** False while the invocation query has not answered. Absent hides the stop chip. */
   stopReceiptsLoaded?: boolean;
   rejections?: readonly SerializedAgentInvocationRejection[];
-  /** The connector command this message is. Absent on a quote of it. */
-  connector?: ConnectorInvocation;
   /** The model and effort statements this message is. Absent on a quote of it. */
   controls?: readonly AgentControlInvocation[];
   /** Hub receipts for this message's command, drawn on it instead of as rows. */
@@ -215,14 +213,13 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
     return segmentMessageInteraction<MentionReadTarget>(text, {
       continuations: scope?.continuations, rejections: scope?.rejections, launches,
       ...(stop ? { stop } : {}),
-      ...(scope?.connector ? { connector: scope.connector } : {}),
       ...(scope?.controls ? { controls: scope.controls } : {}),
       ...(scope?.notices ? { notices: scope.notices } : {}),
       launchStatusUnavailable: scope?.launchStatusUnavailable,
       mentions: run => splitMentionSegments(run, index ? index(run) : null),
     }, allowed);
   }, [text, allowed, base, scope?.continuations, scope?.rejections, scope?.launches,
-    scope?.stops, scope?.stopReceiptsLoaded, scope?.connector, scope?.controls, scope?.notices, scope?.sourceBody, scope?.launchStatusUnavailable]);
+    scope?.stops, scope?.stopReceiptsLoaded, scope?.controls, scope?.notices, scope?.sourceBody, scope?.launchStatusUnavailable]);
   if (!operational) return <PageReferenceRichText text={text} />;
   return <>{segments.map((segment, index) =>
     <InteractionSegmentView key={index} segment={segment} scope={scope} reading={reading} />)}</>;
@@ -289,8 +286,6 @@ function InteractionSegmentView({ segment, scope, reading }: {
         notice={segment.notice} sentAt={scope?.sentAt} />;
     case "mention.v1":
       return <MentionReadChip target={segment.target} text={segment.text} token={segment.token} />;
-    case "connector.v1":
-      return <ConnectorCommandChip invocation={segment.invocation} text={segment.text} />;
     default:
       // A contract this client does not know stays the text it was written as.
       return <PageReferenceRichText text={(segment as { text: string }).text} />;
@@ -424,7 +419,7 @@ export function MentionReadChip({
  * target marked where it sits, the way a summon's conditions are. Its result
  * is the connector's reply.
  */
-function ConnectorCommandChip({ invocation, text }: { invocation: ConnectorInvocation; text: string }) {
+export function ConnectorCommandChip({ invocation, text }: { invocation: ConnectorInvocation; text: string }) {
   const at = (offset: number) => Math.min(text.length, offset - invocation.start);
   const target = invocation.target;
   return (

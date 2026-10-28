@@ -20,6 +20,353 @@ lightning bolt. The Agents editor uses the same words in English and Chinese.
 No migration or native update is needed; recovery is a CI-validated beta Web
 release reverting the change.
 
+## Unreleased: Mention keyboard checks address their trigger
+
+The independent invocation timeline browser case presses Enter on the intended
+trigger in one locator action. Its former separate focus and global key could
+race the previous popup's frame-delayed initial focus, sending Enter to a close
+button or the document instead. Controlled delayed-focus evidence reproduces
+that misdirected key on the same deployed client; targeting the trigger passes
+the original dialog/progress assertions. This changes the fixture only, with
+no production behavior, timeout, tolerance or retry-policy change.
+
+## Unreleased: The first sign-in keeps one query lifecycle
+
+The first sign-in keeps both the open page and its QueryClient, so observers
+and actions remain on the same cache without re-consuming a one-time callback.
+Leaving any signed-in reader advances a separate mount generation and creates
+a fresh client, including first sign-in followed by sign-out; using the word
+anonymous for both keys could previously skip that reset. Returning to an
+earlier account cannot revive its old mounted state. Existing pin/browser and
+callback owner cases cover initial sign-in and account changes. No API, schema
+or native change is needed; recovery is a CI-validated beta Web reverting it.
+
+## Unreleased: Message catalog checks start after bootstrap refreshes
+
+The unpaged-message browser case now installs its fixed catalog before one
+navigation and drains startup's refresh window before injecting arrivals.
+Previously a reconnect and the synthetic messages could share one window:
+the normal full-refresh path then read the fixture's permanently old catalog
+instead of exercising message promotion. The two-message count and the
+shared snapshot without viewer read state keep their original assertions.
+No product, API, schema, timeout, retry policy or native behavior changes.
+
+## Unreleased: Page link editing checks start at the selected text
+
+The Page link browser case now verifies that closing its discussion returns
+focus to the editor, then moves within the selected guide to expose its link
+address. Jumping to the document start and counting one visual Down key could
+leave the caret in a decorated title, so the case waited for a control outside
+its actual caret paragraph. Drag selection, address editing, continued writing
+and unsafe-link assertions stay intact, with unchanged timeouts and retries.
+This is browser setup only; no product, API, schema or native behavior changes.
+
+## Unreleased: Message Channel lock failures retain their blocker
+
+HUB-AZ timed out while an Agent append waited for a Channel lifecycle lock.
+The event had no holder evidence, and console capture lost the database's
+named-query diagnostics. The message failure boundary now explicitly reports
+the original exception with that bounded evidence once. The existing slow-lock
+sampler also covers Channel lifecycle admission locks, retaining waiter and
+blocker owner categories, states and transaction ages before PostgreSQL removes
+the wait edge. It shares the execution-report sampler's one-connection bound;
+fast locks open no diagnostic connection. Lock order, authorization, public
+errors, retry policy and unknown-COMMIT reconciliation are unchanged. This is
+missing diagnostic coverage, not a confirmed fix for the underlying contention.
+No migration; recovery uses a CI-validated beta Hub reverting this change.
+
+## Unreleased: Query observers follow the signed-in identity
+
+Changing the signed-in identity already creates a fresh QueryClient, but its
+mounted query observers could still belong to the previous client. A screen
+could therefore show an existing pin while its action read an empty current
+cache and pinned it again. Key the QueryClientProvider subtree by identity so
+observers and mutations move together; an unchanged identity keeps its client
+and mounted state. The existing unpin browser case now changes sessions first,
+then checks the empty saved pin list. Pending old-session Done responses and
+rapid pin/unpin remain covered. No API, schema or native change is needed;
+recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: Channel catalog tests advance on a committed revision
+
+The catalog-notification browser fixture no longer changes its rows after a
+second read. Initial hydration or a legitimate refresh could consume that
+response before the test sent its revision notification, inventing a new
+Channel prematurely. Install the initial snapshot before navigation and replace
+it only when simulating the commit, then send the existing notification. The
+owning case now holds the old snapshot across an additional refresh and keeps
+its original absent-before/present-after assertions. This changes test data
+only; no product, schema, retry policy or native artifact changes.
+
+## Unreleased: Successful stops no longer repeat their status as a message
+
+Stops from UI controls lacked a source command, so their successful Machine
+result still posted a separate system fact after inline status replaced that
+feedback. Routine success now updates state alone; the Web hides historical
+typed success notices too. Stop failures, failed-startup cleanup and external
+causes such as access withdrawal remain explained. This ships in the Hub and
+beta Web, with no data migration or native update. Stored history is preserved;
+recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Spaces can store more than 128 secrets
+
+A Space with 128 secrets refused the next credential even when it was needed
+for normal work. The Hub removes that storage quota, and catalog, Run value
+and approval reads also work beyond the old boundary. Reads use ordered,
+bounded SQL pages and per-request byte budgets; alias listings do not fetch
+encrypted values. Existing encryption, live Run authorization and admin
+approval remain in force. This ships in the Hub without a schema or client
+change. Recovery is a CI-validated Hub release reverting this change; keep
+stored secrets intact and restore forward support for catalogs above 128
+before relying on an older read implementation.
+
+## Unreleased: Page links open with a click or tap
+
+Bare URLs and Markdown links in an editable page now open directly in a new
+tab. Before, opening them required Ctrl/⌘, leaving phone readers without that
+gesture. Dragging across link text still selects it, and its visible Markdown
+destination still opens the address editor. This ships in the beta Web; no
+schema or native change is needed. Recovery is a CI-validated beta Web release
+reverting the change.
+
+## Unreleased: Explicit activation keeps mention details open
+
+A mention's delayed hover-close can already be queued when Enter or a click
+pins its details open. Both invocation and prose-detail cards now reject that
+stale hover close after explicit activation. Escape, an outside press, focus
+leaving and ordinary hover-only dismissal retain their existing behavior. A
+controlled-clock browser regression reproduces the old disappearance without
+changing position, timeout or retry tolerances. No API, data or native update
+is needed; recovery uses a CI-validated beta Web reverting the change.
+
+## Unreleased: Sending does not wait for summon previews
+
+Pressing Enter or Send with an Agent mention previously waited up to six
+seconds for the draft intent preview before the message appeared. Sending
+now takes completed readings for the exact current draft immediately;
+unfinished previews use the existing post-send intent check. Changed drafts
+cannot carry an older reading. This ships in the beta Web, with no API or
+data migration. Recovery is a CI-validated beta Web reverting the change.
+
+## Unreleased: Page edits in a Channel fold to a summary with a preview
+
+An Agent message that changed a page drew its first three changed lines in
+full under the message, and clicking anywhere on it opened the page. The card
+now folds by default: one line names the page, the sections changed and the
+lines added and taken out (+3 −3), and two changes preview on one line each,
+cut to where the words changed and leading with what the page says now.
+Unfolding lists every change by section; Open page is its own button. This
+ships in the beta Web; no API or data migration is needed. Recovery is a
+CI-validated beta Web reverting the change.
+
+## Unreleased: Automatic Gmail reads use the Hub's Composio key
+
+Live receipts for automatic Gmail reads reported a failure. A stored Composio
+grant holds only account ids, and the Hub adds its project key per call; the
+notification worker read without it. The automatic read now adds the key the
+same way, and a Hub without one fails the read and names Composio. This ships in the Hub.
+
+## Unreleased: Automatic Gmail reads now reach the Channel
+
+The first release of automatic Gmail reads posted no receipt: each one replied
+to the notification, and an App's message cannot be a reply target, so the
+append was refused. The receipt now follows its notification, and a refused
+receipt is logged by failure kind without mail content. This ships in the Hub.
+## Unreleased: Share says who reads a page and who changes it
+
+A page's Share now opens just under its button as one glass pane. "Who can
+read" names everyone in the Space, with the page's own link beside them, and
+"Anyone with the link" as a switch; once a page is public, its public link
+stands under that switch with its own Copy. "Who changes it" holds the
+Agents-only-suggest and Space-rules switches. Copying confirms on the button,
+and a switch that fails says why beneath itself instead of behind the
+dialog. Before, Copy link only ever gave the in-app link, and a failed
+suggest-only change said nothing. This ships in the beta Web; no API or data
+migration is needed. Recovery is a CI-validated beta Web reverting the change.
+
+## Unreleased: New Gmail messages arrive already read
+
+When a new message reaches a mailbox with notifications on, the Gmail
+connector now reads it itself, as the mailbox owner, and answers the
+notification with a private Gmail read receipt. The owner sees the message
+right there in the Web; everyone else in the Channel, and every Agent, sees
+only the mask, and Agents read a message with their own `@gmail:read` as
+before. Reads also report Gmail's own SPF/DKIM/DMARC results, so a forged
+sender is visible. A failed read never holds back the notification, and after
+30 messages in an hour a mailbox's notifications skip the read. This ships in
+the Hub; no migration is needed. Recovery is a CI-validated Hub reverting the change.
+
+## Unreleased: An App's page leads with the one thing to do
+
+Every App's page is rebuilt around one lead. Its name, what it does and one
+status line come first. When the reader has something to do (connect,
+reconnect, fix a broken connection) that one step is a tinted sheet with the
+page's only solid action; a credentials-only app shows its form there instead
+of below twenty command descriptions. A working app shows no call to action.
+Below come what it reaches (accounts, mailboxes, logins, groups), the command
+that subscribes a channel, recent activity, permissions (its defaults in one
+sentence, then each channel rule), settings, the command reference folded,
+and Disconnect last. Every part uses the same rows, quiet actions and "add"
+row. The Apps list groups what needs attention, what is connected and what
+was disconnected, then every other app once under its category.
+
+## Unreleased: Native scrolling stays free while older history settles
+
+After an older history page loads, a layout callback no longer consumes a
+wheel or other pending scroll before the browser has moved the timeline.
+That race could mistake the subsequent movement for layout drift and pull
+the reader back in either direction. The anchor keeps waiting for movement;
+its own corrections and compensated virtualizer changes update the pending
+baseline without claiming reader input. Existing quiet and maximum lifetimes
+still apply. This ships in the beta Web; no API or data migration is needed.
+Recovery is a CI-validated beta Web reverting the change.
+
+## Unreleased: Shared pages read as the page does in the app
+
+A published page (`/p/…`) is set with the live editor's styles on the app's
+paper: headings, lists and tables come out formatted instead of bare text. A
+thin bar carries where the page sits and the xMatrix mark; the title stands
+large, with the faces of who keeps the page current and when it last changed
+under it; the page's sections are rules at the right edge. In the app and on a
+shared page, tables drop their cell grid for hairline rows, columns fit their
+content and short cells keep to one line, and a page's reminders read as their
+names in ink instead of sky-blue pills. Web only; recovery is a beta Web
+reverting this change.
+
+## Unreleased: The iOS swipe back shows its parent once
+
+An iPhone edge swipe now reveals the parent screen directly. The Web page
+commits Back synchronously under UIKit's moving snapshot, without starting a
+second Web animation of the outgoing conversation. This fixes the appearance
+of returning to the current conversation before reaching its channel list.
+The existing iOS bridge is unchanged, so the fix reaches current TestFlight
+apps through the beta Web; no new native build or migration is required.
+Chevron, Android and browser Back keep their Web transitions. Recovery is a
+new beta Web reverting this change.
+
+## Unreleased: The iOS swipe back follows the finger again
+
+On iPhone, dragging from the left edge moves the screen with the finger again.
+Let go far or fast enough and the screen goes Back to its parent (a
+conversation to its channel list, a page to the page list) and slides off;
+short of that it settles back. #1027 had replaced WebKit's history swipe with
+one that acted only on release and waited behind the page's own scrolling, so
+the gesture felt gone. Back still never walks browser history. This ships in
+the iOS app (TestFlight); Web and Android are unchanged. Recovery is a new
+iOS build reverting this change.
+
+## Unreleased: Machine registry rejections retain their cause
+
+The daemon socket keeps the exact registry fence and legacy compatibility,
+but reports a rejected snapshot or successful spawn with a fixed reason,
+full/partial snapshot category, advertised capability and bounded client
+version. Sentry retains the originating stack and its issue reader exposes
+those fields without report payloads, identities, leases or raw epoch/sequence
+values. HUB-AX's generic console event could not distinguish stale evidence
+from missing or malformed fields; the next event can. This is diagnostic
+coverage, not a confirmed repair of its underlying cause. No schema or client
+update is needed. Recovery uses a CI-validated beta Hub reverting this change.
+
+## Unreleased: History anchoring regressions fail on the first attempt
+
+The history-prepend reading-position spec overrides shared CI retries and runs
+each case once. Frames are read in a task posted after animation-frame work,
+without installing a ResizeObserver that changes layout delivery order. Both
+scroll directions are covered, and raw frame coordinates are attached to the
+result. The downward case stays short of the finite tail and verifies that it
+has room to move. A measured jump cannot become a successful stable gate by
+passing a retry. Position tolerances and CPU throttling are unchanged; unrelated
+Web specs retain their existing retry policy. This tightens the existing test gate
+without changing deployment, signing or publication authority. A known reading
+regression is repaired on main and verified in a new beta before another stable
+request; runner setup failures retain the existing failed-job recovery path.
+
+## Unreleased: Archive the nested Desktop publisher
+
+Archive Release Assets recognizes the exact historical and nested Desktop
+publisher names, as it already does for Android. The nested publisher's successful
+job previously failed the archive's component proof despite a complete scoped
+production receipt. Both names appearing together remain ambiguous and fail;
+missing CLI, unrelated jobs, wrong source/attempt/scope and incomplete receipts
+remain rejected. This only repairs mirroring of sealed R2 artifacts to GitHub;
+deployment, signing and channel publication are unchanged. Migration uses the
+existing workflow, and recovery reruns that archive for the same successful
+production SHA, run, attempt and scope without rebuilding or moving tags.
+
+## Unreleased: Apple sign-in failures retain native diagnostic evidence
+
+Apple authorization failures keep up to three native error-domain categories
+and codes, plus the app version, build and iOS version, across the string-based
+iOS bridge. Unknown domains become `other`; descriptions, userInfo values,
+account details and tokens are excluded. The Web captures the native call's
+source-mapped boundary before exchanging a token with the Hub. Older shells
+still supply their existing error text; older Webs accept the diagnostic string.
+Cancellation remains silent and authorization is never automatically replayed.
+This supplies missing evidence for XMATRIX-WEB-S's unknown Apple error 1000;
+it does not establish or fix the underlying authorization failure. No schema
+migration is needed. The native diagnostics require the new TestFlight build;
+recovery uses a CI-validated beta Web/iOS release reverting this change.
+
+## Unreleased: Keep history anchoring until scrolling and layout settle
+
+An older history page keeps the reader's place while the virtualizer measures
+it. The quiet timer now follows scrolling and layout activity, including
+measurements that need no correction, instead of treating stable text as a
+settled list. Margin/padding swaps that move text without resizing a border box
+are also corrected. Pending input movement is credited before those corrections
+even when the browser has not delivered its scroll event yet, so anchoring does
+not cancel the reader's scroll. The existing quiet-release and ten-second
+deadline remain bounded; iPhone momentum still releases the anchor instead of
+writing a scroll. No protocol or schema change is needed. Recovery is a
+CI-validated beta Web reverting this fix.
+
+## Unreleased: Installer progress emits complete UTF-8 characters
+
+The Unix download bar repeats full Unicode strings rather than passing them
+through byte-oriented `tr`. Its spinner indexes complete symbols in a Bash
+array, so even a C locale cannot split a multibyte character. This keeps
+terminal output and captured install logs valid UTF-8 for both known and
+unknown content lengths. Download integrity and installation behavior are
+unchanged; a CI-validated beta Web reverting this change is the recovery path.
+
+## Unreleased: Delayed components validate their frozen release
+
+CLI, Desktop, Android and iOS component jobs verify consistent manifests, the
+remote annotated tag and its exact SHA, then the clean checkout's tag/version
+and main-history or version-stamp proof. The train still enforces ascending
+versions when it cuts a new tag, and component channel pointers still move
+only forward. A later parallel Hub tag is not a new version floor for a
+component that was already authorized.
+
+In 1.11.2-beta.12, Desktop started after CLI publication and a Hub-only beta.13
+had been tagged. Its late global version-order check rejected that frozen
+release before Desktop published, although Web and CLI had succeeded.
+Migration uses the same release workflows with the shared corrected check;
+there is no new deployment, signing or authorization path. Immutable old
+tags remain untouched. Recovery is a new CI-validated beta containing this
+fix and the failed beta's intents; retrying its old immutable script cannot
+repair the check. The real-Git regression reproduces that failure and keeps
+new-cut downgrades, wrong remote SHAs, tag/version mismatches and dirty
+checkouts rejected.
+
+## Unreleased: Starting two-step sign-in over abandons the old app handoff
+
+After signing out, the two-step page replaces the document with the cleaned
+sign-in URL before showing another email form. Previously the form could
+appear while client navigation still retained the old app continuation.
+Other account switches keep their existing request destination. No schema or
+native bridge change is needed; recovery is a CI-validated beta Web reverting
+the change. The existing browser regression protects the transition.
+
+## Unreleased: Keep standalone Agent launch context within its budget
+
+The shared bootstrap and Channel reporting text uses shorter wording while
+retaining identity, access, approach, progress, final-reply and working-mode
+requirements. This restores the existing 9,000-byte standalone/old-Hub launch
+budget without raising its limit or weakening the contract. Hub-delivered
+launches and the CLI's compiled fallback share the same text; no protocol or
+schema migration is needed. Recovery is a CI-validated beta reverting the text.
+
 ## Unreleased: Binary-only installation and Agent setup boundaries
 
 The Unix and PowerShell installers can install an integrity-verified binary
@@ -1498,3 +1845,17 @@ selection fill. This restores the established mention geometry contract without
 changing keyboard selection, routing or profile permissions. No migration or
 native update is needed; recovery is a CI-validated beta Web release reverting
 the change.
+
+## Unreleased: Execution report lock failures retain their blocker
+
+HUB-AY lost a Run-lock response, then its one fresh-session replay hit a lock
+timeout. The event did not identify the holder. A slow execution-owner query
+now takes one bounded, independent read of the live PostgreSQL wait edge,
+before a lock timeout erases it. Failures retain waiter and blocker state,
+transaction age and fixed owner categories; SQL, parameters, backend ids and
+user identities stay out of the event and Sentry issue reader. Fast queries
+open no extra connection, and each isolate permits only one concurrent sample.
+Unavailable diagnostics preserve the original error. Existing replay and
+unknown-COMMIT boundaries are unchanged. This is missing diagnostic coverage,
+not a confirmed repair of the underlying contention. Hub only, no migration;
+recovery is a CI-validated beta Hub reverting the change.

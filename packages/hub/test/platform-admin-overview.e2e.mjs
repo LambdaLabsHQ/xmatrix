@@ -13,6 +13,7 @@ import {
 import { createAuthorityDatabase, PostgresSpaceControlRepository } from "../../db/dist/index.js";
 import { Client } from "pg";
 import { POSTGRES_ADMIN_OVERVIEW_QUERY } from "../src/postgres-admin-overview-query.ts";
+import { rollUpAdminActivity } from "../src/postgres-admin-activity-rollup.ts";
 
 const ADMIN_EMAIL = "platform-admin-e2e@example.com";
 const OPERATOR_TOKEN = `operator-${"0123456789abcdef".repeat(4)}`;
@@ -152,10 +153,13 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     assert.equal(serialized.includes("private-admin-machine-host"), false);
     assert.equal(serialized.includes("must-not-appear"), false);
 
-    // Protect the admin read's cost at the real SQL boundary. A wide history
-    // must use the metadata/activity indexes rather than read every preview.
+    // Protect the admin read's cost at the real SQL boundary. Once settled, a
+    // wide history is read from the per-day rollup and the sent-time index,
+    // never by scanning every message.
     const profile = new Client({ connectionString: worker.postgresUrl });
     await profile.connect();
+    const database = createAuthorityDatabase({ connectionString: worker.postgresUrl, shardId: "admin-cost",
+      applicationName: "admin-cost", statementTimeoutMs: 30_000, transactionTimeoutMs: 60_000 });
     try {
       await profile.query(`INSERT INTO data.messages SELECT (jsonb_populate_record(
         NULL::data.messages, to_jsonb(source) || jsonb_build_object(
@@ -166,12 +170,18 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
             'senderSnapshot', jsonb_build_object('userId', $2::text))))).*
         FROM (SELECT * FROM data.messages WHERE channel_id = $1 AND author_kind = 'user' LIMIT 1) source
         CROSS JOIN generate_series(1, 20000) n`, [channel.id, userId]);
+      await profile.query("UPDATE data.messages SET sent_at = sent_at - interval '3 days' WHERE space_id = $1",
+        [space.id]);
+      assert.equal((await rollUpAdminActivity(database, { requestId: "admin-cost", now: Date.now() })).status,
+        "settled");
       await profile.query('VACUUM ANALYZE data.messages');
+      const { rows: [state] } = await profile.query(
+        "SELECT to_char(settled_through + 1, 'YYYY-MM-DD') AS live FROM data.admin_activity_rollup");
       const now = new Date();
-      const since = new Date(now); since.setUTCDate(since.getUTCDate() - 6); since.setUTCHours(0, 0, 0, 0);
-      const before = new Date(now); before.setUTCDate(before.getUTCDate() + 1); before.setUTCHours(0, 0, 0, 0);
+      const today = now.toISOString().slice(0, 10);
+      const first = new Date(Date.parse(`${today}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10);
       const result = await profile.query(`EXPLAIN (ANALYZE, FORMAT JSON) ${POSTGRES_ADMIN_OVERVIEW_QUERY}`,
-        [new Date(+now - 86400000), new Date(+now - 7 * 86400000), 201, since, before, true]);
+        [new Date(+now - 86400000), today, 201, first, today, true, `${state.live}T00:00:00.000Z`]);
       const scans = [];
       function inspect(plan) {
         if (plan['Relation Name'] === 'messages') scans.push(plan['Node Type']);
@@ -179,9 +189,70 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
       }
       inspect(result.rows[0]['QUERY PLAN'][0].Plan);
       assert.ok(scans.length > 0);
-      assert.ok(scans.every(type => type.includes('Index')), `history must stay on indexes: ${scans}`);
-    } finally { await profile.end(); }
+      assert.ok(scans.every(type => /Index|Bitmap Heap/u.test(type)), `history must stay on indexes: ${scans}`);
+    } finally { await profile.end(); await database.close?.(); }
   } finally {
+    await worker.stop();
+  }
+});
+
+test("settled activity reads the same as every message, and counts each day once", async () => {
+  const userId = `platform-admin-rollup-${randomUUID()}`;
+  const { worker, auth, jsonAuth } = await adminFixture(userId);
+  const database = createAuthorityDatabase({ connectionString: worker.postgresUrl, shardId: "admin-rollup",
+    applicationName: "admin-rollup", statementTimeoutMs: 30_000, transactionTimeoutMs: 60_000 });
+  const client = new Client({ connectionString: worker.postgresUrl });
+  await client.connect();
+  try {
+    const space = await createSpace(worker, `Admin Rollup ${randomUUID()}`);
+    const channel = await createOpenChannel(worker, jsonAuth, space.id, "rollup");
+    await postChannelMessage(worker, MOCK_TOKEN, channel.id, "settled message one");
+    await postChannelMessage(worker, MOCK_TOKEN, channel.id, "settled message two");
+    // History: sent three days ago, so its day settles on the next roll-up.
+    await client.query("UPDATE data.messages SET sent_at = sent_at - interval '3 days' WHERE space_id = $1",
+      [space.id]);
+    const read = async () => (await json(await worker.fetch("/api/admin/overview?activityDays=30",
+      { headers: auth }))).overview;
+    const facts = (overview) => {
+      const user = overview.users.find((entry) => entry.userId === userId);
+      const summary = overview.spaces.find((entry) => entry.id === space.id);
+      return {
+        messages: overview.totals.messages, humanMessages: overview.totals.humanMessages,
+        space: summary?.messages, spaceLastMessageAt: summary?.lastMessageAt,
+        user: user?.messages, lastMessageAt: user?.lastMessageAt, activeDays: user?.activeDays,
+        activity: overview.activity,
+      };
+    };
+
+    const unsettled = facts(await read());
+    assert.equal(unsettled.space, 2);
+    const historyDay = unsettled.activity.at(-4);
+    assert.deepEqual([historyDay.ownMessages, historyDay.activeUsers, historyDay.activeSpaces], [2, 1, 1]);
+    assert.equal(unsettled.activity.at(-1).activeUsers7d, 1, "three days ago is inside the last 7 days");
+    assert.equal(unsettled.activeDays.length, 1);
+
+    const first = await rollUpAdminActivity(database, { requestId: "admin-rollup-1", now: Date.now() });
+    assert.equal(first.status, "settled");
+    assert.equal(first.from, null, "the first roll-up settles every day before it");
+    const { rows: [settledRows] } = await client.query(
+      "SELECT COALESCE(SUM(messages), 0)::int AS messages FROM data.admin_activity_days WHERE space_id = $1",
+      [space.id]);
+    assert.equal(settledRows.messages, 2, "settled days are in the rollup");
+    assert.deepEqual(facts(await read()), unsettled, "a settled read equals reading every message");
+
+    // Today stays live, then settles exactly once.
+    await postChannelMessage(worker, MOCK_TOKEN, channel.id, "settled message three");
+    const live = facts(await read());
+    assert.equal(live.space, 3);
+    assert.equal(live.activity.at(-1).ownMessages, 1);
+    const later = await rollUpAdminActivity(database, { requestId: "admin-rollup-2", now: Date.now() + 3 * 86400000 });
+    assert.equal(later.status, "settled");
+    assert.deepEqual(facts(await read()), live, "settling a live day does not count it twice");
+    assert.equal((await rollUpAdminActivity(database, { requestId: "admin-rollup-3",
+      now: Date.now() + 3 * 86400000 })).status, "current");
+  } finally {
+    await client.end();
+    await database.close?.();
     await worker.stop();
   }
 });

@@ -4,7 +4,7 @@ import test from "node:test";
 import { createAuthorityDatabase } from "@xmatrix/db";
 import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { transientFailure } from "../src/error-contract.ts";
-import { postgresMessageSearch } from "../src/postgres-message-authority.ts";
+import { postgresMessageErrorResponse, postgresMessageSearch } from "../src/postgres-message-authority.ts";
 import { sentryEventMetadata } from "../src/connectors/actions/sentry-event-metadata.ts";
 
 // The client owns named-query evidence. Exercise that boundary through the HTTP
@@ -48,6 +48,39 @@ test("deadlock reports retain the query and safe wait graph without changing ret
   assert.deepEqual(sentryEventMetadata({ context: {
     postgres_conflict_locks: "private-canary", postgres_conflict_relation: "private-canary",
   } }), []);
+});
+
+// HUB-AZ reached the message-specific boundary, whose console capture lost
+// the driver's WeakMap evidence. The common HTTP classifier does not own it.
+test("message lock timeouts reach Sentry with database evidence and their original stack once", async t => {
+  const envelopes = captureErrorReports(t);
+  t.mock.method(console, "warn", () => {});
+  const failure = Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+  failure.stack = "Error: canceling statement due to lock timeout\n    at channelLock (index.js:123:4)";
+  const database = createAuthorityDatabase({ connectionString: "postgres://fixture", shardId: "shard-0",
+    clientFactory: () => ({ connect: async () => {}, end: async () => {}, async query(input) {
+      if (typeof input === "object") throw failure;
+      return { rows: [] };
+    } }) });
+  await assert.rejects(database.transaction({ requestId: "private-request", operation: "message.append" },
+    tx => tx.query({ name: "channel_lifecycle_lock_runtime_new_work_v1",
+      text: "SELECT private_canary", values: ["private-channel"], maxRows: 1 })), error => error === failure);
+  const response = postgresMessageErrorResponse(failure);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "PostgreSQL message authority is unavailable",
+    code: "postgres_message_authority_unavailable", retryable: true });
+  await sendErrorReports();
+  const events = exceptionEvents(envelopes);
+  assert.equal(events.length, 1);
+  const event = events[0];
+  const [attempt] = JSON.parse(event.extra.database_failure_attempts);
+  assert.equal(attempt.operation, "message.append");
+  assert.equal(attempt.queryName, "channel_lifecycle_lock_runtime_new_work_v1");
+  assert.equal(attempt.code, "55P03");
+  assert.equal(attempt.phase, "sql");
+  assert.ok(event.exception.values[0].stacktrace.frames.some(frame => frame.function === "channelLock"));
+  assert.ok(sentryEventMetadata({ context: event.extra }).some(line => line.startsWith("Database failure 1:")));
+  assert.doesNotMatch(JSON.stringify(event.extra), /private-|SELECT|postgres:\/\//u);
 });
 
 // HUB-AG: console capture discarded the driver's linked retry evidence and

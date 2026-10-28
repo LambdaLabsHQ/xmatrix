@@ -8,8 +8,8 @@ type AuthorizeRequest = { url: string; redirectParam: string };
  * A phone app that can open the provider's page in place: the shell's sheet is
  * stubbed to answer the address the Hub would send it back to.
  */
-async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerState?: "same" | "other"; client?: "ios" | "desktop"; newAccount?: boolean }) {
-  await page.addInitScript(({ inPlace, answerState, client = "ios", newAccount = false }) => {
+async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerState?: "same" | "other"; client?: "ios" | "desktop"; newAccount?: boolean; appleFailure?: string }) {
+  await page.addInitScript(({ inPlace, answerState, client = "ios", newAccount = false, appleFailure }) => {
     const shell = window as unknown as Record<string, unknown>;
     shell.__xmatrixDisableMockAuth = true;
     shell.__authorizeRequests = [];
@@ -19,6 +19,15 @@ async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerSta
       setBadge: async () => undefined, setTitle: async () => undefined,
       notify: async () => true, openExternal: async () => undefined,
       checkCliInstalled: async () => ({ installed: false }),
+      ...(appleFailure ? {
+        signInWithApple: async () => {
+          const error = new Error(appleFailure);
+          // WKWebView builds its Error in the document's injected script.
+          error.stack = `${error.name}: ${error.message}\n    at global code (${location.origin}/login:1:30)`;
+          if (appleFailure === "cancel") error.name = "AbortError";
+          throw error;
+        },
+      } : {}),
       ...(inPlace ? {
         authorizeInBrowser: async (request: AuthorizeRequest) => {
           (shell.__authorizeRequests as AuthorizeRequest[]).push(request);
@@ -49,6 +58,42 @@ const signedIn = {
   user: { id: "app-user", email: "app@example.test", name: "App User" },
   hubUrl: "https://xmatrix-hub.test", relayUrl: "wss://xmatrix-hub.test",
 };
+
+for (const appleFailure of [
+  "The operation couldn’t be completed. (com.apple.AuthenticationServices.AuthorizationError error 1000.)",
+  "Apple authorization failed: authorization:1000 > authentication:-7026; app=1.11.0; build=123; ios=26.0.0",
+  "cancel",
+]) {
+  test(`Apple authorization failure preserves its boundary and native evidence: ${appleFailure}`, async ({ page }) => {
+    await openAsPhoneApp(page, { inPlace: true, appleFailure });
+    const reports: Record<string, string>[] = [];
+    let exchanges = 0;
+    await page.route("**/api/client-defects", async route => {
+      reports.push(route.request().postDataJSON());
+      await route.fulfill({ status: 202, json: { reference: null } });
+    });
+    await page.route("**/api/auth/sign-in/social", async route => {
+      exchanges += 1;
+      await route.fulfill({ status: 500, json: {} });
+    });
+    await page.goto("/login");
+    await page.getByRole("button", { name: "Continue with Apple", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Continue with Apple", exact: true })).toBeEnabled();
+    if (appleFailure === "cancel") {
+      await expect(page.getByText(/Couldn't sign you in/u)).toHaveCount(0);
+      expect(reports).toHaveLength(0);
+    } else {
+      await expect(page.getByText(/Couldn't sign you in/u)).toBeVisible();
+      await expect.poll(() => reports.length).toBe(1);
+      expect(reports[0].action).toBe("Couldn't sign you in");
+      expect(reports[0].message).toBe(`Apple sign-in native authorization failed: ${appleFailure}`);
+      expect(reports[0].stack).toContain("/_next/static/");
+      expect(reports[0].stack).not.toContain("/login:1:30");
+      await expect(page.getByText(appleFailure, { exact: true })).toHaveCount(0);
+    }
+    expect(exchanges).toBe(0);
+  });
+}
 
 for (const newAccount of [false, true]) {
   test(`an app signs in with Google and keeps its landing path (new account: ${newAccount})`, async ({ page }) => {

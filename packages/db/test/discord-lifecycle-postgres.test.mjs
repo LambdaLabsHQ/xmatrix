@@ -139,7 +139,7 @@ integration('real callback-first and revoke-first contention fence both orders u
 
   await f.create('revoke-first', { fields: { oauthUserId: '423456789012345678' } });
   const originalSnapshot = await f.credentials.installationSnapshot({ requestId: crypto.randomUUID(), spaceId: 'revoke-first', actorUserId: 'owner', providerId: 'discord' });
-  const revokeGate = pauseAfterQuery(f.database, 'discord_lifecycle_targets_v1');
+  const revokeGate = pauseAfterQuery(f.database, 'discord_lifecycle_targets_v2');
   const first = new PostgresDiscordLifecycleRepository(revokeGate.repository).receive({ requestId: crypto.randomUUID(),
     appClientId: appId, userId: '423456789012345678', type: 'APPLICATION_DEAUTHORIZED', eventAt: revoked });
   await revokeGate.reached;
@@ -172,19 +172,19 @@ integration('Space deletion and grant binding tampering fail closed; invalid ide
 }));
 
 
-integration('fanout overflow rolls back every credential retirement and its watermark instead of partially revoking', async () => fixture(async f => {
+integration('Discord retires all bindings beyond 50 with its revocation watermark', async () => fixture(async f => {
   await f.create('bounded');
   await f.sql(`INSERT INTO data.app_connector_connections SELECT 'overflow-'||n||':discord','overflow-'||n,
     provider_id,status,version,'overflow-'||n,created_by,updated_at,last_checked_at,error
-    FROM data.app_connector_connections CROSS JOIN generate_series(1,50) n WHERE space_id='bounded'`);
+    FROM data.app_connector_connections CROSS JOIN generate_series(1,150) n WHERE space_id='bounded'`);
   await f.sql(`INSERT INTO data.app_connector_credentials SELECT 'overflow-'||n||':discord','overflow-'||n,
     field_names_json,encrypted_value_json,version,updated_by,created_at,updated_at
-    FROM data.app_connector_credentials CROSS JOIN generate_series(1,50) n WHERE space_id='bounded'`);
+    FROM data.app_connector_credentials CROSS JOIN generate_series(1,150) n WHERE space_id='bounded'`);
   await f.sql(`INSERT INTO data.app_connector_oauth_installations SELECT 'overflow-'||n||':discord','overflow-'||n,
     provider_id,app_client_id,installation_id,credential_version,updated_at,event_scope_id,gen_random_uuid(),discord_authorized_at
-    FROM data.app_connector_oauth_installations CROSS JOIN generate_series(1,50) n WHERE space_id='bounded'`);
-  await assert.rejects(f.event(), e => e.code === 'too_many_installations');
-  assert.equal((await f.sql(`SELECT count(*)::int AS n FROM data.app_connector_credentials`))[0].n, 51);
-  assert.equal((await f.sql(`SELECT count(*)::int AS n FROM data.app_discord_revocations`))[0].n, 0);
-  assert.equal((await f.sql(`SELECT count(*)::int AS n FROM data.app_connector_connections WHERE status='disconnected'`))[0].n, 0);
+    FROM data.app_connector_oauth_installations CROSS JOIN generate_series(1,150) n WHERE space_id='bounded'`);
+  assert.equal((await f.event()).matched, 151);
+  assert.equal((await f.sql(`SELECT count(*)::int AS n FROM data.app_connector_credentials`))[0].n, 0);
+  assert.equal((await f.sql(`SELECT count(*)::int AS n FROM data.app_discord_revocations`))[0].n, 1);
+  assert.equal((await f.sql(`SELECT count(*)::int AS n FROM data.app_connector_connections WHERE status='disconnected'`))[0].n, 151);
 }));

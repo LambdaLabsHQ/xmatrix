@@ -6,7 +6,7 @@ import { recordingDatabase } from "./recording-database.fixture.mjs";
 
 const invalidDevice = (error) => error instanceof PushDeviceError && error.status === 400;
 
-test("a phone registers its token and a person keeps a bounded number of devices", async () => {
+test("a phone registers its token under the person who last signed in", async () => {
   const db = recordingDatabase();
   const devices = new PostgresPushDeviceRepository(db);
   const first = await devices.register({ requestId: "r1", userId: "user-1", platform: "apns", token: "ab".repeat(32) });
@@ -22,12 +22,10 @@ test("a phone registers its token and a person keeps a bounded number of devices
     [first.deviceId, "user-2", "apns", "ab".repeat(32), null],
     [other.deviceId, "user-1", "fcm", "ab".repeat(32), null],
   ]);
-  const trims = db.calls.filter((call) => call.name === "push_device_trim_v1");
-  assert.deepEqual(trims.map((call) => call.values), [["user-1", 20], ["user-2", 20], ["user-1", 20]]);
 });
 
 test("the Mac app registers as an Apple device of its own kind", async () => {
-  const db = recordingDatabase((query) => query.name === "push_device_list_v1" ? [
+  const db = recordingDatabase((query) => query.name === "push_device_list_v2" ? [
     { device_id: "a".repeat(64), user_id: "user-1", platform: "apns", token: "cd".repeat(32), keys_json: { app: "mac" } },
     { device_id: "b".repeat(64), user_id: "user-1", platform: "apns", token: "ab".repeat(32), keys_json: null },
   ] : []);
@@ -67,7 +65,7 @@ test("what is not a device is refused before anything is written", async () => {
 });
 
 test("devices are listed for the people asked and forgotten by id", async () => {
-  const db = recordingDatabase((query) => query.name === "push_device_list_v1" ? [
+  const db = recordingDatabase((query) => query.name === "push_device_list_v2" ? [
     { device_id: "a".repeat(64), user_id: "user-1", platform: "apns", token: "ab".repeat(32), keys_json: null },
     { device_id: "b".repeat(64), user_id: "user-2", platform: "webpush", token: "https://push.example.test/x",
       keys_json: { p256dh: "pub", auth: "secret" } },
@@ -79,8 +77,8 @@ test("devices are listed for the people asked and forgotten by id", async () => 
     { deviceId: "b".repeat(64), userId: "user-2", platform: "webpush", token: "https://push.example.test/x",
       keys: { p256dh: "pub", auth: "secret" } },
   ]);
-  const list = db.calls.find((call) => call.name === "push_device_list_v1");
-  assert.deepEqual(list.values, [["user-1", "user-2"], 40]);
+  const list = db.calls.find((call) => call.name === "push_device_list_v2");
+  assert.deepEqual(list.values[0], ["user-1", "user-2"]);
 
   await devices.unregister({ requestId: "r3", userId: "user-1", deviceId: "a".repeat(64) });
   await devices.forget({ requestId: "r4", deviceIds: ["b".repeat(64), "b".repeat(64)] });

@@ -1,10 +1,12 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import {WEB_PROXY_ROUTES} from '@xmatrix/protocol';
-import {Button} from '@/components/ui/button';
+import {Input} from '@/components/ui/input';
+import {Textarea} from '@/components/ui/textarea';
+import {ConnectorField,ConnectorLinkActions,ConnectorRow,ConnectorRows} from './connector-page';
 import {xmatrixApiRequest} from '@/lib/query/api-client';
 type Installation={corpId:string;appId:number;agentId:number;recipients:{memberId:string;recipientRef:string}[]};
-export function DingTalkCompanyConnection({spaceId,token,beforeLink,afterRefresh}:{spaceId:string;token:string;beforeLink:()=>Promise<void>;afterRefresh:()=>Promise<void>}) {
+export function DingTalkCompanyConnection({spaceId,token,beforeLink,afterRefresh,lead=false}:{spaceId:string;token:string;beforeLink:()=>Promise<void>;afterRefresh:()=>Promise<void>;lead?:boolean}) {
   const [corpId,setCorpId]=useState(''),[members,setMembers]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [installation,setInstallation]=useState<Installation|null>(null);
   const work=useRef({generation:0,controller:null as AbortController|null});
@@ -39,17 +41,16 @@ export function DingTalkCompanyConnection({spaceId,token,beforeLink,afterRefresh
     } catch {if(current())setError('Check the company ID, explicit member IDs and current company authorization, then start again.');}
     finally {if(current())setBusy(false);}
   }
-  return <div className="space-y-3">
-    <p className="text-sm text-muted-foreground">Authorize one company and up to 20 members. Current company visibility and contact permission must include every selected member. Work notifications use the company’s approved template and each Channel’s action policy.</p>
-    <label className="block text-sm">Company ID<input aria-label="DingTalk company ID" className="mt-1 block w-full rounded border p-2" value={corpId} disabled={busy} onChange={event=>setCorpId(event.target.value)} autoComplete="off"/></label>
-    <label className="block text-sm">Member IDs<textarea aria-label="DingTalk member IDs" className="mt-1 block w-full rounded border p-2" value={members} disabled={busy} onChange={event=>setMembers(event.target.value)} placeholder="Separate IDs with spaces or commas"/></label>
-    <div className="flex flex-wrap gap-2">
-      <Button size="sm" disabled={busy} onClick={()=>void run(true)}>{busy?'Working…':'Authorize company'}</Button>
-      <Button size="sm" variant="outline" disabled={busy} onClick={()=>void run(false)}>Refresh connection</Button>
-    </div>
-    {installation&&<div role="status" className="space-y-2 text-sm"><p>Company <code>{installation.corpId}</code> · Application <code>{installation.appId}</code> · Agent <code>{installation.agentId}</code></p>
-      {installation.recipients.map(value=><div key={value.recipientRef} className="break-all"><p>Member <code>{value.memberId}</code></p><p>Read/send recipient: <code>{value.recipientRef}</code></p></div>)}
-    </div>}
-    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+  return <div className="space-y-4">
+    {installation&&<ConnectorRows>
+      <ConnectorRow title={<>Company <code>{installation.corpId}</code></>} meta={<>Application <code>{installation.appId}</code> · Agent <code>{installation.agentId}</code></>}/>
+      {installation.recipients.map(value=><ConnectorRow key={value.recipientRef} title={<>Member <code>{value.memberId}</code></>}
+        meta={<>Read/send recipient <code className="break-all">{value.recipientRef}</code></>}/>)}
+    </ConnectorRows>}
+    <ConnectorField label="Company ID"><Input aria-label="DingTalk company ID" value={corpId} disabled={busy} onChange={event=>setCorpId(event.target.value)} autoComplete="off"/></ConnectorField>
+    <ConnectorField label="Member IDs" help="Up to 20, separated by spaces or commas. Current company visibility and contact permission must include every one.">
+      <Textarea aria-label="DingTalk member IDs" value={members} disabled={busy} rows={2} onChange={event=>setMembers(event.target.value)}/>
+    </ConnectorField>
+    <ConnectorLinkActions lead={lead} busy={busy} startLabel="Authorize company" onStart={()=>void run(true)} onRefresh={()=>void run(false)} error={error}/>
   </div>;
 }

@@ -424,8 +424,10 @@ curl_file() {
         f=$((pct * w / 100))
         e=$((w - f))
         filled="" empty=""
-        [ "$f" -gt 0 ] && filled=$(printf '%*s' "$f" '' | tr ' ' '━')
-        [ "$e" -gt 0 ] && empty=$(printf '%*s' "$e" '' | tr ' ' '─')
+        printf -v filled '%*s' "$f" ''
+        printf -v empty '%*s' "$e" ''
+        filled=${filled// /━}
+        empty=${empty// /─}
         mb=$(awk "BEGIN{printf \"%.1f/%.1f MB\", ${cur}/1048576, ${total}/1048576}" 2>/dev/null) || mb=""
         printf "\r    \033[36m%s\033[0m\033[2m%s %3d%%" "$filled" "$empty" "$pct"
         [ -n "$mb" ] && printf "  %s" "$mb"
@@ -434,23 +436,25 @@ curl_file() {
       sleep 0.1
     done
     # Final 100%
-    bar_full=$(printf '%*s' "$w" '' | tr ' ' '━')
+    printf -v bar_full '%*s' "$w" ''
+    bar_full=${bar_full// /━}
     total_mb=$(awk "BEGIN{printf \"%.1f MB\", ${total}/1048576}" 2>/dev/null) || total_mb=""
     printf "\r    \033[36m%s\033[0m\033[2m 100%%" "$bar_full"
     [ -n "$total_mb" ] && printf "  %s" "$total_mb"
     printf "\033[K\033[0m\n"
   else
     # ── Spinner fallback ──
-    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 cur=0 mb="" fc=0 final_mb=""
+    local -a spin=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local i=0 cur=0 mb="" fc=0 final_mb=""
     while kill -0 "$pid" 2>/dev/null; do
       if [ -f "$output" ]; then
         cur=$(wc -c < "$output" 2>/dev/null | tr -d ' ') || true
         mb=$(awk "BEGIN{printf \"%.1f\", ${cur:-0}/1048576}" 2>/dev/null) || mb="?"
-        printf "\r    \033[2m${spin:$i:1} %s MB downloaded\033[K\033[0m" "$mb"
+        printf "\r    \033[2m%s %s MB downloaded\033[K\033[0m" "${spin[$i]}" "$mb"
       else
-        printf "\r    \033[2m${spin:$i:1} starting...\033[K\033[0m"
+        printf "\r    \033[2m%s starting...\033[K\033[0m" "${spin[$i]}"
       fi
-      i=$(( (i + 1) % ${#spin} ))
+      i=$(( (i + 1) % ${#spin[@]} ))
       sleep 0.08
     done
     if [ -f "$output" ]; then

@@ -40,9 +40,9 @@ test("Telegram refresh lists exact authorized groups and unlink posts only its s
   await openTelegram(page);
   await fixtureJson(page, "telegram-list", endpoint, { bindings: [{ chatSpace: room, sourceRef: `telegram:${room}` }, { chatSpace: "-222", sourceRef: "telegram:-222" }] }, { method: "GET" });
   await page.getByRole("button", { name: "Refresh connection", exact: true }).click();
-  await expect(page.getByText("Connected Telegram group:", { exact: false })).toHaveCount(2);
+  await expect(page.getByTestId("chat-link-binding")).toHaveCount(2);
   await fixtureJson(page, "telegram-remove", endpoint, { ok: true }, { method: "DELETE" });
   await page.getByRole("button", { name: "Unlink group", exact: true }).first().click();
   expect(await fixtureRequestBodies(page, "telegram-remove")).toEqual([{ chatId: room }]);
-  await expect(page.getByText("Connected Telegram group:", { exact: false })).toHaveCount(1);
+  await expect(page.getByTestId("chat-link-binding")).toHaveCount(1);
 });

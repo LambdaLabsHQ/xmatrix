@@ -203,7 +203,7 @@ test("the list adds a newly committed conversation from the Space catalog revisi
       }));
     });
   });
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const pageResponse = (revision: number, channels: typeof E2E_CHANNEL[]) => ({
     protocolVersion: 1,
     catalogRevision: revision,
@@ -215,18 +215,22 @@ test("the list adds a newly committed conversation from the Space catalog revisi
     nextCursor: null,
     counts: { active: channels.length, archive: 0, unread: 0, mentions: 0 },
   });
-  await fixtureRule(page, {
-    id: "flat-catalog-revision",
-    pattern: /\/api\/xmatrix\/channels\/page\?.*view=flat/u,
-    responder: { kind: "sequence", responses: [
-      { json: pageResponse(1, [E2E_CHANNEL]) },
-      { json: pageResponse(2, [thread, E2E_CHANNEL]) },
-    ] },
+  const catalogPattern = /\/api\/xmatrix\/channels\/page\?.*view=flat/u;
+  await fixtureJson(page, "flat-catalog-revision", catalogPattern, pageResponse(1, [E2E_CHANNEL]));
+  await page.goto(`/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, {
+    waitUntil: "domcontentloaded",
   });
 
   await expect(page.locator(`[data-channel-row-id="${E2E_CHANNEL.id}"]`)).toBeVisible();
+  // Extra initial reads must not manufacture a catalog revision before its commit.
+  const reads = (await fixtureRequests(page, "flat-catalog-revision")).length;
+  await page.evaluate(spaceId => window.dispatchEvent(new CustomEvent(
+    "xmatrix:channel-catalog-change", { detail: { spaceId, kind: "structure" } },
+  )), E2E_SPACE.id);
+  await expect.poll(async () => (await fixtureRequests(page, "flat-catalog-revision")).length).toBeGreaterThan(reads);
   await expect(page.locator(`[data-channel-row-id="${thread.id}"]`)).toHaveCount(0);
   await expect.poll(() => Boolean(publishCatalogChange)).toBe(true);
+  await fixtureJson(page, "flat-catalog-revision", catalogPattern, pageResponse(2, [thread, E2E_CHANNEL]));
   publishCatalogChange!();
   await expect(page.locator(`[data-channel-row-id="${thread.id}"]`)).toBeVisible();
 });
@@ -258,16 +262,19 @@ test("a message for a conversation the list has not paged in brings its row with
   const shown = { ...far, id: "channel-shown", name: "shown" };
   let send: ((frame: unknown) => void) | undefined;
   await routeHumanSocket(page, (frame, reply) => { if (frame.type === "human_connect") send = reply; });
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, far, shown] });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, far, shown] });
   await fixtureRule(page, {
     id: "flat-open-only", pattern: /\/api\/xmatrix\/channels\/page\?.*view=flat/u,
     responder: { kind: "static", json: { protocolVersion: 1, catalogRevision: 1, nextCursor: null,
       rows: [{ channel: E2E_CHANNEL, ownActivityAt: E2E_CHANNEL.updatedAt }], counts: { active: 3, unread: 0, mentions: 0 } } },
   });
-  send = undefined;
-  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   await expect.poll(visibleChannelRowIds(page)).toEqual([E2E_CHANNEL.id]);
   await expect.poll(() => Boolean(send)).toBe(true);
+  // This fixture keeps the paged snapshot fixed to exercise message promotion,
+  // not a reconnect reread. Finish startup's refresh window before arrivals.
+  await page.clock.install();
+  await page.clock.runFor(1_000);
   const message = (channelId: string, sequence: number, body: string) => ({ type: "channel_message_received", message: {
     messageId: `${channelId}-${sequence}`, channelId, sequence, body, sentAt: new Date().toISOString(),
     reactions: [], annotations: [], attachments: [],
@@ -407,16 +414,31 @@ for (const accounts of [["e2e-user", "other-reader"], ["e2e-user", "other-reader
   });
 }
 
-test("unpinning the last conversation removes Pinned and saves an empty list", async ({ page }) => {
+for (const changedAccount of [false, true]) test(`unpinning the last conversation removes Pinned and saves an empty list (${changedAccount ? "after changing accounts" : "after first sign-in"})`, async ({ page }) => {
+  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
+  const signIn = (id: string, delayMs = 0) => fixtureJson(page, `unpin-session-${id}`, "**/api/auth/get-session**", {
+    user: { id, email: `${id}@xmatrix.test`, name: id },
+    session: { token: `session-${id}`, expiresAt: new Date(Date.now() + 60_000).toISOString() },
+  }, { delayMs });
   const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan",
     updatedAt: "2026-07-01T08:00:00.000Z" };
   const other = { ...E2E_CHANNEL, id: "channel-other", name: "random",
     updatedAt: "2026-07-01T12:00:00.000Z" };
-  await openWorkspaceWithStubs(page, {
+  await installWorkspaceStubs(page, {
     spaces: [E2E_SPACE], channels: [pinned, other],
     channelViewPreference: { pinnedChannelIds: [pinned.id] },
   });
+  await fixtureJson(page, "auth-token", "**/api/auth/token**", { token: "test-jwt" });
+  await signIn("e2e-user", 200);
+  await page.goto(`/app/${pinned.spaceId}/channels/${pinned.name}--${pinned.id}`, { waitUntil: "domcontentloaded" });
   const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+  await expect(sidebar.getByRole("button", { name: "Unpin #launch-plan", exact: true })).toBeVisible();
+  if (changedAccount) {
+    const reads = (await fixtureRequests(page, "channel-view-preference")).length;
+    await signIn("other-reader");
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(async () => (await fixtureRequests(page, "channel-view-preference")).length).toBeGreaterThan(reads);
+  }
   await sidebar.getByRole("button", { name: "Unpin #launch-plan", exact: true }).click();
   await expect(sidebar.getByText("Pinned", { exact: true })).toHaveCount(0);
   await expect.poll(visibleChannelRowIds(page)).toEqual([other.id, pinned.id]);

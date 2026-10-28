@@ -27,6 +27,12 @@ category before Agent summons. Its fold is independent of the harness catalog. O
 remain in the colon reference picker. A new thread draft offers no Instances
 from its parent Channel.
 
+Routine successful stops update Instance and invocation state without posting a
+separate Channel message, including stops from UI controls without a source
+command. Historical typed stop-success notices are hidden in the timeline.
+Stop failures, failed-startup cleanup and stops caused by access changes or
+Instance deletion retain their explanations. Stored history is not erased.
+
 Mention categories are named by the lists' coloured section label (icon, name, count; one hue per category), one-line choices (name,
 then its description truncated in the remaining width), inset rounded selections
 and plain expansion rows inside the composer's single Liquid Glass surface.
@@ -45,8 +51,9 @@ Channel context. Mention bands show the reading. A declined address has a clicka
 underline that opens xMatrix's explanation and a **Start anyway** option at
 that mention. The option writes `launch:force` only on that summon; sending
 still owns publication and launch. Normal summons add no explanatory text,
-and no caption sits below the input. The separate intent/Force pill is removed. Enter finishes or reuses
-the current bounded preview request before publishing. Any edit or Channel
+and no caption sits below the input. The separate intent/Force pill is removed.
+Sending takes only completed readings for the current draft and never waits
+for the preview debounce or an in-flight request. Any edit or Channel
 change discards the old reading. Forced mentions skip preview.
 
 A Human send carries the confirmed readings, bound to exact UTF-16 offsets and

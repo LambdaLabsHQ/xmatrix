@@ -234,9 +234,12 @@ function waitForFile(file, timeoutMs = 10_000) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
     const timer = setInterval(() => {
-      if (fs.existsSync(file)) {
+      // Opening the file makes it visible before writeFileSync writes the PID.
+      // An empty read is not readiness: Number("") would turn it into PID 0.
+      const value = fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "";
+      if (/^[1-9]\d*$/.test(value)) {
         clearInterval(timer);
-        resolve(fs.readFileSync(file, "utf8").trim());
+        resolve(value);
       } else if (Date.now() - startedAt >= timeoutMs) {
         clearInterval(timer);
         reject(new Error(`Timed out waiting for ${file}`));

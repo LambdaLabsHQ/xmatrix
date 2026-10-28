@@ -47,7 +47,8 @@ function controlOutcomes(value: unknown): AgentControlOutcomeRecord[] | undefine
  * that message. A notice whose command is not loaded, edited or recalled
  * keeps its own row: there is nothing on screen to draw it on. A switch's
  * continuation is the Instance's instruction to resume, not news for anyone
- * reading: it folds away with the switch it follows.
+ * reading: it folds away with the switch it follows. Historical routine stop
+ * confirmations are redundant with Instance state even without a loaded command.
  */
 export function foldCommandNotices(history: readonly ChannelMessage[]): {
   noticesBySource: Map<string, CommandNotice[]>;
@@ -62,12 +63,17 @@ export function foldCommandNotices(history: readonly ChannelMessage[]): {
     if (recorded.length) noticesBySource.set(message.messageId, recorded);
   }
   for (const message of history) {
+    const metadata = message.metadata ?? {};
+    if (metadata.xmatrixSystemNotice === true && metadata.source === "machine_stop_result" &&
+        metadata.stopOutcome === "completed" && metadata.startupFailed !== true && !metadata.stopCause) {
+      folded.add(message.messageId);
+      continue;
+    }
     const sourceId = noticeSource(message);
     const source = sourceId ? byId.get(sourceId) : undefined;
     if (!source || source.recalledAt || source.editedAt || message.recalledAt) continue;
     let interaction = interactions.get(source.messageId);
     if (!interaction) interactions.set(source.messageId, interaction = parseMessageInteraction(source.body));
-    const metadata = message.metadata ?? {};
     const answers = interaction.controls.length > 0 || interaction.stop !== undefined ||
       [...interaction.reborn.map(({ agentName, channelInstanceId }) => ({ agentName, channelInstanceId })),
         ...interaction.handoff.map(({ sourceAgentName, channelInstanceId }) => ({ agentName: sourceAgentName, channelInstanceId }))]

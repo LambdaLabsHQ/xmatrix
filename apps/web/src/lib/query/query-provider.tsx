@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryCache, QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import { subscribeResume } from "@/lib/connectivity/connectivity";
 import { shouldRetryXMatrixQuery, xmatrixRetryDelayMs } from "./api-client";
@@ -44,12 +44,32 @@ onlineManager.setEventListener((setOnline) => {
   };
 });
 
+/**
+ * One key for the mounted page and its query client. First sign-in binds the
+ * current anonymous tree; leaving a signed-in account starts a fresh one,
+ * even if that account had kept the initial anonymous key.
+ */
+export function queryMountKey(
+  mountKey: number | undefined,
+  previousUserId: string | null | undefined,
+  userId: string | null,
+): number {
+  const current = mountKey ?? 0;
+  return previousUserId != null && previousUserId !== userId ? current + 1 : current;
+}
+
 export function XMatrixQueryProvider(props: { userId: string | null; children: ReactNode }) {
-  const client = useMemo(createClient, [props.userId]);
+  const mountKeyRef = useRef<number | undefined>(undefined);
+  const previousUserIdRef = useRef<string | null | undefined>(undefined);
+  const mountKey = queryMountKey(mountKeyRef.current, previousUserIdRef.current, props.userId);
+  mountKeyRef.current = mountKey;
+  previousUserIdRef.current = props.userId;
+  // An observer retains its creating client. Keep both lifetimes together.
+  const client = useMemo(createClient, [mountKey]);
 
   useEffect(() => {
     return () => client.clear();
   }, [client]);
 
-  return <QueryClientProvider client={client}>{props.children}</QueryClientProvider>;
+  return <QueryClientProvider key={mountKey} client={client}>{props.children}</QueryClientProvider>;
 }

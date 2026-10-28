@@ -119,6 +119,18 @@ test("read returns the text body and every link, fenced, from nested parts", asy
   assert.match(plain.result.summary, /:\n~~~\n/u);
 });
 
+test("read reports Gmail's own sender checks and ignores ones the sender wrote", async () => {
+  const headers = auth => ({ payload: { mimeType: "text/plain", headers: [{ name: "From", value: "Cloudflare <no-reply@notify.cloudflare.com>" }, ...auth],
+    body: { data: base64url("hello") } } });
+  const checked = async auth => (await fetched([gmail(headers(auth))], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }))).result.summary;
+  assert.match(await checked([{ name: "Authentication-Results", value: "mx.google.com; dkim=pass header.i=@cloudflare.com; spf=pass smtp.mailfrom=x; dmarc=PASS (p=REJECT) header.from=cloudflare.com" }]),
+    /Sender checks: spf=pass dkim=pass dmarc=pass\n/u);
+  assert.match(await checked([{ name: "Authentication-Results", value: "mx.google.com; spf=softfail smtp.mailfrom=x; dmarc=fail header.from=cloudflare.com" },
+    { name: "Authentication-Results", value: "mx.google.com; spf=pass; dkim=pass; dmarc=pass" }]), /Sender checks: spf=softfail dkim=none dmarc=fail\n/u);
+  assert.match(await checked([{ name: "Authentication-Results", value: "evil.example; spf=pass; dkim=pass; dmarc=pass" }]), /Sender checks: unavailable\n/u);
+  assert.match(await checked([]), /Sender checks: unavailable\n/u);
+});
+
 test("read preserves ordered mixed body segments without duplicating alternatives or reading attachments", async () => {
   const text = (mimeType, value, extra = {}) => ({ mimeType, body: { data: base64url(value) }, ...extra });
   const payload = { mimeType: "multipart/mixed", parts: [

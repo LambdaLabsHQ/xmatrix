@@ -57,7 +57,8 @@ async function stubPages(browser: Page, pages: ReturnType<typeof page>[], channe
  */
 const sessionSockets = new WeakMap<Y.Doc, Set<(data: Uint8Array, from: object) => void>>();
 async function servePageSession(browser: Page, server: Y.Doc,
-  on: { connect?: (send: (data: Uint8Array) => void) => void; clientUpdate?: () => void; syncAfterMs?: number } = {}) {
+  on: { connect?: (send: (data: Uint8Array) => void) => void; clientUpdate?: () => void; syncAfterMs?: number;
+    headReady?: Promise<void> } = {}) {
   const peers = sessionSockets.get(server) ?? new Set();
   sessionSockets.set(server, peers);
   await browser.routeWebSocket(/\/ws\/pages\//u, async (socket) => {
@@ -69,7 +70,9 @@ async function servePageSession(browser: Page, server: Y.Doc,
     const notice = encoding.createEncoder();
     encoding.writeVarUint(notice, 2);
     encoding.writeVarString(notice, JSON.stringify({ type: "session", headRevision: 3, canEdit: true }));
-    send(encoding.toUint8Array(notice));
+    const tellHead = () => send(encoding.toUint8Array(notice));
+    if (on.headReady) void on.headReady.then(tellHead);
+    else tellHead();
     peers.add(relay);
     socket.onMessage((message) => {
       if (typeof message === "string") return;
@@ -159,8 +162,9 @@ async function stubCoWriting(browser: Page, blockId: string) {
 }
 
 /** Opens Pages on a page whose live session holds `body`, and returns its editor. */
-async function openLivePage(browser: Page, session: Y.Doc | string = BODY) {
-  await servePageSession(browser, typeof session === "string" ? pageDocument(session) : session);
+async function openLivePage(browser: Page, session: Y.Doc | string = BODY,
+  on: Parameters<typeof servePageSession>[2] = {}) {
+  await servePageSession(browser, typeof session === "string" ? pageDocument(session) : session, on);
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
   return browser.getByTestId("page-editor");
@@ -910,8 +914,19 @@ test("an owner may start a Space's pages from a repository or a first page, and 
   await fixtureJson(browser, "page-publish", /\/pages\/p-first\/publication$/u,
     { page: { ...page("p-first", null, "First document", "V"), publishedAt: NOW } }, { method: "PUT" });
   await browser.getByTestId("pages-view").getByRole("button", { name: "Share" }).click();
-  await browser.getByLabel("Anyone with the link can read this page").click();
+  // Share drops from its button and says who reads the page now, the Space's own link beside them.
+  const share = browser.getByTestId("page-share");
+  await expect(share).toContainText("Everyone in this Space");
+  await expect(share.getByRole("button", { name: "Copy link" })).toBeVisible();
+  await fixtureJson(browser, "page-tree-published", pageTree,
+    { pages: [{ ...page("p-first", null, "First document", "V"), publishedAt: NOW }] }, { method: "GET" });
+  await browser.getByRole("switch", { name: "Anyone with the link can read this page" }).click();
   await expect.poll(async () => fixtureRequestBodies(browser, "page-publish")).toEqual([{ published: true }]);
+  // Once public, the public link stands under the switch that made it.
+  await expect(share.getByRole("link", { name: /\/p\/[^/]+\/p-first$/u })).toBeVisible();
+  await expect(browser.getByRole("switch", { name: "Anyone with the link can read this page" })).toBeChecked();
+  await browser.keyboard.press("Escape");
+  await expect(share).toBeHidden();
   // Once an Agent drafts the move, the page says so until it is applied, however many pages exist.
   await fixtureJson(browser, "migration-proposed", /\/api\/xmatrix\/spaces\/[^/]+\/page-migration$/u,
     { spaceId: E2E_SPACE.id, state: "proposed", version: 1, drafter: null, draft: { pages: [] }, sources: [], report: null },
@@ -1621,7 +1636,19 @@ test("paragraph attribution stays in the margin and selecting text leaves only d
   // Their faces: Daniel's own picture, and the mark of the harness claude:1's Instance runs.
   await fixtureFaces(browser, { "user:u-daniel": "/role-avatars/default.svg", "agent:a": "/agent-vendors/claude.svg" });
   const live = pageDocument(BODY);
-  const editor = await openLivePage(browser, live);
+  let tellHead!: () => void;
+  const headReady = new Promise<void>((resolve) => { tellHead = resolve; });
+  const editor = await openLivePage(browser, live, { headReady });
+  await expect(editor).toContainText("In progress");
+  // Sync and the authoritative head notice are separate socket messages. Let
+  // the editor paint first: attribution must not read under an unknown head
+  // and then read that same revision again when its notice arrives.
+  await browser.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const readsBeforeHead = (await fixtureRequestRecords(browser, "page-blame")).length;
+  tellHead();
+  expect(readsBeforeHead).toBe(0);
 
   // Under the title, its authors by face and name, most words first, as a column's byline.
   const byline = browser.getByTestId("page-byline");
@@ -2180,6 +2207,68 @@ test("typing fast at the top of a busy page while an Agent writes keeps every ke
   await expect.poll(() => pageMarkdown(server)).toContain(`${typed}!`);
   expect(pageMarkdown(server)).toContain("none yet 6");
   await expect(editor).toContainText("none yet 6");
+});
+
+for (const width of [1280, 393]) test.describe(`page links at ${width}px`, () => {
+  test.use({ viewport: { width, height: 852 }, isMobile: width === 393, hasTouch: width === 393 });
+
+  // The formatting case below only checks the anchor exists. It cannot catch an editor swallowing its click.
+  test("plain URLs and Markdown links open directly while the page is editable", async ({ page: browser }) => {
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await browser.context().route("https://example.com/**", (route) => route.fulfill({ body: "Linked page" }));
+    const document = pageDocument("# Relay\n\nhttps://example.com/plain\n\n[Markdown guide](https://example.com/markdown)\n\n" +
+      "[**Formatted guide**](https://example.com/formatted)\n\nKeep editing here.\n");
+    const editor = width === 393 ? await openRelayOnPhone(browser, document) : await openLivePage(browser, document);
+    await expect(editor.locator(".page-document")).toHaveAttribute("contenteditable", "true");
+    for (const path of ["plain", "markdown", "formatted"]) {
+      const link = editor.locator(`a[href="https://example.com/${path}"]`);
+      const opened = browser.waitForEvent("popup", { timeout: 5_000 });
+      if (width === 393) await link.tap();
+      else await link.click();
+      const destination = await opened;
+      await expect(destination).toHaveURL(`https://example.com/${path}`);
+      await destination.close();
+    }
+    await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
+    await editor.getByText("Keep editing here.").click();
+    await browser.keyboard.press("End");
+    await browser.keyboard.type(" Still editable.");
+    await expect(editor).toContainText("Keep editing here. Still editable.");
+  });
+});
+
+test("link text can still be selected and its address edited, and unsafe links never open", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const editor = await openLivePage(browser,
+    "# Relay\n\n[A guide to the rollout](https://example.com/guide)\n\n" +
+    "[Unsafe script](javascript:alert%281%29)\n\n[Unsafe data](data:text/html,blocked)\n\nKeep editing here.\n");
+  const opened: Page[] = [];
+  browser.on("popup", (popup) => opened.push(popup));
+  const guide = editor.getByRole("link", { name: "A guide to the rollout" });
+  const bounds = (await guide.boundingBox())!;
+  await browser.mouse.move(bounds.x + 3, bounds.y + bounds.height / 2);
+  await browser.mouse.down();
+  await browser.mouse.move(bounds.x + bounds.width - 3, bounds.y + bounds.height / 2, { steps: 8 });
+  await browser.mouse.up();
+  await expect(browser.getByRole("textbox", { name: "Comment", exact: true })).toBeFocused();
+  expect(opened).toHaveLength(0);
+  await browser.keyboard.press("Escape");
+
+  // Closing the comment restores the caret to the selected guide. Move within
+  // that text, rather than counting visual rows from a decorated heading.
+  await expect(editor.locator(".page-document")).toBeFocused();
+  await browser.keyboard.press("ArrowLeft");
+  await editor.locator('[data-edit-link="https://example.com/guide"]').click();
+  await expect(browser.getByRole("textbox", { name: "Link address" })).toHaveValue("https://example.com/guide");
+  await browser.keyboard.press("Escape");
+  for (const name of ["Unsafe script", "Unsafe data"]) await editor.getByRole("link", { name }).click();
+  await editor.getByText("Keep editing here.").click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.type(" Safe.");
+  await expect(editor).toContainText("Keep editing here. Safe.");
+  expect(opened).toHaveLength(0);
 });
 
 test("everyday editing works as in Google Docs: rename the page, grow a table, links from typed URLs", async ({ page: browser }) => {

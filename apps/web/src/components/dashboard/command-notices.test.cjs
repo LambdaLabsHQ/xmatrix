@@ -89,3 +89,18 @@ test("a note about a Run keeps the Run, so the summon that started it can show i
   assert.deepEqual(noticesBySource.get("m1").map(notice => [notice.body, notice.runId]),
     [["Couldn't start @codex on build-1.", "run:1"]]);
 });
+
+test("legacy routine stop confirmations disappear without a loaded command, while causes and failures remain", () => {
+  const stopped = { source: "machine_stop_result", stopOutcome: "completed", runId: "run:1" };
+  const { folded } = foldCommandNotices([
+    notice("routine", undefined, "Stopped @claude on build-1.", stopped),
+    notice("source-unloaded", "gone", "Stopped @claude on build-1.", stopped),
+    notice("withdrawn", undefined, "Daniel turned this Agent off.", { ...stopped, stopCause: "registration_disabled" }),
+    notice("startup", undefined, "Startup failed. Cleanup confirmed.", { ...stopped, startupFailed: true }),
+    notice("failed", undefined, "Couldn't stop @claude.", { ...stopped, stopOutcome: "failed" }),
+    notice("unknown", undefined, "Stop result unavailable.", { source: stopped.source }),
+    notice("other", undefined, "Another system fact.", { ...stopped, source: "other" }),
+    human("human", "Stopped @claude on build-1.", { metadata: stopped }),
+  ]);
+  assert.deepEqual([...folded], ["routine", "source-unloaded"]);
+});

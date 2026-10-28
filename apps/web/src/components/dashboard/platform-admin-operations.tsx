@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * The platform's moving parts: Machines and the runtimes on them, Runs,
- * Automations, and the event delivery queue. Statuses, counts, and times only;
+ * The platform's moving parts: Machines and the runtimes on them, Runs, and
+ * Automations. Statuses, counts, and times only;
  * Machine host names, Run payloads, and Automation prompts or errors are not
  * part of this read.
  */
@@ -11,14 +11,11 @@ import type { AdminOperations, AdminOperationsHarness, AdminOperationsMachine } 
 
 import { noticeClass } from "@/components/ui/status-tone";
 import { AdminTable, type AdminColumn } from "./admin-table";
-import { TimeCell, adminAge, adminAutomationStats, adminPercent, adminStatusLine, adminSum } from "./platform-admin-cells";
+import { TimeCell, adminAutomationStats, adminPercent, adminStatusLine, adminSum } from "./platform-admin-cells";
 import { openAdminUser, useAdminOperations } from "./platform-admin-data";
 import { adminTime, formatAdminCount } from "./platform-admin-overview";
 import { ToolDetailSection } from "./tool-split";
 import { AdminDailyBars, AdminQueryView, AdminStatGrid } from "./workspace-platform-admin-view";
-
-/** An undelivered event older than this means delivery has stalled. */
-const OUTBOX_STALL_MS = 10 * 60 * 1_000;
 
 const MACHINE_COLUMNS: AdminColumn<AdminOperationsMachine>[] = [
   { key: "machine", label: "Machine", value: (machine) => machine.machineId,
@@ -58,26 +55,20 @@ export function PlatformAdminOperations({ token }: { token?: string }) {
 }
 
 function OperationsBody({ operations }: { operations: AdminOperations }) {
-  const { runs, automations, outbox } = operations;
+  const { runs, automations } = operations;
   const machines = adminSum(operations.machinesByStatus);
   const online = operations.machinesByStatus.online ?? 0;
   const started = adminSum(runs.byStatus);
   const failedRuns = runs.byStatus.failed ?? 0;
   const occurrences = adminSum(automations.occurrencesByStatus);
-  const failedEvents = outbox.byStatus.failed ?? 0;
-  const undelivered = (outbox.byStatus.pending ?? 0) + (outbox.byStatus.leased ?? 0);
-  const stalled = outbox.oldestPendingAt !== undefined &&
-    Date.now() - Date.parse(outbox.oldestPendingAt) > OUTBOX_STALL_MS;
   const cut = (key: string, what: string) =>
     operations.truncated.includes(key) ? `Showing the most recent ${what} only; the Hub caps one read.` : undefined;
   return (
     <>
-      {(stalled || failedEvents > 0 || automations.overdue > 0) && (
-        <div role="status" className={noticeClass(failedEvents > 0 ? "alert" : "attention", "space-y-1 rounded-lg px-4 py-3")}>
-          {stalled && <p>Event delivery is behind: the oldest undelivered event was queued {adminAge(outbox.oldestPendingAt)}.</p>}
-          {failedEvents > 0 && <p>{formatAdminCount(failedEvents)} events failed delivery.</p>}
-          {automations.overdue > 0 && <p>{formatAdminCount(automations.overdue)} Automation occurrences are past their scheduled time.</p>}
-        </div>
+      {automations.overdue > 0 && (
+        <p role="status" className={noticeClass("attention", "rounded-lg px-4 py-3")}>
+          {formatAdminCount(automations.overdue)} Automation occurrences are past their scheduled time.
+        </p>
       )}
 
       <ToolDetailSection title="Machines">
@@ -113,10 +104,8 @@ function OperationsBody({ operations }: { operations: AdminOperations }) {
           <p className="mt-3 text-xs text-muted-foreground">By status: {adminStatusLine(runs.byStatus)}</p>
         )}
         <div className="mt-4">
-          <AdminDailyBars label="Runs started per day" points={runs.daily.map((day) => ({
-            date: day.date,
-            messages: day.started,
-            title: `${day.date}: ${day.started} started, ${day.failed} failed`,
+          <AdminDailyBars label="Runs started per day" unit="Runs started" points={runs.daily.map((day) => ({
+            date: day.date, messages: day.started,
           }))} />
         </div>
       </ToolDetailSection>
@@ -131,15 +120,6 @@ function OperationsBody({ operations }: { operations: AdminOperations }) {
         )}
       </ToolDetailSection>
 
-      <ToolDetailSection title="Event delivery">
-        <AdminStatGrid stats={[
-          { label: "Undelivered", value: formatAdminCount(undelivered),
-            hint: outbox.oldestPendingAt ? `oldest ${adminAge(outbox.oldestPendingAt)}` : "Queue is empty" },
-          { label: "Delivered", value: formatAdminCount(outbox.byStatus.delivered ?? 0) },
-          { label: "Failed", value: formatAdminCount(failedEvents) },
-          { label: "Most attempts", value: formatAdminCount(outbox.maxAttempts) },
-        ]} />
-      </ToolDetailSection>
     </>
   );
 }

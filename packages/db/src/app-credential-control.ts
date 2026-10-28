@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { resourcePages } from "./resource-pages.js";
 import { SENTRY_PUBLIC_INTEGRATION_SCOPES, utf8ByteLength } from "@xmatrix/protocol";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -265,7 +266,7 @@ export class PostgresAppCredentialRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.credentials.put" }, async (tx) => {
       if (!input.asHub) await requireSpaceAdmin(tx, spaceId, actorUserId);
-      if (providerId === "discord" && installation) await lockDiscordInstallation(tx, installation, `${spaceId}:discord`);
+      if (providerId === "discord" && installation) await lockDiscordInstallation(tx, installation);
       if (providerId === "slack" && installation) await claimSlackWorkspace(tx, installation, spaceId, input.at);
       if (verified) await lockSentryAttempt(tx, installation!, spaceId, verified.attemptId, String(input.fields.oauthExpiresAt));
       const connectionId = `${spaceId}:${providerId}`;
@@ -410,25 +411,28 @@ export class PostgresAppCredentialRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.sentry-installation-retire" }, async tx => {
       await retireSentryAttempt(tx, { appClientId: clientId, eventScopeId: input.appUuid, installationId: input.installationId });
-      const targets = await tx.query<QueryResultRow>({ name: "app_sentry_retirement_lock_v1", text: `SELECT
+      const read = (after: string | null) => tx.query<QueryResultRow>({ name: "app_sentry_retirement_lock_v2", text: `SELECT
         c.connection_id FROM data.app_connector_connections c
         JOIN data.app_connector_oauth_installations i ON i.connection_id=c.connection_id AND i.space_id=c.space_id
         JOIN data.app_connector_credentials k ON k.connection_id=c.connection_id AND k.space_id=c.space_id
           AND k.version=i.credential_version
         WHERE i.provider_id='sentry' AND i.app_client_id=$1 AND i.event_scope_id=$2 AND i.installation_id=$3
-        ORDER BY c.connection_id LIMIT $4 FOR UPDATE OF c,k,i`,
-      values: [clientId, input.appUuid, input.installationId, input.limit + 1], maxRows: input.limit + 1 });
-      if (targets.length > input.limit) throw new AppControlError("too_many_installations", 503, "Sentry retirement exceeds its bound", true);
-      const ids = targets.map(row => String(row.connection_id));
-      if (!ids.length) return 0;
-      await tx.query({ name: "app_sentry_retire_credentials_v1", text: `DELETE FROM data.app_connector_credentials
-        WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
-      await tx.query({ name: "app_sentry_retire_binding_v1", text: `DELETE FROM data.app_connector_oauth_installations
-        WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
-      await tx.query({ name: "app_sentry_retire_connection_v1", text: `UPDATE data.app_connector_connections
-        SET status='disconnected',error=NULL,version=version+1,updated_at=$2 WHERE connection_id=ANY($1::text[])`,
-      values: [ids, new Date(input.at).toISOString()], maxRows: 0 });
-      return ids.length;
+        AND ($4::text IS NULL OR c.connection_id>$4)
+        ORDER BY c.connection_id LIMIT $5 FOR UPDATE OF c,k,i`,
+      values: [clientId, input.appUuid, input.installationId, after, input.limit], maxRows: input.limit });
+      let retired = 0;
+      for await (const targets of resourcePages(read, row => String(row.connection_id), input.limit)) {
+        const ids = targets.map(row => String(row.connection_id));
+        await tx.query({ name: "app_sentry_retire_credentials_v1", text: `DELETE FROM data.app_connector_credentials
+          WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
+        await tx.query({ name: "app_sentry_retire_binding_v1", text: `DELETE FROM data.app_connector_oauth_installations
+          WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
+        await tx.query({ name: "app_sentry_retire_connection_v1", text: `UPDATE data.app_connector_connections
+          SET status='disconnected',error=NULL,version=version+1,updated_at=$2 WHERE connection_id=ANY($1::text[])`,
+        values: [ids, new Date(input.at).toISOString()], maxRows: 0 });
+        retired += ids.length;
+      }
+      return retired;
     });
   }
 

@@ -15,6 +15,20 @@ const {
   shouldRetryXMatrixQuery,
   xmatrixQueryRawResponse,
 } = require("./api-client.ts");
+const { queryMountKey } = require("./query-provider.tsx");
+
+test("the first sign-in shares the query lifecycle, and leaving any reader replaces it", () => {
+  assert.equal(queryMountKey(undefined, undefined, null), 0);
+  assert.equal(queryMountKey(undefined, undefined, "ada"), 0);
+  assert.equal(queryMountKey(0, null, "ada"), 0);
+  assert.equal(queryMountKey(0, "ada", "ada"), 0);
+  assert.notEqual(queryMountKey(0, "ada", "grace"), 0);
+  assert.notEqual(queryMountKey(0, "ada", null), 0, "the first account must not reuse its anonymous key on sign-out");
+  assert.equal(queryMountKey(1, null, null), 1);
+  assert.equal(queryMountKey(1, null, "ada"), 1, "a new first sign-in keeps the cleared signed-out client");
+  assert.notEqual(queryMountKey(1, "ada", null), 1);
+  assert.notEqual(queryMountKey(1, "grace", "ada"), 1, "returning to an earlier reader is a new lifecycle");
+});
 
 test("a dropped JSON body retries as transport failure, including compatibility readers", async (t) => {
   const originalFetch = globalThis.fetch;

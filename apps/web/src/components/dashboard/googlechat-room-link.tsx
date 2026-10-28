@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { ConnectorAction, ConnectorCopyLine, ConnectorLinkActions, ConnectorRow, ConnectorRows } from "./connector-page";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
@@ -11,8 +12,30 @@ type Binding = { chatSpace: string; sourceRef: string };
 type Challenge = { chatSpace: string; nonce: string; expiresAt: string; botUsername?: string };
 
 /** The short-lived confirmation stays only in this mounted Human form, outside the query cache. */
-export function GoogleChatRoomLink({ spaceId, token, beforeLink, afterRefresh, provider = "googlechat" }: {
+/** How a provider's group or space is linked, said once where the link is made, and the fine print folded under it. */
+export function chatLinkGuide(provider: "googlechat" | "feishu" | "telegram" | "teams"): { lead: string; details: string } {
+  if (provider === "teams") return {
+    lead: "Install the xMatrix company app in a Teams personal or group chat, start confirmation here, then send the code to xMatrix in that chat.",
+    details: "One conversation can be linked per Space; team channels are not supported yet. A Space owner or admin must complete the confirmation in the selected Teams conversation.",
+  };
+  if (provider === "telegram") return {
+    lead: "Add the xMatrix company bot to your Telegram group with permission to send messages, enter the group's negative ID, then a Telegram group administrator sends the confirmation.",
+    details: "Each Space links up to 20 groups. Bot privacy mode decides which later messages Telegram delivers. A Space owner or admin must complete the confirmation in that same group.",
+  };
+  if (provider === "feishu") return {
+    lead: "Install the xMatrix company app in your Feishu tenant and add its bot to a group, then enter the tenant key and the group chat ID.",
+    details: "Each Space links up to 20 groups. A Space owner or admin must complete the confirmation in that same group.",
+  };
+  return {
+    lead: "Add xMatrix to your Google Chat space, then enter its space ID and confirm there.",
+    details: "One Chat space can be linked per Space. A Space owner or admin must complete the confirmation in that same Chat space.",
+  };
+}
+
+export function GoogleChatRoomLink({ spaceId, token, beforeLink, afterRefresh, provider = "googlechat", lead = false }: {
   spaceId: string; token: string; provider?: "googlechat" | "feishu" | "telegram" | "teams"; beforeLink: () => Promise<void>; afterRefresh: () => Promise<void>;
+  /** The page's lead: Start confirmation is its one solid action. */
+  lead?: boolean;
 }) {
   const [chatSpace, setChatSpace] = useState("");
   const [bindings, setBindings] = useState<Binding[]>([]);
@@ -94,31 +117,31 @@ export function GoogleChatRoomLink({ spaceId, token, beforeLink, afterRefresh, p
     });
   }
 
-  return <div id={`${provider}-room-link`} className="space-y-3">
-    <p className="text-sm text-muted-foreground">{isTeams ? "Install the xMatrix company app in your company Teams personal or group chat. Start confirmation here, then send the private code to xMatrix in that conversation. One conversation can be linked per Space; team channels are not supported yet." : isTelegram ? "Add the xMatrix company bot to your Telegram group with permission to send messages, then enter the negative group ID. A Telegram group administrator must send the confirmation; each Space supports up to 20 groups. Bot privacy mode determines which later messages Telegram delivers." : isFeishu ? "Install the xMatrix company app in your Feishu tenant and add its bot to a group. Enter that tenant key and group chat ID; each Space supports up to 20 groups." : "Add xMatrix to your Google Chat space, then enter its space ID."}
-      {" "}A Space owner or admin must complete the confirmation in {isTeams ? "the selected Teams conversation" : multiple ? "that same group" : "that same Chat space"}.</p>
-    <form onSubmit={(event) => void start(event)} className="flex flex-wrap gap-2">
+  const valid = isTeams || ((isTelegram ? /^-[1-9][0-9]{0,15}$/ : isFeishu ? /^[A-Za-z0-9_-]{1,64}\/oc_[A-Za-z0-9]{4,64}$/ : /^spaces\/[A-Za-z0-9_-]{1,128}$/).test(selectedRoom)
+    && (!isTelegram || Number.isSafeInteger(Number(selectedRoom))));
+  const command = challenge ? isTeams ? `link ${challenge.nonce}` : isTelegram ? `/xmatrix_link@${challenge.botUsername} ${challenge.nonce}` : `@xMatrix link ${challenge.nonce}` : "";
+  return <div id={`${provider}-room-link`}>
+    {bindings.length > 0 ? <ConnectorRows>
+      {bindings.map(binding => <ConnectorRow key={binding.chatSpace} testId="chat-link-binding"
+        title={<code className="font-mono text-[13px]">{binding.chatSpace}</code>}
+        meta={<>Channel subscription <code className="break-all">{binding.sourceRef}</code></>}
+        trailing={(multiple || isTeams) ? <ConnectorAction disabled={busy} aria-label={`Unlink ${isTeams ? "conversation" : "group"}`}
+          onClick={() => void unlink(binding)}>Unlink</ConnectorAction> : null} />)}
+    </ConnectorRows> : null}
+    <form onSubmit={(event) => void start(event)} className={cn("flex flex-wrap items-center gap-2", bindings.length > 0 && "mt-2")}>
       {isFeishu && <Input id="feishu-tenant-input" aria-label="Feishu tenant key" placeholder="Tenant key" value={tenantKey}
-        maxLength={64} disabled={busy} onChange={event => { setTenantKey(event.target.value); setChallenge(null); }} />}
-      {!isTeams && <Input id={`${provider}-room-input`} aria-label={`${label} ${multiple ? "group chat" : "space"} ID`} placeholder={isTelegram ? "-100…" : isFeishu ? "oc_…" : "spaces/AAAA…"}
-        value={chatSpace} maxLength={135} disabled={busy}
+        className="min-w-0 flex-1 basis-40" maxLength={64} disabled={busy} onChange={event => { setTenantKey(event.target.value); setChallenge(null); }} />}
+      {!isTeams && <Input id={`${provider}-room-input`} aria-label={`${label} ${multiple ? "group chat" : "space"} ID`} placeholder={isTelegram ? "Group ID, -100…" : isFeishu ? "Group chat ID, oc_…" : "Space ID, spaces/AAAA…"}
+        className="min-w-0 flex-1 basis-48" value={chatSpace} maxLength={135} disabled={busy}
         onChange={(event) => { setChatSpace(event.target.value); setChallenge(null); }} />}
-      <Button id={`${provider}-link-start`} size="sm" type="submit" disabled={busy || (!isTeams && !(isTelegram ? /^-[1-9][0-9]{0,15}$/ : isFeishu ? /^[A-Za-z0-9_-]{1,64}\/oc_[A-Za-z0-9]{4,64}$/ : /^spaces\/[A-Za-z0-9_-]{1,128}$/).test(selectedRoom) || (isTelegram && !Number.isSafeInteger(Number(selectedRoom))))}>
-        {busy ? "Working…" : "Start confirmation"}
-      </Button>
-      <Button size="sm" type="button" variant="outline" disabled={busy} onClick={() => void refresh()}>Refresh connection</Button>
+      <ConnectorLinkActions lead={lead} busy={busy} start="submit" startLabel="Start confirmation" startId={`${provider}-link-start`}
+        startDisabled={!valid} onRefresh={() => void refresh()} />
     </form>
-    {challenge && <div className="space-y-2 text-sm" role="status">
-      <p>In {isTeams ? "your chosen Teams conversation" : <code>{challenge.chatSpace}</code>}, send this to xMatrix within three minutes:</p>
-      <p className="break-all font-mono">{isTeams ? `link ${challenge.nonce}` : isTelegram ? `/xmatrix_link@${challenge.botUsername} ${challenge.nonce}` : `@xMatrix link ${challenge.nonce}`}</p>
-      {isTeams && <p>Mention @xMatrix before the code in a group chat.</p>}
-      <p className="text-muted-foreground">Send once, then refresh the connection to confirm it. Keep this confirmation private.</p>
+    {challenge && <div className="mt-4 space-y-1.5 text-[13px] leading-[1.45]" role="status">
+      <p>In {isTeams ? "your chosen Teams conversation" : <code>{challenge.chatSpace}</code>}, send this to xMatrix within three minutes{isTeams ? ", mentioning @xMatrix first in a group chat" : ""}:</p>
+      <ConnectorCopyLine value={command} label="confirmation" />
+      <p className="text-muted-foreground">Send it once, then refresh the connection. Keep it private.</p>
     </div>}
-    {bindings.map(binding => <div key={binding.chatSpace} className="space-y-1 text-sm" role="status">
-      <p>Connected {multiple ? `${label} group` : isTeams ? "Teams conversation" : "Chat space"}: <code>{binding.chatSpace}</code></p>
-      <p className="break-all text-muted-foreground">Channel subscription: <code>{binding.sourceRef}</code></p>
-      {(multiple || isTeams) && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void unlink(binding)}>Unlink {isTeams ? "conversation" : "group"}</Button>}
-    </div>)}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && <p role="alert" className="mt-2 text-[13px] text-destructive">{error}</p>}
   </div>;
 }

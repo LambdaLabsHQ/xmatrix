@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { RESOURCE_PAGE_SIZE, resourcePages } from "./resource-pages.js";
 import { commandDigest as digest } from "./command-digest.js";
 import { ControlError } from "./control-error.js";
 
@@ -44,8 +45,6 @@ function array(value: unknown, field: string, fallback: string[] = []): string[]
   return Array.from(new Set(value.map((item) => String(item).trim()))).sort();
 }
 
-const METADATA_LIST_MAX_ITEMS = 32;
-
 /**
  * Adds each `metadataAppend` value to its string-list field, keeping every
  * other field and every value already listed. Runs under the connection's
@@ -70,9 +69,6 @@ export function appendMetadataLists(metadata: Record<string, unknown>, append: u
     const list = ((existing as unknown[] | undefined) ?? []).filter((item): item is string =>
       typeof item === "string");
     if (list.includes(value)) continue;
-    if (list.length >= METADATA_LIST_MAX_ITEMS) {
-      throw new AppControlError("invalid_app_request", 400, "metadataAppend list is full");
-    }
     merged[field] = [...list, value];
   }
   return merged;
@@ -154,19 +150,18 @@ async function credentialFieldsByConnection(tx: DatabaseTransaction, connectionI
     Array.isArray(row.field_names_json) ? (row.field_names_json as unknown[]).map(String) : []]));
 }
 
-/** A Space links at most this many GitHub installations; each has at most one link record. */
-const GITHUB_LINKS_PER_CONNECTION = 32;
-
 /** Who handed each linked GitHub installation to its Space, as GitHub Connect recorded it. */
 async function githubLinksByConnection(tx: DatabaseTransaction, connectionIds: string[]) {
   const byConnection = new Map<string, { installationId: string; githubUserId: number }[]>();
   if (connectionIds.length === 0) return byConnection;
-  const rows = await tx.query<QueryResultRow>({ name: "app_connection_github_links_v1", text: `SELECT
-    connection_id,installation_id,github_user_id FROM (SELECT connection_id,installation_id,github_user_id,
-      row_number() OVER (PARTITION BY connection_id ORDER BY installation_id) AS position
-      FROM data.app_github_installation_links WHERE connection_id=ANY($1::text[])) ranked
-    WHERE position<=$2 ORDER BY connection_id,installation_id`,
-  values: [connectionIds, GITHUB_LINKS_PER_CONNECTION], maxRows: connectionIds.length * GITHUB_LINKS_PER_CONNECTION });
+  const rows = [];
+  for await (const page of resourcePages((after: [string, string] | null) => tx.query<QueryResultRow>({
+    name: "app_connection_github_links_v2", text: `SELECT connection_id,installation_id,github_user_id
+      FROM data.app_github_installation_links WHERE connection_id=ANY($1::text[])
+        AND ($2::text IS NULL OR (connection_id,installation_id)>($2,$3))
+      ORDER BY connection_id,installation_id LIMIT $4`,
+    values: [connectionIds, after?.[0] ?? null, after?.[1] ?? null, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE }),
+  (row): [string, string] => [String(row.connection_id), String(row.installation_id)])) rows.push(...page);
   for (const row of rows) {
     const id = String(row.connection_id);
     byConnection.set(id, [...byConnection.get(id) ?? [],

@@ -1,13 +1,19 @@
 import { expect, test } from "./fixtures";
-import { fixtureRequests, fixtureRule, releaseFixture } from "./in-page-api-fixtures";
+import { fixtureRequests } from "./in-page-api-fixtures";
 import { OVERVIEW, USER_DETAIL, openWorkspaceAs } from "./platform-admin-fixtures";
 import { fixtureJson } from "./workspace-fixtures";
 
 // The operator rail entry is desktop-only (md:flex), so this spec runs wide.
 test.use({ viewport: { width: 1280, height: 900 } });
 
-test("a platform admin sees platform totals, user access, and activity", async ({ page }, testInfo) => {
+test("a platform admin sees active people, growth, activation, retention, and platform totals", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
+  // A newcomer from inside the range, who joined a Space and wrote once.
+  await fixtureJson(page, "admin-overview", /\/api\/xmatrix\/admin\/overview(?:\?.*)?$/, { overview: { ...OVERVIEW, users: [
+    ...OVERVIEW.users,
+    { userId: "user:new", email: "new@example.com", spaces: 1, ownedSpaces: 1, agentRegistrations: 0, machines: 0,
+      messages: 1, registeredAt: "2026-08-02T09:00:00.000Z", activeDays: [20668] },
+  ] } });
   await page.goto("/app/personal-sspaceperso/admin");
 
   const totals = page.getByRole("region", { name: "Platform", exact: true });
@@ -15,15 +21,24 @@ test("a platform admin sees platform totals, user access, and activity", async (
   await expect(totals.getByText("4.2k", { exact: true })).toBeVisible();
   await expect(totals.getByText("9 spaces", { exact: true })).toBeVisible();
 
-  const access = page.getByRole("region", { name: "Registered users" });
-  await expect(access.getByText("Active 7d")).toBeVisible();
-  await expect(access.getByText("58% of users")).toBeVisible();
-  await expect(page.getByRole("img", { name: /Daily message volume/ })).toBeVisible();
+  const glance = page.getByRole("region", { name: /^At a glance/ });
+  await expect(glance.getByText("Active people", { exact: true })).toBeVisible();
+  await expect(glance.getByText("New accounts", { exact: true })).toBeVisible();
+  const active = page.getByRole("region", { name: "Active people" });
+  await expect(active.getByRole("img", { name: /People active each day/ })).toBeVisible();
+  // The readout names every series at the latest day without hovering.
+  await expect(active.getByText("30-day", { exact: true })).toBeVisible();
+  await expect(active.getByText(/Signed in .*71|Signed in .*9 in 30d/)).toBeVisible();
+  const activation = page.getByRole("region", { name: /^Activation/ });
+  await expect(activation.getByText("Sent a message of their own")).toBeVisible();
+  // Registered, in a Space, wrote, and active this week; no Machine or Agent yet.
+  await expect(activation.getByText("100%")).toHaveCount(4);
+  await expect(activation.getByText("0%", { exact: true })).toHaveCount(2);
+  await expect(page.getByRole("region", { name: "Weekly retention" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Daily numbers" }).getByRole("button", { name: /CSV/ })).toBeVisible();
 
   // The rail offers the operator entry only for an allowlisted account.
   await expect(page.getByRole("button", { name: "Platform admin" })).toBeVisible();
-  await page.getByRole("group", { name: "Activity range" }).getByRole("button", { name: "30d", exact: true }).click();
-  await expect(page.getByRole("button", { name: "30d", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.screenshot({ path: testInfo.outputPath("desktop-overview.png") });
 });
 
@@ -136,26 +151,26 @@ test("a non-admin account is offered no operator entry and the view fails closed
 });
 
 
-test("changing the activity range keeps the overview visible while the new read waits", async ({ page }) => {
+test("changing the range keeps it in the address and reads nothing new", async ({ page }) => {
   await openWorkspaceAs(page, true);
   await page.goto("/app/personal-sspaceperso/admin");
-  const platform = page.getByRole("region", { name: "Platform", exact: true });
-  await expect(platform.getByText("4.2k", { exact: true })).toBeVisible();
-  await fixtureRule(page, {
-    id: "admin-range-pending",
-    pattern: /\/api\/xmatrix\/admin\/overview.*activityDays=30/,
-    responder: { kind: "deferred", json: { overview: { ...OVERVIEW, activityDays: 30 } } },
-  });
-  try {
-    await page.getByRole("button", { name: "30d", exact: true }).click();
-    await expect.poll(() => fixtureRequests(page, "admin-range-pending")).toHaveLength(1);
-    await expect(platform.getByText("4.2k", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeDisabled();
-    await expect(page.getByText("Loading platform data")).toHaveCount(0);
-  } finally {
-    await releaseFixture(page, "admin-range-pending");
-  }
-  await expect(page.getByRole("img", { name: "Daily message volume for the last 30 days, peaking at 130" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Active people" })).toBeVisible();
+  const reads = await fixtureRequests(page, "admin-overview");
+  expect(reads.length).toBeGreaterThan(0);
+  expect(reads.every((url) => url.includes("activityDays=365"))).toBe(true);
+
+  const range = page.getByRole("group", { name: "Range" });
+  await range.getByRole("button", { name: "7d", exact: true }).click();
+  await expect(range.getByRole("button", { name: "7d", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/range=7d/);
+  await expect(page.getByText("Jul 29 – Aug 4, UTC")).toBeVisible();
+  await range.getByRole("button", { name: "All", exact: true }).click();
+  await expect(page.getByText("Jul 22 – Aug 4, UTC")).toBeVisible();
+  expect(await fixtureRequests(page, "admin-overview")).toHaveLength(reads.length);
+
+  // Users and Spaces read the same overview: opening them waits on nothing.
+  await page.goto("/app/personal-sspaceperso/admin?item=users");
+  await expect(page.getByRole("region", { name: "Registered users" }).getByText("Active days, 30d")).toBeVisible();
 });
 
 test("a Space opens from the list with billing, members, and usage, and a member opens their user", async ({ page }, testInfo) => {
@@ -192,11 +207,12 @@ test("a Space opens from the list with billing, members, and usage, and a member
   await expect(page.getByRole("region", { name: "Spaces" }).getByText("Solo Space")).toBeVisible();
 });
 
-test("Operations shows Machines, runtimes, Runs, and a stalled delivery notice", async ({ page }, testInfo) => {
+test("Operations shows Machines, runtimes, Runs, and Automations", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
   await page.goto("/app/personal-sspaceperso/admin?item=operations");
   await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
-  await expect(page.getByRole("status").getByText(/Event delivery is behind/)).toBeVisible();
+  // data.outbox has no consumer, so there is no delivery backlog to report.
+  await expect(page.getByText(/Event delivery/)).toHaveCount(0);
   const machines = page.getByRole("region", { name: "Machines", exact: true });
   await expect(machines.getByText("machine:1")).toBeVisible();
   await expect(machines.getByText("offline 1 · online 1")).toBeVisible();

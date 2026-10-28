@@ -1,10 +1,10 @@
 /**
  * Platform operations for operators: Machines and Agent runtimes, Runs,
- * Automations, the event delivery queue, billing, and paid calls.
+ * Automations, billing, and paid calls.
  *
  * Each query names its columns: metadata only. Machine host and display
- * names, capabilities, Run and Automation payloads and error text, outbox
- * payloads, billing provider ids and payload digests, and every
+ * names, capabilities, Run and Automation payloads and error text,
+ * billing provider ids and payload digests, and every
  * `metadata_json` are never selected. Machines live on the directory shard;
  * everything else is read from every physical shard and merged.
  */
@@ -61,10 +61,6 @@ interface AutomationRow extends QueryResultRow { total: AdminCountValue; enabled
 
 interface OverdueRow extends QueryResultRow { overdue: AdminCountValue }
 
-interface OutboxRow extends QueryResultRow {
-  status: string; total: AdminCountValue; oldest_pending_at: AdminTimeValue | null; max_attempts: AdminCountValue | null;
-}
-
 interface SubscriptionRow extends QueryResultRow {
   space_id: string; space_name: string | null; plan: string; status: string; seat_quantity: number;
   billing_provider: string | null; current_period_end: AdminTimeValue | null; cancel_at_period_end: boolean;
@@ -87,7 +83,6 @@ interface ShardPart {
   runDays: readonly RunDayRow[];
   automations: { total: number; enabled: number; withError: number; overdue: number };
   occurrencesByStatus: Record<string, number>;
-  outbox: readonly OutboxRow[];
   subscriptions: AdminOperationsSubscription[];
   webhookEvents: AdminBillingWebhookEvent[];
   webhooksByOutcome: Record<string, number>;
@@ -191,15 +186,6 @@ async function readShard(
       maxRows: 1,
     }))[0];
 
-    const outbox = await transaction.query<OutboxRow>({
-      name: "postgres_admin_operations_outbox_v1",
-      text: `SELECT status, COUNT(*) AS total,
-          MIN(created_at) FILTER (WHERE status IN ('pending', 'leased')) AS oldest_pending_at,
-          MAX(attempts) FILTER (WHERE status <> 'delivered') AS max_attempts
-        FROM data.outbox GROUP BY status ORDER BY status LIMIT 20`,
-      values: [],
-      maxRows: 20,
-    });
 
     const subscriptions = await transaction.query<SubscriptionRow>({
       name: "postgres_admin_operations_subscriptions_v1",
@@ -256,7 +242,6 @@ async function readShard(
         overdue: adminCount(overdue?.overdue),
       },
       occurrencesByStatus: statusCounts(occurrences),
-      outbox,
       subscriptions: subscriptions.slice(0, bound).map((row) => {
         const currentPeriodEnd = adminOptionalIso(row.current_period_end);
         const graceUntil = adminOptionalIso(row.grace_until);
@@ -363,13 +348,9 @@ export async function readPostgresAdminOperationsFromFleet(
     current.failed += adminCount(row.failed);
   }
 
+  // data.outbox has no consumer, so it has no delivery backlog to report;
+  // the empty shape stays for clients that still read it.
   const outbox: AdminOperations["outbox"] = { byStatus: {}, maxAttempts: 0 };
-  for (const row of parts.flatMap((part) => part.outbox)) {
-    outbox.byStatus[row.status] = (outbox.byStatus[row.status] ?? 0) + adminCount(row.total);
-    outbox.maxAttempts = Math.max(outbox.maxAttempts, adminCount(row.max_attempts));
-    const oldest = adminOptionalIso(row.oldest_pending_at);
-    if (oldest && (!outbox.oldestPendingAt || oldest < outbox.oldestPendingAt)) outbox.oldestPendingAt = oldest;
-  }
 
   const merged: AdminOperations = {
     generatedAt: now,

@@ -73,6 +73,8 @@ export const OVERVIEW = {
       profileCompleted: true,
       providers: ["github"],
       lastMessageAt: "2026-08-04T11:00:00.000Z",
+      // 2026-08-03 and 2026-08-04, as days since 1970-01-01.
+      activeDays: [20668, 20669],
     },
   ],
   userAccess: {
@@ -88,6 +90,13 @@ export const OVERVIEW = {
     messages: index * 10,
     humanMessages: index * 3,
     agentMessages: index * 7,
+    ownMessages: index * 2,
+    activeUsers: (index % 3) + 1,
+    activeUsers7d: Math.min(index + 1, 6),
+    activeUsers30d: Math.min(index + 2, 9),
+    activeSpaces: (index % 2) + 1,
+    signups: index % 4 === 0 ? 1 : 0,
+    runsStarted: index,
   })),
   storage: [
     { category: "messages", rows: 4200, logicalBytes: 900_000, updatedAt: "2026-08-04T12:00:00.000Z" },

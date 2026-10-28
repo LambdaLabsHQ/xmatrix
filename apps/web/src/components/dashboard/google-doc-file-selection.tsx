@@ -2,9 +2,10 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useRef, useState } from "react";
-import { Copy, FileText, Loader2 } from "lucide-react";
+import { FileText, Loader2 } from "lucide-react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { Button } from "@/components/ui/button";
+import { actionClass } from "@/components/ui/action-tone";
+import { ConnectorCopyLine, ConnectorRow, ConnectorRows } from "./connector-page";
 import { xmatrixApiRequest, XMatrixApiError } from "@/lib/query/api-client";
 import { loadGoogleDocPicker, openGoogleDocPicker, type GooglePickerConfiguration } from "@/lib/google-doc-picker";
 
@@ -59,21 +60,18 @@ export function GoogleDocFileSelection({ spaceId, token }: { spaceId: string; to
   };
 
   const readCommand = file ? file.kind === "sheet" ? `@google:read_sheet:${file.id} A1:T20` : `@google:read_doc:${file.id}` : "";
-  return <div className="space-y-3">
-    <p className="text-sm text-muted-foreground">Choose a Google Doc or Sheet using the Google account connected to this Space. This grants xMatrix access to that file.</p>
-    <Button size="sm" variant="outline" disabled={!ready || busy} onClick={select}>
-      {busy ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <FileText />} {busy ? "Selecting file" : "Choose Google Doc or Sheet"}
-    </Button>
-    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-    {file ? <div className="space-y-2 text-sm">
-      <a href={file.url} target="_blank" rel="noopener noreferrer" className="underline">{file.name}</a>
-      <div className="flex flex-wrap items-center gap-2">
-        <code className="break-all">{readCommand}</code>
-        <Button size="xs" variant="ghost" onClick={() => void navigator.clipboard.writeText(readCommand)
-          .catch(() => setError("Could not copy; select the command above."))} aria-label="Copy file read command"><Copy /> Copy</Button>
-      </div>
-      {file.kind === "sheet" ? <p className="text-xs text-muted-foreground">The command reads A1:T20 on the first worksheet. Change it to the exact worksheet and range you need before posting.</p> : null}
-      <p className="text-xs text-muted-foreground">Post this command in the channel where the file should be read. Writes follow that channel&apos;s action policy.</p>
-    </div> : null}
+  return <div>
+    <button type="button" className={actionClass({ variant: "secondary", size: "sm" })} disabled={!ready || busy} onClick={select}>
+      {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />} {busy ? "Selecting file" : "Choose a Doc or Sheet"}
+    </button>
+    {error ? <p role="alert" className="mt-2 text-[13px] text-destructive">{error}</p> : null}
+    {file ? <ConnectorRows className="mt-2">
+      <ConnectorRow title={<a href={file.url} target="_blank" rel="noopener noreferrer" className="underline">{file.name}</a>}
+        meta={file.kind === "sheet"
+          ? "Post this in the channel that should read it. It reads A1:T20 of the first worksheet; change the range to the one you need."
+          : "Post this in the channel that should read it. Writes follow that channel's permissions."}>
+        <div className="mt-1.5"><ConnectorCopyLine value={readCommand} label="file read command" /></div>
+      </ConnectorRow>
+    </ConnectorRows> : null}
   </div>;
 }

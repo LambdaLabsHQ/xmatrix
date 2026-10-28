@@ -77,6 +77,40 @@ final class AppSignIn: NSObject {
         return false
     }
 
+    /// Diagnostics for an otherwise opaque Apple authorization failure. Never
+    /// serialize NSError descriptions or userInfo: they can contain account data.
+    nonisolated static func authorizationFailureMessage(_ error: Error) -> String? {
+        let native = error as NSError
+        guard native.domain == ASAuthorizationError.errorDomain else { return nil }
+        let domains = [
+            ASAuthorizationError.errorDomain: "authorization",
+            "AKAuthenticationError": "authentication",
+            "AKAuthenticationErrorDomain": "authentication",
+            "AKAuthenticationServerError": "authentication_server",
+            "AKSQLError": "authentication_store",
+            NSURLErrorDomain: "url", NSCocoaErrorDomain: "cocoa",
+            NSPOSIXErrorDomain: "posix", NSOSStatusErrorDomain: "os_status"
+        ]
+        var chain: [String] = []
+        var current: NSError? = native
+        for _ in 0..<3 {
+            guard let cause = current else { break }
+            chain.append("\(domains[cause.domain] ?? "other"):\(cause.code)")
+            current = cause.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        if current != nil { chain.append("more") }
+        func version(_ key: String) -> String {
+            guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+                  value.range(of: "^[0-9][0-9A-Za-z.+-]{0,23}$", options: .regularExpression) != nil
+            else { return "unknown" }
+            return value
+        }
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        return "Apple authorization failed: \(chain.joined(separator: " > ")); "
+            + "app=\(version("CFBundleShortVersionString")); build=\(version("CFBundleVersion")); "
+            + "ios=\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+    }
+
     /// The one Hub that the beta and stable Webs both sign in through.
     private static let hubHost = "xmatrix-hub.xmatrix.sh"
 

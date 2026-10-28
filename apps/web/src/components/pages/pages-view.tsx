@@ -658,6 +658,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const [changesOpen, setChangesOpen] = useState(false);
   const { list: changeList, notice: undoNotice } = useSessionChanges(sessionChanges);
   const [dialog, setDialog] = useState<PageDialogState | null>(null);
+  // The Share button its panel drops from.
+  const [shareAnchor, setShareAnchor] = useState<HTMLElement | null>(null);
+  const closeShare = useCallback(() => setDialog((open) => (open === "share" ? null : open)), []);
   // The conversation whose card is being read, so its passage is marked (§4.4).
   const [focused, setFocused] = useState<string | null>(null);
   // A conversation being read is about to be opened: what opening it needs is read now.
@@ -954,6 +957,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       off();
       if (madeSession.current === live) return;
       live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false); setChangesOpen(false);
+      setHeadRevision(null);
       setOffline(false); edited.current = false;
     };
   }, [spaceId, pageId, pending, hasToken, userId, userName, queryClient]);
@@ -1187,24 +1191,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
 
   const togglePublished = async () => {
     if (!spaceId || !page) return;
-    try {
-      await pageApi.publish(spaceId, page.pageId, token, !page.publishedAt);
-      await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
-    } catch (cause) {
-      setNotice(userErrorMessage(cause, "Couldn't change who can read this page"));
-    }
+    // Share says what went wrong beside the switch.
+    await pageApi.publish(spaceId, page.pageId, token, !page.publishedAt);
+    await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
   const publicUrl = spaceId && page ? `/p/${encodeURIComponent(spaceId)}/${encodeURIComponent(page.pageId)}` : null;
 
   // The page that states the project's rules only owners and admins edit (open-project-governance.md §4).
   const toggleRulesPage = async () => {
     if (!spaceId || !page) return;
-    try {
-      await pageApi.setGovernance(spaceId, token, { governancePageId: page.governance ? null : page.pageId });
-      await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
-    } catch (cause) {
-      setNotice(userErrorMessage(cause, "Couldn't change who edits this page"));
-    }
+    await pageApi.setGovernance(spaceId, token, { governancePageId: page.governance ? null : page.pageId });
+    await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
 
   // A new page opens on its title, the first line of its document, as in Notion.
@@ -1350,8 +1347,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   const resolveDiscussion = (linkId: string) => pageApi.resolveLink(spaceId, token, linkId, true)
     .then(() => links.refetch(), (cause: Error) => setNotice(cause.message));
-  const copy = (text: string) => void navigator.clipboard.writeText(text)
-    .then(() => setNotice("Link copied."), (cause: Error) => setNotice(cause.message));
   // Co-writing with an Agent: a conversation of its own, linked to the page or a section, whose first
   // message calls the chosen runtime to infer what the page needs and write it. The page stays open,
   // and the Agent shows at the right edge beside the line it writes.
@@ -1495,7 +1490,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     onOpenConversation(conversationId, at ? { messageId: at.messageId, sequence: at.sequence } : undefined);
   };
   // Who wrote what (page-blame.tsx), read once per head revision when the reader first asks.
-  const blame: PageBlameSource | undefined = spaceId && pageId && !pending ? {
+  // The document can sync before the session announces its head. Reading then
+  // would cache under null and read the same revision again when it arrives.
+  const blame: PageBlameSource | undefined = spaceId && pageId && !pending && headRevision !== null ? {
     read: () => queryClient.fetchQuery({
       queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-blame",
         [spaceId, pageId, blameRevision.current]),
@@ -1716,7 +1713,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             <History /> History
             {unseen && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" data-testid="page-history-new" />}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setDialog("share")}>
+          <Button variant="ghost" size="sm" aria-expanded={dialog === "share"} onClick={(event) => {
+            setShareAnchor(event.currentTarget);
+            setDialog((open) => (open === "share" ? null : "share"));
+          }}>
             <Share /> Share
           </Button>
           {canEdit && (
@@ -1921,11 +1921,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           )}
           <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}
             onClose={() => setDialog(null)} onDelete={removePage} />
-          <ShareDialog open={dialog === "share"} onClose={() => setDialog(null)} canPublish={canMigrate}
-            canEdit={canEdit} published={Boolean(page.publishedAt)} restricted={restricted} publicUrl={publicUrl}
-            suggestOnly={page.agentSuggestOnly} rulesPage={page.governance} onTogglePublished={() => void togglePublished()}
-            onToggleSuggestOnly={() => void toggleSuggestOnly()} onToggleRulesPage={() => void toggleRulesPage()}
-            onCopyLink={() => copy(pageLink())} />
+          <ShareDialog open={dialog === "share"} anchor={shareAnchor} onClose={closeShare} canPublish={canMigrate}
+            canEdit={canEdit} published={Boolean(page.publishedAt)} restricted={restricted} members={members.length}
+            pageLink={pageLink()} publicUrl={publicUrl} suggestOnly={page.agentSuggestOnly} rulesPage={page.governance}
+            onTogglePublished={togglePublished} onToggleSuggestOnly={toggleSuggestOnly} onToggleRulesPage={toggleRulesPage} />
           <PageDialog open={listSection !== null} onClose={() => setDialog(null)} id="page-conversations-title"
             title="Conversations about this page" wide>
             <ConversationList conversations={conversations} blocks={blocks} onOpen={openConversation}

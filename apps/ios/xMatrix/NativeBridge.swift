@@ -139,8 +139,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         if AppleSubscriptions.isCancellation(error) || AppSignIn.isCancellation(error) {
             return ["name": "AbortError", "message": "The operation was cancelled."]
         }
-        // Keep the existing string contract for every actual failure.
-        return error.localizedDescription
+        // Keep the string contract, but retain safe native evidence for Apple's
+        // generic authorization error instead of dropping its underlying cause.
+        return AppSignIn.authorizationFailureMessage(error) ?? error.localizedDescription
     }
 
     @MainActor

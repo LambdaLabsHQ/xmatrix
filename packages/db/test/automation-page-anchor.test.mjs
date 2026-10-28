@@ -20,7 +20,7 @@ function anchorTx(current) {
     calls,
     async query(query) {
       calls.push(query);
-      if (query.name === "page_automations_reconcile_v3") return [current];
+      if (query.name === "page_automations_reconcile_v4") return [current];
       if (query.name === "automation_control_head_v1") return [{ commit_sequence: 4 }];
       return [];
     },

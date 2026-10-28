@@ -36,21 +36,10 @@ export async function lockSentryInstallation(tx: DatabaseTransaction, installati
   return { key, retired: rows[0].retired_at !== null };
 }
 
-export async function limitSentryBindings(tx: DatabaseTransaction, installation: AppOAuthInstallation, connectionId: string) {
-  const rows = await tx.query<QueryResultRow>({ name: "sentry_install_binding_capacity_v1", text: `SELECT connection_id
-    FROM data.app_connector_oauth_installations WHERE provider_id='sentry' AND app_client_id=$1
-      AND event_scope_id=$2 AND installation_id=$3 ORDER BY connection_id LIMIT 51`,
-  values: sentryInstallationKey(installation), maxRows: 51 });
-  if (rows.length > 50 || (rows.length === 50 && !rows.some(row => row.connection_id === connectionId))) {
-    throw new AppControlError("too_many_installations", 503, "Sentry installation binding capacity reached", true);
-  }
-}
-
 /** A live request is valid for one minute. It is never returned to a client or command replay. */
 export async function beginSentryAttempt(tx: DatabaseTransaction, installation: AppOAuthInstallation, spaceId: string) {
   const { key, retired } = await lockSentryInstallation(tx, installation);
   if (retired) throw new AppControlError("installation_retired", 409, "Sentry installation was uninstalled; start again");
-  await limitSentryBindings(tx, installation, `${spaceId}:sentry`);
   const attemptId = crypto.randomUUID();
   await tx.query({ name: "sentry_install_attempt_begin_v1", text: `UPDATE data.app_sentry_installation_lifecycle
     SET attempt_id=$4::uuid,attempt_space_id=$5,attempt_expires_at=statement_timestamp()+interval '1 minute',
@@ -71,7 +60,6 @@ export async function lockSentryAttempt(tx: DatabaseTransaction, installation: A
       AND $6::bigint <= extract(epoch FROM statement_timestamp())*1000+86400000 FOR UPDATE`,
   values: [...sentryInstallationKey(installation), attemptId, spaceId, tokenExpiresAt], maxRows: 1 });
   if (!rows[0]) throw new AppControlError("installation_changed", 409, "Sentry installation expired, changed or was uninstalled");
-  await limitSentryBindings(tx, installation, `${spaceId}:sentry`);
 }
 
 export async function consumeSentryAttempt(tx: DatabaseTransaction, installation: AppOAuthInstallation) {
