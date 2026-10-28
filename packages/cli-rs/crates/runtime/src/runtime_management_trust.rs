@@ -627,22 +627,27 @@ struct DaemonAgentAuthGrantState {
 /// still outlives that interval with time to spare.
 const AGENT_RUN_TOKEN_REUSE: Duration = Duration::from_secs(60);
 
+/// Held by wall-clock time: the Hub's ten minutes keep running while the
+/// computer sleeps, and a monotonic clock (macOS `Instant`) does not, so a
+/// token held across a sleep would read as just minted.
 #[derive(Clone, Debug)]
 struct HeldAgentRunToken {
     token: String,
-    minted_at: std::time::Instant,
+    minted_at: std::time::SystemTime,
 }
 
 impl HeldAgentRunToken {
     fn now(token: String) -> Self {
         Self {
             token,
-            minted_at: std::time::Instant::now(),
+            minted_at: std::time::SystemTime::now(),
         }
     }
 
-    fn reusable_at(&self, now: std::time::Instant) -> Option<&str> {
-        (now.saturating_duration_since(self.minted_at) < AGENT_RUN_TOKEN_REUSE)
+    /// A clock set back before the mint reads as an error: not reused.
+    fn reusable_at(&self, now: std::time::SystemTime) -> Option<&str> {
+        now.duration_since(self.minted_at)
+            .is_ok_and(|age| age < AGENT_RUN_TOKEN_REUSE)
             .then_some(self.token.as_str())
     }
 }
@@ -748,7 +753,7 @@ fn take_daemon_agent_auth_grant(
     // the map only ever holds Runs this daemon spawned or restored, and reading
     // a key requires the owner-only run registry -- the same OS account that
     // could read the raw capability out of the live wrapper's environment.
-    let now = std::time::Instant::now();
+    let now = std::time::SystemTime::now();
     capabilities.lock().ok().and_then(|capabilities| {
         let grant = daemon_capability_candidates(capability).find_map(|key| capabilities.get(&key))?;
         let reusable = grant
@@ -2980,6 +2985,10 @@ mod restored_run_auth_capability_tests {
 
         let held = HeldAgentRunToken::now("minted".into());
         assert_eq!(held.reusable_at(held.minted_at + AGENT_RUN_TOKEN_REUSE), None);
+        // A day asleep is a day by the wall clock, and a clock set back
+        // before the mint proves nothing about its age.
+        assert_eq!(held.reusable_at(held.minted_at + Duration::from_secs(25 * 3600)), None);
+        assert_eq!(held.reusable_at(held.minted_at - Duration::from_secs(1)), None);
         // Ten-minute tokens: whatever is reused still covers a full refresh
         // interval of the wrapper that holds it.
         assert!(

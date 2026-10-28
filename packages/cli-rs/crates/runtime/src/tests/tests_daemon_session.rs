@@ -1797,6 +1797,50 @@ mod git_credential_revocation {
 }
 
 #[test]
+fn only_a_refused_run_credential_is_refreshed_before_registering_again() {
+    let refusal = |code: &str| -> CliError {
+        xmatrix_cli_core::error::AgentOperationError {
+            message: "The Agent run credential is invalid or expired.".into(),
+            failure: protocol::AgentOperationFailure {
+                code: code.into(),
+                stage: "relay.authenticate".into(),
+                origin_stage: Some("relay.authenticate".into()),
+                diagnostic_id: "diag_11111111-1111-4111-8111-111111111111".into(),
+                retryable: false,
+            },
+        }
+        .into()
+    };
+    // A token that expired while the computer slept: not retryable as it is,
+    // but a fresh one from the daemon may be accepted.
+    let expired = refusal("agent_run_credential_invalid");
+    assert!(super::is_refused_run_credential(&expired));
+    assert!(!is_retryable_initial_register_error(&expired));
+    assert!(!super::is_refused_run_credential(&refusal("agent_run_forbidden")));
+    assert!(!super::is_refused_run_credential(&CliError::Relay(
+        "Invalid or expired auth token".into()
+    )));
+}
+
+#[tokio::test]
+async fn a_wall_clock_wait_ends_once_its_time_has_passed() {
+    let past = std::time::SystemTime::now() - Duration::from_secs(25 * 3600);
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        super::wait_until_wall_clock(past, Duration::from_secs(15)),
+    )
+    .await
+    .expect("a deadline already behind the wall clock does not wait");
+    let soon = std::time::SystemTime::now() + Duration::from_millis(50);
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        super::wait_until_wall_clock(soon, Duration::from_millis(10)),
+    )
+    .await
+    .expect("a near deadline is reached by ticking the wall clock");
+}
+
+#[test]
 fn structured_registration_rejections_override_text_retry_heuristics() {
     for retryable in [false, true] {
         let error: CliError = xmatrix_cli_core::error::AgentOperationError {
