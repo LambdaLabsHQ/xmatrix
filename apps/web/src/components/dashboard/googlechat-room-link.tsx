@@ -2,11 +2,9 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { RefreshCw } from "lucide-react";
-import { actionClass } from "@/components/ui/action-tone";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ConnectorAction, ConnectorCopyLine, ConnectorRow, ConnectorRows } from "./connector-page";
+import { ConnectorAction, ConnectorCopyLine, ConnectorLinkActions, ConnectorRow, ConnectorRows } from "./connector-page";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
@@ -136,13 +134,8 @@ export function GoogleChatRoomLink({ spaceId, token, beforeLink, afterRefresh, p
       {!isTeams && <Input id={`${provider}-room-input`} aria-label={`${label} ${multiple ? "group chat" : "space"} ID`} placeholder={isTelegram ? "Group ID, -100…" : isFeishu ? "Group chat ID, oc_…" : "Space ID, spaces/AAAA…"}
         className="min-w-0 flex-1 basis-48" value={chatSpace} maxLength={135} disabled={busy}
         onChange={(event) => { setChatSpace(event.target.value); setChallenge(null); }} />}
-      <button id={`${provider}-link-start`} type="submit" disabled={busy || !valid}
-        className={actionClass({ variant: lead ? "primary" : "secondary", size: "md" })}>
-        {busy ? "Working…" : "Start confirmation"}
-      </button>
-      <ConnectorAction disabled={busy} onClick={() => void refresh()}>
-        <RefreshCw className="size-3.5" /> Refresh connection
-      </ConnectorAction>
+      <ConnectorLinkActions lead={lead} busy={busy} start="submit" startLabel="Start confirmation" startId={`${provider}-link-start`}
+        startDisabled={!valid} onRefresh={() => void refresh()} />
     </form>
     {challenge && <div className="mt-4 space-y-1.5 text-[13px] leading-[1.45]" role="status">
       <p>In {isTeams ? "your chosen Teams conversation" : <code>{challenge.chatSpace}</code>}, send this to xMatrix within three minutes{isTeams ? ", mentioning @xMatrix first in a group chat" : ""}:</p>

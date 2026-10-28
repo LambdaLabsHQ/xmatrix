@@ -1,11 +1,9 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import {WEB_PROXY_ROUTES} from '@xmatrix/protocol';
-import {RefreshCw} from 'lucide-react';
-import {actionClass} from '@/components/ui/action-tone';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
-import {ConnectorAction,ConnectorField,ConnectorRow,ConnectorRows} from './connector-page';
+import {ConnectorField,ConnectorLinkActions,ConnectorRow,ConnectorRows} from './connector-page';
 import {xmatrixApiRequest} from '@/lib/query/api-client';
 type Installation={corpId:string;appId:number;agentId:number;recipients:{memberId:string;recipientRef:string}[]};
 export function DingTalkCompanyConnection({spaceId,token,beforeLink,afterRefresh,lead=false}:{spaceId:string;token:string;beforeLink:()=>Promise<void>;afterRefresh:()=>Promise<void>;lead?:boolean}) {
@@ -53,10 +51,6 @@ export function DingTalkCompanyConnection({spaceId,token,beforeLink,afterRefresh
     <ConnectorField label="Member IDs" help="Up to 20, separated by spaces or commas. Current company visibility and contact permission must include every one.">
       <Textarea aria-label="DingTalk member IDs" value={members} disabled={busy} rows={2} onChange={event=>setMembers(event.target.value)}/>
     </ConnectorField>
-    <div className="flex flex-wrap items-center gap-2">
-      <button type="button" className={actionClass({variant:lead?'primary':'secondary',size:'md'})} disabled={busy} onClick={()=>void run(true)}>{busy?'Working…':'Authorize company'}</button>
-      <ConnectorAction disabled={busy} onClick={()=>void run(false)}><RefreshCw className="size-3.5"/> Refresh connection</ConnectorAction>
-    </div>
-    {error&&<p role="alert" className="text-[13px] text-destructive">{error}</p>}
+    <ConnectorLinkActions lead={lead} busy={busy} startLabel="Authorize company" onStart={()=>void run(true)} onRefresh={()=>void run(false)} error={error}/>
   </div>;
 }

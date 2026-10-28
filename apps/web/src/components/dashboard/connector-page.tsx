@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { Check, ChevronDown, Copy, Plus } from "lucide-react";
+import { Check, ChevronDown, Copy, Plus, RefreshCw } from "lucide-react";
 import { actionClass } from "@/components/ui/action-tone";
 import { cn } from "@/lib/utils";
 
@@ -176,5 +176,38 @@ export function ConnectorField({ label, help, required, saved, children }: {
       {children}
       {help ? <span className="mt-1.5 block max-w-[62ch] text-[12px] leading-[1.45] text-muted-foreground">{help}</span> : null}
     </label>
+  );
+}
+
+/**
+ * Linking a group or a company: the step that starts it (solid while it is the
+ * page's lead) and Refresh connection, which reads back what the provider
+ * confirmed; then what went wrong, if anything did.
+ */
+export function ConnectorLinkActions({ lead, busy, startLabel, startId, startDisabled, onStart, onRefresh, error, start = "button" }: {
+  lead: boolean;
+  busy: boolean;
+  startLabel: string;
+  startId?: string;
+  startDisabled?: boolean;
+  /** A form's submit starts it when the step's fields are a form. */
+  start?: "button" | "submit";
+  onStart?: () => void;
+  onRefresh: () => void;
+  error?: string | null;
+}) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <button id={startId} type={start} disabled={busy || startDisabled} onClick={onStart}
+          className={actionClass({ variant: lead ? "primary" : "secondary", size: "md" })}>
+          {busy ? "Working…" : startLabel}
+        </button>
+        <ConnectorAction disabled={busy} onClick={onRefresh}>
+          <RefreshCw className="size-3.5" /> Refresh connection
+        </ConnectorAction>
+      </div>
+      {error ? <p role="alert" className="text-[13px] text-destructive">{error}</p> : null}
+    </>
   );
 }

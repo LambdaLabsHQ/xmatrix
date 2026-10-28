@@ -1,9 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { RefreshCw } from "lucide-react";
-import { actionClass } from "@/components/ui/action-tone";
-import { ConnectorAction, ConnectorRow, ConnectorRows } from "./connector-page";
+import { ConnectorLinkActions, ConnectorRow, ConnectorRows } from "./connector-page";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 type Installation = { corpId: string; agentId: number; recipients: { memberId: string; recipientRef: string; sourceRef: string }[] };
 export function WeComCompanyConnection({ spaceId, token, beforeLink, afterRefresh, lead = false }: {
@@ -47,10 +45,7 @@ export function WeComCompanyConnection({ spaceId, token, beforeLink, afterRefres
         meta={<>Channel subscription <code className="break-all">{value.sourceRef}</code> · send recipient <code className="break-all">{value.recipientRef}</code></>} />)}
     </ConnectorRows>}
     <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={test} disabled={busy} onChange={event => setTest(event.target.checked)} />Use the company test application</label>
-    <div className="flex flex-wrap items-center gap-2">
-      <button id="wecom-install-start" type="button" className={actionClass({ variant: lead ? "primary" : "secondary", size: "md" })} disabled={busy} onClick={() => void run(true)}>{busy ? "Working…" : "Authorize company"}</button>
-      <ConnectorAction disabled={busy} onClick={() => void run(false)}><RefreshCw className="size-3.5" /> Refresh connection</ConnectorAction>
-    </div>
-    {error && <p role="alert" className="text-[13px] text-destructive">{error}</p>}
+    <ConnectorLinkActions lead={lead} busy={busy} startLabel="Authorize company" startId="wecom-install-start"
+      onStart={() => void run(true)} onRefresh={() => void run(false)} error={error} />
   </div>;
 }
