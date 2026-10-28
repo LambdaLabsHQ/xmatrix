@@ -333,34 +333,6 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
         itemMaxLength: 80,
       },
       {
-        id: "commentWriteChannelId",
-        label: "Comment write channel",
-        description: "Channel id where the GitHub comment action is explicitly enabled.",
-        placeholder: "channel-id",
-        pattern: "^[A-Za-z0-9_-]+$",
-      },
-      {
-        id: "createIssueWriteChannelId",
-        label: "Create issue write channel",
-        description: "Channel id where the GitHub create issue action is explicitly enabled.",
-        placeholder: "channel-id",
-        pattern: "^[A-Za-z0-9_-]+$",
-      },
-      {
-        id: "closeReopenWriteChannelId",
-        label: "Close/reopen write channel",
-        description: "Channel id where GitHub close and reopen actions are explicitly enabled.",
-        placeholder: "channel-id",
-        pattern: "^[A-Za-z0-9_-]+$",
-      },
-      {
-        id: "actionsWriteChannelId",
-        label: "Actions write channel",
-        description: "Channel id where GitHub Actions rerun and workflow dispatch actions are explicitly enabled.",
-        placeholder: "channel-id",
-        pattern: "^[A-Za-z0-9_-]+$",
-      },
-      {
         id: "actionsWorkflowIds",
         label: "Allowed workflow ids",
         description: "Workflow file names or numeric ids that the dispatch action may invoke.",
@@ -370,19 +342,12 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
         maxItems: 32,
         itemMaxLength: 128,
       },
-      {
-        id: "reviewWriteChannelId",
-        label: "Review write channel",
-        description: "Channel id where GitHub pull request review actions are explicitly enabled.",
-        placeholder: "channel-id",
-        pattern: "^[A-Za-z0-9_-]+$",
-      },
     ],
     actions: [
       {
         id: "subscribe",
-        /* Writes nothing to GitHub, but brings its content into the Channel,
-           so a Channel's policy may deny it. */
+        /* Imports GitHub content into the Channel; repository read access and
+           current Channel access are still required. */
         effect: "read",
         label: "Subscribe repository, issue, or PR",
         description: "Link the current channel or thread to repository-wide commit, issue, and pull request updates, or to one issue or PR. Use all for every repository feature; each feature requires its matching read access.",

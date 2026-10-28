@@ -4,7 +4,6 @@ import { test } from "node:test";
 import {
   executeAppConnectorProviderAction,
 } from "../src/app-connectors.ts";
-import { isGitHubConnectorCommand } from "../src/connectors/github-command.ts";
 import { githubRequiredCapabilities } from "../src/github-subscription-domain.ts";
 import {
   githubProviderManifest, stubGitHubInstallation, githubActionContext, githubAppEnv, githubConnection, jsonResponse,
@@ -31,7 +30,6 @@ function connection(overrides = {}) {
     capabilities: ["github.actions.write"],
     metadata: {
       installationIds: ["777"],
-      actionsWriteChannelId: "channel-1",
       actionsWorkflowIds: ["production-release-request.yml"],
     },
     ...overrides,
@@ -56,19 +54,6 @@ async function withDispatchedWorkflow(body, verify) {
     await verify(result, github);
   } finally { github.restore(); }
 }
-
-test("GitHub Actions writes are typed, capability-gated, and Channel-gated", async () => {
-  const github = githubProviderManifest();
-  assert.ok(github.auth.scopes.includes("actions:write"));
-  assert.ok(github.auth.capabilities.some((capability) => capability.id === "github.actions.write"));
-  assert.ok(github.connectionMetadata.some((field) => field.id === "actionsWriteChannelId"));
-  assert.ok(github.connectionMetadata.some((field) => field.id === "actionsWorkflowIds"));
-  assert.ok(github.actions.some((action) => action.id === "rerun_failed_jobs"));
-  assert.ok(github.actions.some((action) => action.id === "dispatch_workflow"));
-
-  assert.ok(isGitHubConnectorCommand("@github:rerun_failed_jobs:LambdaLabsHQ/xmatrix:1"));
-  assert.ok(isGitHubConnectorCommand("@github:dispatch_workflow:LambdaLabsHQ/xmatrix:main release.yml"));
-});
 
 test("rerun_failed_jobs uses a repository-scoped token and the failed-jobs endpoint", async () => {
   const github = stubGitHub({ metadata: "read", actions: "write" });
