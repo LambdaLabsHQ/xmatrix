@@ -1,4 +1,5 @@
 import { Bell, CalendarDays, Eye, MapPin, Repeat, Users } from "lucide-react";
+import { GOOGLE_CALENDAR_SEND_UPDATES, isGoogleCalendarSendUpdates, type GoogleCalendarSendUpdates } from "@xmatrix/protocol";
 
 /**
  * The event a Google Calendar write would leave behind, read as an event and
@@ -24,7 +25,7 @@ export interface CalendarEventDraft {
   /** RRULE lines, one per line; `(no recurrence)` when a change removes the repeat. */
   recurrence?: string;
   /** Who Google emails about the change. */
-  sendUpdates?: "all" | "externalOnly" | "none";
+  sendUpdates?: GoogleCalendarSendUpdates;
   /** For one event of a repeating series: the whole series or this occurrence. */
   series?: "all" | "this";
   /** Who sees the event's details, when not the calendar's default. */
@@ -38,7 +39,6 @@ export interface CalendarEventDraft {
 }
 
 const NO_RECURRENCE = "(no recurrence)";
-const SEND_UPDATES = { all: "Emails every guest", externalOnly: "Emails only guests outside your organization", none: "Emails no one" } as const;
 /** Google's field names, in the words the card uses for them. */
 const FIELD_NAMES: Record<string, string> = {
   summary: "title", start: "time", end: "time", location: "place", description: "notes", attendees: "guests", recurrence: "repeat",
@@ -58,7 +58,7 @@ export function calendarEventDraft(preview: Record<string, string>): CalendarEve
     if (!preview[key]) return { problem: `Google Calendar approval preview is missing ${key}` };
   }
   const { sendUpdates, series } = preview;
-  if (sendUpdates !== undefined && !(sendUpdates in SEND_UPDATES)) return { problem: `Google Calendar approval preview has an unknown sendUpdates ${JSON.stringify(sendUpdates)}` };
+  if (sendUpdates !== undefined && !isGoogleCalendarSendUpdates(sendUpdates)) return { problem: `Google Calendar approval preview has an unknown sendUpdates ${JSON.stringify(sendUpdates)}` };
   if (series !== undefined && series !== "all" && series !== "this") return { problem: `Google Calendar approval preview has an unknown series ${JSON.stringify(series)}` };
   let changes: Record<string, unknown> | undefined;
   if (preview.changes !== undefined) {
@@ -72,7 +72,7 @@ export function calendarEventDraft(preview: Record<string, string>): CalendarEve
     ...(preview.optionalGuests ? { optionalGuests: preview.optionalGuests } : {}),
     ...(preview.notes ? { notes: preview.notes } : {}),
     ...(preview.recurrence ? { recurrence: preview.recurrence } : {}),
-    ...(sendUpdates ? { sendUpdates: sendUpdates as keyof typeof SEND_UPDATES } : {}),
+    ...(isGoogleCalendarSendUpdates(sendUpdates) ? { sendUpdates } : {}),
     ...(series ? { series } : {}),
     ...(changes ? { changes } : {}),
     ...(preview.visibility ? { visibility: preview.visibility } : {}),
@@ -108,24 +108,27 @@ const FREQUENCIES: Record<string, [string, string]> = { DAILY: ["Daily", "days"]
 const WEEKDAYS: Record<string, string> = { MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat", SU: "Sun" };
 
 /**
- * "Weekly on Mon, Wed · 10 times", for the rules people write; a rule with any
- * other part stays as Google stores it, so nothing it does is left unsaid.
+ * "Weekly on Mon, Wed · 10 times", only when every clause is represented.
+ * Extended or ambiguous rules stay whole as Google stores them: WKST changes
+ * occurrences, and UNTIL includes an exact cutoff, not just a calendar day.
  */
 export function calendarRepeatText(rule: string): string {
   const match = /^RRULE:(.+)$/.exec(rule);
   if (!match) return rule;
-  const parts = Object.fromEntries(match[1]!.split(";").map(part => part.split("=") as [string, string]));
-  const known = new Set(["FREQ", "INTERVAL", "BYDAY", "COUNT", "UNTIL", "WKST"]);
-  const frequency = FREQUENCIES[parts.FREQ ?? ""];
-  const days = parts.BYDAY?.split(",").map(day => WEEKDAYS[day]);
-  if (!frequency || Object.keys(parts).some(key => !known.has(key)) || days?.some(day => !day)) return rule;
+  const parts: Record<string, string> = {};
+  for (const clause of match[1]!.split(";")) {
+    const pair = /^(FREQ|INTERVAL|BYDAY|COUNT)=([^=]+)$/.exec(clause);
+    if (!pair || Object.hasOwn(parts, pair[1]!)) return rule;
+    parts[pair[1]!] = pair[2]!;
+  }
+  const frequency = Object.hasOwn(FREQUENCIES, parts.FREQ ?? "") ? FREQUENCIES[parts.FREQ!] : undefined;
+  const days = parts.BYDAY?.split(",").map(day => Object.hasOwn(WEEKDAYS, day) ? WEEKDAYS[day] : undefined);
+  if (!frequency || days?.some(day => !day)) return rule;
   const interval = Number(parts.INTERVAL ?? "1");
-  const until = parts.UNTIL ? /^(\d{4})(\d{2})(\d{2})/.exec(parts.UNTIL) : null;
-  if (!Number.isInteger(interval) || interval < 1 || (parts.UNTIL && !until)) return rule;
+  if (![parts.INTERVAL, parts.COUNT].every(value => value === undefined || /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)))) return rule;
   return [
     `${interval === 1 ? frequency[0] : `Every ${interval} ${frequency[1]}`}${days ? ` on ${days.join(", ")}` : ""}`,
     parts.COUNT ? `${parts.COUNT} times` : "",
-    until ? `until ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(`${until[1]}-${until[2]}-${until[3]}T12:00:00Z`))}` : "",
   ].filter(Boolean).join(" · ");
 }
 
@@ -205,7 +208,7 @@ export function CalendarEventPreview({ draft, locale }: { draft: CalendarEventDr
         </p> : null}
         {draft.sendUpdates ? <p className="mt-1 flex min-w-0 items-start gap-1.5 text-muted-foreground">
           <Bell className="mt-0.5 size-3.5 shrink-0" aria-label="Notifications" />
-          <span>{SEND_UPDATES[draft.sendUpdates]}</span>
+          <span>{GOOGLE_CALENDAR_SEND_UPDATES[draft.sendUpdates]}</span>
         </p> : null}
         {draft.notes ? <p className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">{draft.notes}</p> : null}
       </div>

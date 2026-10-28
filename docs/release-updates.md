@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Calendar approvals preserve notification and recurrence meaning
+
+Calendar approvals described `externalOnly` as an organization boundary and
+discarded week-start and exact-cutoff details while translating recurrence.
+Hub validation and Web approval copy now share the protocol's notification
+modes; external-only means guests who do not use Google Calendar. Repeat
+rules are translated only when every clause is represented, otherwise their
+complete original is shown. Unknown modes cannot be approved. Regression
+cases reproduce the prior behavior at the projection and browser boundaries.
+Hub and beta Web, no migration or native update; recovery is a CI-validated
+beta reverting this change. Existing stored approval previews stay readable.
+
 ## Unreleased: Each app has one permission
 
 Apps now have one Space-connection setting: Read only, Ask first, or Read and

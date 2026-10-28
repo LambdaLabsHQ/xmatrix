@@ -641,3 +641,5 @@ export { usageWithoutQuota, mergeLlmUsagePreferringQuotas, accountQuotaUsageFrom
 export { releaseNotesPath, publishedReleaseNotes } from "./release-notes.js";
 
 export * from "./page-assistant-output.js";
+export { GOOGLE_CALENDAR_SEND_UPDATES, isGoogleCalendarSendUpdates } from "./google-calendar.js";
+export type { GoogleCalendarSendUpdates } from "./google-calendar.js";
