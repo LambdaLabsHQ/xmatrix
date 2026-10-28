@@ -8,7 +8,20 @@ const subscription = (id, productId, state) => ({ type: "subscriptions", id,
 const catalog = (...rows) => ({ ...apps,
   "GET /v1/apps/6760000001/subscriptionGroups": { data: [{ type: "subscriptionGroups", id: "g-1", attributes: { referenceName: "Pro" } }] },
   "GET /v1/subscriptionGroups/g-1/subscriptions": { data: rows } });
-const submitted = { "POST /v1/subscriptionSubmissions": (call) => ({ data: { type: "subscriptionSubmissions", id: `sub-${call.body.relationships.subscription.data.id}` } }) };
+/* No open review submission and no versions yet: each subscription and its group get one, and all join a new draft. */
+const submitted = {
+  "GET /v1/reviewSubmissions": { data: [] },
+  "POST /v1/reviewSubmissions": { data: { type: "reviewSubmissions", id: "draft-1", attributes: { state: "READY_FOR_REVIEW" } } },
+  "GET /v1/reviewSubmissions/draft-1/items": { data: [] },
+  "GET /v1/subscriptionGroups/g-1/versions": { data: [] },
+  "GET /v1/subscriptions/s-month/versions": { data: [{ type: "subscriptionVersions", id: "sv-old", attributes: { state: "APPROVED" } }] },
+  "GET /v1/subscriptions/s-year/versions": { data: [{ type: "subscriptionVersions", id: "sv-year", attributes: { state: "PREPARE_FOR_SUBMISSION" } }] },
+  "POST /v1/subscriptionGroupVersions": { data: { type: "subscriptionGroupVersions", id: "gv-1" } },
+  "POST /v1/subscriptionVersions": (call) => ({ data: { type: "subscriptionVersions", id: `sv-${call.body.relationships.subscription.data.id}` } }),
+  "POST /v1/reviewSubmissionItems": (call) => ({ data: { type: "reviewSubmissionItems", id: `item-${Object.keys(call.body.relationships).join("-")}` } }),
+};
+const itemsOf = (calls) => calls.filter(call => call.method === "POST" && call.path === "/v1/reviewSubmissionItems")
+  .map(call => Object.entries(call.body.relationships).find(([key]) => key !== "reviewSubmission")).map(([key, value]) => `${key}:${value.data.id}`);
 
 test("subscription statements are validated before any request", () => {
   assert.deepEqual(statement(`@appstoreconnect:subscriptions:${BUNDLE}`), { app: BUNDLE });
@@ -27,15 +40,32 @@ test("subscriptions lists each product with its group and review state", async (
   assert.deepEqual(writes(shown.calls), []);
 });
 
-test("submit_subscriptions sends every ready subscription, each exactly once", async () => {
+test("submit_subscriptions adds each ready subscription and its group to the draft review submission once", async () => {
   const sent = await run({ ...catalog(subscription("s-month", "app.pro.monthly", "READY_TO_SUBMIT"), subscription("s-year", "app.pro.annual", "READY_TO_SUBMIT"),
     subscription("s-old", "app.pro.legacy", "APPROVED")), ...submitted }, `@appstoreconnect:submit_subscriptions:${BUNDLE}`);
-  assert.deepEqual(sent.calls.filter(call => call.method === "POST").map(call => call.body.relationships.subscription.data),
-    [{ type: "subscriptions", id: "s-month" }, { type: "subscriptions", id: "s-year" }]);
-  assert.match(sent.value.summary, /Submitted app\.pro\.monthly, app\.pro\.annual .*submit that version to send them/u);
+  assert.deepEqual(itemsOf(sent.calls), ["subscriptionGroupVersion:gv-1", "subscriptionVersion:sv-s-month", "subscriptionVersion:sv-year"],
+    "an approved version gets a new one, a pending one is reused");
+  assert.equal(sent.calls.filter(call => call.method === "POST" && call.path === "/v1/reviewSubmissions").length, 1);
+  assert.ok(!sent.calls.some(call => call.method === "PATCH"), "the draft is left for submit to send with the app version");
+  assert.match(sent.value.summary, /Added app\.pro\.monthly, app\.pro\.annual .*Run submit for the app version/u);
+
+  const again = await run({ ...catalog(subscription("s-year", "app.pro.annual", "READY_TO_SUBMIT")), ...submitted,
+    "GET /v1/reviewSubmissions": { data: [{ type: "reviewSubmissions", id: "draft-1", attributes: { state: "READY_FOR_REVIEW" } }] },
+    "GET /v1/subscriptionGroups/g-1/versions": { data: [{ type: "subscriptionGroupVersions", id: "gv-ok", attributes: { state: "APPROVED" } }] },
+    "GET /v1/reviewSubmissions/draft-1/items": { data: [{ type: "reviewSubmissionItems", id: "i-1",
+      relationships: { subscriptionVersion: { data: { type: "subscriptionVersions", id: "sv-year" } } } }] } }, `@appstoreconnect:submit_subscriptions:${BUNDLE}`);
+  assert.deepEqual(writes(again.calls), [], "an approved group and an item already in the draft are not added again");
+
   const none = await run(catalog(subscription("s-old", "app.pro.legacy", "APPROVED")), `@appstoreconnect:submit_subscriptions:${BUNDLE}`);
   assert.match(none.value.summary, /nothing was submitted/u);
   assert.deepEqual(writes(none.calls), []);
+});
+
+test("a review submission already sent is not changed", async () => {
+  const busy = await withApple({ ...catalog(subscription("s-month", "app.pro.monthly", "READY_TO_SUBMIT")), ...submitted,
+    "GET /v1/reviewSubmissions": { data: [{ type: "reviewSubmissions", id: "r-9", attributes: { state: "WAITING_FOR_REVIEW" } }] } },
+  () => assert.rejects(ACTIONS.submit_subscriptions.execute({ credentials }, { app: BUNDLE, products: "" }), /open review submission is WAITING_FOR_REVIEW/u));
+  assert.deepEqual(writes(busy.calls), []);
 });
 
 test("named subscriptions must exist and be ready, or nothing is sent", async () => {
@@ -47,5 +77,5 @@ test("named subscriptions must exist and be ready, or nothing is sent", async ()
     { app: BUNDLE, products: "app.pro.monthly app.pro.annual" }), /app\.pro\.annual is WAITING_FOR_REVIEW/u));
   assert.deepEqual(writes(blocked.calls), [], "one unready product stops the whole statement");
   const one = await run(routes, `@appstoreconnect:submit_subscriptions:${BUNDLE} app.pro.monthly`);
-  assert.deepEqual(writes(one.calls), ["POST /v1/subscriptionSubmissions"]);
+  assert.deepEqual(itemsOf(one.calls), ["subscriptionGroupVersion:gv-1", "subscriptionVersion:sv-s-month"]);
 });
