@@ -261,6 +261,10 @@ export async function installWorkspaceStubs(
   // A search the test did not set up finds nothing, as the Hub answers it: an
   // empty page, which the catch-all's `{}` is not.
   await fixtureJson(page, "message-search", "**/api/xmatrix/messages/search?**", { results: [], execution: "proven" });
+  // A paused search may ask for a rerank after its message results appear.
+  // The Hub always returns a results array; the generic `{}` would crash the
+  // picker only when that response wins the race with closing it.
+  await fixtureJson(page, "search-rerank", "**/api/xmatrix/search/rerank", { results: [], best: null });
   await fixtureJson(page, "client-compatibility", /\/api\/(?:xmatrix\/)?client-compatibility(?:\?.*)?$/, {
     compatible: true,
     code: "compatible",

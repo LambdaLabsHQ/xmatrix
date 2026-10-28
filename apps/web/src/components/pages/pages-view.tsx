@@ -954,6 +954,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       off();
       if (madeSession.current === live) return;
       live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false); setChangesOpen(false);
+      setHeadRevision(null);
       setOffline(false); edited.current = false;
     };
   }, [spaceId, pageId, pending, hasToken, userId, userName, queryClient]);
@@ -1495,7 +1496,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     onOpenConversation(conversationId, at ? { messageId: at.messageId, sequence: at.sequence } : undefined);
   };
   // Who wrote what (page-blame.tsx), read once per head revision when the reader first asks.
-  const blame: PageBlameSource | undefined = spaceId && pageId && !pending ? {
+  // The document can sync before the session announces its head. Reading then
+  // would cache under null and read the same revision again when it arrives.
+  const blame: PageBlameSource | undefined = spaceId && pageId && !pending && headRevision !== null ? {
     read: () => queryClient.fetchQuery({
       queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-blame",
         [spaceId, pageId, blameRevision.current]),

@@ -57,7 +57,8 @@ async function stubPages(browser: Page, pages: ReturnType<typeof page>[], channe
  */
 const sessionSockets = new WeakMap<Y.Doc, Set<(data: Uint8Array, from: object) => void>>();
 async function servePageSession(browser: Page, server: Y.Doc,
-  on: { connect?: (send: (data: Uint8Array) => void) => void; clientUpdate?: () => void; syncAfterMs?: number } = {}) {
+  on: { connect?: (send: (data: Uint8Array) => void) => void; clientUpdate?: () => void; syncAfterMs?: number;
+    headReady?: Promise<void> } = {}) {
   const peers = sessionSockets.get(server) ?? new Set();
   sessionSockets.set(server, peers);
   await browser.routeWebSocket(/\/ws\/pages\//u, async (socket) => {
@@ -69,7 +70,9 @@ async function servePageSession(browser: Page, server: Y.Doc,
     const notice = encoding.createEncoder();
     encoding.writeVarUint(notice, 2);
     encoding.writeVarString(notice, JSON.stringify({ type: "session", headRevision: 3, canEdit: true }));
-    send(encoding.toUint8Array(notice));
+    const tellHead = () => send(encoding.toUint8Array(notice));
+    if (on.headReady) void on.headReady.then(tellHead);
+    else tellHead();
     peers.add(relay);
     socket.onMessage((message) => {
       if (typeof message === "string") return;
@@ -159,8 +162,9 @@ async function stubCoWriting(browser: Page, blockId: string) {
 }
 
 /** Opens Pages on a page whose live session holds `body`, and returns its editor. */
-async function openLivePage(browser: Page, session: Y.Doc | string = BODY) {
-  await servePageSession(browser, typeof session === "string" ? pageDocument(session) : session);
+async function openLivePage(browser: Page, session: Y.Doc | string = BODY,
+  on: Parameters<typeof servePageSession>[2] = {}) {
+  await servePageSession(browser, typeof session === "string" ? pageDocument(session) : session, on);
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
   return browser.getByTestId("page-editor");
@@ -1621,7 +1625,19 @@ test("paragraph attribution stays in the margin and selecting text leaves only d
   // Their faces: Daniel's own picture, and the mark of the harness claude:1's Instance runs.
   await fixtureFaces(browser, { "user:u-daniel": "/role-avatars/default.svg", "agent:a": "/agent-vendors/claude.svg" });
   const live = pageDocument(BODY);
-  const editor = await openLivePage(browser, live);
+  let tellHead!: () => void;
+  const headReady = new Promise<void>((resolve) => { tellHead = resolve; });
+  const editor = await openLivePage(browser, live, { headReady });
+  await expect(editor).toContainText("In progress");
+  // Sync and the authoritative head notice are separate socket messages. Let
+  // the editor paint first: attribution must not read under an unknown head
+  // and then read that same revision again when its notice arrives.
+  await browser.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const readsBeforeHead = (await fixtureRequestRecords(browser, "page-blame")).length;
+  tellHead();
+  expect(readsBeforeHead).toBe(0);
 
   // Under the title, its authors by face and name, most words first, as a column's byline.
   const byline = browser.getByTestId("page-byline");
