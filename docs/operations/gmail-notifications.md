@@ -86,8 +86,8 @@ Sources: [labels.get](https://developers.google.com/workspace/gmail/api/referenc
 
 After a notification is posted, the connector reads that message itself, as
 the mailbox owner, through the same Gmail read and endpoint allowlist that
-`@gmail:read` uses. Each notified Channel gets a Gmail read receipt in reply
-to the notification. The read is a private result: the owner sees the message
+`@gmail:read` uses. Each notified Channel gets a Gmail read receipt right
+after the notification (an App message cannot be a reply target). The read is a private result: the owner sees the message
 in the Web for 30 days while they can read the Channel. Shared history, other
 members, admins and every Agent receive only the mask. Agents get no new access;
 they read a message with their own `@gmail:read` call, as before. The receipt is a

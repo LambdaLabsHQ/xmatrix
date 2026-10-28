@@ -35,7 +35,9 @@ test("the connector reads a new message once and answers each notification with 
     ["channel-2","owner","system:gmail-auto-read:app:gmail:route-1:abcdef1234567890:channel-2:gmail"]]);
   assert.match(calls.stored[0].detail,/private body/u);
   for(const [index,{input:command,lines,options}] of calls.published.entries()) {
-    assert.equal(command.commandMessageId,notifications[index].messageId);
+    assert.equal(command.messageId,`gmail-auto-read:${notifications[index].messageId}`);
+    // The message authority refuses replies to App messages, so the receipt is not threaded.
+    assert.equal(command.commandMessageId,null);
     assert.equal(command.actorUserId,"owner");
     assert.deepEqual(lines,["Gmail read: completed; Result: [hidden — private call]."]);
     // The receipt never resumes anyone: the notification it answers is the work.
