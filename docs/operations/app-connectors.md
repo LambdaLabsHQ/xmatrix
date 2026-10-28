@@ -284,9 +284,9 @@ Use a runtime token restricted to the intended actions and stable connection IDs
 with no proxy grants. Provider credentials remain in that runtime.
 
 Search requires the token and validates service-qualified action IDs, displaying
-at most 30. All `run` calls share one xMatrix policy, `run`, including provider actions
-described as reads; a Space administrator's Read only app permission
-turns them off there. Input is one JSON object up to 16 KiB UTF-8.
+at most 30. All `run` calls are treated as mutations, including provider actions
+described as reads; a Space administrator's Read only app permission blocks
+all of them in every conversation. Input is one JSON object up to 16 KiB UTF-8.
 The transport has a 10-second timeout, a 256 KiB response limit and no redirects
 or automatic replay. A successful run must confirm the exact action, a bounded
 execution ID and `auditPersisted: true`; content is fenced, mention-shielded and
@@ -297,18 +297,18 @@ runtime token are distinct controls; runtime revocation must be tested against
 the actual deployment. Gateway/runtime tests do not establish native acceptance
 of Gmail, Slack or any other third-party provider.
 
-Policy is stored in `data.app_connector_action_policies` and read at execution
-time:
+Permission is stored in `data.app_connector_connections.permission_mode` and
+read uncached before execution and immediately before each mutation:
 
-- **`allow`.** Execute immediately within the provider's existing permissions.
-- **`ask`.** Create a 24-hour, encrypted, immutable request. A current Human
-  Space admin approves or denies it in the Channel's Pending approvals. Each
-  approval covers one request only; duplicate clicks cannot dispatch twice.
-- **`disallow`.** Block the action. Legacy `deny` remains the same restrictive alias.
-- **Default.** Gmail send/reply and Google Ads mutate/set_campaign_status use
-  ask; other actions retain allow. Existing
-  explicit overrides keep their meaning. GitHub's specialized dispatcher does
-  not support ask and rejects it.
+- **`read`.** Read without changing provider state.
+- **`ask`.** Read directly; each mutation creates a 24-hour encrypted immutable
+  request for a current Human Space admin. One approval covers one request;
+  duplicate clicks cannot dispatch twice.
+- **`write`.** Read and mutate within the provider's existing permissions.
+- **Default.** Calendar and other writable apps use write; Gmail, Google Ads,
+  X and Linear use ask; read-only apps use read. NULL inherits that one app
+  default. GitHub does not support ask and rejects it. No Channel overrides or
+  per-action settings remain.
 
 Ask stages before the normal execution record. Approved dispatch rechecks
 Channel access, policy, account generation, credentials and mailbox ownership.
