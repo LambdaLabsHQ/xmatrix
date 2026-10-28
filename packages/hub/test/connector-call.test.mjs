@@ -9,7 +9,7 @@ import { privateResponse } from "../src/private-response.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { connectorActionCatalog } from "../src/connectors/action-catalog.ts";
 import { connectorForCommand } from "../src/connectors/registry.ts";
-import { ProviderRequestError } from "../src/connectors/http.ts";
+import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 import { runCliCommand } from "../src/cli-commands.ts";
 import { CONNECTOR_CALL_COMMAND } from "../src/cli-commands-call.ts";
@@ -28,14 +28,14 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 // their own PostgreSQL tests own membership, registration and grant validation.
 // Here we protect private response delivery, policy admission, and masking
 // before result persistence, which public Channel-command tests cannot see.
-function fixture({ mode = null, failAtAuthorization, otherMailbox = false, changeConnection = false } = {}) {
+function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMailbox = false, changeConnection = false } = {}) {
   const checks = [], reports = [], policies = [], appends = [], persisted = [], privateRecords = [];
   let scopes = 0;
   const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
     ownerUserId: "member", spaceId: "space", executionKey: "execution-alpha" };
-  const credentials = { composioApiKey: "fixture-key", mailboxes: JSON.stringify([
+  const credentials = { composioApiKey: "fixture-key", ...(noMailbox ? {} : { mailboxes: JSON.stringify([
     { account: "ca_fixture", address: "me@example.com", owner: otherMailbox ? "user:other" : "user:member" },
-  ]) };
+  ]) }) };
   const append = async (_env, channelId, command) => {
     assert.equal(channelId, run.channelId); appends.push(command); return Response.json({});
   };
@@ -57,7 +57,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, chang
     "./command-support": support,
     "./credentials": { connectorPermissionRepository: () => ({ mode: async input => { policies.push(input); return mode; } }) },
     "./connection-credentials": { connectionCredentials: async () => credentials },
-    "./http": { ProviderRequestError },
+    "./http": { ConnectorRemedy, ProviderRequestError },
     "../usage-cost-metering": metering,
   })[name] ?? {});
   const app = new Hono();
@@ -76,7 +76,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, chang
     "./connectors/action-catalog": { connectorActionCatalog },
     "./connectors/registry": { connectorForCommand },
     "./connectors/connector-commands": executor,
-    "./connectors/http": { ProviderRequestError },
+    "./connectors/http": { ConnectorRemedy, ProviderRequestError },
     "./connectors/command-support": support,
     "./connectors/private-result-content": { writeConnectorPrivateResult: async (_env, record) => { privateRecords.push(record); } },
     "./product-message-append": { dispatchProductMessageAppend: append },
@@ -147,6 +147,15 @@ test("private failure details reach the caller while Channel and execution histo
   assert.match(f.appends[1].body, /blocked; Result: \[hidden — private call\]/);
   assert.doesNotMatch(JSON.stringify([f.appends, f.persisted, f.reports]), /654321|fixture-private/);
   assert.equal(f.persisted.find(row => row.kind === "finalize-execution").input.status, "blocked");
+});
+
+test("a private failure keeps the Hub's own next step, which carries no provider data", async () => {
+  const f = fixture({ noMailbox: true });
+  const { result, calls } = await fetched([], () => f.request({ command: `@gmail:read:${id}`, resultVisibility: "private" }));
+  assert.equal(result.status, 403); assert.equal(calls.length, 0);
+  assert.match(f.appends[1].body, /blocked; save mailboxes in Apps → Gmail → Credentials\./);
+  assert.equal(f.persisted.find(row => row.kind === "finalize-execution").input.reason, "save mailboxes in Apps → Gmail → Credentials");
+  assert.doesNotMatch(JSON.stringify([f.appends, f.persisted]), /hidden — private call/);
 });
 
 test("result visibility is strictly typed and cannot be coerced into a public result", async () => {

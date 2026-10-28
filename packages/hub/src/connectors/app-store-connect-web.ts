@@ -3,7 +3,7 @@ import { appStoreConnect, appleApp, appleResource, BUNDLE_ID, relatedId, type Ap
 import { quoteRetrievedText } from "./actions/common";
 import { cell } from "./actions/google-report";
 import { record, text } from "./event-format";
-import { ProviderRequestError } from "./http";
+import { ConnectorRemedy, ProviderRequestError } from "./http";
 import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, ConnectorActionStatement } from "./provider";
 
 /*
@@ -90,7 +90,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
   let changed = false;
   const call = async (method: "GET" | "POST" | "PATCH" | "DELETE", path: string, query: Record<string, string>,
     body?: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    if (!cookies.size) throw new ProviderRequestError(401, EXPIRED);
+    if (!cookies.size) throw new ConnectorRemedy(401, EXPIRED);
     const url = new URL(path, ORIGIN);
     if (url.origin !== ORIGIN || !/^\/(iris\/v1|olympus\/v1)\//u.test(url.pathname)) throw new ProviderRequestError(502, "App Store Connect returned a link outside its website API");
     for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
@@ -101,7 +101,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
     changed = applySetCookies(cookies, setCookies(response.headers)) || changed;
     if (response.status === 401 || (response.status >= 300 && response.status < 400)) {
       await response.body?.cancel();
-      throw new ProviderRequestError(401, EXPIRED);
+      throw new ConnectorRemedy(401, EXPIRED);
     }
     const bytes = await response.arrayBuffer();
     if (bytes.byteLength > MAX_BYTES) throw new ProviderRequestError(502, "App Store Connect's answer is too large");
@@ -110,7 +110,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
     try { payload = JSON.parse(new TextDecoder().decode(bytes)); } catch { payload = undefined; }
     // A refusal with Apple's reasons is about the request; a bare 403 is the session.
     const problem = response.ok ? undefined : websiteProblem(payload);
-    if (response.status === 403 && !problem) throw new ProviderRequestError(401, EXPIRED);
+    if (response.status === 403 && !problem) throw new ConnectorRemedy(401, EXPIRED);
     if (!response.ok || !payload || typeof payload !== "object") {
       throw new ProviderRequestError(response.ok ? 502 : response.status, response.ok ? "App Store Connect did not answer with JSON; the website may have changed"
         : `App Store Connect's website returned ${response.status}${problem ? `: ${problem}` : ""}`);

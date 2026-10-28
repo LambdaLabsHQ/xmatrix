@@ -16,6 +16,15 @@ export class ProviderRequestError extends Error {
   }
 }
 
+/** A failure the Hub words itself to say what to do next, such as signing in
+ * again. It carries no provider data, so a private call records it unmasked. */
+export class ConnectorRemedy extends ProviderRequestError {
+  constructor(status: number, message: string) {
+    super(status, message);
+    this.name = "ConnectorRemedy";
+  }
+}
+
 export function providerUrl(base: string, path = ""): URL {
   let url: URL;
   try {

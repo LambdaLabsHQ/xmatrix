@@ -2,7 +2,7 @@ import { APP_CONNECTOR_PROVIDER_MANIFESTS, trimEnd, type AppConnectorProviderMan
 import { base64UrlDecode, signGitHubAppState, verifyGitHubAppState } from "../index-shared";
 import type { Env } from "../types";
 import { metered, type UpstreamMeter } from "../usage-cost-metering";
-import { providerJson, ProviderRequestError } from "./http";
+import { ConnectorRemedy, providerJson, ProviderRequestError } from "./http";
 import { vercelEventScopeId, vercelOAuthFields } from "./vercel-api";
 import { pkceChallenge, pkceGrantProof, validPkceClaims, oauthGrantState } from "./oauth-pkce";
 import { pagerDutyGrantContext, validatePagerDutyCredentials, validatePagerDutyGrant } from "./pagerduty-oauth";
@@ -370,11 +370,11 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
   const completeGoogleGrant = providerId === "gcp" || providerId === "googleads" || providerId === "googlecalendar";
   if (completeGoogleGrant && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
-    throw new ProviderRequestError(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`);
+    throw new ConnectorRemedy(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`);
   }
   if (providerId === "bitbucket" && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
-    throw new ProviderRequestError(401, "Bitbucket OAuth requires a complete expiring grant; reconnect");
+    throw new ConnectorRemedy(401, "Bitbucket OAuth requires a complete expiring grant; reconnect");
   }
   if (!values.oauthRefreshToken || (!afterNotionUnauthorized &&
       (!Number.isFinite(expiresAt) || expiresAt - now > REFRESH_MARGIN_MS))) return undefined;

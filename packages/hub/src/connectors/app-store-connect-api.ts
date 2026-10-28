@@ -2,7 +2,7 @@ import { pemPrivateKeyBytes } from "../push/apns";
 import { base64UrlEncodeValue } from "../relay-v2-primitives";
 import { connectorIngressUrl } from "./credentials";
 import { oneLine, record, text } from "./event-format";
-import { providerJson, ProviderRequestError } from "./http";
+import { ConnectorRemedy, providerJson, ProviderRequestError } from "./http";
 import type { ConnectorSubscriptionSync } from "./provider";
 
 /*
@@ -78,14 +78,14 @@ async function bearer(credentials: Credentials, nowSeconds: number): Promise<str
   const keyId = credentials.keyId?.trim() ?? "";
   const issuerId = credentials.issuerId?.trim() ?? "";
   if (!/^[A-Z0-9]{8,20}$/u.test(keyId) || !credentials.privateKey || (issuerId && !/^[0-9a-f-]{36}$/iu.test(issuerId))) {
-    throw new ProviderRequestError(401, "Save the App Store Connect API key first: Key ID, the .p8 private key, and the Issuer ID for a team key");
+    throw new ConnectorRemedy(401, "Save the App Store Connect API key first: Key ID, the .p8 private key, and the Issuer ID for a team key");
   }
   let key: CryptoKey;
   try {
     key = await crypto.subtle.importKey("pkcs8", privateKeyBytes(credentials.privateKey),
       { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   } catch {
-    throw new ProviderRequestError(401, "The private key is not a .p8 file from App Store Connect; paste the whole AuthKey file");
+    throw new ConnectorRemedy(401, "The private key is not a .p8 file from App Store Connect; paste the whole AuthKey file");
   }
   const claims = { iat: nowSeconds - 10, exp: nowSeconds + TOKEN_SECONDS, aud: "appstoreconnect-v1" };
   const unsigned = `${base64UrlEncodeValue(JSON.stringify({ alg: "ES256", kid: keyId, typ: "JWT" }))}.${

@@ -15,7 +15,7 @@ import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
 import { connectorPermissionRepository, connectorActionRequestRepository, connectorCredentialRepository } from "./credentials";
-import { ProviderRequestError } from "./http";
+import { ConnectorRemedy, ProviderRequestError } from "./http";
 import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
 import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
@@ -89,6 +89,12 @@ export function connectorCommands(providerId: string,
   };
 }
 
+/** What a private call's failure records: the Hub's own next step, or the mask
+ * when the failure may carry what the provider returned. */
+export function privateFailure(error: unknown): string {
+  return error instanceof ConnectorRemedy ? error.message : PRIVATE_CONNECTOR_RESULT;
+}
+
 /** A synchronous read returns the original result to its caller. Recorded
  * private calls give execution history a fixed mask rather than an excerpt. */
 export async function callConnectorRead(providerId: string, input: ConnectorCommandInput, actionId: string,
@@ -97,27 +103,27 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
   const manifest = getAppConnectorProvider(providerId);
   const entry = connectorActionCatalog(providerId, { [actionId]: action }).get(actionId);
   if (!manifest || !entry || action.effect !== "read") {
-    throw new ProviderRequestError(403, "Private calls support declared read actions only; use a Channel command for writes");
+    throw new ConnectorRemedy(403, "Private calls support declared read actions only; use a Channel command for writes");
   }
   const parsed = action.parse(statement);
-  if (typeof parsed === "string") throw new ProviderRequestError(400, parsed);
+  if (typeof parsed === "string") throw new ConnectorRemedy(400, parsed);
   const scope = await commandScope(manifest, input);
-  if (typeof scope === "string") throw new ProviderRequestError(403, scope);
+  if (typeof scope === "string") throw new ConnectorRemedy(403, scope);
   const authorize = async () => {
     await authorizeCaller();
     const live = await commandScope(manifest, input);
     if (typeof live === "string" || live.spaceId !== scope.spaceId || live.connectionId !== scope.connectionId) {
-      throw new ProviderRequestError(403, "Connector access changed during the private call");
+      throw new ConnectorRemedy(403, "Connector access changed during the private call");
     }
     const refusal = actionRefusal({ actionId, mode: await connectionActionPolicy(input.env, {
       providerId, connectionId: scope.connectionId, actionId }) });
-    if (refusal) throw new ProviderRequestError(403, refusal);
+    if (refusal) throw new ConnectorRemedy(403, refusal);
   };
   const execute = async () => {
     await authorize();
     const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorize,
       `call:${input.messageId}`);
-    if (typeof context === "string") throw new ProviderRequestError(403, context);
+    if (typeof context === "string") throw new ConnectorRemedy(403, context);
     let result: ConnectorActionResult;
     try { result = await action.execute(context, parsed); }
     // Provider errors can contain the same private values as successes.
@@ -137,7 +143,7 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
     } catch (error) {
       failure = error;
       return { status: error instanceof ProviderRequestError && error.status === 403 ? "blocked" : "failed",
-        summary: resultVisibility === "private" ? PRIVATE_CONNECTOR_RESULT
+        summary: resultVisibility === "private" ? privateFailure(error)
           : error instanceof ProviderRequestError ? error.message : "The connector call failed" };
     }
   });

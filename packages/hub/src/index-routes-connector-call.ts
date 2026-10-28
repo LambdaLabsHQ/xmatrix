@@ -8,7 +8,7 @@ import { AuthFailure, PermissionFailure, readBoundedRequestBody, requireAuth, re
 import { privateResponse } from "./private-response";
 import { parseActionCommand } from "./connectors/action-parse";
 import { connectorActionCatalog } from "./connectors/action-catalog";
-import { callConnectorRead } from "./connectors/connector-commands";
+import { callConnectorRead, privateFailure } from "./connectors/connector-commands";
 import { connectorForCommand } from "./connectors/registry";
 import { ProviderRequestError } from "./connectors/http";
 import { commandResult, publishCommandStatus } from "./connectors/command-support";
@@ -40,7 +40,7 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       spaceId: string; actionId: string; visibility: ConnectorResultVisibility } | undefined;
     let receiptAttempted = false;
     let authorizeCaller: (() => Promise<void>) | undefined;
-    const publish = async (status: "completed" | "failed" | "blocked", summary: string) => {
+    const publish = async (status: "completed" | "failed" | "blocked", summary: string, masked = PRIVATE_CONNECTOR_RESULT) => {
       if (!invocation) return;
       receiptAttempted = true;
       const { manifest, input, actionId, visibility, spaceId } = invocation;
@@ -49,7 +49,7 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
         messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200), detail: summary,
       });
       await publishCommandStatus(manifest, input, [commandResult(manifest.name, actionId, {
-        status, summary: visibility === "private" ? PRIVATE_CONNECTOR_RESULT : summary,
+        status, summary: visibility === "private" ? masked : summary,
       })], { resumeRequester: false,
         ...(visibility === "private" ? { privateResultOwnerUserId: input.actorUserId } : {}) });
     };
@@ -98,7 +98,7 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       if (invocation && !receiptAttempted) {
         try {
           await publish(error instanceof ProviderRequestError && error.status === 403 ? "blocked" : "failed",
-            error instanceof ProviderRequestError ? error.message : "The connector call failed");
+            error instanceof ProviderRequestError ? error.message : "The connector call failed", privateFailure(error));
         } catch {
           return c.json({ error: "The call's Channel receipt could not be saved" }, 503, NO_STORE);
         }

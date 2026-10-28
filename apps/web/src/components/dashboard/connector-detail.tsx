@@ -2,10 +2,11 @@
 
 import { useState, type ComponentType, type ReactNode } from "react";
 import { ChevronLeft, Loader2, PlugZap, RefreshCw, Shield } from "lucide-react";
-import type {
-  SerializedAppConnectorConnection,
-  SerializedAppConnectorExecution,
-  SpaceMember,
+import {
+  PRIVATE_CONNECTOR_RESULT,
+  type SerializedAppConnectorConnection,
+  type SerializedAppConnectorExecution,
+  type SpaceMember,
 } from "@xmatrix/protocol";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
@@ -90,7 +91,7 @@ function appExecutionStatusClassName(status: SerializedAppConnectorExecution["st
 export function ConnectorDetailPage({
   connector, Icon, connection, spaceId, token, userId, members, oauth, native,
   executions, executionsLoading, executionsError, notice, error, connecting, checking, disconnecting,
-  onBack, onConnect, onCheck, onDisconnect, onRefreshExecutions, onSaveMetadata, ensureConnectionRow, refreshConnections,
+  onBack, onConnect, onCheck, onDisconnect, onRefreshExecutions, onOpenConversation, onSaveMetadata, ensureConnectionRow, refreshConnections,
 }: {
   connector: AppConnectorManifest;
   Icon: ComponentType<{ className?: string }>;
@@ -116,6 +117,7 @@ export function ConnectorDetailPage({
   onCheck: () => Promise<void>;
   onDisconnect: () => void;
   onRefreshExecutions: () => void;
+  onOpenConversation: (channelId: string) => void;
   onSaveMetadata: (metadata: Record<string, unknown>) => Promise<void>;
   /** Creates the unconnected row credentials and links are stored on. */
   ensureConnectionRow: () => Promise<void>;
@@ -209,8 +211,8 @@ export function ConnectorDetailPage({
         {configured ? <ConnectorUseInChannel connector={connector} /> : null}
 
         {configured || executions.length > 0 ? (
-          <ConnectorActivity executions={executions} loading={executionsLoading} error={executionsError}
-            onRefresh={onRefreshExecutions} />
+          <ConnectorActivity executions={executions} members={members} loading={executionsLoading} error={executionsError}
+            onRefresh={onRefreshExecutions} onOpenConversation={onOpenConversation} />
         ) : null}
 
         {configured && connectorWriteActions(connector).length > 0 ? (
@@ -460,11 +462,20 @@ const EXECUTION_STATUS_LABELS: Record<SerializedAppConnectorExecution["status"],
   queued: "Queued", planned: "Planned", completed: "Completed", failed: "Failed", blocked: "Blocked",
 };
 
-function ConnectorActivity({ executions, loading, error, onRefresh }: {
+/** Who asked for a run: a member by name, never a bare user id. */
+function requesterName(execution: SerializedAppConnectorExecution, members: SpaceMember[]): string {
+  const id = execution.requestedByLabel || execution.requestedBy;
+  const member = members.find((candidate) => candidate.userId === id);
+  return member ? member.name || member.email || "A member" : id;
+}
+
+function ConnectorActivity({ executions, members, loading, error, onRefresh, onOpenConversation }: {
   executions: SerializedAppConnectorExecution[];
+  members: SpaceMember[];
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
+  onOpenConversation: (channelId: string) => void;
 }) {
   return (
     <ConnectorSection title="Recent activity" testId="connector-activity"
@@ -478,9 +489,19 @@ function ConnectorActivity({ executions, loading, error, onRefresh }: {
           <ConnectorRow key={execution.id} testId="connector-execution"
             title={execution.actionLabel || execution.actionId || "Default action"}
             meta={<>
-              {execution.requestedByLabel || execution.requestedBy} · {relativeTime(execution.createdAt)}
-              {execution.resultSummary ? <span className="block">{execution.resultSummary}</span> : null}
-              {execution.reason ? <span className="block first-letter:uppercase">{execution.reason.replace(/_/g, " ")}</span> : null}
+              {requesterName(execution, members)} · {relativeTime(execution.createdAt)}
+              {/* A private call keeps its result in its conversation, for the person who ran it. */}
+              {execution.resultSummary === PRIVATE_CONNECTOR_RESULT || execution.reason === PRIVATE_CONNECTOR_RESULT ? (
+                <span className="block">
+                  Private call; the result is in{" "}
+                  <button type="button" onClick={() => onOpenConversation(execution.channelId)}
+                    className="font-medium text-foreground hover:underline">its conversation</button>
+                </span>
+              ) : <>
+                {execution.resultSummary ? <span className="block">{execution.resultSummary}</span> : null}
+                {execution.reason ? <span className="block first-letter:uppercase">
+                  {/^[a-z_]+$/u.test(execution.reason) ? execution.reason.replace(/_/g, " ") : execution.reason}</span> : null}
+              </>}
             </>}
             trailing={(
               <span className={cn("pr-2 text-[13px] font-semibold", appExecutionStatusClassName(execution.status))}>
