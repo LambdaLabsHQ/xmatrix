@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Channel catalog tests advance on a committed revision
+
+The catalog-notification browser fixture no longer changes its rows after a
+second read. Initial hydration or a legitimate refresh could consume that
+response before the test sent its revision notification, inventing a new
+Channel prematurely. Install the initial snapshot before navigation and replace
+it only when simulating the commit, then send the existing notification. The
+owning case now holds the old snapshot across an additional refresh and keeps
+its original absent-before/present-after assertions. This changes test data
+only; no product, schema, retry policy or native artifact changes.
+
 ## Unreleased: Spaces can store more than 128 secrets
 
 A Space with 128 secrets refused the next credential even when it was needed
