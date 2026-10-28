@@ -79,8 +79,9 @@ test("action commands take one statement whose text spans the following lines", 
 });
 
 test("policy: actions follow their defaults and the Channel's explicit approval or denial", () => {
-  /* Public publishing, mail and advertising changes ask until a Space admin allows them. */
+  /* Public publishing, mail, calendar and advertising changes ask until a Space admin allows them. */
   const gated = new Set(["gmail:send", "gmail:reply", "googleads:mutate", "googleads:set_campaign_status",
+    "googlecalendar:create_event", "googlecalendar:update_event", "googlecalendar:delete_event",
     "x:post", "x:quote", "x:upload_video",
     "linear:archive_issue", "linear:unarchive_issue", "linear:delete_issue", "linear:delete_project",
     "linear:unarchive_project", "linear:archive_cycle", "linear:archive_project_update", "linear:delete_comment",
