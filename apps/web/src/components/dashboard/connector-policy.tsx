@@ -16,6 +16,8 @@ import { channelTitle } from "@/components/dashboard/channel-links";
    write actions are allowed, ask for approval, or are disallowed in a Channel. Space admins edit it;
    the Hub reads it at execution time. */
 
+const POLICY_LABELS: Record<ConnectorActionPolicy, string> = { allow: "Allow", ask: "Ask", disallow: "Disallow" };
+
 interface PolicyRow { channelId: string; actionId: string; mode: ConnectorActionPolicy }
 
 export function connectorWriteActions(connector: AppConnectorManifest) {
@@ -70,7 +72,7 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
               <span className="font-bold">{action(row.actionId)?.label ?? row.actionId}</span>
               {" · "}#{channelName(row.channelId)}
             </span>
-            <span className={row.mode === "disallow" ? "text-destructive" : "text-foreground"}>{row.mode}</span>
+            <span className={row.mode === "disallow" ? "text-destructive" : "text-foreground"}>{POLICY_LABELS[row.mode]}</span>
             <Button size="xs" variant="ghost" aria-label={`Reset ${row.actionId} in ${channelName(row.channelId)}`}
               disabled={write.isPending}
               onClick={() => write.mutate({ channelId: row.channelId, actionId: row.actionId, mode: null })}>
@@ -87,7 +89,8 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
           onChange={setChannelId} options={channels.map((channel) => ({ value: channel.id, label: `#${channelTitle(channel)}` }))} />
         <GlassSelect className={selectClassName} value={mode} aria-label="Policy"
           onChange={(value) => setMode(value as ConnectorActionPolicy)}
-          options={[{ value: "allow", label: "Allow" }, ...(connector.id === "github" ? [] : [{ value: "ask", label: "Ask" }]), { value: "disallow", label: "Disallow" }]} />
+          options={(["allow", ...(connector.id === "github" ? [] : ["ask" as const]), "disallow"] as const)
+            .map((value) => ({ value, label: POLICY_LABELS[value] }))} />
         <Button size="sm" type="button" disabled={!actionId || !channelId || write.isPending}
           onClick={() => write.mutate({ channelId, actionId, mode })}>
           {write.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Set

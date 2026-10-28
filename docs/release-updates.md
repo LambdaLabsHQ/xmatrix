@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Apps reads state first, then setup, then reference
+
+The Apps list groups what needs attention, what is connected and what was
+disconnected, then lists every other app once under its category instead of
+repeating an invitation under each row. An app's page puts its state, how it
+is authorized and when it was last checked in one line under its name, with
+Disconnect set apart from Reconnect, Check and Configure. Accounts and
+credentials follow directly, then recent activity and channel action policy;
+the command reference comes last and folds after four commands. A
+credentials-only app no longer hides its form below the reference.
+
 ## Unreleased: The iOS swipe back follows the finger again
 
 On iPhone, dragging from the left edge moves the screen with the finger again.

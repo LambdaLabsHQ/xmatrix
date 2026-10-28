@@ -137,19 +137,13 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
   return (
     <div className="space-y-4">
       {error ? <p className="text-sm font-medium text-destructive">{error}</p> : null}
-      {ingress ? (
-        view.data?.ingressUrl ? (
-          <div className="space-y-2">
-            <CopyValue label="Ingress URL" value={view.data.ingressUrl} secret />
-            <p className="text-xs leading-5 text-muted-foreground">
-              Paste this into {connector.name} as the webhook URL. Anyone with it can post events, so treat it as a secret.
-            </p>
-          </div>
-        ) : (
+      {ingress && view.data?.ingressUrl ? (
+        <div className="space-y-2">
+          <CopyValue label="Ingress URL" value={view.data.ingressUrl} secret />
           <p className="text-xs leading-5 text-muted-foreground">
-            Generate an ingress URL to start receiving {connector.name} events.
+            Paste this into {connector.name} as the webhook URL. Anyone with it can post events, so treat it as a secret.
           </p>
-        )
+        </div>
       ) : null}
       {generated.map((field) => view.data?.generated?.[field.id] ? (
         <div key={field.id} className="space-y-1">
@@ -196,6 +190,12 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
             {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <KeyRound />} {connected ? "Save credentials" : "Save and connect"}
           </Button>
         </form>
+      ) : null}
+      {/* Said beside the button that does it, after the form that connects the app. */}
+      {missingIngress ? (
+        <p className="pt-2 text-xs leading-5 text-muted-foreground">
+          Generate an ingress URL to start receiving {connector.name} events.
+        </p>
       ) : null}
       {ingress || generated.length > 0 ? (
         <Button size="sm" variant="outline" type="button" disabled={pending}

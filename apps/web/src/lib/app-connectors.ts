@@ -181,3 +181,45 @@ export function orderConnectorsForList<T extends Pick<AppConnectorProviderManife
   return [...connectors].sort((left, right) => group(left) - group(right)
     || left.name.localeCompare(right.name, "en", { sensitivity: "base" }));
 }
+
+/* Apps nobody has connected yet are found by what they do, so the list names
+   their category once as a heading instead of a line under every row. */
+const CONNECTOR_CATEGORIES: { title: string; kinds: AppConnectorProviderManifest["kind"][] }[] = [
+  { title: "Code & CI", kinds: ["code-host", "ci"] },
+  { title: "Chat", kinds: ["chat"] },
+  { title: "Issues & incidents", kinds: ["issue-tracker", "incident"] },
+  { title: "Ship & deploy", kinds: ["deploy"] },
+  { title: "Analytics & monitoring", kinds: ["observability"] },
+  { title: "Docs & mail", kinds: ["docs"] },
+  { title: "More", kinds: ["billing", "gateway", "webhook"] },
+];
+
+export interface ConnectorListGroup<T> {
+  title: string;
+  connectors: T[];
+}
+
+/**
+ * The Apps list's sections, in `orderConnectorsForList` order: what needs the
+ * reader's hand, what works, what was disconnected, then everything else by
+ * category, then what is not available yet. Empty sections are left out.
+ */
+export function groupConnectorsForList<T extends Pick<AppConnectorProviderManifest, "id" | "name" | "status" | "kind">>(
+  connectors: readonly T[],
+  connections: readonly { providerId: string; status: string }[],
+): ConnectorListGroup<T>[] {
+  const statusByProvider = new Map(connections.map((connection) => [connection.providerId, connection.status]));
+  const ordered = orderConnectorsForList(connectors, connections);
+  const pick = (test: (connector: T, status: string | undefined) => boolean) =>
+    ordered.filter((connector) => test(connector, statusByProvider.get(connector.id)));
+  const unconnected = pick((connector, status) => !status && connector.status === "available");
+  return [
+    { title: "Needs attention", connectors: pick((_, status) => status === "error") },
+    { title: "Connected", connectors: pick((_, status) => status === "configured") },
+    { title: "Disconnected", connectors: pick((_, status) => Boolean(status) && status !== "error" && status !== "configured") },
+    ...CONNECTOR_CATEGORIES.map(({ title, kinds }) => ({
+      title, connectors: unconnected.filter((connector) => kinds.includes(connector.kind)),
+    })),
+    { title: "Coming soon", connectors: pick((connector, status) => !status && connector.status !== "available") },
+  ].filter((group) => group.connectors.length > 0);
+}

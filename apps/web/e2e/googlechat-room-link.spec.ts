@@ -53,7 +53,7 @@ test(`${label} confirmation stays private and cannot mark a connection active be
   await expect(page.getByText(command, { exact: true })).toHaveCount(0);
   await expect(page.getByText(provider === "teams" ? "Connected Teams conversation:" : "Connected Chat space:", { exact: false })).toBeVisible();
   await expect(row.getByRole("img", { name: "Connected" })).toBeVisible();
-  await expect(page.getByText(provider === "teams" ? "Microsoft Teams company app" : "Google Chat app", { exact: true })).toBeVisible();
+  await expect(page.getByText(provider === "teams" ? "via Microsoft Teams company app" : "via Google Chat app", { exact: false })).toBeVisible();
   await expect(page.getByText(`Saving a manual ${provider === "teams" ? "Workflows" : "incoming"} webhook replaces the linked app connection.`, { exact: true })).toBeVisible();
 });
 

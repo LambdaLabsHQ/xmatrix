@@ -8186,6 +8186,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 }
 
 .xmatrix-app .app-tool-dot {
+  vertical-align: middle;
   display: inline-block;
   width: 8px;
   height: 8px;

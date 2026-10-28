@@ -6,7 +6,6 @@ import Image from "next/image";
 import { openRepositoryToStar } from "./star-prompt";
 import { registrationStatus } from "./my-agents-registrations";
 import {
-  DetailRow,
   EmptyToolState,
   ErrorPanel,
   MachineVersionValue,
@@ -53,8 +52,8 @@ import {
 } from "./machine-list-row";
 import { machineOs } from "./machine-os";
 import {
-  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListRow, ToolSplit,
-  ToolSettingRow, ToolStateDot, useToolItem,
+  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSplit,
+  ToolStateDot, useToolItem,
 } from "./tool-split";
 import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
@@ -128,7 +127,7 @@ import {
   type DesktopWorkspaceCandidate,
 } from "@/lib/desktop/bridge";
 
-import { orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
+import { groupConnectorsForList, orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
 import { ConnectorCredentials, connectorGeneratesCredentials, connectorReconnectsWithSavedCredentials, connectorTakesCredentials,
   connectorWritableCredentials } from "./connector-credentials";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
@@ -1462,6 +1461,11 @@ export function AppsView({
     }
   }
 
+  /* Only a form connects it: no sign-in with the provider, no linked company app. */
+  const connectsByTypedCredentials = (connector: AppConnectorManifest) => connectorTakesCredentials(connector)
+    && connectorWritableCredentials(connector).length > 0
+    && !oauthProviders.includes(connector.id) && !nativeProviders.includes(connector.id);
+
   const connectorState = (connector: AppConnectorManifest) => {
     const connection = connectionsByProvider.get(connector.id);
     const available = connector.status === "available";
@@ -1471,39 +1475,43 @@ export function AppsView({
       connection, available, configured, needsAttention,
       label: configured ? "Connected" : needsAttention ? "Needs attention" : connection ? "Disconnected"
         : available ? "Not connected" : "Coming soon",
-      summary: configured ? connector.id === "x" ? "Connected accounts are available to their owners and their Agents" : "Ready in every channel in this space"
+      summary: configured ? connector.id === "x" ? "Connected accounts are available to their owners and their Agents" : "Ready in every channel in this Space"
         : needsAttention ? connection.error || "The connection needs to be authorized again"
-          : connection ? connectorTakesCredentials(connector) && connectorWritableCredentials(connector).length > 0
-            && !oauthProviders.includes(connector.id) && !nativeProviders.includes(connector.id)
-            && !connectorReconnectsWithSavedCredentials(connector, connection)
+          : connection ? connectsByTypedCredentials(connector) && !connectorReconnectsWithSavedCredentials(connector, connection)
             ? "Save its credentials below to connect again" : "Reconnect to resume channel delivery"
-            : available ? "Connect an account and choose what xMatrix can access" : "This connector is not available yet",
+            : !available ? "This connector is not available yet"
+              : connectsByTypedCredentials(connector) ? `Save its credentials below; xMatrix checks them with ${connector.name}`
+                : "Connect an account and choose what xMatrix can access",
     };
   };
 
   const list = (
     <ToolList title="Apps">
-      <ul className="app-connectors-list">
-        {connectors.map((connector) => {
-          const Icon = connectorIcon(connector);
-          const state = connectorState(connector);
-          // Not connected yet says nothing: the line under the name already invites a connection.
-          const StateIcon = state.configured ? Check : state.needsAttention ? AlertTriangle : state.connection ? Unplug : null;
-          return (
-            <ToolListRow key={connector.id} testId="connector-row"
-              selected={Boolean(connectorItem) && connector.id === selectedConnector?.id}
-              shownBeside={!connectorItem && connector.id === selectedConnector?.id}
-              onSelect={() => { selectConnector(connector.id); closeConnectorConfiguration(); }}
-              leading={<Icon className="size-7" />}
-              title={connector.name}
-              trailing={StateIcon && <span role="img" aria-label={state.label} title={state.label}
-                className="app-tool-state-icon app-connector-state-icon flex shrink-0" data-state={state.needsAttention ? "attention" : state.configured ? "running" : "offline"}>
-                <StateIcon className="size-4" /></span>}
-              state={state.needsAttention ? "attention" : state.configured ? "running" : "paused"}
-              subtitle={state.summary} />
-          );
-        })}
-      </ul>
+      <div className="app-connectors-list">
+        {groupConnectorsForList(connectors, connections).map((group) => (
+          <ToolListGroup key={group.title} title={group.title}>
+            {group.connectors.map((connector) => {
+              const Icon = connectorIcon(connector);
+              const state = connectorState(connector);
+              // An app nobody connected says nothing more: its heading already names what it does.
+              const StateIcon = state.configured ? Check : state.needsAttention ? AlertTriangle : state.connection ? Unplug : null;
+              return (
+                <ToolListRow key={connector.id} testId="connector-row"
+                  selected={Boolean(connectorItem) && connector.id === selectedConnector?.id}
+                  shownBeside={!connectorItem && connector.id === selectedConnector?.id}
+                  onSelect={() => { selectConnector(connector.id); closeConnectorConfiguration(); }}
+                  leading={<Icon className="size-7" />}
+                  title={connector.name}
+                  trailing={StateIcon && <span role="img" aria-label={state.label} title={state.label}
+                    className="app-tool-state-icon app-connector-state-icon flex shrink-0" data-state={state.needsAttention ? "attention" : state.configured ? "running" : "offline"}>
+                    <StateIcon className="size-4" /></span>}
+                  state={state.needsAttention ? "attention" : state.configured ? "running" : "paused"}
+                  subtitle={state.connection ? state.summary : undefined} />
+              );
+            })}
+          </ToolListGroup>
+        ))}
+      </div>
     </ToolList>
   );
 
@@ -1521,36 +1529,27 @@ export function AppsView({
       context={`Apps · ${currentSpace?.name || "this space"}`}
       title={<span className="inline-flex items-center gap-3"><DetailIcon className="size-7" />{connector.name}</span>}
       status={
-        <span className="flex flex-wrap items-center gap-x-2">
+        // One run of text, so a phone wraps it between words rather than leaving a "·" at a line start.
+        <span>
           <ToolStateDot state={state.needsAttention ? "attention" : state.configured ? "running" : "offline"} />
-          <span className={cn("text-foreground", state.needsAttention && "text-destructive")}>{state.label}</span>
-          <span>· {state.summary}</span>
-          {state.configured && state.connection?.lastCheckedAt ? <span>· checked {relativeTime(state.connection.lastCheckedAt)}</span> : null}
+          <span className={cn("ml-2 text-foreground", state.needsAttention && "text-destructive")}>{state.label}</span>
+          {" · "}{state.summary}
+          {state.configured && state.connection ? <> · via {connectorAuthorizationLabel(connector, state.connection,
+            nativeProviders.includes(connector.id))}</> : null}
+          {state.configured && state.connection?.lastCheckedAt ? <> · checked {relativeTime(state.connection.lastCheckedAt)}</> : null}
         </span>
       }
       actions={
-        <div className="app-connector-actions flex flex-wrap items-center gap-2" role="group"
+        <div className="app-connector-actions flex w-full flex-wrap items-center gap-2" role="group"
           aria-label={`${connector.name} connection actions`}>
           {state.configured && state.connection ? (
-            <>
+            oauthProviders.includes(connector.id) || nativeProviders.includes(connector.id) ? (
               <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id || configuring}
-                onClick={() => openConnectorConfiguration(connector, state.connection!)}>
-                <Settings /> Configure
+                onClick={() => void configureConnector(connector)}
+                title={`Reconnect ${connector.name}`} aria-label={`Reconnect ${connector.name}`}>
+                {updating ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />} Reconnect
               </Button>
-              {oauthProviders.includes(connector.id) || nativeProviders.includes(connector.id) ? (
-                <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id || configuring}
-                  onClick={() => void configureConnector(connector)}
-                  title={`Reconnect ${connector.name}`} aria-label={`Reconnect ${connector.name}`}>
-                  {updating ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />} Reconnect
-                </Button>
-              ) : null}
-              <Button size="sm" variant="ghost" disabled={updating || checking}
-                onClick={() => void disconnectConnector(connector)}
-                className="text-muted-foreground hover:text-destructive"
-                title={`Disconnect ${connector.name}`} aria-label={`Disconnect ${connector.name}`}>
-                <LogOut /> {disconnectingProviderId === connector.id ? "Disconnecting" : "Disconnect"}
-              </Button>
-            </>
+            ) : null
           ) : state.available && !oauthProviders.includes(connector.id) && !nativeProviders.includes(connector.id)
             && connectorReconnectsWithSavedCredentials(connector, state.connection) ? (
             <Button size="sm" variant="outline" disabled={updating || checking} onClick={() => void checkConnector(connector)}
@@ -1571,6 +1570,21 @@ export function AppsView({
               title={`Check ${connector.name} connection`} aria-label={`Check ${connector.name} connection`}>
               {checking ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <RefreshCw />} Check
             </Button>
+          ) : null}
+          {state.configured && state.connection ? (
+            <>
+              <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id || configuring}
+                onClick={() => openConnectorConfiguration(connector, state.connection!)}>
+                <Settings /> Configure
+              </Button>
+              {/* Ending the connection sits apart from the steps that keep it working. */}
+              <Button size="sm" variant="ghost" disabled={updating || checking}
+                onClick={() => void disconnectConnector(connector)}
+                className="text-muted-foreground hover:text-destructive sm:ml-auto"
+                title={`Disconnect ${connector.name}`} aria-label={`Disconnect ${connector.name}`}>
+                <LogOut /> {disconnectingProviderId === connector.id ? "Disconnecting" : "Disconnect"}
+              </Button>
+            </>
           ) : null}
         </div>
       }
@@ -1648,14 +1662,6 @@ export function AppsView({
             onSave={() => void saveConnectorConfiguration(connector, selectedConnection)}
           />
         </ToolDetailSection>
-      ) : (
-        <ConnectorDetail connector={connector} connection={selectedConnection} oauth={oauthProviders.includes(connector.id)}
-          native={nativeProviders.includes(connector.id)} />
-      )}
-      {state.configured && connectorWriteActions(connector).length > 0 && token && currentSpace && user?.id ? (
-        <ToolDetailSection title="Channel action policy">
-          <ConnectorPolicy connector={connector} channels={channels} spaceId={currentSpace.id} token={token} userId={user.id} />
-        </ToolDetailSection>
       ) : null}
       {connectorTakesCredentials(connector) && token && currentSpace && user?.id
         && (state.configured || (state.available && connectorWritableCredentials(connector).length > 0)) ? (
@@ -1676,17 +1682,22 @@ export function AppsView({
         </ToolDetailSection>
       ) : null}
       {selectedConnection || selectedExecutions.length > 0 ? (
-        <ToolDetailSection title="Recent activity">
-          <div className="mb-2 flex justify-end">
-            <Button size="xs" variant="ghost" onClick={() => void loadExecutions()} disabled={loadingExecutions}
-              title="Refresh connector activity">
-              <AnimatedIcon icon={RefreshCw} className={cn(loadingExecutions && "animate-spin")} /> Refresh
-            </Button>
-          </div>
+        <ToolDetailSection title="Recent activity" action={
+          <Button size="xs" variant="ghost" onClick={() => void loadExecutions()} disabled={loadingExecutions}
+            title="Refresh connector activity">
+            <AnimatedIcon icon={RefreshCw} className={cn(loadingExecutions && "animate-spin")} /> Refresh
+          </Button>
+        }>
           {executionsError && <p className="mb-3 text-sm font-medium text-destructive">{executionsError}</p>}
           <ConnectorExecutionList executions={selectedExecutions} loading={loadingExecutions} />
         </ToolDetailSection>
       ) : null}
+      {state.configured && connectorWriteActions(connector).length > 0 && token && currentSpace && user?.id ? (
+        <ToolDetailSection title="Channel action policy">
+          <ConnectorPolicy connector={connector} channels={channels} spaceId={currentSpace.id} token={token} userId={user.id} />
+        </ToolDetailSection>
+      ) : null}
+      <ConnectorReference connector={connector} />
     </ToolDetail>
   ) : null;
 
@@ -1807,114 +1818,73 @@ export function ConnectorConfiguration({
   );
 }
 
-/* The saved credentials by their manifest labels, e.g. "Integration token". */
-function credentialLabels(connector: AppConnectorManifest, fields: readonly string[] | undefined): string {
-  return (fields ?? []).map((id) => connector.credentials?.find((field) => field.id === id))
-    .filter((field) => field && !field.generated).map((field) => field!.label).join(", ");
+/* What a connected app authorizes with, said once in its status line:
+   "via GitHub App", "via Feishu company app", "via Integration token". */
+function connectorAuthorizationLabel(connector: AppConnectorManifest, connection: SerializedAppConnectorConnection,
+  native: boolean): string {
+  if (connector.id === "github") return "GitHub App";
+  if (native && ["googlechat", "feishu", "telegram", "teams"].includes(connector.id) && !connection.credentialFields?.length) {
+    return connector.id === "googlechat" ? "Google Chat app" : `${connector.name} company app`;
+  }
+  const saved = (connection.credentialFields ?? []).map((id) => connector.credentials?.find((field) => field.id === id))
+    .filter((field) => field && !field.generated);
+  if (saved.some((field) => field!.managed)) return `${connector.name} sign-in`;
+  return saved.map((field) => field!.label).join(", ") || "saved credentials";
 }
 
-export function ConnectorDetail({
-  connector,
-  connection,
-  oauth = false,
-  native = false,
-}: {
-  connector: AppConnectorManifest;
-  connection?: SerializedAppConnectorConnection;
-  /** One-click OAuth is configured for this app on the Hub. */
-  oauth?: boolean;
-  native?: boolean;
-}) {
-  const nativeChat = native && ["googlechat", "feishu", "telegram", "teams"].includes(connector.id) && !connection?.credentialFields?.length;
-  const configured = connection?.status === "configured";
-  const needsAttention = connection?.status === "error";
-  const statusLabel = configured
-    ? "Connected"
-    : needsAttention
-      ? "Needs attention"
-      : connection
-        ? "Disconnected"
-        : "Not connected";
-  const quickStart = connector.id === "github"
+/** Rows a reference shows before the reader asks for the rest. */
+const REFERENCE_FOLD = 4;
+
+/**
+ * How the app is used once connected, kept last: the command that subscribes a
+ * channel, then every command, folded after the first few. A reference, not a
+ * step, so it never sits between the reader and what they came to change.
+ */
+export function ConnectorReference({ connector }: { connector: AppConnectorManifest }) {
+  const [expanded, setExpanded] = useState(false);
+  const subscribe = connector.id === "github"
     ? { command: "@github:subscribe:OWNER/REPO all",
-        description: "Run this in a channel to receive commit, issue, pull request, comment, and review updates from the repository." }
+        description: "Receive commit, issue, pull request, comment, and review updates from the repository." }
     : connector.events
       ? { command: `@${connector.id}:subscribe:${connector.events.source.placeholder}`,
-          description: `Run this in a channel to receive ${connector.name} events. ${connector.events.source.description}` }
+          description: connector.events.source.description }
       : null;
+  const actions = connector.actions.filter((action) => !subscribe || action.id !== "subscribe");
+  const shown = expanded ? actions : actions.slice(0, REFERENCE_FOLD);
   return (
-    <div className="space-y-10">
-      <ToolDetailSection title="Connection">
-        <ToolSettingRow
-          title={
-            <span className={cn("flex items-center gap-2", needsAttention && "text-destructive")}>
-              {configured ? <Check className="size-4" /> : needsAttention ? <AlertTriangle className="size-4" /> : <Circle className="size-4 text-muted-foreground" />}
-              {statusLabel}
-            </span>
-          }
-          description={
-            configured
-              ? connector.id === "github"
-                ? "Repository access is authorized. Connector commands can now run from enabled channels."
-                : nativeChat
-                  ? `${connector.name} conversations are linked. Connector commands can now run from enabled channels.`
-                  : `${connector.name} accepted the saved credentials. Connector commands can now run from enabled channels.`
-              : needsAttention
-                ? connection?.error || "Reconnect this provider to restore channel delivery."
-                : connector.id === "github"
-                  ? "Connect the provider, choose the repositories or resources xMatrix may access, then use connector commands in a channel."
-                  : native && ["googlechat", "feishu", "telegram", "teams"].includes(connector.id)
-                    ? `Link your ${connector.name} ${connector.id === "teams" ? "conversation" : connector.id === "googlechat" ? "space" : "groups"} above, or explicitly configure your own connection below.`
-                    : `${oauth ? `Connect with ${connector.name}, or save` : "Save"} the credentials below. xMatrix checks them with ${connector.name} before the app counts as connected.`
-          }
-        />
-        {configured ? (
-          <div className="pb-2 text-sm">
-            <DetailRow
-              label="Last checked"
-              value={connection.lastCheckedAt ? relativeTime(connection.lastCheckedAt) : "Not checked yet"}
-            />
-            <DetailRow label="Authorization" value={connector.id === "github" ? "GitHub App"
-              : nativeChat ? connector.id === "googlechat" ? "Google Chat app" : `${connector.name} company app` : credentialLabels(connector, connection.credentialFields) || "No credentials saved"} />
-          </div>
-        ) : connector.id === "github" ? (
-          <ol className="list-decimal space-y-1.5 pb-2 pl-5 text-sm text-muted-foreground marker:text-muted-foreground">
-            <li>Connect your provider account.</li>
-            <li>Choose the repositories or resources xMatrix may access.</li>
-            <li>Use a connector command in the channel that should receive updates.</li>
-          </ol>
-        ) : null}
-      </ToolDetailSection>
-
-      {quickStart ? (
-        <ToolDetailSection title="Quick start">
-          <code className="app-paper-tag mt-2 block overflow-x-auto px-3 py-2 font-mono text-xs text-foreground">
-            {quickStart.command}
+    <ToolDetailSection title="Use it in a channel">
+      {subscribe ? (
+        <div className="py-3">
+          <p className="text-sm font-semibold">Subscribe a channel</p>
+          <code className="app-paper-tag mt-1.5 block overflow-x-auto px-3 py-2 font-mono text-xs text-foreground">
+            {subscribe.command}
           </code>
-          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{quickStart.description}</p>
-        </ToolDetailSection>
+          <p className="mt-1.5 max-w-[56ch] text-[13px] leading-[1.45] text-muted-foreground">{subscribe.description}</p>
+        </div>
       ) : null}
-
-      <ToolDetailSection title="What you can do">
-        {connector.actions.map((action) => (
-          <ToolSettingRow
-            key={action.id}
-            title={action.label}
-            description={<>
-              {action.description}
-              {action.usage ? (
-                <code className="mt-1 block font-mono text-xs">@{connector.id}:{action.id}:{action.usage}</code>
-              ) : null}
-            </>}
-          />
+      <ul data-testid="connector-commands">
+        {shown.map((action) => (
+          <li key={action.id} className="py-2.5">
+            <p className="text-sm font-semibold">{action.label}</p>
+            <p className="mt-0.5 max-w-[56ch] text-[13px] leading-[1.45] text-muted-foreground">{action.description}</p>
+            {action.usage ? (
+              <code className="mt-1 block break-all font-mono text-xs text-muted-foreground">@{connector.id}:{action.id}:{action.usage}</code>
+            ) : null}
+          </li>
         ))}
-      </ToolDetailSection>
-
-      <p className="flex gap-2 text-xs leading-5 text-muted-foreground">
+      </ul>
+      {actions.length > REFERENCE_FOLD ? (
+        <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}
+          className="mt-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
+          {expanded ? "Show fewer commands" : `Show all ${actions.length} commands`}
+          <ChevronDown aria-hidden="true" className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+        </button>
+      ) : null}
+      <p className="mt-8 flex gap-2 text-xs leading-5 text-muted-foreground">
         <Shield className="mt-0.5 size-3.5 shrink-0" />
         Credentials stay out of chat: xMatrix uses scoped provider authorization and short-lived credentials for connector actions.
       </p>
-    </div>
+    </ToolDetailSection>
   );
 }
 
@@ -1951,7 +1921,7 @@ export function ConnectorExecutionList({
             </span>
           </div>
           {execution.resultSummary && <p className="mt-2 text-xs text-muted-foreground">{execution.resultSummary}</p>}
-          {execution.reason && <p className="mt-2 text-xs text-muted-foreground">{execution.reason.replace(/_/g, " ")}</p>}
+          {execution.reason && <p className="mt-2 text-xs text-muted-foreground first-letter:uppercase">{execution.reason.replace(/_/g, " ")}</p>}
         </div>
       ))}
     </div>

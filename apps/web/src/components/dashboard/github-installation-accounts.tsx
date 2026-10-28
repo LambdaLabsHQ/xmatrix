@@ -159,7 +159,8 @@ function AccountRow({ account, children }: { account: GitHubInstallationAccount;
       {/* A GitHub account has no xMatrix account: its face is the picture GitHub gives. */}
       <Face of={{ kind: "external", name: account.login, imageUrl: account.avatarUrl ?? null }} size="xs" shape="circle"
         glass={false} className="size-6 [&_.identity-avatar-face]:size-6" />
-      <span className="min-w-0 flex-1 text-sm">
+      {/* The name keeps its width; on a phone the buttons go under it rather than squeezing it. */}
+      <span className="min-w-0 flex-1 basis-48 text-sm">
         <span className="font-bold">{account.login}</span>
         <span className="ml-1.5 text-xs text-muted-foreground">
           {account.type === "Organization" ? "Organization" : account.type === "User" ? "Personal account" : account.type}
@@ -171,7 +172,7 @@ function AccountRow({ account, children }: { account: GitHubInstallationAccount;
           </span>
         ) : null}
       </span>
-      <span className="flex gap-2">{children}</span>
+      <span className="flex gap-2 max-sm:pl-8">{children}</span>
     </li>
   );
 }

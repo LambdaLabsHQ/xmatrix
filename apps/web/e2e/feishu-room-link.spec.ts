@@ -42,7 +42,7 @@ test("Feishu refresh exposes several independently authorized groups and unlink 
   await page.getByRole("button", { name: "Refresh connection", exact: true }).click();
   await expect(page.getByText("@xMatrix link " + nonce, { exact: true })).toHaveCount(0);
   await expect(page.getByText("Connected Feishu group:", { exact: false })).toHaveCount(2);
-  await expect(page.getByText("Feishu company app", { exact: true })).toBeVisible();
+  await expect(page.getByText("via Feishu company app", { exact: false })).toBeVisible();
   await fixtureJson(page, "feishu-unlink", link, { ok: true }, { method: "DELETE" });
   await page.getByRole("button", { name: "Unlink group", exact: true }).first().click();
   expect(await fixtureRequestBodies(page, "feishu-unlink")).toEqual([{ tenantKey: "tenantA", chatId: "oc_AbCd" }]);
