@@ -251,6 +251,15 @@ export class PostgresGmailRoutingRepository {
         (SELECT 1 FROM data.app_gmail_routes WHERE route_id=$1 AND enabled AND lease_id=$3::uuid AND lease_until>now())`,
     values: [job.id, id, job.leaseId], maxRows: 0 }));
   }
+  /** Messages this mailbox delivered within the last hour, counted up to `limit`. */
+  async deliveredLastHour(job: GmailRoutingJob, limit: number): Promise<number> {
+    return this.transaction("delivered-last-hour", async tx => {
+      const rows = await tx.query<QueryResultRow>({ name: "gmail_route_delivered_last_hour_v1", text: `SELECT count(*) AS count
+        FROM (SELECT 1 FROM data.app_gmail_notifications WHERE route_id=$1 AND delivered_at>now()-interval '1 hour' LIMIT $2) n`,
+      values: [job.id, limit], maxRows: 1 });
+      return Number(rows[0]?.count ?? 0);
+    }, "single_read");
+  }
   async finish(job: GmailRoutingJob, outcome: "done" | "continue" | "retry" | "blocked") {
     const retired=outcome==="blocked" ? await encryptSecretValue(this.material,`gmail-route:${job.id}`,"selection",1,
       JSON.stringify({...job.selection,oauthVerifier:"",refreshToken:undefined,pollToken:undefined})) : undefined;

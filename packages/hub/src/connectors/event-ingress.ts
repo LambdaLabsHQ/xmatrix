@@ -194,6 +194,11 @@ export async function deliverEvent(
   return appendToRoutes(env, append, providerId, event, [...routes.values()]);
 }
 
+/** The Channel message one connector event becomes in one route. */
+export function connectorEventMessageId(providerId: string, eventId: string, channelId: string): string {
+  return `app:${providerId}:${eventId}:${channelId}`.slice(0, 200);
+}
+
 export async function appendToRoutes(
   env: Env,
   append: typeof dispatchProductMessageAppend,
@@ -207,7 +212,7 @@ export async function appendToRoutes(
       const key = `${providerId}:${event.eventId}:${route.channelId}`;
       const response = await append(env, route.channelId, {
         commandId: `product:connector-event:${key}`.slice(0, 200),
-        messageId: `app:${key}`.slice(0, 200),
+        messageId: connectorEventMessageId(providerId, event.eventId, route.channelId),
         channelId: route.channelId,
         body: event.body,
         principal: { kind: "user", id: route.authorityRootUserId },

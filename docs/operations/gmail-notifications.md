@@ -82,6 +82,31 @@ Sources: [labels.get](https://developers.google.com/workspace/gmail/api/referenc
 [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes),
 [Google identity](https://developers.google.com/identity/openid-connect/openid-connect).
 
+## Automatic read
+
+After a notification is posted, the connector reads that message itself, as
+the mailbox owner, through the same Gmail read and endpoint allowlist that
+`@gmail:read` uses. Each notified Channel gets a Gmail read receipt in reply
+to the notification. The read is a private result: the owner sees the message
+in the Web for 30 days while they can read the Channel. Shared history, other
+members, admins and every Agent receive only the mask. Agents get no new access;
+they read a message with their own `@gmail:read` call, as before. The receipt is a
+system fact and wakes no one; the notification stays the work it always was.
+
+- The notification never waits on the read. If the read fails, its receipt
+  says so (the reason stays private). If the owner's access changes while Gmail
+  answers, nothing is stored or posted.
+- Mail is untrusted. The read quotes it as retrieved text, never opens its links
+  or remote images, and leaves it unread in Gmail. It reports Gmail's own
+  SPF/DKIM/DMARC results (`Sender checks`), so a forged sender reads as failing
+  DMARC. Only an `Authentication-Results` header from `mx.google.com` counts.
+- Once a mailbox has delivered 30 messages in the past hour, later notifications
+  are not read automatically. Their receipt says so and names `@gmail:read:<id>`.
+  This caps the Composio calls and stored copies a flood can cause; it costs one
+  proxied read per new message (metered as `auto_read`).
+- Verification and sign-in mail is read like any other. Its codes and links stay
+  in the owner's private record. The Hub never extracts them into Secrets.
+
 ## Optional native watch
 
 This optional feature supplies mailbox-change signals, then queries new inbox

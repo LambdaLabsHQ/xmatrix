@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: New Gmail messages arrive already read
+
+When a new message reaches a mailbox with notifications on, the Gmail
+connector now reads it itself, as the mailbox owner, and answers the
+notification with a private Gmail read receipt. The owner sees the message
+right there in the Web; everyone else in the Channel, and every Agent, sees
+only the mask, and Agents read a message with their own `@gmail:read` as
+before. Reads also report Gmail's own SPF/DKIM/DMARC results, so a forged
+sender is visible. A failed read never holds back the notification, and after
+30 messages in an hour a mailbox's notifications skip the read. This ships in
+the Hub; no migration is needed. Recovery is a CI-validated Hub reverting the change.
+
 ## Unreleased: An App's page leads with the one thing to do
 
 Every App's page is rebuilt around one lead. Its name, what it does and one
