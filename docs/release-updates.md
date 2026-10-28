@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Placement read timeouts retain origin wait evidence
+
+HUB-B1 exhausted both fresh-connection single-read attempts while resolving a
+Page's Space placement. Recovery already existed, but the event could not show
+whether the origin was still executing or waiting. Placement reads in flight
+for 500 ms now take one bounded live origin sample, sharing the existing lock
+diagnostic connection limit. Each attempt uses a temporary SQL marker; failure
+evidence retains only fixed state/wait/owner categories and capped ages, never
+SQL, parameters, identities or the marker. Missing and unavailable samples do
+not establish a transport cause. Real PostgreSQL coverage checks blocked reads,
+both attempts, diagnostic failure and fast reads; the Sentry reader checks its
+strict projection. Hub only, no migration or native update. Recovery is a
+CI-validated beta reverting this diagnostic change; replay boundaries stay intact.
+
 ## Unreleased: Welcome text and provider quota recovery agree with the UI
 
 The welcome conversation's stored fallback text now excludes Agents whose

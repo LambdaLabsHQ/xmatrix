@@ -376,25 +376,28 @@ test("scheduled failures expose bounded retry phases and keep unrelated event ex
   }
 });
 
-test("execution lock snapshots reach read_issue with strict content-free validation (HUB-AY)", async () => {
+test("origin wait snapshots reach read_issue with strict content-free validation (HUB-AY/B1)", async () => {
   const backend = { state: "idle in transaction", wait: "Client", owner: "execution-report", ageMs: 5500 };
   const lockWait = { status: "sampled", waiter: { ...backend, state: "active", wait: "Lock", ageMs: 500 },
     blockers: [backend] };
   const failure = { operation: "runtime.execution-report", shardId: "shard-0", statement: "transaction",
     phase: "sql", queryName: "runtime_execution_report_owner_v4", code: "55P03", durationMs: 2000 };
-  for (const [snapshot, valid] of [[lockWait, true], [{ ...lockWait, blockers: Array(5).fill(backend) }, false],
-    [{ ...lockWait, pid: "private-id" }, false], [{ ...lockWait, waiter: { ...backend, query: "private-sql" } }, false],
-    [{ ...lockWait, blockers: [{ ...backend, owner: "private-user" }] }, false],
-    [{ ...lockWait, blockers: [{ ...backend, ageMs: 120001 }] }, false],
-    [{ status: "busy", blockers: [] }, true], [{ status: "missing", blockers: [backend] }, false]]) {
-    const { result } = await run([{ body: issue }, { body: { ...event, context: {
-      database_failure_attempts: JSON.stringify([{ ...failure, lockWait: snapshot }]), sql: "private-sql",
-    } } }], undefined, "123");
-    if (valid) assert.match(result.summary, /Database lock wait 1: (sampled|busy)/);
-    else assert.doesNotMatch(result.summary, /Database failure|Database lock wait/);
-    if (snapshot === lockWait) assert.match(result.summary,
-      /blockers=execution-report\/idle in transaction\/Client\/age=5500 ms/);
-    assert.doesNotMatch(result.summary, /private-/);
+  for (const field of ["lockWait", "queryWait"]) {
+    const label = field === "lockWait" ? "lock wait" : "read wait";
+    for (const [snapshot, valid] of [[lockWait, true], [{ ...lockWait, blockers: Array(5).fill(backend) }, false],
+      [{ ...lockWait, pid: "private-id" }, false], [{ ...lockWait, waiter: { ...backend, query: "private-sql" } }, false],
+      [{ ...lockWait, blockers: [{ ...backend, owner: "private-user" }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, ageMs: 120001 }] }, false],
+      [{ status: "busy", blockers: [] }, true], [{ status: "missing", blockers: [backend] }, false]]) {
+      const { result } = await run([{ body: issue }, { body: { ...event, context: {
+        database_failure_attempts: JSON.stringify([{ ...failure, [field]: snapshot }]), sql: "private-sql",
+      } } }], undefined, "123");
+      if (valid) assert.match(result.summary, new RegExp(`Database ${label} 1: (sampled|busy)`));
+      else assert.doesNotMatch(result.summary, /Database failure|Database (?:lock|read) wait/);
+      if (snapshot === lockWait) assert.match(result.summary,
+        /blockers=execution-report\/idle in transaction\/Client\/age=5500 ms/);
+      assert.doesNotMatch(result.summary, /private-/);
+    }
   }
 });
 

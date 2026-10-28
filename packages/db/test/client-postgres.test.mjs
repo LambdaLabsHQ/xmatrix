@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Client, Pool } from "pg";
 import { randomUUID } from "node:crypto";
 
-import { createAuthorityDatabase, databaseFailureEvidence } from "../dist/index.js";
+import { createAuthorityDatabase, databaseFailureEvidence, PostgresSpacePlacementDirectory } from "../dist/index.js";
 import { lockAgentRunChannels } from "../dist/agent-channel-access.js";
 
 
@@ -174,6 +174,75 @@ integration("Agent message Channel lock failures retain either Channel's live bl
     await database.transaction({ requestId: "fast", operation: "message.append" },
       tx => lockAgentRunChannels(tx, "private-b", "private-a"));
     assert.equal(samples, 2, "uncontended Channel locks open no diagnostic connection");
+  } finally {
+    await holder.query("ROLLBACK").catch(() => {});
+    await isolated.close();
+  }
+});
+
+// HUB-B1 already retries safely. The missing contract is observing this exact
+// single-read attempt without a transaction-scoped backend PID; lock-owner
+// tests never exercise the transaction-pool lookup or the retry's new marker.
+integration("placement read timeouts retain each attempt's live origin wait without private data", async () => {
+  const isolated = await isolatedPostgres("placement_wait", { migrate: false, runtimeRole: false });
+  const holder = isolated.client;
+  const connectionString = isolated.url.toString();
+  try {
+    await holder.query(`CREATE SCHEMA control;
+      CREATE TABLE control.space_placement (space_id text PRIMARY KEY,shard_id text,placement_epoch int,
+        state text,target_shard_id text,plan_class text);
+      INSERT INTO control.space_placement VALUES ('private-space','shard-0',1,'active',NULL,'free')`);
+    await holder.query("BEGIN; SET LOCAL application_name='xmatrix-agent-launch-coordinator'");
+    await holder.query("LOCK control.space_placement IN ACCESS EXCLUSIVE MODE");
+    for (const mode of ["available", "unavailable", "missing"]) {
+      let samples = 0;
+      const prefixes = [];
+      const database = createAuthorityDatabase({ connectionString, shardId: "shard-0",
+        statementTimeoutMs: 1300, lockTimeoutMs: 2000, clientFactory: config => {
+          if (config.application_name === "xmatrix-lock-diagnostic") {
+            samples++;
+            if (mode === "unavailable") throw new Error("private-diagnostic");
+          }
+          const client = new Client(config);
+          return { on: client.on.bind(client), connect: client.connect.bind(client),
+            async query(input) {
+              if (config.application_name === "xmatrix-lock-diagnostic") {
+                prefixes.push(input.values[0]);
+                if (mode === "missing") {
+                  // A real query with no matching backend, not invented evidence.
+                  return client.query({ ...input, values: ["/* absent-at-origin */"] });
+                }
+              }
+              return client.query(input);
+            }, end: client.end.bind(client) };
+        } });
+      await assert.rejects(new PostgresSpacePlacementDirectory(database).read({
+        requestId: "private-request", operation: "page.links",
+      }, "private-space"), error => {
+        assert.match(error.message, /Query read timeout/);
+        const attempts = databaseFailureEvidence(error);
+        assert.equal(attempts.length, 2, "the original one-retry boundary stays intact");
+        for (const attempt of attempts) {
+          assert.equal(attempt.queryWait?.status, mode === "available" ? "sampled" : mode);
+          if (mode === "available") {
+            assert.equal(attempt.queryWait.waiter.state, "active");
+            assert.equal(attempt.queryWait.waiter.wait, "Lock");
+            assert.equal(attempt.queryWait.blockers[0].owner, "launch");
+          }
+        }
+        assert.doesNotMatch(JSON.stringify(attempts), /private-|SELECT|xmatrix-read-|postgres:\/\//);
+        return true;
+      });
+      assert.equal(samples, 2);
+      if (mode !== "unavailable") assert.equal(new Set(prefixes).size, 2, "retry has its own correlation");
+    }
+    await holder.query("ROLLBACK");
+    const database = createAuthorityDatabase({ connectionString, shardId: "shard-0", clientFactory: config => {
+      assert.notEqual(config.application_name, "xmatrix-lock-diagnostic", "fast placement reads need no extra connection");
+      return new Client(config);
+    } });
+    assert.equal((await new PostgresSpacePlacementDirectory(database).read({ requestId: "fast",
+      operation: "page.links" }, "private-space")).spaceId, "private-space");
   } finally {
     await holder.query("ROLLBACK").catch(() => {});
     await isolated.close();

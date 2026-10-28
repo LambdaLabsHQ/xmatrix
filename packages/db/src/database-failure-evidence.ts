@@ -10,6 +10,7 @@ export interface DatabaseFailureEvidence {
   code: string;
   durationMs: number;
   lockWait?: PostgresLockWait;
+  queryWait?: PostgresLockWait;
   /** Cumulative session progress at this failure, before rollback or retry. */
   session?: Readonly<Record<"wallMs" | "queueMs" | "checkoutMs" | "beginMs" | "sqlMs" |
     "sqlMaxMs" | "commitMs" | "roundTrips" | "queries", number>>;
@@ -28,8 +29,8 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
   if (!Array.isArray(value) || value.length > LIMIT) return [];
   const result: DatabaseFailureEvidence[] = [];
   for (const item of value) {
-    if (!item || typeof item !== "object" || Object.keys(item).length !== FIELDS.length + ("session" in item ? 1 : 0) + ("lockWait" in item ? 1 : 0) ||
-        Object.keys(item).some(key => key !== "session" && key !== "lockWait" && !FIELDS.includes(key)) ||
+    if (!item || typeof item !== "object" || Object.keys(item).length !== FIELDS.length + ("session" in item ? 1 : 0) + ("lockWait" in item ? 1 : 0) + ("queryWait" in item ? 1 : 0) ||
+        Object.keys(item).some(key => key !== "session" && key !== "lockWait" && key !== "queryWait" && !FIELDS.includes(key)) ||
         typeof item.operation !== "string" || !/^[a-z][a-z0-9_.:-]{0,119}$/u.test(item.operation) ||
         typeof item.shardId !== "string" || !/^[a-z0-9][a-z0-9_.:-]{0,79}$/u.test(item.shardId) ||
         !["single_read", "transaction"].includes(item.statement) ||
@@ -41,9 +42,11 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
     if (session === null) return [];
     const lockWait = "lockWait" in item ? parsePostgresLockWait(item.lockWait) : undefined;
     if ("lockWait" in item && !lockWait) return [];
+    const queryWait = "queryWait" in item ? parsePostgresLockWait(item.queryWait) : undefined;
+    if ("queryWait" in item && !queryWait) return [];
     result.push(Object.freeze({ operation: item.operation, shardId: item.shardId, statement: item.statement,
       phase: item.phase, queryName: item.queryName, code: item.code, durationMs: item.durationMs,
-      ...(session ? { session } : {}), ...(lockWait ? { lockWait } : {}) }));
+      ...(session ? { session } : {}), ...(lockWait ? { lockWait } : {}), ...(queryWait ? { queryWait } : {}) }));
   }
   return Object.freeze(result);
 }
