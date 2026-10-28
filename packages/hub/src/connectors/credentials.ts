@@ -1,6 +1,6 @@
 import { trimEnd } from "@xmatrix/protocol";
 import { PostgresGmailRoutingRepository } from "@xmatrix/db";
-import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppActionPolicyRepository, PostgresAppActionRequestRepository, PostgresAppCredentialRepository,
+import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppPermissionRepository, PostgresAppActionRequestRepository, PostgresAppCredentialRepository,
   PostgresAppRepository, PostgresWeComSuiteRepository, PostgresTelegramRoomRepository, PostgresFeishuAppRepository, PostgresFeishuRoomRepository, PostgresSentryEventRepository, PostgresGoogleChatRoomRepository, PostgresTeamsRoomRepository, type AuthorityDatabase } from "@xmatrix/db";
 import { postgresDatabaseObservers } from "../postgres-observability";
 import type { Env } from "../types";
@@ -45,8 +45,8 @@ export function connectorFeishuRoomRepository(env: Env): PostgresFeishuRoomRepos
   return new PostgresFeishuRoomRepository(appPolicyDatabase(env));
 }
 
-export function connectorActionPolicyRepository(env: Env): PostgresAppActionPolicyRepository {
-  return new PostgresAppActionPolicyRepository(appPolicyDatabase(env));
+export function connectorPermissionRepository(env: Env): PostgresAppPermissionRepository {
+  return new PostgresAppPermissionRepository(appPolicyDatabase(env));
 }
 
 /** 128 bits, URL-safe: the secret half of a connection's ingress URL. */

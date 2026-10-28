@@ -35,7 +35,7 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
     .map(table => ({ table, predicate: "space_id=$1 AND starts_with(storage_key,$4)" })),
   ...[
     "data.agent_launches", "data.agent_message_executions", "data.agent_reborn_intents",
-    "data.app_connector_action_requests", "data.app_connector_action_policies",
+    "data.app_connector_action_requests",
     "data.app_connector_executions", "data.app_source_relations",
     "data.registration_launch_intents", "data.registration_stop_intents",
     "data.channel_access", "data.channel_content_counters", "data.channel_message_sequences",

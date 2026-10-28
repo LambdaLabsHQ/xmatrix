@@ -3,7 +3,6 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import { ChevronLeft, Loader2, PlugZap, RefreshCw, Shield } from "lucide-react";
 import type {
-  ChannelSnapshot,
   SerializedAppConnectorConnection,
   SerializedAppConnectorExecution,
   SpaceMember,
@@ -89,7 +88,7 @@ function appExecutionStatusClassName(status: SerializedAppConnectorExecution["st
 }
 
 export function ConnectorDetailPage({
-  connector, Icon, connection, spaceId, token, userId, members, channels, oauth, native,
+  connector, Icon, connection, spaceId, token, userId, members, oauth, native,
   executions, executionsLoading, executionsError, notice, error, connecting, checking, disconnecting,
   onBack, onConnect, onCheck, onDisconnect, onRefreshExecutions, onSaveMetadata, ensureConnectionRow, refreshConnections,
 }: {
@@ -100,7 +99,6 @@ export function ConnectorDetailPage({
   token: string;
   userId: string;
   members: SpaceMember[];
-  channels: ChannelSnapshot[];
   /** One-click OAuth is configured for this app on the Hub. */
   oauth: boolean;
   /** The Hub's company app links this app's groups. */
@@ -216,7 +214,7 @@ export function ConnectorDetailPage({
         ) : null}
 
         {configured && connectorWriteActions(connector).length > 0 ? (
-          <ConnectorPolicy connector={connector} channels={channels} spaceId={spaceId} token={token} userId={userId} />
+          <ConnectorPolicy connector={connector} spaceId={spaceId} token={token} userId={userId} />
         ) : null}
 
         {connector.id === "github" && configured && connection ? (
@@ -566,7 +564,7 @@ function GitHubSettings({ connection, onSave }: {
             onChange={(event) => setDraft((current) => ({ ...current, repository: event.target.value }))} />
         </ConnectorField>
         <ConnectorField label="Workflows Agents may dispatch"
-          help="One workflow file name or numeric id per line. Every workflow not listed stays off; which channels may dispatch is set under Permissions.">
+          help="One workflow file name or numeric id per line. Every workflow not listed stays off; whether agents may dispatch is set under Permissions.">
           <Textarea value={draft.workflows} rows={3} placeholder={"production-release-request.yml\n123456"}
             onChange={(event) => setDraft((current) => ({ ...current, workflows: event.target.value }))} />
         </ConnectorField>

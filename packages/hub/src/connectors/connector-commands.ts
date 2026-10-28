@@ -5,16 +5,16 @@ import { dingtalkActionCapability } from "./dingtalk-native";
 import { telegramActionCapability } from "./telegram-native";
 import { wecomActionCapability } from "./wecom-native";
 import { connectorActionPolicy, PRIVATE_CONNECTOR_RESULT, sha256Hex, utf8ByteLength, type ConnectorResultVisibility,
-  type ConnectorActionPolicy, type AppConnectorProviderManifest } from "@xmatrix/protocol";
+  type ConnectorActionPolicy } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "../app-connectors";
-import { parseActionCommand, parsePolicyCommand } from "./action-parse";
+import { parseActionCommand } from "./action-parse";
 import { connectorActionCatalog } from "./action-catalog";
 import { commandResult, commandScope, publishCommandStatus, withExecution } from "./command-support";
 import { connectionCredentials } from "./connection-credentials";
 import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
-import { connectorActionPolicyRepository, connectorActionRequestRepository, connectorCredentialRepository } from "./credentials";
+import { connectorPermissionRepository, connectorActionRequestRepository, connectorCredentialRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
 import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
@@ -32,34 +32,31 @@ import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 /*
  * A provider's Channel commands (docs/design/connector-platform.md §3.3, §3.5):
  * subscriptions for event providers, one outbound action per message, and the
- * per-Channel action policy for Space admins. Policy is read at execution
- * time: allow executes, ask stages an immutable request for a Human admin,
- * and disallow refuses. Gmail send/reply default to ask.
+ * connection permission. Every read runs; writes follow read/ask/write.
+ * The uncached mode is checked at execution and immediately before mutation.
  */
 
-/** Effective policy is read from the owning uncached authority on every execution. */
-export async function channelActionPolicy(env: Env, input: { connectionId: string; channelId: string;
-  actionId: string; defaultPolicy?: ConnectorActionPolicy }): Promise<ConnectorActionPolicy> {
-  return await connectorActionPolicyRepository(env).mode({ requestId: crypto.randomUUID(),
-    connectionId: input.connectionId, channelId: input.channelId, actionId: input.actionId }) ?? input.defaultPolicy ?? "allow";
+/** One connection mode, read uncached for every execution and immediately before writes. */
+export async function connectionActionPolicy(env: Env, input: { connectionId: string; providerId: string; actionId: string }): Promise<ConnectorActionPolicy> {
+  const manifest = getAppConnectorProvider(input.providerId);
+  const action = manifest?.actions.find(action => action.id === input.actionId);
+  if (!manifest || !action?.effect) return "disallow";
+  if (action.effect === "read") return "allow";
+  const mode = await connectorPermissionRepository(env).mode({ requestId: crypto.randomUUID(), connectionId: input.connectionId })
+    ?? manifest.defaultPermission ?? "write";
+  return mode === "read" ? "disallow" : mode === "ask" ? "ask" : "allow";
 }
 
 /** Legacy callers that cannot ask must refuse ask as well as disallow. */
 export function actionRefusal(input: { actionId: string; mode: ConnectorActionPolicy | "deny" | null;
-  defaultPolicy?: ConnectorActionPolicy }): string | undefined {
-  const mode = input.mode === null ? input.defaultPolicy ?? "allow" : connectorActionPolicy(input.mode) ?? "disallow";
-  return mode === "disallow" ? `${input.actionId} is denied in this channel`
+  }): string | undefined {
+  const mode = input.mode === null ? "allow" : connectorActionPolicy(input.mode) ?? "disallow";
+  return mode === "disallow" ? `${input.actionId} is denied by this app permission`
     : mode === "ask" ? `${input.actionId} needs approval of this request by a Space admin` : undefined;
 }
 
-export async function channelActionRefusal(env: Env, input: { connectionId: string; channelId: string;
-  actionId: string; defaultPolicy?: ConnectorActionPolicy }): Promise<string | undefined> {
-  return actionRefusal({ actionId: input.actionId, mode: await channelActionPolicy(env, input) });
-}
-
-/** Whether a Channel policy can name this action: one that acts on the provider. */
-export function isPolicyAction(manifest: AppConnectorProviderManifest, actionId: string): boolean {
-  return manifest.actions.some((action) => action.id === actionId && action.effect);
+export async function connectionActionRefusal(env: Env, input: { connectionId: string; providerId: string; actionId: string }): Promise<string | undefined> {
+  return actionRefusal({ actionId: input.actionId, mode: await connectionActionPolicy(env, input) });
 }
 
 export function connectorCommands(providerId: string,
@@ -68,7 +65,7 @@ export function connectorCommands(providerId: string,
   const accepts = (body: string) => {
     if (isConnectorSubscriptionCommand(providerId, body)) return true;
     const parsed = parseActionCommand(providerId, body);
-    return Boolean(parsed && (parsed.actionId === "policy" || catalog.has(parsed.actionId)));
+    return Boolean(parsed && catalog.has(parsed.actionId));
   };
   return {
     accepts,
@@ -83,8 +80,7 @@ export function connectorCommands(providerId: string,
       } else {
         const parsed = parseActionCommand(providerId, input.body);
         const action = parsed ? catalog.get(parsed.actionId)?.executor : undefined;
-        if (parsed?.actionId === "policy") lines.push(await runPolicy(providerId, input, parsed.statement, actions));
-        else if (parsed && action) {
+        if (parsed && action) {
           lines.push(await runAction(providerId, input, parsed.actionId, action, parsed.statement));
         }
       }
@@ -113,8 +109,8 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
     if (typeof live === "string" || live.spaceId !== scope.spaceId || live.connectionId !== scope.connectionId) {
       throw new ProviderRequestError(403, "Connector access changed during the private call");
     }
-    const refusal = actionRefusal({ actionId, mode: await channelActionPolicy(input.env, {
-      connectionId: scope.connectionId, channelId: input.channelId, actionId, defaultPolicy: entry.definition.defaultPolicy }) });
+    const refusal = actionRefusal({ actionId, mode: await connectionActionPolicy(input.env, {
+      providerId, connectionId: scope.connectionId, actionId }) });
     if (refusal) throw new ProviderRequestError(403, refusal);
   };
   const execute = async () => {
@@ -147,32 +143,6 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
   });
   if (!result) throw failure;
   return result;
-}
-
-export async function runPolicy(providerId: string, input: ConnectorCommandInput,
-  statement: Parameters<typeof parsePolicyCommand>[0], actions: Readonly<Record<string, ConnectorAction>> = {}): Promise<string> {
-  const manifest = getAppConnectorProvider(providerId)!;
-  if (input.senderKind !== "user") return `${manifest.name} policy: blocked; only a Space admin sets action policy.`;
-  const parsed = parsePolicyCommand(statement);
-  if ("error" in parsed) return `${manifest.name} policy: failed; ${parsed.error}.`;
-  if (!isPolicyAction(manifest, parsed.actionId)) {
-    return `${manifest.name} policy: failed; ${parsed.actionId} is not a ${manifest.name} action.`;
-  }
-  if (parsed.mode === "ask" && !connectorActionCatalog(providerId, actions).get(parsed.actionId)?.executor) {
-    return `${manifest.name} policy: failed; this action does not support per-request approval.`;
-  }
-  const scope = await commandScope(manifest, input);
-  if (typeof scope === "string") return `${manifest.name} policy: blocked; ${scope}.`;
-  try {
-    await connectorActionPolicyRepository(input.env).set({ requestId: crypto.randomUUID(), spaceId: scope.spaceId,
-      providerId, channelId: input.channelId, actionId: parsed.actionId, mode: parsed.mode,
-      actorUserId: input.actorUserId, at: new Date().toISOString() });
-  } catch (error) {
-    const status = (error as { status?: number }).status;
-    if (status === 404) return `${manifest.name} policy: blocked; only a Space owner or admin sets action policy.`;
-    throw error;
-  }
-  return `${manifest.name} policy: completed; ${parsed.actionId} is ${parsed.mode ?? "default"} in this channel.`;
 }
 
 /** Runs one action a Human admin approved and posts its receipt in the Channel. */
@@ -216,13 +186,12 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
     commandResult(manifest.name, actionId, { status, summary });
   const entry = manifest.actions.find((candidate) => candidate.id === actionId);
   const label = entry?.label ?? actionId;
-  const defaultPolicy = entry?.defaultPolicy;
   const parsed = approved?.prepared ?? action.parse(statement);
   if (typeof parsed === "string") return result("failed", parsed);
   const scope = await commandScope(manifest, input);
   if (typeof scope === "string") return result("blocked", scope);
-  const policyInput = { connectionId: scope.connectionId, channelId: input.channelId, actionId, defaultPolicy };
-  const mode = await channelActionPolicy(input.env, policyInput);
+  const policyInput = { providerId, connectionId: scope.connectionId, actionId };
+  const mode = await connectionActionPolicy(input.env, policyInput);
   const requestId = `action-request:${await sha256Hex(JSON.stringify([scope.connectionId, input.channelId, input.messageId, actionId]))}`;
   const durableUpload = providerId === "x" && actionId === "upload_video";
   if (!approved && action.effect === "write") {
@@ -241,7 +210,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       throw new ProviderRequestError(409, `${manifest.name} Channel access changed before posting`);
     }
     if (approved) await connectorActionRequestRepository(input.env).authorize(approved.requestId, scope.connectionId, input.channelId);
-    const changed = await channelActionPolicy(input.env, policyInput);
+    const changed = await connectionActionPolicy(input.env, policyInput);
     if (changed === "disallow" || (changed === "ask" && !approved)) {
       throw new ProviderRequestError(403, actionRefusal({ actionId, mode: changed })!);
     }

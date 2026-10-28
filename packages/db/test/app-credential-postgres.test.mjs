@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   AppControlError,
   createAuthorityDatabase,
-  PostgresAppActionPolicyRepository,
+  PostgresAppPermissionRepository,
   PostgresAppActionRequestRepository,
   PostgresAppCredentialRepository,
   PostgresAppRepository,
@@ -29,7 +29,7 @@ async function withDatabase(run) {
   const { client, database, sql } = await connectorDatabase("app-credential-test");
   const space = `credential-space-${crypto.randomUUID()}`;
   const cleanup = async () => {
-    for (const table of ["app_connector_action_requests", "app_connector_action_policies", "app_connector_credentials", "app_source_relations",
+    for (const table of ["app_connector_action_requests", "app_connector_credentials", "app_source_relations",
       "app_connector_connections",
       "channels", "space_members", "app_slack_workspace_claims"]) await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
   };
@@ -362,40 +362,24 @@ integration("a Channel's connection list reads subscriptions and credentials in 
   });
 });
 
-integration("action policy is admin-written per Channel, read at execution, and removed with its connection", async () => {
-  await withDatabase(async ({ sql, database, space }) => {
-    const policies = new PostgresAppActionPolicyRepository(database);
-    const apps = new PostgresAppRepository(database);
-    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
-      created_at,updated_at) VALUES ($2||':a',$2,'a','a','open',$2||':rank-a',1,$1,$1)`, [at, space]);
-    const base = { spaceId: space, providerId: "webhook", channelId: `${space}:a`, actionId: "Post", at };
-    const read = () => policies.mode({ requestId: crypto.randomUUID(), connectionId: `${space}:webhook`,
-      channelId: `${space}:a`, actionId: "post" });
-    assert.equal(await read(), null);
-    await policies.set({ ...base, requestId: "p1", mode: "allow", actorUserId: "owner" });
-    assert.equal(await read(), "allow");
-    await policies.set({ ...base, requestId: "p2", mode: "disallow", actorUserId: "owner" });
-    assert.equal(await read(), "disallow");
-    await assert.rejects(policies.set({ ...base, requestId: "p3", mode: "allow", actorUserId: "member" }),
-      (error) => error instanceof AppControlError && error.status === 404);
-    await assert.rejects(policies.set({ ...base, requestId: "p4", channelId: "elsewhere", mode: "allow", actorUserId: "owner" }),
-      (error) => error instanceof AppControlError && error.code === "channel_not_found");
-    assert.deepEqual((await policies.list({ requestId: "l1", spaceId: space, providerId: "webhook", actorUserId: "member" }))
-      .map(({ channelId, actionId, mode }) => ({ channelId, actionId, mode })),
-    [{ channelId: `${space}:a`, actionId: "post", mode: "disallow" }], "members see the Channel overrides");
-    await assert.rejects(policies.list({ requestId: "l2", spaceId: space, providerId: "webhook", actorUserId: "stranger" }),
-      (error) => error instanceof AppControlError && error.status === 404);
-    await policies.set({ ...base, requestId: "ask", mode: "ask", actorUserId: "owner" });
-    assert.equal(await read(), "ask");
-    await sql("UPDATE data.app_connector_action_policies SET mode='deny',version=version+1 WHERE space_id=$1", [space]);
-    assert.equal(await read(), "disallow", "legacy deny remains restrictive");
-    await policies.set({ ...base, requestId: "p5", mode: null, actorUserId: "owner" });
-    assert.equal(await read(), null);
-    await policies.set({ ...base, requestId: "p6", mode: "allow", actorUserId: "owner" });
-    await apps.command({ commandId: `delete-policy-${space}`, spaceId: space, providerId: "webhook",
-      principal: { kind: "user", id: "owner" } }, "delete");
-    assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_connector_action_policies WHERE space_id=$1",
-      [space])).rows[0].n, 0);
+integration("app permission is admin-owned, shared by every Channel, resettable and removed with the connection", async () => {
+  await withDatabase(async ({ database, space }) => {
+    const permissions = new PostgresAppPermissionRepository(database);
+    const base = { spaceId: space, providerId: "webhook", actorUserId: "owner", at };
+    const read = actorUserId => permissions.read({ ...base, actorUserId, requestId: crypto.randomUUID() });
+    assert.equal(await read("member"), null);
+    for (const mode of ["write", "ask", "read", null]) {
+      await permissions.set({ ...base, requestId: crypto.randomUUID(), mode });
+      assert.equal(await read("member"), mode);
+      assert.equal(await permissions.mode({ connectionId: `${space}:webhook`, requestId: crypto.randomUUID() }), mode);
+    }
+    await permissions.set({ ...base, requestId: crypto.randomUUID(), mode: "read" });
+    for (const actorUserId of ["member", "stranger"]) await assert.rejects(permissions.set({ ...base, actorUserId, requestId: crypto.randomUUID(), mode: "write" }), e => e.status === 404);
+    await assert.rejects(read("stranger"), e => e.status === 404);
+    await assert.rejects(permissions.set({ ...base, requestId: crypto.randomUUID(), mode: "allow" }), e => e.status === 400);
+    assert.equal(await read("owner"), "read");
+    await new PostgresAppRepository(database).command({ commandId: `delete-permission-${space}`, spaceId: space, providerId: "webhook", principal: { kind: "user", id: "owner" } }, "delete");
+    await assert.rejects(permissions.mode({ connectionId: `${space}:webhook`, requestId: crypto.randomUUID() }), e => e.status === 404);
   });
 });
 
@@ -1485,7 +1469,7 @@ integration("durable X uploads claim explicit allow once and retain one scoped e
       created_at,updated_at) VALUES ($2,$3,'upload','upload','open',$2||':rank',1,$1,$1)`, [at, channelId, space]);
     const credentials = new PostgresAppCredentialRepository(database, material);
     const requests = new PostgresAppActionRequestRepository(database, material);
-    const policies = new PostgresAppActionPolicyRepository(database);
+    const policies = new PostgresAppPermissionRepository(database);
     const account = { id: "101", generation: crypto.randomUUID(), ownerUserId: "owner" };
     const writeGrant = (value) => credentials.put({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x",
       actorUserId: "owner", fields: { accounts: JSON.stringify([value]) }, policy: { allowed: ["accounts"] }, at });
@@ -1503,7 +1487,7 @@ integration("durable X uploads claim explicit allow once and retain one scoped e
     const start = (reference, actorUserId = "owner") => requests.startAllowed({ ...reference, actorUserId });
     const authorize = (reference) => requests.authorize(reference.requestId, `${space}:x`, channelId);
     const policyMode = (mode) => policies.set({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x",
-      channelId, actionId: "upload_video", actorUserId: "owner", mode, at });
+      actorUserId: "owner", mode: mode === "allow" ? "write" : mode === "disallow" ? "read" : mode, at });
     const reference = await stage("allow-once");
     const forbidden = error => error instanceof AppControlError && error.status === 403;
     await assert.rejects(start(reference), forbidden, "the default policy is not an explicit allow");

@@ -2627,7 +2627,6 @@ export function ToolSurface({
         connectors={APP_CONNECTORS}
         currentSpace={currentSpace}
         token={token}
-        channels={currentSpaceChannels}
       />
     );
   }

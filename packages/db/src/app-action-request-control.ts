@@ -136,11 +136,11 @@ export class PostgresAppActionRequestRepository {
     if (row.provider_id !== "x" || row.action_id !== "upload_video") {
       throw new AppControlError("action_request_scope_changed", 409, "This request cannot start an allowed upload");
     }
-    const policies = await tx.query<QueryResultRow>({ name: "app_action_request_upload_allow_v1", text: `SELECT mode
-      FROM data.app_connector_action_policies WHERE connection_id=$1 AND channel_id=$2 AND space_id=$3
-        AND action_id='upload_video' AND mode='allow' LIMIT 1 FOR SHARE`,
-    values: [row.connection_id, row.channel_id, row.space_id], maxRows: 1 });
-    if (!policies[0]) throw new AppControlError("action_request_forbidden", 403, "This upload requires an explicit allow policy");
+    const policies = await tx.query<QueryResultRow>({ name: "app_action_request_upload_write_v1", text: `SELECT permission_mode
+      FROM data.app_connector_connections WHERE connection_id=$1 AND space_id=$2
+        AND permission_mode='write' LIMIT 1 FOR SHARE`,
+    values: [row.connection_id, row.space_id], maxRows: 1 });
+    if (!policies[0]) throw new AppControlError("action_request_forbidden", 403, "This upload requires Read and write permission");
   }
 
   /** Re-delivery of a staged call never becomes an immediate send after a policy change. */

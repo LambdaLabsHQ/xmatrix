@@ -106,11 +106,10 @@ test("read fails on denied access and mismatched or malformed document data", as
   }
 });
 
-test("create and append are separate policy-declared writes, use fixed origins and never replay failed mutations", async () => {
+test("create and append are declared writes, use fixed origins and never replay failed mutations", async () => {
   const manifest = getAppConnectorProvider("google");
   assert.equal(manifest.actions.find(action => action.id === "create_doc").effect, "write");
   assert.equal(manifest.actions.find(action => action.id === "append_doc").effect, "write");
-  assert.ok(manifest.actions.some(action => action.id === "policy"));
   const created = await fetched([{ body: { documentId: id } }], () =>
     GOOGLE_ACTIONS.create_doc.execute({ credentials: { oauthToken: "access" } }, { title: "Work plan" }));
   assert.deepEqual(created.calls[0].body, { title: "Work plan" });

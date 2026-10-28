@@ -8,7 +8,7 @@ import {
 import type { Env } from "./types";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, listAppSourceRelations, usableAppConnections } from "./apps";
 import { getChannel } from "./spaces";
-import { channelActionRefusal } from "./connectors/connector-commands";
+import { connectionActionRefusal } from "./connectors/connector-commands";
 import { publishCommandStatus } from "./connectors/command-support";
 import {
   githubRepositoryFeaturesFromCommand,
@@ -185,8 +185,8 @@ async function runGitHubConnectorStatement(
      (docs/design/connector-platform.md §3.5): a subscription brings the
      repository's content into the Channel. Unsubscribing only narrows it. */
   if (action !== "unsubscribe") {
-    const refusal = await channelActionRefusal(input.env, { connectionId: connection.id,
-      channelId: input.channelId, actionId: action });
+    const refusal = await connectionActionRefusal(input.env, { connectionId: connection.id,
+      providerId: "github", actionId: action });
     if (refusal) {
       await finalizeExecution(executionId, input, "blocked", refusal.slice(0, 500));
       input.status(`GitHub ${action}: blocked; ${refusal}.`);

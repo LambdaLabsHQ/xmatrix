@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "../../protocol/src/app-connector-manifests.ts";
 import { SENTRY_ACTIONS, verifySentry } from "../src/connectors/actions/sentry.ts";
-import { actionRefusal, isPolicyAction } from "../src/connectors/connector-commands.ts";
+import { actionRefusal } from "../src/connectors/connector-commands.ts";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
 
 const read = SENTRY_ACTIONS.read_issue;
@@ -88,7 +88,7 @@ async function run(responses, credentials = { authToken: "test-token", organizat
 test("Sentry issue reads use the current read/deny policy independently of resolve permission", () => {
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === "sentry");
   assert.equal(manifest.actions.find(action => action.id === "read_issue").effect, "read");
-  assert.ok(isPolicyAction(manifest, "read_issue"));
+
   assert.equal(actionRefusal({ providerId: "sentry", actionId: "read_issue", effect: "read", mode: null,
     senderKind: "agent" }), undefined);
   assert.match(actionRefusal({ providerId: "sentry", actionId: "read_issue", effect: "read", mode: "deny",
