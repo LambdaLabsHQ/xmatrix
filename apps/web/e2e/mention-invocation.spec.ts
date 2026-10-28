@@ -76,6 +76,46 @@ test("repository baseline remains in finished invocation details with UTC and un
   await expect(dialog).not.toContainText("recorded base is outside");
 });
 
+test("keyboard activation keeps mention details open past a pending hover close", async ({ page }) => {
+  await page.clock.install({ time: new Date(E2E_NOW) });
+  await installInvocationFixture(page, [codex, claude]);
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const chip = page.locator(".app-mention-invocation").nth(2);
+  const dialog = page.getByRole("dialog");
+  await expect(chip).toContainText("Failed");
+  // Freeze only after bootstrap; then put Enter inside the leave-delay window.
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1_000));
+  await chip.hover();
+  await page.clock.runFor(300);
+  await expect(dialog).toContainText("No new process was started");
+  await page.mouse.move(10, 10);
+  await page.clock.runFor(80);
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await page.clock.runFor(300);
+  await expect(dialog).toContainText("No new process was started");
+  await page.keyboard.press("Escape");
+  await page.clock.runFor(300);
+  await expect(dialog).toBeHidden();
+
+  // Explicit activation still closes on an outside press.
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await page.clock.runFor(300);
+  await expect(dialog).toBeVisible();
+  await page.locator(".app-message-timeline").click({ position: { x: 10, y: 10 } });
+  await page.clock.runFor(300);
+  await expect(dialog).toBeHidden();
+
+  // A hover-only card keeps its normal leave behavior after being unpinned.
+  await chip.hover();
+  await page.clock.runFor(300);
+  await expect(dialog).toBeVisible();
+  await page.mouse.move(10, 10);
+  await page.clock.runFor(300);
+  await expect(dialog).toBeHidden();
+});
+
 test("each mention has independent live progress and a keyboard-accessible timeline", async ({ page }) => {
   await page.clock.install({ time: new Date(E2E_NOW) });
   const push = await installInvocationFixture(page, [codex, claude]);
