@@ -40,14 +40,18 @@ resources. Adding an arbitrary larger number is not a repair.
 
 ## Migration and recovery
 
-`0225_contract_remove_pin_count_quota.sql` drops only the pin-array count CHECK.
-The array type, optimistic versioning and current Channel visibility checks
-remain enforced. It takes a short metadata lock with a five-second timeout;
+`0225_expand_pin_collection.sql` consolidates the existing array-type and
+count CHECKs into one array-type CHECK. Existing rows already satisfy the old
+validated type CHECK, so the replacement uses `NOT VALID` to avoid a rescan
+while enforcing the same type invariant on every new write. Old writers stay
+compatible; optimistic versioning and current Channel visibility checks remain
+enforced. It takes a short metadata lock with a five-second timeout;
 no stored rows are rewritten or deleted. The migration ledger owns replay.
 No other resource requires a data migration. Previously evicted devices and
 silently discarded entries cannot be reconstructed; devices register again
 through their ordinary signed-in registration flow.
 
+The ordinary exact-tag expand migration step applies this change on each shard.
 Release the Hub through Production Release Intent. A recovery build must keep
 complete collection reads and accept already-saved large pin arrays; do not
 restore the former count constraint after users have saved larger arrays.

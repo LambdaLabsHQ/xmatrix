@@ -43,6 +43,9 @@ integration("pins beyond 200 round trip completely and still reject an unreadabl
     await repository.updateChannelView(context, { commandId: crypto.randomUUID(), spaceId: f.ids.space,
       userId: f.ids.owner, expectedVersion: 0, pinnedChannelIds: pins, at: new Date().toISOString() });
     assert.deepEqual((await repository.readChannelView(context, f.ids.space, f.ids.owner)).pinnedChannelIds, pins);
+    await assert.rejects(f.client.query(`UPDATE data.user_space_channel_view_preferences
+      SET pinned_channel_ids_json='{}' WHERE space_id=$1 AND user_id=$2`, [f.ids.space, f.ids.owner]),
+    error => error.code === "23514", "the replacement migration still rejects non-array pins");
     await f.client.query("UPDATE data.channels SET mode='closed' WHERE channel_id=$1", [pins.at(-1)]);
     await assert.rejects(repository.updateChannelView(context, { commandId: crypto.randomUUID(), spaceId: f.ids.space,
       userId: f.ids.owner, expectedVersion: 1, pinnedChannelIds: [...pins].reverse(), at: new Date().toISOString() }),
