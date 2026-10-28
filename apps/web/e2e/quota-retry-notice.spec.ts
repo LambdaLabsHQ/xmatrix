@@ -47,6 +47,7 @@ test("waiting requires an explicit choice, survives reload and can be cancelled 
   await page.reload();
   await expect(card.getByRole("button", { name: "Cancel waiting" })).toBeVisible();
   expect(await actions()).toEqual([{ action: "wait" }]);
+  await fixtureJson(page, "quota-read", pattern, value("cancelled"), { method: "GET" });
   await card.getByRole("button", { name: "Cancel waiting" }).click();
   await expect(card.getByRole("status")).toHaveText("Waiting cancelled");
   expect(await actions()).toEqual([{ action: "wait" }, { action: "cancel" }]);
