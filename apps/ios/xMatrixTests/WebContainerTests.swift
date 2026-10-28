@@ -141,15 +141,32 @@ final class WebContainerTests: XCTestCase {
     }
 
     func testEdgeSwipeGoesBackInThePageNotThroughHistory() {
-        var scripts: [String] = []
-        let (coordinator, container) = makeCoordinator { scripts.append($1) }
+        var asked: [String] = []
+        var pageWentBack = true
+        let (coordinator, container) = makeCoordinator(askScript: { _, script, answer in
+            asked.append(script)
+            answer(pageWentBack)
+        })
         defer { withExtendedLifetime(container) {} }
         coordinator.load(AppConfiguration.mobileTabURL(.messages))
         XCTAssertFalse(page(coordinator).allowsBackForwardNavigationGestures)
         coordinator.edgeSwipeEnded(distance: 20, speed: 100)
-        XCTAssertEqual(scripts, [])
+        XCTAssertEqual(asked, [])
         coordinator.edgeSwipeEnded(distance: 120, speed: 0)
-        XCTAssertEqual(scripts, ["window.__xmatrixNativeBack?.();"])
+        XCTAssertEqual(asked, ["window.__xmatrixNativeBack?.() === true"])
+        pageWentBack = false
+        coordinator.edgeSwipeEnded(distance: 0, speed: 900)
+        XCTAssertEqual(asked.count, 2)
+    }
+
+    func testEdgeSwipeRunsAlongsideThePageTouches() {
+        let (coordinator, container) = makeCoordinator()
+        defer { withExtendedLifetime(container) {} }
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        let edgeSwipe = page(coordinator).gestureRecognizers?.compactMap { $0 as? UIScreenEdgePanGestureRecognizer }.first
+        XCTAssertEqual(edgeSwipe?.edges, .left)
+        XCTAssertTrue(edgeSwipe?.delegate === coordinator)
+        XCTAssertTrue(coordinator.gestureRecognizer(edgeSwipe!, shouldRecognizeSimultaneouslyWith: UIPanGestureRecognizer()))
     }
 
     func testReportedViewPicksTheActiveTab() {
