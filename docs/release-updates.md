@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: The first sign-in keeps one query lifecycle
+
+The first sign-in keeps both the open page and its QueryClient, so observers
+and actions remain on the same cache without re-consuming a one-time callback.
+Leaving any signed-in reader advances a separate mount generation and creates
+a fresh client, including first sign-in followed by sign-out; using the word
+anonymous for both keys could previously skip that reset. Returning to an
+earlier account cannot revive its old mounted state. Existing pin/browser and
+callback owner cases cover initial sign-in and account changes. No API, schema
+or native change is needed; recovery is a CI-validated beta Web reverting it.
+
 ## Unreleased: Message catalog checks start after bootstrap refreshes
 
 The unpaged-message browser case now installs its fixed catalog before one

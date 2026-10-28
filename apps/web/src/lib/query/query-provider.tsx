@@ -45,28 +45,27 @@ onlineManager.setEventListener((setOnline) => {
 });
 
 /**
- * Key of the query tree. Observers keep the client that created them, so a
- * change from one signed-in account to another, or a sign-out, remounts them
- * onto the cache their actions write. The first sign-in does not: the open
- * page has already read a one-time callback or stored where to return.
+ * One key for the mounted page and its query client. First sign-in binds the
+ * current anonymous tree; leaving a signed-in account starts a fresh one,
+ * even if that account had kept the initial anonymous key.
  */
 export function queryMountKey(
-  mountKey: string | undefined,
+  mountKey: number | undefined,
   previousUserId: string | null | undefined,
   userId: string | null,
-): string {
-  if (previousUserId === undefined || mountKey === undefined) return userId ?? "anonymous";
-  if (previousUserId && previousUserId !== userId) return userId ?? "anonymous";
-  return mountKey;
+): number {
+  const current = mountKey ?? 0;
+  return previousUserId != null && previousUserId !== userId ? current + 1 : current;
 }
 
 export function XMatrixQueryProvider(props: { userId: string | null; children: ReactNode }) {
-  const client = useMemo(createClient, [props.userId]);
-  const mountKeyRef = useRef<string | undefined>(undefined);
+  const mountKeyRef = useRef<number | undefined>(undefined);
   const previousUserIdRef = useRef<string | null | undefined>(undefined);
   const mountKey = queryMountKey(mountKeyRef.current, previousUserIdRef.current, props.userId);
   mountKeyRef.current = mountKey;
   previousUserIdRef.current = props.userId;
+  // An observer retains its creating client. Keep both lifetimes together.
+  const client = useMemo(createClient, [mountKey]);
 
   useEffect(() => {
     return () => client.clear();
