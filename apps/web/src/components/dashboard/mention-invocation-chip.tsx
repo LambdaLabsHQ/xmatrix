@@ -2,7 +2,7 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 
-import { createContext, Fragment, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
@@ -176,26 +176,33 @@ function useDeclinedIntentConfidence(channelId: string, messageId: string, categ
   return confidence;
 }
 
-/** The dotted underline a hint settles into, and the card that opens from it.
- *  A span, not a button: a button is always an atomic box, so the mention
- *  could not wrap with the prose it settled back into. */
-function useMentionProseCard() {
+/** Shared activation and group selection for invocation and prose-detail cards. */
+function useInvocationPopover() {
   const group = useContext(InvocationPopoverContext);
   const popoverId = useId();
   const portal = useAppPortalContainer();
-  return { group, popoverId, portal, open: group?.openId === popoverId };
+  const pressed = useRef(false);
+  const onOpenChange = useCallback((open: boolean, details: Popover.Root.ChangeEventDetails) => {
+    // A leave timer may already be queued when a keyboard press pins the card.
+    // Cancel that stale close, as a newly scheduled hover close would be ignored.
+    if (!open && details.reason === "trigger-hover" && pressed.current) {
+      details.cancel();
+      return;
+    }
+    pressed.current = open && details.reason === "trigger-press";
+    group?.setOpenId((current) => open ? popoverId : current === popoverId ? null : current);
+  }, [group, popoverId]);
+  const open = group?.openId === popoverId;
+  return { portal, open, rootProps: { ...(group ? { open } : {}), onOpenChange } };
 }
 
 function MentionProseCard({ card, sourceMention, labelContent, title, ariaLabel, className, launching, children }: {
-  card: ReturnType<typeof useMentionProseCard>;
+  card: ReturnType<typeof useInvocationPopover>;
   sourceMention: string; labelContent?: ReactNode; title: string; ariaLabel: string; className: string;
   launching?: boolean; children: ReactNode;
 }) {
-  const { group, popoverId, portal } = card;
-  return <Popover.Root {...(group ? {
-    open: group.openId === popoverId,
-    onOpenChange: (next: boolean) => group.setOpenId((current) => next ? popoverId : current === popoverId ? null : current),
-  } : {})}>
+  const { rootProps, portal } = card;
+  return <Popover.Root {...rootProps}>
     <Popover.Trigger ref={portal.triggerRef} openOnHover delay={250} closeDelay={180} nativeButton={false} render={<span />}
       className={className}
       data-launching={launching ? "true" : undefined}
@@ -227,7 +234,7 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
   rejection: SerializedAgentInvocationRejection; category: DeclinedIntent; labelContent?: ReactNode;
   onLaunchAnyway?: () => Promise<void>;
 }) {
-  const card = useMentionProseCard();
+  const card = useInvocationPopover();
   const confidence = useDeclinedIntentConfidence(rejection.channelId, rejection.sourceMessageId, category, card.open);
   const [launching, setLaunching] = useState<"idle" | "launching" | "sent" | "failed">("idle");
   const copy = declinedIntentCopy(category);
@@ -356,7 +363,7 @@ const LAUNCH_HINT_TITLES: Record<string, string> = {
 export function MentionLaunchHintChip({ rejection, labelContent }: {
   rejection: SerializedAgentInvocationRejection; labelContent?: ReactNode;
 }) {
-  const card = useMentionProseCard();
+  const card = useInvocationPopover();
   const title = LAUNCH_HINT_TITLES[rejection.code] ?? "How to start";
   const detail = preparationFailureSummary(rejection.code) ?? rejection.message;
   return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title={title}
@@ -424,9 +431,7 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
   /** The message whose retained Jev decisions lead the timeline. */
   jev?: JevSource;
 }) {
-  const group = useContext(InvocationPopoverContext);
-  const popoverId = useId();
-  const portal = useAppPortalContainer();
+  const { rootProps, portal } = useInvocationPopover();
   const [retrying, setRetrying] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const Icon = view.tone === "error" ? TriangleAlert : view.tone === "success" ? Check
@@ -446,10 +451,7 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
     catch { setActionError("The retry was not confirmed. Refresh status before trying again."); }
     finally { setRetrying(false); }
   };
-  return <Popover.Root {...(group ? {
-    open: group.openId === popoverId,
-    onOpenChange: (open: boolean) => group.setOpenId((current) => open ? popoverId : current === popoverId ? null : current),
-  } : {})}>
+  return <Popover.Root {...rootProps}>
     {/* A span, not a button: a button is always an atomic inline-block, which
         kept a summon with conditions from wrapping and stretched its line. */}
     <Popover.Trigger ref={portal.triggerRef} openOnHover delay={250} closeDelay={180} nativeButton={false} render={<span />}
