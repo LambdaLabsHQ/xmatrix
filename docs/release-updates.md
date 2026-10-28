@@ -1,6 +1,6 @@
 # Release Updates
 
-## Unreleased: The Apps list groups by connection state and ticks what works
+## Unreleased: The Apps list groups by connection state and marks what is plugged in
 
 The Apps list put category headings (Code & CI, Chat…) beside Connected, mixing
 a state with what an app does, and connected rows carried no state mark. Sections are
