@@ -39,7 +39,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
     "./action-catalog": { connectorActionCatalog },
     "./subscription-parse": subscriptionParse,
     "./connection-credentials": { connectionCredentials: async () => credentials },
-    "./credentials": { connectorActionPolicyRepository: () => ({ mode: async () => "allow" }) },
+    "./credentials": { connectorPermissionRepository: () => ({ mode: async () => "write" }) },
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "owner", machineId: "machine", harnessId: "codex" }) },
     "./http": { ProviderRequestError },
     "../usage-cost-metering": metering,

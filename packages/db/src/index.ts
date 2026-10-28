@@ -139,9 +139,8 @@ export {
   type PostgresGitHubSubscriptionRoute,
 } from "./app-control.js";
 export {
-  PostgresAppActionPolicyRepository,
-  type AppActionPolicyMode,
-} from "./app-action-policy-control.js";
+  PostgresAppPermissionRepository,
+} from "./app-permission-control.js";
 export {
   PostgresAppCredentialRepository,
   appCredentialValueLimit,

@@ -289,13 +289,13 @@ export function PrivacyPolicyContent() {
           it lists the connected account&apos;s GA4 properties and reads the reports a person or Agent
           asks for, including sessions, users, and landing pages. Google Calendar access lists the
           connected account&apos;s calendars, reads events and availability, and creates, edits or deletes
-          events when requested and permitted by the Channel&apos;s action policy or a specific approval.
+          events when requested and permitted by the app&apos;s permission or a specific approval.
           Event content can include titles, descriptions, locations and guest email addresses; Google
           may notify guests according to the requested notification setting. Google Business Profile access lists
           accounts and locations, reads performance and reviews, and publishes a review reply only when
           someone in the Space asks for that reply. Google Ads access reads the selected advertising
           account&apos;s settings, campaigns, budgets, ads, and performance reports. When requested and
-          permitted by the Channel&apos;s action policy or a specific approval, it validates, creates,
+          permitted by the app&apos;s permission or a specific approval, it validates, creates,
           updates, pauses, or enables advertising resources in that account. Enabling a campaign can
           incur Google Ads charges in the Customer&apos;s account.
         </p>

@@ -37,7 +37,7 @@ test("Ads OAuth is a separate exact offline grant on the company client and fail
   await assert.rejects(refreshOAuthFields(company, "googleads", { oauthToken: "a" }), /complete expiring grant/u);
   await assert.rejects(refreshOAuthFields({}, "googleads", { oauthToken: "a", oauthRefreshToken: "r", oauthExpiresAt: "1" }), /unavailable/u);
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === "googleads");
-  for (const id of ["mutate", "set_campaign_status"]) assert.equal(manifest.actions.find(action => action.id === id).defaultPolicy, "ask");
+  assert.equal(manifest.defaultPermission, "ask");
 });
 
 test("selected-customer reads use v25 without a retired token, bound GAQL and fence provider text", async () => {

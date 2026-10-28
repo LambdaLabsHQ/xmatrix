@@ -12,6 +12,20 @@ cases reproduce the prior behavior at the projection and browser boundaries.
 Hub and beta Web, no migration or native update; recovery is a CI-validated
 beta reverting this change. Existing stored approval previews stay readable.
 
+## Unreleased: Each app has one permission
+
+Apps now have one Space-connection setting: Read only, Ask first, or Read and
+write. Calendar defaults to direct scheduling; Gmail, Ads, X and Linear default
+to Ask first. The same choice applies in every conversation. Per-action and
+Channel policies, their command parser and their runtime queries are removed;
+legacy API bodies are rejected rather than interpreted as wider authority.
+Claude's one-row selector ships with the backend. Migration adds the connection
+field and freezes the retired writer after checking the live policy inventory;
+the old table is dropped after the new Hub is verified. See the
+[retirement procedure](operations/connector-permission-retirement.md). Recovery
+uses a CI-validated forward release preserving configured permissions, not an
+old Channel-policy executor.
+
 ## Unreleased: Page comments continue the existing conversation
 
 The Page comment box showed a live Agent but created a new conversation before
@@ -42,7 +56,7 @@ See [Google grant expiration](operations/google-oauth-grants.md).
 
 Spaces can connect Google Calendar to read calendars, search events in an
 explicit time interval and check availability, then create, edit or delete an
-event under Channel policy (writes ask by default). It uses a separate scoped
+event under the app permission (Calendar defaults to write). It uses a separate scoped
 Google grant; existing Drive and other Google connections do not gain calendar
 access. Approvals resolve the calendar and show the proposed event, guest
 notifications and recurring-series impact. Edits/deletion retain the exact

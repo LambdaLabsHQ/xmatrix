@@ -6,7 +6,7 @@ App connectors route app context into xMatrix channels through typed provider ma
 
 - Linear provides task search/editing, assignments, states, labels, projects,
   cycles, dependencies, documents, milestones, updates and linked attachments.
-  Scope discovery, Channel policy and native acceptance are documented in
+  Scope discovery, app permission and native acceptance are documented in
   [Linear connector](../connectors/linear.md).
 
 - X connects company and personal accounts through independent OAuth 2.0
@@ -255,7 +255,7 @@ is absent.
 4. `@googlesearchconsole:submit_sitemap:sc-domain:example.com https://example.com/sitemap.xml`
    and `get_sitemap` confirm submission; fetching and indexing remain asynchronous.
 
-Every mutation respects the Channel's current deny policy. Property removal,
+Every mutation respects the app's current permission. Property removal,
 sitemap removal and unverification are separate actions. Owner-list replacement
 requires an exact resource id and `{"owners":["email@example.com"]}`; it replaces
 the full list and does not remove verification tokens from DNS or the website.
@@ -285,14 +285,14 @@ with no proxy grants. Provider credentials remain in that runtime.
 
 Search requires the token and validates service-qualified action IDs, displaying
 at most 30. All `run` calls share one xMatrix policy, `run`, including provider actions
-described as reads; a Channel administrator's `@openconnector:policy:run deny`
+described as reads; a Space administrator's Read only app permission
 turns them off there. Input is one JSON object up to 16 KiB UTF-8.
 The transport has a 10-second timeout, a 256 KiB response limit and no redirects
 or automatic replay. A successful run must confirm the exact action, a bounded
 execution ID and `auditPersisted: true`; content is fenced, mention-shielded and
 explicitly untrusted, with an 800-character preview. An uncertain response can
 follow a completed side effect: inspect the runtime/provider before retrying.
-Removing the Space connection, denying the Channel policy and revoking the
+Removing the Space connection, denying the app permission and revoking the
 runtime token are distinct controls; runtime revocation must be tested against
 the actual deployment. Gateway/runtime tests do not establish native acceptance
 of Gmail, Slack or any other third-party provider.
@@ -664,9 +664,10 @@ In the xMatrix Apps view, configure GitHub for each space that should use it:
 - After connecting, click `Configure` to select the default agent that should be added to issue work channels.
 - The first successful `@github:subscribe` in a channel creates that channel's GitHub binding. `@github:unsubscribe` removes selected source features and removes the binding when the final subscription is gone. Channel details displays this derived subscription state and opens Composer `@` completion; Space-wide connection management remains in `Apps`.
 - Set the default repository as `owner/repo` when users should be able to type short issue refs such as `#42`.
-- GitHub write actions follow the generic Channel action policy:
-  - Every action, including `merge`, `rerun_failed_jobs` and `dispatch_workflow`, runs for a Human or an Agent unless a Space admin denies it in that channel, under Apps → GitHub → Channel action policy or with `@github:policy:<action> deny`. Actions writes still need the GitHub App's Actions write permission.
-  - Migration `0127` converted the retired `*WriteChannelId` metadata into `allow` rows. Those keys are no longer read.
+- GitHub uses one Space-connection permission: Read only or Read and write.
+  Ask is rejected because these specialized actions have no approval executor.
+  App installation capabilities still constrain every operation; no Channel
+  rules or legacy `@github:policy` commands remain.
 - A GitHub App installation belongs to exactly one User or Organization; a Space links up to 32 of them, and its repositories, webhook delivery and org/repo completion cover every linked installation. The GitHub connector's `GitHub accounts` section, shown whether or not the Space is connected, lists each linked account with `Manage on GitHub` (repository selection for that installation) and `Unlink` (forgets it here; unlinking the last one disconnects). After Connect, or `Find my GitHub accounts`, the installations the grant names but the Space has not linked are listed with `Link`, which links them directly, since GitHub does not return to xMatrix for an installation that is unchanged. `Install on another account` installs the App on a new account. None of these change xMatrix-owned channel/agent/write settings.
 - Use full issue URLs or `owner/repo#42` when no default repository is configured.
 
@@ -873,7 +874,7 @@ manual own-bot credentials are not evidence of company registration.
 
 In Apps, a Human Space admin selects Connect with Discord and explicitly chooses
 an isolated test guild in native consent. Return to the same Space, reload and run
-Check. Enable the `post` action policy from a Human admin in the E2E Channel, post
+Check. Set the app permission to Read and write as a Human Space admin, post
 one unique marker to a test text channel and verify it in the native Discord UI.
 Confirm a different guild/DM is rejected, then revoke the authorization or remove
 the bot and verify a later post cannot dispatch. Reconnect through native consent;
@@ -939,7 +940,7 @@ privacy mode. Group removal or migration requires a new explicit confirmation;
 automatic rejoining cannot restore access. A Space supports twenty groups and
 can unlink each one independently.
 
-Agent sends additionally require the Channel's current action policy. Verify a
+Agent sends additionally follow the app permission. Verify a
 single authorized test message and its real provider receipt, authenticated
 inbound message, and bot-removal denial before recording native E2E completion.
 Manual credentials replace all company group grants for that Space. Company
@@ -1018,7 +1019,7 @@ xMatrix Space admin confirms one to twenty recipients at `/connect/wecom`.
 The Hub then checks current native authorization, basic contact permissions,
 enabled agent and active visible members. Copy opaque source/recipient references
 from Refresh connection to subscribe and invoke `@wecom:send:<recipient> <text>`
-under a separately authorized Channel policy. Group webhook posts use the
+under a separately authorized app permission. Group webhook posts use the
 independent `post` action. Saving that webhook replaces the native installation.
 
 Real incoming text produces a notification without exposing native content.

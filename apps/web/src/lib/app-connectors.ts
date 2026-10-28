@@ -11,7 +11,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   x: [
     "Connect company and personal accounts through separate authorizations.",
     "Read posts and timelines with results visible in the calling Channel.",
-    "Publish from an explicitly selected account under Channel approval policy; quote posts require X Enterprise API access.",
+    "Publish from an explicitly selected account under the app permission; quote posts require X Enterprise API access.",
   ],
   github: [
     "Dispatch issue triage to a channel-local agent instance.",
@@ -54,7 +54,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   gcp: [
     "Read project cost reports and analyze exported credits/net spend by month, service or SKU.",
     "Investigate Google Cloud alerts using project resources, Cloud Run status, logs and metrics.",
-    "Keep GCP credentials in the Space while IAM and channel policies control access.",
+    "Keep GCP credentials in the Space while IAM and the app permission control access.",
   ],
   feishu: [
     "Let people stay in Feishu while their messages reach the agents' channel.",
@@ -91,7 +91,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Follow a page from Search Console clicks to Google Analytics sessions and conversions.",
   ],
   googleads: [
-    "Create paused advertising campaigns, budgets, creatives and targeting, then enable or pause them under the Channel's action policy.",
+    "Create paused advertising campaigns, budgets, creatives and targeting, then enable or pause them under the app permission.",
     "Read spend and conversions for the selected advertiser and use them to adjust future campaigns.",
   ],
   googlebusinessprofile: [

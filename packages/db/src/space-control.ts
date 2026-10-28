@@ -622,11 +622,7 @@ async function releaseChannelTreeForMove(
     text: "DELETE FROM data.app_connector_action_requests WHERE channel_id=ANY($1::text[])",
     values: [channelIds], maxRows: 0,
   });
-  await transaction.query({
-    name: "channel_move_remove_app_action_policies_v1",
-    text: "DELETE FROM data.app_connector_action_policies WHERE channel_id=ANY($1::text[])",
-    values: [channelIds], maxRows: 0,
-  });
+
   await transaction.query({
     name: "channel_move_fail_reborn_v1",
     text: `UPDATE data.agent_reborn_intents SET state='failed', error_code='channel_moved',

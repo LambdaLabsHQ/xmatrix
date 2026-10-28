@@ -56,8 +56,8 @@ test("Connect signs in through Composio as a per-attempt user and stores only th
   for (const [id, action] of Object.entries(ACTIONS)) {
     const entry = manifest.actions.find(candidate => candidate.id === id);
     const write = id === "send" || id === "reply";
-    assert.deepEqual([action.effect, entry?.effect, entry?.defaultPolicy],
-      write ? ["write", "write", "ask"] : ["read", "read", undefined], id);
+    assert.deepEqual([action.effect, entry?.effect],
+      write ? ["write", "write"] : ["read", "read"], id);
   }
 });
 

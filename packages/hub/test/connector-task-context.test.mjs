@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "../../protocol/src/app-connector-manifests.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
-import { actionRefusal, isPolicyAction } from "../src/connectors/connector-commands.ts";
+import { actionRefusal } from "../src/connectors/connector-commands.ts";
 import { connectorProvider } from "../src/connectors/registry.ts";
 
 const LINEAR = { id: "issue-id", identifier: "ENG-42", url: "https://linear.app/made-by-robot/issue/ENG-42/fix?tracking=1",
@@ -34,7 +34,7 @@ test("task read actions use the current Channel read policy and their writes run
   for (const [providerId, actionId] of [["linear", "read_issue"], ["gitlab", "read_issue"], ["gitlab", "read_merge_request"], ["jira", "read_issue"]]) {
     const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === providerId);
     assert.equal(manifest.actions.find(action => action.id === actionId).effect, "read");
-    assert.ok(isPolicyAction(manifest, actionId));
+
     assert.equal(actionRefusal({ providerId, actionId, effect: "read", mode: null, senderKind: "agent" }), undefined);
     assert.match(actionRefusal({ providerId, actionId, effect: "read", mode: "deny", senderKind: "agent" }), /denied/);
     assert.equal(actionRefusal({ providerId, actionId: "comment", effect: "write", mode: null, senderKind: "agent" }), undefined);
