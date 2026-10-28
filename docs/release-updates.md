@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Mention keyboard checks address their trigger
+
+The independent invocation timeline browser case presses Enter on the intended
+trigger in one locator action. Its former separate focus and global key could
+race the previous popup's frame-delayed initial focus, sending Enter to a close
+button or the document instead. Controlled delayed-focus evidence reproduces
+that misdirected key on the same deployed client; targeting the trigger passes
+the original dialog/progress assertions. This changes the fixture only, with
+no production behavior, timeout, tolerance or retry-policy change.
+
 ## Unreleased: The first sign-in keeps one query lifecycle
 
 The first sign-in keeps both the open page and its QueryClient, so observers
