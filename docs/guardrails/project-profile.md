@@ -24,6 +24,13 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Saved resources do not inherit fixed cardinality quotas from query bounds.
+Space secrets, Channel pins, push registrations, memory entries, GitHub links,
+Page Automation reconciliation and Sentry/Discord installation bindings retain
+complete sets through bounded batches. Request sizes, byte budgets,
+authorization and transaction deadlines remain explicit. See
+[resource counts](../operations/resource-counts.md).
+
 Agent Runs cannot configure the installation DaemonHost through setup commands,
 matching the existing host-start and Profile-registry boundary. Installer
 binary-only mode verifies and installs the published binary without shell,

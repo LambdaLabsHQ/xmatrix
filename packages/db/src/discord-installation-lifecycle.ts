@@ -1,10 +1,10 @@
 import type { QueryResultRow } from "pg";
+import { RESOURCE_PAGE_SIZE, resourcePages } from "./resource-pages.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { AppOAuthInstallation } from "./app-credential-control.js";
 import { AppControlError } from "./app-control.js";
 
 const ID = /^[1-9][0-9]{14,24}$/u;
-const LIMIT = 50;
 function identity(appClientId: string, userId: string) {
   if (!ID.test(appClientId) || !ID.test(userId)) throw new AppControlError("invalid_app_request", 400, "Invalid Discord lifecycle identity");
 }
@@ -15,7 +15,7 @@ async function lockUser(tx: DatabaseTransaction, appClientId: string, userId: st
     pg_advisory_xact_lock(hashtextextended($1,0))`, values: [`discord:${appClientId}:${userId}`], maxRows: 1 });
 }
 /** Called under the callback's transaction before any credential/connection lock. */
-export async function lockDiscordInstallation(tx: DatabaseTransaction, installation: AppOAuthInstallation, connectionId: string) {
+export async function lockDiscordInstallation(tx: DatabaseTransaction, installation: AppOAuthInstallation) {
   await lockUser(tx, installation.appClientId, installation.eventScopeId!);
   const rows = await tx.query<QueryResultRow>({ name: "discord_installation_revocation_v1", text: `SELECT revoked_at
     FROM data.app_discord_revocations WHERE app_client_id=$1 AND user_id=$2 AND expires_at>statement_timestamp()`,
@@ -23,10 +23,7 @@ export async function lockDiscordInstallation(tx: DatabaseTransaction, installat
   if (rows[0] && new Date(rows[0].revoked_at).getTime() >= Date.parse(installation.discordAuthorizedAt!)) {
     throw new AppControlError("installation_revoked", 409, "Discord authorization was revoked; restart Connect");
   }
-  const targets = await tx.query({ name: "discord_installation_capacity_v1", text: `SELECT connection_id
-    FROM data.app_connector_oauth_installations WHERE provider_id='discord' AND app_client_id=$1
-      AND event_scope_id=$2 ORDER BY connection_id LIMIT 51`, values: [installation.appClientId, installation.eventScopeId], maxRows: 51 });
-  if (targets.length > LIMIT || (targets.length === LIMIT && !targets.some(row => row.connection_id === connectionId))) throw new AppControlError("too_many_installations", 503, "Discord installation capacity reached", true);
+
 }
 
 /** Only the dedicated Hub signature boundary invokes this authority. */
@@ -67,31 +64,33 @@ export class PostgresDiscordLifecycleRepository {
       }
       // Lock connections first, then reread each binding/credential to avoid a
       // joined snapshot observed before waiting on a concurrent manual edit.
-      const targets = await tx.query<QueryResultRow>({ name: "discord_lifecycle_targets_v1", text: `SELECT c.connection_id,c.space_id
+      const read = (after: string | null) => tx.query<QueryResultRow>({ name: "discord_lifecycle_targets_v2", text: `SELECT c.connection_id,c.space_id
         FROM data.app_connector_connections c JOIN data.app_connector_oauth_installations i
           ON i.connection_id=c.connection_id AND i.space_id=c.space_id
         WHERE c.provider_id='discord' AND i.provider_id='discord' AND i.app_client_id=$1 AND i.event_scope_id=$2
           AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=c.space_id)
-        ORDER BY c.connection_id LIMIT 51 FOR UPDATE OF c`, values: [input.appClientId, input.userId], maxRows: 51 });
-      if (targets.length > LIMIT) throw new AppControlError("too_many_installations", 503, "Discord lifecycle exceeds its bound", true);
+        AND ($3::text IS NULL OR c.connection_id>$3)
+        ORDER BY c.connection_id LIMIT $4 FOR UPDATE OF c`, values: [input.appClientId, input.userId, after, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE });
       let matched = 0;
-      for (const target of targets) {
-        const current = await tx.query<QueryResultRow>({ name: "discord_lifecycle_current_v1", text: `SELECT i.installation_id
-          FROM data.app_connector_oauth_installations i JOIN data.app_connector_credentials k
-            ON k.connection_id=i.connection_id AND k.space_id=i.space_id AND k.version=i.credential_version
-          JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
-          WHERE i.connection_id=$1 AND i.space_id=$2 AND i.provider_id='discord' AND c.provider_id='discord'
-            AND i.app_client_id=$3 AND i.event_scope_id=$4 AND i.discord_authorized_at<=$5
-            AND ($6::text IS NULL OR (i.installation_id=$6 AND c.status='configured')) FOR UPDATE OF i,k`,
-        values: [target.connection_id, target.space_id, input.appClientId, input.userId, eventAt.toISOString(), input.guildId ?? null], maxRows: 1 });
-        if (!current.length) continue;
-        matched++;
-        if (input.type !== "APPLICATION_DEAUTHORIZED") continue;
-        await tx.query({ name: "discord_lifecycle_credentials_retire_v1", text: `DELETE FROM data.app_connector_credentials WHERE connection_id=$1`, values: [target.connection_id], maxRows: 0 });
-        await tx.query({ name: "discord_lifecycle_binding_retire_v1", text: `DELETE FROM data.app_connector_oauth_installations WHERE connection_id=$1`, values: [target.connection_id], maxRows: 0 });
-        await tx.query({ name: "discord_lifecycle_connection_retire_v1", text: `UPDATE data.app_connector_connections
-          SET status='disconnected',error=NULL,last_checked_at=NULL,version=version+1,updated_at=statement_timestamp() WHERE connection_id=$1`,
-        values: [target.connection_id], maxRows: 0 });
+      for await (const targets of resourcePages(read, row => String(row.connection_id))) {
+        for (const target of targets) {
+          const current = await tx.query<QueryResultRow>({ name: "discord_lifecycle_current_v1", text: `SELECT i.installation_id
+            FROM data.app_connector_oauth_installations i JOIN data.app_connector_credentials k
+              ON k.connection_id=i.connection_id AND k.space_id=i.space_id AND k.version=i.credential_version
+            JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
+            WHERE i.connection_id=$1 AND i.space_id=$2 AND i.provider_id='discord' AND c.provider_id='discord'
+              AND i.app_client_id=$3 AND i.event_scope_id=$4 AND i.discord_authorized_at<=$5
+              AND ($6::text IS NULL OR (i.installation_id=$6 AND c.status='configured')) FOR UPDATE OF i,k`,
+          values: [target.connection_id, target.space_id, input.appClientId, input.userId, eventAt.toISOString(), input.guildId ?? null], maxRows: 1 });
+          if (!current.length) continue;
+          matched++;
+          if (input.type !== "APPLICATION_DEAUTHORIZED") continue;
+          await tx.query({ name: "discord_lifecycle_credentials_retire_v1", text: `DELETE FROM data.app_connector_credentials WHERE connection_id=$1`, values: [target.connection_id], maxRows: 0 });
+          await tx.query({ name: "discord_lifecycle_binding_retire_v1", text: `DELETE FROM data.app_connector_oauth_installations WHERE connection_id=$1`, values: [target.connection_id], maxRows: 0 });
+          await tx.query({ name: "discord_lifecycle_connection_retire_v1", text: `UPDATE data.app_connector_connections
+            SET status='disconnected',error=NULL,last_checked_at=NULL,version=version+1,updated_at=statement_timestamp() WHERE connection_id=$1`,
+          values: [target.connection_id], maxRows: 0 });
+        }
       }
       return { matched };
     });

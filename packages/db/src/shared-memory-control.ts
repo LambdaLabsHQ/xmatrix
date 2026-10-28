@@ -8,7 +8,6 @@ import { ControlError } from "./control-error.js";
 import { readScopedCommandReplay, storeScopedCommandReplay } from "./command-replay.js";
 
 const VALUE_BYTES = 64 * 1024;
-const WORKSPACE_ROWS = 10_000;
 const WORKSPACE_BYTES = 64 * 1024 * 1024;
 const GLOBAL_BYTES = 512 * 1024 * 1024;
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -81,7 +80,7 @@ export class PostgresSharedMemoryRepository {
           values: [owner, workspace, key], maxRows: 1 });
         if (kind === "put-shared-memory") {
           const usage = await tx.query<QueryResultRow>({ name: "shared_memory_usage_v1",
-            text: `SELECT COUNT(*) AS rows_count,COALESCE(SUM(encoded_bytes),0) AS workspace_bytes,
+            text: `SELECT COALESCE(SUM(encoded_bytes),0) AS workspace_bytes,
               (SELECT COALESCE(SUM(encoded_bytes),0) FROM data.shared_memory_workspace_entries
                 WHERE ${ACTIVE_EXPIRY_PREDICATE}) AS global_bytes
               FROM data.shared_memory_workspace_entries
@@ -89,10 +88,8 @@ export class PostgresSharedMemoryRepository {
             values: [owner, workspace], maxRows: 1 });
           const currentLive = Boolean(currentRows[0] && (currentRows[0].expires_at == null ||
             new Date(currentRows[0].expires_at as string | Date).getTime() > Date.now()));
-          const rowDelta = currentLive ? 0 : 1;
           const byteDelta = encodedBytes - (currentLive ? Number(currentRows[0]?.encoded_bytes ?? 0) : 0);
-          if (Number(usage[0]?.rows_count ?? 0) + rowDelta > WORKSPACE_ROWS ||
-              Number(usage[0]?.workspace_bytes ?? 0) + byteDelta > WORKSPACE_BYTES) {
+          if (Number(usage[0]?.workspace_bytes ?? 0) + byteDelta > WORKSPACE_BYTES) {
             throw new SharedMemoryControlError("shared_memory_workspace_backpressure", 503,
               "shared memory workspace budget is exhausted", true);
           }

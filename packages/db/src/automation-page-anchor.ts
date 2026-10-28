@@ -3,8 +3,7 @@ import { automationReferences, sha256Hex, type PageAutomationAnchorChange } from
 import type { DatabaseTransaction } from "./contracts.js";
 import { automationName, commitAutomationChange } from "./automation-commit.js";
 import { storedIso, storedObject } from "./stored-values.js";
-
-const MAX_PAGE_AUTOMATIONS = 200;
+import { RESOURCE_PAGE_SIZE, resourcePages } from "./resource-pages.js";
 
 /**
  * A page's text is where its Automations are anchored
@@ -19,41 +18,44 @@ export async function reconcilePageAutomations(tx: DatabaseTransaction, input: {
   spaceId: string; pageId: string; body: string; at: string; revision: number;
 }): Promise<PageAutomationReconciliation> {
   const referenced = automationReferences(input.body);
-  const rows = await tx.query<QueryResultRow>({ name: "page_automations_reconcile_v3", text: `SELECT
+  const read = (after: string | null) => tx.query<QueryResultRow>({ name: "page_automations_reconcile_v4", text: `SELECT
       a.automation_id,a.channel_id,a.enabled,a.detached_at,a.version,
       a.created_at,a.next_run_at,a.last_run_at,a.payload_json
     FROM data.automations a JOIN data.channels c ON c.channel_id=a.channel_id
-    WHERE a.page_id=$1 AND c.space_id=$2 ORDER BY a.automation_id FOR UPDATE OF a`,
-  values: [input.pageId, input.spaceId], maxRows: MAX_PAGE_AUTOMATIONS });
+    WHERE a.page_id=$1 AND c.space_id=$2 AND ($3::text IS NULL OR a.automation_id>$3)
+    ORDER BY a.automation_id LIMIT $4 FOR UPDATE OF a`,
+  values: [input.pageId, input.spaceId, after, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE });
   const changed: string[] = [];
   const detached: PageAutomationAnchorChange[] = [];
   const attached: PageAutomationAnchorChange[] = [];
-  for (const row of rows) {
-    const automationId = String(row.automation_id);
-    const present = referenced.has(automationId);
-    const detach = !present && row.enabled === true;
-    const attach = present && row.detached_at !== null;
-    if (!detach && !attach) continue;
-    const version = Number(row.version) + 1;
-    const nextRunAt = attach ? nextRunWhenEnabled(row, input.at) : storedIso(row.next_run_at);
-    if (detach) {
-      await tx.query({ name: "page_automation_detach_occurrences_v1", text: `UPDATE
-        data.automation_occurrences SET status='cancelled',lease_owner=NULL,lease_until=NULL,
-        error_code='automation_detached',error_message='Its reference left the page before dispatch',
-        updated_at=$1,finished_at=$1 WHERE automation_id=$2 AND status IN ('pending','leased')`,
-      values: [input.at, automationId], maxRows: 0 });
+  for await (const rows of resourcePages(read, (row) => String(row.automation_id))) {
+    for (const row of rows) {
+      const automationId = String(row.automation_id);
+      const present = referenced.has(automationId);
+      const detach = !present && row.enabled === true;
+      const attach = present && row.detached_at !== null;
+      if (!detach && !attach) continue;
+      const version = Number(row.version) + 1;
+      const nextRunAt = attach ? nextRunWhenEnabled(row, input.at) : storedIso(row.next_run_at);
+      if (detach) {
+        await tx.query({ name: "page_automation_detach_occurrences_v1", text: `UPDATE
+          data.automation_occurrences SET status='cancelled',lease_owner=NULL,lease_until=NULL,
+          error_code='automation_detached',error_message='Its reference left the page before dispatch',
+          updated_at=$1,finished_at=$1 WHERE automation_id=$2 AND status IN ('pending','leased')`,
+        values: [input.at, automationId], maxRows: 0 });
+      }
+      await tx.query({ name: "page_automation_anchor_v2", text: `UPDATE data.automations SET
+          enabled=$1,detached_at=$2,next_run_at=$3,version=$4,updated_at=$5 WHERE automation_id=$6`,
+      values: [attach, detach ? input.at : null, nextRunAt, version, input.at, automationId], maxRows: 0 });
+      const kind = "automation_put";
+      const commandId = `page-anchor:${input.pageId}:${input.revision}:${automationId}`.slice(0, 200);
+      await commitAutomationChange(tx, input.spaceId, commandId, kind, await sha256Hex(commandId), {
+        commandId, kind, entityId: automationId, channelId: String(row.channel_id), entityVersion: version,
+        reused: false, projectionMutations: [], recipientChanges: [],
+      }, input.at);
+      changed.push(String(row.channel_id));
+      (detach ? detached : attached).push({ automationId, name: storedName(row.payload_json) });
     }
-    await tx.query({ name: "page_automation_anchor_v2", text: `UPDATE data.automations SET
-        enabled=$1,detached_at=$2,next_run_at=$3,version=$4,updated_at=$5 WHERE automation_id=$6`,
-    values: [attach, detach ? input.at : null, nextRunAt, version, input.at, automationId], maxRows: 0 });
-    const kind = "automation_put";
-    const commandId = `page-anchor:${input.pageId}:${input.revision}:${automationId}`.slice(0, 200);
-    await commitAutomationChange(tx, input.spaceId, commandId, kind, await sha256Hex(commandId), {
-      commandId, kind, entityId: automationId, channelId: String(row.channel_id), entityVersion: version,
-      reused: false, projectionMutations: [], recipientChanges: [],
-    }, input.at);
-    changed.push(String(row.channel_id));
-    (detach ? detached : attached).push({ automationId, name: storedName(row.payload_json) });
   }
   return { channels: [...new Set(changed)], detached, attached };
 }
@@ -101,27 +103,31 @@ function nextRunWhenEnabled(row: QueryResultRow, at: string): string {
 export async function removePageAutomations(tx: DatabaseTransaction, input: {
   spaceId: string; pageId: string; at: string;
 }): Promise<string[]> {
-  const rows = await tx.query<QueryResultRow>({ name: "page_automations_remove_v1", text: `SELECT
+  const read = (after: string | null) => tx.query<QueryResultRow>({ name: "page_automations_remove_v2", text: `SELECT
       a.automation_id,a.channel_id,a.version
     FROM data.automations a JOIN data.channels c ON c.channel_id=a.channel_id
-    WHERE a.page_id=$1 AND c.space_id=$2 ORDER BY a.automation_id FOR UPDATE OF a`,
-  values: [input.pageId, input.spaceId], maxRows: MAX_PAGE_AUTOMATIONS });
-  if (!rows.length) return [];
-  const ids = rows.map((row) => String(row.automation_id));
-  await tx.query({ name: "page_automations_remove_occurrences_v1", text: `UPDATE
-    data.automation_occurrences SET status='cancelled',lease_owner=NULL,lease_until=NULL,
-    error_code='page_removed',error_message='Its page was removed before dispatch',
-    updated_at=$1,finished_at=$1 WHERE automation_id=ANY($2::text[]) AND status IN ('pending','leased')`,
-  values: [input.at, ids], maxRows: 0 });
-  await tx.query({ name: "page_automations_remove_rows_v1",
-    text: "DELETE FROM data.automations WHERE automation_id=ANY($1::text[])", values: [ids], maxRows: 0 });
-  for (const row of rows) {
-    const kind = "automation_remove";
-    const commandId = `page-removed:${input.pageId}:${String(row.automation_id)}`.slice(0, 200);
-    await commitAutomationChange(tx, input.spaceId, commandId, kind, await sha256Hex(commandId), {
-      commandId, kind, entityId: String(row.automation_id), channelId: String(row.channel_id),
-      entityVersion: Number(row.version) + 1, reused: false, projectionMutations: [], recipientChanges: [],
-    }, input.at);
+    WHERE a.page_id=$1 AND c.space_id=$2 AND ($3::text IS NULL OR a.automation_id>$3)
+    ORDER BY a.automation_id LIMIT $4 FOR UPDATE OF a`,
+  values: [input.pageId, input.spaceId, after, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE });
+  const channels = new Set<string>();
+  for await (const rows of resourcePages(read, (row) => String(row.automation_id))) {
+    const ids = rows.map((row) => String(row.automation_id));
+    await tx.query({ name: "page_automations_remove_occurrences_v1", text: `UPDATE
+      data.automation_occurrences SET status='cancelled',lease_owner=NULL,lease_until=NULL,
+      error_code='page_removed',error_message='Its page was removed before dispatch',
+      updated_at=$1,finished_at=$1 WHERE automation_id=ANY($2::text[]) AND status IN ('pending','leased')`,
+    values: [input.at, ids], maxRows: 0 });
+    await tx.query({ name: "page_automations_remove_rows_v1",
+      text: "DELETE FROM data.automations WHERE automation_id=ANY($1::text[])", values: [ids], maxRows: 0 });
+    for (const row of rows) {
+      const kind = "automation_remove";
+      const commandId = `page-removed:${input.pageId}:${String(row.automation_id)}`.slice(0, 200);
+      await commitAutomationChange(tx, input.spaceId, commandId, kind, await sha256Hex(commandId), {
+        commandId, kind, entityId: String(row.automation_id), channelId: String(row.channel_id),
+        entityVersion: Number(row.version) + 1, reused: false, projectionMutations: [], recipientChanges: [],
+      }, input.at);
+    }
+    for (const row of rows) channels.add(String(row.channel_id));
   }
-  return [...new Set(rows.map((row) => String(row.channel_id)))];
+  return [...channels];
 }

@@ -7,7 +7,6 @@ import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
 
 const MAX_BYTES = 64 * 1024;
-const MAX_ENTRIES = 80;
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 
 
@@ -84,8 +83,7 @@ function apply(currentValue: unknown, updateValue: unknown, now: string) {
       sourceRefs: sourceRefs(value.sourceRefs), updatedAt: now };
   })();
   const result = { schemaVersion: 1,
-    entries: [...entries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
-      .slice(0, MAX_ENTRIES), ...(checkpoint ? { checkpoint } : {}), updatedAt: now };
+    entries: [...entries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))), ...(checkpoint ? { checkpoint } : {}), updatedAt: now };
   if (utf8ByteLength(stable(result)) > MAX_BYTES) {
     throw new AssistantMemoryControlError("assistant_memory_too_large", 409,
       "assistant memory exceeds its bounded size");

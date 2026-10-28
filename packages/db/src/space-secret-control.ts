@@ -11,8 +11,8 @@ import { requireChannelCapability } from "./channel-capability-policy.js";
 import { inActiveSpace } from "./page-control.js";
 import { PostgresChannelSpaceDirectory } from "./placement.js";
 import { decryptSpaceSecretValue, encryptSpaceSecretValue, secretHmac } from "./secret-value-control.js";
+import { RESOURCE_PAGE_SIZE, resourcePages } from "./resource-pages.js";
 
-const MAX_SPACE_SECRETS = 128;
 const MAX_VALUE_BYTES = 64 * 1024;
 const SECRET_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u;
 
@@ -119,11 +119,15 @@ async function liveRunSpace(tx: DatabaseTransaction, run: RunSecretCaller, use: 
 }
 
 async function runViews(tx: DatabaseTransaction, spaceId: string, runId: string, refs?: string[]) {
-  const rows = await tx.query({ name: "space_secret_run_views_v1", text: `SELECT s.*,
+  const rows = [];
+  for await (const page of resourcePages((after: string | null) => tx.query({
+    name: "space_secret_run_views_v2", text: `SELECT s.*,
     (s.access='auto' OR a.run_id IS NOT NULL) AS readable FROM data.space_secrets s
     LEFT JOIN data.run_secret_approvals a ON a.run_id=$2 AND a.secret_ref=s.secret_ref AND a.space_id=s.space_id
-    WHERE s.space_id=$1 AND ($3::text[] IS NULL OR s.secret_ref=ANY($3::text[])) ORDER BY s.secret_ref`,
-  values: [spaceId, runId, refs ?? null], maxRows: MAX_SPACE_SECRETS });
+    WHERE s.space_id=$1 AND ($3::text[] IS NULL OR s.secret_ref=ANY($3::text[]))
+      AND ($4::text IS NULL OR s.secret_ref>$4) ORDER BY s.secret_ref LIMIT $5`,
+    values: [spaceId, runId, refs ?? null, after, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE }),
+  (row) => String(row.secret_ref))) rows.push(...page);
   return rows;
 }
 
@@ -142,8 +146,12 @@ export class PostgresSpaceSecretRepository {
       if (!memberRole || !SECRET_READERS.includes(memberRole)) {
         throw new SpaceSecretError("forbidden", 403, "Only a Space member sees its secrets");
       }
-      const rows = await tx.query({ name: "space_secret_list_v1", text: `SELECT * FROM data.space_secrets
-        WHERE space_id=$1 ORDER BY secret_ref`, values: [input.spaceId], maxRows: MAX_SPACE_SECRETS });
+      const rows = [];
+      for await (const page of resourcePages((after: string | null) => tx.query({
+        name: "space_secret_list_v2", text: `SELECT * FROM data.space_secrets
+          WHERE space_id=$1 AND ($2::text IS NULL OR secret_ref>$2) ORDER BY secret_ref LIMIT $3`,
+        values: [input.spaceId, after, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE }),
+      (row) => String(row.secret_ref))) rows.push(...page);
       return { secrets: rows.map(entry), canManage: SECRET_ADMINS.includes(memberRole) };
     });
   }
@@ -312,12 +320,6 @@ export class PostgresSpaceSecretRepository {
     if (current && mode === "create") throw new SpaceSecretError("secret_already_exists", 409,
       "This Space already has a secret with this alias");
     if (!current && value === undefined) throw new SpaceSecretError("secret_value_required", 400, "A new secret needs its value");
-    if (!current) {
-      const count = await tx.query({ name: "space_secret_write_count_v1", text: `SELECT count(*)::int AS count
-        FROM data.space_secrets WHERE space_id=$1`, values: [spaceId], maxRows: 1 });
-      if (Number(count[0]?.count ?? 0) >= MAX_SPACE_SECRETS) throw new SpaceSecretError("secret_limit_reached", 409,
-        `A Space holds at most ${MAX_SPACE_SECRETS} secrets`);
-    }
     const envName = input.envName !== undefined ? envNameOf(input.envName) : current ? String(current.env_name) : defaultSecretEnvName(ref);
     const description = input.description !== undefined ? descriptionOf(input.description) : current?.description ?? null;
     const access = input.access ?? (current ? String(current.access) : "ask");
@@ -356,9 +358,13 @@ async function approveRun(tx: DatabaseTransaction, spaceId: string, runId: strin
 
 /** The named secrets the Space holds, each with how it is read; one it does not hold is left out. */
 async function accessStatus(tx: DatabaseTransaction, spaceId: string, refs: string[], userId: string) {
-  const rows = await tx.query({ name: "space_secret_access_status_v1", text: `SELECT secret_ref,env_name,access
-    FROM data.space_secrets WHERE space_id=$1 AND secret_ref=ANY($2::text[]) ORDER BY secret_ref`,
-  values: [spaceId, refs], maxRows: MAX_SPACE_SECRETS });
+  const rows = [];
+  for await (const page of resourcePages((after: string | null) => tx.query({
+    name: "space_secret_access_status_v2", text: `SELECT secret_ref,env_name,access
+      FROM data.space_secrets WHERE space_id=$1 AND secret_ref=ANY($2::text[])
+        AND ($3::text IS NULL OR secret_ref>$3) ORDER BY secret_ref LIMIT $4`,
+    values: [spaceId, refs, after, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE }),
+  (row) => String(row.secret_ref))) rows.push(...page);
   return { secrets: rows.map((row) => ({ secretRef: String(row.secret_ref), envName: String(row.env_name),
     access: String(row.access) as SpaceSecretAccess })),
     canApprove: SECRET_ADMINS.includes((await role(tx, spaceId, userId)) ?? "") };
