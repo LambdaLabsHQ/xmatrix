@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
-import { integration, isolatedPostgres, frozenRetiredTables } from "../../db/test/postgres-database.fixture.mjs";
+import { integration, isolatedPostgres } from "../../db/test/postgres-database.fixture.mjs";
 import { createAuthorityDatabase, PostgresSpaceControlRepository, PostgresPageRepository, PostgresAutomationRepository, CHANNEL_PURGE_STEPS } from "@xmatrix/db";
 import { requireChannelCapability } from "../../db/src/channel-capability-policy.ts";
 import { signAgentRunToken } from "../src/auth.ts";
@@ -151,7 +151,7 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
     const keyed = await f.run(`SELECT DISTINCT c.table_schema||'.'||c.table_name AS name FROM information_schema.columns c
       JOIN information_schema.tables t USING(table_schema,table_name) WHERE c.table_schema IN ('data','control')
       AND c.column_name IN ('channel_id','conversation_id','source_channel_id') AND t.table_type='BASE TABLE'`);
-    const classified = new Set([...CHANNEL_PURGE_STEPS.map(step => step.table), ...await frozenRetiredTables(f.client)]);
+    const classified = new Set(CHANNEL_PURGE_STEPS.map(step => step.table));
     for (const name of ["data.channels", "data.channel_deletions", "control.channel_space_routes", "control.channel_space_directory"]) classified.add(name);
     assert.deepEqual(keyed.map(row => row.name).filter(name => !classified.has(name)), []);
   } finally { await f.close(); }

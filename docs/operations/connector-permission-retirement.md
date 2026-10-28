@@ -30,9 +30,10 @@ The connection owns the durable value, so deleting it removes the setting.
    or write the retired table. Old Channel/action request bodies return 400;
    they cannot silently become Space-wide grants. The Web shows only the one
    setting. Verify real read/ask/write behavior and absence of old runtime use.
-4. After that release is verified, land and release a contract migration to drop
+4. After that release is verified, apply and release contract migration 0227 to drop
    the old table and its freeze constraint. No old rule writer/reader or fallback
-   remains. Historical applied migrations retain their original bytes.
+   remains. The temporary frozen-table test classification is removed too.
+   Historical applied migrations retain their original bytes.
 
 The initial NULL column is compatible with the previous Hub during expansion;
 new settings are exposed only alongside the new Hub. Once users configure the
