@@ -137,7 +137,7 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_model_unavailable: "No registered environment offers the requested model with the other launch parameters. No launch was allocated.",
   registration_effort_unavailable: "No registered environment offers the requested reasoning effort with the other launch parameters. No launch was allocated.",
   registration_directory_unavailable: "The requested directory is not authorized for any environment matching the other launch parameters. No launch was allocated.",
-  registration_quota_exhausted: "Every environment matching this request has used up its provider quota until the quota resets. No launch was allocated.",
+  registration_quota_exhausted: "The matching agents have used up their provider account quota. Choose another Agent, or wait for the provider to reset the quota and send your message again. No launch was allocated.",
   registration_machine_not_auto_assigned: "Only machines their owners keep out of automatic assignment can run this; name one with machine:<name> to use it. No launch was allocated.",
   ...Object.fromEntries((["environment", "parameter"] as const).flatMap(phase =>
     Object.entries(REGISTRATION_JEV_FAILURES).map(([reason, description]) => [

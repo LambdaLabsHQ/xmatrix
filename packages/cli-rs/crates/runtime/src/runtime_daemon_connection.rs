@@ -1938,15 +1938,22 @@ async fn register_long_lived_relay(
 ) -> error::Result<(protocol::SerializedAgent, Vec<protocol::SerializedAgent>)> {
     let mut attempt: u32 = 0;
     let mut backoff = long_lived_register_backoff();
-    let mut next_daemon_auth_refresh = refresh_daemon_auth
-        .then(|| Instant::now() + Duration::from_secs(AGENT_RUN_TOKEN_REFRESH_INTERVAL_SECS));
+    // Wall-clock deadlines: the Hub's token expires while the computer sleeps,
+    // and `Instant` on macOS does not advance then.
+    let mut next_daemon_auth_refresh = refresh_daemon_auth.then(|| {
+        std::time::SystemTime::now() + Duration::from_secs(AGENT_RUN_TOKEN_REFRESH_INTERVAL_SECS)
+    });
+    // A refused credential is refreshed and registration tried once more; a
+    // second refusal with a fresh one is the failure it says.
+    let mut refreshed_after_refusal = false;
     loop {
-        if next_daemon_auth_refresh.is_some_and(|deadline| Instant::now() >= deadline) {
+        if next_daemon_auth_refresh.is_some_and(|deadline| std::time::SystemTime::now() >= deadline) {
             match resolve_local_daemon_auth_token_for_refresh().await {
                 Ok(Some(token)) => {
                     relay.update_auth_token(token)?;
                     next_daemon_auth_refresh = Some(
-                        Instant::now() + Duration::from_secs(AGENT_RUN_TOKEN_REFRESH_INTERVAL_SECS),
+                        std::time::SystemTime::now()
+                            + Duration::from_secs(AGENT_RUN_TOKEN_REFRESH_INTERVAL_SECS),
                     );
                 }
                 Ok(None) => {
@@ -1958,14 +1965,27 @@ async fn register_long_lived_relay(
                     );
                     write_current_run_error_status("relay_auth_refresh_retrying", false, &err);
                     eprintln!("{} {detail}", "⚠".yellow().bold());
-                    next_daemon_auth_refresh =
-                        Some(Instant::now() + Duration::from_secs(DAEMON_AUTH_REFRESH_RETRY_SECS));
+                    next_daemon_auth_refresh = Some(
+                        std::time::SystemTime::now() + Duration::from_secs(DAEMON_AUTH_REFRESH_RETRY_SECS),
+                    );
                 }
             }
         }
 
         match relay.register().await {
             Ok(registered) => return Ok(registered),
+            Err(err)
+                if refresh_daemon_auth
+                    && !refreshed_after_refusal
+                    && is_refused_run_credential(&err) =>
+            {
+                refreshed_after_refusal = true;
+                eprintln!(
+                    "{} {label} run credential was refused ({err}); refreshing it",
+                    "⚠".yellow().bold()
+                );
+                next_daemon_auth_refresh = Some(std::time::SystemTime::now());
+            }
             Err(err)
                 if is_retryable_initial_register_error(&err)
                     || is_bounded_retryable_session_register_error(&err, attempt) =>
@@ -2014,6 +2034,13 @@ fn operation_retryable_or(err: &CliError, fallback: impl FnOnce(&CliError, &str)
         return failure.retryable;
     }
     fallback(err, &err.to_string().to_ascii_lowercase())
+}
+
+/// The Hub refused the run credential itself, as when it expired while the
+/// computer slept: a fresh one from the daemon may be accepted.
+fn is_refused_run_credential(err: &CliError) -> bool {
+    err.operation_failure()
+        .is_some_and(|failure| failure.code == "agent_run_credential_invalid")
 }
 
 fn is_retryable_initial_register_error(err: &CliError) -> bool {

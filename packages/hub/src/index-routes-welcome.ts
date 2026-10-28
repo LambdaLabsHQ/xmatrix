@@ -1,10 +1,11 @@
 import type { Hono } from "hono";
 import { ControlError } from "@xmatrix/db";
 import {
-  ONBOARDING_MESSAGE_KIND, onboardingLocale, type AgentRegistrationSummary, type OnboardingLocale, type OnboardingStage,
+  ONBOARDING_MESSAGE_KIND, onboardingLocale, parseHarnessInventory, type AgentRegistrationSummary, type OnboardingLocale, type OnboardingStage,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { listAgentRegistrations } from "./agent-registrations";
+import { listOwnerMachineDaemons, machineRepository } from "./machines";
 import { deterministicConversationId } from "./deterministic-id";
 import { jsonErrors, requireAuth, requireHumanAuth } from "./index-shared";
 import { postgresMessageExists, withPostgresMessageRequestScope } from "./postgres-message-authority";
@@ -138,8 +139,24 @@ async function appendOnboardingStep(env: Env, step: { ownerUserId: string; chann
 }
 
 async function enabledAgentHandles(env: Env, ownerUserId: string, spaceId: string): Promise<string[]> {
-  const { registrations } = await listAgentRegistrations(env, { actorUserId: ownerUserId, spaceId, limit: 50 });
-  return [...new Set((registrations as AgentRegistrationSummary[])
-    .filter((registration) => registration.state === "enabled")
-    .map((registration) => `@${registration.displayName}`))];
+  const daemons = await listOwnerMachineDaemons(machineRepository(env), ownerUserId);
+  const signedOut = new Set(daemons.flatMap((daemon) => {
+    const metadata = daemon.metadata as Record<string, unknown> | undefined;
+    return (parseHarnessInventory(metadata?.harnesses)?.items ?? [])
+      .filter((item) => item.login === "signed_out")
+      .map((item) => `${daemon.userId}\0${daemon.machineId}\0${item.id}`);
+  }));
+  const handles = new Set<string>();
+  let cursor: string | null | undefined;
+  do {
+    const page = await listAgentRegistrations(env, { actorUserId: ownerUserId, spaceId, cursor, limit: 200 });
+    for (const registration of page.registrations as AgentRegistrationSummary[]) {
+      const { key } = registration;
+      if (registration.state === "enabled" && !signedOut.has(`${key.ownerUserId}\0${key.machineId}\0${key.harness}`)) {
+        handles.add(`@${registration.displayName}`);
+      }
+    }
+    cursor = page.cursor;
+  } while (cursor);
+  return [...handles];
 }

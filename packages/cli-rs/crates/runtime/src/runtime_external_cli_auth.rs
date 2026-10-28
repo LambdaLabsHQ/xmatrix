@@ -807,10 +807,27 @@ fn probe_local_authority_now() {
     LOCAL_AUTHORITY_PROBE.notify_one();
 }
 
+/// How often a refresh wait reads the wall clock. Tokio's timers run on a
+/// monotonic clock that stops while macOS sleeps, but the Hub's ten-minute
+/// token does not: after a long sleep the wait must notice within one tick
+/// that the token it holds has expired.
+const DAEMON_AUTH_REFRESH_CLOCK_TICK: Duration = Duration::from_secs(15);
+
 async fn wait_for_daemon_auth_refresh(sleep_secs: u64) {
+    let due = std::time::SystemTime::now() + Duration::from_secs(sleep_secs);
     tokio::select! {
-        _ = tokio::time::sleep(Duration::from_secs(sleep_secs)) => {}
+        _ = wait_until_wall_clock(due, DAEMON_AUTH_REFRESH_CLOCK_TICK) => {}
         _ = LOCAL_AUTHORITY_PROBE.notified() => {}
+    }
+}
+
+/// Sleeps until the wall clock reaches `due`, reading it every `tick`.
+async fn wait_until_wall_clock(due: std::time::SystemTime, tick: Duration) {
+    while let Ok(left) = due.duration_since(std::time::SystemTime::now()) {
+        if left.is_zero() {
+            return;
+        }
+        tokio::time::sleep(left.min(tick)).await;
     }
 }
 

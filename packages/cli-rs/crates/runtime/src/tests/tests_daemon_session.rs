@@ -4,6 +4,15 @@ use super::run_worktree;
 use super::select_headless_wrapper_executable;
 use super::{CodexTurnRequest, ImageBlockShape, MachineWorktreeDisposition, prompt_content_blocks};
 
+fn restore_daemon_test_env<const N: usize>(names: [&str; N], previous: [Option<std::ffi::OsString>; N]) {
+    for (name, value) in names.into_iter().zip(previous) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+}
+
 fn daemon_test_session(token: &str) -> super::config::CliSession {
     super::config::CliSession {
         token: token.to_string(),
@@ -1796,6 +1805,99 @@ mod git_credential_revocation {
     }
 }
 
+// Exercise the real wrapper/daemon/relay boundary: classification alone cannot
+// catch a refresh that never happens or registration retried with the old token.
+#[test]
+fn a_refused_run_credential_is_refreshed_once_before_registering_again() {
+    use futures_util::{SinkExt, StreamExt};
+    let _guard = test_process_env_lock();
+    let names = [super::DAEMON_AUTH_URL_ENV, super::DAEMON_AUTH_CAPABILITY_ENV, "XMATRIX_CONFIG_DIR"];
+    let previous = names.map(std::env::var_os);
+    let root = std::env::temp_dir().join(format!("xmatrix-register-refresh-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    unsafe { std::env::set_var("XMATRIX_CONFIG_DIR", &root) };
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        for final_code in [None, Some("agent_run_credential_invalid"), Some("agent_run_forbidden")] {
+            let broker = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            unsafe {
+                std::env::set_var(super::DAEMON_AUTH_URL_ENV, format!("http://{}", broker.local_addr().unwrap()));
+                std::env::set_var(super::DAEMON_AUTH_CAPABILITY_ENV, "fixture-capability");
+            }
+            let refresh = tokio::spawn(async move {
+                let (mut stream, _) = broker.accept().await.unwrap();
+                let request = super::read_daemon_local_http_request(&mut stream).await.unwrap();
+                assert_eq!(request.path, "/auth/token");
+                assert_eq!(request.headers["x-xmatrix-auth-capability"], "fixture-capability");
+                super::write_daemon_auth_broker_response(&mut stream, "200 OK", r#"{"token":"fresh-token"}"#).await;
+            });
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+            let server = tokio::spawn(async move {
+                for (attempt, expected_token) in ["expired-token", "fresh-token"].into_iter().enumerate() {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    let request = socket.next().await.unwrap().unwrap().into_text().unwrap();
+                    let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+                    assert_eq!(request["token"], expected_token);
+                    let code = if attempt == 0 { Some("agent_run_credential_invalid") } else { final_code };
+                    let response = if let Some(code) = code {
+                        protocol::AgentInstanceServerMessage::Error {
+                            request_id: None, message: "Registration refused".into(),
+                            failure: Some(protocol::AgentOperationFailure {
+                                code: code.into(), stage: "relay.authenticate".into(), origin_stage: None,
+                                diagnostic_id: "diag_11111111-1111-4111-8111-111111111111".into(), retryable: false,
+                            }),
+                        }
+                    } else {
+                        protocol::AgentInstanceServerMessage::AgentInstanceConnected {
+                            agent: test_serialized_agent("codex"), peers: vec![], hub_capabilities: None,
+                        }
+                    };
+                    socket.send(tokio_tungstenite::tungstenite::Message::Text(
+                        serde_json::to_string(&response).unwrap().into())).await.unwrap();
+                    if attempt == 1 { let _ = stopped.await; break; }
+                }
+            });
+            let mut relay = super::agent_instance_connection::AgentInstanceConnectionClient::new(
+                format!("ws://{address}"), "expired-token".into(), "codex".into(), "codex".into(), None);
+            let result = tokio::time::timeout(Duration::from_secs(5),
+                super::register_long_lived_relay(&mut relay, "fixture", true)).await
+                .expect("refusal cannot cause an unbounded retry");
+            if let Some(code) = final_code {
+                assert_eq!(result.unwrap_err().operation_failure().unwrap().code, code);
+            } else {
+                assert_eq!(result.unwrap().0.name, "codex");
+                relay.disconnect();
+            }
+            let _ = stop.send(());
+            server.await.unwrap();
+            refresh.await.unwrap();
+        }
+    });
+    restore_daemon_test_env(names, previous);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn a_wall_clock_wait_ends_once_its_time_has_passed() {
+    let past = std::time::SystemTime::now() - Duration::from_secs(25 * 3600);
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        super::wait_until_wall_clock(past, Duration::from_secs(15)),
+    )
+    .await
+    .expect("a deadline already behind the wall clock does not wait");
+    let soon = std::time::SystemTime::now() + Duration::from_millis(50);
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        super::wait_until_wall_clock(soon, Duration::from_millis(10)),
+    )
+    .await
+    .expect("a near deadline is reached by ticking the wall clock");
+}
+
 #[test]
 fn structured_registration_rejections_override_text_retry_heuristics() {
     for retryable in [false, true] {
@@ -2020,7 +2122,7 @@ fn claude_reborn_in_a_foreign_cwd_is_refused_before_spawn() {
     for dir in [&config_dir, &slot, &fresh, &transcripts] {
         std::fs::create_dir_all(dir).unwrap();
     }
-    let previous = ["XMATRIX_CONFIG_DIR", "CLAUDE_CONFIG_DIR"].map(|name| std::env::var(name).ok());
+    let previous = ["XMATRIX_CONFIG_DIR", "CLAUDE_CONFIG_DIR"].map(std::env::var_os);
     unsafe {
         std::env::set_var("XMATRIX_CONFIG_DIR", &config_dir);
         std::env::set_var("CLAUDE_CONFIG_DIR", &claude_dir);
@@ -2071,15 +2173,7 @@ fn claude_reborn_in_a_foreign_cwd_is_refused_before_spawn() {
         "{missing}"
     );
 
-    for (name, value) in ["XMATRIX_CONFIG_DIR", "CLAUDE_CONFIG_DIR"]
-        .into_iter()
-        .zip(previous)
-    {
-        match value {
-            Some(value) => unsafe { std::env::set_var(name, value) },
-            None => unsafe { std::env::remove_var(name) },
-        }
-    }
+    restore_daemon_test_env(["XMATRIX_CONFIG_DIR", "CLAUDE_CONFIG_DIR"], previous);
     let _ = std::fs::remove_dir_all(root);
 }
 
