@@ -2122,7 +2122,7 @@ fn claude_reborn_in_a_foreign_cwd_is_refused_before_spawn() {
     for dir in [&config_dir, &slot, &fresh, &transcripts] {
         std::fs::create_dir_all(dir).unwrap();
     }
-    let previous = ["XMATRIX_CONFIG_DIR", "CLAUDE_CONFIG_DIR"].map(|name| std::env::var(name).ok());
+    let previous = ["XMATRIX_CONFIG_DIR", "CLAUDE_CONFIG_DIR"].map(std::env::var_os);
     unsafe {
         std::env::set_var("XMATRIX_CONFIG_DIR", &config_dir);
         std::env::set_var("CLAUDE_CONFIG_DIR", &claude_dir);
