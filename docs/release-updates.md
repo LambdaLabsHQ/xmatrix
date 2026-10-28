@@ -1737,3 +1737,17 @@ selection fill. This restores the established mention geometry contract without
 changing keyboard selection, routing or profile permissions. No migration or
 native update is needed; recovery is a CI-validated beta Web release reverting
 the change.
+
+## Unreleased: Execution report lock failures retain their blocker
+
+HUB-AY lost a Run-lock response, then its one fresh-session replay hit a lock
+timeout. The event did not identify the holder. A slow execution-owner query
+now takes one bounded, independent read of the live PostgreSQL wait edge,
+before a lock timeout erases it. Failures retain waiter and blocker state,
+transaction age and fixed owner categories; SQL, parameters, backend ids and
+user identities stay out of the event and Sentry issue reader. Fast queries
+open no extra connection, and each isolate permits only one concurrent sample.
+Unavailable diagnostics preserve the original error. Existing replay and
+unknown-COMMIT boundaries are unchanged. This is missing diagnostic coverage,
+not a confirmed repair of the underlying contention. Hub only, no migration;
+recovery is a CI-validated beta Hub reverting the change.

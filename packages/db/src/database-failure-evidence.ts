@@ -1,3 +1,5 @@
+import { parsePostgresLockWait, type PostgresLockWait } from "./postgres-lock-wait.js";
+
 /** Metadata-only failures. Never retain SQL, parameters, caller IDs or driver messages. */
 export interface DatabaseFailureEvidence {
   operation: string;
@@ -7,6 +9,7 @@ export interface DatabaseFailureEvidence {
   queryName: string;
   code: string;
   durationMs: number;
+  lockWait?: PostgresLockWait;
   /** Cumulative session progress at this failure, before rollback or retry. */
   session?: Readonly<Record<"wallMs" | "queueMs" | "checkoutMs" | "beginMs" | "sqlMs" |
     "sqlMaxMs" | "commitMs" | "roundTrips" | "queries", number>>;
@@ -25,8 +28,8 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
   if (!Array.isArray(value) || value.length > LIMIT) return [];
   const result: DatabaseFailureEvidence[] = [];
   for (const item of value) {
-    if (!item || typeof item !== "object" || Object.keys(item).length !== FIELDS.length + ("session" in item ? 1 : 0) ||
-        Object.keys(item).some(key => key !== "session" && !FIELDS.includes(key)) ||
+    if (!item || typeof item !== "object" || Object.keys(item).length !== FIELDS.length + ("session" in item ? 1 : 0) + ("lockWait" in item ? 1 : 0) ||
+        Object.keys(item).some(key => key !== "session" && key !== "lockWait" && !FIELDS.includes(key)) ||
         typeof item.operation !== "string" || !/^[a-z][a-z0-9_.:-]{0,119}$/u.test(item.operation) ||
         typeof item.shardId !== "string" || !/^[a-z0-9][a-z0-9_.:-]{0,79}$/u.test(item.shardId) ||
         !["single_read", "transaction"].includes(item.statement) ||
@@ -36,9 +39,11 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
         !Number.isSafeInteger(item.durationMs) || item.durationMs < 0 || item.durationMs > 120_000) return [];
     const session = "session" in item ? parseSession(item.session) : undefined;
     if (session === null) return [];
+    const lockWait = "lockWait" in item ? parsePostgresLockWait(item.lockWait) : undefined;
+    if ("lockWait" in item && !lockWait) return [];
     result.push(Object.freeze({ operation: item.operation, shardId: item.shardId, statement: item.statement,
       phase: item.phase, queryName: item.queryName, code: item.code, durationMs: item.durationMs,
-      ...(session ? { session } : {}) }));
+      ...(session ? { session } : {}), ...(lockWait ? { lockWait } : {}) }));
   }
   return Object.freeze(result);
 }

@@ -53,6 +53,10 @@ from earlier checkout, BEGIN or SQL work without SQL, parameters or identities;
 recovery remains bounded to the existing attempt. See
 [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
 
+Slow execution-owner locks take one bounded live wait-edge sample per isolate.
+Failure evidence exposes only fixed waiter/blocker categories, states and ages;
+diagnostic failure cannot change the command's error or replay boundary.
+
 Independent Auth public-key, directory, profile, session, handle and OAuth
 application reads use `single_read`: a lost database response retries once on a
 fresh connection, while answered and exhausted failures propagate. JWT checks

@@ -61,7 +61,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
     } catch { /* Malformed optional diagnostics do not fail the issue read. */ }
   }
   const attempts = extra && typeof extra === "object" ? (extra as Record<string, unknown>).database_failure_attempts : undefined;
-  if (typeof attempts === "string" && attempts.length <= 4096) {
+  if (typeof attempts === "string" && attempts.length <= 8192) {
     try {
       for (const [index, failure] of parseDatabaseFailureEvidence(JSON.parse(attempts)).entries()) {
         lines.push(`Database failure ${index + 1}: ${failure.operation} · ${failure.shardId} · ${failure.statement} · ` +
@@ -70,6 +70,13 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
         if (session) lines.push(`Database session ${index + 1}: wall=${session.wallMs} ms · queue=${session.queueMs} ms · ` +
           `checkout=${session.checkoutMs} ms · begin=${session.beginMs} ms · sql=${session.sqlMs} ms · ` +
           `max_sql=${session.sqlMaxMs} ms · commit=${session.commitMs} ms · round_trips=${session.roundTrips} · queries=${session.queries}`);
+        const wait = failure.lockWait;
+        if (wait) {
+          const backend = (value: NonNullable<typeof wait.waiter>) =>
+            `${value.owner}/${value.state}/${value.wait}/age=${value.ageMs} ms`;
+          lines.push(`Database lock wait ${index + 1}: ${wait.status}` +
+            (wait.waiter ? ` · waiter=${backend(wait.waiter)} · blockers=${wait.blockers.map(backend).join(";") || "none"}` : ""));
+        }
       }
     } catch { /* Malformed optional diagnostics do not fail the issue read. */ }
   }
