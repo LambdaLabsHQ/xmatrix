@@ -768,10 +768,8 @@ pub enum HarnessAction {
     LoginCancel,
 }
 
-include!("harness_action_names.rs");
-
 impl HarnessAction {
-    harness_action_names!(
+    xmatrix_action_names::harness_action_names!(
         LoginStart => "login_start",
         LoginFinish => "login_finish",
         LoginCancel => "login_cancel",

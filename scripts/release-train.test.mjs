@@ -97,16 +97,14 @@ test("the JavaScript and TypeScript halves read every shipped file exactly once,
   }
 });
 
-test("the shared CLI action-name macro is included from inside each crate", () => {
-  const root = new URL("../packages/cli-rs/crates/", import.meta.url);
-  const args = readFileSync(new URL("args/src/harness_action_names.rs", root), "utf8");
-  const core = readFileSync(new URL("core/src/harness_action_names.rs", root), "utf8");
-  assert.equal(args, core);
-  assert.match(args, /macro_rules! harness_action_names/u);
-  for (const file of ["args/src/harness.rs", "core/src/machine_daemon_connection.rs"]) {
+test("the shared CLI action-name macro expands from its own crate", () => {
+  const root = new URL("../packages/cli-rs/", import.meta.url);
+  const macro = readFileSync(new URL("crates/action-names/src/lib.rs", root), "utf8");
+  assert.match(macro, /#\[macro_export\]\s*macro_rules! harness_action_names/u);
+  for (const file of ["crates/args/src/harness.rs", "crates/core/src/machine_daemon_connection.rs"]) {
     const source = readFileSync(new URL(file, root), "utf8");
-    assert.match(source, /include!\("harness_action_names\.rs"\);/u);
-    assert.doesNotMatch(source, /include!\("\.\./u);
+    assert.match(source, /xmatrix_action_names::harness_action_names!/u);
+    assert.doesNotMatch(source, /include!\(/u);
   }
   const request = readFileSync(new URL("../.github/workflows/production-release-request.yml", import.meta.url), "utf8");
   const codeql = request.slice(request.indexOf("\n  codeql:\n"), request.indexOf("\n  gates:\n"));
