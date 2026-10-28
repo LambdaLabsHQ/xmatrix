@@ -331,7 +331,8 @@ for (const cancelled of [false, true]) {
     });
     const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("cleanup", "machine_stop_result",
       { runId: "run-1", executionKey: "execution-1", requestId: "stop-1", ok: true }));
-    assert.equal(value.stopResultNoticeContext.startupFailed, cancelled ? undefined : true);
+    if (cancelled) assert.equal(value.stopResultNoticeContext, undefined);
+    else assert.equal(value.stopResultNoticeContext.startupFailed, true);
     const update = db.calls.find(q => q.name === "machine_lifecycle_run_update_v1");
     assert.equal(update.values[0], "failed");
     if (cancelled) assert.equal(JSON.parse(update.values[1]).executionCancellation.processCleanup.status, "confirmed");
@@ -353,7 +354,7 @@ test("a confirmed channel stop leaves the receipt on the command instead of a Ch
   assert.equal(db.calls.find(query => query.name === "machine_lifecycle_run_update_v1").values[0], "stopped");
 });
 
-test("a confirmed stop with no channel command still posts its notice", async () => {
+test("a confirmed stop with no channel command updates state without a redundant notice", async () => {
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" };
   const db = lifecycleDatabase({ status: "running", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
     machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
@@ -363,8 +364,8 @@ test("a confirmed stop with no channel command still posts its notice", async ()
   });
   const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("orphan-stop", "machine_stop_result",
     { runId: "run-1", executionKey: "execution-1", requestId: "stop-2", ok: true }));
-  assert.equal(value.stopResultNoticeContext.ok, true);
-  assert.equal(value.stopResultNoticeContext.startupFailed, undefined);
+  assert.equal(value.stopResultNoticeContext, undefined);
+  assert.equal(db.calls.find(query => query.name === "machine_lifecycle_run_update_v1").values[0], "stopped");
 });
 
 test("a stop from a withdrawn registration carries why and who withdrew it", async () => {

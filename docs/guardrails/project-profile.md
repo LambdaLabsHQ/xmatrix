@@ -24,6 +24,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Routine successful stops appear in Instance and invocation state without a
+separate Channel notice; the Web also hides historical typed confirmations.
+Failures and external stop causes retain their explanations. See
+[invocation status](../design/mention-invocation/README.md).
+
 Page links open with an ordinary click or tap while the document is editable,
 including bare URLs and Markdown labels. Drag selection and address editing
 remain available. See [live documents](../design/pages-live-document.md#42-surface).

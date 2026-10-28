@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Successful stops no longer repeat their status as a message
+
+Stops from UI controls lacked a source command, so their successful Machine
+result still posted a separate system fact after inline status replaced that
+feedback. Routine success now updates state alone; the Web hides historical
+typed success notices too. Stop failures, failed-startup cleanup and external
+causes such as access withdrawal remain explained. This ships in the Hub and
+beta Web, with no data migration or native update. Stored history is preserved;
+recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Spaces can store more than 128 secrets
 
 A Space with 128 secrets refused the next credential even when it was needed
