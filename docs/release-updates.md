@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Page link editing checks start at the selected text
+
+The Page link browser case now verifies that closing its discussion returns
+focus to the editor, then moves within the selected guide to expose its link
+address. Jumping to the document start and counting one visual Down key could
+leave the caret in a decorated title, so the case waited for a control outside
+its actual caret paragraph. Drag selection, address editing, continued writing
+and unsafe-link assertions stay intact, with unchanged timeouts and retries.
+This is browser setup only; no product, API, schema or native behavior changes.
+
 ## Unreleased: Message Channel lock failures retain their blocker
 
 HUB-AZ timed out while an Agent append waited for a Channel lifecycle lock.

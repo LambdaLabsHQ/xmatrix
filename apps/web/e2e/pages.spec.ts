@@ -2256,11 +2256,10 @@ test("link text can still be selected and its address edited, and unsafe links n
   expect(opened).toHaveLength(0);
   await browser.keyboard.press("Escape");
 
-  // Enter the link with the keyboard so its Markdown destination is shown without following it.
-  await editor.getByText("Keep editing here.").click();
-  await browser.keyboard.press("ControlOrMeta+Home");
-  await browser.keyboard.press("ArrowDown");
-  await browser.keyboard.press("ArrowRight");
+  // Closing the comment restores the caret to the selected guide. Move within
+  // that text, rather than counting visual rows from a decorated heading.
+  await expect(editor.locator(".page-document")).toBeFocused();
+  await browser.keyboard.press("ArrowLeft");
   await editor.locator('[data-edit-link="https://example.com/guide"]').click();
   await expect(browser.getByRole("textbox", { name: "Link address" })).toHaveValue("https://example.com/guide");
   await browser.keyboard.press("Escape");
