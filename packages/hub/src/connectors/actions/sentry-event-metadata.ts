@@ -70,11 +70,11 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
         if (session) lines.push(`Database session ${index + 1}: wall=${session.wallMs} ms · queue=${session.queueMs} ms · ` +
           `checkout=${session.checkoutMs} ms · begin=${session.beginMs} ms · sql=${session.sqlMs} ms · ` +
           `max_sql=${session.sqlMaxMs} ms · commit=${session.commitMs} ms · round_trips=${session.roundTrips} · queries=${session.queries}`);
-        const wait = failure.lockWait;
-        if (wait) {
+        for (const [label, wait] of [["lock wait", failure.lockWait], ["read wait", failure.queryWait]] as const) {
+          if (!wait) continue;
           const backend = (value: NonNullable<typeof wait.waiter>) =>
             `${value.owner}/${value.state}/${value.wait}/age=${value.ageMs} ms`;
-          lines.push(`Database lock wait ${index + 1}: ${wait.status}` +
+          lines.push(`Database ${label} ${index + 1}: ${wait.status}` +
             (wait.waiter ? ` · waiter=${backend(wait.waiter)} · blockers=${wait.blockers.map(backend).join(";") || "none"}` : ""));
         }
       }

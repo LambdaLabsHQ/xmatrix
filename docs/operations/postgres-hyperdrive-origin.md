@@ -247,6 +247,19 @@ idle in transaction, but does not alone prove it was this request's first
 attempt. An original timeout or rejection remains authoritative; existing
 pre-COMMIT recovery and unknown-commit reconciliation are unchanged.
 
+Placement directory single reads use the same diagnostic capacity after 500 ms
+(HUB-B1). Because transaction pooling provides no stable backend pid before a
+single read, each attempt prefixes its SQL with a fresh random diagnostic marker.
+The independent sample matches that exact prefix in active `pg_stat_activity`
+rows and returns the same bounded state, wait class, transaction age and blockers
+as `queryWait`; the Sentry reader labels it `Database read wait`. SQL, the marker,
+parameters and backend identities never enter failure evidence. Each retry has
+its own marker. `sampled` can distinguish an origin lock wait from another wait;
+`missing` means no active match at the sample instant, not proof the SQL never
+arrived or that Hyperdrive caused the loss. `busy` and `unavailable` likewise
+cannot establish absence of origin work. Fast reads open no extra connection,
+and diagnostic failure preserves the original error and single retry bound.
+
 First-reply observation runs after the Agent message commits. It checks current
 Channel access without a lifecycle row lock (`runtime_check`): it starts no work
 and updates only the connected Launch whose `first_reply_at` is still null.

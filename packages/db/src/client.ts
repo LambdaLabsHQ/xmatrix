@@ -26,7 +26,7 @@ import { dingtalkPreparation, dingtalkDecision, dingtalkPreparedPlan, registerDi
   type DingTalkPreparedPlan, type DingTalkPreparedDecision } from "./dingtalk-prepared-port.js";
 
 import { recordDatabaseFailure, linkDatabaseFailures, type DatabaseFailureEvidence } from "./database-failure-evidence.js";
-import { watchPostgresLockWait } from "./postgres-lock-wait.js";
+import { watchPostgresLockWait, watchPostgresReadWait } from "./postgres-lock-wait.js";
 
 const MAX_QUERY_NAME_BYTES = 160;
 const MAX_QUERY_BYTES = 64 * 1024;
@@ -334,9 +334,11 @@ class PgDatabaseTransaction implements DatabaseTransaction {
     const query = validatedQuery(input);
     const startedAt = performance.now();
     const finishWait = watchPostgresLockWait(query.name, this.stats.backendPid, this.options);
+    const readWait = this.context.statement === "single_read"
+      ? watchPostgresReadWait(query.name, query.text, this.options) : undefined;
     try {
       const result = await this.client.query<Row>({
-        text: query.text,
+        text: readWait?.text ?? query.text,
         ...(query.values ? { values: [...query.values] } : {}),
       });
       const durationMs = performance.now() - startedAt;
@@ -367,9 +369,11 @@ class PgDatabaseTransaction implements DatabaseTransaction {
         this.stats.fail(errorCode(error), this.context.operation, query.name);
         const session = this.stats.failureSession();
         const lockWait = await finishWait?.();
+        const queryWait = await readWait?.finish();
         recordDatabaseFailure(error, { operation: this.context.operation, shardId: this.options.shardId,
           statement: this.context.statement ?? "transaction", phase: "sql", queryName: query.name,
-          code: errorCode(error), durationMs, session, ...(lockWait ? { lockWait } : {}) });
+          code: errorCode(error), durationMs, session, ...(lockWait ? { lockWait } : {}),
+          ...(queryWait ? { queryWait } : {}) });
         observe(this.options.observer, this.observation(
           query.name,
           durationMs,
@@ -381,6 +385,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
       throw error;
     } finally {
       await finishWait?.();
+      await readWait?.finish();
     }
   }
 

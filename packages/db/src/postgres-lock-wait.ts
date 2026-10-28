@@ -38,7 +38,7 @@ interface DiagnosticClient {
   query(input: { text: string; values: unknown[] }): Promise<QueryResult>;
   end(): Promise<void>;
 }
-// At most one extra connection per isolate, only while a selected lock query is slow.
+// Lock and placement-read diagnostics share at most one extra connection per isolate.
 let sampling = false;
 const projection = (alias: string) => `json_build_object(
   'state',CASE WHEN ${alias}.state IN ('active','idle in transaction','idle in transaction (aborted)','idle')
@@ -52,7 +52,7 @@ const projection = (alias: string) => `json_build_object(
   'ageMs',LEAST(120000,GREATEST(0,COALESCE(EXTRACT(epoch FROM (clock_timestamp()-${alias}.xact_start))*1000,0)))::int)`;
 
 /** Sample while the row lock is still waiting: after 55P03 the wait edge has already disappeared. */
-async function sample(backendPid: number, config: ClientConfig,
+async function sample(selector: number | string, config: ClientConfig,
   factory: (config: ClientConfig) => DiagnosticClient): Promise<PostgresLockWait> {
   if (sampling) return { status: "busy", blockers: [] };
   sampling = true;
@@ -69,7 +69,8 @@ async function sample(backendPid: number, config: ClientConfig,
       FROM pg_stat_activity waiter
       LEFT JOIN LATERAL (SELECT unnest(pg_blocking_pids(waiter.pid)) AS pid LIMIT 4) blocked ON true
       LEFT JOIN pg_stat_activity blocker ON blocker.pid=blocked.pid
-      WHERE waiter.pid=$1 AND waiter.datname=current_database() LIMIT 4`, values: [backendPid] });
+      WHERE ${typeof selector === "number" ? "waiter.pid=$1" : "starts_with(waiter.query,$1) AND waiter.pid<>pg_backend_pid() AND waiter.state='active'"}
+        AND waiter.datname=current_database() LIMIT 4`, values: [selector] });
     return parsePostgresLockWait(result.rows.length ? { status: "sampled", waiter: result.rows[0]!.waiter,
       blockers: result.rows.flatMap(row => row.blocker ? [row.blocker] : []) }
       : { status: "missing", blockers: [] }) ?? { status: "unavailable", blockers: [] };
@@ -87,9 +88,25 @@ export function watchPostgresLockWait(queryName: string, backendPid: number | un
 ): (() => Promise<PostgresLockWait | undefined>) | undefined {
   if (!["runtime_execution_report_owner_v4", "channel_lifecycle_lock_runtime_new_work_v1"].includes(queryName) ||
       !backendPid) return;
+  return watch(backendPid, Math.min(500, Math.max(1, Math.floor(options.lockTimeoutMs / 2))), options);
+}
+
+/** A single read has no stable backend PID through transaction pooling. Match only
+ * this attempt's ephemeral SQL prefix; never retain that prefix in the evidence. */
+export function watchPostgresReadWait(queryName: string, text: string,
+  options: { connectionString: string; clientFactory: (config: ClientConfig) => DiagnosticClient },
+): { text: string; finish: () => Promise<PostgresLockWait | undefined> } | undefined {
+  if (queryName !== "space_placement_resolve_v1") return;
+  const prefix = `/* xmatrix-read-${crypto.randomUUID()} */`;
+  return { text: `${prefix} ${text}`, finish: watch(prefix, 500, options) };
+}
+
+function watch(selector: number | string, delayMs: number,
+  options: { connectionString: string; clientFactory: (config: ClientConfig) => DiagnosticClient },
+): () => Promise<PostgresLockWait | undefined> {
   let pending: Promise<PostgresLockWait> | undefined;
   const timer = setTimeout(() => {
-    pending = sample(backendPid, { connectionString: options.connectionString }, options.clientFactory);
-  }, Math.min(500, Math.max(1, Math.floor(options.lockTimeoutMs / 2))));
+    pending = sample(selector, { connectionString: options.connectionString }, options.clientFactory);
+  }, delayMs);
   return async () => { clearTimeout(timer); return pending; };
 }
