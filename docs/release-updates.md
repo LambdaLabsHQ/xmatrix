@@ -1,13 +1,13 @@
 # Release Updates
 
-## Unreleased: Sending does not wait for summon previews
+## Unreleased: Page links open with a click or tap
 
-Pressing Enter or Send with an Agent mention previously waited up to six
-seconds for the draft intent preview before the message appeared. Sending
-now takes completed readings for the exact current draft immediately;
-unfinished previews use the existing post-send intent check. Changed drafts
-cannot carry an older reading. This ships in the beta Web, with no API or
-data migration. Recovery is a CI-validated beta Web reverting the change.
+Bare URLs and Markdown links in an editable page now open directly in a new
+tab. Before, opening them required Ctrl/⌘, leaving phone readers without that
+gesture. Dragging across link text still selects it, and its visible Markdown
+destination still opens the address editor. This ships in the beta Web; no
+schema or native change is needed. Recovery is a CI-validated beta Web release
+reverting the change.
 
 ## Unreleased: Explicit activation keeps mention details open
 
@@ -18,6 +18,15 @@ leaving and ordinary hover-only dismissal retain their existing behavior. A
 controlled-clock browser regression reproduces the old disappearance without
 changing position, timeout or retry tolerances. No API, data or native update
 is needed; recovery uses a CI-validated beta Web reverting the change.
+
+## Unreleased: Sending does not wait for summon previews
+
+Pressing Enter or Send with an Agent mention previously waited up to six
+seconds for the draft intent preview before the message appeared. Sending
+now takes completed readings for the exact current draft immediately;
+unfinished previews use the existing post-send intent check. Changed drafts
+cannot carry an older reading. This ships in the beta Web, with no API or
+data migration. Recovery is a CI-validated beta Web reverting the change.
 
 ## Unreleased: Page edits in a Channel fold to a summary with a preview
 
