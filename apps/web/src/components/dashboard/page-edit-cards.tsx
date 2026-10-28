@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { FileText } from "lucide-react";
-import { WEB_PROXY_ROUTES, HUB_ROUTES, pageEditGlimpses, type PageEditGlimpse, type PageMessageEdit } from "@xmatrix/protocol";
+import { ArrowUpRight, ChevronDown, FileText } from "lucide-react";
+import { WEB_PROXY_ROUTES, HUB_ROUTES, pageEditGlimpses, type PageEditGlimpse, type PageEditSegment, type PageMessageEdit } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixHubRead } from "@/lib/query/hub-read";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -15,8 +15,8 @@ import { heldPageMessageEdits } from "./page-message-edits-hold";
 export interface PageEditOpening { since: number; from: { channelId: string; messageId: string } }
 
 const NO_EDITS = new Map<string, readonly PageMessageEdit[]>();
-/** How many changed lines a card shows before it says how many more there are. */
-const SHOWN = 3;
+/** How many changed lines a folded card previews, each on one line. */
+const PREVIEW = 2;
 
 /**
  * What the Agent messages on screen changed on pages, by message. Each is read once for the messages shown: a
@@ -56,10 +56,29 @@ function editRuns(edit: PageMessageEdit): Array<{ from: number; to: number }> {
   return runs;
 }
 
+/** The words before a line's first change that a one-line preview keeps, so the change itself stays in view. */
+const LEAD = 28;
+
+/** A changed line cut to its change: a long unchanged start keeps only the words just before what changed. */
+function clippedSegments(glimpse: PageEditGlimpse): PageEditSegment[] {
+  const [first, ...rest] = glimpse.segments;
+  if (!first || first.change || first.text.length <= LEAD || !rest.length) return glimpse.segments;
+  const tail = first.text.slice(-LEAD);
+  const word = tail.search(/\s/u);
+  return [{ text: `…${word > 0 ? tail.slice(word) : tail}` }, ...rest];
+}
+
+function Segments({ segments }: { segments: readonly PageEditSegment[] }) {
+  return segments.map((segment, at) => segment.change === "added" ? <ins key={at}>{segment.text}</ins>
+    : segment.change === "removed" ? <del key={at}>{segment.text}</del> : <span key={at}>{segment.text}</span>);
+}
+
 /**
- * The pages an Agent's message changed, drawn with it as a tool call's result is: one card per page, its name
- * first and largest, then each changed line where it stands, new words underlined and words taken out struck
- * through, as the page itself marks what changed since it was read. Opening it shows the page at that change.
+ * The pages an Agent's message changed, drawn with it as a tool call's result is: one folded card per page. Folded,
+ * it names the page and the sections changed, counts the lines added and taken out, and previews two changes each
+ * on one line, cut to where the words changed, leading with what the page says now. Unfolded, it lists every change
+ * by section, new words underlined and words taken out struck through, as the page itself marks what changed since
+ * it was read. Open shows the page at that change.
  */
 export function PageEditCards({ edits, channelId, messageId }: {
   edits: readonly PageMessageEdit[]; channelId: string; messageId: string;
@@ -80,6 +99,7 @@ function PageEditCard({ edit, spaceId, token, onOpen }: {
   edit: PageMessageEdit; spaceId: string; token: string; onOpen: (blockId: string | null, since: number) => void;
 }) {
   const { user } = useAuth();
+  const [open, setOpen] = useState(false);
   const runs = useMemo(() => editRuns(edit), [edit]);
   const revisions = useMemo(() => [...new Set(runs.flatMap(({ from, to }) => [from, to]))], [runs]);
   const read = useQueries({
@@ -103,40 +123,51 @@ function PageEditCard({ edit, spaceId, token, onOpen }: {
   // A page the reader cannot open, or an edit that changed only how the text is written, says nothing. Until
   // its revisions are read the card is not drawn either, so it never shows and then takes itself back.
   if (failed || !glimpses?.length) return null;
-  const shown = glimpses;
-  const sections = [...new Set(shown.map((glimpse) => glimpse.section).filter(Boolean))];
-  const oneSection = sections.length === 1 && shown.every((glimpse) => glimpse.section === sections[0]);
+  const sections = [...new Set(glimpses.map((glimpse) => glimpse.section))];
+  const named = sections.filter(Boolean);
+  // A rewritten line counts as one line taken out and one added, as a code diff counts it.
+  const added = glimpses.filter((glimpse) => glimpse.kind !== "removed").length;
+  const removed = glimpses.filter((glimpse) => glimpse.kind !== "added").length;
+  // The preview leads with what the page says now; lines only taken out come after, in page order.
+  const preview = [...glimpses.filter((glimpse) => glimpse.kind !== "removed"),
+    ...glimpses.filter((glimpse) => glimpse.kind === "removed")].slice(0, PREVIEW);
   const since = runs[0]!.from;
-  const open = () => onOpen(shown[0]?.blockId || null, since);
+  const body = `page-edit-${edit.messageId}-${edit.pageId}`;
   return (
-    <div role="link" tabIndex={0} className="app-page-edit" data-testid="page-edit-card"
-      aria-label={`${edit.title}: open the page at this change`} onClick={open}
-      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } }}>
-      <p className="app-page-edit-title">
-        <FileText aria-hidden="true" />
-        <span>{edit.title}{oneSection && <> › {sections[0]}</>}</span>
-      </p>
-      <p className="app-page-edit-count">
-        <strong>{shown.length === 1 ? "1 change" : `${shown.length} changes`}</strong>
-        {!oneSection && sections.length > 0 && <> · {sections.slice(0, 4).join(", ")}</>}
-      </p>
-      {shown.slice(0, SHOWN).map((glimpse, index) => (
-        <div key={index} className="app-page-edit-line" data-kind={glimpse.kind}>
-          {(!oneSection || glimpse.kind !== "changed") && (
-            <span className="app-page-edit-where">
-              {[!oneSection && glimpse.section, glimpse.kind === "added" ? "New" : glimpse.kind === "removed" ? "Removed" : null]
-                .filter(Boolean).join(" · ")}
-            </span>
-          )}
-          {glimpse.segments.map((segment, at) => segment.change === "added" ? <ins key={at}>{segment.text}</ins>
-            : segment.change === "removed" ? <del key={at}>{segment.text}</del> : <span key={at}>{segment.text}</span>)}
-        </div>
-      ))}
-      {shown.length > SHOWN && (
-        <p className="app-page-edit-more">
-          <span>{shown.length - SHOWN} more</span><span className="app-page-edit-open">Open in page →</span>
+    <div className="app-page-edit" data-testid="page-edit-card" data-open={open || undefined}>
+      <button type="button" className="app-page-edit-head" aria-expanded={open} aria-controls={body}
+        onClick={() => setOpen((was) => !was)}>
+        <FileText aria-hidden="true" className="app-page-edit-icon" />
+        <span className="app-page-edit-title">{edit.title}</span>
+        {named.length > 0 && <span className="app-page-edit-sections">{named.join(" · ")}</span>}
+        <span className="app-page-edit-stat" aria-label={`${added} lines added, ${removed} taken out`}>
+          {added > 0 && <span data-kind="added">+{added}</span>}
+          {removed > 0 && <span data-kind="removed">−{removed}</span>}
+        </span>
+        <ChevronDown aria-hidden="true" className="app-page-edit-chevron" />
+      </button>
+      <div id={body} className="app-page-edit-body">
+        {open ? sections.map((section) => (
+          <section key={section} className="app-page-edit-section">
+            {named.length > 1 && section && <p className="app-page-edit-where">{section}</p>}
+            {glimpses.filter((glimpse) => glimpse.section === section).map((glimpse, index) => (
+              <p key={index} className="app-page-edit-line" data-kind={glimpse.kind}><Segments segments={glimpse.segments} /></p>
+            ))}
+          </section>
+        )) : preview.map((glimpse, index) => (
+          <p key={index} className="app-page-edit-line" data-kind={glimpse.kind} data-clipped="">
+            <Segments segments={clippedSegments(glimpse)} />
+          </p>
+        ))}
+        <p className="app-page-edit-foot">
+          {!open && glimpses.length > PREVIEW
+            ? <button type="button" className="app-page-edit-more" onClick={() => setOpen(true)}>{glimpses.length - PREVIEW} more</button>
+            : <span />}
+          <button type="button" className="app-page-edit-open" onClick={() => onOpen(glimpses[0]?.blockId || null, since)}>
+            Open page <ArrowUpRight aria-hidden="true" />
+          </button>
         </p>
-      )}
+      </div>
     </div>
   );
 }
