@@ -874,7 +874,7 @@ manual own-bot credentials are not evidence of company registration.
 
 In Apps, a Human Space admin selects Connect with Discord and explicitly chooses
 an isolated test guild in native consent. Return to the same Space, reload and run
-Check. Enable the `post` action policy from a Human admin in the E2E Channel, post
+Check. Set the app permission to Read and write as a Human Space admin, post
 one unique marker to a test text channel and verify it in the native Discord UI.
 Confirm a different guild/DM is rejected, then revoke the authorization or remove
 the bot and verify a later post cannot dispatch. Reconnect through native consent;
@@ -940,7 +940,7 @@ privacy mode. Group removal or migration requires a new explicit confirmation;
 automatic rejoining cannot restore access. A Space supports twenty groups and
 can unlink each one independently.
 
-Agent sends additionally require the Channel's current action policy. Verify a
+Agent sends additionally follow the app permission. Verify a
 single authorized test message and its real provider receipt, authenticated
 inbound message, and bot-removal denial before recording native E2E completion.
 Manual credentials replace all company group grants for that Space. Company

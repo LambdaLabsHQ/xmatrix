@@ -140,7 +140,7 @@ export class PostgresAppActionRequestRepository {
       FROM data.app_connector_connections WHERE connection_id=$1 AND space_id=$2
         AND permission_mode='write' LIMIT 1 FOR SHARE`,
     values: [row.connection_id, row.space_id], maxRows: 1 });
-    if (!policies[0]) throw new AppControlError("action_request_forbidden", 403, "This upload requires an explicit allow policy");
+    if (!policies[0]) throw new AppControlError("action_request_forbidden", 403, "This upload requires Read and write permission");
   }
 
   /** Re-delivery of a staged call never becomes an immediate send after a policy change. */

@@ -1173,8 +1173,8 @@ or generates a webhook secret in the Apps view.
       Run accepts only explicit success with an exact action ID, execution ID
       and persisted audit confirmation. Untrusted output is fenced and limited
       to 800 characters. Invalid or uncertain receipts never imply safe retry.
-    - Policy is per channel for all OpenConnector actions together; a Space
-      admin's `@openconnector:policy:run deny` turns them off there.
+    - All OpenConnector writes follow the connection's app permission. A Space
+      admin selects Read only to block them in every conversation.
 
 ## 5. Delivery plan (one PR each)
 

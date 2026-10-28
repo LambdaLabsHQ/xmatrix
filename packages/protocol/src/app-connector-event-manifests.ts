@@ -267,7 +267,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "googlebusinessprofile", name: "Google Business Profile", kind: "observability",
-      description: "Read Business Profile accounts, locations, search and Maps performance and reviews, and reply to reviews under the channel's action policy.",
+      description: "Read Business Profile accounts, locations, search and Maps performance and reviews, and reply to reviews under the app permission.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/business.manage"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
@@ -939,7 +939,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     id: "openconnector",
     name: "OpenConnector",
     kind: "gateway",
-    description: "Discover and run actions available on your own OpenConnector runtime, under this channel's action policy and the runtime token's grants. Provider credentials stay in OpenConnector; xMatrix keeps only its runtime token. Catalog presence does not prove a provider is configured or usable.",
+    description: "Discover and run actions available on your own OpenConnector runtime, under the app permission and the runtime token's grants. Provider credentials stay in OpenConnector; xMatrix keeps only its runtime token. Catalog presence does not prove a provider is configured or usable.",
     credentials: [
       { id: "runtimeUrl", label: "Runtime URL", required: true,
         description: "Your OpenConnector runtime's public https URL, self-hosted or OOMOL-hosted." },

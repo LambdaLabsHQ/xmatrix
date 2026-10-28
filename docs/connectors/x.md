@@ -106,7 +106,7 @@ when those results should not be shared with company Channel members.
 | `timeline` | `<account ID or @handle>` | Reads up to ten of the selected account's own recent posts |
 | `upload_video` | `<account ID or @handle> <message ID>/<attachment ID>` | Uploads one current-Channel MP4 attachment under its own write approval |
 | `media_status` | `<account ID or @handle> <media receipt>` | Reads processing status once for the scoped upload receipt |
-| `post` | `<account ID or @handle> {"text":"…","mediaReceipt":"…"}` | Publishes the exact text with an optional ready video under Channel policy |
+| `post` | `<account ID or @handle> {"text":"…","mediaReceipt":"…"}` | Publishes the exact text with an optional ready video under the app permission |
 | `quote` | `<account ID or @handle>/<post ID> <text>` | Quotes the selected post with exact text; requires X Enterprise API access |
 
 For example, after `@x:accounts:*` returns the intended stable account ID:
@@ -127,7 +127,7 @@ message in the calling Channel, with a filename of at most 255 UTF-8 bytes.
 It does not accept a remote URL or a caller-supplied X media ID. The upload's
 approval freezes the stable account and authorization generation along with
 the source message, attachment ID, name, size, content hash and version.
-Source access, immutable metadata and current Channel policy are checked again
+Source access, immutable metadata and current app permission are checked again
 while streaming the upload. Initialize, append and finalize use X's v2 media
 API with at most 64 one-MiB chunks and no automatic replay of an uncertain
 write. The transfer has a two-minute deadline, with each provider request
