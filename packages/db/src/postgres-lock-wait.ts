@@ -33,6 +33,7 @@ export function parsePostgresLockWait(value: unknown): PostgresLockWait | undefi
 }
 
 interface DiagnosticClient {
+  on?(event: "error", listener: () => void): unknown;
   connect(): Promise<unknown>;
   query(input: { text: string; values: unknown[] }): Promise<QueryResult>;
   end(): Promise<void>;
@@ -59,6 +60,9 @@ async function sample(backendPid: number, config: ClientConfig,
   try {
     client = factory({ ...config, application_name: "xmatrix-lock-diagnostic",
       connectionTimeoutMillis: 250, query_timeout: 250, statement_timeout: 250 });
+    // A direct pg Client also emits connection errors; diagnostic transport
+    // failures must not become an uncaught event on the command's request.
+    client.on?.("error", () => {});
     await client.connect();
     const result = await client.query({ text: `SELECT ${projection("waiter")} AS waiter,
         CASE WHEN blocker.pid IS NOT NULL THEN ${projection("blocker")} END AS blocker

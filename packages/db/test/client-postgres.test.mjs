@@ -62,7 +62,7 @@ integration("execution-owner lock failures retain the live blocker without ident
     await holder.query(`INSERT INTO ${table} VALUES (1,'private-report')`);
     await holder.query("BEGIN; SET LOCAL application_name='xmatrix-execution-report'");
     await holder.query(`SELECT * FROM ${table} FOR UPDATE`);
-    for (const unavailable of [false, true]) {
+    for (const mode of ["available", "unavailable", "disconnect"]) {
       let diagnosticConnections = 0;
       const database = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic",
         lockTimeoutMs: 1500, clientFactory: config => {
@@ -70,7 +70,12 @@ integration("execution-owner lock failures retain the live blocker without ident
           // connection is unavailable in the negative case.
           if (config.application_name === "xmatrix-lock-diagnostic") {
             diagnosticConnections++;
-            if (unavailable) throw new Error("private-diagnostic-failure");
+            if (mode === "unavailable") throw new Error("private-diagnostic-failure");
+            if (mode === "disconnect") {
+              const client = new Client(config);
+              return { on: client.on.bind(client), connect: client.connect.bind(client),
+                query: () => client.query("SELECT pg_terminate_backend(pg_backend_pid())"), end: client.end.bind(client) };
+            }
           }
           return new Client(config);
         } });
@@ -79,8 +84,8 @@ integration("execution-owner lock failures retain the live blocker without ident
         text: `SELECT private_value FROM ${table} WHERE id=$1 FOR UPDATE`, values: [1], maxRows: 1 })), error => {
         assert.equal(error.code, "55P03", "the original failure remains authoritative");
         const [evidence] = databaseFailureEvidence(error);
-        assert.equal(evidence.lockWait?.status, unavailable ? "unavailable" : "sampled");
-        if (!unavailable) {
+        assert.equal(evidence.lockWait?.status, mode === "available" ? "sampled" : "unavailable");
+        if (mode === "available") {
           assert.equal(evidence.lockWait.waiter.owner, "execution-report");
           assert.equal(evidence.lockWait.waiter.wait, "Lock");
           assert.equal(evidence.lockWait.blockers.length, 1);
