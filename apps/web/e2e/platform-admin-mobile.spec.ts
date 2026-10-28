@@ -39,7 +39,7 @@ test("a phone enters Platform from More, opens a section, and returns to its sec
   await expect(list).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("mobile-sections.png") });
   await list.getByRole("button", { name: "Overview" }).click();
-  await expect(page.getByRole("img", { name: /Daily message volume/ })).toBeVisible();
+  await expect(page.getByRole("img", { name: /People active each day/ })).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-overview.png") });
   await page.getByRole("button", { name: "Platform admin", exact: true }).click();
