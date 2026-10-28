@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Page edits in a Channel fold to a summary with a preview
+
+An Agent message that changed a page drew its first three changed lines in
+full under the message, and clicking anywhere on it opened the page. The card
+now folds by default: one line names the page, the sections changed and the
+lines added and taken out (+3 −3), and two changes preview on one line each,
+cut to where the words changed and leading with what the page says now.
+Unfolding lists every change by section; Open page is its own button. This
+ships in the beta Web; no API or data migration is needed. Recovery is a
+CI-validated beta Web reverting the change.
+
 ## Unreleased: Automatic Gmail reads use the Hub's Composio key
 
 Live receipts for automatic Gmail reads reported a failure. A stored Composio

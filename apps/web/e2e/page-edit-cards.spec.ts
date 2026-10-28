@@ -51,22 +51,34 @@ for (const first of ["bookmark", "edit card"] as const) test(`page edits and boo
     await expect(bookmark).toContainText("Leave on 3 November from Shanghai on GA 859.");
     await releaseFixture(page, "page-edits");
   } else {
-    await expect(card).toContainText("3 changes");
+    await expect(card).toContainText("+2");
     await releaseFixture(page, "awareness");
   }
   await expect(bookmark).toContainText("claude");
   await expect(bookmark).toContainText("Leave on 3 November from Shanghai on GA 859.");
   await expect(card).toContainText("Bali plan");
-  await expect(card).toContainText("3 changes");
-  // Each changed line where it stands: new words underlined, words taken out struck through.
+  // Folded: the sections changed, lines added and taken out, and two changes on a line each, what the page says
+  // now before what was only taken out.
+  const head = card.locator(".app-page-edit-head");
+  await expect(head).toHaveAttribute("aria-expanded", "false");
+  await expect(head).toContainText("Itinerary · Budget · Stay");
+  await expect(head).toContainText("+2");
+  await expect(head).toContainText("−2");
+  await expect(card.locator(".app-page-edit-line")).toHaveCount(2);
   await expect(card.locator("ins").first()).toHaveText(" from Shanghai on GA 859");
-  await expect(card.locator("del")).toHaveText("To be decided.");
   await expect(card.locator(".app-page-edit-line[data-kind=added]")).toContainText("Two weeks in Ubud, then Canggu.");
+  await expect(card.locator("del")).toHaveCount(0);
+  await expect(card.locator(".app-page-edit-more")).toHaveText("1 more");
+  // Unfolded: every change by section, in page order.
+  await head.click();
+  await expect(head).toHaveAttribute("aria-expanded", "true");
+  await expect(card.locator(".app-page-edit-line")).toHaveCount(3);
+  await expect(card.locator(".app-page-edit-line[data-kind=removed] del")).toHaveText("To be decided.");
   // A person's message changed nothing, so only the Agent's reply carries a card.
   await expect(card).toHaveCount(1);
   await expect(page.locator(".app-message-row", { hasText: "Wrote the outline" }).getByTestId("page-edit-card")).toBeVisible();
 
-  await card.click();
+  await card.getByRole("button", { name: "Open page" }).click();
   const back = page.getByTestId("page-back-to-message");
   await expect(back).toBeVisible();
   await back.click();
