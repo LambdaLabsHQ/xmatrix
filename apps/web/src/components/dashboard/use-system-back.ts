@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { BROWSER_BACK_ENTRY_STATE_KEY } from "./browser-back-entry-script";
@@ -28,6 +29,25 @@ declare global {
  */
 const systemBackEntries: SystemBackEntry[] = [];
 let unsubscribeSystemBack: (() => void) | null = null;
+let nativeBackAnimation = false;
+
+/** UIKit already moves the outgoing snapshot during an iOS edge swipe. */
+export function nativeBackOwnsAnimation(): boolean {
+  return nativeBackAnimation;
+}
+
+function dispatchIOSBack(): boolean {
+  nativeBackAnimation = true;
+  try {
+    let handled = false;
+    // The native cover starts settling as soon as this call answers. Commit
+    // the parent (or dismiss the top layer) underneath it before then.
+    flushSync(() => { handled = dispatchSystemBack(); });
+    return handled;
+  } finally {
+    nativeBackAnimation = false;
+  }
+}
 
 function dispatchSystemBack(): boolean {
   // A layer mounted with the shell registers before it (children's effects run
@@ -47,10 +67,11 @@ function ensureSystemBackDispatcher(): void {
   const unsubscribeAndroid = bridge?.client === "android" && bridge.onBackRequested
     ? bridge.onBackRequested(dispatchSystemBack)
     : null;
-  window.__xmatrixNativeBack = dispatchSystemBack;
+  const nativeBack = bridge?.client === "ios" ? dispatchIOSBack : dispatchSystemBack;
+  window.__xmatrixNativeBack = nativeBack;
   unsubscribeSystemBack = () => {
     unsubscribeAndroid?.();
-    if (window.__xmatrixNativeBack === dispatchSystemBack) delete window.__xmatrixNativeBack;
+    if (window.__xmatrixNativeBack === nativeBack) delete window.__xmatrixNativeBack;
   };
 }
 

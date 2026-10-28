@@ -12,6 +12,7 @@ import type { ComposerInvocationDraft } from "./composer-invocation-bindings";
 
 import { ChannelHistoryPreload } from "./channel-history-preload";
 import { useStartupBackgroundReady } from "./use-startup-background-ready";
+import { nativeBackOwnsAnimation } from "./use-system-back";
 
 import type {
   DesktopAgentPresetDiscovery,
@@ -505,7 +506,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       startViewTransition?: (callback: () => void) => { ready: Promise<void>; finished: Promise<void> };
     };
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!isMobileViewportRef.current || reduceMotion || !transitionDocument.startViewTransition) {
+    if (nativeBackOwnsAnimation() || !isMobileViewportRef.current || reduceMotion || !transitionDocument.startViewTransition) {
       update();
       return;
     }
