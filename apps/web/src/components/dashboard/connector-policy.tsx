@@ -50,6 +50,17 @@ function connectorPolicyDefaults(connector: AppConnectorManifest): string {
   return `Unless a channel has a rule of its own, ${parts.join("; ")}.`;
 }
 
+/** Connecting an app is not consent to its writes: say how an action that asks can run without asking. */
+function connectorPolicyNote(connector: AppConnectorManifest): string {
+  const defaults = connectorPolicyDefaults(connector);
+  return connectorWriteActions(connector).some((action) => action.defaultPolicy === "ask")
+    ? `${defaults} To let agents act without asking in a channel, add a rule there set to Allow.`
+    : defaults;
+}
+
+/** The action select's choice that writes one rule for each write action. */
+const EVERY_ACTION = "*";
+
 export function ConnectorPolicy({ connector, channels, spaceId, token, userId }: {
   connector: AppConnectorManifest;
   channels: ChannelSnapshot[];
@@ -73,17 +84,24 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
   });
   const actions = connectorWriteActions(connector);
   const [adding, setAdding] = useState(false);
-  const [actionId, setActionId] = useState(actions[0]?.id ?? "");
+  const [actionId, setActionId] = useState(actions.length > 1 ? EVERY_ACTION : actions[0]?.id ?? "");
   const [channelId, setChannelId] = useState("");
   const [mode, setMode] = useState<ConnectorActionPolicy>(connector.id === "gmail" ? "ask" : "allow");
   const channelName = (id: string) => { const channel = channels.find((candidate) => candidate.id === id); return channel ? channelTitle(channel) : id; };
   const action = (id: string) => actions.find((candidate) => candidate.id === id);
   const modes: ConnectorActionPolicy[] = ["allow", ...(connector.id === "github" ? [] : ["ask" as const]), "disallow"];
   const error = userErrorMessage(write.error ?? policies.error, "Couldn't save the app settings");
+  /* One rule per action, so each stays its own row to change or remove later. */
+  async function saveRule() {
+    for (const id of actionId === EVERY_ACTION ? actions.map((candidate) => candidate.id) : [actionId]) {
+      await write.mutateAsync({ channelId, actionId: id, mode });
+    }
+    setAdding(false); setChannelId("");
+  }
 
   return (
     <ConnectorSection title="Permissions" testId="connector-policy"
-      note={connectorPolicyDefaults(connector)}>
+      note={connectorPolicyNote(connector)}>
       <ConnectorRows>
         {(policies.data ?? []).map((row) => (
           <ConnectorRow key={`${row.actionId}:${row.channelId}`} testId="connector-policy-rule"
@@ -102,7 +120,8 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
           <li className="py-2.5">
             <div className="grid gap-2 sm:grid-cols-[1.3fr_1fr_0.8fr]">
               <GlassSelect value={actionId} aria-label="Action" onChange={setActionId}
-                options={actions.map((candidate) => ({ value: candidate.id, label: candidate.label }))} />
+                options={[...(actions.length > 1 ? [{ value: EVERY_ACTION, label: "Every action" }] : []),
+                  ...actions.map((candidate) => ({ value: candidate.id, label: candidate.label }))]} />
               <GlassSelect value={channelId} placeholder="Channel" aria-label="Channel" onChange={setChannelId}
                 options={channels.map((channel) => ({ value: channel.id, label: `#${channelTitle(channel)}` }))} />
               <GlassSelect value={mode} aria-label="Policy" onChange={(value) => setMode(value as ConnectorActionPolicy)}
@@ -111,7 +130,7 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
             <div className="mt-2 flex items-center gap-1">
               <button type="button" disabled={!actionId || !channelId || write.isPending}
                 className={actionClass({ variant: "secondary", size: "sm" })}
-                onClick={() => write.mutate({ channelId, actionId, mode }, { onSuccess: () => { setAdding(false); setChannelId(""); } })}>
+                onClick={() => void saveRule().catch(() => undefined)}>
                 {write.isPending ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null} Save rule
               </button>
               <ConnectorAction onClick={() => setAdding(false)}>Cancel</ConnectorAction>

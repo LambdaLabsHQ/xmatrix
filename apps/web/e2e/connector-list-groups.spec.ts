@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_CHANNEL, E2E_NOW, fixtureJson, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_CHANNEL, E2E_NOW, fixtureJson, fixtureRequestBodies, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 const connection = (providerId: string, providerName: string, status: string, authMode = "api-token") => ({
@@ -56,4 +56,20 @@ test("a connected app shows no call to action, and Disconnect comes last", async
   await expect(page_(page).locator(".app-action-primary")).toHaveCount(0);
   await expect(page_(page).locator("section[aria-label]").last()).toHaveAttribute("aria-label", "Disconnect");
   await expect(page.getByTestId("connector-policy")).toContainText(/unless a channel has a rule of its own/i);
+});
+
+test("Google Calendar says connecting is not leave to write, and one rule lets agents schedule in a channel", async ({ page }) => {
+  await openApps(page, { providers: ["googlecalendar"], connections: [connection("googlecalendar", "Google Calendar", "configured", "oauth")], app: "Google Calendar" });
+  await fixtureJson(page, "policy-put", /\/app-connections\/googlecalendar\/policies$/, { ok: true }, { method: "PUT" });
+
+  const permissions = page.getByTestId("connector-policy");
+  await expect(permissions).toContainText("Every action asks for approval first unless a channel has a rule of its own. To let agents act without asking in a channel, add a rule there set to Allow.");
+  await page.getByTestId("connector-policy-add").click();
+  await expect(permissions.getByRole("combobox", { name: "Action" })).toContainText("Every action");
+  await permissions.getByRole("combobox", { name: "Channel" }).click();
+  await page.getByRole("option", { name: "#general" }).click();
+  await expect(permissions.getByRole("combobox", { name: "Policy" })).toContainText("Allow");
+  await permissions.getByRole("button", { name: "Save rule" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "policy-put")).toEqual(["create_event", "update_event", "delete_event"]
+    .map(actionId => ({ channelId: E2E_CHANNEL.id, actionId, mode: "allow" })));
 });
