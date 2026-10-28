@@ -5,7 +5,10 @@ export function checkReleaseVersion({ run = spawnSync, env = process.env } = {})
   const checks = [
     ["scripts/version.mjs", "check"],
     ["scripts/production-release-policy.mjs", "verify-remote-tag", env.GITHUB_REF_NAME ?? "", env.GITHUB_SHA ?? ""],
-    ["scripts/version.mjs", "check-release-order", "--require-new-version"],
+    // The train already chose an ascending version before it cut this tag.
+    // A component may start after a newer parallel train: prove its frozen
+    // checkout, rather than treating that later tag as a new release floor.
+    ["scripts/production-release-policy.mjs", "validate-checkout", env.GITHUB_REF_NAME ?? ""],
   ];
   for (const args of checks) {
     const result = run(process.execPath, args, { env, stdio: "inherit" });

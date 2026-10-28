@@ -1,5 +1,25 @@
 # Release Updates
 
+## Unreleased: Delayed components validate their frozen release
+
+CLI, Desktop, Android and iOS component jobs verify consistent manifests, the
+remote annotated tag and its exact SHA, then the clean checkout's tag/version
+and main-history or version-stamp proof. The train still enforces ascending
+versions when it cuts a new tag, and component channel pointers still move
+only forward. A later parallel Hub tag is not a new version floor for a
+component that was already authorized.
+
+In 1.11.2-beta.12, Desktop started after CLI publication and a Hub-only beta.13
+had been tagged. Its late global version-order check rejected that frozen
+release before Desktop published, although Web and CLI had succeeded.
+Migration uses the same release workflows with the shared corrected check;
+there is no new deployment, signing or authorization path. Immutable old
+tags remain untouched. Recovery is a new CI-validated beta containing this
+fix and the failed beta's intents; retrying its old immutable script cannot
+repair the check. The real-Git regression reproduces that failure and keeps
+new-cut downgrades, wrong remote SHAs, tag/version mismatches and dirty
+checkouts rejected.
+
 ## Unreleased: Starting two-step sign-in over abandons the old app handoff
 
 After signing out, the two-step page replaces the document with the cleaned
