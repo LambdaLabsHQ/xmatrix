@@ -15,6 +15,18 @@ const {
   shouldRetryXMatrixQuery,
   xmatrixQueryRawResponse,
 } = require("./api-client.ts");
+const { queryMountKey } = require("./query-provider.tsx");
+
+test("the first sign-in keeps the mounted page, and a later account change remounts it", () => {
+  assert.equal(queryMountKey(undefined, undefined, null), "anonymous");
+  assert.equal(queryMountKey(undefined, undefined, "ada"), "ada");
+  const first = queryMountKey(undefined, undefined, null);
+  assert.equal(queryMountKey(first, null, "ada"), first);
+  assert.equal(queryMountKey(first, "ada", "ada"), first);
+  assert.equal(queryMountKey(first, "ada", "grace"), "grace");
+  assert.equal(queryMountKey("grace", "grace", null), "anonymous");
+  assert.equal(queryMountKey("anonymous", null, null), "anonymous");
+});
 
 test("a dropped JSON body retries as transport failure, including compatibility readers", async (t) => {
   const originalFetch = globalThis.fetch;
