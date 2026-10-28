@@ -2,7 +2,6 @@
 
 import {
   useEffect,
-  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -11,13 +10,15 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Bot,
   ChevronRight,
   FileText,
   Hash,
   Pin,
   PlugZap,
+  SlidersHorizontal,
+  Sparkles,
   Wrench,
-  Zap,
 } from "lucide-react";
 import {
   WEB_PROXY_ROUTES,
@@ -198,7 +199,6 @@ export function useComposerCompletion({
 }: ComposerCompletionInput): ComposerCompletionApi {
   const { user } = useAuth();
   const profileCopy = HARNESS_PROFILE_COPY[useOnboardingLocale(space?.id, token, user?.id)];
-  const profileHintId = useId();
   const referenceCatalog = useMessageReferenceCatalog();
   const mentionListRef = useRef<HTMLDivElement | null>(null);
   const mentionOptionRefs = useRef<Array<HTMLElement | null>>([]);
@@ -336,8 +336,12 @@ export function useComposerCompletion({
         !launchActive && !continuingLaunch) return registrationMentionCompletion;
     const query = launchActive?.query ?? "";
     const allChoices = autoLaunchCandidates(launchTargets, bodySummon?.tags ?? {},
-      registrationCatalog.data?.registrations);
-    const choices = filterLaunchCandidates((bodySummon ? allChoices : summonStartCandidates(allChoices)).filter(item =>
+      registrationCatalog.data?.registrations, profileCopy.auto);
+    // auto starts a summon; it is not a condition on one. After a summon it is
+    // offered only to an `@` typed there, which begins the next summon.
+    const typingSummon = !fieldCompletion && Boolean(registrationMentionCompletion.active);
+    const choices = filterLaunchCandidates((bodySummon ? allChoices.filter(item =>
+      item.id !== "launch:auto" || typingSummon) : summonStartCandidates(allChoices)).filter(item =>
       bodySummon || !item.launchTags?.harness ||
       !registrationMentionCompletion.candidates.some(candidate => candidate.invocationTarget &&
         (candidate.mention || candidate.name).toLowerCase() === item.launchTags!.harness)), query);
@@ -350,7 +354,7 @@ export function useComposerCompletion({
       active: launchActive ?? { start: cursor, end: cursor, tokenEnd: cursor, query: "" },
       candidates: [...choices, ...(continuingLaunch || fieldCompletion ? [] : references)] };
   }, [bodySummon, launchTargets, registrationCatalog.data, registrationMentionCompletion,
-    continuingLaunch, cursor, fieldCompletion, launchActive]);
+    continuingLaunch, cursor, fieldCompletion, launchActive, profileCopy.auto]);
   const mentionDynamicValueLoaded = mentionDynamicQuery.isSuccess;
   const mentionDynamicLoadState: MentionDynamicLoadState | undefined = mentionDynamicQuery.isError
     ? {
@@ -969,12 +973,6 @@ export function useComposerCompletion({
                       <MentionCategoryLabel section={section} />
                     </div>
                   ) : null}
-                  {onEditHarnessProfile && section.kind === "agent" &&
-                    section.candidates.some((candidate) => candidate.invocationTarget?.kind === "capability") ? (
-                    <p id={profileHintId} className="app-mention-profile-hint">
-                      {profileCopy.hint}
-                    </p>
-                  ) : null}
                   {section.candidates.map((candidate, sectionIndex) => {
                     const index = section.startIndex + sectionIndex;
                     const isApp = candidate.kind === "app";
@@ -997,12 +995,20 @@ export function useComposerCompletion({
                       (candidate.completionSuffix === ":" || Boolean(candidate.invocationTarget || candidate.launchTags));
                     const detail = candidate.description ||
                       (candidate.mention && candidate.mention !== candidate.name ? `@${candidate.mention}` : "");
-                    const profileHarness = onEditHarnessProfile && candidate.invocationTarget?.kind === "capability"
-                      ? candidate.invocationTarget.harness : null;
-                    const profileEditLabel = profileHarness ? <>
-                      <span className="hidden sm:inline">{profileCopy.editLong}</span>
-                      <span className="sm:hidden">{profileCopy.edit}</span>
-                    </> : null;
+                    // Only a harness nobody has described, shown to someone who may describe it.
+                    const profileHarness = onEditHarnessProfile && candidate.invocationTarget?.kind === "capability" &&
+                      candidate.profileInvite ? candidate.invocationTarget.harness : null;
+                    // A condition naming a harness wears that harness's face.
+                    const launchHarness = candidate.launchField === "harness" ? candidate.launchTags?.harness : undefined;
+                    // A badge says what the row's name and section do not: live
+                    // presence, or why a condition cannot be chosen. A command
+                    // row also says which kind of command it is.
+                    const badge = isLaunch ? (candidate.unavailable ? "offline" : null)
+                      : isAgentCommand
+                        ? candidate.action === "agent-model-switch" ? "model"
+                          : candidate.action === "agent-effort-switch" ? "effort" : "goal"
+                        : isAppCommand ? "action"
+                          : candidate.kind === "agent" && !isSummonableAgent ? candidate.status : null;
 
                     const option = (
                       <CompletionOptionButton
@@ -1014,15 +1020,22 @@ export function useComposerCompletion({
                         disabled={Boolean(candidate.unavailable)}
                         onSelect={() => applyMention(candidate)}
                       >
-                        {isApp || isAiService || isLaunch || isAgentCommand ? (
+                        {launchHarness ? (
+                          <Face of={{ kind: "agent", name: launchHarness, harness: launchHarness }} size="xs" shape="circle" />
+                        ) : isApp || isAiService || isLaunch || isAgentCommand ? (
                           <span className="flex size-5 shrink-0 items-center justify-center text-foreground/45 [&_svg]:size-4 [&_svg]:stroke-[1.75]">
                             {isAgentGoal ? (
                               <Pin className="size-4" />
                             ) : candidate.action === "agent-model-switch" ||
                               candidate.action === "agent-effort-switch" ? (
                               <Wrench className="size-4" />
-                            ) : isAiService || isLaunch ? (
-                              <Zap className="size-4" />
+                            ) : isLaunch && candidate.launchField ? (
+                              <SlidersHorizontal className="size-4" />
+                            ) : isLaunch ? (
+                              // auto is an Agent chosen for you: it wears the Agent mark.
+                              <Bot className="size-4" />
+                            ) : isAiService ? (
+                              <Sparkles className="size-4" />
                             ) : (
                               <PlugZap className="size-4" />
                             )}
@@ -1059,51 +1072,45 @@ export function useComposerCompletion({
                               this machine
                             </span>
                           )}
-                          {!isSummonableAgent && (
+                          {badge && (
                             <span className="rounded bg-muted/70 px-1.5 py-0 text-[10px] text-muted-foreground">
-                              {isLaunch ? (candidate.unavailable ? "offline" : (Object.keys(candidate.launchTags ?? {})[0] || "auto")) : isAgentCommand
-                                    ? candidate.action === "agent-model-switch"
-                                      ? "model"
-                                      : candidate.action === "agent-effort-switch"
-                                        ? "effort"
-                                        : "goal"
-                                    : isAppCommand
-                                      ? "action"
-                                      : isAiService
-                                        ? "AI"
-                                      : isApp
-                                        ? "app"
-                                        : candidate.kind === "agent"
-                                          ? candidate.status
-                                          : "human"}
+                              {badge}
                             </span>
                           )}
                         </span>
-                        {profileHarness && <span className="app-mention-profile-space" aria-hidden="true">
-                          {profileEditLabel}
-                        </span>}
                       </CompletionOptionButton>
                     );
                     if (!profileHarness || !onEditHarnessProfile) return option;
+                    /* The invitation stands where the description would, in its
+                       grey, laid over the row by a copy of the row's own layout:
+                       the row still summons, and this control opens the editor
+                       without nesting one button in another. */
                     return (
                       <div key={candidate.id} className="app-mention-capability">
                         {option}
-                        <button
-                          type="button"
-                          className="app-mention-profile-edit"
-                          aria-label={profileCopy.editNamed(candidate.name)}
-                          aria-describedby={profileHintId}
-                          onPointerDown={(event) => {
-                            if (event.pointerType === "mouse") event.preventDefault();
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            onEditHarnessProfile(profileHarness);
-                          }}
-                        >
-                          {profileEditLabel}
-                        </button>
+                        <span className="app-mention-profile-layer text-sm">
+                          <span className="app-mention-profile-face" aria-hidden="true" />
+                          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                            <span className="invisible min-w-0 shrink-0 truncate font-semibold" aria-hidden="true">
+                              {candidate.name}
+                            </span>
+                            <button
+                              type="button"
+                              className="app-mention-profile-edit min-w-0 truncate text-xs"
+                              aria-label={profileCopy.editNamed(candidate.name)}
+                              onPointerDown={(event) => {
+                                if (event.pointerType === "mouse") event.preventDefault();
+                              }}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                onEditHarnessProfile(profileHarness);
+                              }}
+                            >
+                              {profileCopy.edit}
+                            </button>
+                          </span>
+                        </span>
                       </div>
                     );
                   })}

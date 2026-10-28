@@ -44,7 +44,7 @@ test("whoever may describe a harness writes what it is for in place, as free tex
     { harness: "codex", description: "saved", revision: 3 }, { method: "POST" });
   await page.goto("/app/personal-sspaceperso/agents");
   /* The text is the agent's, whichever machine runs it: a machine's page does not carry it. */
-  const text = page.getByLabel("When to pick codex");
+  const text = page.getByLabel("What codex is good at");
   const machine = page.getByTestId("agent-row").filter({ hasText: "Remote server" });
   await machine.click();
   await expect(machine).toHaveAttribute("aria-current", "true");

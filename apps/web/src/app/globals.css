@@ -7276,54 +7276,55 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   color: var(--muted-foreground);
   font-size: 11px;
 }
-/* The specialty line is the Space's own text. The hint says so, and the control
-   opens the editor without taking the row's click, which still summons. */
-.app-mention-profile-hint {
-  margin: 0 18px 4px;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 1.35;
-}
+/* An undescribed Agent's invitation stands where its description would. It
+   lies over the row in a copy of the row's own layout (an invisible name after
+   a face-wide gap), so it lands on the description's place and baseline, and
+   only the invitation takes the pointer: the rest of the row still summons. */
 .xmatrix-app .app-mention-suggestions .app-mention-capability {
-  position: relative;
+  display: grid;
   width: calc(100% - 16px);
   margin: 0 8px;
 }
+.xmatrix-app .app-mention-suggestions .app-mention-capability > * { grid-area: 1 / 1; }
 .xmatrix-app .app-mention-suggestions .app-mention-capability button.app-completion-option {
   width: 100% !important;
   min-width: 0;
   margin: 0 !important;
 }
-.app-mention-profile-edit,
-.app-mention-profile-space {
-  flex: 0 0 auto;
-  max-width: 46%;
-  margin: 0;
-  padding: 4px 8px;
-  font-size: 11px;
-  line-height: 1.3;
-  text-align: right;
+.app-mention-profile-layer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  pointer-events: none;
 }
-/* Reserve the same label width inside the full selection without nesting buttons. */
-.app-mention-profile-space { visibility: hidden; pointer-events: none; }
-.app-mention-profile-edit {
-  position: absolute;
-  inset-inline-end: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  border: 0;
-  background: transparent;
-  color: var(--muted-foreground);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.app-mention-profile-face { flex: none; width: 20px; }
+/* Padding widens the target; the equal negative margin keeps the text on the
+   row's baseline. The composer's glass button chrome does not apply to it. */
+.xmatrix-app .app-mention-suggestions .app-mention-capability .app-mention-profile-edit {
+  min-width: 0;
+  min-height: 0;
+  margin: -6px;
+  padding: 6px;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  color: color-mix(in oklch, var(--foreground) 50%, transparent);
+  text-align: left;
   cursor: pointer;
+  pointer-events: auto;
 }
-.app-mention-profile-edit:hover { color: var(--foreground); }
+.xmatrix-app .app-mention-suggestions .app-mention-capability .app-mention-profile-edit:hover { color: var(--foreground); }
 /* A finger needs a taller target than a pointer. */
 @media (pointer: coarse) {
   .xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option { min-height: 38px; }
   .xmatrix-app .app-mention-suggestions .app-mention-category button.app-mention-category-more { min-height: 32px; }
-  .app-mention-profile-edit, .app-mention-profile-space { min-height: 38px; padding-inline: 10px; }
+  .xmatrix-app .app-mention-suggestions .app-mention-capability .app-mention-profile-edit { margin: -10px -6px; padding: 10px 6px; }
 }
 
 .app-invocation-popup:has(.app-routing-board) { width: min(520px, calc(100vw - 24px)); }

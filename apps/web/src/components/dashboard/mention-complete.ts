@@ -82,6 +82,8 @@ export type MentionCandidate = {
   appId?: string;
   appActionId?: string;
   description?: string;
+  /** A capability row with no description yet, which the reader may write. */
+  profileInvite?: boolean;
   /** Shown, but not selectable. The text is why, for example "Offline". */
   unavailable?: string;
   completionSuffix?: CommandCompletionDelimiter;
@@ -120,7 +122,7 @@ export type MentionCompletionResult = {
 
 export type MentionCandidateSection = {
   kind: MentionCandidate["kind"] | "instance";
-  label: "Instance" | "Condition" | "AI service" | "Agent" | "Human" | "App";
+  label: "In this conversation" | "Condition" | "AI service" | "Agent" | "Human" | "App";
   candidates: MentionCandidate[];
   startIndex: number;
   totalCount: number;
@@ -430,7 +432,8 @@ function channelTargetEntries(
       status: app.status === "available" ? "online" : "offline",
       mention: appMention,
       appId: app.id,
-      description: app.status === "available" ? "App connector" : "Planned app connector",
+      // The App section already names the kind; only a planned App says more.
+      ...(app.status === "available" ? {} : { description: "Planned" }),
       completionSuffix: ":",
     }, connectorInteractionTarget(appMention, (app.actions ?? []).map(action => action.id)));
   }
@@ -570,7 +573,7 @@ export function resolveMentionCompletion(
         active,
         candidates: filterMentionCandidates(candidates, segmentQuery),
         stage: "agent-reference",
-        stageLabel: `${agent.name} target`,
+        stageLabel: `${agent.name} in this conversation`,
       };
     }
   }
@@ -632,7 +635,7 @@ function resolveHandoffSuccessorCompletion(
     face: { kind: "agent", name: harness, harness },
     mention: `${sourceMention}:handoff:@${harness}`,
     action: "handoff-instance",
-    description: `Hand off @${sourceMention} to a new @${harness} instance`,
+    description: `Hand off @${sourceMention} to a new @${harness}`,
     completionSuffix: " ",
     schemaNodeId: "handoff-successor-profiles",
   }));
@@ -1112,7 +1115,6 @@ function agentReferenceCandidates(
       ...instanceIdentity,
       mention,
       local: isLocalAgentCandidate(localMachineKeys, member, instance),
-      description: `Use @${mention}`,
       completionSuffix: " ",
       schemaNodeId: "agent-reference:instance",
     });
@@ -1124,8 +1126,8 @@ function agentReferenceCandidates(
       local: isLocalAgentCandidate(localMachineKeys, member, instance),
       description:
         instance.status === "offline"
-          ? `Restart @${mention} in its channel slot with prior context`
-          : `Kill live @${mention}, then reborn in its channel slot with prior context`,
+          ? `Start @${mention} again, keeping its context`
+          : `Stop @${mention} and start it again, keeping its context`,
       completionSuffix: " ",
       schemaNodeId: "agent-reference:reborn",
     });
@@ -1138,8 +1140,8 @@ function agentReferenceCandidates(
       action: "handoff-instance",
       description:
         instance.status === "offline"
-          ? `Transfer @${mention}'s retained checkout to a new same-machine instance`
-          : `Stop @${mention} and transfer its checkout to a new same-machine instance`,
+          ? `Move @${mention}'s checkout to a new Agent on the same machine`
+          : `Stop @${mention} and move its checkout to a new Agent on the same machine`,
       completionSuffix: AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA.next?.delimiter || ":",
       schemaNodeId: AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA.id,
     });
@@ -1258,15 +1260,18 @@ export function filterMentionCandidates(
             mention.startsWith(normalized)
           );
         }
+        // Kind words and descriptions are a second way in, from three letters:
+        // `@co` is the start of a name, not every App's "connector".
+        const described = normalized.length >= 3;
         return (
           name.startsWith(normalized) ||
           name.includes(normalized) ||
           mention.includes(normalized) ||
           email.includes(normalized) ||
           action.includes(normalized) ||
-          app.includes(normalized) ||
-          description.includes(normalized) ||
-          local.includes(normalized)
+          described && app.includes(normalized) ||
+          described && description.includes(normalized) ||
+          described && local.includes(normalized)
         );
       })
     : candidates;
@@ -1300,7 +1305,9 @@ export function groupedMentionCandidates(
     typeof options === "number" || !options.openKinds ? null : new Set(options.openKinds);
   let startIndex = 0;
   return ([
-    { kind: "instance", label: "Instance" },
+    // Only this conversation's live Agents are listed here, and early screens
+    // name no Run, Instance or Harness.
+    { kind: "instance", label: "In this conversation" },
     { kind: "launch", label: "Condition" },
     { kind: "service", label: "AI service" },
     { kind: "agent", label: "Agent" },

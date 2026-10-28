@@ -116,7 +116,7 @@ test("harness-first completion uses new syntax and preserves words before and af
   await setDraftSelection(input, 13);
   await input.press("ArrowLeft");
   await input.press("ArrowRight");
-  await page.getByRole("option").filter({ hasText: "@codex" }).click();
+  await page.getByRole("option").filter({ hasText: /^codex$/u }).click();
   await expectDraft(input, "Before @codex after");
 });
 
@@ -172,7 +172,7 @@ test.describe("mobile launch syntax", () => {
   test("touch completion remains editable inline", async ({ page }) => {
     const input = page.locator(".composer-textarea").first();
     await input.fill("@codex");
-    await page.getByRole("option").filter({ hasText: "@codex" }).tap();
+    await page.getByRole("option").filter({ hasText: /^codex$/u }).tap();
     await expectDraft(input, "@codex ");
     await input.pressSequentially("effort:h");
     await page.getByRole("option").filter({ hasText: "effort:high" }).tap();

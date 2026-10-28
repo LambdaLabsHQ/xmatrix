@@ -1,5 +1,25 @@
 # Release Updates
 
+## Unreleased: The @ menu says once what each row does
+
+Every row of the `@` menu now says one thing: what choosing it does. `auto`
+is written as it is typed and says it picks an Agent by what each is good at,
+which is where those descriptions are used, so the separate hint line above
+the Agents is gone. An Agent with a description shows it; one without
+shows **Say what it's good at** in the same place and grey, only to people
+who may write it, instead of a second "Choose automatically" that collided
+with `auto`. Badges that repeated the section or the row's own name (human,
+app, repo, model and the like) are removed; live presence and "offline" stay.
+`@co` no longer lists every App, because kind words and descriptions match
+from three letters. Conditions after a summon no longer offer `auto`, use the
+condition icon, and an Agent condition wears its face. Following the rule that
+early screens name no Run, Instance or Harness, the live Agents section is
+"In this conversation", the Agent condition reads "Agent", and instance
+actions say plainly what they do. `auto` wears the Agent mark rather than a
+lightning bolt. The Agents editor uses the same words in English and Chinese.
+No migration or native update is needed; recovery is a CI-validated beta Web
+release reverting the change.
+
 ## Unreleased: Mention keyboard checks address their trigger
 
 The independent invocation timeline browser case presses Enter on the intended

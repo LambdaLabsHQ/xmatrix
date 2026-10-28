@@ -52,7 +52,7 @@ for (const mobile of [false, true]) {
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
   const draft = page.locator(".composer-textarea").first();
   await draft.fill("@");
-  await expect(page.getByRole("listbox").getByText("Instance", { exact: true })).toBeVisible();
+  await expect(page.getByRole("listbox").getByText("In this conversation", { exact: true })).toBeVisible();
   const instance = page.getByRole("option", { name: /^codex:1\s/u });
   await expect(instance).toBeVisible();
   await expect.poll(() => page.locator(".app-composer-box").first()
@@ -92,7 +92,7 @@ async function expectSelectedMachineSent(page: import("@playwright/test").Page,
 test("composer sends one capability selection bound to its final message text", async ({ page }) => {
   const { draft } = await canonicalComposer(page);
   await draft.fill("@cod");
-  const candidate = page.getByRole("option", { name: /codex.*Choose automatically/u });
+  const candidate = page.getByRole("option").filter({ hasText: /^codex$/u });
   await expect(candidate).toHaveCount(1);
   await candidate.click();
   await draft.fill("@codex fix this");
@@ -117,12 +117,12 @@ for (const mobile of [false, true]) {
   test.describe(`what an agent is good at, from the mention menu, on ${mobile ? "mobile" : "desktop"}`, () => {
     test.use({ viewport: mobile ? { width: 393, height: 852 } : { width: 1280, height: 900 },
       isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 });
-    test("says that text can be written and opens the editor", async ({ page }) => {
+    test("auto says what it reads, and an undescribed harness invites its description", async ({ page }) => {
       const locations = ["Workstation", "MacBook"].map((machineName, index) => ({
         key: { spaceId: E2E_SPACE.id, ownerUserId: `owner-${index}`, machineId: `machine-${index}`, harness: "codex" },
         displayName: "codex", ownerName: `Owner ${index + 1}`, machineName, version: 1, state: "enabled",
         models: ["same-model"], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false,
-        canRemoveFromSpace: false, canDescribe: true, profile: { description: "Careful code review.", revision: 2 },
+        canRemoveFromSpace: false, canDescribe: true, profile: { description: "", revision: 0 },
       }));
       await fixtureJson(page, "registration-catalog", /\/agent-registrations(?:\?[^#]*)?$/u, {
         registrations: locations, capabilities: [{ harness: "codex", models: ["same-model"], locations }],
@@ -130,15 +130,44 @@ for (const mobile of [false, true]) {
       await page.goto("/app/personal-sspaceperso/channels/channel-general");
       const draft = page.locator(".composer-textarea").first();
       await draft.fill("@");
-      await expect(page.getByText("What an agent is good at can be written.")).toBeVisible();
-      await page.getByRole("button", { name: "Click to edit what codex is good at" }).click();
+      await expect(page.getByRole("option", { name: /^auto\s*Picks an Agent by what each is good at$/u })).toBeVisible();
+      await expect(page.getByRole("option").filter({ hasText: /^codex$/u })).toBeVisible();
+      await page.getByRole("button", { name: "Say what codex is good at" }).click();
       await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
-      const text = page.getByLabel("When to pick codex");
-      await expect(text).toHaveValue("Careful code review.");
+      const text = page.getByLabel("What codex is good at");
+      await expect(text).toHaveValue("");
       await expect(text).toBeFocused();
     });
   });
 }
+
+test("a described harness shows its description and invites no edit", async ({ page }) => {
+  const locations = [{
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "owner-0", machineId: "machine-0", harness: "codex" },
+    displayName: "codex", ownerName: "Owner 1", machineName: "Workstation", version: 1, state: "enabled",
+    models: ["same-model"], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false,
+    canRemoveFromSpace: false, canDescribe: true, profile: { description: "Careful code review.", revision: 2 },
+  }];
+  await fixtureJson(page, "registration-catalog", /\/agent-registrations(?:\?[^#]*)?$/u, {
+    registrations: locations, capabilities: [{ harness: "codex", models: ["same-model"], locations }],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/channel-general");
+  await page.locator(".composer-textarea").first().fill("@");
+  await expect(page.getByRole("option", { name: /codex.*Careful code review/u })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Say what codex is good at" })).toHaveCount(0);
+});
+
+test("an undescribed harness invites only readers who may describe it", async ({ page }) => {
+  const locations = harnessRegistrations(["codex"]).map(location => ({ ...location, canDescribe: false,
+    profile: { description: "", revision: 0 } }));
+  await fixtureJson(page, "registration-catalog", /\/agent-registrations(?:\?[^#]*)?$/u, {
+    registrations: locations, capabilities: [{ harness: "codex", models: [], locations }],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/channel-general");
+  await page.locator(".composer-textarea").first().fill("@");
+  await expect(page.getByRole("option").filter({ hasText: /^codex$/u })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Say what codex is good at" })).toHaveCount(0);
+});
 
 test.describe("what an agent is good at, in Chinese", () => {
   test.use({ locale: "zh-CN", viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
@@ -147,7 +176,7 @@ test.describe("what an agent is good at, in Chinese", () => {
       key: { spaceId: E2E_SPACE.id, ownerUserId: `owner-${index}`, machineId: `machine-${index}`, harness: "codex" },
       displayName: "codex", ownerName: `Owner ${index + 1}`, machineName, version: 1, state: "enabled",
       models: ["same-model"], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false,
-      canRemoveFromSpace: false, canDescribe: true, profile: { description: "Careful code review.", revision: 2 },
+      canRemoveFromSpace: false, canDescribe: true, profile: { description: "", revision: 0 },
     }));
     await fixtureJson(page, "registration-catalog", /\/agent-registrations(?:\?[^#]*)?$/u, {
       registrations: locations, capabilities: [{ harness: "codex", models: ["same-model"], locations }],
@@ -155,11 +184,11 @@ test.describe("what an agent is good at, in Chinese", () => {
     await page.goto("/app/personal-sspaceperso/channels/channel-general");
     const draft = page.locator(".composer-textarea").first();
     await draft.fill("@");
-    await expect(page.getByText("Agent 擅长什么、不擅长什么，都可以写。")).toBeVisible();
-    await page.getByRole("button", { name: "点击此处修改 codex 的优势劣势" }).click();
+    await expect(page.getByRole("option", { name: /^auto\s*按各 Agent 适合做什么自动分配$/u })).toBeVisible();
+    await page.getByRole("button", { name: "写下 codex 适合做什么" }).click();
     await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
-    const text = page.getByLabel("codex 擅长什么");
-    await expect(text).toHaveValue("Careful code review.");
+    const text = page.getByLabel("codex 适合做什么");
+    await expect(text).toHaveValue("");
     await expect(text).toBeFocused();
   });
 });

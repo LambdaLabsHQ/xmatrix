@@ -342,7 +342,7 @@ export function toolItemPath(viewPath: string, item: string | null): string {
 }
 
 /**
- * The mention menu opens When to pick it with `edit=profile`. That marker is
+ * The mention menu opens What it's good at with `edit=profile`. That marker is
  * part of an Agents address while it is there; other list addresses do not carry it.
  */
 export function agentsProfileEditPath(viewPath: string, location: string): string {
