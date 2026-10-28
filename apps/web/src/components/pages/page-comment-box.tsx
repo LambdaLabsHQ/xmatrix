@@ -10,9 +10,10 @@ import type { MarginAgent } from "./page-margin-model";
 /**
  * What the passage a reader selected opens (pages-live-document.md §4.2): the product's own message box on a card
  * of paper, beside the passage in the margin (under it where the page has no margin), the caret already in it, so
- * it reads at once as somewhere to write. Typing is the comment; Enter or Send sends it as a discussion of the
+ * it reads at once as somewhere to write. Typing is the comment; Enter or Send sends it with the selected
  * passage. The Agent at work on the page takes it, its Instance card under the box as under a conversation's
- * composer, unless the comment mentions whom it is for; with none there, xMatrix gives it to one. Until something
+ * composer, unless the comment mentions whom it is for. It continues that Agent's conversation, or the passage's
+ * editing conversation; with neither there, xMatrix gives it to one in a new discussion. Until something
  * is typed, the keys that act on a selection (Backspace, copy, cut, marks) still act on the passage. Leaving it, by a click anywhere else, closes it as Escape does; what was typed
  * comes back if the same passage is commented on again.
  */

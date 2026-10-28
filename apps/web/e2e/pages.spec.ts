@@ -1277,6 +1277,44 @@ test("a drag selects the line under the pointer, wherever the caret was: nothing
   await drag("Under the table.", 400);
 });
 
+for (const target of ["live", "mentioned", "edited"] as const) {
+  test(`a passage comment continues its ${target} conversation without creating a Channel`, async ({ page: browser }) => {
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await stubWriters(browser, ["grok"]);
+    await stubPageConversation(browser, { ...E2E_CHANNEL, id: "unexpected-new-channel" },
+      { linkId: "l-comment", blockId: "status" });
+    await fixtureJson(browser, "comment-message", /\/api\/xmatrix\/channels\/[^/]+\/messages$/u, { message: {} },
+      { method: "POST" });
+    if (target === "edited") {
+      await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
+        pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "status", present: [], discussions: [],
+          updated: { revision: 3, authors: [], conversationIds: [E2E_CHANNEL.id], createdAt: NOW } }],
+      });
+    } else await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+      pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-grok", name: "grok:1", status: "busy",
+        conversationId: E2E_CHANNEL.id, activity: "thinking", blockId: "status", harness: "grok" }] }],
+    });
+    await openLivePage(browser);
+    await selectLine(browser, "In progress");
+    const box = browser.getByTestId("page-comment-box");
+    await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+    if (target !== "edited") await expect(box).toContainText("grok:1");
+    await browser.keyboard.type(target === "mentioned" ? "@grok Is this still accurate?" : "Is this still accurate?");
+    await browser.keyboard.press("Enter");
+    const expected = target === "edited" ? "Is this still accurate?" : "@grok:1 Is this still accurate?";
+    await expect.poll(async () => (await fixtureRequestRecords(browser, "comment-message"))
+      .map((request) => ({ path: new URL(request.url).pathname, body: JSON.parse(request.body ?? "{}").body }))).toEqual([
+      { path: `/api/xmatrix/channels/${E2E_CHANNEL.id}/messages`, body: expect.stringContaining(`\n\n${expected}`) },
+    ]);
+    const [sent] = await fixtureRequestBodies(browser, "comment-message");
+    expect(sent!.body).toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*page=p-relay#status\)/u);
+    expect(await fixtureRequestBodies(browser, "channel-create")).toEqual([]);
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
+      conversationId: E2E_CHANNEL.id, pageId: "p-relay", blockId: "status", anchor: { quote: "In progress" } });
+    await expect(box).toHaveCount(0);
+  });
+}
+
 test("selecting a passage opens a comment box beside it in the margin; sent, the comment is a discussion anchored there", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
