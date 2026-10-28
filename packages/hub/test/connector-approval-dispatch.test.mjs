@@ -121,3 +121,34 @@ test("Calendar approval stores the prepared event preview without executing the 
   assert.equal(staged.payload.prepared.calendar, "owner@example.com");
   assert.equal(writes, 0);
 });
+
+// Calendar's real action must obey Allow without staging an approval, and its
+// destination lookup must not open a race in the final live-policy check.
+test("Calendar Allow schedules directly and a policy change during preparation prevents the real write", async () => {
+  const { GOOGLE_CALENDAR_ACTIONS } = await import("../src/connectors/actions/google-calendar.ts");
+  const { stubFetchResponses } = await import("./support/fetch-responses.mjs");
+  for (const revokeDuringPreparation of [false, true]) {
+    let mode = "allow", approvals = 0;
+    const commands = await dispatcher({ providerId: "googlecalendar", spaceId: "s", mode: async () => mode,
+      repository: { find: async () => null, create: async () => { approvals++; throw new Error("Allow must not ask"); } },
+      imports: { "./connection-credentials": { connectionCredentials: async () => ({ oauthToken: "a" }) } } });
+    const calendar = { id: "owner@example.com", primary: true, summary: "Work", timeZone: "UTC" };
+    const event = { kind: "calendar#event", id: "abcde12345", etag: '"v1"' };
+    const fetch = stubFetchResponses([{ body: calendar }, { body: event }], {
+      decodeBody: body => body ? JSON.parse(body) : undefined,
+      reply: response => {
+        if (response.body === calendar && revokeDuringPreparation) mode = "disallow";
+        return new Response(JSON.stringify(response.body));
+      },
+    });
+    try {
+      const result = await commands.runConnectorAction("googlecalendar", { env: {}, channelId: "c", messageId: "m", actorUserId: "owner", senderKind: "agent", senderId: "instance" },
+        "create_event", GOOGLE_CALENDAR_ACTIONS.create_event, { target: "primary", text: JSON.stringify({ id: event.id, summary: "AI arranged meeting",
+          start: { date: "2026-10-29" }, end: { date: "2026-10-30" }, sendUpdates: "none" }) });
+      assert.equal(approvals, 0);
+      assert.equal(fetch.calls.filter(call => call.method === "POST").length, revokeDuringPreparation ? 0 : 1);
+      assert.match(result, revokeDuringPreparation ? /failed|blocked/u : /completed/u);
+      if (!revokeDuringPreparation) assert.equal(fetch.calls[1].body.summary, "AI arranged meeting");
+    } finally { fetch.restore(); }
+  }
+});

@@ -55,6 +55,20 @@ An empty busy list means free only within the requested interval.
 
 ## Write actions
 
+Users can let AI schedule directly: in the app's **Permissions**, select a
+Channel and set each desired write action to **Allow**. Creation, edits and
+deletion are independent permissions; allowing creation need not allow deletion.
+Allow executes without a per-event approval and still checks current Channel
+access/policy immediately before the write. Switch back to **Ask** for
+per-request approval or **Disallow** to stop that action. Connecting Google
+alone does not grant automatic scheduling. Space admins can also configure:
+
+```text
+@googlecalendar:policy:create_event allow
+@googlecalendar:policy:update_event allow
+@googlecalendar:policy:delete_event ask
+```
+
 All three actions default to **ask** and use the existing immutable request,
 Space-admin approval and live Channel policy checks. Every write requires an
 explicit `sendUpdates`: `all`, `externalOnly` or `none`. This controls Google's
