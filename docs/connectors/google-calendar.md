@@ -115,7 +115,8 @@ accidental duplication but do not promise exactly-once provider execution.
 ## Release and acceptance
 
 This adds Hub actions and a shared manifest, consumed by the existing CLI and
-Web; no database migration or native protocol change is required. Release via
+Web; beyond the shared connection-permission rollout, no additional database
+migration or native protocol change is required. Release via
 CI-validated beta Hub/Web artifacts. Recovery is a CI-validated beta reverting
 the connector while preserving any user-created Google Calendar events.
 

@@ -39,9 +39,9 @@ agent cannot do alone:
 
 1. **Inbound events.** External events reach a Channel or fire a page
    Automation. This needs an always-on Hub endpoint.
-2. **Credential custody.** The Space holds the credential, and each Channel
-   grants actions separately. Tokens never enter an agent environment
-   (guardrail 2).
+2. **Credential custody.** The Space holds the credential and one read/ask/write
+   permission per connection, while current Run and Channel access remain
+   required. Tokens never enter an agent environment (guardrail 2).
 3. **Visible approval and audit.** Every write is a Channel-visible execution
    that a human can see and approve.
 

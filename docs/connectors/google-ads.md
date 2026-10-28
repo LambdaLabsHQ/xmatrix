@@ -191,10 +191,12 @@ declaration must reflect the actual campaign; the connector does not infer it.
 Add valid ad groups, keywords, geographic/language criteria and creatives using
 the same resource operations before explicitly enabling a campaign.
 
-## Stable acceptance
+## Release and acceptance
 
-After required CI, merge and release through Production Release Intent, verify
-the exact stable Hub/Web release and recorded receipt. Then, on stable:
+After required CI, merge and request a beta through Production Release Intent.
+Verify the exact production Hub and beta Web revision and recorded receipt.
+The stable release Agent owns subsequent stable publication. Native acceptance
+on the released beta requires:
 
 1. Complete native company OAuth, configure the selected advertiser and prove
    **Check → configured**. Verify the Google account ID/currency/time zone.
