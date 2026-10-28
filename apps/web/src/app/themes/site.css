@@ -1221,7 +1221,7 @@ html:has(.site-page) {
 
 /* A published page (/p/…), set as Notion sets its published pages: the page
    as the live editor draws it (page-document.css) on the app's paper, a thin
-   bar with where the page sits and one wood action, and the page's sections
+   bar with where the page sits and the xMatrix mark, and the page's sections
    as rules at the right edge. Under the title, what Notion leaves out: who
    keeps the page current and when it last changed. */
 .public-page {
@@ -1251,20 +1251,7 @@ html:has(.site-page) {
 .public-page-crumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .public-page-crumb[aria-current] { color: var(--foreground); font-weight: 550; }
 .public-page-crumb-gap { opacity: 0.5; }
-.public-page-cta.app-material-wood-panel {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  height: 34px;
-  padding: 0 16px;
-  border-radius: 999px;
-  color: oklch(0.2 0.04 58);
-  font-size: 13px;
-  font-weight: 750;
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.45), inset 1px 0 0 oklch(1 0 0 / 0.18),
-    inset 0 -1px 0 oklch(0 0 0 / 0.3), inset -1px 0 0 oklch(0 0 0 / 0.18),
-    0 10px 18px -10px oklch(0 0 0 / 0.5) !important;
-}
+.public-page-brand { flex-shrink: 0; gap: 6px; }
 .public-page-sheet {
   max-width: calc(900px + 2 * 48px);
   margin: 0 auto;

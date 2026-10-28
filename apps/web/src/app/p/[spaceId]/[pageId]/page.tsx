@@ -7,12 +7,10 @@ import {
   withRoute,
 } from "@xmatrix/protocol";
 import { BrandMark } from "@/components/shared/brand-mark";
-import { WoodPanel } from "@/components/ui/material-surfaces";
 import { isShortCell, SHORT_CELL_CLASS } from "@/components/pages/page-table-cells";
 import { getXMatrixHubUrl } from "@/lib/xmatrix";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 import { loadPublicPage as load } from "@/lib/pages/public-page";
-import { landingCopy } from "@/lib/landing-copy";
 import { PublicPageFaces, PublicPageRefresh } from "./public-page-live";
 import { PublicPageOutline } from "./public-page-outline";
 
@@ -136,14 +134,12 @@ export default async function PublicPageView({ params }: Params) {
       <PublicPageRefresh />
       <header className="public-page-bar">
         <nav className="public-page-crumbs" aria-label="Breadcrumb">
-          <BrandMark href="https://xmatrix.sh" showWordmark={false} iconClassName="size-5 rounded-[6px]" />
           <span className="public-page-crumb">{page.spaceName}</span>
           <span aria-hidden className="public-page-crumb-gap">/</span>
           <span className="public-page-crumb" aria-current="page">{page.title}</span>
         </nav>
-        <WoodPanel as={Link} href="/login" className="public-page-cta">
-          {landingCopy[locale].nav.startFree}
-        </WoodPanel>
+        <BrandMark href="https://xmatrix.sh" className="public-page-brand" iconClassName="size-6"
+          iconSrc="/brand/xmatrix-icon-transparent-128.png" wordmarkClassName="text-[15px]" />
       </header>
       <main className="public-page-sheet">
         <h1 className="public-page-title">{title}</h1>
