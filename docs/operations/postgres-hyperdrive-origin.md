@@ -222,6 +222,22 @@ latency. There is no extra SQL, broader retry or COMMIT replay.
 
 ## Agent lifecycle locks
 
+Execution-report owner queries that remain in flight for 500 ms (or half the
+configured lock timeout, if shorter) sample `pg_blocking_pids` and
+`pg_stat_activity` through an independent read-only statement. A lock timeout
+has already removed its wait edge, so sampling after that error cannot recover
+the holder. The opening round trip obtains the origin backend pid without an
+extra query; it is used only as the sample's parameter and never reported.
+The sampler has 250 ms connection and query deadlines and one concurrent slot
+per isolate. Fast queries cancel the timer, and the request awaits any sample
+it started. Busy, missing and unavailable results are explicit, not proof that
+there was no contention. The sample reports at most four blockers, their fixed
+owner category, state, wait class and capped transaction age; no SQL, ids or
+parameters. The execution-report category can reveal an earlier report still
+idle in transaction, but does not alone prove it was this request's first
+attempt. An original timeout or rejection remains authoritative; existing
+pre-COMMIT recovery and unknown-commit reconciliation are unchanged.
+
 First-reply observation runs after the Agent message commits. It checks current
 Channel access without a lifecycle row lock (`runtime_check`): it starts no work
 and updates only the connected Launch whose `first_reply_at` is still null.

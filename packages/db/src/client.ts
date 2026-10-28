@@ -26,6 +26,7 @@ import { dingtalkPreparation, dingtalkDecision, dingtalkPreparedPlan, registerDi
   type DingTalkPreparedPlan, type DingTalkPreparedDecision } from "./dingtalk-prepared-port.js";
 
 import { recordDatabaseFailure, linkDatabaseFailures, type DatabaseFailureEvidence } from "./database-failure-evidence.js";
+import { watchExecutionOwnerWait } from "./postgres-lock-wait.js";
 
 const MAX_QUERY_NAME_BYTES = 160;
 const MAX_QUERY_BYTES = 64 * 1024;
@@ -250,6 +251,7 @@ type SessionPhase = "pool_checkout" | "begin" | "commit" | "rollback";
  * the session's first statement outcome to the shard's connectivity breaker.
  */
 class SessionStats {
+  backendPid?: number;
   operation: string | null = null;
   startedAt = 0;
   errorCode: string | undefined;
@@ -331,6 +333,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
   async query<Row extends QueryResultRow>(input: DatabaseQuery): Promise<readonly Row[]> {
     const query = validatedQuery(input);
     const startedAt = performance.now();
+    const finishWait = watchExecutionOwnerWait(query.name, this.stats.backendPid, this.options);
     try {
       const result = await this.client.query<Row>({
         text: query.text,
@@ -362,9 +365,11 @@ class PgDatabaseTransaction implements DatabaseTransaction {
         const durationMs = performance.now() - startedAt;
         this.stats.query(durationMs, 0);
         this.stats.fail(errorCode(error), this.context.operation, query.name);
+        const session = this.stats.failureSession();
+        const lockWait = await finishWait?.();
         recordDatabaseFailure(error, { operation: this.context.operation, shardId: this.options.shardId,
           statement: this.context.statement ?? "transaction", phase: "sql", queryName: query.name,
-          code: errorCode(error), durationMs, session: this.stats.failureSession() });
+          code: errorCode(error), durationMs, session, ...(lockWait ? { lockWait } : {}) });
         observe(this.options.observer, this.observation(
           query.name,
           durationMs,
@@ -374,6 +379,8 @@ class PgDatabaseTransaction implements DatabaseTransaction {
         ));
       }
       throw error;
+    } finally {
+      await finishWait?.();
     }
   }
 
@@ -535,6 +542,7 @@ function placeholderFrom(first: number): (offset: number) => string {
 /** Transaction-local settings, each value supplied by `p(offset)` in `transactionSettingValues` order. */
 function transactionSettingsSql(p: (offset: number) => string): string {
   return `SELECT
+      pg_backend_pid() AS backend_pid,
       set_config('application_name', ${p(0)}, true),
       set_config('statement_timeout', ${p(1)}, true),
       set_config('transaction_timeout', ${p(2)}, true),
@@ -552,7 +560,7 @@ function transactionSettingValues(
   options: ResolvedOptions,
 ): string[] {
   return [
-    options.applicationName,
+    context.operation === "runtime.execution-report" ? "xmatrix-execution-report" : options.applicationName,
     String(options.statementTimeoutMs),
     String(options.transactionTimeoutMs),
     String(options.lockTimeoutMs),
@@ -611,17 +619,19 @@ async function openTransaction(
   client: PgClientPort,
   context: DatabaseRequestContext,
   options: ResolvedOptions,
+  stats: SessionStats,
 ): Promise<boolean> {
   const values = transactionSettingValues(context, options);
   const literal = (offset: number) => sqlLiteral(values[offset]!);
   const settings = transactionSettingsSql(literal);
   const begin = context.isolation === "serializable" ? "BEGIN ISOLATION LEVEL SERIALIZABLE" : "BEGIN";
   if (!context.placement) {
-    await client.query(`${begin};${settings}`);
+    const result: unknown = await client.query(`${begin};${settings}`);
+    stats.backendPid = openingBackendPid(result);
     return true;
   }
   // node-postgres answers a multi-statement message with one result per statement.
-  const result: unknown = await client.query(`${begin};SELECT fence.shard_id,fence.placement_epoch,
+  const result: unknown = await client.query(`${begin};SELECT settings.backend_pid,fence.shard_id,fence.placement_epoch,
       fence.state,fence.target_shard_id
     FROM (${settings}) settings
     LEFT JOIN LATERAL (
@@ -631,7 +641,14 @@ async function openTransaction(
       FOR SHARE
     ) fence ON true`);
   const fence = (Array.isArray(result) ? result.at(-1) : result) as QueryResult<PlacementFenceRow> | undefined;
+  stats.backendPid = openingBackendPid(result);
   return fenceAdmits(fence?.rows[0], context.placement);
+}
+
+function openingBackendPid(result: unknown): number | undefined {
+  const last = (Array.isArray(result) ? result.at(-1) : result) as QueryResult | undefined;
+  const pid: unknown = last?.rows[0]?.backend_pid;
+  return Number.isSafeInteger(pid) && Number(pid) > 0 ? Number(pid) : undefined;
 }
 
 function observePhase(
@@ -906,7 +923,7 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
     const startedAt = performance.now();
     let admitted: boolean;
     try {
-      admitted = await openTransaction(client, context, this.options);
+      admitted = await openTransaction(client, context, this.options, this.stats);
     } catch (error) {
       observePhase(this.options, context, this.stats, "begin", startedAt, error);
       throw error;
