@@ -1,4 +1,4 @@
-import { connectionString, integration } from "./postgres-database.fixture.mjs";
+import { connectionString, integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
 import { Client, Pool } from "pg";
 import { randomUUID } from "node:crypto";
@@ -49,10 +49,16 @@ integration("one opening message begins the transaction with every setting intac
 // HUB-AY: a lock timeout erases pg_blocking_pids' wait edge. Existing driver
 // recovery tests cannot prove the diagnostic was taken while the SQL was waiting.
 integration("execution-owner lock failures retain the live blocker without identities or SQL", async () => {
+  const isolated = await isolatedPostgres("execution_lock", { migrate: false, runtimeRole: false });
+  const connectionString = isolated.url.toString();
+  const placement = { spaceId: "space", shardId: "lock-diagnostic", placementEpoch: 1 };
   const holder = new Client({ connectionString });
   const table = `execution_wait_${randomUUID().replaceAll("-", "")}`;
   await holder.connect();
   try {
+    await holder.query(`CREATE SCHEMA control;
+      CREATE TABLE control.space_placement (space_id text,shard_id text,placement_epoch int,state text,target_shard_id text);
+      INSERT INTO control.space_placement VALUES ('space','lock-diagnostic',1,'active',NULL)`);
     await holder.query(`CREATE TABLE ${table} (id int PRIMARY KEY, private_value text)`);
     await holder.query(`INSERT INTO ${table} VALUES (1,'private-report')`);
     await holder.query("BEGIN; SET LOCAL application_name='xmatrix-execution-report'");
@@ -70,7 +76,7 @@ integration("execution-owner lock failures retain the live blocker without ident
           return new Client(config);
         } });
       await assert.rejects(database.transaction({ requestId: "private-request",
-        operation: "runtime.execution-report" }, tx => tx.query({ name: "runtime_execution_report_owner_v4",
+        operation: "runtime.execution-report", placement }, tx => tx.query({ name: "runtime_execution_report_owner_v4",
         text: `SELECT private_value FROM ${table} WHERE id=$1 FOR UPDATE`, values: [1], maxRows: 1 })), error => {
         assert.equal(error.code, "55P03", "the original failure remains authoritative");
         const [evidence] = databaseFailureEvidence(error);
@@ -89,7 +95,7 @@ integration("execution-owner lock failures retain the live blocker without ident
       assert.equal(diagnosticConnections, 1);
     }
     let samples = 0;
-    const concurrent = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic-concurrent",
+    const concurrent = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic",
       lockTimeoutMs: 1500, clientFactory: config => {
         const client = new Client(config);
         if (config.application_name !== "xmatrix-lock-diagnostic") return client;
@@ -100,22 +106,23 @@ integration("execution-owner lock failures retain the live blocker without ident
         }, query: client.query.bind(client), end: client.end.bind(client) };
       } });
     const failures = await Promise.allSettled([1, 2].map(index => concurrent.transaction({
-      requestId: `concurrent-${index}`, operation: "runtime.execution-report",
+      requestId: `concurrent-${index}`, operation: "runtime.execution-report", placement,
     }, tx => tx.query({ name: "runtime_execution_report_owner_v4", text: `SELECT id FROM ${table} FOR UPDATE`, maxRows: 1 }))));
     assert.ok(failures.every(result => result.status === "rejected" && result.reason.code === "55P03"));
     assert.deepEqual(failures.map(result => databaseFailureEvidence(result.reason)[0].lockWait.status).sort(), ["busy", "sampled"]);
     assert.equal(samples, 1, "concurrent waiting reports share the isolate's one diagnostic slot");
     await holder.query("ROLLBACK");
-    const database = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic-fast",
+    const database = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic",
       clientFactory: config => {
         assert.notEqual(config.application_name, "xmatrix-lock-diagnostic", "a fast query opens no diagnostic connection");
         return new Client(config);
       } });
-    assert.deepEqual(await database.transaction({ requestId: "fast", operation: "runtime.execution-report" },
+    assert.deepEqual(await database.transaction({ requestId: "fast", operation: "runtime.execution-report", placement },
       tx => tx.query({ name: "runtime_execution_report_owner_v4", text: "SELECT 1 AS ok", maxRows: 1 })), [{ ok: 1 }]);
   } finally {
     await holder.query("ROLLBACK");
     await holder.query(`DROP TABLE ${table}`);
     await holder.end();
+    await isolated.close();
   }
 });
