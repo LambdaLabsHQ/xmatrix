@@ -257,12 +257,14 @@ test("the iOS app's edge swipe goes Back in the page, and a notification opens w
         handled,
         parentVisible: list?.checkVisibility() === true,
         transitions,
+        path: location.pathname,
       };
     } finally {
       document.startViewTransition = start;
     }
   });
-  expect(back).toEqual({ handled: true, parentVisible: true, transitions: 0 });
+  expect(back).toEqual({ handled: true, parentVisible: true, transitions: 0,
+    path: "/app/personal-sspaceperso/channels" });
   await expectChannelListVisible(page);
   // A dock tab's own screen has nothing to go Back to; the app keeps it.
   expect(await nativeBackForTest(page)).toBe(false);
