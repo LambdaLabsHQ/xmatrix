@@ -1,3 +1,4 @@
+import { isGoogleCalendarSendUpdates } from "@xmatrix/protocol";
 import { record } from "../command-support";
 
 const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
@@ -53,7 +54,7 @@ export const MUTATION_FIELDS = ["id", "eventId", "etag", "sendUpdates", ...CONTE
 
 /** Only ordinary event content, never calendar ACLs, organizer impersonation or arbitrary API fields. */
 export function eventMutation(input: Record<string, unknown>, mode: "create" | "update" | "delete"): Record<string, unknown> | undefined {
-  if (typeof input.sendUpdates !== "string" || !["all", "externalOnly", "none"].includes(input.sendUpdates)) return undefined;
+  if (!isGoogleCalendarSendUpdates(input.sendUpdates)) return undefined;
   if (mode === "create") {
     if (typeof input.id !== "string" || !/^[a-v0-9]{5,1024}$/u.test(input.id) || input.eventId !== undefined || input.etag !== undefined ||
       typeof input.summary !== "string" || !input.summary.trim() || !input.start || !input.end) return undefined;

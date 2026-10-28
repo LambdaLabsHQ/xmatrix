@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "../../protocol/src/app-connector-manifests.ts";
 import { PAGERDUTY_ACTIONS } from "../src/connectors/actions/pagerduty.ts";
-import { actionRefusal, isPolicyAction } from "../src/connectors/connector-commands.ts";
+import { actionRefusal } from "../src/connectors/connector-commands.ts";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
 
 const incident = { id: "Q1ABC2DEF", type: "incident", title: "Database unavailable", status: "triggered", urgency: "high",
@@ -22,7 +22,7 @@ async function execute(responses, credentials = { apiKey: "scoped-test-key" }) {
 test("incident reads have an independent current read/deny policy and do not grant status writes", () => {
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === "pagerduty");
   assert.equal(manifest.actions.find(action => action.id === "read_incident").effect, "read");
-  assert.ok(isPolicyAction(manifest, "read_incident"));
+
   assert.deepEqual(read.requires, ["apiKey|oauthToken"]);
   assert.equal(actionRefusal({ providerId: "pagerduty", actionId: "read_incident", effect: "read", mode: null,
     senderKind: "agent" }), undefined);

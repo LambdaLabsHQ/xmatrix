@@ -76,7 +76,7 @@ edits an existing comment.
 | `create_project_update:<project UUID>` / `update_project_update:<UUID>` | `body`, `health` (`onTrack`, `atRisk`, `offTrack`) |
 | `create_attachment:<issue>` / `update_attachment:<UUID>` | HTTPS `url`, `title`, optional `subtitle`; update edits title/subtitle; this links a resource and does not upload bytes |
 
-All writes pass the existing Channel policy and execution machinery. For an
+All writes pass the app permission and execution machinery. For an
 approval request, issue identifiers and team keys are resolved to stable IDs
 before asking; the approved destination remains frozen. Execution rechecks
 write authorization after destination lookup and immediately before mutation.
@@ -93,8 +93,8 @@ repeated.
 deletion. `delete_project` calls the current `projectDelete` API; the retired
 `projectArchive` mutation is not exposed. `delete_comment`, `delete_relation`, `delete_label`, `delete_document`,
 `delete_milestone` and `delete_attachment` remove the named object. These lifecycle
-actions default to per-request approval; existing task/project writes keep the
-platform's normal default. Only a human Space admin changes Channel policies.
+actions and other Linear writes default to per-request approval. A Human Space
+admin can choose Read only, Ask first, or Read and write for the whole connection.
 
 ## Cycle creation
 

@@ -59,7 +59,7 @@ use the connector registry. The later sections define provider-specific bounds.
 | Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and default policies are shared with clients |
 | Executor | `ConnectorProvider` and `platform-providers.ts` | Provider-owned parse/prepare/execute, authenticated Check and bounded outbound HTTP |
 | Commands | `connector-commands.ts`, `connectors/usage.ts` | Channel commands publish their receipts; `xmatrix call --public` records normal read results; `--private` keeps the invocation visible and masks only the Channel/history result, returning the original to its caller and retaining a protected 30-day Web view for its Human owner. Discover actions with `xmatrix connector list` |
-| Policy and approval | Scoped connector repositories and approval routes | Channel allow/ask/disallow, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
+| Policy and approval | Scoped connector repositories and approval routes | Connection read/ask/write, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
 | Credentials | Encrypted connector credential repository | Per-Space provider grants; company app secrets remain Hub-held, and OAuth refresh failures do not become wider grants |
 | Inbound | Generic event ingress plus provider-specific native routes | Authenticated deliveries normalize to typed source/event identities and route through explicit subscriptions |
 | Automations | Provider event triggers | Normalized connector events can wake linked page Automations; a scheduled report is not a native provider webhook |
@@ -171,7 +171,7 @@ and truncation is explicit. An optional `#tab=<id>` selects a tab.
 `@google:list_files:*` lists at most 20 app-authorized Drive files.
 `@google:create_doc:new <title>` creates a blank Doc, and
 `@google:append_doc:<id>[#tab=<id>] <text>` appends at the tab's end (first tab
-by default). Both writes use the Channel's existing action policy and are never
+by default). Both writes use the connection's permission and are never
 automatically replayed. A denied file id or URL cannot widen the Google grant;
 provider errors stop the operation. Retrieved text remains untrusted content.
 
@@ -233,7 +233,7 @@ response-size bound; paginate explicitly with startRow. Google returns top rows,
 not a guaranteed complete export. URL inspection includes the bounded full
 inspection result, including rich results and referring URLs.
 
-All actions follow the existing Channel policy: an explicit deny blocks execution.
+Reads require the connected grant and current access; writes follow the app permission.
 Page/sitemap URLs must belong to the exact property before any provider call.
 Search Console has no webhooks; schedule a page Automation for recurring reports.
 Enable both Search Console and Site Verification APIs on the company Google
@@ -276,7 +276,7 @@ API, so the Hub never echoes a request URL into a summary or error. A site is
 the exact URL Bing lists (`https://example.com/`). Reads: `list_sites:*`,
 `traffic:<site>` (daily clicks and impressions), `queries:<site>` and
 `pages:<site>` (top 50 by clicks), `crawl_stats:<site>`. Writes, under the
-Channel's action policy: `submit_urls:<site> <url …>` (at most 100, all inside
+app's permission: `submit_urls:<site> <url …>` (at most 100, all inside
 the site; the reply carries the remaining quota), `submit_sitemap:<site> <url>`
 and `indexnow:<site> <url …>`. IndexNow needs no account: the connection keeps
 the site's own IndexNow key, which the site publishes at `/<key>.txt`; the
@@ -407,7 +407,7 @@ company Google client, holding only `https://www.googleapis.com/auth/business.ma
 (Performance API daily metrics summed over a range ending three days ago, since
 Google's figures lag) and `reviews:<location>` (My Business v4, still the only
 reviews API; newest 50). The write `reply_review:<…/reviews/<id>> <text>` puts
-the owner's public reply under the Channel's action policy. Check lists one
+the owner's public reply under the app's permission. Check lists one
 account. Google must approve the company Cloud project for Business Profile
 API access (a request form, separate from OAuth verification) and the
 Account Management, Business Information and Performance APIs must be enabled;
@@ -443,7 +443,7 @@ which Check also does. A host is Yandex's id, `https:example.com:443`. Reads:
 `list_hosts:*`, `summary:<host>` (SQI, pages in search, excluded pages, site
 problems by severity), `queries:<host>` (top 50 popular queries by clicks).
 The write `recrawl:<host> <page url>` queues one page of that exact scheme,
-host and port, under the Channel's action policy.
+host and port, under the app's permission.
 
 Gmail content access signs in through Composio rather than the company Google client.
 Composio's managed Google app is approved by Google only for its default
@@ -455,9 +455,9 @@ default profile and contacts scopes, and the Hub is the boundary the grant
 is not: every user-invoked Gmail action passes an endpoint list in `actions/gmail.ts`
 (GET profile, message list and one message; POST messages/send) and any
 other endpoint is refused before Composio is called. The only write, POST
-messages/send, belongs to `send` and `reply`, whose manifest
-`defaultPolicy: "ask"` stages an immutable email for a Space admin to approve
-once in that Channel (§3.5). A read-only grant would need the company's own
+messages/send, belongs to `send` and `reply`. Gmail inherits the app manifest
+`defaultPermission: "ask"`, staging an immutable email for a Space admin to
+approve once (§3.5). A read-only grant would need the company's own
 Google app verified for `gmail.readonly` (OAuth verification and CASA).
 One Gmail connection holds any number of mailboxes. Its only credential,
 `mailboxes`, lists each mailbox's Composio account, address and owner: a
@@ -686,7 +686,7 @@ and 12,000 text characters across the description/comments; omitted rich content
 and text are marked. Account profile fields and ADF mention attributes are not
 copied, and account mentions become anonymous `@user`. Free text remains customer
 content; this does not claim a universal exemption from personal-data obligations.
-The existing Channel read/deny policy applies, independently of write approvals.
+The existing connection grant and Run/Channel access applies, independently of write approvals.
 See [Jira issue reads](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/#api-rest-api-3-issue-issueidorkey-get),
 [comment permissions and pagination](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-comments/#api-rest-api-3-issue-issueidorkey-comment-get)
 and [ADF structure](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/).
@@ -729,7 +729,7 @@ or frames are omitted. It is fenced as untrusted and capped at 12,000 characters
 omissions are explicit. Request bodies/headers, local variables, source context,
 breadcrumbs, account profiles, attachments and linked URLs are not fetched or
 copied. Missing events, revoked access and mismatched issue/event identities
-fail the read. The Channel read/deny policy does not authorize status writes.
+fail the read. The connection grant and Run/Channel access does not authorize status writes.
 The registered OAuth app always uses `sentry.io` and its OAuth token, ignoring
 stale manual URL/token fields for reads, writes and Check; manual tokens retain
 their configured self-hosted origin. Malformed short-id lookup responses cannot
@@ -810,7 +810,7 @@ See [issue details](https://docs.sentry.io/api/events/retrieve-an-issue/),
 and [Sentry's Public Integration installation example](https://github.com/getsentry/integration-platform-example/blob/main/docs/installation.md).
 
 Requests use the connection's provider grant, verify returned task identity,
-and obey the current Channel read/deny policy; existing comment/create/merge
+and obey the current connection grant and Run/Channel access; existing comment/create/merge
 writes still require their own policy. This enables explicit task context →
 work → comment workflows without granting a write or selecting a whole project.
 See [Linear issue queries](https://linear.app/developers/graphql),
@@ -826,7 +826,7 @@ including page metadata, and eight nested levels. It follows only Notion block
 ids and bounded API pagination, never external URLs or child-page/database
 contents. Unsupported non-text blocks are marked as omitted; limit exhaustion
 is reported as truncation. Retrieved content is fenced and untrusted. Current
-Channel read/deny policy and the Space connection's provider grant still apply;
+connection grant and Run/Channel access and the Space connection's provider grant still apply;
 append/create remain separately governed writes. See [Notion block children](https://developers.notion.com/reference/get-block-children).
 
 Notion's OAuth access and refresh tokens are stored together in the encrypted
@@ -1053,20 +1053,19 @@ GitHub triggers may use either spelling.
 
 ### 3.5 Outbound actions and policy
 
-- Per-Channel action policy has three values: `allow` executes immediately,
-  `ask` stages each request for a Human Space admin, and `disallow` refuses it.
-  The legacy command/API spelling `deny` remains a restrictive `disallow` alias.
-  Only current Space owners/admins change a policy or decide a request; an Agent
-  Run cannot approve its own call.
-- No override uses the manifest default: Gmail `send`/`reply` and Google Ads
-  `mutate`/`set_campaign_status` default to `ask`, while other actions retain
-  `allow`. Existing explicit allow/deny rows keep
-  their meaning. GitHub's specialized dispatcher retains allow/disallow; it
-  rejects ask instead of suggesting that an unsupported approval will appear.
-- The existing policy row stays the sole authority. The additive `ask_version`
-  column identifies ask only when it equals that row's version and its legacy
-  mode is deny. Old executors therefore fail closed; old writers advance the
-  version and invalidate ask. This avoids rewriting rows or relaxing constraints.
+- Each Space connection has one permission: `read` permits provider reads and
+  blocks writes; `ask` permits reads and stages each write for a Human Space
+  admin; `write` permits reads and writes directly. Only current Space admins
+  may change it. There are no Channel exceptions or per-action settings.
+- `data.app_connector_connections.permission_mode` is the sole stored setting;
+  NULL inherits the manifest's `defaultPermission`. Calendar defaults to write;
+  Gmail, Google Ads, X and Linear default to ask; read-only apps default to read.
+  GitHub rejects ask because its specialized dispatcher has no approval executor.
+- Permission is read uncached for each execution and immediately before writes.
+  API GET `/api/spaces/:spaceId/app-connections/:providerId/policies` returns
+  `{mode,inherited}`; PUT accepts only `{mode:"read"|"ask"|"write"|null}`.
+  Old Channel/action bodies are rejected rather than reinterpreted globally.
+  The retired `@app:policy:<action>` commands are not executable commands.
 - `data.app_connector_action_requests` owns encrypted, immutable request input
   and its 24-hour expiry, account generation and credential version. Channel
   commands from people and Agents stage the same flow. The Pending approvals card fetches
@@ -1088,10 +1087,10 @@ GitHub triggers may use either spelling.
   only `{decision: "allow"|"disallow"}`; content is read from the frozen request,
   never from the decision body. Both require current Channel access and return
   private/no-store. Web proxies use the corresponding `/api/xmatrix` routes.
-- Migration: each `*WriteChannelId` metadata value becomes one
-  `(connection, channel, action, allow)` row.
-  - The migration is idempotent and bounded per connection.
-  - The old fields are read as a fallback for one release, then dropped.
+- Channel-rule retirement is sequenced: freeze old writers after verifying
+  that their rows contain no restrictive settings; deploy and verify this
+  connection-only executor; then drop the retired table/function in a separate
+  contract migration. See [permission retirement](../operations/connector-permission-retirement.md).
 - Agents act the way people do: every connector command is a Channel message,
   parsed after it commits, so nothing calls a provider out of the Channel's
   sight. An Agent sends one with `xmatrix send`; its identity, Channel and
@@ -1163,7 +1162,7 @@ or generates a webhook secret in the Apps view.
       credential store.
     - `@openconnector:search:<service>` (read) lists a service's actions.
     - `@openconnector:run:<service.action>[@alias] <json>` (write) runs one
-      action. It goes through the same channel policy, execution record and
+      action. It goes through the same app permission, execution record and
       receipt.
     - The result preview is bounded, and mentions in it are shielded.
     - Check authenticates `/v1/health` and confirms `oomol-connect` health;
@@ -1174,8 +1173,8 @@ or generates a webhook secret in the Apps view.
       Run accepts only explicit success with an exact action ID, execution ID
       and persisted audit confirmation. Untrusted output is fenced and limited
       to 800 characters. Invalid or uncertain receipts never imply safe retry.
-    - Policy is per channel for all OpenConnector actions together; a Space
-      admin's `@openconnector:policy:run deny` turns them off there.
+    - All OpenConnector writes follow the connection's app permission. A Space
+      admin selects Read only to block them in every conversation.
 
 ## 5. Delivery plan (one PR each)
 
@@ -1192,7 +1191,7 @@ or generates a webhook secret in the Apps view.
    Cloudflare, Notion, Discord and Feishu, in that order.
 6. **Agent access.** Connected app names in the launch prompt and `xmatrix connector list`.
 7. **Web Apps view.** A generic connect form driven by the manifest (token
-   fields, webhook URL and secret display, per-Channel policy editor).
+   fields, webhook URL and secret display, connection permission selector).
 
 ## 6. Compatibility and safety
 
@@ -1378,7 +1377,7 @@ app/room. Starting a reconnect preserves the old grant until confirmation.
 
 Native Check proves the captured room's app membership and rechecks its grant.
 Native post takes a server capability scoped to that room, rechecking current
-grant and Channel action policy both before token minting and immediately
+grant and app permission both before token minting and immediately
 before the single provider write. Missing configuration, inactive bindings,
 changed app identity or revoked grants cannot fall back to manual credentials.
 An explicit later manual credential edit retires the native binding.
@@ -1571,7 +1570,7 @@ all company group grants and pending confirmations.
 Incoming messages route only through current primary room/tenant grants and
 existing Channel subscriptions. Before each Channel append and Automation the
 server checks the captured grant again. Native sending resolves one explicit
-group among the Space's confirmed grants, checks current Channel action policy
+group among the Space's confirmed grants, checks current app permission
 and bot membership, then rechecks immediately before a single provider write.
 No mention markup or write retries are issued. Check confirms all current
 bound groups with bounded concurrency and a shared request deadline. Signed bot

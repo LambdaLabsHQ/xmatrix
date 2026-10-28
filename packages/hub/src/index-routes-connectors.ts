@@ -9,9 +9,9 @@ import { handleDingTalkSuiteCallback } from "./connectors/dingtalk-suite";
 import { handleDingTalkSyncHTTP } from "./connectors/dingtalk-synchttp-ingress";
 import { registerDingTalkRoutes } from "./index-routes-dingtalk";
 import type { Hono } from "hono";
-import { connectorActionPolicy, HUB_ROUTES } from "@xmatrix/protocol";
+import { connectorPermission, HUB_ROUTES } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "./app-connectors";
-import { connectorActionPolicyRepository, connectorIngressUrl, connectorCredentialRepository, INGRESS_KEY_FIELD,
+import { connectorPermissionRepository, connectorIngressUrl, connectorCredentialRepository, INGRESS_KEY_FIELD,
   mintConnectorSecret } from "./connectors/credentials";
 import { handleAppConnectorDelivery, handleConnectorDelivery } from "./connectors/event-ingress";
 import { handleSentryInstallationDelivery } from "./connectors/sentry-app-lifecycle";
@@ -25,7 +25,6 @@ import { registerTelegramRoutes } from "./index-routes-telegram";
 import { registerWeComRoutes } from "./index-routes-wecom";
 import { registerFeishuRoutes } from "./index-routes-feishu";
 import { registerGoogleChatRoutes } from "./index-routes-googlechat";
-import { isPolicyAction } from "./connectors/connector-commands";
 import { connectorActionCatalog } from "./connectors/action-catalog";
 import { connectorProvider } from "./connectors/registry";
 import { connectorUsage } from "./connectors/usage";
@@ -129,9 +128,11 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
       const authenticated = await requireAuth(c.req.raw, c.env);
       if (authenticated.agentRun) return c.json({ error: "Connector policy is for Space members" }, 403);
       const user = requireHumanAuth(authenticated);
-      const policies = await connectorActionPolicyRepository(c.env).list({ requestId: crypto.randomUUID(),
-        spaceId: c.req.param("spaceId"), providerId: c.req.param("providerId"), actorUserId: user.id });
-      return c.json({ policies }, 200, { "cache-control": "private, no-store" });
+      const manifest = getAppConnectorProvider(c.req.param("providerId"));
+      if (!manifest) return c.json({ error: "App not found" }, 404);
+      const stored = await connectorPermissionRepository(c.env).read({ requestId: crypto.randomUUID(),
+        spaceId: c.req.param("spaceId"), providerId: manifest.id, actorUserId: user.id });
+      return c.json({ mode: stored ?? manifest.defaultPermission ?? "write", inherited: stored === null }, 200, { "cache-control": "private, no-store" });
     } catch (error) {
       return errorResponse(error);
     }
@@ -145,23 +146,19 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
       const manifest = getAppConnectorProvider(c.req.param("providerId"));
       const bytes = await readBoundedRequestBody(c.req.raw, 4_096);
       if (!manifest || !bytes) return c.json({ error: "Invalid connector policy request" }, 400);
-      let body: { channelId?: unknown; actionId?: unknown; mode?: unknown };
+      let body: { mode?: unknown };
       try { body = JSON.parse(new TextDecoder().decode(bytes)) as typeof body; } catch {
-        return c.json({ error: "Invalid connector policy request" }, 400);
+        return c.json({ error: "Invalid app permission" }, 400);
       }
-      const actionId = typeof body.actionId === "string" ? body.actionId : "";
-      if (!isPolicyAction(manifest, actionId)) {
-        return c.json({ error: `${actionId || "action"} is not a ${manifest.name} write action` }, 400);
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "mode") ||
+          body.mode !== null && !connectorPermission(body.mode)) return c.json({ error: "Use {mode: read|ask|write|null}" }, 400);
+      if (body.mode === "ask" && manifest.actions.some(action => action.effect === "write" &&
+          !connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions).get(action.id)?.executor)) {
+        return c.json({ error: "This app does not support per-request approval" }, 400);
       }
-      if (body.mode !== null && !connectorActionPolicy(body.mode)) {
-        return c.json({ error: "mode is allow, ask, disallow or null" }, 400);
-      }
-      if (body.mode === "ask" && !connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions).get(actionId)?.executor) {
-        return c.json({ error: "This action does not support per-request approval" }, 400);
-      }
-      const result = await connectorActionPolicyRepository(c.env).set({ requestId: crypto.randomUUID(),
-        spaceId: c.req.param("spaceId"), providerId: manifest.id, channelId: String(body.channelId ?? ""), actionId,
-        mode: body.mode === null ? null : connectorActionPolicy(body.mode)!, actorUserId: user.id, at: new Date().toISOString() });
+      const result = await connectorPermissionRepository(c.env).set({ requestId: crypto.randomUUID(),
+        spaceId: c.req.param("spaceId"), providerId: manifest.id, mode: body.mode === null ? null : connectorPermission(body.mode)!,
+        actorUserId: user.id, at: new Date().toISOString() });
       return c.json(result);
     } catch (error) {
       return errorResponse(error);

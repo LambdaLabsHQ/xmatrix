@@ -181,7 +181,7 @@ A paused Search campaign and its dedicated $1 average daily budget:
 ```
 
 Supply that JSON as `text` to `validate_mutations` first. A real create needs
-`mutate` and its write approval or authorized Channel policy. The political-ad
+`mutate` and its write approval or app permission. The political-ad
 declaration must reflect the actual campaign; the connector does not infer it.
 Add valid ad groups, keywords, geographic/language criteria and creatives using
 the same resource operations before explicitly enabling a campaign.

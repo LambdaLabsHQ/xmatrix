@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_CHANNEL, E2E_NOW, fixtureJson, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_CHANNEL, E2E_NOW, fixtureJson, fixtureRequestBodies, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 const connection = (providerId: string, providerName: string, status: string, authMode = "api-token") => ({
@@ -8,14 +8,14 @@ const connection = (providerId: string, providerName: string, status: string, au
   credentialFields: [], createdBy: "e2e-user", createdAt: E2E_NOW, updatedAt: E2E_NOW, lastCheckedAt: E2E_NOW });
 
 /** Opens Apps with these one-click providers and connections, then the named app when given. */
-async function openApps(page: Page, { providers = [], connections = [], app }: {
-  providers?: string[]; connections?: unknown[]; app?: string;
+async function openApps(page: Page, { providers = [], connections = [], app, permission = { mode: "write", inherited: true } }: {
+  providers?: string[]; connections?: unknown[]; app?: string; permission?: unknown;
 }) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   await fixtureJson(page, "providers", "**/api/xmatrix/connectors/oauth/providers", { providers, nativeProviders: [] });
   await fixtureJson(page, "connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections });
   await fixtureJson(page, "executions", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });
-  await fixtureJson(page, "policies", /\/app-connections\/[^/]+\/policies$/, { policies: [] });
+  await fixtureJson(page, "policies", /\/app-connections\/[^/]+\/policies$/, permission);
   await fixtureJson(page, "credentials", /\/app-connections\/[^/]+\/credentials$/, { credentialFields: [] });
   await page.getByRole("button", { name: "App", exact: true }).click();
   if (app) await page.getByTestId("connector-row").filter({ hasText: app }).click();
@@ -55,5 +55,21 @@ test("a connected app shows no call to action, and Disconnect comes last", async
   await expect(page.getByTestId("connector-lead")).toHaveCount(0);
   await expect(page_(page).locator(".app-action-primary")).toHaveCount(0);
   await expect(page_(page).locator("section[aria-label]").last()).toHaveAttribute("aria-label", "Disconnect");
-  await expect(page.getByTestId("connector-policy")).toContainText(/unless a channel has a rule of its own/i);
+  await expect(page.getByTestId("connector-policy")).toContainText("Agents read and make changes directly");
+});
+
+test("Permissions are one choice for the app: read only, ask first, or read and write", async ({ page }) => {
+  await openApps(page, { providers: ["googlecalendar"], connections: [connection("googlecalendar", "Google Calendar", "configured", "oauth")],
+    app: "Google Calendar" });
+  await fixtureJson(page, "policy-put", /\/app-connections\/googlecalendar\/policies$/, { ok: true }, { method: "PUT" });
+
+  const permissions = page.getByTestId("connector-policy");
+  const choice = permissions.getByRole("combobox", { name: "Agents may" });
+  await expect(choice).toContainText("Read and write");
+  await expect(permissions).toContainText("Agents read and make changes directly");
+  await expect(permissions.getByText(/channel/i)).toHaveCount(0);
+  await choice.click();
+  for (const label of ["Read only", "Ask first", "Read and write"]) await expect(page.getByRole("option", { name: label })).toBeVisible();
+  await page.getByRole("option", { name: "Ask first" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "policy-put")).toEqual([{ mode: "ask" }]);
 });

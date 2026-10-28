@@ -13,7 +13,7 @@ async function dispatcher({ providerId, spaceId, mode, repository, publish = asy
     "./command-support": { commandResult, commandScope: async () => ({ spaceId, connectionId: `${spaceId}:${providerId}` }),
       withExecution: async (manifest, _input, _scope, action, run) => commandResult(manifest.name, action.id, await run()),
       publishCommandStatus: publish },
-    "./credentials": { connectorActionPolicyRepository: () => ({ mode }), connectorActionRequestRepository: () => repository },
+    "./credentials": { connectorPermissionRepository: () => ({ mode }), connectorActionRequestRepository: () => repository },
     "./http": { ProviderRequestError },
     "../usage-cost-metering": metering,
     ...imports,
@@ -43,13 +43,13 @@ test("Gmail ask stages a request, allow executes, and disallow blocks before pro
   // The staged request is announced, so an admin's open Channel shows it without polling for it.
   const announcement = { spaceId: "s", resource: "connector_action_requests", channelId: "c" };
   assert.deepEqual(announced, [announcement]);
-  mode = "allow";
+  mode = "write";
   assert.match(await commands.runConnectorAction("gmail", input, "send", action, { target: "to@example.test", text: "Subject\nBody" }), /awaiting approval/);
   assert.equal(writes, 0, "re-delivery after allow cannot bypass the pending approval");
-  mode = "disallow";
+  mode = "read";
   assert.match(await commands.runConnectorAction("gmail", { ...input, messageId: "m2" }, "send", action, { target: "to@example.test", text: "" }), /blocked/);
   assert.equal(writes, 0);
-  mode = "allow";
+  mode = "write";
   assert.match(await commands.runConnectorAction("gmail", { ...input, messageId: "m3" }, "send", action, { target: "to@example.test", text: "" }), /completed/);
   assert.equal(writes, 1);
   assert.deepEqual(announced, [announcement], "only a newly staged request changes what waits");
@@ -58,7 +58,7 @@ test("Gmail ask stages a request, allow executes, and disallow blocks before pro
 // Slow provider work must never run during command admission. The repository
 // tests own authorization; this dispatcher owns routing both policy modes to a job.
 test("X allow uploads freeze input and queue once; only the durable executor performs the transfer", async () => {
-  let mode = "allow", stage, writes = 0, authorizations = 0;
+  let mode = "write", stage, writes = 0, authorizations = 0;
   const queued = [], published = [], transferred = [];
   const action = { effect: "write", requires: [], parse: () => ({ account: "@company" }),
     prepare: async () => ({ accountId: "101", accountGeneration: "grant", accountUsername: "company", sourceHash: "frozen" }),
@@ -98,7 +98,7 @@ test("X allow uploads freeze input and queue once; only the durable executor per
   await commands.publishDurableXUploadReceipt({}, { ...stage, ...result });
   assert.equal(published[2].input.messageId, "original:upload-result");
   assert.equal(published[2].input.commandMessageId, "original");
-  mode = "disallow";
+  mode = "read";
   assert.equal((await commands.executeDurableXUpload({}, stage)).status, "blocked");
   assert.equal(writes, 1, "a current denial prevents provider I/O");
 });
@@ -108,7 +108,7 @@ test("X allow uploads freeze input and queue once; only the durable executor per
 test("Calendar approval stores the prepared event preview without executing the write", async () => {
   let staged, writes = 0;
   const preview = { change: "update", calendar: "owner@example.com", title: "Changed meeting", start: "2026-10-29", end: "2026-10-30", sendUpdates: "all" };
-  const commands = await dispatcher({ providerId: "googlecalendar", spaceId: "s", mode: async () => null,
+  const commands = await dispatcher({ providerId: "googlecalendar", spaceId: "s", mode: async () => "ask",
     repository: { find: async () => null, create: async input => { staged = input; return { requestId: input.requestId, status: "pending" }; } },
     imports: { "./connection-credentials": { connectionCredentials: async () => ({ oauthToken: "a" }) },
       "../workspace-resource-notification": { notifyWorkspaceResource: async () => {} } } });
@@ -128,7 +128,7 @@ test("Calendar Allow schedules directly and a policy change during preparation p
   const { GOOGLE_CALENDAR_ACTIONS } = await import("../src/connectors/actions/google-calendar.ts");
   const { stubFetchResponses } = await import("./support/fetch-responses.mjs");
   for (const revokeDuringPreparation of [false, true]) {
-    let mode = "allow", approvals = 0;
+    let mode = null, approvals = 0;
     const commands = await dispatcher({ providerId: "googlecalendar", spaceId: "s", mode: async () => mode,
       repository: { find: async () => null, create: async () => { approvals++; throw new Error("Allow must not ask"); } },
       imports: { "./connection-credentials": { connectionCredentials: async () => ({ oauthToken: "a" }) } } });
@@ -137,7 +137,7 @@ test("Calendar Allow schedules directly and a policy change during preparation p
     const fetch = stubFetchResponses([{ body: calendar }, { body: event }], {
       decodeBody: body => body ? JSON.parse(body) : undefined,
       reply: response => {
-        if (response.body === calendar && revokeDuringPreparation) mode = "disallow";
+        if (response.body === calendar && revokeDuringPreparation) mode = "read";
         return new Response(JSON.stringify(response.body));
       },
     });

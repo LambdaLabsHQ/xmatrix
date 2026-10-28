@@ -36,7 +36,7 @@ test("Calendar has a separate exact three-scope offline grant and refuses missin
   await assert.rejects(refreshOAuthFields(company, "googlecalendar", { oauthToken: "old" }), /complete expiring grant/u);
   await assert.rejects(refreshOAuthFields({}, "googlecalendar", { oauthToken: "old", oauthRefreshToken: "r", oauthExpiresAt: "1" }), /unavailable for refresh/u);
   const manifest = getAppConnectorProvider("googlecalendar");
-  for (const id of ["create_event", "update_event", "delete_event"]) assert.equal(manifest.actions.find(a => a.id === id).defaultPolicy, "ask");
+  assert.equal(manifest.defaultPermission, "write");
 });
 
 test("Calendar validates addresses, explicit offsets, bounded intervals, event fields and conditional writes before requests", () => {

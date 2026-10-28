@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
 
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "../../protocol/src/app-connector-manifests.ts";
-import { parseActionCommand, parsePolicyCommand } from "../src/connectors/action-parse.ts";
-import { actionRefusal, connectorCommands, isPolicyAction } from "../src/connectors/connector-commands.ts";
+import { parseActionCommand } from "../src/connectors/action-parse.ts";
+import { actionRefusal, connectorCommands } from "../src/connectors/connector-commands.ts";
 import { providerUrl } from "../src/connectors/http.ts";
 import { connectorForCommand, connectorInteractionRegistry, connectorProvider } from "../src/connectors/registry.ts";
 
@@ -46,7 +45,7 @@ test("every manifest write action has an executor that declares it, and every ex
         assert.ok(manifest.credentials.some((credential) => credential.id === field), `${manifest.id}.${id} needs ${field}`);
       }
     }
-    if (declared.length > 0) assert.ok(manifest.actions.some((action) => action.id === "policy"), `${manifest.id} policy`);
+    assert.ok(!manifest.actions.some(action => action.id === "policy"), "retired per-action policy commands must not reappear");
   }
 });
 
@@ -59,7 +58,7 @@ test("every command a connector declares resolves to it, however many it declare
       assert.equal(registry.resolve(manifest.id, action.id).status, "resolved", `@${manifest.id}:${action.id}`);
     }
   }
-  assert.equal(connectorForCommand("@appstoreconnect:policy:release deny")?.id, "appstoreconnect");
+  assert.equal(connectorForCommand("@appstoreconnect:policy:release deny")?.id, undefined);
   assert.equal(connectorForCommand("@appstoreconnect:read_profile:9663S6W4AA")?.id, "appstoreconnect");
 });
 
@@ -68,63 +67,20 @@ test("action commands take one statement whose text spans the following lines", 
     actionId: "create_issue", statement: { target: "ENG", text: "Fix login\nSteps:\n1. open" } });
   assert.equal(parseActionCommand("linear", "please @linear:comment:ENG-1 hi"), undefined);
   assert.equal(connectorForCommand("@slack:post:C0123456789 hello")?.id, "slack");
-  assert.equal(connectorForCommand("@slack:policy:post allow")?.id, "slack");
+  assert.equal(connectorForCommand("@slack:policy:post allow")?.id, undefined);
   assert.equal(connectorForCommand("@slack:nope:C1 hi"), undefined, "an unknown action is not a command");
   assert.equal(connectorForCommand("@linear:create_cycle:MAD {}"), undefined,
     "Linear retired manual cycle creation; only its supported cycle workflows are commands");
   assert.equal(connectorForCommand("@circleci:post:x hi"), undefined, "an event-only provider takes no actions");
-  assert.deepEqual(parsePolicyCommand({ target: "post", text: "allow" }), { actionId: "post", mode: "allow" });
-  assert.deepEqual(parsePolicyCommand({ target: "post", text: "default" }), { actionId: "post", mode: null });
-  assert.ok("error" in parsePolicyCommand({ target: "post", text: "maybe" }));
+
 });
 
-test("policy: actions follow their defaults and the Channel's explicit approval or denial", () => {
-  /* Public publishing, mail, calendar and advertising changes ask until a Space admin allows them. */
-  const gated = new Set(["gmail:send", "gmail:reply", "googleads:mutate", "googleads:set_campaign_status",
-    "googlecalendar:create_event", "googlecalendar:update_event", "googlecalendar:delete_event",
-    "x:post", "x:quote", "x:upload_video",
-    "linear:archive_issue", "linear:unarchive_issue", "linear:delete_issue", "linear:delete_project",
-    "linear:unarchive_project", "linear:archive_cycle", "linear:archive_project_update", "linear:delete_comment",
-    "linear:delete_relation", "linear:delete_label", "linear:delete_document", "linear:delete_milestone", "linear:delete_attachment"]);
-  for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
-    for (const action of provider.actions.filter((candidate) => candidate.effect)) {
-      const id = `${provider.id}:${action.id}`;
-      assert.equal(action.defaultPolicy, gated.has(id) ? "ask" : undefined, `${id} default`);
-      const refusal = (mode) => actionRefusal({ actionId: action.id, mode, defaultPolicy: action.defaultPolicy });
-      if (gated.has(id)) assert.match(refusal(null), /needs approval/u, id);
-      else assert.equal(refusal(null), undefined, id);
-      assert.equal(refusal("allow"), undefined, id);
-      assert.match(refusal("disallow"), /denied/u, id);
-      assert.match(refusal("ask"), /needs approval/u, id);
-      assert.match(refusal("deny"), /denied/u, id);
-    }
-  }
-});
-
-test("a Channel policy names only the actions that act on the provider", () => {
-  const github = APP_CONNECTOR_PROVIDER_MANIFESTS.find((provider) => provider.id === "github");
-  assert.equal(isPolicyAction(github, "merge"), true);
-  // A subscription brings the repository's content into the Channel; unsubscribing only narrows it.
-  assert.equal(isPolicyAction(github, "subscribe"), true);
-  assert.equal(isPolicyAction(github, "unsubscribe"), false);
-  assert.equal(isPolicyAction(github, "nope"), false);
-});
-
-test("every connector action reads the Channel's policy through channelActionRefusal", () => {
-  const src = new URL("../src/", import.meta.url);
-  const files = (dir) => readdirSync(dir).flatMap((name) => {
-    const url = new URL(name, dir);
-    return statSync(url).isDirectory() ? files(new URL(`${name}/`, dir)) : name.endsWith(".ts") ? [url] : [];
-  });
-  const owner = new URL("connectors/connector-commands.ts", src).href;
-  for (const url of files(src)) {
-    if (url.href === owner) continue;
-    const source = readFileSync(url, "utf8");
-    assert.doesNotMatch(source, /\bactionRefusal\(/u, `${url.pathname} decides a Channel policy refusal by hand`);
-    assert.doesNotMatch(source, /connectorActionPolicyRepository\([^)]*\)\.mode\(/u,
-      `${url.pathname} reads a Channel's action policy mode by hand`);
-    assert.doesNotMatch(source, /action\.id === \w+ && action\.effect/u, `${url.pathname} checks a policy action by hand`);
-  }
+test("app permission defaults preserve approval for publishing and allow Calendar scheduling", () => {
+  for (const id of ["linear", "gmail", "googleads", "x"]) assert.equal(APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === id).defaultPermission, "ask");
+  assert.equal(APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === "googlecalendar").defaultPermission, "write");
+  assert.equal(actionRefusal({ actionId: "create_event", mode: "allow" }), undefined);
+  assert.match(actionRefusal({ actionId: "create_event", mode: "ask" }), /needs approval/u);
+  assert.match(actionRefusal({ actionId: "create_event", mode: "disallow" }), /denied/u);
 });
 
 test("action targets and text are validated before any provider call", () => {
@@ -239,7 +195,7 @@ test("a provider's command handler accepts its subscriptions, actions and policy
   const handler = connectorCommands("slack", connectorProvider("slack").actions);
   assert.ok(handler.accepts("@slack:subscribe:C0123456789"));
   assert.ok(handler.accepts("@slack:post:C0123456789 hi"));
-  assert.ok(handler.accepts("@slack:policy:post allow"));
+  assert.ok(!handler.accepts("@slack:policy:post allow"));
   assert.ok(!handler.accepts("@slack:delete:C0123456789"));
   assert.ok(!handler.accepts("@linear:comment:ENG-1 hi"));
 });
@@ -271,7 +227,7 @@ test("Channel action admission requires a declared own executor with the declare
     for (const action of ["post", "not_declared", "constructor", "__proto__"]) {
       assert.equal(commands.accepts(`@slack:${action}:C0123456789 hi`), false, action);
     }
-    assert.equal(commands.accepts("@slack:policy:post allow"), true);
+    assert.equal(commands.accepts("@slack:policy:post allow"), false);
     assert.equal(commands.accepts("@slack:subscribe:C0123456789"), true);
   }
   assert.equal(connectorCommands("slack", { post }).accepts("@slack:post:C0123456789 hi"), true);

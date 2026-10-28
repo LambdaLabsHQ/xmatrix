@@ -40,7 +40,7 @@ Worker mutation is needed.
 
 ## Commands
 
-Commands run from Channel messages, under per-action Channel policies. Use an
+Commands run from Channel messages, under the app permission. Use an
 explicit project ID or number and Cloud Run region:
 
 Region numbers can have two digits, such as `europe-west10` and `europe-west12`.
@@ -165,7 +165,7 @@ is not a missing OAuth scope. Check or enable a supported API through Connector:
 @gcp:enable_api:123456789/bigquery.googleapis.com
 ```
 
-`enable_api` is a declared write, uses the Channel's action policy and Google
+`enable_api` is a declared write, uses the app permission and Google
 IAM, and returns an operation receipt; use `read_api_status` until `ENABLED`.
 Use the numeric project number (returned by `list_projects` or the Google
 error consumer). Only App Optimize, Billing, BigQuery, Asset, Resource Manager, Run, Logging and
@@ -202,7 +202,7 @@ sign these payloads. Notification contents do not authorize operations.
 ## Acceptance
 
 After the normal Hub/Web release, verify real OAuth, Check, resource/log/metric
-reads under the intended IAM grant, denied Channel policy, and permission/API
+reads under the intended IAM grant, Read-only app permission, and permission/API
 errors. Trigger and close a real Monitoring incident; verify metrics-scope
 routing, duplicate suppression and Automation delivery. Verify wrong tokens,
 OAuth revocation, rotation and reconnect. Fixtures and a deployed manifest are

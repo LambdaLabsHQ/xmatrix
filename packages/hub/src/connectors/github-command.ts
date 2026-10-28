@@ -1,9 +1,9 @@
 /* The GitHub actions a channel message runs. Which of them may run in a given
-   Channel, and by whom, is the action policy's decision
+   Channel, and by whom, is the app permission's decision
    (docs/design/connector-platform.md §3.5). */
 export const GITHUB_COMMAND_ACTIONS = [
   "subscribe", "unsubscribe", "merge", "rerun_failed_jobs", "dispatch_workflow",
-  "comment", "create_issue", "close_issue", "reopen_issue", "review", "policy",
+  "comment", "create_issue", "close_issue", "reopen_issue", "review",
 ] as const;
 
 const GITHUB_COMMAND = new RegExp(

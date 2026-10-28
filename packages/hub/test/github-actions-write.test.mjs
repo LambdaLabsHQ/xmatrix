@@ -94,7 +94,6 @@ test("GitHub writes run by default and Actions writes fail closed on a missing l
   for (const id of ["rerun_failed_jobs", "dispatch_workflow", "comment", "create_issue", "close_issue", "reopen_issue", "review"]) {
     const action = github.actions.find((candidate) => candidate.id === id);
     assert.equal(action.effect, "write", id);
-    assert.equal("defaultPolicy" in action, false, `${id} runs without a Channel opt-in`);
   }
 
   const stub = stubGitHub({ metadata: "read", actions: "read" });

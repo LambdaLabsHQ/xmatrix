@@ -49,7 +49,7 @@ export interface ConnectorActionContext {
   x?: XActionCapability;
   /** Channel attachment access and account-bound X video upload receipts. */
   xMedia?: XMediaCapability;
-  /** Revalidates current Channel policy immediately before an outbound write. */
+  /** Revalidates current app permission immediately before an outbound write. */
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;

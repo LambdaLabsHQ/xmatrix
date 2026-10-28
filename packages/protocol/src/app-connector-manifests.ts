@@ -5,7 +5,6 @@ import type {
   CommandCompletionArgumentSchema,
   CommandCompletionDelimiter,
 } from "./authority.js";
-import type { ConnectorActionPolicy } from "./app-connector-policy.js";
 import { EVENT_CONNECTOR_MANIFESTS } from "./app-connector-event-manifests.js";
 
 // Public Integration Issue Read & Write includes both event scopes in Sentry's native UI.
@@ -20,6 +19,8 @@ export interface AppConnectorProviderManifest {
   kind: AppConnectorProviderKind;
   status: AppConnectorProviderStatus;
   description: string;
+  /** One connection-wide default; an admin may choose read, ask or write. */
+  defaultPermission?: "read" | "ask" | "write";
   auth: {
     type: "oauth" | "api-token";
     scopes: string[];
@@ -117,7 +118,7 @@ export interface AppConnectorProviderManifest {
      * `ask` requires approval of each request; `disallow` refuses the action.
      * Missing means `allow`. Overrides are set by a Space admin.
      */
-    defaultPolicy?: ConnectorActionPolicy;
+
     /** How to write the command after `@<provider>:<action>`, shown in completion and help. */
     usage?: string;
     completion?: {
@@ -481,13 +482,7 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
           arguments: GITHUB_ORGANIZATION_REPOSITORY_REF_ARGUMENT,
         },
       },
-      {
-        id: "policy",
-        label: "Set action policy",
-        description: "Space admins: allow a write action in this channel, deny it for everyone, or reset it to the default.",
-        usage: "<action> allow|deny|default",
-        completion: { trailingDelimiter: ":" },
-      },
+
     ],
   },
   ...EVENT_CONNECTOR_MANIFESTS,

@@ -25,7 +25,8 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 ## Current behavior
 
 Google Calendar has a separate Space connection for calendar/event reads,
-availability and approved event writes. Conditional changes retain event ETags
+availability and event writes. Every App now has one connection-wide
+read/ask/write permission; Calendar defaults to write, with no Channel rules. Conditional changes retain event ETags
 and resolved calendar IDs. See the [Calendar contract](../connectors/google-calendar.md).
 
 Routine successful stops appear in Instance and invocation state without a
@@ -180,7 +181,7 @@ Connector reads have normal (`xmatrix call --public`) and private (`--private`)
 result modes. Both retain their invocation and parameters in the Channel;
 private receipts and execution history receive a fixed mask before any result
 write. The original value or provider error returns to the caller and is retained in restricted content for its Human owner’s Web view for 30 days; other members and Agent Runs cannot read that view.
-Run, mailbox and Channel-policy checks remain unchanged. See
+Run, mailbox and app-permission checks remain unchanged. See
 [connector delivery](../design/connector-platform.md).
 
 Gmail notifications default to minute INBOX count polling with a separate
