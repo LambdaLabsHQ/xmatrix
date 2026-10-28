@@ -8,6 +8,7 @@ now takes completed readings for the exact current draft immediately;
 unfinished previews use the existing post-send intent check. Changed drafts
 cannot carry an older reading. This ships in the beta Web, with no API or
 data migration. Recovery is a CI-validated beta Web reverting the change.
+
 ## Unreleased: Explicit activation keeps mention details open
 
 A mention's delayed hover-close can already be queued when Enter or a click
