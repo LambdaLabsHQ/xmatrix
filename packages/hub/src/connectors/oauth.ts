@@ -370,11 +370,11 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
   const completeGoogleGrant = providerId === "gcp" || providerId === "googleads" || providerId === "googlecalendar";
   if (completeGoogleGrant && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
-    throw new ConnectorRemedy(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`);
+    throw new ConnectorRemedy(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`, { kind: "reconnect" });
   }
   if (providerId === "bitbucket" && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
-    throw new ConnectorRemedy(401, "Bitbucket OAuth requires a complete expiring grant; reconnect");
+    throw new ConnectorRemedy(401, "Bitbucket OAuth requires a complete expiring grant; reconnect", { kind: "reconnect" });
   }
   if (!values.oauthRefreshToken || (!afterNotionUnauthorized &&
       (!Number.isFinite(expiresAt) || expiresAt - now > REFRESH_MARGIN_MS))) return undefined;

@@ -32,7 +32,7 @@ const PROFILE = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 
 /** The stored list; a malformed value fails closed rather than being read in part. */
 export function parseMailboxes(value: string | undefined): GmailMailbox[] {
-  if (!value) throw new ConnectorRemedy(401, "Connect a Gmail mailbox first");
+  if (!value) throw new ConnectorRemedy(401, "Connect a Gmail mailbox first", { kind: "reconnect" });
   const mailboxes = parseAccountList(MAILBOXES, value, ({ account, address, owner }) =>
     typeof account === "string" && ACCOUNT_ID.test(account) && typeof address === "string" && ADDRESS.test(address) &&
       typeof owner === "string" && OWNER.test(owner) ? { account, address: address.toLowerCase(), owner } : undefined,

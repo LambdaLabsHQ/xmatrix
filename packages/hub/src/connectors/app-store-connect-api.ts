@@ -85,7 +85,8 @@ async function bearer(credentials: Credentials, nowSeconds: number): Promise<str
     key = await crypto.subtle.importKey("pkcs8", privateKeyBytes(credentials.privateKey),
       { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   } catch {
-    throw new ConnectorRemedy(401, "The private key is not a .p8 file from App Store Connect; paste the whole AuthKey file");
+    throw new ConnectorRemedy(401, "The private key is not a .p8 file from App Store Connect; paste the whole AuthKey file",
+      { kind: "credential", field: "privateKey" });
   }
   const claims = { iat: nowSeconds - 10, exp: nowSeconds + TOKEN_SECONDS, aud: "appstoreconnect-v1" };
   const unsigned = `${base64UrlEncodeValue(JSON.stringify({ alg: "ES256", kid: keyId, typ: "JWT" }))}.${

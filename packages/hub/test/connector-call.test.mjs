@@ -28,7 +28,7 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 // their own PostgreSQL tests own membership, registration and grant validation.
 // Here we protect private response delivery, policy admission, and masking
 // before result persistence, which public Channel-command tests cannot see.
-function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMailbox = false, changeConnection = false } = {}) {
+function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMailbox = false, changeConnection = false, retry } = {}) {
   const checks = [], reports = [], policies = [], appends = [], persisted = [], privateRecords = [];
   let scopes = 0;
   const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
@@ -64,7 +64,9 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
   loadRoute(name => ({
     "@xmatrix/protocol": protocol, "@xmatrix/db": { ControlError },
     "./private-response": { privateResponse },
-    "./index-shared": { AuthFailure, PermissionFailure, readBoundedRequestBody,
+    "./apps": { appExecutionRetry: async (_env, input) => {
+      assert.deepEqual(input, { spaceId: "space", executionId: "execution-1", actorUserId: "member" }); return retry; } },
+    "./index-shared": { AuthFailure, PermissionFailure, readBoundedRequestBody, requireHumanAuth: user => user,
       requireAuth: async request => request.headers.get("authorization") === "Bearer human" ? { id: "member" }
         : { id: "member", agentRun: run },
       requestErrorResponse: (c, error) => { reports.push(error.message); return c.json({ error: error.message }, 403); } },
@@ -82,7 +84,10 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
     "./product-message-append": { dispatchProductMessageAppend: append },
     "./app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
   })[name]).registerConnectorCallRoutes(app);
-  return { checks, reports, policies, appends, persisted, privateRecords, request: (body, token = "agent") => app.request(protocol.HUB_ROUTES.connector_call,
+  return { checks, reports, policies, appends, persisted, privateRecords,
+    retry: () => app.request("/api/spaces/space/app-executions/execution-1/retry",
+      { method: "POST", headers: { authorization: "Bearer human" } }, {}),
+    request: (body, token = "agent") => app.request(protocol.HUB_ROUTES.connector_call,
     { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: typeof body === "string" ? body : JSON.stringify({ resultVisibility: "private", ...body }) }, {}) };
 }
@@ -156,6 +161,35 @@ test("a private failure keeps the Hub's own next step, which carries no provider
   assert.match(f.appends[1].body, /blocked; save mailboxes in Apps → Gmail → Credentials\./);
   assert.equal(f.persisted.find(row => row.kind === "finalize-execution").input.reason, "save mailboxes in Apps → Gmail → Credentials");
   assert.doesNotMatch(JSON.stringify([f.appends, f.persisted]), /hidden — private call/);
+  const finalized = f.persisted.find(row => row.kind === "finalize-execution").input;
+  assert.equal(finalized.remedy, "reconnect", "a missing mailbox is fixed by connecting one");
+  const recorded = f.persisted.find(row => row.kind === "record-execution").input;
+  assert.equal(recorded.retryCommand, `@gmail:read:${id}`);
+  assert.equal(recorded.resultVisibility, "private");
+});
+
+test("the person a private read ran for runs it again from its row; the result returns to them alone", async () => {
+  const f = fixture({ retry: { channelId: "channel-alpha", requestedBy: "member", command: `@gmail:read:${id}`, visibility: "private" } });
+  const { result } = await fetched([gmail(privateText)], () => f.retry());
+  assert.equal(result.status, 200, await result.clone().text());
+  assert.match((await result.json()).summary, /654321/);
+  assert.equal(f.appends[0].body, `@gmail:read:${id}`);
+  assert.deepEqual(f.appends[0].principal, { kind: "user", id: "member" });
+  assert.equal(f.appends[0].agentRunProof, undefined);
+  assert.match(f.appends[1].body, /completed; Result: \[hidden — private call\]/);
+  assert.equal(f.privateRecords[0].ownerUserId, "member");
+  assert.doesNotMatch(JSON.stringify(f.persisted), /654321/);
+});
+
+test("only a read runs again, and a private one only for the person it ran for", async () => {
+  for (const [retry, status] of [
+    [{ channelId: "channel-alpha", requestedBy: "other", command: `@gmail:read:${id}`, visibility: "private" }, 403],
+    [{ channelId: "channel-alpha", requestedBy: "member" }, 409],
+  ]) {
+    const f = fixture({ retry });
+    const { result, calls } = await fetched([], () => f.retry());
+    assert.equal(result.status, status); assert.equal(calls.length, 0); assert.deepEqual(f.appends, []);
+  }
 });
 
 test("result visibility is strictly typed and cannot be coerced into a public result", async () => {

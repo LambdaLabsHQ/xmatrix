@@ -47,7 +47,7 @@ function logins(credentials: Credentials): Login[] {
   /* A connection that has not been connected again since logins existed keeps its single grant. */
   if (credentials.oauthToken) list.push({ token: credentials.oauthToken });
   if (credentials.apiToken) list.push({ token: credentials.apiToken });
-  if (!list.length) throw new ConnectorRemedy(401, "Connect Cloudflare first");
+  if (!list.length) throw new ConnectorRemedy(401, "Connect Cloudflare first", { kind: "reconnect" });
   return list;
 }
 

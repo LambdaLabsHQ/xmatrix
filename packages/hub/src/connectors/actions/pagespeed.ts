@@ -33,7 +33,7 @@ const AUDIT_TIMEOUT_MS = 60_000;
 function apiKey(credentials: Readonly<Record<string, string>>): Record<string, string> {
   const key = credentials.apiKey?.trim();
   if (!key || key.length > 200 || !/^[A-Za-z0-9_-]+$/u.test(key)) {
-    throw new ConnectorRemedy(401, "Save a Google API key with the PageSpeed Insights and Chrome UX Report APIs enabled");
+    throw new ConnectorRemedy(401, "Save a Google API key with the PageSpeed Insights and Chrome UX Report APIs enabled", { kind: "credential", field: "apiKey" });
   }
   return { "x-goog-api-key": key };
 }

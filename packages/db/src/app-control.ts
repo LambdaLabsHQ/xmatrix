@@ -206,6 +206,17 @@ async function connection(tx: DatabaseTransaction, row: QueryResultRow, channelI
  * An App execution row as every App authority returns it. The authorities
  * store its id and times differently, so they pass those in already read.
  */
+function visibility(value: unknown): "public" | "private" {
+  if (value === "public" || value === "private") return value;
+  throw new AppControlError("invalid_app_request", 400, "execution result visibility is invalid");
+}
+
+/** A stored remedy code, `reconnect` or `credential:<field>`, as the execution reports it. */
+function appExecutionRemedy(code: string) {
+  return code === "reconnect" ? { kind: "reconnect" as const }
+    : { kind: "credential" as const, field: code.slice("credential:".length) };
+}
+
 export function appExecutionView(row: Record<string, unknown>,
   stored: { id: string; createdAt: string; updatedAt: string }) {
   return { id: stored.id, spaceId: String(row.space_id), channelId: String(row.channel_id),
@@ -218,6 +229,9 @@ export function appExecutionView(row: Record<string, unknown>,
     ...(row.result_summary ? { resultSummary: String(row.result_summary) } : {}),
     requestedBy: String(row.requested_by),
     ...(row.requested_by_label ? { requestedByLabel: String(row.requested_by_label) } : {}),
+    ...(row.remedy ? { remedy: appExecutionRemedy(String(row.remedy)) } : {}),
+    ...(row.retry_command ? { retryable: true } : {}),
+    ...(row.result_visibility ? { resultVisibility: String(row.result_visibility) } : {}),
     version: Number(row.version), createdAt: stored.createdAt, updatedAt: stored.updatedAt };
 }
 
@@ -472,6 +486,24 @@ export class PostgresAppRepository {
       return { executions: page.map(execution), cursor: rows.length > limit && page.at(-1)
         ? JSON.stringify([iso(page.at(-1)!.created_at as string | Date),
           String(page.at(-1)!.execution_id)]) : null };
+    });
+  }
+
+  /** What a read needs to run again: its command, visibility, Channel and requester. Space members only. */
+  async executionRetry(input: { requestId: string; spaceId: string; executionId: string; actorUserId: string }) {
+    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+      operation: "app.executions.retry" }, async (tx) => {
+      // Running a read is using the Space's apps, which a participant or viewer may not.
+      await requireSpace(tx, text(input.spaceId, "spaceId", 300), text(input.actorUserId, "actorUserId", 300), false, true);
+      const rows = await tx.query<QueryResultRow>({ name: "app_execution_retry_v1", text: `SELECT
+        channel_id,requested_by,retry_command,result_visibility FROM data.app_connector_executions
+        WHERE space_id=$1 AND execution_id=$2 LIMIT 1`,
+      values: [input.spaceId, text(input.executionId, "executionId", 300)], maxRows: 1 });
+      const row = rows[0];
+      if (!row) throw new AppControlError("execution_not_found", 404, "App execution not found");
+      return { channelId: String(row.channel_id), requestedBy: String(row.requested_by),
+        ...(row.retry_command && row.result_visibility ? { command: String(row.retry_command),
+          visibility: row.result_visibility === "private" ? "private" as const : "public" as const } : {}) };
     });
   }
 
@@ -1024,17 +1056,20 @@ export class PostgresAppRepository {
     const exists = await tx.query({ name: "app_execution_exists_v1", text: `SELECT execution_id
       FROM data.app_connector_executions WHERE execution_id=$1 LIMIT 1`, values: [executionId], maxRows: 1 });
     if (exists[0]) throw new AppControlError("execution_exists", 409, "App execution already exists");
-    await tx.query({ name: "app_execution_record_v1", text: `INSERT INTO data.app_connector_executions
+    await tx.query({ name: "app_execution_record_v2", text: `INSERT INTO data.app_connector_executions
       (execution_id,space_id,channel_id,message_id,provider_id,provider_name,action_id,action_label,
        status,dispatch_state,reason,connection_id,result_channel_id,result_summary,requested_by,
-       requested_by_label,version,created_at,updated_at) VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,'queued','pending',NULL,$9,NULL,NULL,$10,$11,1,$12,$12)`, values: [
+       requested_by_label,retry_command,result_visibility,version,created_at,updated_at) VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,'queued','pending',NULL,$9,NULL,NULL,$10,$11,$13,$14,1,$12,$12)`, values: [
       executionId, rows[0].space_id, channelId, text(input.messageId, "messageId", 300),
       rows[0].provider_id, rows[0].provider_name,
       input.actionId === undefined ? null : text(input.actionId, "actionId", 100),
       input.actionLabel === undefined ? null : text(input.actionLabel, "actionLabel", 120),
       connectionId, actor.id,
-      input.requestedByLabel === undefined ? null : text(input.requestedByLabel, "requestedByLabel", 120), at], maxRows: 0 });
+      input.requestedByLabel === undefined ? null : text(input.requestedByLabel, "requestedByLabel", 120), at,
+      input.retryCommand === undefined ? null : text(input.retryCommand, "retryCommand", 4000),
+      input.resultVisibility === undefined ? null : visibility(input.resultVisibility)],
+    maxRows: 0 });
     const created = await tx.query<QueryResultRow>({ name: "app_execution_recorded_v1",
       text: "SELECT * FROM data.app_connector_executions WHERE execution_id=$1 LIMIT 1",
       values: [executionId], maxRows: 1 });
@@ -1059,10 +1094,14 @@ export class PostgresAppRepository {
     const summary = input.resultSummary === undefined ? null : text(input.resultSummary, "resultSummary", 1000);
     const resultChannelId = input.resultChannelId === undefined ? null
       : text(input.resultChannelId, "resultChannelId", 300);
-    await tx.query({ name: "app_execution_finalize_v1", text: `UPDATE data.app_connector_executions SET
-      status=$1,reason=$2,result_channel_id=$3,result_summary=$4,dispatch_state='terminal',
+    const remedy = input.remedy === undefined ? null : text(input.remedy, "remedy", 120);
+    if (remedy !== null && !/^(reconnect|credential:[A-Za-z0-9_]{1,80})$/u.test(remedy)) {
+      throw new AppControlError("invalid_app_request", 400, "execution remedy is invalid");
+    }
+    await tx.query({ name: "app_execution_finalize_v2", text: `UPDATE data.app_connector_executions SET
+      status=$1,reason=$2,result_channel_id=$3,result_summary=$4,remedy=$8,dispatch_state='terminal',
       version=version+1,updated_at=$5 WHERE execution_id=$6 AND version=$7 AND dispatch_state='pending'`,
-    values: [status, reason, resultChannelId, summary, at, executionId, expected], maxRows: 0 });
+    values: [status, reason, resultChannelId, summary, at, executionId, expected, remedy], maxRows: 0 });
     const updated = await tx.query<QueryResultRow>({ name: "app_execution_finalized_v1",
       text: "SELECT * FROM data.app_connector_executions WHERE execution_id=$1 LIMIT 1",
       values: [executionId], maxRows: 1 });

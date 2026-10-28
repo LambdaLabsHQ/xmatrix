@@ -89,6 +89,11 @@ export function connectorCommands(providerId: string,
   };
 }
 
+/** The fix a failure names, when the Hub worded it. */
+function remedyOf(error: unknown) {
+  return error instanceof ConnectorRemedy ? error.fix : undefined;
+}
+
 /** What a private call's failure records: the Hub's own next step, or the mask
  * when the failure may carry what the provider returned. */
 export function privateFailure(error: unknown): string {
@@ -135,7 +140,7 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
     return result;
   };
   let result: ConnectorActionResult | undefined, failure: unknown;
-  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "" }, async () => {
+  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "", retry: resultVisibility }, async () => {
     try {
       result = await execute();
       return { status: "completed", summary: resultVisibility === "private" ? PRIVATE_CONNECTOR_RESULT
@@ -144,7 +149,7 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
       failure = error;
       return { status: error instanceof ProviderRequestError && error.status === 403 ? "blocked" : "failed",
         summary: resultVisibility === "private" ? privateFailure(error)
-          : error instanceof ProviderRequestError ? error.message : "The connector call failed" };
+          : error instanceof ProviderRequestError ? error.message : "The connector call failed", remedy: remedyOf(error) };
     }
   });
   if (!result) throw failure;
@@ -251,10 +256,12 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
     } catch (error) {
       const shared = sharedWorkspace(error);
       if (shared) return result("blocked", shared);
+      if (error instanceof ConnectorRemedy && error.status === 403) return result("blocked", error.message);
       return result("failed", error instanceof ProviderRequestError ? error.message : "could not create an approval request");
     }
   }
-  return withExecution(manifest, input, scope, { id: actionId, label, key: "" }, async () => {
+  return withExecution(manifest, input, scope, { id: actionId, label, key: "",
+    ...(action.effect === "read" && !approved ? { retry: "public" as const } : {}) }, async () => {
     if (mode === "disallow") return { status: "blocked", summary: actionRefusal({ actionId, mode })! };
     try {
       const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite,
@@ -269,13 +276,14 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
         const reason = error instanceof ProviderRequestError ? error.message
           : error instanceof DOMException && error.name === "TimeoutError"
             ? "the provider did not answer in time" : "the provider call failed";
-        return { status: "failed", summary: reason +
+        return { status: "failed", remedy: remedyOf(error), summary: reason +
           (context.x?.billingSummary?.() ? `\n${context.x.billingSummary()}` : "") };
       }
     } catch (error) {
       const shared = sharedWorkspace(error);
       if (shared) return { status: "blocked", summary: shared };
-      if (error instanceof ProviderRequestError) return { status: "failed", summary: error.message };
+      if (error instanceof ProviderRequestError) return { status: error instanceof ConnectorRemedy && error.status === 403 ? "blocked" : "failed",
+        summary: error.message, remedy: remedyOf(error) };
       return { status: "failed", summary: error instanceof DOMException && error.name === "TimeoutError"
         ? "the provider did not answer in time" : "the provider call failed" };
     }
@@ -325,7 +333,13 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const credentials = native ? {} : await connectionCredentials(input.env, spaceId, providerId);
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
   const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
-  if (missing.length > 0) return `save ${missing.join(", ")} in Apps → ${getAppConnectorProvider(providerId)!.name} → Credentials`;
+  if (missing.length > 0) {
+    // One field a person types is replaced where the failure shows; anything else comes from connecting again.
+    const typed = (getAppConnectorProvider(providerId)!.credentials ?? []).find((field) =>
+      field.id === missing[0] && !field.generated && !field.managed);
+    throw new ConnectorRemedy(403, `save ${missing.join(", ")} in Apps → ${getAppConnectorProvider(providerId)!.name} → Credentials`,
+      missing.length === 1 && typed ? { kind: "credential", field: typed.id } : { kind: "reconnect" });
+  }
   const instanceId = input.senderKind === "agent" ? input.senderId : undefined;
   const caller = { userId: input.actorUserId,
     ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };

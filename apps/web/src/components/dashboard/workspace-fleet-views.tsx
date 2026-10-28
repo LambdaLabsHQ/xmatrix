@@ -1058,12 +1058,10 @@ export function AppsView({
   connectors: catalog,
   currentSpace,
   token,
-  onOpenConversation,
 }: {
   connectors: AppConnectorManifest[];
   currentSpace: SerializedSpace | null;
   token?: string;
-  onOpenConversation: (channelId: string) => void;
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -1427,7 +1425,6 @@ export function AppsView({
       onCheck={() => checkConnector(connector)}
       onDisconnect={() => void disconnectConnector(connector)}
       onRefreshExecutions={() => void loadExecutions()}
-      onOpenConversation={onOpenConversation}
       onSaveMetadata={(metadata) => saveConnectorMetadata(connector, metadata)}
       ensureConnectionRow={() => ensureConnectionRow(connector)}
       refreshConnections={async () => { await connectionsQuery.refetch(); }} />

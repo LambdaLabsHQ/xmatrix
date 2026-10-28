@@ -1,16 +1,16 @@
-import { HUB_ROUTES, PRIVATE_CONNECTOR_RESULT, type AppConnectorProviderManifest,
-  type ConnectorResultVisibility } from "@xmatrix/protocol";
+import { HUB_ROUTES, PRIVATE_CONNECTOR_RESULT, type ConnectorResultVisibility } from "@xmatrix/protocol";
 import { ControlError } from "@xmatrix/db";
 import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
-import { AuthFailure, PermissionFailure, readBoundedRequestBody, requireAuth, requestErrorResponse } from "./index-shared";
+import { AuthFailure, PermissionFailure, readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorResponse } from "./index-shared";
 import { privateResponse } from "./private-response";
 import { parseActionCommand } from "./connectors/action-parse";
 import { connectorActionCatalog } from "./connectors/action-catalog";
 import { callConnectorRead, privateFailure } from "./connectors/connector-commands";
 import { connectorForCommand } from "./connectors/registry";
-import { ProviderRequestError } from "./connectors/http";
+import { ConnectorRemedy, ProviderRequestError } from "./connectors/http";
+import { appExecutionRetry } from "./apps";
 import { commandResult, publishCommandStatus } from "./connectors/command-support";
 import { getAppConnectorProvider } from "./app-connectors";
 import { dispatchProductMessageAppend } from "./product-message-append";
@@ -36,23 +36,7 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
     }
   });
   app.post(HUB_ROUTES.connector_call, async c => {
-    let invocation: { manifest: AppConnectorProviderManifest; input: ConnectorCommandInput;
-      spaceId: string; actionId: string; visibility: ConnectorResultVisibility } | undefined;
-    let receiptAttempted = false;
     let authorizeCaller: (() => Promise<void>) | undefined;
-    const publish = async (status: "completed" | "failed" | "blocked", summary: string, masked = PRIVATE_CONNECTOR_RESULT) => {
-      if (!invocation) return;
-      receiptAttempted = true;
-      const { manifest, input, actionId, visibility, spaceId } = invocation;
-      if (visibility === "private") await writeConnectorPrivateResult(c.env, {
-        channelId: input.channelId, spaceId, ownerUserId: input.actorUserId,
-        messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200), detail: summary,
-      });
-      await publishCommandStatus(manifest, input, [commandResult(manifest.name, actionId, {
-        status, summary: visibility === "private" ? masked : summary,
-      })], { resumeRequester: false,
-        ...(visibility === "private" ? { privateResultOwnerUserId: input.actorUserId } : {}) });
-    };
     try {
       const user = await requireAuth(c.req.raw, c.env);
       const run = user.agentRun;
@@ -72,37 +56,13 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
         return c.json({ error: "Provide a connector command and public or private resultVisibility" }, 400, NO_STORE);
       }
       const { command, resultVisibility } = body as { command: string; resultVisibility: ConnectorResultVisibility };
-      const provider = connectorForCommand(command);
-      const parsed = provider && parseActionCommand(provider.id, command);
-      const action = parsed && connectorActionCatalog(provider!.id, provider!.actions).get(parsed.actionId)?.executor;
-      if (!provider || !parsed || !action) return c.json({ error: "Unknown connector action" }, 400, NO_STORE);
-      if (action.effect !== "read") return c.json({ error: "Calls support read actions only; use a Channel command for writes" }, 403, NO_STORE);
-      const input: ConnectorCommandInput = { env: c.env, channelId: run.channelId,
-        actorUserId: run.ownerUserId, senderKind: "agent", senderId: run.instanceId,
-        messageId: crypto.randomUUID(), body: command };
-      const appended = await dispatchProductMessageAppend(c.env, run.channelId, {
-        commandId: `connector-call:${input.messageId}`, messageId: input.messageId,
-        channelId: run.channelId, body: command,
+      const result = await recordedRead(c.env, { channelId: run.channelId, spaceId: run.spaceId, ownerUserId: run.ownerUserId,
+        command, visibility: resultVisibility, authorize, sender: { kind: "agent", id: run.instanceId },
         principal: { kind: "agent", id: run.agentId, agentSpaceId: run.spaceId },
-        agentRunProof: { runId: run.runId, instanceId: run.instanceId, executionKey: run.executionKey },
-        residual: { appMetadata: { xmatrixConnectorResultVisibility: resultVisibility } },
-      });
-      if (!appended.ok) throw new ProviderRequestError(appended.status, "The call's Channel record could not be saved");
-      invocation = { manifest: getAppConnectorProvider(provider.id)!, input,
-        spaceId: run.spaceId, actionId: parsed.actionId, visibility: resultVisibility };
-      const result = await callConnectorRead(provider.id, input, parsed.actionId, action, parsed.statement, authorize, resultVisibility);
-      await publish("completed", `${result.summary}${result.url ? ` — ${result.url}` : ""}`);
-      await authorize();
+        agentRunProof: { runId: run.runId, instanceId: run.instanceId, executionKey: run.executionKey } });
       return c.json(result, 200, NO_STORE);
     } catch (error) {
-      if (invocation && !receiptAttempted) {
-        try {
-          await publish(error instanceof ProviderRequestError && error.status === 403 ? "blocked" : "failed",
-            error instanceof ProviderRequestError ? error.message : "The connector call failed", privateFailure(error));
-        } catch {
-          return c.json({ error: "The call's Channel receipt could not be saved" }, 503, NO_STORE);
-        }
-      }
+      if (error instanceof ReceiptUnsaved) return c.json({ error: error.message }, 503, NO_STORE);
       // Provider errors may contain private data too. The receipt applies its
       // chosen visibility; raw exceptions never reach shared error reporting.
       if (error instanceof ProviderRequestError && authorizeCaller) {
@@ -117,4 +77,81 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       return privateResponse(requestErrorResponse(c, safe));
     }
   });
+  /* A person runs a failed read again from where it shows, as themselves and
+     with the visibility it had: a private result returns to its owner alone. */
+  app.post("/api/spaces/:spaceId/app-executions/:executionId/retry", async c => {
+    try {
+      const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));
+      const spaceId = c.req.param("spaceId");
+      const retry = await appExecutionRetry(c.env, { spaceId, executionId: c.req.param("executionId"), actorUserId: user.id });
+      if (!retry.command || !retry.visibility) return c.json({ error: "Only a read can run again" }, 409, NO_STORE);
+      if (retry.visibility === "private" && retry.requestedBy !== user.id) {
+        return c.json({ error: "Only the person a private call ran for can run it again" }, 403, NO_STORE);
+      }
+      const result = await recordedRead(c.env, { channelId: retry.channelId, spaceId, ownerUserId: user.id, command: retry.command,
+        visibility: retry.visibility, authorize: async () => {}, sender: { kind: "user", id: user.id },
+        principal: { kind: "user", id: user.id } });
+      return c.json(result, 200, NO_STORE);
+    } catch (error) {
+      if (error instanceof ProviderRequestError) return c.json({ error: error.message,
+        ...(error instanceof ConnectorRemedy && error.fix ? { remedy: error.fix } : {}) },
+      (error.status >= 400 && error.status <= 599 ? error.status : 502) as ContentfulStatusCode, NO_STORE);
+      if (error instanceof ReceiptUnsaved) return c.json({ error: error.message }, 503, NO_STORE);
+      return privateResponse(requestErrorResponse(c, error instanceof ControlError || error instanceof AuthFailure
+        || error instanceof PermissionFailure ? error : new Error("The connector call failed")));
+    }
+  });
+}
+
+class ReceiptUnsaved extends Error {}
+
+/** One recorded read: its command message, its execution, a receipt in its
+ * Channel (masked when private, the original kept for its Human owner), and
+ * the original returned to whoever asked. */
+async function recordedRead(env: Env, call: {
+  channelId: string; spaceId: string; ownerUserId: string; command: string; visibility: ConnectorResultVisibility;
+  authorize: () => Promise<void>; sender: { kind: "agent" | "user"; id: string };
+  principal: { kind: "agent"; id: string; agentSpaceId: string } | { kind: "user"; id: string };
+  agentRunProof?: { runId: string; instanceId: string; executionKey: string };
+}) {
+  const provider = connectorForCommand(call.command);
+  const parsed = provider && parseActionCommand(provider.id, call.command);
+  const action = parsed && connectorActionCatalog(provider!.id, provider!.actions).get(parsed.actionId)?.executor;
+  if (!provider || !parsed || !action) throw new ProviderRequestError(400, "Unknown connector action");
+  if (action.effect !== "read") throw new ProviderRequestError(403, "Calls support read actions only; use a Channel command for writes");
+  const manifest = getAppConnectorProvider(provider.id)!;
+  const input: ConnectorCommandInput = { env, channelId: call.channelId, actorUserId: call.ownerUserId,
+    senderKind: call.sender.kind, senderId: call.sender.id, messageId: crypto.randomUUID(), body: call.command };
+  const appended = await dispatchProductMessageAppend(env, call.channelId, {
+    commandId: `connector-call:${input.messageId}`, messageId: input.messageId,
+    channelId: call.channelId, body: call.command, principal: call.principal,
+    ...(call.agentRunProof ? { agentRunProof: call.agentRunProof } : {}),
+    residual: { appMetadata: { xmatrixConnectorResultVisibility: call.visibility } },
+  });
+  if (!appended.ok) throw new ProviderRequestError(appended.status, "The call's Channel record could not be saved");
+  const publish = async (status: "completed" | "failed" | "blocked", summary: string, masked = PRIVATE_CONNECTOR_RESULT) => {
+    if (call.visibility === "private") await writeConnectorPrivateResult(env, {
+      channelId: call.channelId, spaceId: call.spaceId, ownerUserId: call.ownerUserId,
+      messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200), detail: summary,
+    });
+    await publishCommandStatus(manifest, input, [commandResult(manifest.name, parsed.actionId, {
+      status, summary: call.visibility === "private" ? masked : summary,
+    })], { resumeRequester: false,
+      ...(call.visibility === "private" ? { privateResultOwnerUserId: call.ownerUserId } : {}) });
+  };
+  let result;
+  try {
+    result = await callConnectorRead(provider.id, input, parsed.actionId, action, parsed.statement, call.authorize, call.visibility);
+  } catch (error) {
+    try {
+      await publish(error instanceof ProviderRequestError && error.status === 403 ? "blocked" : "failed",
+        error instanceof ProviderRequestError ? error.message : "The connector call failed", privateFailure(error));
+    } catch {
+      throw new ReceiptUnsaved("The call's Channel receipt could not be saved");
+    }
+    throw error;
+  }
+  await publish("completed", `${result.summary}${result.url ? ` — ${result.url}` : ""}`);
+  await call.authorize();
+  return result;
 }

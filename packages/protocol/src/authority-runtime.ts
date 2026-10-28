@@ -289,6 +289,9 @@ export interface UpsertAppConnectorConnectionRequest {
 
 export type AppConnectorExecutionStatus = "queued" | "completed" | "failed" | "blocked" | "planned";
 
+/** What fixes a failed execution: replace (or sign in again for) one credential, or reconnect the app. */
+export type AppConnectorRemedy = { kind: "credential"; field: string } | { kind: "reconnect" };
+
 export interface SerializedAppConnectorExecution {
   id: string;
   spaceId: string;
@@ -305,6 +308,12 @@ export interface SerializedAppConnectorExecution {
   resultSummary?: string;
   requestedBy: string;
   requestedByLabel?: string;
+  /** Set on a failure the person can fix from where it shows. */
+  remedy?: AppConnectorRemedy;
+  /** A read whose command can run again. */
+  retryable?: boolean;
+  /** Whether its result reached shared history or only its requester. */
+  resultVisibility?: "public" | "private";
   createdAt: string;
   updatedAt: string;
 }

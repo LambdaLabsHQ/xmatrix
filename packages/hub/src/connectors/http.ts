@@ -1,4 +1,4 @@
-import { readBoundedStream } from "@xmatrix/protocol";
+import { readBoundedStream, type AppConnectorRemedy } from "@xmatrix/protocol";
 
 /*
  * Outbound provider calls for connector actions. Bounded in time and size,
@@ -17,9 +17,10 @@ export class ProviderRequestError extends Error {
 }
 
 /** A failure the Hub words itself to say what to do next, such as signing in
- * again. It carries no provider data, so a private call records it unmasked. */
+ * again. It carries no provider data, so a private call records it unmasked,
+ * and `fix` lets the page offer that next step where the failure shows. */
 export class ConnectorRemedy extends ProviderRequestError {
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, readonly fix?: AppConnectorRemedy) {
     super(status, message);
     this.name = "ConnectorRemedy";
   }

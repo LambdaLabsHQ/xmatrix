@@ -2,11 +2,10 @@
 
 import { useState, type ComponentType, type ReactNode } from "react";
 import { ChevronLeft, Loader2, PlugZap, RefreshCw, Shield } from "lucide-react";
-import {
-  PRIVATE_CONNECTOR_RESULT,
-  type SerializedAppConnectorConnection,
-  type SerializedAppConnectorExecution,
-  type SpaceMember,
+import type {
+  SerializedAppConnectorConnection,
+  SerializedAppConnectorExecution,
+  SpaceMember,
 } from "@xmatrix/protocol";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
@@ -17,12 +16,13 @@ import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { CloudflareLogins } from "./cloudflare-logins";
+import { ConnectorActivity } from "./connector-activity";
 import {
   ConnectorCredentialForm, ConnectorCredentialRows, ConnectorEventDelivery, connectorGeneratesCredentials,
   connectorReconnectsWithSavedCredentials, connectorTakesCredentials, connectorWritableCredentials,
 } from "./connector-credentials";
 import {
-  ConnectorAction, ConnectorBlock, ConnectorCopyLine, ConnectorEmpty, ConnectorField, ConnectorFold, ConnectorRow,
+  ConnectorAction, ConnectorBlock, ConnectorCopyLine, ConnectorField, ConnectorFold, ConnectorRow,
   ConnectorRows, ConnectorSection, ConnectorSheet,
 } from "./connector-page";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
@@ -79,19 +79,10 @@ function connectorAuthorizationLabel(connector: AppConnectorManifest, connection
   return saved.length === 1 ? saved[0]!.label : saved.length > 1 ? "saved credentials" : null;
 }
 
-/* Ink, not colour: `completed` is the resting state and says nothing extra,
-   `queued` is true but not what you are watching for, and the two ways a run
-   can stop share the alert ink. */
-function appExecutionStatusClassName(status: SerializedAppConnectorExecution["status"]): string {
-  if (status === "blocked" || status === "failed") return "text-destructive";
-  if (status === "completed") return "text-foreground";
-  return "text-muted-foreground";
-}
-
 export function ConnectorDetailPage({
   connector, Icon, connection, spaceId, token, userId, members, oauth, native,
   executions, executionsLoading, executionsError, notice, error, connecting, checking, disconnecting,
-  onBack, onConnect, onCheck, onDisconnect, onRefreshExecutions, onOpenConversation, onSaveMetadata, ensureConnectionRow, refreshConnections,
+  onBack, onConnect, onCheck, onDisconnect, onRefreshExecutions, onSaveMetadata, ensureConnectionRow, refreshConnections,
 }: {
   connector: AppConnectorManifest;
   Icon: ComponentType<{ className?: string }>;
@@ -117,7 +108,6 @@ export function ConnectorDetailPage({
   onCheck: () => Promise<void>;
   onDisconnect: () => void;
   onRefreshExecutions: () => void;
-  onOpenConversation: (channelId: string) => void;
   onSaveMetadata: (metadata: Record<string, unknown>) => Promise<void>;
   /** Creates the unconnected row credentials and links are stored on. */
   ensureConnectionRow: () => Promise<void>;
@@ -212,7 +202,7 @@ export function ConnectorDetailPage({
 
         {configured || executions.length > 0 ? (
           <ConnectorActivity executions={executions} members={members} loading={executionsLoading} error={executionsError}
-            onRefresh={onRefreshExecutions} onOpenConversation={onOpenConversation} />
+            credentials={credentials} onRefresh={onRefreshExecutions} onReconnect={() => onConnect()} />
         ) : null}
 
         {configured && connectorWriteActions(connector).length > 0 ? (
@@ -454,66 +444,6 @@ function ConnectorUseInChannel({ connector }: { connector: AppConnectorManifest 
   return (
     <ConnectorSection title="Use it in a channel" note={subscribe.note} testId="connector-use-in-channel">
       <ConnectorCopyLine value={subscribe.command} label="subscribe command" />
-    </ConnectorSection>
-  );
-}
-
-const EXECUTION_STATUS_LABELS: Record<SerializedAppConnectorExecution["status"], string> = {
-  queued: "Queued", planned: "Planned", completed: "Completed", failed: "Failed", blocked: "Blocked",
-};
-
-/** Who asked for a run: a member by name, never a bare user id. */
-function requesterName(execution: SerializedAppConnectorExecution, members: SpaceMember[]): string {
-  const id = execution.requestedByLabel || execution.requestedBy;
-  const member = members.find((candidate) => candidate.userId === id);
-  return member ? member.name || member.email || "A member" : id;
-}
-
-function ConnectorActivity({ executions, members, loading, error, onRefresh, onOpenConversation }: {
-  executions: SerializedAppConnectorExecution[];
-  members: SpaceMember[];
-  loading: boolean;
-  error: string | null;
-  onRefresh: () => void;
-  onOpenConversation: (channelId: string) => void;
-}) {
-  return (
-    <ConnectorSection title="Recent activity" testId="connector-activity"
-      action={(
-        <ConnectorAction disabled={loading} onClick={onRefresh} title="Refresh connector activity">
-          <AnimatedIcon icon={RefreshCw} className={cn("size-3.5", loading && "animate-spin")} /> Refresh
-        </ConnectorAction>
-      )}>
-      <ConnectorRows>
-        {executions.map((execution) => (
-          <ConnectorRow key={execution.id} testId="connector-execution"
-            title={execution.actionLabel || execution.actionId || "Default action"}
-            meta={<>
-              {requesterName(execution, members)} · {relativeTime(execution.createdAt)}
-              {/* A private call keeps its result in its conversation, for the person who ran it. */}
-              {execution.resultSummary === PRIVATE_CONNECTOR_RESULT || execution.reason === PRIVATE_CONNECTOR_RESULT ? (
-                <span className="block">
-                  Private call; the result is in{" "}
-                  <button type="button" onClick={() => onOpenConversation(execution.channelId)}
-                    className="font-medium text-foreground hover:underline">its conversation</button>
-                </span>
-              ) : <>
-                {execution.resultSummary ? <span className="block">{execution.resultSummary}</span> : null}
-                {execution.reason ? <span className="block first-letter:uppercase">
-                  {/^[a-z_]+$/u.test(execution.reason) ? execution.reason.replace(/_/g, " ") : execution.reason}</span> : null}
-              </>}
-            </>}
-            trailing={(
-              <span className={cn("pr-2 text-[13px] font-semibold", appExecutionStatusClassName(execution.status))}>
-                {EXECUTION_STATUS_LABELS[execution.status] ?? execution.status}
-              </span>
-            )} />
-        ))}
-        {executions.length === 0 ? (
-          <ConnectorEmpty>{loading ? "Loading activity…" : "Nothing has run yet. Commands this app runs appear here."}</ConnectorEmpty>
-        ) : null}
-      </ConnectorRows>
-      {error ? <p role="alert" className="mt-1 text-[13px] font-medium text-destructive">{error}</p> : null}
     </ConnectorSection>
   );
 }
