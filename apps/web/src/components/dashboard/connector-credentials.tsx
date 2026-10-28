@@ -3,19 +3,25 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Loader2, LogIn, RefreshCw } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Loader2, LogIn, RefreshCw } from "lucide-react";
 import { WEB_PROXY_ROUTES, type SerializedAppConnectorConnection } from "@xmatrix/protocol";
-import { Button } from "@/components/ui/button";
+import { actionClass } from "@/components/ui/action-tone";
 import { Input } from "@/components/ui/input";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import {
+  ConnectorAction, ConnectorCopyLine, ConnectorField, ConnectorFold, ConnectorRow, ConnectorRows, ConnectorSection,
+} from "./connector-page";
 
 /* A connection's credentials (docs/design/connector-platform.md §3.2). Values
    an admin writes are never read back; the ingress URL and secrets the Hub
-   generated are shown so they can be pasted into the provider. */
+   generated are shown so they can be pasted into the provider. The page shows
+   them three ways: the form that connects the app, the saved fields of a
+   connected app (each replaced on its own), and where the provider delivers
+   its events. All three read one stored view. */
 
 interface CredentialView {
   credentialFields?: string[];
@@ -56,37 +62,9 @@ export function connectorGeneratesCredentials(connector: AppConnectorManifest): 
   return Boolean(takesIngress(connector) || connector.credentials?.some((field) => field.generated && !field.managed));
 }
 
-function CopyValue({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  const [revealed, setRevealed] = useState(!secret);
-  return (
-    <div>
-      <p className="mb-1 text-xs font-bold text-muted-foreground">{label}</p>
-      <div className="flex items-center gap-2">
-        <Input readOnly value={revealed ? value : "•".repeat(24)} className="font-mono text-xs"
-          aria-label={label} onFocus={(event) => event.currentTarget.select()} />
-        {secret ? (
-          <Button size="sm" variant="ghost" type="button" onClick={() => setRevealed((value) => !value)}>
-            {revealed ? "Hide" : "Show"}
-          </Button>
-        ) : null}
-        <Button size="sm" variant="outline" type="button" aria-label={`Copy ${label}`}
-          onClick={() => void navigator.clipboard.writeText(value).then(() => {
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1_500);
-          })}>
-          {copied ? <Check /> : <Copy />}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-export function ConnectorCredentials({ connector, connection, connected, spaceId, token, userId, beforeSave, afterSave }: {
+type CredentialStoreInput = {
   connector: AppConnectorManifest;
   connection?: SerializedAppConnectorConnection;
-  /** Before it is connected, saving is how the app connects. */
-  connected: boolean;
   spaceId: string;
   token: string;
   userId: string;
@@ -94,7 +72,9 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
   beforeSave: () => Promise<void>;
   /** Checks the saved credentials with the provider. */
   afterSave: () => Promise<void>;
-}) {
+};
+
+function useCredentialStore({ connector, connection, spaceId, token, userId, beforeSave, afterSave }: CredentialStoreInput) {
   const queryClient = useQueryClient();
   const key = xmatrixQueryKeys.domain({ userId }, "app-connection-credentials", [spaceId, connector.id]);
   const url = WEB_PROXY_ROUTES.space_app_connection_credentials(spaceId, connector.id);
@@ -102,7 +82,6 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
     queryKey: key,
     queryFn: ({ signal }) => xmatrixApiRequest<CredentialView>({ url, token, signal }),
   });
-  const [draft, setDraft] = useState<Record<string, string>>({});
   const save = useMutation({
     mutationKey: [...key, "put"],
     mutationFn: async (body: { fields?: Record<string, string | null>; regenerate?: string[] }) => {
@@ -111,103 +90,194 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
     },
     onSuccess: async (payload) => {
       queryClient.setQueryData(key, payload);
-      setDraft({});
       await afterSave();
     },
   });
+  const stored = new Set(view.data?.credentialFields ?? connection?.credentialFields ?? []);
+  return { view, save, stored };
+}
+
+/**
+ * The form that connects an app by its credentials: the required fields, the
+ * optional ones folded under them, and Save and connect as the page's one
+ * solid action.
+ */
+export function ConnectorCredentialForm({ submitLabel = "Save and connect", ...input }: CredentialStoreInput & {
+  submitLabel?: string;
+}) {
+  const { connector } = input;
+  const { view, save, stored } = useCredentialStore(input);
+  const [draft, setDraft] = useState<Record<string, string>>({});
   // The desktop app signs in on the service's own page and saves the session it then holds.
   const bridge = getDesktopBridge();
   const signIn = useMutation({
-    mutationKey: [...key, "sign-in"],
+    mutationKey: ["connector-sign-in", connector.id],
     mutationFn: async ({ field, service, fresh }: { field: string; service: string; fresh: boolean }) => {
       const outcome = await bridge!.serviceSignIn!(service, { fresh });
       if (outcome.status === "signed-in") await save.mutateAsync({ fields: { [field]: outcome.session } });
     },
   });
   const writable = connectorWritableCredentials(connector);
-  const generated = (connector.credentials ?? []).filter((field) => field.generated && !field.managed);
-  const stored = new Set(view.data?.credentialFields ?? connection?.credentialFields ?? []);
-  const ingress = takesIngress(connector);
-  const missingIngress = ingress && !view.data?.ingressUrl;
+  // Required fields lead; when none is required every field is shown, since any of them may be the one.
+  const lead = writable.some((field) => field.required) ? writable.filter((field) => field.required) : writable;
+  const rest = writable.filter((field) => !lead.includes(field));
   const pending = save.isPending || view.isFetching || signIn.isPending;
   const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
     userErrorMessage(signIn.error, "Couldn't sign in to the service") ??
     userErrorMessage(view.error, "Couldn't load the credentials");
+  const field = (candidate: (typeof writable)[number]) => (
+    <div key={candidate.id}>
+      {/* Outside the label, which would otherwise pass its clicks to the button. */}
+      {candidate.signIn && bridge?.serviceSignIn ? (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <button type="button" disabled={pending} className={actionClass({ variant: "secondary", size: "sm" })}
+            onClick={() => signIn.mutate({ field: candidate.id, service: candidate.signIn!, fresh: false })}>
+            {signIn.isPending ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <LogIn className="size-3.5" />}
+            Sign in to {connector.name}
+          </button>
+          {stored.has(candidate.id) ? (
+            <ConnectorAction disabled={pending}
+              onClick={() => signIn.mutate({ field: candidate.id, service: candidate.signIn!, fresh: true })}>
+              Use another account
+            </ConnectorAction>
+          ) : null}
+        </div>
+      ) : null}
+      <ConnectorField label={candidate.label} help={candidate.description} required={candidate.required}
+        saved={stored.has(candidate.id)}>
+        <Input type="password" autoComplete="off" value={draft[candidate.id] ?? ""}
+          placeholder={stored.has(candidate.id) ? "Enter a new value to replace it" : ""}
+          onChange={(event) => setDraft((current) => ({ ...current, [candidate.id]: event.target.value }))} />
+      </ConnectorField>
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
-      {error ? <p className="text-sm font-medium text-destructive">{error}</p> : null}
-      {ingress && view.data?.ingressUrl ? (
-        <div className="space-y-2">
-          <CopyValue label="Ingress URL" value={view.data.ingressUrl} secret />
-          <p className="text-xs leading-5 text-muted-foreground">
-            Paste this into {connector.name} as the webhook URL. Anyone with it can post events, so treat it as a secret.
-          </p>
-        </div>
+    <form className="space-y-4" data-testid="connector-credential-form" onSubmit={(event) => {
+      event.preventDefault();
+      const fields = Object.fromEntries(Object.entries(draft).filter(([, value]) => value.trim()));
+      if (Object.keys(fields).length > 0) save.mutate({ fields }, { onSuccess: () => setDraft({}) });
+    }}>
+      {lead.map(field)}
+      {rest.length > 0 ? (
+        <ConnectorFold summary={`More fields (${rest.length})`}>
+          <div className="space-y-4 pt-2">{rest.map(field)}</div>
+        </ConnectorFold>
       ) : null}
-      {generated.map((field) => view.data?.generated?.[field.id] ? (
-        <div key={field.id} className="space-y-1">
-          <CopyValue label={field.label} value={view.data.generated[field.id]!} secret />
-          <p className="text-xs leading-5 text-muted-foreground">{field.description}</p>
-        </div>
-      ) : null)}
-      {writable.length > 0 ? (
-        <form className="space-y-3" onSubmit={(event) => {
-          event.preventDefault();
-          const fields = Object.fromEntries(Object.entries(draft).filter(([, value]) => value.trim()));
-          if (Object.keys(fields).length > 0) save.mutate({ fields });
+      {error ? <p role="alert" className="text-[13px] font-medium text-destructive">{error}</p> : null}
+      <button type="submit" disabled={pending || !Object.values(draft).some((value) => value.trim())}
+        className={actionClass({ variant: "primary", size: "md" })}>
+        {save.isPending ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+        {submitLabel}
+      </button>
+    </form>
+  );
+}
+
+/**
+ * A connected app's saved credentials, a row each: whether it is set, and
+ * Replace, which opens that one field. A value is never shown back.
+ */
+export function ConnectorCredentialRows(input: CredentialStoreInput) {
+  const { connector } = input;
+  const { view, save, stored } = useCredentialStore(input);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [value, setValue] = useState("");
+  const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
+    userErrorMessage(view.error, "Couldn't load the credentials");
+  return (
+    <>
+      <ConnectorRows testId="connector-credential-rows">
+        {connectorWritableCredentials(connector).map((field) => (
+          <ConnectorRow key={field.id} title={field.label}
+            meta={stored.has(field.id) ? "Saved" : field.required ? "Required, not set" : "Not set"}
+            trailing={editing === field.id ? null : (
+              <ConnectorAction disabled={save.isPending} onClick={() => { setEditing(field.id); setValue(""); }}>
+                {stored.has(field.id) ? "Replace" : "Add"}
+              </ConnectorAction>
+            )}>
+            {editing === field.id ? (
+              <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={(event) => {
+                event.preventDefault();
+                if (!value.trim()) return;
+                save.mutate({ fields: { [field.id]: value } }, { onSuccess: () => { setEditing(null); setValue(""); } });
+              }}>
+                <Input type="password" autoComplete="off" autoFocus value={value} aria-label={field.label}
+                  className="min-w-0 flex-1 basis-56" onChange={(event) => setValue(event.target.value)} />
+                <button type="submit" disabled={save.isPending || !value.trim()}
+                  className={actionClass({ variant: "secondary", size: "sm" })}>
+                  {save.isPending ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null} Save
+                </button>
+                <ConnectorAction onClick={() => setEditing(null)}>Cancel</ConnectorAction>
+                {field.description ? <p className="basis-full text-[12px] leading-[1.45] text-muted-foreground">{field.description}</p> : null}
+              </form>
+            ) : null}
+          </ConnectorRow>
+        ))}
+      </ConnectorRows>
+      {error ? <p role="alert" className="mt-1 text-[13px] font-medium text-destructive">{error}</p> : null}
+    </>
+  );
+}
+
+/**
+ * Where the provider delivers its events: the ingress URL and any secret the
+ * Hub made, to paste into the provider, and Rotate for when one leaked.
+ */
+export function ConnectorEventDelivery({ note, ...input }: CredentialStoreInput & { note?: string }) {
+  const { connector } = input;
+  const { view, save } = useCredentialStore(input);
+  const ingress = takesIngress(connector);
+  const generated = (connector.credentials ?? []).filter((field) => field.generated && !field.managed);
+  const missingIngress = ingress && !view.data?.ingressUrl;
+  const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
+    userErrorMessage(view.error, "Couldn't load the credentials");
+  const busy = save.isPending || view.isFetching;
+  return (
+    <ConnectorSection title="Event delivery" testId="connector-event-delivery"
+      note={note ?? (missingIngress
+        ? `Generate an ingress URL to start receiving ${connector.name} events.`
+        : `Paste these into ${connector.name}. Anyone with the URL can post events, so treat it as a secret.`)}
+      action={missingIngress ? null : (
+        <ConnectorAction disabled={busy} onClick={() => {
+          if (!window.confirm(`Rotate the ${connector.name} ingress URL and secrets? The provider stops delivering until you paste the new values.`)) return;
+          save.mutate({ regenerate: [...(ingress ? [INGRESS_KEY_FIELD] : []), ...generated.map((field) => field.id)] });
         }}>
-          {writable.map((field) => (
-            <div key={field.id}>
-              {/* Outside the label, which would otherwise pass its clicks to the first button. */}
-              {field.signIn && bridge?.serviceSignIn ? (
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <Button size="sm" type="button" disabled={pending}
-                    onClick={() => signIn.mutate({ field: field.id, service: field.signIn!, fresh: false })}>
-                    {signIn.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <LogIn />} Sign in to {connector.name}
-                  </Button>
-                  {stored.has(field.id) ? (
-                    <Button size="sm" variant="ghost" type="button" disabled={pending}
-                      onClick={() => signIn.mutate({ field: field.id, service: field.signIn!, fresh: true })}>
-                      Use another account
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
-              <label className="block">
-                <span className="mb-1 flex items-center gap-2 text-xs font-bold text-muted-foreground">
-                  {field.label}{field.required ? " *" : ""}
-                  {stored.has(field.id) ? <span className="font-normal">· saved</span> : null}
-                </span>
-                <Input type="password" autoComplete="off" value={draft[field.id] ?? ""}
-                  placeholder={stored.has(field.id) ? "Saved — enter a new value to replace it" : ""}
-                  onChange={(event) => setDraft((current) => ({ ...current, [field.id]: event.target.value }))} />
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
-              </label>
-            </div>
-          ))}
-          <Button size="sm" type="submit" disabled={pending || !Object.values(draft).some((value) => value.trim())}>
-            {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <KeyRound />} {connected ? "Save credentials" : "Save and connect"}
-          </Button>
-        </form>
-      ) : null}
-      {/* Said beside the button that does it, after the form that connects the app. */}
+          {save.isPending ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+          Rotate URL and secrets
+        </ConnectorAction>
+      )}>
       {missingIngress ? (
-        <p className="pt-2 text-xs leading-5 text-muted-foreground">
-          Generate an ingress URL to start receiving {connector.name} events.
-        </p>
-      ) : null}
-      {ingress || generated.length > 0 ? (
-        <Button size="sm" variant="outline" type="button" disabled={pending}
-          onClick={() => {
-            if (missingIngress) return save.mutate({});
-            if (!window.confirm(`Rotate the ${connector.name} ingress URL and secrets? The provider stops delivering until you paste the new values.`)) return;
-            save.mutate({ regenerate: [...(ingress ? [INGRESS_KEY_FIELD] : []), ...generated.map((field) => field.id)] });
-          }}>
-          {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <RefreshCw />}
-          {missingIngress ? "Generate ingress URL" : "Rotate URL and secrets"}
-        </Button>
-      ) : null}
-    </div>
+        <button type="button" disabled={busy} onClick={() => save.mutate({})}
+          className={actionClass({ variant: "secondary", size: "sm" }, "mt-1")}>
+          {save.isPending ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+          Generate ingress URL
+        </button>
+      ) : (
+        <ConnectorRows>
+          {view.data?.ingressUrl ? <SecretRow label="Ingress URL" value={view.data.ingressUrl} /> : null}
+          {generated.map((field) => view.data?.generated?.[field.id]
+            ? <SecretRow key={field.id} label={field.label} value={view.data.generated[field.id]!} help={field.description} />
+            : null)}
+        </ConnectorRows>
+      )}
+      {error ? <p role="alert" className="mt-1 text-[13px] font-medium text-destructive">{error}</p> : null}
+    </ConnectorSection>
+  );
+}
+
+function SecretRow({ label, value, help }: { label: string; value: string; help?: string }) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <ConnectorRow title={label} meta={help}
+      trailing={(
+        <ConnectorAction aria-label={revealed ? `Hide ${label}` : `Show ${label}`} onClick={() => setRevealed((shown) => !shown)}>
+          {revealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />} {revealed ? "Hide" : "Show"}
+        </ConnectorAction>
+      )}>
+      <div className="mt-1.5">
+        <ConnectorCopyLine value={value} label={label} display={revealed ? value : "•".repeat(32)} />
+      </div>
+    </ConnectorRow>
   );
 }

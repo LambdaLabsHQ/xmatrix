@@ -25,14 +25,14 @@ async function open(page: Page, credentialFields: string[]) {
 test("a disconnected app whose credentials are still saved reconnects by a check", async ({ page }) => {
   await open(page, ["issuerId", "keyId", "privateKey", "webhookSecret"]);
   await page.getByRole("button", { name: "Reconnect", exact: true }).click();
-  const row = page.getByTestId("connector-row").filter({ hasText: "App Store Connect" });
-  await expect(row.getByRole("img", { name: "Connected" })).toBeVisible();
+  const connected = page.getByRole("region", { name: "Connected" }).getByTestId("connector-row");
+  await expect(connected.filter({ hasText: "App Store Connect" })).toBeVisible();
   expect(await fixtureRequests(page, "check")).toHaveLength(1);
 });
 
 test("a disconnected app missing a required credential asks for it instead of offering Reconnect", async ({ page }) => {
   await open(page, ["keyId"]);
-  await expect(page.getByText("Save its credentials below to connect again").first()).toBeVisible();
+  await expect(page.getByTestId("connector-lead")).toContainText("Reconnect App Store Connect");
   await expect(page.getByRole("button", { name: "Reconnect", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save and connect" })).toBeVisible();
   expect(await fixtureRequests(page, "check")).toHaveLength(0);

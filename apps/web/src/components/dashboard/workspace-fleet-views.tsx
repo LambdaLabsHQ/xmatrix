@@ -14,11 +14,7 @@ import {
   setMachineAutoAssign,
 } from "./workspace-admin-views";
 
-import { GoogleChatRoomLink } from "./googlechat-room-link";
-import { GitHubInstallationAccounts } from "./github-installation-accounts";
 import { takeGitHubConnectOutcome } from "@/lib/github-connect-return";
-import { WeComCompanyConnection } from "./wecom-company-connection";
-import { DingTalkCompanyConnection } from "./dingtalk-company-connection";
 import type { HumanProfile } from "@xmatrix/protocol";
 
 import {
@@ -55,7 +51,6 @@ import {
   ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSplit,
   ToolStateDot, useToolItem,
 } from "./tool-split";
-import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
@@ -82,7 +77,6 @@ import {
   HardDrive,
   Loader2,
   ListTodo,
-  LogOut,
   MessageSquare,
   MessageSquareText,
   Pencil,
@@ -99,14 +93,12 @@ import {
   Bot,
   Trash2,
   PowerOff,
-  Unplug,
   Users,
   Webhook,
   Wrench,
 } from "lucide-react";
 
 import { ListSkeleton } from "./content-skeleton";
-import { Textarea } from "@/components/ui/textarea";
 
 import { Input } from "@/components/ui/input";
 
@@ -128,23 +120,17 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { groupConnectorsForList, orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
-import { ConnectorCredentials, connectorGeneratesCredentials, connectorReconnectsWithSavedCredentials, connectorTakesCredentials,
-  connectorWritableCredentials } from "./connector-credentials";
-import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
-import { GmailMailboxes } from "./gmail-mailboxes";
-import { CloudflareLogins } from "./cloudflare-logins";
-import { XAccounts } from "./x-accounts";
+import { ConnectorDetailPage } from "./connector-detail";
+import { connectorGeneratesCredentials } from "./connector-credentials";
 
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, unexpectedResponse } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { GoogleDocFileSelection } from "./google-doc-file-selection";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { cn } from "@/lib/utils";
 
-import { tagClass } from "./status-tag";
-import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
+import { statusChipClass } from "@/components/ui/status-tone";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
@@ -1066,11 +1052,6 @@ export function MachinesView({
 /** The address key of the desktop app's own machine in the Machines list. */
 export const THIS_MACHINE_ITEM = "this-machine";
 
-export interface AppConnectorConfigurationDraft {
-  repository: string;
-  actionsWorkflowIds: string;
-}
-
 const NO_CONNECTIONS: SerializedAppConnectorConnection[] = [];
 const NO_EXECUTIONS: SerializedAppConnectorExecution[] = [];
 
@@ -1096,9 +1077,6 @@ export function AppsView({
   const [updatingProviderId, setUpdatingProviderId] = useState<string | null>(null);
   const [disconnectingProviderId, setDisconnectingProviderId] = useState<string | null>(null);
   const [checkingProviderId, setCheckingProviderId] = useState<string | null>(null);
-  const [configuringProviderId, setConfiguringProviderId] = useState<string | null>(null);
-  const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
-  const [configurationDraft, setConfigurationDraft] = useState<AppConnectorConfigurationDraft | null>(null);
   const connectionKey = xmatrixQueryKeys.domain(
     { userId: user?.id ?? "anonymous" }, "app-connections", [currentSpace?.id ?? null],
   );
@@ -1171,11 +1149,6 @@ export function AppsView({
     () => executions.filter((execution) => execution.providerId === selectedConnector?.id).slice(0, 6),
     [executions, selectedConnector?.id]
   );
-
-  useEffect(() => {
-    setConfiguringProviderId(null);
-    setConfigurationDraft(null);
-  }, [currentSpace?.id]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -1373,7 +1346,6 @@ export function AppsView({
     setConnectionsError(null);
     try {
       await patchConnectorConnection(connector.id, { providerId: connector.id, status: "disconnected" });
-      if (configuringProviderId === connector.id) closeConnectorConfiguration();
     } catch (error) {
       setConnectionsError(userErrorMessage(error, "Couldn't disconnect the app", `Couldn't disconnect ${connector.name}`));
     } finally {
@@ -1407,83 +1379,9 @@ export function AppsView({
     }
   }
 
-  function openConnectorConfiguration(
-    connector: AppConnectorManifest,
-    connection: SerializedAppConnectorConnection
-  ) {
-    const metadata = connection.metadata || {};
-    const metadataText = (key: string) => typeof metadata[key] === "string" ? metadata[key] : "";
-    const metadataListText = (key: string) => Array.isArray(metadata[key])
-      ? metadata[key].filter((value): value is string => typeof value === "string").join("\n")
-      : "";
-    setConnectionsError(null);
-    setSelectedConnectorId(connector.id);
-    setConfiguringProviderId(connector.id);
-    setConfigurationDraft({
-      repository: metadataText("repository") || metadataText("githubRepository"),
-      actionsWorkflowIds: metadataListText("actionsWorkflowIds"),
-    });
+  async function saveConnectorMetadata(connector: AppConnectorManifest, metadata: Record<string, unknown>) {
+    await patchConnectorConnection(connector.id, { providerId: connector.id, metadata });
   }
-
-  function closeConnectorConfiguration() {
-    setConfiguringProviderId(null);
-    setConfigurationDraft(null);
-    setConnectionsError(null);
-  }
-
-  async function saveConnectorConfiguration(
-    connector: AppConnectorManifest,
-    connection: SerializedAppConnectorConnection
-  ) {
-    if (!token || !currentSpace || !configurationDraft) return;
-    const actionsWorkflowIds = Array.from(new Set(configurationDraft.actionsWorkflowIds
-      .split(/[\r\n,]+/u)
-      .map((value) => value.trim())
-      .filter(Boolean)));
-    if (actionsWorkflowIds.length > 32 || actionsWorkflowIds.some((value) =>
-      value.length > 128 || !/^(?:[1-9][0-9]*|[A-Za-z0-9_.-]+\.ya?ml)$/u.test(value)
-    )) {
-      setConnectionsError("Allowed workflow dispatches must contain at most 32 numeric ids or .yml/.yaml file names.");
-      return;
-    }
-    setSavingProviderId(connector.id);
-    setConnectionsError(null);
-    try {
-      await patchConnectorConnection(connector.id, {
-        providerId: connector.id,
-        metadata: { ...connection.metadata, repository: configurationDraft.repository, actionsWorkflowIds },
-      });
-      closeConnectorConfiguration();
-    } catch (error) {
-      setConnectionsError(userErrorMessage(error, "Couldn't save the app settings", `Couldn't save the ${connector.name} settings`));
-    } finally {
-      setSavingProviderId(null);
-    }
-  }
-
-  /* Only a form connects it: no sign-in with the provider, no linked company app. */
-  const connectsByTypedCredentials = (connector: AppConnectorManifest) => connectorTakesCredentials(connector)
-    && connectorWritableCredentials(connector).length > 0
-    && !oauthProviders.includes(connector.id) && !nativeProviders.includes(connector.id);
-
-  const connectorState = (connector: AppConnectorManifest) => {
-    const connection = connectionsByProvider.get(connector.id);
-    const available = connector.status === "available";
-    const configured = connection?.status === "configured";
-    const needsAttention = connection?.status === "error";
-    return {
-      connection, available, configured, needsAttention,
-      label: configured ? "Connected" : needsAttention ? "Needs attention" : connection ? "Disconnected"
-        : available ? "Not connected" : "Coming soon",
-      summary: configured ? connector.id === "x" ? "Connected accounts are available to their owners and their Agents" : "Ready in every channel in this Space"
-        : needsAttention ? connection.error || "The connection needs to be authorized again"
-          : connection ? connectsByTypedCredentials(connector) && !connectorReconnectsWithSavedCredentials(connector, connection)
-            ? "Save its credentials below to connect again" : "Reconnect to resume channel delivery"
-            : !available ? "This connector is not available yet"
-              : connectsByTypedCredentials(connector) ? `Save its credentials below; xMatrix checks them with ${connector.name}`
-                : "Connect an account and choose what xMatrix can access",
-    };
-  };
 
   const list = (
     <ToolList title="Apps">
@@ -1492,21 +1390,21 @@ export function AppsView({
           <ToolListGroup key={group.title} title={group.title}>
             {group.connectors.map((connector) => {
               const Icon = connectorIcon(connector);
-              const state = connectorState(connector);
-              // An app nobody connected says nothing more: its heading already names what it does.
-              const StateIcon = state.configured ? Check : state.needsAttention ? AlertTriangle : state.connection ? Unplug : null;
+              const connection = connectionsByProvider.get(connector.id);
+              // The group says the state; a row adds only what needs the reader: what stopped.
+              const needsAttention = connection?.status === "error";
               return (
                 <ToolListRow key={connector.id} testId="connector-row"
                   selected={Boolean(connectorItem) && connector.id === selectedConnector?.id}
                   shownBeside={!connectorItem && connector.id === selectedConnector?.id}
-                  onSelect={() => { selectConnector(connector.id); closeConnectorConfiguration(); }}
+                  onSelect={() => selectConnector(connector.id)}
                   leading={<Icon className="size-7" />}
                   title={connector.name}
-                  trailing={StateIcon && <span role="img" aria-label={state.label} title={state.label}
-                    className="app-tool-state-icon app-connector-state-icon flex shrink-0" data-state={state.needsAttention ? "attention" : state.configured ? "running" : "offline"}>
-                    <StateIcon className="size-4" /></span>}
-                  state={state.needsAttention ? "attention" : state.configured ? "running" : "paused"}
-                  subtitle={state.connection ? state.summary : undefined} />
+                  trailing={needsAttention ? <span role="img" aria-label="Needs attention" title="Needs attention"
+                    className="app-tool-state-icon flex shrink-0" data-state="attention">
+                    <AlertTriangle className="size-4" /></span> : null}
+                  state={needsAttention ? "attention" : connection?.status === "configured" ? "running" : "paused"}
+                  subtitle={needsAttention ? connection?.error || "The connection needs to be authorized again" : undefined} />
               );
             })}
           </ToolListGroup>
@@ -1516,189 +1414,23 @@ export function AppsView({
   );
 
   const connector = selectedConnector;
-  const DetailIcon = connector ? connectorIcon(connector) : PlugZap;
-  const state = connector ? connectorState(connector) : null;
-  const updating = connector ? updatingProviderId === connector.id : false;
-  const checking = connector ? checkingProviderId === connector.id : false;
-  const configuring = Boolean(connector && configuringProviderId === connector.id);
-  const detail = connector && state ? (
-    <ToolDetail
-      key={connector.id}
+  const detail = connector && token && currentSpace && user?.id ? (
+    <ConnectorDetailPage key={connector.id} connector={connector} Icon={connectorIcon(connector)}
+      connection={selectedConnection} spaceId={currentSpace.id} token={token} userId={user.id}
+      members={currentSpace.members} channels={channels}
+      oauth={oauthProviders.includes(connector.id)} native={nativeProviders.includes(connector.id)}
+      executions={selectedExecutions} executionsLoading={loadingExecutions} executionsError={executionsError}
+      notice={setupNotice} error={connectionsError}
+      connecting={updatingProviderId === connector.id} checking={checkingProviderId === connector.id}
+      disconnecting={disconnectingProviderId === connector.id}
       onBack={() => selectConnector(null)}
-      backLabel="Apps"
-      context={`Apps · ${currentSpace?.name || "this space"}`}
-      title={<span className="inline-flex items-center gap-3"><DetailIcon className="size-7" />{connector.name}</span>}
-      status={
-        // One run of text, so a phone wraps it between words rather than leaving a "·" at a line start.
-        <span>
-          <ToolStateDot state={state.needsAttention ? "attention" : state.configured ? "running" : "offline"} />
-          <span className={cn("ml-2 text-foreground", state.needsAttention && "text-destructive")}>{state.label}</span>
-          {" · "}{state.summary}
-          {state.configured && state.connection ? <> · via {connectorAuthorizationLabel(connector, state.connection,
-            nativeProviders.includes(connector.id))}</> : null}
-          {state.configured && state.connection?.lastCheckedAt ? <> · checked {relativeTime(state.connection.lastCheckedAt)}</> : null}
-        </span>
-      }
-      actions={
-        <div className="app-connector-actions flex w-full flex-wrap items-center gap-2" role="group"
-          aria-label={`${connector.name} connection actions`}>
-          {state.configured && state.connection ? (
-            oauthProviders.includes(connector.id) || nativeProviders.includes(connector.id) ? (
-              <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id || configuring}
-                onClick={() => void configureConnector(connector)}
-                title={`Reconnect ${connector.name}`} aria-label={`Reconnect ${connector.name}`}>
-                {updating ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />} Reconnect
-              </Button>
-            ) : null
-          ) : state.available && !oauthProviders.includes(connector.id) && !nativeProviders.includes(connector.id)
-            && connectorReconnectsWithSavedCredentials(connector, state.connection) ? (
-            <Button size="sm" variant="outline" disabled={updating || checking} onClick={() => void checkConnector(connector)}
-              title={`Reconnect ${connector.name} with its saved credentials`}>
-              {checking ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />} Reconnect
-            </Button>
-          ) : state.available && (connector.id === "github" || oauthProviders.includes(connector.id) || nativeProviders.includes(connector.id)
-            || connectorWritableCredentials(connector).length === 0) ? (
-            <Button size="sm" variant="outline" disabled={updating || checking} onClick={() => void configureConnector(connector)}>
-              {updating ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />}
-              {state.connection ? "Reconnect" : connector.id === "github" ? "Connect GitHub"
-                : oauthProviders.includes(connector.id) ? `Connect with ${connector.name}` : "Connect"}
-            </Button>
-          ) : null}
-          {(state.configured || state.needsAttention) && state.connection ? (
-            <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id}
-              onClick={() => void checkConnector(connector)}
-              title={`Check ${connector.name} connection`} aria-label={`Check ${connector.name} connection`}>
-              {checking ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <RefreshCw />} Check
-            </Button>
-          ) : null}
-          {state.configured && state.connection ? (
-            <>
-              <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id || configuring}
-                onClick={() => openConnectorConfiguration(connector, state.connection!)}>
-                <Settings /> Configure
-              </Button>
-              {/* Ending the connection sits apart from the steps that keep it working. */}
-              <Button size="sm" variant="ghost" disabled={updating || checking}
-                onClick={() => void disconnectConnector(connector)}
-                className="text-muted-foreground hover:text-destructive sm:ml-auto"
-                title={`Disconnect ${connector.name}`} aria-label={`Disconnect ${connector.name}`}>
-                <LogOut /> {disconnectingProviderId === connector.id ? "Disconnecting" : "Disconnect"}
-              </Button>
-            </>
-          ) : null}
-        </div>
-      }
-    >
-      {setupNotice ? (
-        <p className={noticeClass(setupNotice.tone === "success" ? "settled" : "attention", "rounded-lg p-3 font-medium")}>
-          {setupNotice.message}
-        </p>
-      ) : null}
-      {connectionsError && <p className="text-sm font-medium text-destructive">{connectionsError}</p>}
-      <p className="text-sm leading-6 text-muted-foreground">{connector.description}</p>
-      {connector.id === "google" && state.configured && token && currentSpace ? (
-        <ToolDetailSection title="Documents">
-          <GoogleDocFileSelection key={currentSpace.id} spaceId={currentSpace.id} token={token} />
-        </ToolDetailSection>
-      ) : null}
-      {["googlechat", "feishu", "telegram", "teams"].includes(connector.id) && nativeProviders.includes(connector.id) && token && currentSpace ? (
-        <ToolDetailSection title={connector.id === "teams" ? "Teams conversation" : connector.id === "telegram" ? "Telegram groups" : connector.id === "feishu" ? "Feishu groups" : "Google Chat space"}>
-          <GoogleChatRoomLink key={`${currentSpace.id}:${connector.id}`} provider={connector.id as "googlechat" | "feishu" | "telegram" | "teams"} spaceId={currentSpace.id} token={token}
-            beforeLink={() => ensureConnectionRow(connector)}
-            afterRefresh={async () => { await connectionsQuery.refetch(); }} />
-        </ToolDetailSection>
-      ) : null}
-      {[{ id: "dingtalk", label: "DingTalk", Component: DingTalkCompanyConnection },
-        { id: "wecom", label: "WeCom", Component: WeComCompanyConnection }].map(({ id, label, Component }) =>
-        connector.id === id && nativeProviders.includes(id) && token && currentSpace ? (
-          <ToolDetailSection key={id} title={`${label} company application`}>
-            <Component key={currentSpace.id} spaceId={currentSpace.id} token={token}
-              beforeLink={() => ensureConnectionRow(connector)}
-              afterRefresh={async () => { await connectionsQuery.refetch(); }} />
-          </ToolDetailSection>
-        ) : null)}
-      {connector.id === "github" && token && currentSpace ? (
-        // Shown in every state, so a disconnected Space can link an account directly.
-        <ToolDetailSection title="GitHub accounts">
-          <GitHubInstallationAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token}
-            onManage={(installationId) => void configureConnector(connector, { mode: "manage", installationId })}
-            onAuthorize={() => void configureConnector(connector, { mode: "add" })}
-            onInstall={() => void configureConnector(connector, { mode: "account" })}
-            onChanged={async () => { await connectionsQuery.refetch(); }} />
-        </ToolDetailSection>
-      ) : null}
-      {connector.id === "gmail" && state.configured && token && currentSpace && user?.id ? (
-        <ToolDetailSection title="Gmail mailboxes">
-          <GmailMailboxes key={currentSpace.id} spaceId={currentSpace.id} token={token} userId={user.id}
-            members={currentSpace.members} adding={updatingProviderId === connector.id}
-            onAdd={() => void configureConnector(connector)} />
-        </ToolDetailSection>
-      ) : null}
-      {(connector.id === "cloudflare" || connector.id === "x") && token && currentSpace && user?.id ? (() => {
-        // Both keep one OAuth grant per connected login; Connect adds one.
-        const grants = { spaceId: currentSpace.id, token, userId: user.id, members: currentSpace.members,
-          adding: updatingProviderId === connector.id, canAdd: oauthProviders.includes(connector.id),
-          onAdd: () => void configureConnector(connector), onChanged: async () => { await connectionsQuery.refetch(); } };
-        return connector.id === "cloudflare" ? (
-          <ToolDetailSection title="Cloudflare logins">
-            <CloudflareLogins key={currentSpace.id} {...grants} />
-          </ToolDetailSection>
-        ) : (
-          <ToolDetailSection title="X accounts">
-            <XAccounts key={currentSpace.id} {...grants}
-              onReconnect={(accountId) => void configureConnector(connector, { xAccountId: accountId })} />
-          </ToolDetailSection>
-        );
-      })() : null}
-      {configuring && selectedConnection && configurationDraft ? (
-        <ToolDetailSection title="Configuration">
-          <p className="mb-4 text-sm text-muted-foreground">Choose where this connector can run and which write actions are allowed.</p>
-          <ConnectorConfiguration
-            connector={connector}
-            draft={configurationDraft}
-            saving={savingProviderId === connector.id}
-            onChange={setConfigurationDraft}
-            onCancel={closeConnectorConfiguration}
-            onSave={() => void saveConnectorConfiguration(connector, selectedConnection)}
-          />
-        </ToolDetailSection>
-      ) : null}
-      {connectorTakesCredentials(connector) && token && currentSpace && user?.id
-        && (state.configured || (state.available && connectorWritableCredentials(connector).length > 0)) ? (
-        <ToolDetailSection title={connector.id === "wecom" ? "Manual group robot" : ["googlechat", "teams"].includes(connector.id) ? "Manual webhook" : "Credentials"}>
-          {["googlechat", "teams"].includes(connector.id) && nativeProviders.includes(connector.id) ? (
-            <p className="mb-4 text-sm text-muted-foreground">Saving a manual {connector.id === "teams" ? "Workflows" : "incoming"} webhook replaces the linked app connection.</p>
-          ) : connector.id === "feishu" && nativeProviders.includes("feishu") ? (
-            <p className="mb-4 text-sm text-muted-foreground">Saving your own app credentials or generating a manual ingress URL replaces all linked company app groups.</p>
-          ) : connector.id === "telegram" && nativeProviders.includes("telegram") ? (
-            <p className="mb-4 text-sm text-muted-foreground">Saving your own bot credentials or generating a manual ingress URL replaces all linked company bot groups.</p>
-          ) : connector.id === "wecom" && nativeProviders.includes("wecom") ? (
-            <p className="mb-4 text-sm text-muted-foreground">Saving a group robot webhook key replaces the company installation and its member range. Group robots support outbound messages only.</p>
-          ) : null}
-          <ConnectorCredentials connector={["googlechat", "wecom", "teams"].includes(connector.id) ? { ...connector, events: undefined } : connector}
-            connection={selectedConnection} connected={state.configured}
-            spaceId={currentSpace.id} token={token} userId={user.id}
-            beforeSave={() => ensureConnectionRow(connector)} afterSave={() => checkConnector(connector)} />
-        </ToolDetailSection>
-      ) : null}
-      {selectedConnection || selectedExecutions.length > 0 ? (
-        <ToolDetailSection title="Recent activity" action={
-          <Button size="xs" variant="ghost" onClick={() => void loadExecutions()} disabled={loadingExecutions}
-            title="Refresh connector activity">
-            <AnimatedIcon icon={RefreshCw} className={cn(loadingExecutions && "animate-spin")} /> Refresh
-          </Button>
-        }>
-          {executionsError && <p className="mb-3 text-sm font-medium text-destructive">{executionsError}</p>}
-          <ConnectorExecutionList executions={selectedExecutions} loading={loadingExecutions} />
-        </ToolDetailSection>
-      ) : null}
-      {state.configured && connectorWriteActions(connector).length > 0 && token && currentSpace && user?.id ? (
-        <ToolDetailSection title="Channel action policy">
-          <ConnectorPolicy connector={connector} channels={channels} spaceId={currentSpace.id} token={token} userId={user.id} />
-        </ToolDetailSection>
-      ) : null}
-      <ConnectorReference connector={connector} />
-    </ToolDetail>
+      onConnect={(options) => void configureConnector(connector, options)}
+      onCheck={() => checkConnector(connector)}
+      onDisconnect={() => void disconnectConnector(connector)}
+      onRefreshExecutions={() => void loadExecutions()}
+      onSaveMetadata={(metadata) => saveConnectorMetadata(connector, metadata)}
+      ensureConnectionRow={() => ensureConnectionRow(connector)}
+      refreshConnections={async () => { await connectionsQuery.refetch(); }} />
   ) : null;
 
   return (
@@ -1725,216 +1457,6 @@ export function githubConnectionInstallationIdsFromMetadata(
   }
   push(metadata?.installationId);
   return ids;
-}
-
-export function ConnectorConfiguration({
-  connector,
-  draft,
-  saving,
-  onChange,
-  onCancel,
-  onSave,
-}: {
-  connector: AppConnectorManifest;
-  draft: AppConnectorConfigurationDraft;
-  saving: boolean;
-  onChange: (draft: AppConnectorConfigurationDraft) => void;
-  onCancel: () => void;
-  onSave: () => void;
-}) {
-  function update(patch: Partial<AppConnectorConfigurationDraft>) {
-    onChange({ ...draft, ...patch });
-  }
-
-  return (
-    <form
-      className="app-connector-configuration space-y-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSave();
-      }}
-    >
-      {connector.id === "github" ? (
-        <div>
-          <label className="mb-1.5 block text-[13px] font-semibold" htmlFor="github-default-repository">
-            Default repository
-          </label>
-          <Input
-            id="github-default-repository"
-            value={draft.repository}
-            onChange={(event) => update({ repository: event.target.value })}
-            placeholder="owner/repository"
-            pattern="[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
-          />
-          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-            Used when a channel command contains a short reference such as <code>#42</code>.
-          </p>
-        </div>
-      ) : null}
-
-      {connector.id === "github" ? (
-        <fieldset>
-          <legend className="mb-1 text-[13px] font-semibold">Workflow dispatch</legend>
-          <p className="mb-3 text-xs leading-5 text-muted-foreground">
-            Which channels may run each write action is set under Channel action policy.
-          </p>
-          <div className="space-y-3">
-            <label className="grid gap-1.5 text-sm">
-              <span className="font-bold">Allowed workflow dispatches</span>
-              <Textarea
-                value={draft.actionsWorkflowIds}
-                onChange={(event) => update({ actionsWorkflowIds: event.target.value })}
-                placeholder={"production-release-request.yml\n123456"}
-                rows={3}
-              />
-              <span className="text-xs leading-5 text-muted-foreground">
-                One workflow file name or numeric id per line. Dispatch remains disabled for every workflow not listed here.
-              </span>
-            </label>
-          </div>
-        </fieldset>
-      ) : null}
-
-
-      <div className="flex flex-wrap justify-end gap-2 pt-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className={actionClass({ variant: "quiet" })}
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={saving}
-          className={actionClass({ variant: "primary" })}
-        >
-          {saving ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
-          {saving ? "Saving" : "Save configuration"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-/* What a connected app authorizes with, said once in its status line:
-   "via GitHub App", "via Feishu company app", "via Integration token". */
-function connectorAuthorizationLabel(connector: AppConnectorManifest, connection: SerializedAppConnectorConnection,
-  native: boolean): string {
-  if (connector.id === "github") return "GitHub App";
-  if (native && ["googlechat", "feishu", "telegram", "teams"].includes(connector.id) && !connection.credentialFields?.length) {
-    return connector.id === "googlechat" ? "Google Chat app" : `${connector.name} company app`;
-  }
-  const saved = (connection.credentialFields ?? []).map((id) => connector.credentials?.find((field) => field.id === id))
-    .filter((field) => field && !field.generated);
-  if (saved.some((field) => field!.managed)) return `${connector.name} sign-in`;
-  return saved.map((field) => field!.label).join(", ") || "saved credentials";
-}
-
-/** Rows a reference shows before the reader asks for the rest. */
-const REFERENCE_FOLD = 4;
-
-/**
- * How the app is used once connected, kept last: the command that subscribes a
- * channel, then every command, folded after the first few. A reference, not a
- * step, so it never sits between the reader and what they came to change.
- */
-export function ConnectorReference({ connector }: { connector: AppConnectorManifest }) {
-  const [expanded, setExpanded] = useState(false);
-  const subscribe = connector.id === "github"
-    ? { command: "@github:subscribe:OWNER/REPO all",
-        description: "Receive commit, issue, pull request, comment, and review updates from the repository." }
-    : connector.events
-      ? { command: `@${connector.id}:subscribe:${connector.events.source.placeholder}`,
-          description: connector.events.source.description }
-      : null;
-  const actions = connector.actions.filter((action) => !subscribe || action.id !== "subscribe");
-  const shown = expanded ? actions : actions.slice(0, REFERENCE_FOLD);
-  return (
-    <ToolDetailSection title="Use it in a channel">
-      {subscribe ? (
-        <div className="py-3">
-          <p className="text-sm font-semibold">Subscribe a channel</p>
-          <code className="app-paper-tag mt-1.5 block overflow-x-auto px-3 py-2 font-mono text-xs text-foreground">
-            {subscribe.command}
-          </code>
-          <p className="mt-1.5 max-w-[56ch] text-[13px] leading-[1.45] text-muted-foreground">{subscribe.description}</p>
-        </div>
-      ) : null}
-      <ul data-testid="connector-commands">
-        {shown.map((action) => (
-          <li key={action.id} className="py-2.5">
-            <p className="text-sm font-semibold">{action.label}</p>
-            <p className="mt-0.5 max-w-[56ch] text-[13px] leading-[1.45] text-muted-foreground">{action.description}</p>
-            {action.usage ? (
-              <code className="mt-1 block break-all font-mono text-xs text-muted-foreground">@{connector.id}:{action.id}:{action.usage}</code>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      {actions.length > REFERENCE_FOLD ? (
-        <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}
-          className="mt-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
-          {expanded ? "Show fewer commands" : `Show all ${actions.length} commands`}
-          <ChevronDown aria-hidden="true" className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
-        </button>
-      ) : null}
-      <p className="mt-8 flex gap-2 text-xs leading-5 text-muted-foreground">
-        <Shield className="mt-0.5 size-3.5 shrink-0" />
-        Credentials stay out of chat: xMatrix uses scoped provider authorization and short-lived credentials for connector actions.
-      </p>
-    </ToolDetailSection>
-  );
-}
-
-export function ConnectorExecutionList({
-  executions,
-  loading,
-}: {
-  executions: SerializedAppConnectorExecution[];
-  loading: boolean;
-}) {
-  if (loading && executions.length === 0) {
-    return (
-      <ListSkeleton label="Loading executions" rows={3} mark={false} className="[--app-list-row-end:0px] [--app-list-row-start:0px]" />
-    );
-  }
-  if (executions.length === 0) {
-    return <p className="text-sm text-muted-foreground">No executions recorded for this connector yet.</p>;
-  }
-  return (
-    <div>
-      {executions.map((execution) => (
-        <div key={execution.id} className="py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{execution.actionLabel || execution.actionId || "Default action"}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {relativeTime(execution.createdAt)} by {execution.requestedByLabel || execution.requestedBy}
-              </p>
-            </div>
-            <span
-              className={tagClass("app-connector-status app-status-chip capitalize", appExecutionStatusClassName(execution.status))}
-            >
-              {execution.status}
-            </span>
-          </div>
-          {execution.resultSummary && <p className="mt-2 text-xs text-muted-foreground">{execution.resultSummary}</p>}
-          {execution.reason && <p className="mt-2 text-xs text-muted-foreground first-letter:uppercase">{execution.reason.replace(/_/g, " ")}</p>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* Ink, not colour: `completed` is the resting state and says nothing extra,
-   `queued` is true but not what you are watching for, and the two ways a run
-   can stop share the alert ink. */
-export function appExecutionStatusClassName(status: SerializedAppConnectorExecution["status"]): string {
-  if (status === "blocked" || status === "failed") return "text-destructive";
-  if (status === "completed") return "text-foreground";
-  return "text-muted-foreground";
 }
 
 const CONNECTOR_KIND_ICONS: Partial<Record<AppConnectorManifest["kind"], React.ComponentType<{ className?: string }>>> = {

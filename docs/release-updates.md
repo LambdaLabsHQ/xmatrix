@@ -1,15 +1,18 @@
 # Release Updates
 
-## Unreleased: Apps reads state first, then setup, then reference
+## Unreleased: An App's page leads with the one thing to do
 
-The Apps list groups what needs attention, what is connected and what was
-disconnected, then lists every other app once under its category instead of
-repeating an invitation under each row. An app's page puts its state, how it
-is authorized and when it was last checked in one line under its name, with
-Disconnect set apart from Reconnect, Check and Configure. Accounts and
-credentials follow directly, then recent activity and channel action policy;
-the command reference comes last and folds after four commands. A
-credentials-only app no longer hides its form below the reference.
+Every App's page is rebuilt around one lead. Its name, what it does and one
+status line come first. When the reader has something to do (connect,
+reconnect, fix a broken connection) that one step is a tinted sheet with the
+page's only solid action; a credentials-only app shows its form there instead
+of below twenty command descriptions. A working app shows no call to action.
+Below come what it reaches (accounts, mailboxes, logins, groups), the command
+that subscribes a channel, recent activity, permissions (its defaults in one
+sentence, then each channel rule), settings, the command reference folded,
+and Disconnect last. Every part uses the same rows, quiet actions and "add"
+row. The Apps list groups what needs attention, what is connected and what
+was disconnected, then every other app once under its category.
 
 ## Unreleased: The iOS swipe back follows the finger again
 

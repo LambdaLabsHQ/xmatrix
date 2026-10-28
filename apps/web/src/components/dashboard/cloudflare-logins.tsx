@@ -2,9 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { WEB_PROXY_ROUTES, type SpaceMember } from "@xmatrix/protocol";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { Button } from "@/components/ui/button";
+import { ConnectorAction, ConnectorAddRow, ConnectorEmpty, ConnectorFold, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
@@ -57,46 +57,42 @@ export function CloudflareLogins({ spaceId, token, userId, members, adding, canA
   const busy = adding || remove.isPending;
 
   return (
-    <div className="space-y-3" data-testid="cloudflare-logins">
-      <p className="text-xs leading-5 text-muted-foreground">
-        Add a login for each Cloudflare user whose accounts this Space works with. To add another user, sign out of
-        Cloudflare first or finish the sign-in in a private window.
-      </p>
-      <p className="text-xs leading-5 text-muted-foreground">
-        Commands use the default account, or name another as <code>&lt;account id&gt;/…</code>.
-        Run <code>@cloudflare:list_accounts:*</code> in a Channel to see every account and its id.
-      </p>
-      {logins.isPending ? <p className="text-xs text-muted-foreground">Loading Cloudflare logins…</p> : null}
-      {remove.error || logins.error ? (
-        <p className="text-sm font-medium text-destructive" role="alert">{(remove.error ?? logins.error)?.message}</p>
-      ) : null}
-      <ul className="divide-y divide-border/60 text-sm">
+    <ConnectorSection title="Cloudflare logins" testId="cloudflare-logins"
+      note="Each login reaches the accounts of one Cloudflare user. Commands use the default account unless they name another.">
+      {logins.isPending ? <p className="py-2.5 text-[13px] text-muted-foreground">Loading Cloudflare logins…</p> : null}
+      <ConnectorRows>
         {(logins.data ?? []).map((login) => (
-          <li key={login.id} className="flex flex-wrap items-center gap-3 py-2">
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-bold">{label(login)}</p>
-              <p className="text-xs text-muted-foreground">
-                Connected by {connectedBy(login.connectedBy)} on {new Date(login.connectedAt).toLocaleDateString()}
-              </p>
-            </div>
-            <Button size="xs" variant="ghost" aria-label={`Remove ${label(login)}`} disabled={busy}
-              onClick={() => {
-                if (window.confirm(`Remove the Cloudflare login for ${label(login)}? Commands and alerts for its accounts stop working.`)) {
-                  remove.mutate(login);
-                }
-              }}>
-              {remove.isPending && remove.variables.id === login.id
-                ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Trash2 />}
-              Remove
-            </Button>
-          </li>
+          <ConnectorRow key={login.id} title={label(login)}
+            meta={`Connected by ${connectedBy(login.connectedBy)} on ${new Date(login.connectedAt).toLocaleDateString()}`}
+            trailing={(
+              <ConnectorAction aria-label={`Remove ${label(login)}`} disabled={busy}
+                onClick={() => {
+                  if (window.confirm(`Remove the Cloudflare login for ${label(login)}? Commands and alerts for its accounts stop working.`)) {
+                    remove.mutate(login);
+                  }
+                }}>
+                {remove.isPending && remove.variables.id === login.id
+                  ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                Remove
+              </ConnectorAction>
+            )} />
         ))}
-        {logins.data?.length === 0 ? <li className="py-2 text-muted-foreground">No Cloudflare login is connected.</li> : null}
-      </ul>
-      {!canAdd ? <p className="text-xs text-muted-foreground">Cloudflare one-click connect must be configured before logins can be added.</p> : null}
-      <Button size="sm" type="button" disabled={busy || !canAdd} onClick={onAdd}>
-        {adding ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add Cloudflare login
-      </Button>
-    </div>
+        {logins.data?.length === 0 ? <ConnectorEmpty>No Cloudflare login is connected.</ConnectorEmpty> : null}
+        <ConnectorAddRow label="Add Cloudflare login" onClick={onAdd} disabled={busy || !canAdd} busy={adding} />
+      </ConnectorRows>
+      {!canAdd ? <p className="mt-1 text-[13px] text-muted-foreground">Cloudflare one-click connect must be configured before logins can be added.</p> : null}
+      {remove.error || logins.error ? (
+        <p className="mt-1 text-[13px] font-medium text-destructive" role="alert">{(remove.error ?? logins.error)?.message}</p>
+      ) : null}
+      <div className="mt-2">
+        <ConnectorFold summary="Adding another user, choosing an account">
+          <div className="max-w-[62ch] space-y-2 pb-1 text-[13px] leading-[1.45] text-muted-foreground">
+            <p>To add another Cloudflare user, sign out of Cloudflare first or finish the sign-in in a private window.</p>
+            <p>A command names another account as <code>&lt;account id&gt;/…</code>. Run <code>@cloudflare:list_accounts:*</code> in
+              a Channel to see every account and its id.</p>
+          </div>
+        </ConnectorFold>
+      </div>
+    </ConnectorSection>
   );
 }

@@ -41,7 +41,7 @@ test("a failed Check can be retried without reconnecting and only server success
     ...connection, status: "configured", error: null, version: 6, lastCheckedAt: E2E_NOW,
   } }, { method: "POST" });
   await check.click();
-  await expect(row.getByRole("img", { name: "Connected" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Connected" }).getByTestId("connector-row").filter({ hasText: "Sentry" })).toBeVisible();
   await expect(check).toBeEnabled();
   expect(await fixtureRequests(page, "sentry-failed-check")).toHaveLength(1);
   expect(await fixtureRequests(page, "sentry-passed-check")).toHaveLength(1);

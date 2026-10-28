@@ -26,7 +26,7 @@ test("Apps lists what needs a hand first, then what works, then the rest by cate
   await expect(gitlab).toHaveText("GitLab");
 });
 
-test("a credentials-only app shows its form before the command reference", async ({ page }) => {
+test("a credentials-only app leads with its form; the command reference stays folded", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   await fixtureJson(page, "providers", "**/api/xmatrix/connectors/oauth/providers", { providers: [], nativeProviders: [] });
   await fixtureJson(page, "connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections: [] });
@@ -35,11 +35,31 @@ test("a credentials-only app shows its form before the command reference", async
   await page.getByRole("button", { name: "App", exact: true }).click();
   await page.getByTestId("connector-row").filter({ hasText: "App Store Connect" }).click();
 
-  const sections = page.locator(".app-tool-detail-scroll:visible section[aria-label]");
-  await expect(sections.first()).toHaveAttribute("aria-label", "Credentials");
-  await expect(sections.last()).toHaveAttribute("aria-label", "Use it in a channel");
-  const commands = page.getByTestId("connector-commands").locator("li");
-  await expect(commands).toHaveCount(4);
+  const lead = page.getByTestId("connector-lead");
+  await expect(lead).toContainText("Connect App Store Connect");
+  await expect(lead.getByTestId("connector-credential-form")).toBeVisible();
+  // The one solid action on the page is the lead's.
+  await expect(page.locator(".app-tool-detail-scroll:visible .app-action-primary")).toHaveCount(1);
+  await expect(page.getByTestId("connector-commands")).toHaveCount(0);
   await page.getByRole("button", { name: /Show all \d+ commands/ }).click();
-  expect(await commands.count()).toBeGreaterThan(4);
+  expect(await page.getByTestId("connector-commands").locator("li").count()).toBeGreaterThan(4);
+});
+
+test("a connected app shows no call to action, and Disconnect comes last", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await fixtureJson(page, "providers", "**/api/xmatrix/connectors/oauth/providers", { providers: ["linear"], nativeProviders: [] });
+  await fixtureJson(page, "connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections: [
+    { ...connection("linear", "Linear", "configured"), authMode: "oauth" }] });
+  await fixtureJson(page, "executions", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });
+  await fixtureJson(page, "policies", /\/app-connections\/[^/]+\/policies$/, { policies: [] });
+  await fixtureJson(page, "credentials", /\/app-connections\/[^/]+\/credentials$/, { credentialFields: [] });
+  await page.getByRole("button", { name: "App", exact: true }).click();
+  await page.getByTestId("connector-row").filter({ hasText: "Linear" }).click();
+
+  await expect(page.getByTestId("connector-status")).toContainText("Connected · via Linear sign-in");
+  await expect(page.getByTestId("connector-lead")).toHaveCount(0);
+  await expect(page.locator(".app-tool-detail-scroll:visible .app-action-primary")).toHaveCount(0);
+  const sections = page.locator(".app-tool-detail-scroll:visible section[aria-label]");
+  await expect(sections.last()).toHaveAttribute("aria-label", "Disconnect");
+  await expect(page.getByTestId("connector-policy")).toContainText(/unless a channel has a rule of its own/i);
 });

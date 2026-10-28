@@ -4976,14 +4976,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   color: var(--app-panel-ink) !important;
 }
 
-/* App connectors view: themed material pass. The JSX exposes explicit
-   connector classes so this page does not depend on generic rounded-card
-   selectors. */
-.xmatrix-app.xmatrix-app .app-connectors-view {
-  --app-connector-glass-bg: var(--app-liquid-surface-bg);
-  --app-connector-glass-filter: var(--app-glass-backdrop, blur(6px) saturate(1.12));
-}
-
+/* App connectors view: its type is set flat, like the rest of the paper. */
 .xmatrix-app.xmatrix-app .app-connectors-view :is(h1, h2, h3, h4, p, span, button, code) {
   letter-spacing: 0 !important;
   text-rendering: geometricPrecision;
@@ -4992,114 +4985,6 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 
 .xmatrix-app.xmatrix-app .app-connectors-view svg {
   filter: none !important;
-}
-
-/* The list and the detail panel are the shared LiquidGlassCard, so they carry
-   no material of their own here — only padding. They used to be painted as
-   wooden plaques (`oklch(0.85 0.06 76)` + plank grain), which on the wooden
-   board read as a second slab of the same species glued to the first; the
-   Summary-card ruling already rejected that. One board, glass on it. */
-/* Rows run edge to edge inside the card, the way More's rows do; the card's
-   own radius clips the first and last (`overflow: hidden`). A padded list
-   with rounded rows inside it drew every row as a smaller box floating
-   inside a bigger one. */
-.xmatrix-app.xmatrix-app .app-connectors-list {
-  overflow: hidden !important;
-  padding: 0 !important;
-
-  /* Text-beside-actions is a fact about the row's own width, not the viewport's.
-   At a 1280 desktop the list column is ~420px (the detail pane takes 360), and
-   a viewport breakpoint put the two side by side anyway: the actions took
-   their full width and the description wrapped one word per line. Query the
-   list's inline size instead, so the row stacks whenever it is narrow —
-   whatever the screen around it is doing. */
-  container-type: inline-size;
-}
-
-.xmatrix-app.xmatrix-app .app-connectors-list.divide-y > :not([hidden]) ~ :not([hidden]) {
-  border-color: oklch(0 0 0 / 0.1) !important;
-}
-
-/* The status chip is deliberately NOT in this list. This recessed inset is a
-   trough for things that sit *in* the card — the icon well, code and command
-   blocks. Applying it to a label produced a hollow outlined pill with no fill,
-   which read as washed out on the plank. Status chips wear the shared chip
-   material instead (COUNT_CHIP_MATERIAL_CLASS + .app-status-chip). */
-.xmatrix-app.xmatrix-app .app-connector-command {
-  border-color: transparent !important;
-  background: var(--app-connector-inset-bg) !important;
-  box-shadow:
-    inset 0 0 0 0.5px oklch(1 0 0 / 0.3),
-    inset 0 1px 0 oklch(1 0 0 / 0.26) !important;
-}
-
-.xmatrix-app.xmatrix-app .app-connector-secondary-action,
-.xmatrix-app.xmatrix-app .app-connector-primary-action {
-  border-radius: 12px !important;
-  min-width: 0 !important;
-  transition:
-    background-color 180ms ease,
-    color 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease !important;
-}
-
-.xmatrix-app.xmatrix-app .app-connector-card {
-  border-radius: 20px !important;
-  border-color: transparent !important;
-  background: var(--app-connector-inset-bg) !important;
-  box-shadow:
-    inset 0 0 0 0.5px oklch(1 0 0 / 0.42),
-    inset 0 1px 0 oklch(1 0 0 / 0.3) !important;
-}
-
-.xmatrix-app.xmatrix-app .app-connector-card:hover {
-  background: oklch(1 0 0 / 0.1) !important;
-}
-
-.xmatrix-app.xmatrix-app .app-connector-actions button:focus-visible {
-  outline: 2px solid var(--ring) !important;
-  outline-offset: 2px !important;
-}
-
-.xmatrix-app.xmatrix-app .app-connector-actions button:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.xmatrix-app.xmatrix-app .app-connector-setup-state,
-.xmatrix-app.xmatrix-app .app-connector-command {
-  background: var(--app-connector-inset-bg) !important;
-  box-shadow: inset 0 0 0 0.5px oklch(1 0 0 / 0.24) !important;
-}
-
-.xmatrix-app.xmatrix-app .app-connector-step-number {
-  display: inline-flex;
-  width: 1.25rem;
-  height: 1.25rem;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: var(--app-connector-inset-bg);
-  color: var(--foreground);
-  font-size: 0.6875rem;
-  font-weight: 800;
-}
-
-.xmatrix-app.xmatrix-app .app-connector-configuration select {
-  background-color: var(--app-connector-inset-bg) !important;
-  box-shadow: inset 0 0 0 0.5px oklch(1 0 0 / 0.2) !important;
-}
-
-.xmatrix-app.xmatrix-app .app-connector-configuration input:is([type="radio"], [type="checkbox"]) {
-  margin-top: 0.2rem;
-  accent-color: currentColor;
-}
-
-html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-connectors-view {
-  --app-connector-inset-bg: oklch(1 0.02 88 / 0.18);
-  --app-connector-engraved-text-shadow: none;
-  --app-connector-engraved-icon-filter: none;
 }
 
 /* Final liquid-glass convex highlight normalization.
@@ -8186,7 +8071,6 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 }
 
 .xmatrix-app .app-tool-dot {
-  vertical-align: middle;
   display: inline-block;
   width: 8px;
   height: 8px;
@@ -8289,11 +8173,6 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 
 .xmatrix-app .app-tool-state-icon[data-state="attention"] {
   color: var(--m-ink-attention, var(--accent));
-}
-
-/* A connected app is green, the ink the Agents' resume action and free presence use. */
-.xmatrix-app .app-connector-state-icon[data-state="running"] {
-  color: oklch(0.63 0.16 155);
 }
 
 .xmatrix-app .app-tool-detail-section-title {
@@ -8503,6 +8382,26 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
 
 .xmatrix-app button.app-paper-tile:hover:not(:disabled) {
   background: color-mix(in oklch, var(--foreground) 7%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+
+/* An App's page (connector-page.tsx) has one lead: the thing the reader has
+   to do now is a sheet of the same tinted paper as a problem card, square
+   like all paper; when something stopped it carries the problem card's alert
+   rail. Everything else on the page is the plain paper around it. */
+.xmatrix-app .app-connector-sheet {
+  padding: 18px 20px 20px;
+  border-radius: 0;
+  background: color-mix(in oklch, var(--foreground) 4%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+
+.xmatrix-app .app-connector-sheet[data-tone="alert"] {
+  box-shadow: inset 3px 0 0 var(--m-ink-alert, var(--destructive));
+}
+
+/* A value to paste elsewhere is a slip of the same tint, square. */
+.xmatrix-app .app-connector-copy-line code {
+  border-radius: 0;
+  background: color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 
 .xmatrix-app .app-ask-card[data-ask-card="open"],
