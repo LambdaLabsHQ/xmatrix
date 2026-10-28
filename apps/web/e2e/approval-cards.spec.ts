@@ -256,6 +256,33 @@ test("Gmail approval shows the frozen email and allows only that request", async
   expect(await fixtureRequestBodies(page, "connector-answer")).toEqual([{ decision: "allow" }]);
 });
 
+test("Google Calendar approval reads as the event it would leave, not as fields", async ({ page }) => {
+  const request = { requestId: "email-request", channelId: E2E_CHANNEL.id, providerId: "googlecalendar", actionId: "create_event",
+    requestedBy: "e2e-user", expiresAt: "2026-10-14T00:00:00.000Z",
+    preview: { change: "create", calendar: "team@example.test", title: "Launch review", start: "2026-10-30T15:00:00+08:00",
+      end: "2026-10-30T16:00:00+08:00", timeZone: "Asia/Shanghai", location: "Room 4", guests: "a@example.test, b@example.test",
+      notes: "Walk through the beta checklist" } };
+  await openCards(page, [], [], VALUE_ASKED, [request]);
+  const approval = page.getByRole("region", { name: "Pending approvals" });
+  await expect(approval.getByRole("heading", { name: "Add this event to the calendar?" })).toBeVisible();
+  for (const text of ["Launch review", "Room 4", "a@example.test, b@example.test", "team@example.test", "Walk through the beta checklist"]) {
+    await expect(approval.getByText(text, { exact: true })).toBeVisible();
+  }
+  await expect(approval.getByText(/Thu, Oct 30 · 3:00\s*–\s*4:00\sPM GMT\+8/)).toBeVisible();
+  await expect(approval.getByText("timeZone", { exact: false })).toHaveCount(0);
+  await approval.getByRole("button", { name: "Allow once", exact: true }).click();
+  expect(await fixtureRequestBodies(page, "connector-answer")).toEqual([{ decision: "allow" }]);
+});
+
+test("a Google Calendar approval missing its event cannot be allowed, and says what is missing", async ({ page }) => {
+  const request = { requestId: "email-request", channelId: E2E_CHANNEL.id, providerId: "googlecalendar", actionId: "delete_event",
+    requestedBy: "e2e-user", expiresAt: "2026-10-14T00:00:00.000Z", preview: { change: "delete", calendar: "team@example.test" } };
+  await openCards(page, [], [], VALUE_ASKED, [request]);
+  const approval = page.getByRole("region", { name: "Pending approvals" });
+  await expect(approval.getByRole("alert")).toContainText("Google Calendar approval preview is missing title");
+  await expect(approval.getByRole("button", { name: "Allow once", exact: true })).toBeDisabled();
+});
+
 // An open Channel reads its pending requests when the Hub announces a change of
 // them. Reading them on a timer instead costs the Hub a request every few
 // seconds from every admin with a Channel open, whether or not anything waits.

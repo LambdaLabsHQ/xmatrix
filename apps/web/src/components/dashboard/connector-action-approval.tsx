@@ -9,6 +9,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { AskCard } from "./ask-card";
+import { CalendarEventPreview, calendarApprovalQuestion, calendarEventDraft, type CalendarEventDraft } from "./calendar-event-preview";
 import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
 interface ActionApproval {
@@ -61,20 +62,30 @@ export function ConnectorActionApproval({ request, token, userId }: {
     } catch (failure) { setError(userErrorMessage(failure, "Couldn't record your decision")); }
     finally { setBusy(false); }
   }
+  let calendar: CalendarEventDraft | null = null;
+  let previewError: string | null = null;
+  if (request.providerId === "googlecalendar") {
+    try { calendar = calendarEventDraft(request.preview); } catch (failure) { previewError = (failure as Error).message; }
+  }
+  const question = calendar ? calendarApprovalQuestion(calendar)
+    : request.providerId === "gmail" ? "Send this email?" : `Allow ${request.providerId} ${request.actionId}?`;
   return (
     <AskCard who={request.providerId} kind="Action approval" icon={<Send className="size-3.5" />}
-      open={!settled} question={request.providerId === "gmail" ? "Send this email?" : `Allow ${request.providerId} ${request.actionId}?`}
+      open={!settled} question={question}
       detail="Your answer covers this request only. The next request asks again."
       status={settled ? { tone: "settled", label: settled } : null}>
-      <dl className="mt-2 space-y-1 text-sm">
-        {Object.entries(request.preview).filter(([key]) => key !== "body" && key !== "text").map(([key, value]) => (
-          <div key={key}><dt className="inline font-semibold capitalize">{key}: </dt><dd className="inline [overflow-wrap:anywhere]">{value}</dd></div>
-        ))}
-      </dl>
-      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{request.preview.body ?? request.preview.text}</pre>
+      {calendar ? <CalendarEventPreview draft={calendar} /> : previewError ? null : <>
+        <dl className="mt-2 space-y-1 text-sm">
+          {Object.entries(request.preview).filter(([key]) => key !== "body" && key !== "text").map(([key, value]) => (
+            <div key={key}><dt className="inline font-semibold capitalize">{key}: </dt><dd className="inline [overflow-wrap:anywhere]">{value}</dd></div>
+          ))}
+        </dl>
+        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{request.preview.body ?? request.preview.text}</pre>
+      </>}
+      {previewError && <p role="alert" className="mt-2 text-xs text-destructive">{previewError}. Disallow it and ask the Agent again.</p>}
       {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
       {!settled && <div className="mt-3 flex gap-2">
-        <button type="button" disabled={busy} onClick={() => void decide("allow")} className={actionClass({ variant: "primary", size: "sm" })}>
+        <button type="button" disabled={busy || Boolean(previewError)} onClick={() => void decide("allow")} className={actionClass({ variant: "primary", size: "sm" })}>
           {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Allow once
         </button>
         <button type="button" disabled={busy} onClick={() => void decide("disallow")} className={actionClass({ variant: "secondary", size: "sm" })}>
