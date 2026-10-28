@@ -169,10 +169,9 @@ jobs:
   # findings are code scanning alerts on main, not a verdict. Test code never
   # ships, so it is not scanned. The JavaScript and TypeScript analysis runs
   # as two halves side by side. Rust stays one analysis so cross-crate flow
-  # remains, but the buildless extractor does not load an include! that leaves
-  # its crate: the shared CLI action-name macro never expands. CodeQL traces
-  # a cargo check of the workspace instead, without the compile-cache wrapper,
-  # because a cache hit would not run rustc.
+  # remains. This CodeQL only accepts Rust build-mode none; its rust-analyzer
+  # expands include! only for a file inside the crate, so the shared
+  # action-name macro is copied into each crate that invokes it.
   codeql:
     needs: plan
     if: needs.plan.outputs.scope != ''
@@ -192,27 +191,12 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.source_sha }}
           persist-credentials: false
-      # The pinned toolchain only. Kache would satisfy later checks from its
-      # store without invoking rustc, and CodeQL would then have nothing to trace.
-      - uses: ./.github/actions/setup-rust-kache
-        if: matrix.language == 'rust'
-        with:
-          kache: "false"
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.language == 'swift' && 'autobuild' || matrix.language == 'rust' && 'manual' || 'none' }}
+          build-mode: ${{ matrix.language == 'swift' && 'autobuild' || 'none' }}
           queries: security-extended
           config: ${{ matrix.config }}
-      - name: Check the Rust workspace for CodeQL to trace
-        if: matrix.language == 'rust'
-        working-directory: packages/cli-rs
-        env:
-          CARGO_INCREMENTAL: "0"
-        run: |
-          set -euo pipefail
-          unset RUSTC_WRAPPER
-          cargo check --locked --workspace
       - uses: github/codeql-action/analyze@v4
         with:
           category: ${{ matrix.category }}

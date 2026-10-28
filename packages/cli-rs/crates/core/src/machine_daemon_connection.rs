@@ -768,7 +768,7 @@ pub enum HarnessAction {
     LoginCancel,
 }
 
-include!("../../../shared/harness_action_names.rs");
+include!("harness_action_names.rs");
 
 impl HarnessAction {
     harness_action_names!(

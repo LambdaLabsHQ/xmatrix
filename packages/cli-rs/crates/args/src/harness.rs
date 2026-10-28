@@ -30,7 +30,7 @@ pub enum HarnessApplyAction {
     Release,
 }
 
-include!("../../../shared/harness_action_names.rs");
+include!("harness_action_names.rs");
 
 impl HarnessApplyAction {
     harness_action_names!();

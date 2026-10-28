@@ -1,5 +1,7 @@
 // The CLI parser and serialized daemon protocol expose the same closed actions;
 // the daemon protocol alone adds the owner's remote sign-in actions.
+// This copy lives inside the crate: CodeQL's rust-analyzer extractor does not
+// load an include! that leaves the crate. Keep the two copies identical.
 macro_rules! harness_action_names {
     ($($variant:ident => $name:literal),* $(,)?) => {
         pub fn as_str(self) -> &'static str {
