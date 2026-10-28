@@ -240,6 +240,7 @@ export function ConnectorDetailPage({
           )
         ) : null}
         {kind !== "chat" && kind !== "company" && configured && connectorGeneratesCredentials(manualConnector)
+          && !(connector.id === "stripe" && kind === "oauth" && !hasTypedCredentials)
           ? <ConnectorEventDelivery {...credentials} connector={manualConnector} /> : null}
 
         <ConnectorCommands connector={connector} />

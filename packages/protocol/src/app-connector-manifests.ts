@@ -74,7 +74,11 @@ export interface AppConnectorProviderManifest {
      * Vercel external Integration installs use their registered slug and completion redirect;
      * Composio signs the account in with its own verified app (client id = Composio auth config; the secret is the shared CONNECTOR_COMPOSIO_API_KEY).
      */
-    flow?: "vercel-integration" | "composio";
+    /**
+     * Stripe Apps exchange the code with the developer secret key as HTTP Basic
+     * and no client secret pair; the authorize URL carries only client id, redirect and state.
+     */
+    flow?: "vercel-integration" | "composio" | "stripe-app";
   };
   credentials?: Array<{
     id: string;

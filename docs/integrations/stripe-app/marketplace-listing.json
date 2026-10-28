@@ -1,0 +1,58 @@
+{
+  "name": "xMatrix",
+  "built_by": "MadeByRobot, LLC",
+  "category_preference": "Workflow automation",
+  "subtitle": "Bring payment failures, disputes, and subscription updates to your team.",
+  "about": "xMatrix brings people and their coding agents together in shared workspaces. Connect your Stripe account to route selected payment failure, dispute, and subscription events into the channels where your team works, with shared context and living pages.",
+  "company_website": "https://xmatrix.sh",
+  "privacy_policy": "https://xmatrix.sh/privacy",
+  "terms_of_service": "https://xmatrix.sh/terms",
+  "support_email": "hello@xmatrix.sh",
+  "support_note": "Self-serve product help. No support SLA.",
+  "pricing_type": "Paid subscription required",
+  "pricing_url": "https://xmatrix.sh/#pricing",
+  "pricing_note": "xMatrix Pro is required for connectors. Current published pricing is $10 per human seat per month or $96 per seat per year. Connector messages use the Space credit allowance. Coding agents run with the subscriptions and credentials users supply. The live pricing page is authoritative.",
+  "based_in": "United States",
+  "supported_languages": [
+    "English"
+  ],
+  "features": [
+    {
+      "title": "Bring payment failures into the conversation",
+      "description": "Route failed invoice and PaymentIntent events to selected xMatrix channels so your team can see the event context and coordinate follow-up.",
+      "image": null
+    },
+    {
+      "title": "Keep dispute and subscription updates together",
+      "description": "Deliver dispute changes and subscription lifecycle events to the channels your team selects. Keep the relevant discussion and decisions in one workspace.",
+      "image": null
+    },
+    {
+      "title": "Connect with OAuth and control the destination",
+      "description": "Authorize five read-only permissions and choose where events go. Revoke the app in Stripe or disconnect it in xMatrix when access is no longer needed.",
+      "image": null
+    }
+  ],
+  "testing_guidance": [
+    "Sign in to the dedicated xMatrix reviewer test account supplied separately. Use its isolated test Space with administrator rights.",
+    "Open the Space Apps page and choose Connect with Stripe. For app review, use the normal public OAuth installation path; the external test path is for implementation testing only.",
+    "Select the reviewer-owned Stripe account, inspect the five read-only permissions, authorize, and return to xMatrix. No client ID, account ID, signing secret, or API key is entered by the connecting user.",
+    "In the isolated test channel, subscribe to invoice, payment_intent, dispute, and subscription event sources as described by the released connector guide.",
+    "Use Stripe test events for the reviewer test account. Verify events reach its selected channel and do not reach a separate unconnected Space.",
+    "Disconnect or uninstall the integration and verify subsequent events no longer reach the Space."
+  ],
+  "submission_open_work": [
+    "Complete live developer key issuance after the owner enters the authenticator code; save the three connector values through the formal production configuration path.",
+    "Release and verify the Hub OAuth callback, account routing, revocation, and bounded external test Space configuration.",
+    "Capture feature images at least 1600 pixels wide using sanitized released UI; do not show real customer data.",
+    "Provision an isolated non-real reviewer account and deliver its credentials through the approved private submission mechanism.",
+    "Finalize the category from the actual Stripe submission choices and submit the accurate listing after end-to-end verification."
+  ],
+  "sources": [
+    "https://docs.stripe.com/stripe-apps/publish-app",
+    "https://docs.stripe.com/stripe-apps/review-requirements",
+    "https://xmatrix.sh/pricing.md",
+    "https://xmatrix.sh/about.md"
+  ],
+  "prepared_at_utc": "2026-10-28"
+}

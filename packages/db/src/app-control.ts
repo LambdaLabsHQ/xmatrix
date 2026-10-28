@@ -605,7 +605,7 @@ export class PostgresAppRepository {
     const providerId = text(input.providerId, "providerId", 80);
     const appClientId = text(input.appClientId, "appClientId", 256);
     const installationId = text(input.installationId, "installationId", 128);
-    if (!["slack", "linear"].includes(providerId) || !Number.isSafeInteger(input.limit) ||
+    if (!["slack", "linear", "stripe"].includes(providerId) || !Number.isSafeInteger(input.limit) ||
         input.limit < 1 || input.limit > 100) throw new AppControlError("invalid_app_request", 400, "Invalid OAuth event route");
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.oauth-event-connections" }, async (tx) => {
@@ -734,6 +734,43 @@ export class PostgresAppRepository {
         SET status='disconnected',version=version+1,updated_at=$2 WHERE connection_id=ANY($1::text[])
           AND status<>'disconnected'`, values: [ids, at], maxRows: 0 });
       await tx.query({ name: "app_slack_retirement_binding_v1", text: `DELETE FROM
+        data.app_connector_oauth_installations WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
+      return rows.length;
+    });
+  }
+
+  /**
+   * A verified Stripe `account.application.deauthorized` retires bindings of
+   * that account made before Stripe's event time. Several Spaces may share
+   * one account. A Connect after the event is a newer grant and stays.
+   */
+  async retireStripeAccount(input: { requestId: string; appClientId: string; installationId: string;
+    at: string; eventAt: string; limit: number }): Promise<number> {
+    const appClientId = text(input.appClientId, "appClientId", 256);
+    const installationId = text(input.installationId, "installationId", 128);
+    const at = iso(input.at);
+    const eventAt = iso(input.eventAt);
+    if (!/^acct_[A-Za-z0-9]{1,64}$/u.test(installationId) || !Number.isSafeInteger(input.limit) ||
+        input.limit < 1 || input.limit > 100) {
+      throw new AppControlError("invalid_app_request", 400, "Invalid Stripe retirement");
+    }
+    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+      operation: "app.stripe-account-retire" }, async tx => {
+      const rows = await tx.query<QueryResultRow>({ name: "app_stripe_retirement_lock_v1", text: `SELECT i.connection_id
+        FROM data.app_connector_oauth_installations i
+        JOIN data.app_connector_connections c ON c.connection_id=i.connection_id AND c.space_id=i.space_id
+          AND c.provider_id=i.provider_id
+        WHERE i.provider_id='stripe' AND i.app_client_id=$1 AND i.installation_id=$2 AND i.updated_at<$4
+        ORDER BY i.connection_id LIMIT $3 FOR UPDATE OF c,i`,
+      values: [appClientId, installationId, input.limit + 1, eventAt], maxRows: input.limit + 1 });
+      if (rows.length > input.limit) throw new AppControlError("too_many_installations", 503,
+        "Stripe retirement exceeds its bound", true);
+      if (!rows.length) return 0;
+      const ids = rows.map(row => String(row.connection_id));
+      await tx.query({ name: "app_stripe_retirement_state_v1", text: `UPDATE data.app_connector_connections
+        SET status='disconnected',version=version+1,updated_at=$2 WHERE connection_id=ANY($1::text[])
+          AND status<>'disconnected'`, values: [ids, at], maxRows: 0 });
+      await tx.query({ name: "app_stripe_retirement_binding_v1", text: `DELETE FROM
         data.app_connector_oauth_installations WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: 0 });
       return rows.length;
     });

@@ -12,6 +12,7 @@ import { isSentryInstallationGrant, refreshSentryInstallation } from "./sentry-i
 import { cloudflareGrantContext } from "./cloudflare-api";
 import { parseCloudflareLogins, serializeCloudflareLogins } from "./cloudflare-logins";
 import { composioConnectedAccount, composioConnectUrl, composioUserId } from "./composio";
+import { allowedStripeAuthorizeUrl, stripeAppSecretsReady, validateStripeGrant } from "./stripe-oauth";
 import { xOAuthFields } from "./x-oauth";
 
 /*
@@ -43,7 +44,8 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
  */
 export function grantFieldsForgottenOnDisconnect(providerId: string): Record<string, null> | undefined {
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
-  if (!GOOGLE_GRANTS[providerId] && manifest?.oauth?.flow !== "composio" && providerId !== "x") return undefined;
+  if (!GOOGLE_GRANTS[providerId] && manifest?.oauth?.flow !== "composio" && providerId !== "x" &&
+      manifest?.oauth?.flow !== "stripe-app") return undefined;
   return Object.fromEntries((manifest?.credentials ?? []).filter((field) => field.managed).map((field) => [field.id, null]));
 }
 
@@ -102,6 +104,7 @@ export function oauthClient(env: Env, providerId: string): OAuthClient | undefin
   /* Composio providers share the company Composio project key; their client id is the provider's auth config. */
   const clientSecret = envValue(env, manifest.oauth.flow === "composio" ? "CONNECTOR_COMPOSIO_API_KEY" : `${prefix}_CLIENT_SECRET`);
   if (!clientId || !clientSecret) return undefined;
+  if (manifest.oauth.flow === "stripe-app" && !stripeAppSecretsReady(env)) return undefined;
   return { manifest: manifest as OAuthClient["manifest"], clientId, clientSecret };
 }
 
@@ -115,7 +118,7 @@ export function oauthRedirectUri(hubOrigin: string): string {
 }
 
 export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: string; userId: string;
-  redirectUri: string; now?: number; accountId?: string; meter?: UpstreamMeter;
+  redirectUri: string; now?: number; accountId?: string; meter?: UpstreamMeter; authorizeUrl?: string;
   connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<string> {
   const { oauth } = client.manifest;
   const claims = { providerId: client.manifest.id, spaceId: input.spaceId, userId: input.userId,
@@ -130,8 +133,17 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
     callback.searchParams.set("state", state);
     return composioConnectUrl(client, composioUserId(input.spaceId, claims.nonce), callback.toString(), input.meter);
   }
-  const url = new URL(oauth.authorizeUrl);
+  if (input.authorizeUrl && !allowedStripeAuthorizeUrl(input.authorizeUrl)) {
+    throw new ProviderRequestError(404, "One-click connect is not configured for this app");
+  }
+  const url = new URL(input.authorizeUrl ?? oauth.authorizeUrl);
   if (oauth.flow === "vercel-integration") {
+    url.searchParams.set("state", state);
+    return url.toString();
+  }
+  if (oauth.flow === "stripe-app") {
+    url.searchParams.set("client_id", client.clientId);
+    url.searchParams.set("redirect_uri", input.redirectUri);
     url.searchParams.set("state", state);
     return url.toString();
   }
@@ -174,6 +186,19 @@ export async function verifyOAuthState(env: Env, state: string):
 
 async function tokenRequest(client: OAuthClient, grant: Record<string, string>, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
   const { oauth } = client.manifest;
+  if (oauth.flow === "stripe-app") {
+    const { redirect_uri: _redirect, ...stripeGrant } = grant;
+    const payload = await providerJson(oauth.tokenUrl, { method: "POST",
+      headers: { authorization: `Basic ${btoa(`${client.clientSecret}:`)}`, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(stripeGrant), describeError: () => "Stripe OAuth token request failed" }).catch(error => {
+        if (error instanceof ProviderRequestError) throw new ProviderRequestError(error.status, "Stripe token exchange failed");
+        throw error;
+      });
+    if (typeof payload.access_token !== "string" || !payload.access_token) {
+      throw new ProviderRequestError(400, "Stripe did not issue a token");
+    }
+    return payload;
+  }
   if (oauth.flow === "vercel-integration") {
     const { grant_type: _grantType, ...integrationGrant } = grant;
     grant = integrationGrant;
@@ -275,6 +300,11 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
   const proof = client.manifest.oauth.pkce ? await pkceGrantProof(client, state, redirectUri) : undefined;
   const payload = await tokenRequest(client, { grant_type: "authorization_code", code, redirect_uri: redirectUri,
     ...(proof ? { code_verifier: proof } : {}) }, meter);
+  if (client.manifest.oauth.flow === "stripe-app") {
+    const account = validateStripeGrant(payload);
+    return { fields: { ...oauthTokenFields(client, payload), stripeUserId: account },
+      installation: { appClientId: client.clientId, installationId: account } };
+  }
   if (client.manifest.id === "x") {
     const claims = await oauthGrantState(client, state, redirectUri);
     return { fields: await xOAuthFields(client, payload, String(claims.userId),
@@ -376,18 +406,24 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
     throw new ConnectorRemedy(401, "Bitbucket OAuth requires a complete expiring grant; reconnect", { kind: "reconnect" });
   }
+  if (providerId === "stripe" && values.oauthToken &&
+      (!values.oauthRefreshToken || !values.stripeUserId || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
+    throw new ConnectorRemedy(401, "Stripe OAuth requires a complete expiring grant; reconnect", { kind: "reconnect" });
+  }
   if (!values.oauthRefreshToken || (!afterNotionUnauthorized &&
       (!Number.isFinite(expiresAt) || expiresAt - now > REFRESH_MARGIN_MS))) return undefined;
   const client = oauthClient(env, providerId);
   if (!client) {
     if (completeGoogleGrant) throw new ProviderRequestError(503, `${GOOGLE_GRANTS[providerId]!.name} OAuth application is unavailable for refresh; reconnect`);
     if (providerId === "bitbucket") throw new ProviderRequestError(503, "Bitbucket OAuth consumer is unavailable for refresh");
+    if (providerId === "stripe") throw new ConnectorRemedy(503, "Stripe OAuth application is unavailable for refresh; reconnect", { kind: "reconnect" });
     if (providerId === "sentry") throw new ProviderRequestError(503, "Sentry user OAuth is unavailable for refresh; reconnect");
     return undefined;
   }
   const payload = await tokenRequest(client, { grant_type: "refresh_token", refresh_token: values.oauthRefreshToken });
   if (GOOGLE_GRANTS[providerId]) validateGoogleGrant(providerId, payload, false);
   if (providerId === "bitbucket") validateBitbucketGrant(payload, false);
+  if (providerId === "stripe") validateStripeGrant(payload, values.stripeUserId);
   if (providerId === "notion" && (typeof payload.refresh_token !== "string" || !payload.refresh_token)) {
     throw new ProviderRequestError(502, "Notion did not return its rotated refresh token");
   }

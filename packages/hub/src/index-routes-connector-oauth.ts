@@ -12,6 +12,7 @@ import { getAppConnectorProvider } from "./app-connectors";
 import { connectorCredentialRepository, INGRESS_KEY_FIELD, mintConnectorSecret } from "./connectors/credentials";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, oauthProviderIds, oauthRedirectUri,
   verifyOAuthState } from "./connectors/oauth";
+import { stripeAuthorizeEndpoint, stripeConnectOffered } from "./connectors/stripe-oauth";
 import { appOrigin } from "./deployment-origins";
 import { vercelCompletionUrl } from "./connectors/vercel-api";
 import { connectorHubOrigin, requireAuth, requireHumanAuth, jsonErrors } from "./index-shared";
@@ -123,7 +124,9 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
 export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get("/api/connectors/oauth/providers", (c) => jsonErrors(c, async () => {
     requireHumanAuth(await requireAuth(c.req.raw, c.env));
-    return c.json({ providers: [...oauthProviderIds(c.env), ...(sentryInstallationClient(c.env) ? ["sentry"] : [])],
+    const spaceId = c.req.query("spaceId");
+    const providers = oauthProviderIds(c.env).filter((id) => id !== "stripe" || stripeConnectOffered(c.env, spaceId));
+    return c.json({ providers: [...providers, ...(sentryInstallationClient(c.env) ? ["sentry"] : [])],
       nativeProviders: [...(teamsNativeApp(c.env) ? ["teams"] : []), ...(googleChatNativeApp(c.env) ? ["googlechat"] : []), ...(await feishuNativeApp(c.env) ? ["feishu"] : []), ...(await telegramNativeApp(c.env) ? ["telegram"] : []), ...(await wecomNativeSuite(c.env) ? ["wecom"] : []), ...(await dingtalkNativeCompany(c.env) ? ["dingtalk"] : [])] }, 200, { "cache-control": "private, no-store" });
   }));
 
@@ -145,6 +148,10 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
     }
     const client = oauthClient(c.env, providerId);
     if (!client) return c.json({ error: "One-click connect is not configured for this app" }, 404);
+    const stripeAuthorizeUrl = providerId === "stripe" ? stripeAuthorizeEndpoint(c.env, spaceId) : undefined;
+    if (providerId === "stripe" && !stripeAuthorizeUrl) {
+      return c.json({ error: "One-click connect is not configured for this app" }, 404);
+    }
     let accountId: string | undefined;
     if (client.manifest.id === "x") {
       const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
@@ -170,6 +177,7 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
         providerId, actorUserId: user.id });
     }
     return c.json({ url: await oauthAuthorizeUrl(client, { spaceId, userId: user.id, connectionSnapshot, accountId,
+      ...(stripeAuthorizeUrl ? { authorizeUrl: stripeAuthorizeUrl } : {}),
       redirectUri: oauthRedirectUri(connectorHubOrigin(c.env, c.req.raw)),
       meter: upstreamMeter(c.env, { spaceId, connector: client.manifest.id, action: "connect" }) }) },
     200, { "cache-control": "private, no-store" });

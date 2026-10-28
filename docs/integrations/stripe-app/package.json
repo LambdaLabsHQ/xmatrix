@@ -1,0 +1,6 @@
+{
+  "name": "xmatrix-stripe-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stripe CLI upload package for the xMatrix app. Not a workspace package."
+}
