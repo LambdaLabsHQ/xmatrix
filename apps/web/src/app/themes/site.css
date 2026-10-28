@@ -1218,3 +1218,124 @@ html:has(.site-page) {
     animation: none;
   }
 }
+
+/* A published page (/p/…), set as Notion sets its published pages: the page
+   as the live editor draws it (page-document.css) on the app's paper, a thin
+   bar with where the page sits and the xMatrix mark, and the page's sections
+   as rules at the right edge. Under the title, what Notion leaves out: who
+   keeps the page current and when it last changed. */
+.public-page {
+  background: var(--app-panel-paper);
+  color: var(--foreground);
+}
+.public-page-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 52px;
+  padding: 0 14px 0 16px;
+  background: linear-gradient(var(--app-panel-paper) 70%, transparent);
+}
+.public-page-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+.public-page-crumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.public-page-crumb[aria-current] { color: var(--foreground); font-weight: 550; }
+.public-page-crumb-gap { opacity: 0.5; }
+.public-page-brand { flex-shrink: 0; gap: 6px; }
+.public-page-sheet {
+  max-width: calc(900px + 2 * 48px);
+  margin: 0 auto;
+  padding: 72px 48px 120px;
+}
+.public-page-title {
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.public-page-byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 14px 0 32px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+.public-page-faces { display: inline-flex; }
+.public-page-faces > * + * { margin-left: -6px; }
+.public-page-face {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  object-fit: cover;
+  box-shadow: 0 0 0 2px var(--app-panel-paper);
+}
+.public-page-face[data-working] { animation: public-page-face-beat 1.6s ease-in-out infinite; }
+@keyframes public-page-face-beat { 50% { transform: scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .public-page-face[data-working] { animation: none; } }
+.public-page-document.page-document { white-space: normal; padding-bottom: 0; font-size: 16px; }
+.public-page-children {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 40px;
+  font-size: 15px;
+}
+.public-page-children a, .public-page-join {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.public-page-join { display: inline-block; margin-top: 32px; font-weight: 600; }
+/* One rule per section at the right edge; hovering opens the names. */
+.public-page-outline {
+  position: fixed;
+  top: 50%;
+  right: 14px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 70vh;
+  padding: 8px;
+  overflow-y: auto;
+  border-radius: 12px;
+  transform: translateY(-50%);
+}
+.public-page-outline > button {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 10px;
+  min-height: 14px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  text-align: right;
+}
+.public-page-outline-rule { flex-shrink: 0; width: 16px; height: 2px; border-radius: 2px; background: currentColor; opacity: 0.35; }
+.public-page-outline > button[data-level="3"] .public-page-outline-rule { width: 10px; }
+.public-page-outline > button[data-current] { color: var(--foreground); }
+.public-page-outline > button[data-current] .public-page-outline-rule { opacity: 1; }
+.public-page-outline-name { display: none; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.public-page-outline:hover { background: var(--app-panel-paper); box-shadow: 0 10px 30px -12px oklch(0.3 0.04 60 / 0.35); }
+.public-page-outline:hover .public-page-outline-name { display: block; }
+.public-page-outline > button:hover { color: var(--foreground); }
+@media (max-width: 1100px) { .public-page-outline { display: none; } }
+@media (max-width: 767px) {
+  .public-page-sheet { padding: 28px 24px 80px; }
+  .public-page-title { font-size: 30px; }
+  .public-page-byline { margin-bottom: 24px; font-size: 13px; }
+  .public-page-crumbs > .public-page-crumb:first-of-type, .public-page-crumb-gap { display: none; }
+}

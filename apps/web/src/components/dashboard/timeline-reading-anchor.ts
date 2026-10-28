@@ -109,11 +109,15 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
        place. A scroll event's difference from it is the reader's own movement
        since the last frame; anything else the anchor moved is drift. */
     let heldScrollTop = root.scrollTop;
+    let inputScrollTop: number | null = null;
     const hold = (top: number, expected: number) => {
       const drift = top - expected;
       offset = expected;
       if (Math.abs(drift) >= 0.5) {
+        const before = root.scrollTop;
         root.scrollTop += drift;
+        // Our correction is not the native input movement still to come.
+        if (inputScrollTop !== null) inputScrollTop += root.scrollTop - before;
         lastActivityAt = performance.now();
       }
       heldScrollTop = root.scrollTop;
@@ -121,9 +125,17 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
 
     // Input can move the scroller before its queued scroll event is delivered.
     // A layout correction in that gap must credit the reader's movement first.
-    let inputScrollTop: number | null = null;
     const followInput = () => {
-      if (inputScrollTop === null) return;
+      // A mutation can run before the browser's wheel default action. Keep
+      // waiting when nothing moved, or when layout and scroll compensated
+      // each other and the text stayed put.
+      if (inputScrollTop === null || root.scrollTop === inputScrollTop) return;
+      const top = anchorTop();
+      if (top !== null && Math.abs(top - offset) < 0.5) {
+        inputScrollTop = root.scrollTop;
+        heldScrollTop = root.scrollTop;
+        return;
+      }
       offset -= root.scrollTop - inputScrollTop;
       inputScrollTop = null;
       heldScrollTop = root.scrollTop;

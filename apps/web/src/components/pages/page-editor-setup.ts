@@ -28,6 +28,7 @@ import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds
 import { imageView, pageMediaPaste, type LocalMedia, type PageMediaSource, type UploadPageMedia } from "./page-media";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
 import { pageTriggers } from "./page-triggers";
+import { tableCells } from "./page-table-cells-plugin";
 import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
 import { NEW_PAGE_TITLE } from "./page-creation";
 import { mountSectionAgents, type SectionAgent } from "./page-section-agents";
@@ -1312,6 +1313,7 @@ export function editorPlugins(input: {
     dropCursor(),
     gapCursor(),
     tableEditing(),
+    tableCells(),
     placeholder(input.placeholder),
     presence(input.awareness, input.onBlockChange),
     sectionOverlay(input.openConversation, input.headingActions),

@@ -117,6 +117,7 @@ function timeline({ userAgent = DESKTOP } = {}) {
   return {
     anchor,
     start() { const key = {}; anchor.snapshot(key); anchor.apply(key); },
+    input() { listeners.get("wheel")?.({ type: "wheel" }); flushInput(); },
     resize() { for (const observer of observers) if (observer.connected) observer.callback(); },
     scrollDrift() { contentTop += 1; listeners.get("scroll")?.(); },
     /** Someone else scrolls the timeline: the reader, or the virtualizer. */
@@ -161,6 +162,26 @@ test("virtualizer compensation before the queued scroll is not counted as reader
     view.scrollBy(0);
     if (!layoutFirst) view.resize();
     assert.equal(view.textTop(), 140);
+  }
+});
+
+test("layout before native input scroll does not consume the reader's pending movement", () => {
+  for (const delta of [-40, 40]) {
+    for (const layout of ["unchanged", "growth", "compensated"]) {
+      const view = timeline();
+      view.start();
+      view.resize();
+      view.input();
+      // Native default scrolling happens after the input task's microtasks.
+      // A mutation or resize can arrive while that movement is still pending.
+      if (layout === "growth") view.growAbove(30);
+      if (layout === "compensated") view.compensate(30);
+      view.resize();
+      view.scrollBy(delta, { emit: false });
+      view.resize();
+      view.scrollBy(0);
+      assert.equal(view.textTop(), 100 - delta, `${layout}, scroll ${delta}`);
+    }
   }
 });
 

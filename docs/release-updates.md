@@ -14,6 +14,29 @@ and Disconnect last. Every part uses the same rows, quiet actions and "add"
 row. The Apps list groups what needs attention, what is connected and what
 was disconnected, then every other app once under its category.
 
+## Unreleased: Native scrolling stays free while older history settles
+
+After an older history page loads, a layout callback no longer consumes a
+wheel or other pending scroll before the browser has moved the timeline.
+That race could mistake the subsequent movement for layout drift and pull
+the reader back in either direction. The anchor keeps waiting for movement;
+its own corrections and compensated virtualizer changes update the pending
+baseline without claiming reader input. Existing quiet and maximum lifetimes
+still apply. This ships in the beta Web; no API or data migration is needed.
+Recovery is a CI-validated beta Web reverting the change.
+
+## Unreleased: Shared pages read as the page does in the app
+
+A published page (`/p/…`) is set with the live editor's styles on the app's
+paper: headings, lists and tables come out formatted instead of bare text. A
+thin bar carries where the page sits and the xMatrix mark; the title stands
+large, with the faces of who keeps the page current and when it last changed
+under it; the page's sections are rules at the right edge. In the app and on a
+shared page, tables drop their cell grid for hairline rows, columns fit their
+content and short cells keep to one line, and a page's reminders read as their
+names in ink instead of sky-blue pills. Web only; recovery is a beta Web
+reverting this change.
+
 ## Unreleased: The iOS swipe back follows the finger again
 
 On iPhone, dragging from the left edge moves the screen with the finger again.
