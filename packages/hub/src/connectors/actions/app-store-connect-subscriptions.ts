@@ -18,21 +18,28 @@ const PRODUCT_ID = /^[A-Za-z0-9._-]{1,100}$/u;
 const MAX_NAMED = 20;
 /* The state Apple must report before a subscription can be submitted. */
 const READY = "READY_TO_SUBMIT";
-/* A version still being prepared joins the draft as it is; anything else means a new one. */
-const PENDING: ReadonlySet<string> = new Set(["PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW"]);
+/* Only a version Apple has finished with needs a new one; any other is still in flight and is reused. */
+const FINISHED: ReadonlySet<string> = new Set(["APPROVED", "REPLACED_WITH_NEW_VERSION"]);
+/* Apple names the version in flight when it refuses another, which the version list may not show. */
+const IN_FLIGHT = /already an inflight version with id '([A-Za-z0-9-]{1,64})'/u;
 
 /**
- * The pending version of a subscription or group, created when there is none. A group Apple already
- * approved has nothing to review unless it was changed, which leaves a pending version of its own.
+ * The version of a subscription or group still in flight, created when there is none. A group Apple
+ * already approved has nothing to review unless it was changed, which leaves a version of its own.
  */
 async function pendingVersion(api: AppStoreConnectApi, kind: "subscriptions" | "subscriptionGroups", id: string): Promise<AppleResource | undefined> {
   const versionType = kind === "subscriptions" ? "subscriptionVersions" : "subscriptionGroupVersions";
   const { rows } = await api.list(`/v1/${kind}/${encodeURIComponent(id)}/versions`, { [`fields[${versionType}]`]: "state", limit: "50" }, 1);
-  const pending = rows.find(row => PENDING.has(text(row.attributes.state)));
+  const pending = rows.find(row => !FINISHED.has(text(row.attributes.state)));
   if (pending) return pending;
   if (kind === "subscriptionGroups" && rows.some(row => text(row.attributes.state) === "APPROVED")) return undefined;
-  const created = appleResource((await api.request(`/v1/${versionType}`, { method: "POST", data: { type: versionType,
-    relationships: { [kind === "subscriptions" ? "subscription" : "subscriptionGroup"]: relation(kind, id) } } })).data);
+  const created = await api.request(`/v1/${versionType}`, { method: "POST", data: { type: versionType,
+    relationships: { [kind === "subscriptions" ? "subscription" : "subscriptionGroup"]: relation(kind, id) } } })
+    .then(response => appleResource(response.data), (error: unknown) => {
+      const inFlight = error instanceof ProviderRequestError && error.status === 409 ? IN_FLIGHT.exec(error.message)?.[1] : undefined;
+      if (!inFlight) throw error;
+      return { type: versionType, id: inFlight, attributes: {} } as AppleResource;
+    });
   if (!created) throw new ProviderRequestError(502, "App Store Connect did not return the new version");
   return created;
 }
