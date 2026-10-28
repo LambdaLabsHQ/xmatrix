@@ -28,6 +28,7 @@ export function QuotaRetryNotice({
   const [retry, setRetry] = useState<AgentQuotaRetry | null>(null);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [readRevision, setReadRevision] = useState(0);
   const version = useRef(0);
   const url = WEB_PROXY_ROUTES.channel_quota_retry(channelId, id);
   useEffect(() => {
@@ -55,7 +56,7 @@ export function QuotaRetryNotice({
       disposed = true;
       clearTimeout(timer);
     };
-  }, [token, url]);
+  }, [token, url, readRevision]);
   const choose = async (action: "wait" | "cancel") => {
     if (pending) return;
     version.current++;
@@ -76,6 +77,10 @@ export function QuotaRetryNotice({
     } catch {
       setFailed(true);
     } finally {
+      // Fence reads started while the choice was in flight and renew their
+      // bounded polling loop, even if the previous read is still pending.
+      version.current++;
+      setReadRevision((revision) => revision + 1);
       setPending(false);
     }
   };
