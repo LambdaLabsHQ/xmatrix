@@ -79,8 +79,11 @@ integration("two pollers keep independent cursors and deduplication; adding a ma
     assert.deepEqual(await repository.pending(a),[message]);assert.deepEqual(await repository.pending(b),[message]);
     await repository.stop(spaceId,"owner",second);
     assert.equal(await repository.current(a),true);assert.equal(await repository.current(b),false);
+    assert.equal(await repository.deliveredLastHour(a,30),0);
     await repository.delivered(a,message);
     assert.deepEqual(await repository.pending(a),[]);
+    // Each mailbox counts only its own recent deliveries, toward the automatic read limit.
+    assert.equal(await repository.deliveredLastHour(a,30),1);assert.equal(await repository.deliveredLastHour(b,30),0);
   });
 });
 

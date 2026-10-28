@@ -16,7 +16,8 @@ async function drainer() {
     userId:"owner",mode:"poll",historyId:"100",pendingWake:false,
     nextSearchAt:new Date(Date.now()+900000).toISOString(),selection:{address:"me@example.com",account:"ca_owned",owner:"user:owner",
       refreshToken:"private-refresh",appIdentity:await polling.gmailPollIdentity(env),pollToken:{accessToken:"private-access",expiresAt:Date.now()+3600000}}};
-  const calls={finish:[],stage:[],append:[],automation:[],cached:[],searched:0};
+  const calls={finish:[],stage:[],append:[],automation:[],cached:[],searched:0,read:[]};
+  const recent={count:0};
   // The owner's subscription to this mailbox; tests add others.
   const routes={"gmail:me@example.com":[{channelId:"channel-1",authorityRootUserId:"owner",features:["message.received"]}],"gmail:*":[]};
   let pending=[];
@@ -24,6 +25,7 @@ async function drainer() {
   const repository={cleanup:async()=>{},claim:async()=>[job],current:async()=>state.current,polled:async()=>{},
     pending:async()=>pending,stage:async(_job,ids,historyId,pageToken)=>{calls.stage.push({ids,historyId,pageToken});pending=[...ids];},
     delivered:async(_job,id)=>{pending=pending.filter(item=>item!==id);},searched:async()=>{calls.searched++;},
+    deliveredLastHour:async(_job,limit)=>Math.min(recent.count,limit),
     cachePollToken:async(_job,token)=>{calls.cached.push(token);},finish:async(_job,outcome)=>{calls.finish.push(outcome);}};
   const imports={"./credentials":{gmailRoutingRepository:()=>repository,
     connectorAppRepository:()=>({connectorEventRoutes:async({sourceRef})=>routes[sourceRef] ?? []}),
@@ -31,12 +33,14 @@ async function drainer() {
     version:1,connectionGeneration:"generation",values:{mailboxes:JSON.stringify([job.selection])}})})},
     "./gmail-mailboxes":{parseMailboxes},"./gmail-poll-client":polling,"./gmail-notification-api":{gmailIncomingChanges},
     "./gmail-watch-client":{},"./http":{ProviderRequestError},
-    "./event-ingress":{appendToRoutes:async(_env,append,_provider,event,targets)=>{
+    "./gmail-auto-read":{GMAIL_AUTO_READ_HOURLY_LIMIT:30,autoReadGmailMessage:async(_env,input)=>{
+      calls.read.push({...input,current:await input.current()});}},
+    "./event-ingress":{connectorEventMessageId:(provider,eventId,channelId)=>`app:${provider}:${eventId}:${channelId}`,appendToRoutes:async(_env,append,_provider,event,targets)=>{
       for(const route of targets)await append(_env,route.channelId,{channelId:route.channelId,body:event.body});}},
     "../product-message-append":{dispatchProductMessageAppend:async(_env,_channel,message)=>{calls.append.push(message);return new Response();}},
     "../automation-triggers":{fireConnectorAutomationTriggers:async(_env,event)=>{calls.automation.push(event);}}};
   const {drainGmailNotifications}=load(name=>imports[name]);
-  return {job,state,calls,routes,run:()=>drainGmailNotifications(env)};
+  return {job,state,calls,routes,recent,run:()=>drainGmailNotifications(env)};
 }
 
 test("unchanged counts reuse the cached grant and avoid Composio until the independent check is due",async()=>{
@@ -64,6 +68,25 @@ test("a notification reaches only the Channels its owner subscribed to the mailb
   assert.deepEqual(due.calls.append.map(message=>message.channelId),["channel-1","channel-all"]);
   assert.equal(due.calls.automation[0].event.sourceRef,"gmail:me@example.com");
   assert.deepEqual(due.calls.finish,["done"]);
+  // The connector's own read answers exactly the notifications it just posted, as the mailbox owner.
+  assert.equal(due.calls.read.length,1);
+  const [read]=due.calls.read;
+  assert.equal(read.id,"abcdef1234567890");assert.equal(read.limited,false);assert.equal(read.current,true);
+  assert.deepEqual(read.mailbox,{account:"ca_owned",address:"me@example.com",owner:"user:owner"});
+  assert.deepEqual(read.notifications,[
+    {channelId:"channel-1",messageId:"app:gmail:route-1:abcdef1234567890:channel-1"},
+    {channelId:"channel-all",messageId:"app:gmail:route-1:abcdef1234567890:channel-all"}]);
+});
+
+test("a mailbox past the hourly limit is notified without an automatic read",async()=>{
+  const flooded=await drainer();flooded.job.pendingWake=true;flooded.recent.count=30;
+  await fetched([{body:counts},{body:{status:200,data:{historyId:"200",history:[{messagesAdded:[
+    {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],flooded.run);
+  assert.equal(flooded.calls.append.length,1);assert.equal(flooded.calls.read[0].limited,true);
+  const below=await drainer();below.job.pendingWake=true;below.recent.count=29;
+  await fetched([{body:counts},{body:{status:200,data:{historyId:"200",history:[{messagesAdded:[
+    {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],below.run);
+  assert.equal(below.calls.read[0].limited,false);
 });
 
 test("pending changes, transient confirmation failure and lost authority retain the right outcome",async()=>{
