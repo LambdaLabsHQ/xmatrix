@@ -245,11 +245,3 @@ export async function seedMessageSpace(client, { space, channel, at, tables }) {
      created_at,updated_at,activity_at)
     VALUES ($3,$2,'Conversation',$3,'open',$4,1,'{}',$1,$1,$1)`, [at, space, channel, `rank:${channel}`]);
 }
-
-/** Retired evidence with database-enforced frozen writers waits only for contract deletion. */
-export async function frozenRetiredTables(client) {
-  return (await client.query(`SELECT n.nspname||'.'||c.relname AS name FROM pg_constraint k
-      JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
-      WHERE k.contype='c' AND NOT k.convalidated AND k.conname LIKE 'retired_%'
-        AND pg_get_expr(k.conbin,k.conrelid)='false' AND n.nspname IN ('data','control')`)).rows.map(row => row.name);
-}

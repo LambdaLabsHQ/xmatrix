@@ -1,4 +1,4 @@
-import { connectionString, integration, frozenRetiredTables } from "./postgres-database.fixture.mjs";
+import { connectionString, integration } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
 
 import { Client } from "pg";
@@ -122,9 +122,8 @@ integration("every Space- or Channel-keyed table is either purged or deliberatel
       WHERE t.table_type='BASE TABLE' AND c.table_schema IN ('data','control')
         AND c.column_name IN ('space_id','channel_id','source_space_id','target_space_id')
       ORDER BY 1`);
-    const frozen = await frozenRetiredTables(client);
     const classified = new Set([...SPACE_PURGE_STEPS.map((step) => step.table),
-      ...Object.keys(SPACE_PURGE_EXCLUDED_TABLES), ...frozen]);
+      ...Object.keys(SPACE_PURGE_EXCLUDED_TABLES)]);
     assert.deepEqual(rows.map((row) => row.name).filter((name) => !classified.has(name)), []);
     const { rows: tables } = await client.query(`SELECT table_schema||'.'||table_name AS name
       FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema IN ('data','control')`);
