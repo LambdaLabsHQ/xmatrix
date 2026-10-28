@@ -75,6 +75,11 @@ function timeline({ userAgent = DESKTOP } = {}) {
   const clock = testClock();
   let contentTop = 100;
   const observers = [];
+  class LayoutObserver {
+    constructor(callback) { this.callback = callback; this.connected = true; observers.push(this); }
+    observe() {}
+    disconnect() { this.connected = false; }
+  }
   const content = { getBoundingClientRect: () => ({ top: contentTop, bottom: contentTop + 100 }) };
   const row = { id: "message:reader", lastElementChild: content, children: [], hasAttribute: () => false };
   const { root, listeners } = listenedRoot({
@@ -102,11 +107,8 @@ function timeline({ userAgent = DESKTOP } = {}) {
     performance: { now: clock.now },
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
-    ResizeObserver: class {
-      constructor(callback) { this.callback = callback; this.connected = true; observers.push(this); }
-      observe() {}
-      disconnect() { this.connected = false; }
-    },
+    MutationObserver: LayoutObserver,
+    ResizeObserver: LayoutObserver,
   });
   const anchor = exports.useTimelineReadingAnchor(root);
   return {
@@ -181,8 +183,14 @@ test("elsewhere the anchor follows the reader's scroll and keeps holding", () =>
   const view = timeline();
   view.start();
   view.resize();
-  view.scrollBy(-80);
-  assert.equal(view.active(), true);
+  for (let at = 500; at <= 2_000; at += 500) {
+    view.advance(at);
+    view.scrollBy(-80);
+    assert.equal(view.active(), true);
+  }
+  view.advance(2_750);
+  assert.equal(view.active(), false);
+  assert.equal(view.pendingTimers(), 0);
 });
 
 /* An older page waits for the timeline to rest (timeline-scroll-rest). */
