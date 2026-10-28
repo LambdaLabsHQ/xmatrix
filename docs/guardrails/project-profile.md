@@ -83,6 +83,12 @@ Slow Channel catalog and placement directory single reads share that capacity, u
 per-attempt SQL marker to locate active origin work without a stable backend
 pid. Sentry reads expose the content-free sample, never the marker or SQL.
 
+Agent registration catalog membership and visibility share one placed single read;
+its authorized machine/quota enrichment is an independent directory single read.
+Both recover one lost response on a fresh connection; repeated loss still fails,
+while mutation locks and private projections stay enforced (HUB-B4). See
+[PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Independent Auth public-key, directory, profile, session, handle and OAuth
 application reads use `single_read`: a lost database response retries once on a
 fresh connection, while answered and exhausted failures propagate. JWT checks

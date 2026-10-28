@@ -333,13 +333,17 @@ export class PostgresAgentRegistrationRepository {
         cursor = [key.ownerUserId, key.machineId, key.harness];
       } catch { throw new RegistrationAccessError("invalid_registration_cursor", 400); }
     }
-    const page = await this.database.transaction(this.context(input, input.requestId, "registration.list"), async tx => {
-      const role = await requireMember(tx, input.spaceId, input.actorUserId);
-      const admin = ["owner", "admin"].includes(role);
+    const page = await this.database.transaction({ ...this.context(input, input.requestId, "registration.list"),
+      statement: "single_read" }, async tx => {
       // Running Instances come from the owner's live Runs on that machine (a
       // partial index keeps this to what is running now), bound to this
       // registration in this Space, in Channels the reader may read.
-      const rows = await tx.query({ name: "registration_catalog_page_v6", text: `SELECT
+      // Membership and visibility share the read's snapshot. The outer row
+      // distinguishes a member's empty page from a nonmember without a lock.
+      const result = await tx.query({ name: "registration_catalog_page_v7", text: `SELECT
+        reader.role AS reader_role,page.* FROM
+        (SELECT role FROM data.space_members WHERE space_id=$1 AND user_id=$2) reader
+        LEFT JOIN LATERAL (SELECT
         r.owner_user_id,r.machine_id,r.harness,r.display_name,r.configuration_json,r.version,
         profile.description AS profile_description,profile.revision AS profile_revision,
         EXISTS (SELECT 1 FROM data.space_agent_registrations own WHERE own.space_id=r.space_id
@@ -387,10 +391,14 @@ export class PostgresAgentRegistrationRepository {
               AND ${channelCapabilityPredicate({ capability: "runtime_history_read", channelAlias: "channel",
                 principalKindSql: "'user'", principalIdSql: "$2" })}
             ORDER BY run.created_at,i.instance_id LIMIT ${RUNNING_INSTANCE_LIMIT}) live) running ON TRUE
-        WHERE r.space_id=$1 AND ($7::boolean OR r.owner_user_id=$2 OR (m.user_id IS NOT NULL AND a.grant_state='active'))
+        WHERE r.space_id=$1 AND (reader.role IN ('owner','admin') OR r.owner_user_id=$2 OR (m.user_id IS NOT NULL AND a.grant_state='active'))
           AND ($3::text IS NULL OR (r.owner_user_id,r.machine_id,r.harness)>($3,$4,$5))
-        ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT $6`,
-      values: [input.spaceId, input.actorUserId, ...(cursor ?? [null, null, null]), limit + 1, admin], maxRows: limit + 1 });
+        ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT $6) page ON TRUE
+        ORDER BY page.owner_user_id,page.machine_id,page.harness`,
+      values: [input.spaceId, input.actorUserId, ...(cursor ?? [null, null, null]), limit + 1], maxRows: limit + 1 });
+      if (!result[0]) throw new RegistrationAccessError("registration_not_found", 404);
+      const admin = ["owner", "admin"].includes(String(result[0].reader_role));
+      const rows = result.filter(row => row.owner_user_id !== null);
       const current = rows.slice(0, limit), last = current.at(-1);
       const registrations: AgentRegistrationSummary[] = current.map(row => {
         const key = parseSpaceAgentRegistrationKey({ spaceId: input.spaceId, ownerUserId: row.owner_user_id,
@@ -428,7 +436,8 @@ export class PostgresAgentRegistrationRepository {
     // other Space tasks, configuration or machine inventory.
     // The quota is the observation a launch reads for this registration's pool,
     // while it is current.
-    const labels = await this.database.transaction({ requestId: input.requestId, operation: "registration.machine-labels" },
+    const labels = await this.database.transaction({ requestId: input.requestId, operation: "registration.machine-labels",
+      statement: "single_read" },
       tx => tx.query({ name: "registration_catalog_machine_labels_v10", text: `SELECT
         requested.owner,requested.machine,requested.harness,machine.name,
         e.declaration_json,daemon.online,daemon.last_seen_at,daemon.resources,daemon.platform,

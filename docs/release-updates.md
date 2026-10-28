@@ -2028,3 +2028,15 @@ Unavailable diagnostics preserve the original error. Existing replay and
 unknown-COMMIT boundaries are unchanged. This is missing diagnostic coverage,
 not a confirmed repair of the underlying contention. Hub only, no migration;
 recovery is a CI-validated beta Hub reverting the change.
+
+
+## Unreleased: Agent catalog reads recover one lost response
+
+HUB-B4 exposed an Agent catalog read that held a member lock and failed after
+a lost PostgreSQL response. Membership, visibility and pagination now share
+one placed single read; machine and quota enrichment uses its own directory
+single read. Each retries a lost response once on a fresh connection, while
+a second failure remains visible. Nonmember rejection, private projections,
+mutation locks and unknown-COMMIT reconciliation are unchanged. Hub only, no
+migration or native update; recovery is a CI-validated beta Hub reverting
+this change. See [PostgreSQL recovery](operations/postgres-hyperdrive-origin.md).

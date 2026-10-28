@@ -156,6 +156,13 @@ Registration quota projections, both authorized batches and owner refreshes,
 also use one `single_read` each (HUB-AQ). A lost response retries once on a fresh
 checkout without BEGIN/COMMIT; repeated loss still fails. Registration keys,
 pool joins, reading freshness and quota observation writes are unchanged.
+Agent registration catalog pages combine membership, visibility and pagination
+in one placed `single_read` (HUB-B4); membership is checked in that statement's
+snapshot without locking the member row. A member's empty page still succeeds,
+and a nonmember still gets `registration_not_found`. The already-authorized
+machine/daemon/quota enrichment is a separate directory `single_read`, with
+its own one lost-response recovery. A second loss still fails the request;
+registration mutation locks and unknown-COMMIT handling are unchanged.
 
 Sentry event claiming (including receipt cleanup), Gmail route cleanup and
 claiming and fenced completion, and Bot room expiry cleanup (Google Chat, Feishu, Telegram and Teams)
