@@ -1,4 +1,6 @@
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
+import { assertQuotaRetryAdmission } from "./agent-quota-retry.js";
+import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { registrationRepository, summonRepositoryCatalog,
   type RegistrationRepositoryCatalog } from "./registration-repository-authority.js";
@@ -67,6 +69,7 @@ import { instanceOrdinalFor, reserveNaturalKey } from "./natural-keys.js";
 import { commitRuntime } from "./runtime-control.js";
 
 interface LaunchRequest {
+  quotaRetry?: AgentQuotaRetryAdmission;
   commandId: string; actorUserId: string; channelId: string;
   /** Present when a Human message carries the invocation; that message then
    * fences the launch. Any other input launches on registration authority alone. */
@@ -296,7 +299,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     // recorded still replays. Where the launch is drawn is the same kind of
     // fact: a handoff staged before that link existed still recovers.
     const { runMetadata: callerMetadata, presentationMessageId: _shownOn, handoffContext: _carried, ...identity } = input;
-    const { sourceMention: _summon, ...runMetadata } = callerMetadata ?? {};
+    const { sourceMention: _summon, handoffSourceInstanceId: _handoffSource, ...runMetadata } = callerMetadata ?? {};
     const requestDigest = await digestCanonicalCloneCborV1({ ...identity, body: bodyHash,
       ...(Object.keys(runMetadata).length ? { runMetadata } : {}) });
     const intent = await this.database.transaction({ requestId: input.commandId, operation: "registration.launch.stage",
@@ -411,6 +414,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     if (input.sourceMessageId === undefined) return undefined;
     const source = await readMessageInvocationSelections(tx, { deriveFromText: true, spaceId: input.key.spaceId, channelId: input.channelId,
       messageId: input.sourceMessageId, actorUserId: input.actorUserId, body: input.body });
+    await assertQuotaRetryAdmission(tx, { channelId: input.channelId, actorUserId: input.actorUserId, admission: input.quotaRetry,
+      sourceMessageId: input.sourceMessageId, selectionIndex: input.selectionIndex });
+    if (!input.quotaRetry) await tx.query({ name: "quota_retry_superseded_by_launch_v1", text: `UPDATE data.agent_quota_retries
+      SET state='cancelled',next_check_at=NULL,updated_at=clock_timestamp()
+      WHERE channel_id=$1 AND source_message_id=$2 AND selection_index=$3 AND kind='launch'
+        AND state IN ('offered','waiting','dispatching')`,
+    values:[input.channelId,input.sourceMessageId,input.selectionIndex],maxRows:0 });
     const selection = source?.selections[input.selectionIndex];
     if (!source || !selection || (selection.target.kind === "capability" ? selection.target.harness !== input.key.harness
       : selection.target.kind === "registration" ? selection.target.key.spaceId !== input.key.spaceId ||
@@ -653,6 +663,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   /** Consume stored invocation intent. Capability selections pick among currently
    * authorized locations; explicit registration selections keep their tuple. */
   async dispatchFromMessage(input: {
+    quotaRetry?: AgentQuotaRetryAdmission;
+    onlySelectionIndex?: number;
     commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
     /** The author's "launch anyway" for one mention Jev read as a non-request:
      * only that summon is prepared, as if it carried `launch:force`. */
@@ -682,7 +694,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
     const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld;
-      signedOut?: HarnessSignedOut; offline?: OfflineMachine[] }> = [];
+      signedOut?: HarnessSignedOut; offline?: OfflineMachine[]; quotaTargets?: SpaceAgentRegistrationKey[] }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
     const summonText = (selection: { start: number; end: number; text: string }) =>
@@ -693,9 +705,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       const signedOut = error instanceof RegistrationAccessError ? error.signedOut : undefined;
       const offline = error instanceof RegistrationAccessError ? error.offline : undefined;
       rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}),
-        ...(signedOut ? { signedOut } : {}), ...(offline?.length ? { offline } : {}) });
+        ...(signedOut ? { signedOut } : {}), ...(offline?.length ? { offline } : {}),
+        ...(error instanceof RegistrationAccessError && error.quotaTargets ? { quotaTargets: error.quotaTargets } : {}) });
     };
     for (const [selectionIndex, selection] of source.selections.entries()) {
+      if (input.onlySelectionIndex !== undefined && input.onlySelectionIndex !== selectionIndex) continue;
       if (input.forceMention !== undefined && summonText(selection) !== input.forceMention) continue;
       try {
         const recovered = await this.recoverFromMessage({ ...input, commandId: `${commandId}:${selectionIndex}`, selectionIndex });
@@ -759,6 +773,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         }
         validateSelectedHarnessParameters(candidate, selected, options.tags);
         prepared.push(await this.prepare({ commandId: `${commandId}:${selectionIndex}`, actorUserId, channelId,
+          ...(input.quotaRetry ? { quotaRetry: input.quotaRetry } : {}),
           sourceMessageId, selectionIndex, body: input.body, key: candidate.key, workspaceReference: selected.workspaceReference,
           // The web binds a launch's status, steps and Jev decision to the summon it answers.
           runMetadata: { sourceMention: summonText(selection) },

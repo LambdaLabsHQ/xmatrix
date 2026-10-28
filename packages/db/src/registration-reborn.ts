@@ -1,4 +1,6 @@
 import { storedObject as object } from "./stored-values.js";
+import { assertQuotaRetryAdmission } from "./agent-quota-retry.js";
+import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { canonicalRegistrationHarness, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
@@ -61,11 +63,12 @@ function text(value: unknown, code = "invalid_registration_reborn"): string {
 type ContinuationInput = ReturnType<typeof continuationInput>;
 
 function continuationInput(raw: { commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
-  sourceInstanceId: string; sourceMention?: string; prompt: string }) {
+  sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: AgentQuotaRetryAdmission }) {
   return { commandId: text(raw.commandId), actorUserId: text(raw.actorUserId), channelId: text(raw.channelId),
     sourceMessageId: text(raw.sourceMessageId), sourceInstanceId: text(raw.sourceInstanceId),
     sourceMention: typeof raw.sourceMention === "string" ? raw.sourceMention : undefined,
-    prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, 64 * 1024) : "" };
+    prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, 64 * 1024) : "",
+    ...(raw.quotaRetry ? { quotaRetry: raw.quotaRetry } : {}) };
 }
 
 /** A wake refusal that no later message can change: the Instance stops resting.
@@ -184,7 +187,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
 
   /** An explicit `@name:N:reborn`: stop the Instance, then resume it, answering the message that asked. */
   async prepare(raw: { commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
-    sourceInstanceId: string; sourceMention?: string; prompt: string }) {
+    sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: AgentQuotaRetryAdmission }) {
     return this.recordResume(continuationInput(raw), "reborn");
   }
 
@@ -207,7 +210,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         sourceInstanceId: input.sourceInstanceId, sourceRunId: source.runId,
         sourceName: /^[@＠](.+):[1-9]\d*:reborn$/iu.exec(input.sourceMention ?? "")?.[1],
         sourceOrdinal: source.channelInstanceId, targetInstanceId: input.sourceInstanceId }) : undefined;
-      const run = { ...successor.run, ...(invocationSource ? { invocationSource } : {}) };
+      const run = { ...successor.run, ...(invocationSource ? { invocationSource } : {}),
+        ...(input.quotaRetry ? { quotaRetry: input.quotaRetry } : {}) };
       const value = await prepareReborn(tx, { kind, run, instance: successor.instance, spawnPayload: successor.spawn,
         channelId: input.channelId, sourceRunId: source.runId, sourceInstanceId: input.sourceInstanceId },
       input.actorUserId, spaceId, at);
@@ -593,6 +597,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     await tx.query({ name: `registration_${operation}_channel_lock_v1`,
       text: "SELECT pg_advisory_xact_lock(hashtextextended('runtime-instance:'||$1,0))",
       values: [input.channelId], maxRows: 1 });
+    await assertQuotaRetryAdmission(tx, { channelId: input.channelId, actorUserId: input.actorUserId, admission: input.quotaRetry,
+      sourceInstanceId: input.sourceInstanceId });
     const source = await this.predecessor(tx, input.sourceInstanceId, input.channelId);
     if (JSON.stringify(source.key) !== JSON.stringify(locatedKey)) throw new RegistrationAccessError("reborn_source_changed", 409);
     const rows = await tx.query({ name: "registration_continuation_configuration_v1", text: `SELECT display_name,
@@ -630,6 +636,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       let spawnPayload: Record<string, unknown> | undefined;
       const value = await advanceReborn(tx, { intentId, channelId: input.channelId }, input.actorUserId, spaceId, at,
         async (run, instance) => {
+          await assertQuotaRetryAdmission(tx, { channelId: input.channelId, actorUserId: input.actorUserId,
+            admission: run.quotaRetry as AgentQuotaRetryAdmission | undefined });
           const fence = { key: registration.key, grantRevision: registration.grantRevision,
             grantExecutionRevision: registration.grantExecutionRevision, policyRevision: registration.policyRevision,
             policyExecutionRevision: registration.policyExecutionRevision };

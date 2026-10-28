@@ -269,6 +269,10 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     // A provider-measured exhausted quota fails every turn until its reset; it
     // is a fact about the environment, not an observation for Jev to weigh.
     const now = Date.now();
+    if (eligible.every(candidate => providerQuotaExhausted(candidate, now))) {
+      throw new RegistrationAccessError("registration_quota_exhausted", 409, undefined, undefined, undefined,
+        eligible.map(candidate => candidate.key));
+    }
     narrow("registration_quota_exhausted", candidate => !providerQuotaExhausted(candidate, now));
     if (eligible.length > 100) throw new RegistrationAccessError("registration_candidates_limit", 409);
     let context: Record<string, unknown> | undefined;

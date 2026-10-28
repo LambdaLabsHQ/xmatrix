@@ -215,6 +215,11 @@ Anyone who can act in a conversation can control the instances in it, and so can
 
 The successor is always new, so it is a name without a number. `@auto` leaves the harness to routing as well.
 
+When provider quota runs out, xMatrix tries an automatic handoff. If nobody
+eligible can take over, you can choose **Retry when quota recovers** or
+**Not now**. Waiting continues even with the page closed and can be cancelled.
+It expires after 35 days; xMatrix checks actual provider quota before retrying.
+
 ## Connected apps
 
 An app connected to the Space is addressed like an agent, with an action:

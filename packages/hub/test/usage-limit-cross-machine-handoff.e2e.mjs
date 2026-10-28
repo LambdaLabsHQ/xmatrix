@@ -6,6 +6,7 @@ import {
 } from "./agent-launch-postgres.fixture.mjs";
 import { channelHistory, sleep, waitForChannelHistoryMessage } from "./agent-mention-spawn.fixture.mjs";
 import { githubAppPrivateKey, githubInstallationCatalog, grantRegistrationRepository } from "./registration-launch.fixture.mjs";
+import { recordRegistrationUsageLimit } from "../../db/dist/agent-registration-quota-probe.js";
 
 /**
  * docs/same-machine-instance-handoff.md §2.1–2.2, end to end against a local
@@ -22,12 +23,27 @@ const machineA = "machine:3ff42ec94ea778fdf762ad6636c0d11e4a418159353c602f01246d
 const machineB = "machine:f890666a197ae125abd20d6cc0bc9f25de8579263943285e87819c555221a2e6";
 const capabilities = [...REGISTERED_DAEMON_CAPABILITIES, "machine_handoff_export_v1"];
 
+function quotaChoice(worker, channelId, id, headers) {
+  const path = `/api/channels/${channelId}/quota-retries/${id}`;
+  return {
+    read: async () => json(await worker.fetch(path, { headers })),
+    pick: action => worker.fetch(path, { method: "POST", headers, body: JSON.stringify({ action }) }),
+  };
+}
+
+async function confirmProviderQuota(userId, id) {
+  await inTestTransaction(tx => tx.query({ text: `UPDATE control.registration_quota_observations SET source='provider',remaining=75,
+    observed_at=clock_timestamp(),expires_at=clock_timestamp()+interval '10 minutes',
+    windows_json='[{"label":"session","usedPercent":25}]'::jsonb WHERE owner_user_id=$1`, values: [userId] }));
+  await inTestTransaction(tx => tx.query({ text: "UPDATE data.agent_quota_retries SET next_check_at=clock_timestamp() WHERE retry_id=$1", values: [id] }));
+}
+
 /**
  * Run claude on machine A until its provider account runs out; `answerStop`
  * plays machine A's daemon answering the handoff stop. Returns what the
  * Channel and machine B saw.
  */
-async function usageLimitedOnMachineA(answerStop, { sleeping = false } = {}) {
+async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuota = false, cancelWaiting = false, initialQuota = false } = {}) {
   const userId = `cross-machine-handoff-${randomUUID()}`;
   const github = await githubInstallationCatalog(installationId, [{
     id: 1, name: "xmatrix", full_name: repository, private: true, archived: false,
@@ -57,6 +73,33 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false } = {}) {
     for (const { key } of [claude, codex]) {
       await grantRegistrationRepository(worker, { token: MOCK_TOKEN, key, repository, installationId });
     }
+    if (waitForQuota) await inTestTransaction(tx => recordRegistrationUsageLimit(tx, {
+      ownerUserId: userId, machineId: machineB, harness: "codex", resetsAt: new Date(Date.now()+3_600_000).toISOString(),
+    }));
+    if (initialQuota) {
+      await inTestTransaction(tx => recordRegistrationUsageLimit(tx, {
+        ownerUserId: userId, machineId: machineA, harness: "claude", resetsAt: new Date(Date.now()+3_600_000).toISOString(),
+      }));
+      const response = await worker.fetch(`/api/channels/${channel.id}/messages`, { method: "POST", headers,
+        body: JSON.stringify({ body: `@claude repo:${repository} machine:${machineA} fix the bug` }) });
+      assert.equal(response.status, 200, await response.clone().text());
+      const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
+        message => message.metadata?.kind === "xmatrix.quota-retry-offer", "initial quota wait offer", 30_000);
+      const id = notice.metadata.xmatrixQuotaRetryId;
+      const { pick } = quotaChoice(worker, channel.id, id, headers);
+      assert.equal((await pick("wait")).status, 202);
+      await confirmProviderQuota(userId, id);
+      const spawned = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
+        "deferred initial invocation", 30_000);
+      await pick("wait");
+      const command = await spawned;
+      assert.equal(command.registration.key.harness, "claude");
+      assert.equal(command.remoteRepo, repository);
+      assert.match(command.prompt, /fix the bug/);
+      const launches = await inTestTransaction(tx => tx.query({ text: "SELECT launch_id FROM data.agent_launches WHERE channel_id=$1", values: [channel.id] }));
+      assert.equal(launches.length, 1);
+      return;
+    }
 
     // claude starts on machine A in a checkout of the repository.
     const spawnA = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
@@ -69,7 +112,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false } = {}) {
     assert.equal(launch.registration.key.harness, "claude");
     const token = await admitRegisteredSpawn(worker, daemonA, launch);
     const repoPool = { repoIdentity: `https://github.com/${repository}`, repoKeyId: "a".repeat(64), slotId: "b".repeat(32) };
-    if (sleeping) sendSpawnResult(daemonA, launch, { ok: true, pid: 4242, metadata: { repoPool } });
+    sendSpawnResult(daemonA, launch, { ok: true, pid: 4242, metadata: { repoPool } });
     source = await connectAgent(worker, { identityId: launch.instanceId, name: launch.agentName, agentType: "claude",
       metadata: { tool: "claude", machineId: machineA, hostId: hostA, workspaceMachineId: machineA,
         workspaceCwd: launch.workspace.canonicalCwd, cwd: launch.workspace.canonicalCwd,
@@ -119,7 +162,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false } = {}) {
       assert.equal(stop.resumeSessionKey, launch.resumeSessionKey);
       for (const [key, value] of Object.entries(repoPool)) assert.equal(stop[key], value);
     }
-    const spawnB = daemonB.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
+    const spawnB = waitForQuota ? null : daemonB.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "codex spawn on machine B", 30_000);
     daemonA.ws.send(JSON.stringify({ type: "machine_stop_result", requestId: stop.requestId, runId: stop.runId,
       executionKey: stop.executionKey, agentId: stop.agentId, instanceId: stop.instanceId,
@@ -127,6 +170,59 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false } = {}) {
       repoIdentity: stop.repoIdentity, repoKeyId: stop.repoKeyId, slotId: stop.slotId,
       worktreeDisposition: stop.worktreeDisposition, ok: true, pid: 4242, cleanupReason: "process_terminated",
       ...answerStop(stop), relayLease: stop.relayLease }));
+
+    if (waitForQuota) {
+      const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
+        message => message.metadata?.kind === "xmatrix.quota-retry-offer", "quota wait offer", 30_000);
+      const id = notice.metadata.xmatrixQuotaRetryId;
+      const { read, pick } = quotaChoice(worker, channel.id, id, headers);
+      assert.equal((await read()).state, "offered");
+      const [queued] = await inTestTransaction(tx => tx.query({ text: "SELECT state,next_check_at FROM data.agent_quota_retries WHERE retry_id=$1", values: [id] }));
+      assert.equal(queued.next_check_at, null, "nobody opted in, so nothing is scheduled");
+      const picks = await Promise.all([pick("wait"), pick("wait")]);
+      for (const response of picks) assert.equal(response.status, 202, await response.clone().text());
+      assert.equal((await read()).state, "waiting");
+      if (cancelWaiting) {
+        const cancelled = await pick("cancel");
+        assert.equal(cancelled.status, 202, await cancelled.clone().text());
+        assert.equal((await read()).state, "cancelled");
+        assert.equal((await pick("wait")).status, 409, "a stale device cannot reopen a cancelled choice");
+        const intents = await inTestTransaction(tx => tx.query({ text: `SELECT intent_id FROM data.agent_reborn_intents
+          WHERE source_instance_id=$1 AND run_input_json->'quotaRetry'->>'id'=$2`, values: [launch.instanceId,id] }));
+        assert.equal(intents.length, 0);
+        return;
+      }
+      // Merely expiring the routing hold is unknown quota, not confirmation.
+      await inTestTransaction(tx => tx.query({ text: `UPDATE control.registration_quota_observations
+        SET observed_at=now()-interval '2 hours',expires_at=now()-interval '1 second'
+        WHERE owner_user_id=$1`, values: [userId] }));
+      await pick("wait");
+      assert.equal((await read()).state, "waiting");
+      // The provider subsequently reports actual headroom. Force the next
+      // persisted deadline due rather than spending a real minute in the test.
+      await confirmProviderQuota(userId, id);
+      const resumed = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.resumeInstanceId === launch.instanceId,
+        "original session resumes after quota confirmation", 30_000);
+      await pick("wait");
+      const recovered = await resumed;
+      assert.equal(recovered.resumeSessionKey, launch.resumeSessionKey);
+      assert.equal(recovered.instanceId, launch.instanceId);
+      assert.notEqual(recovered.runId, launch.runId);
+      assert.match(recovered.prompt, /Continue where you left off/);
+      const intents = await inTestTransaction(tx => tx.query({ text: `SELECT intent_id FROM data.agent_reborn_intents
+        WHERE source_instance_id=$1 AND run_input_json->'quotaRetry'->>'id'=$2`, values: [launch.instanceId,id] }));
+      assert.equal(intents.length, 1, "one current continuation owns recovery");
+      // Simulate the coordinator losing its acknowledgement after reborn and
+      // the Instance rebind committed. It must reconcile that same intent.
+      await inTestTransaction(tx => tx.query({ text: "UPDATE data.agent_quota_retries SET state='dispatching',next_check_at=clock_timestamp() WHERE retry_id=$1", values: [id] }));
+      await pick("wait");
+      for (let attempt=0;attempt<100&&(await read()).state!=="dispatched";attempt++) await sleep(25);
+      assert.equal((await read()).state, "dispatched");
+      const replayed = await inTestTransaction(tx => tx.query({ text: `SELECT intent_id FROM data.agent_reborn_intents
+        WHERE source_instance_id=$1 AND run_input_json->'quotaRetry'->>'id'=$2`, values: [launch.instanceId,id] }));
+      assert.equal(replayed.length, 1);
+      return { recovered };
+    }
 
     // codex starts on machine B.
     const successor = await spawnB;
@@ -198,4 +294,16 @@ test("handing off a sleeping source stops it before the successor's reply can wa
   } }), { sleeping: true });
   assert.ok(successor.prompt.includes(`git fetch origin ${branch} && git checkout --detach FETCH_HEAD`));
   assert.match(successor.prompt, /including uncommitted and untracked work/);
+});
+
+test("when no successor has quota, waiting is opt-in and quota recovery resumes the original session once", async () => {
+  await usageLimitedOnMachineA(() => ({}), { waitForQuota: true });
+});
+
+test("a cancelled quota wait cannot be reopened by a stale device or create a continuation", async () => {
+  await usageLimitedOnMachineA(() => ({}), { waitForQuota: true, cancelWaiting: true });
+});
+
+test("a quota-refused initial summon starts once after its author's choice and fresh quota", async () => {
+  await usageLimitedOnMachineA(() => ({}), { initialQuota: true });
 });

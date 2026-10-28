@@ -1,6 +1,7 @@
 import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { reconcileIdleSleeps } from "./instance-idle-sleep";
 import { reconcileAgentTurnRetries } from "./agent-turn-retry";
+import { reconcileQuotaRetries } from "./agent-quota-retry";
 import { reconcileReborn } from "./reborn-reconcile";
 import { finalizeMachineRunTerminalReports } from "./machine-run-terminal-finalizer";
 import { reconcileRegistrationRevocations } from "./registration-revocation-reconcile";
@@ -502,6 +503,7 @@ export async function channelsWithWork(database: AuthorityDatabase, shardId: str
         UNION SELECT intent.channel_id FROM data.agent_reborn_intents intent
           WHERE intent.state IN ('waiting','prepared') OR (intent.state='failed' AND intent.failure_notified_at IS NULL)
         UNION SELECT retry.channel_id FROM data.runs retry WHERE retry.capacity_retry_at IS NOT NULL
+        UNION SELECT quota.channel_id FROM data.agent_quota_retries quota WHERE quota.next_check_at IS NOT NULL
         UNION SELECT idle.channel_id FROM data.runs idle WHERE idle.idle_sleep_at IS NOT NULL
         UNION SELECT report.channel_id FROM data.machine_run_terminal_reports report
         UNION SELECT stop.channel_id FROM data.registration_stop_intents stop WHERE stop.state='pending'
@@ -526,7 +528,7 @@ export async function channelsWithWork(database: AuthorityDatabase, shardId: str
  */
 /** The coordinated work one pass can do, each run by its own step. */
 export type CoordinatorStep = "registrationPreparation" | "registrationStop" | "runTerminal" | "reborn" | "launch" | "turnRetry" |
-  "idleSleep" | "firstMessageSummon";
+  "idleSleep" | "firstMessageSummon" | "quotaRetry";
 
 
 function dueTime(value: string | Date | null | undefined): number | undefined {
@@ -541,7 +543,7 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
   return database.transaction({ requestId: `agent-launch:next-due:${channelId}`,
     operation: "launch.coordinator.next-due" }, async (tx) => {
     const rows = await tx.query<Record<"launch_due" | "reborn_due" | "report_due" | "preparation_due" | "stop_due"
-      | "automation_due" | "retry_due" | "idle_sleep_due" | "summon_due", string | Date | null>>({ name: options.automation
+      | "automation_due" | "retry_due" | "quota_due" | "idle_sleep_due" | "summon_due", string | Date | null>>({ name: options.automation
         ? "agent_launch_channel_step_due_automation_v4" : "agent_launch_channel_step_due_v4",
       text: `SELECT LEAST(
         (SELECT MIN(${attemptAt("launch")}) FROM data.agent_launches launch
@@ -574,6 +576,7 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
               OR EXISTS (SELECT 1 FROM data.agent_launches l WHERE l.run_id=run.run_id AND l.channel_id=run.channel_id))
             AND NOT EXISTS (SELECT 1 FROM data.registration_stop_intents s WHERE s.run_id=run.run_id))) AS stop_due,
         (SELECT MIN(capacity_retry_at) FROM data.runs WHERE channel_id=$1 AND capacity_retry_at IS NOT NULL) AS retry_due,
+        (SELECT MIN(next_check_at) FROM data.agent_quota_retries WHERE channel_id=$1 AND next_check_at IS NOT NULL) AS quota_due,
         (SELECT MIN(idle_sleep_at) FROM data.runs WHERE channel_id=$1 AND idle_sleep_at IS NOT NULL) AS idle_sleep_due,
         (SELECT MIN(${FIRST_MESSAGE_SUMMON_DUE_AT_SQL}) FROM data.first_message_launch_choices choice
           WHERE choice.channel_id=$1 AND ${FIRST_MESSAGE_SUMMON_PENDING_SQL}) AS summon_due
@@ -589,6 +592,7 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
     set("registrationPreparation", row?.preparation_due); set("registrationStop", row?.stop_due);
     set("automation", row?.automation_due); set("turnRetry", row?.retry_due); set("idleSleep", row?.idle_sleep_due);
     set("firstMessageSummon", row?.summon_due);
+    set("quotaRetry", row?.quota_due);
     return due;
   });
 }
@@ -676,6 +680,7 @@ export class RelayPostgresAgentLaunchCoordinatorService {
       shard.database, fleet.directoryDatabase, shard.shardId, this.env, channelId, plan.includeParked));
     await step("runTerminal", "runTerminal", () => finalizeMachineRunTerminalReports(this.env as Env, fleet.directoryDatabase, channelId));
     await step("turnRetry", "turnRetry", () => reconcileAgentTurnRetries(this.env as Env, shard.database, channelId));
+    await step("quotaRetry", "quotaRetry", () => reconcileQuotaRetries(this.env as Env, shard.database, channelId));
     await step("idleSleep", "idleSleep", () => reconcileIdleSleeps(this.env as Env, shard.database, channelId));
     // A first message decided (or due to be) whose summon its request never finished.
     await step("firstMessageSummon", "firstMessageSummon", () => reconcileFirstMessageSummons(this.env as Env,
