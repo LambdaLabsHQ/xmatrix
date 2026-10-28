@@ -240,7 +240,29 @@ test("the iOS app's edge swipe goes Back in the page, and a notification opens w
   await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
   expect(await page.evaluate(() => (window as typeof window & { __samePage?: boolean }).__samePage)).toBe(true);
 
-  expect(await nativeBackForTest(page)).toBe(true);
+  // UIKit is already sliding a snapshot of the conversation away. Its Back
+  // must commit the parent before answering, without a second Web animation
+  // of that same conversation underneath the native snapshot.
+  const back = await page.evaluate(() => {
+    const start = document.startViewTransition.bind(document);
+    let transitions = 0;
+    document.startViewTransition = ((...args: Parameters<typeof start>) => {
+      transitions += 1;
+      return start(...args);
+    }) as typeof document.startViewTransition;
+    try {
+      const handled = window.__xmatrixNativeBack?.();
+      const list = document.querySelector(".app-mobile-channel-list-pane");
+      return {
+        handled,
+        parentVisible: list?.checkVisibility() === true,
+        transitions,
+      };
+    } finally {
+      document.startViewTransition = start;
+    }
+  });
+  expect(back).toEqual({ handled: true, parentVisible: true, transitions: 0 });
   await expectChannelListVisible(page);
   // A dock tab's own screen has nothing to go Back to; the app keeps it.
   expect(await nativeBackForTest(page)).toBe(false);
