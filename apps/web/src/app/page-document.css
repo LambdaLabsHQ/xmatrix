@@ -1103,3 +1103,23 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 @media (prefers-reduced-motion: reduce) {
   .page-byline-writing { animation: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 24%, transparent); }
 }
+
+/* Share drops from its button as search drops from its magnifier: one glass pane, its rows on the pane
+   itself; the icon wells and the public link are the pane one step deeper, not a second glass. */
+.xmatrix-app .page-share-panel {
+  transform-origin: top right;
+  animation: app-search-panel-in 260ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+.xmatrix-app .page-share-heading {
+  padding: 0.25rem 0 0.125rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.xmatrix-app .page-share-icon,
+.xmatrix-app .page-share-link {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .xmatrix-app .page-share-panel { animation: none; }
+}
