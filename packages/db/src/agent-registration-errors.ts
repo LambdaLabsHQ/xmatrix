@@ -1,4 +1,4 @@
-import type { HarnessSignedOut, HarnessTooOld, LaunchRefusal, OfflineMachine } from "@xmatrix/protocol";
+import type { HarnessSignedOut, HarnessTooOld, LaunchRefusal, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
 import { ControlError } from "./control-error.js";
 
@@ -8,7 +8,7 @@ export class RegistrationAccessError extends ControlError {
    * `signedOut`: what a `registration_harness_signed_out` refusal says to sign in;
    * `offline`: the machines a `registration_daemon_offline` refusal waits for. */
   constructor(code: string, status: number, readonly tooOld?: HarnessTooOld, readonly signedOut?: HarnessSignedOut,
-    readonly offline?: OfflineMachine[]) {
+    readonly offline?: OfflineMachine[], readonly quotaTargets?: SpaceAgentRegistrationKey[]) {
     super(code, status, code, status >= 500);
   }
 

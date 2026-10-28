@@ -331,6 +331,8 @@ export const HUB_ROUTES = {
     `/api/channels/${encodeURIComponent(channelId)}/messages`,
   channel_agent_launches: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/agent-launches/query`,
+  channel_quota_retry: (channelId: string, retryId: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/quota-retries/${encodeURIComponent(retryId)}`,
   channel_page_edits: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/page-edits/query`,
   channel_message_decision_evidence: (channelId: string, messageId: string) =>
@@ -454,6 +456,8 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/agent-instances/${encodeURIComponent(instanceId)}?spaceId=${encodeURIComponent(spaceId)}&channelId=${encodeURIComponent(channelId)}`,
   channel_agent_launches: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/agent-launches/query`,
+  channel_quota_retry: (channelId: string, retryId: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/quota-retries/${encodeURIComponent(retryId)}`,
   channel_page_edits: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/page-edits/query`,
   channel_message_decision_evidence: (channelId: string, messageId: string) =>

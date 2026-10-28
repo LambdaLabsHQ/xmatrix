@@ -3,7 +3,8 @@ import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
-  REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage } from "@xmatrix/protocol";
+  REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
+  AGENT_QUOTA_RETRY_NOTICE_KIND } from "@xmatrix/protocol";
 import { nameDiscussionByFirstMessage, startChannelAbout } from "./channel-about";
 import {
   dispatchProductAgentMentionsAfterAuthorityMessage,
@@ -233,7 +234,10 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
       const reason = known ? preparationRejectionMessage(code, signedOut ?? offline ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
         : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
       const body = `Agent launch failed: ${reason} (${code})`;
-      if (!notices.has(body)) notices.set(body, !item.sourceMention ? undefined
+      const noticeBody = item.quotaRetryId ? `${body}\n\n${item.sourceMention}\nRequest ${(item.selectionIndex ?? 0) + 1}` : body;
+      if (!notices.has(noticeBody)) notices.set(noticeBody, item.quotaRetryId
+        ? { kind: AGENT_QUOTA_RETRY_NOTICE_KIND, xmatrixQuotaRetryId: item.quotaRetryId }
+        : !item.sourceMention ? undefined
         : signedOut ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: item.sourceMention }
         : offline ? { kind: MACHINE_OFFLINE_NOTICE_KIND, offline, sourceMention: item.sourceMention } : undefined);
     }

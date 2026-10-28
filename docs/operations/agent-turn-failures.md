@@ -58,6 +58,8 @@ even when its detail mentions a usage limit.
 
 The optional usage-limit evidence is presentation only; the existing Hub
 classification, quota hold and automatic handoff retain their own authority.
+When no successor can take over, the author may explicitly choose durable
+[quota recovery](agent-quota-recovery.md); no failure notice enrolls work by itself.
 Older Web clients ignore the new evidence field. Historical notices do not gain
 a new quota classification, but expose their original cause in the updated Web.
 

@@ -8,6 +8,7 @@ import type { RoutingEvaluator } from "./agent-routing-evaluation";
 import type { AutoLaunchTags, DraftSummonIntent, HarnessSignedOut, HarnessTooOld, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
+  PostgresQuotaRetryRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
   PostgresFirstMessageLaunchChoiceRepository, PostgresMessageAskRepository, PostgresMessageRepository, MACHINE_OFFLINE_REST_REASON,
 } from "@xmatrix/db";
@@ -39,6 +40,8 @@ async function channelLaunchRepository(input: { database: AuthorityDatabase; dir
 type LaunchEvaluator = (spaceId: string) => RoutingEvaluator;
 
 export async function executeRegistrationLaunchDispatch(input: {
+  quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission;
+  onlySelectionIndex?: number;
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor?: LaunchEvaluator;
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
   /** The author's "launch anyway" for one summon Jev read as a non-request. */
@@ -63,7 +66,17 @@ export async function executeRegistrationLaunchDispatch(input: {
   }
   // A recorded refusal answers its summon now; accepted launches answer as the coordinator publishes them.
   if (result.rejected.length && input.env) await publishChannelInvocationsChanged(input.env as Env, input.channelId);
-  return { ...result, shardId: placement.shardId, channelId: input.channelId };
+  const rejected = [];
+  for (const item of result.rejected) {
+    const { quotaTargets, ...publicItem } = item;
+    const quotaRetryId = !input.quotaRetry && item.code === "registration_quota_exhausted" && quotaTargets?.length
+      ? await new PostgresQuotaRetryRepository(input.database, placement).offer({ channelId: input.channelId,
+        actorUserId: input.actorUserId, sourceMessageId: input.sourceMessageId, sourceMention: item.sourceMention,
+        sourceBodyHash: await digestCanonicalCloneCborV1(input.body),
+        selectionIndex: item.selectionIndex, registrations: quotaTargets }) : undefined;
+    rejected.push({ ...publicItem, ...(quotaRetryId ? { quotaRetryId } : {}) });
+  }
+  return { ...result, rejected, shardId: placement.shardId, channelId: input.channelId };
 }
 
 interface RegistrationInputLaunch {
@@ -296,7 +309,7 @@ export function holdRegistrationUsageLimit(env: Env, input: {
 /** A reborn of a source Instance as a fresh registration Run of its tuple. */
 export function prepareRegistrationReborn(env: Env, input: {
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
-  sourceInstanceId: string; sourceMention?: string; prompt: string;
+  sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission;
 }) {
   return executeRegistrationRebornPrepare({ ...runtimePlacement(env), ...input });
 }
@@ -417,6 +430,7 @@ async function placedRebornRepository(input: { env?: AppConnectorEnv; database: 
 export async function executeRegistrationRebornPrepare(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
   channelId: string; sourceMessageId: string; sourceInstanceId: string; sourceMention?: string; prompt: string;
+  quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission;
 }) {
   return (await placedRebornRepository(input, "reborn")).prepare(input);
 }
@@ -451,7 +465,7 @@ interface MessageLaunchResult {
 
 /** A summon the dispatch refused, and what it names: a program too old or signed out, or offline machines. */
 export interface MessageLaunchRejection { code: string; sourceMention?: string; tooOld?: HarnessTooOld; signedOut?: HarnessSignedOut;
-  offline?: OfflineMachine[] }
+  offline?: OfflineMachine[]; quotaRetryId?: string; selectionIndex?: number }
 
 type MessageLaunchDependencies = {
   launch?: (input: MessageLaunch) => Promise<MessageLaunchResult>;

@@ -60,7 +60,7 @@ test("the source stops and pushes its checkout, then a successor of the named ha
   // The source's own registration is excluded; the same harness elsewhere is not.
   assert.equal(dispatch.excludeSourceInstanceId, "instance-1");
   assert.equal(dispatch.presentationMessageId, "message-1");
-  assert.equal(dispatch.runMetadata, undefined);
+  assert.deepEqual(dispatch.runMetadata, { handoffSourceInstanceId: "instance-1" });
   assert.match(dispatch.body, new RegExp(`git fetch origin ${branch.replaceAll("/", "\\/")}`, "u"));
   assert.match(dispatch.body, /was asked to push its whole checkout/);
   assert.match(dispatch.body, /uncommitted work of/);
@@ -77,7 +77,7 @@ test("@auto leaves the harness to routing and is drawn on the handoff message", 
   const dispatch = f.calls.find(call => call[0] === "dispatch")[1];
   assert.deepEqual(dispatch.tags, { repo: "acme/app" });
   assert.equal(dispatch.presentationMessageId, "message-1");
-  assert.deepEqual(dispatch.runMetadata, { sourceMention: "@claude:3:handoff:@auto" });
+  assert.deepEqual(dispatch.runMetadata, { handoffSourceInstanceId: "instance-1", sourceMention: "@claude:3:handoff:@auto" });
 });
 
 test("an unconfirmed stop still starts the successor, told to wait for the branch", async () => {

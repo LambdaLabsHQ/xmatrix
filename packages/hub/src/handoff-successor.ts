@@ -2,6 +2,7 @@ import { HANDOFF_BRANCH_PREFIX, sha256Hex } from "@xmatrix/protocol";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { dispatchRegistrationInput } from "./registration-launch-dispatch";
 import type { Env } from "./types";
+import { offerUsageLimitRecovery } from "./agent-quota-retry";
 
 /** How long a handoff waits for the source's machine to confirm its stop and
  * push before the successor starts anyway. The push is already commanded and
@@ -104,7 +105,14 @@ export async function launchHandoffSuccessor(env: Env, input: HandoffSuccessor,
     // The pick is a registration launch, not a continuation. Drawing it on the
     // handoff message is what lets `@auto` show the parameters Jev chose.
     presentationMessageId: input.sourceMessageId,
-    ...(input.sourceMention ? { runMetadata: { sourceMention: input.sourceMention } } : {}),
+    runMetadata: { handoffSourceInstanceId: input.sourceInstanceId,
+      ...(input.sourceMention ? { sourceMention: input.sourceMention } : {}) },
+  }).catch(async (error: unknown) => {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    if (!input.harness && ["registration_quota_exhausted", "registration_not_found", "registration_daemon_offline"].includes(String(code))) {
+      await offerUsageLimitRecovery(env, input);
+    }
+    throw error;
   });
   return { agentName: launched.agentName };
 }

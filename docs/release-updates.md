@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Choose to wait when provider quota blocks every Agent
+
+Usage exhaustion still attempts the ordinary automatic handoff first. When no
+eligible Agent can take over, the task owner can choose **Retry when quota
+recovers** or **Not now**. A rejected initial summon has the same choice.
+Waiting survives closing the browser, can be cancelled, and has a fixed 35-day
+limit covering monthly resets. Only a newer provider quota reading authorizes
+retry; expiry of a routing hold never does. Staged launch and original-session
+continuation replay retain one attempt, current permissions and stop/source
+fences. Hub and beta Web, with additive migration 0228 and no host update.
+Older clients retain the ordinary failure text. Recovery is a CI-validated beta
+reverting the feature while retaining the additive table. See
+[quota recovery](operations/agent-quota-recovery.md).
+
 ## Unreleased: Message preflight lock failures retain their blocker
 
 HUB-B3 timed out while append's combined authorization preflight waited for

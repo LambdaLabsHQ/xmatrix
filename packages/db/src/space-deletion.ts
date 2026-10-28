@@ -304,7 +304,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.message_sequence_reservations", "data.messages", "data.page_access",
     "data.page_co_writing", "data.page_links", "data.page_migrations", "data.page_reads",
     "data.page_revisions", "data.pages", "data.registration_access_changes",
-    "data.registration_launch_intents",
+    "data.registration_launch_intents", "data.agent_quota_retries",
     "data.space_agent_registration_access", "data.space_agent_registrations",
     "data.space_billing_checkout_intents", "data.space_harness_profiles",
     "data.space_billing_subscriptions", "data.space_billing_usage", "data.space_billing_webhook_events",
