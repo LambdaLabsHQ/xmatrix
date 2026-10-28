@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: Automatic Gmail reads now reach the Channel
+
+The first release of automatic Gmail reads posted no receipt: each one replied
+to the notification, and an App's message cannot be a reply target, so the
+append was refused. The receipt now follows its notification, and a refused
+receipt is logged by failure kind without mail content. This ships in the Hub.
+
 ## Unreleased: New Gmail messages arrive already read
 
 When a new message reaches a mailbox with notifications on, the Gmail

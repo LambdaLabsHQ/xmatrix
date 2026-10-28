@@ -41,7 +41,8 @@ export async function autoReadGmailMessage(env: Env, input: {
   const manifest = getAppConnectorProvider("gmail")!;
   for (const notification of input.notifications) {
     const command = { env, channelId: notification.channelId, actorUserId: job.userId, senderKind: "user" as const,
-      messageId: `gmail-auto-read:${notification.messageId}`, commandMessageId: notification.messageId, body: "" };
+      // An App's message cannot be a reply target; the receipt follows its notification instead.
+      messageId: `gmail-auto-read:${notification.messageId}`, commandMessageId: null, body: "" };
     const receiptId = `system:${command.messageId}:${manifest.id}`.slice(0, 200);
     try {
       // Ownership can change while Gmail answers; a stale read is never stored or announced.
@@ -53,8 +54,10 @@ export async function autoReadGmailMessage(env: Env, input: {
         ? `${manifest.name} read: ignored; ${outcome.detail}.`
         : commandResult(manifest.name, "read", { status: outcome.status, summary: PRIVATE_CONNECTOR_RESULT })],
       { resumeRequester: false, ...(hidden ? { privateResultOwnerUserId: job.userId } : {}) });
-    } catch {
+    } catch (error) {
       // The notification is already delivered; its read receipt is best effort per Channel.
+      // The log names only the failure's kind, never mail content.
+      console.error("Gmail automatic read receipt failed", error instanceof ProviderRequestError ? error.status : "unexpected");
     }
   }
 }
