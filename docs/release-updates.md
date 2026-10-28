@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Native scrolling stays free while older history settles
+
+After an older history page loads, a layout callback no longer consumes a
+wheel or other pending scroll before the browser has moved the timeline.
+That race could mistake the subsequent movement for layout drift and pull
+the reader back in either direction. The anchor keeps waiting for movement;
+its own corrections and compensated virtualizer changes update the pending
+baseline without claiming reader input. Existing quiet and maximum lifetimes
+still apply. This ships in the beta Web; no API or data migration is needed.
+Recovery is a CI-validated beta Web reverting the change.
+
 ## Unreleased: The iOS swipe back follows the finger again
 
 On iPhone, dragging from the left edge moves the screen with the finger again.
