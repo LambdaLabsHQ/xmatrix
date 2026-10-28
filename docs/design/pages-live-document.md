@@ -382,6 +382,9 @@ fact is about.
     for it shows on its card once sent. Hub authorization still gates every
     message and link; inaccessible or ambiguous editing provenance selects no
     conversation.
+    A destination outside the loaded Channel catalog is resolved by its exact
+    id through the ordinary authorized catalog read before sending. A failed or
+    unavailable lookup reports an error and creates no replacement discussion.
   - An Agent newly called for a comment starts at once in a private managed directory, as a
     co-writer's does, unless the comment names a repository (`repo:`,
     `pwd:`), and writes its change into the page, where its card says it is

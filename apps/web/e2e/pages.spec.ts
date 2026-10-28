@@ -1277,15 +1277,20 @@ test("a drag selects the line under the pointer, wherever the caret was: nothing
   await drag("Under the table.", 400);
 });
 
-for (const target of ["live", "mentioned", "edited"] as const) {
-  test(`a passage comment continues its ${target} conversation without creating a Channel`, async ({ page: browser }) => {
-    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+for (const target of ["live", "mentioned", "edited", "uncatalogued", "edited-uncatalogued", "unavailable"] as const) {
+  test(target === "unavailable" ? "a passage comment rejects an unavailable destination without creating a Channel"
+    : `a passage comment continues its ${target} conversation without creating a Channel`, async ({ page: browser }) => {
+    const editing = target.startsWith("edited");
+    const unloaded = target.includes("uncatalogued") || target === "unavailable";
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")], unloaded ? [] : [E2E_CHANNEL]);
+    if (unloaded) await fixtureRule(browser, { id: "comment-target", pattern: "**/channels/resolve", method: "POST",
+      responder: { kind: "channelCatalog", channels: target === "unavailable" ? [] : [E2E_CHANNEL] } });
     await stubWriters(browser, ["grok"]);
     await stubPageConversation(browser, { ...E2E_CHANNEL, id: "unexpected-new-channel" },
       { linkId: "l-comment", blockId: "status" });
     await fixtureJson(browser, "comment-message", /\/api\/xmatrix\/channels\/[^/]+\/messages$/u, { message: {} },
       { method: "POST" });
-    if (target === "edited") {
+    if (editing) {
       await fixtureJson(browser, "page-awareness", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/awareness(?:\?.*)?$/u, {
         pageId: "p-relay", headRevision: 3, blocks: [{ blockId: "status", present: [], discussions: [],
           updated: { revision: 3, authors: [], conversationIds: [E2E_CHANNEL.id], createdAt: NOW } }],
@@ -1298,10 +1303,16 @@ for (const target of ["live", "mentioned", "edited"] as const) {
     await selectLine(browser, "In progress");
     const box = browser.getByTestId("page-comment-box");
     await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
-    if (target !== "edited") await expect(box).toContainText("grok:1");
+    if (!editing && !unloaded) await expect(box).toContainText("grok:1");
     await browser.keyboard.type(target === "mentioned" ? "@grok Is this still accurate?" : "Is this still accurate?");
     await browser.keyboard.press("Enter");
-    const expected = target === "edited" ? "Is this still accurate?" : "@grok:1 Is this still accurate?";
+    if (target === "unavailable") {
+      await expect(browser.getByText(/This conversation is no longer available\./u)).toBeVisible();
+      expect(await fixtureRequestBodies(browser, "comment-message")).toEqual([]);
+      expect(await fixtureRequestBodies(browser, "channel-create")).toEqual([]);
+      return;
+    }
+    const expected = editing ? "Is this still accurate?" : "@grok:1 Is this still accurate?";
     await expect.poll(async () => (await fixtureRequestRecords(browser, "comment-message"))
       .map((request) => ({ path: new URL(request.url).pathname, body: JSON.parse(request.body ?? "{}").body }))).toEqual([
       { path: `/api/xmatrix/channels/${E2E_CHANNEL.id}/messages`, body: expect.stringContaining(`\n\n${expected}`) },
