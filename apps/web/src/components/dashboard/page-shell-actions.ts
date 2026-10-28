@@ -6,9 +6,6 @@ import { pageApi, type PageLinkAnchor } from "@/lib/pages/page-client";
 import type { ConversationRequest } from "@/components/dashboard/start-conversation";
 import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
 
-/** Calls an Agent live in another conversation to a new one: a message in its own, once the new one's first is in. */
-export type ConversationCall = { channel: ChannelSnapshot; body: (conversationId: string) => string };
-
 /** How the workspace shell opens pages and starts conversations about them. */
 export function pageShellActions(input: {
   token: string | null | undefined;
@@ -107,8 +104,9 @@ export function pageShellActions(input: {
   }
 
   /**
-   * "Discuss" on a page section: a new conversation, linked to that section
-   * from the start so the page shows it and the conversation shows the page.
+   * "Discuss" on a page section: a conversation linked to that section so the
+   * page shows it and the conversation shows the page. Comments with an existing
+   * destination use that conversation and its ordinary message delivery directly.
    * It opens at once, holding its passage, as a Google Docs comment does; the
    * Hub creates and links it meanwhile (`planned` hears its id first, so the
    * page can show the discussion before the link lands), and the answer
@@ -124,11 +122,14 @@ export function pageShellActions(input: {
     planned?: (conversationId: string) => void;
     /** Hears the first message's stored id once it is sent, or null when it was not confirmed. */
     sent?: (messageId: string | null) => void;
-    call?: ConversationCall;
+    /** Continues this conversation instead of creating one, keeping its existing Instances. */
+    existing?: ChannelSnapshot;
   } = {}): Promise<string | null> {
     const { token, user } = input;
     if (!token || !user) return null;
-    const { channel, created } = await input.beginConversation({ spaceId: page.spaceId,
+    const { channel, created } = options.existing
+      ? { channel: options.existing, created: Promise.resolve(options.existing) }
+      : await input.beginConversation({ spaceId: page.spaceId,
       memberName: user.name || user.email || "Human", name: page.name, mode: page.restricted ? "closed" : "open",
       metadata: { fromPageId: page.pageId, ...(page.anchor ? { autoName: true } : {}) } });
     options.planned?.(channel.id);
@@ -155,8 +156,6 @@ export function pageShellActions(input: {
     if (options.firstMessage) {
       const messageId = await (delivered ?? input.deliver(channel, options.firstMessage));
       options.sent?.(messageId);
-      // Its Instance lives in its own conversation, so it is told there, and answers here.
-      if (options.call) await input.deliver(options.call.channel, options.call.body(channel.id));
       if (options.open !== false) openPageConversation(channel.id, { focus: false });
     }
     return channel.id;

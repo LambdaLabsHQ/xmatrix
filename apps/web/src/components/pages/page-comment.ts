@@ -14,24 +14,25 @@ export function commentTaker<Agent extends CommentTaker>(onPage: readonly Agent[
 }
 
 /**
- * A comment as its discussion's first message. A live Instance it names (`@claude:2`, one of `live`) takes it as
- * the Agent at work on the page does; another Agent it mentions starts on it at once. One that mentions nobody
- * goes to the Agent at work on the page (`taker`), which `commentCall` tells in its own conversation, where its
- * Instance lives; it answers in the discussion. With none there, xMatrix gives it to one.
+ * Address the existing Instance in its own conversation. Without one, continue the section's editing
+ * conversation when known. Only an explicit new Agent, or a comment with neither destination, starts work
+ * in a new discussion.
  */
 export function commentBody<Agent extends CommentTaker>(text: string, agents: readonly string[], taker?: Agent,
-  live: readonly Agent[] = []): { body: string; taker?: Agent } {
+  live: readonly Agent[] = [], conversationId?: string): { body: string; taker?: Agent; conversationId?: string } {
   for (const match of text.matchAll(MENTION)) {
-    const named = live.find((agent) => agent.name.toLowerCase() === match[2]!.toLowerCase());
-    if (named) return { body: text, taker: named };
-    if (!agents.includes(match[2]!.split(":")[0]!)) continue;
+    const name = match[2]!.toLowerCase();
+    const matches = (agent: Agent) => agent.name.toLowerCase() === name
+      || (!name.includes(":") && agent.name.split(":")[0]!.toLowerCase() === name);
+    const named = taker && matches(taker) ? taker : live.find(matches);
+    if (named) {
+      const start = match.index! + match[1]!.length;
+      return { body: `${text.slice(0, start)}@${named.name}${text.slice(match.index! + match[0].length)}`, taker: named };
+    }
+    if (!agents.some((agent) => agent.toLowerCase() === name.split(":")[0])) continue;
     const end = match.index! + match[0].length;
     return { body: `${text.slice(0, end)} launch:force${text.slice(end)}` };
   }
-  return taker ? { body: text, taker } : { body: `@auto ${text}` };
-}
-
-/** What calls the taker to the discussion of its comment. */
-export function commentCall(taker: Pick<CommentTaker, "name">, discussionId: string): string {
-  return `@${taker.name} A comment for you: channel:${discussionId}`;
+  return taker ? { body: `@${taker.name} ${text}`, taker }
+    : conversationId ? { body: text, conversationId } : { body: `@auto ${text}` };
 }

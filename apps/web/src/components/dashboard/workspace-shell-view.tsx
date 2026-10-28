@@ -1328,10 +1328,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId, at) => openPageConversation(conversationId, at ? { at } : {})}
       onConversationIntent={resolvePageConversation}
-      onDiscuss={({ firstMessage, quote, open, coWrite, planned, sent, call, ...input }) => startPageConversation(input,
+      onDiscuss={({ firstMessage, quote, open, coWrite, planned, sent, existing, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
           ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}),
-          ...(sent ? { sent } : {}), ...(call ? { call } : {}) })}
+          ...(sent ? { sent } : {}), ...(existing ? { existing } : {}) })}
       canMigrate={canMovePages}
       layout={isMobileViewport ? "phone" : "desktop"} />
   );

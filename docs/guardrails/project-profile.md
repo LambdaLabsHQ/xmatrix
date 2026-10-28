@@ -140,8 +140,12 @@ without periodic polling. The exact installation's effective Code scanning alert
 read grant is checked on subscription and again before every delivery; see
 [App connectors](../operations/app-connectors.md).
 
-Page discussions and conversations started from selected message passages use
-the ordinary first-message automatic summon and author choice window. Passage
+Page comments continue the selected live Instance's conversation, or the section's
+unambiguous readable editing conversation, carrying the quoted passage and its
+link. They create a discussion only when no existing destination is available
+or another Agent is explicitly requested. Newly created Page discussions and
+conversations started from selected message passages use the ordinary
+first-message automatic summon and author choice window. Passage
 discussions are named after the first message's text rather than its quote;
 section discussions keep the section name. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
 
