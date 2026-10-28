@@ -61,6 +61,16 @@ test("submit_subscriptions adds each ready subscription and its group to the dra
   assert.deepEqual(writes(none.calls), []);
 });
 
+test("a version Apple reports in flight is reused instead of a second one", async () => {
+  const sent = await run({ ...catalog(subscription("s-month", "app.pro.monthly", "READY_TO_SUBMIT")), ...submitted,
+    "GET /v1/subscriptions/s-month/versions": { data: [{ type: "subscriptionVersions", id: "sv-wait", attributes: { state: "WAITING_FOR_REVIEW" } }] },
+    "POST /v1/subscriptionGroupVersions": { status: 409, errors: [{ status: "409", code: "ENTITY_ERROR",
+      detail: "There is already an inflight version with id '040f6de5-a2af-4f2d-bafa-8038b1448b51' for subscriptionGroup 22456053." }] } },
+  `@appstoreconnect:submit_subscriptions:${BUNDLE}`);
+  assert.deepEqual(itemsOf(sent.calls), ["subscriptionGroupVersion:040f6de5-a2af-4f2d-bafa-8038b1448b51", "subscriptionVersion:sv-wait"]);
+  assert.ok(!sent.calls.some(call => call.method === "POST" && call.path === "/v1/subscriptionVersions"));
+});
+
 test("a review submission already sent is not changed", async () => {
   const busy = await withApple({ ...catalog(subscription("s-month", "app.pro.monthly", "READY_TO_SUBMIT")), ...submitted,
     "GET /v1/reviewSubmissions": { data: [{ type: "reviewSubmissions", id: "r-9", attributes: { state: "WAITING_FOR_REVIEW" } }] } },
