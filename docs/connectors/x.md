@@ -94,10 +94,11 @@ the rates, permanent receipt authority, refund and reconciliation contract.
 ## Actions and publishing approval
 
 `xmatrix connector list` is the runtime command reference. Actions start from
-visible Channel commands and their results reply in that Channel; there is no
-private connector result path. Channel members can read returned post content,
-including content the authorizing account can access. Choose a personal Space
-when those results should not be shared with company Channel members.
+visible Channel commands and their results reply in that Channel. Reads also
+support `xmatrix call --private`: the invocation and parameters stay visible,
+while shared receipts mask the result and its original remains available to
+the caller and its Human owner. Ordinary Channel results can expose content
+the authorizing account can access; choose visibility and Space accordingly.
 
 | Action | Target and text | Contract |
 | --- | --- | --- |
@@ -131,7 +132,7 @@ Source access, immutable metadata and current app permission are checked again
 while streaming the upload. Initialize, append and finalize use X's v2 media
 API with at most 64 one-MiB chunks and no automatic replay of an uncertain
 write. The transfer has a two-minute deadline, with each provider request
-separately bounded. Both approved and allow-mode uploads first freeze their
+separately bounded. Both approved and write-mode uploads first freeze their
 input in the encrypted PostgreSQL action-request authority, then hand only a
 request reference to a scoped Durable Object alarm executor. HTTP and CLI
 requests acknowledge admission without waiting for the transfer. The executor
@@ -151,11 +152,12 @@ checks the receipt's scope, current source access and X's ready status again.
 An upload approval does not approve the final public post. Quotes accept text
 only.
 
-Publishing defaults to **ask** for each request. A Human Space admin owns the
-Channel's allow/ask/disallow policy. An approved write binds the stable X user
-ID, its per-connect generation and exact publishing content. The Hub rechecks
-the caller's current account ownership, Channel access and policy before
-dispatch. A changed handle cannot retarget an approval, and reconnecting or
+The X connection defaults to **ask** for every write. A Human Space admin
+chooses one read/ask/write permission for the connection, shared by every
+Channel and action; Agents cannot change it. An approved write binds the
+stable X user ID, its per-connect generation and exact publishing content.
+The Hub rechecks current account ownership, Channel access and connection
+permission before dispatch. A changed handle cannot retarget an approval, and reconnecting or
 removing the account invalidates old approvals. Denied, expired or stale
 approvals must not publish. A transport failure after submission is an
 uncertain provider outcome, not authority for an automatic duplicate post.

@@ -124,8 +124,8 @@ in our workspace, never a customer's tasks:
    dates; verify the actual returned object and a fresh read/search.
 4. Write/edit a comment, dependency, milestone, project update and linked resource.
 5. Observe signed issue/comment events in the subscribed Channel; replay must
-   not duplicate effects. Check disallow/ask boundaries without changing policy
-   as an Agent, and retain explicit approval receipts for lifecycle tests.
+   not duplicate effects. Check the connection's read/ask boundaries without
+   changing its permission as an Agent, and retain explicit approval receipts for lifecycle tests.
 6. Record revocation/reconnection and removal tests separately; unperformed
    checks remain open. Code tests use fixed provider responses to exercise
    false/partial confirmations, destination mismatch and authorization races.

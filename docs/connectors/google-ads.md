@@ -23,9 +23,10 @@ do not establish native acceptance.
    have separate restrictions.
 2. Add `https://www.googleapis.com/auth/adwords` to the company's Google consent
    configuration. This scope permits reads and writes; Google Ads does not offer
-   a separate read-only OAuth scope. Google account roles and xMatrix Channel
-   policies still apply. The connector rejects a grant with unrelated scopes,
-   refresh errors and incomplete expiring credentials.
+   a separate read-only OAuth scope. Google account roles and the Space
+   connection's read/ask/write permission still apply. The connector rejects
+   a grant with unrelated scopes, refresh errors and incomplete expiring
+   credentials.
 3. In Space **Apps → Google Ads → Credentials**, set `customerId` to the selected
    advertiser's ten-digit ID, with or without dashes. Set `loginCustomerId` only
    when accessing the advertiser through a Google Ads manager account.
@@ -74,12 +75,16 @@ connector list` lists the available actions. There is no connector MCP.
 | `set_campaign_status` | `<customer ID>/<campaign ID> {"status":"PAUSED"}` | Pause one campaign |
 | `set_campaign_status` | `<customer ID>/<campaign ID> {"status":"ENABLED","currencyCode":"USD","expectedDailyBudgetMicros":"1000000"}` | Verify currency and the current dedicated DAILY budget, then atomically apply that approved amount/budget reference and enable |
 
-Both write actions default to **ask** for each request. A Human Space admin can
-choose `allow`, `ask` or `disallow` for each action in a Channel. Agent commands
-cannot change that policy. Approval freezes the request; the Hub rechecks
-current Channel access/policy immediately before dispatch, including after
-provider preflight. A revoked policy, a different selected customer, a currency
-mismatch or a changed/shared activation budget stops the write at preflight.
+The Google Ads connection defaults to **ask** for every write. A Human Space
+admin chooses one `read`, `ask` or `write` mode for the whole connection in
+Apps; it applies in every Channel, with no per-action or Channel exceptions.
+Agent commands cannot change it. Read mode permits reads and blocks changes;
+ask requires approval of each exact change; write permits direct changes
+within the provider's permissions. Approval freezes the request; the Hub
+rechecks current Channel access and the live connection permission immediately
+before dispatch, including after provider preflight. A revoked permission,
+a different selected customer, a currency mismatch or a changed/shared
+activation budget stops the write at preflight.
 Google has no compare-and-swap for these fields: activation atomically reasserts
 the approved average amount and exact budget reference with the status change.
 This closes the gap between the preflight read and write instead of claiming
@@ -186,23 +191,27 @@ declaration must reflect the actual campaign; the connector does not infer it.
 Add valid ad groups, keywords, geographic/language criteria and creatives using
 the same resource operations before explicitly enabling a campaign.
 
-## Stable acceptance
+## Release and acceptance
 
-After required CI, merge and release through Production Release Intent, verify
-the exact stable Hub/Web release and recorded receipt. Then, on stable:
+After required CI, merge and request a beta through Production Release Intent.
+Verify the exact production Hub and beta Web revision and recorded receipt.
+The stable release Agent owns subsequent stable publication. Native acceptance
+on the released beta requires:
 
 1. Complete native company OAuth, configure the selected advertiser and prove
    **Check → configured**. Verify the Google account ID/currency/time zone.
 2. Read actual campaign state and spend/conversions through the Run's connector,
    comparing results with native Google Ads and preserving report/date scope.
-3. Prove default ask/disallow cannot dispatch a provider write. A Human admin
-   approves each isolated acceptance request or enables the named Channel action.
+3. Prove default ask cannot dispatch before approval, and read mode cannot
+   dispatch a provider write. A Human admin approves each isolated request or
+   selects write for this connection; Agents cannot change its permission.
 4. Validate and create an unmistakable **paused** acceptance campaign with a
    dedicated budget, targeting and ad; query it and verify the same resources
    in Google Ads. Update its budget/creative, pause it and verify the results.
 5. Validate proposed activation without executing it; reject mismatched currency
-   or expected budget and exercise Channel revocation before dispatch. Successful
-   real activation/serving requires a separately authorized promotion and budget;
+   or expected budget and exercise connection-permission and Channel-access
+   revocation before dispatch. Successful real activation/serving requires a
+   separately authorized promotion and budget;
    record it as untested until its real evidence exists.
 6. Revoke/disconnect the grant and prove later actions fail. Reconnect using new
    native consent and recheck the selected customer. Do not alter other Google
