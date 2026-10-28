@@ -597,13 +597,21 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const pageConversationLookup = useRef({ pageConversation, paging: channelCatalogPaging, spaceId: currentSpaceId });
   pageConversationLookup.current = { pageConversation, paging: channelCatalogPaging, spaceId: currentSpaceId };
   const askedPageConversations = useRef(new Set<string>());
-  const resolvePageConversation = useCallback((conversationId: string) => {
+  const readPageConversation = useCallback(async (conversationId: string) => {
     const { pageConversation: known, paging, spaceId } = pageConversationLookup.current;
+    if (!spaceId) return null;
+    const channel = known(conversationId);
+    if (channel) return channel;
+    const resolved = await paging.forSpace(spaceId).resolve([conversationId]);
+    return resolved.channels.find((item) => item.id === conversationId) ?? null;
+  }, []);
+  const resolvePageConversation = useCallback((conversationId: string) => {
+    const { pageConversation: known, spaceId } = pageConversationLookup.current;
     if (!spaceId || known(conversationId) || askedPageConversations.current.has(conversationId)) return;
     askedPageConversations.current.add(conversationId);
-    void paging.forSpace(spaceId).resolve([conversationId])
+    void readPageConversation(conversationId)
       .catch(() => askedPageConversations.current.delete(conversationId));
-  }, []);
+  }, [readPageConversation]);
   // A phone's page is a pushed screen like a conversation: its back bar
   // replaces the dock, and its details are one more screen.
   const phonePageOpen = isMobileViewport && view === "pages" && Boolean(selectedPageId);
@@ -1327,7 +1335,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId, at) => openPageConversation(conversationId, at ? { at } : {})}
-      onConversationIntent={resolvePageConversation}
+      onConversationIntent={resolvePageConversation} onResolveConversation={readPageConversation}
       onDiscuss={({ firstMessage, quote, open, coWrite, planned, sent, existing, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
           ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}),

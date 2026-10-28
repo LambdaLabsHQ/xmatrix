@@ -72,7 +72,7 @@ import type { PageSummons } from "./page-mention-summons";
 import type { PageEditOpening } from "@/components/dashboard/page-edit-cards";
 import { usePageSummons, type PageSummon } from "./page-summon-store";
 import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
-import { userErrorMessage } from "@/lib/user-facing-error";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 // The native shell also imports this module for its list screens. The editor
 // (ProseMirror and the page document) belongs to an open document, not to the cold-start list dependency graph.
@@ -567,7 +567,7 @@ const NO_MEMBERS: readonly SpaceMember[] = [];
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, onSend, activeConversationId = null,
   renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation,
-  onConversationIntent, onDiscuss, canMigrate, layout = "desktop", focusSection = null, onReturnToMessage,
+  onConversationIntent, onResolveConversation, onDiscuss, canMigrate, layout = "desktop", focusSection = null, onReturnToMessage,
   creation, members = NO_MEMBERS }: {
   spaceId: string | null;
   token: string;
@@ -597,6 +597,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onOpenConversation: (conversationId: string, at?: { messageId: string; sequence: number }) => void;
   /** The reader rests on one of the page's conversations, which may be opened next. */
   onConversationIntent?: (conversationId: string) => void;
+  /** Resolves an exact comment destination even when it is outside the loaded catalog page. */
+  onResolveConversation: (conversationId: string) => Promise<ChannelSnapshot | null>;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
     anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
@@ -1310,14 +1312,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const agent = takerOf(blockId);
     return agent && listedAgents([agent])[0];
   };
-  const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) => {
-    const live = liveOnPage.filter((agent) => conversation(agent.conversationId));
+  const comment: NonNullable<PageSectionActions["comment"]> = async (blockId, anchor, text) => {
     const origins = [...new Set(awareness.data?.blocks.find((block) => block.blockId === blockId)
-      ?.updated?.conversationIds ?? [])].filter((id) => conversation(id));
+      ?.updated?.conversationIds ?? [])];
+    const knownOrigins = origins.filter((id) => conversation(id));
+    const origin = knownOrigins.length === 1 ? knownOrigins[0] : origins.length === 1 ? origins[0] : undefined;
     const { body, taker, conversationId } = commentBody(text, writers.agents.map((agent) => agent.harness),
-      takerOf(blockId), live, origins.length === 1 ? origins[0] : undefined);
-    const home = conversation(taker?.conversationId ?? conversationId ?? "");
-    startDiscussion(blockId, anchor, { body, ...(home ? { existing: home } : {}) });
+      takerOf(blockId) ?? commentTaker(liveOnPage, blockId, () => true), liveOnPage, origin);
+    const target = taker?.conversationId ?? conversationId;
+    try {
+      const home = target ? conversation(target) ?? await onResolveConversation(target) : null;
+      if (target && !home) throw new UserFacingProblem("This conversation is no longer available.");
+      startDiscussion(blockId, anchor, { body, ...(home ? { existing: home } : {}) });
+    } catch (cause) {
+      setNotice(userErrorMessage(cause, "Couldn't send the message"));
+    }
   };
   const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
     said?: { body: string; existing?: ChannelSnapshot }) => {

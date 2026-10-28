@@ -35,6 +35,9 @@ to it with the quoted passage and a link back; bare Agent mentions also reuse
 that Instance. With no live Agent, the section's latest unambiguous readable
 editing conversation receives the comment. Only a comment with no existing
 destination or an explicit request for another Agent starts a new discussion.
+An existing destination outside the loaded catalog page is resolved through
+the authorized catalog read before sending; a failure or unavailable result
+reports an error instead of creating a replacement discussion.
 Browser coverage checks the actual message destination and absence of Channel
 creation; the existing new-discussion case covers the remaining startup path.
 Beta Web only, no API, schema or native change. Recovery is a CI-validated beta
