@@ -28,7 +28,7 @@ const HISTORY = Array.from({ length: 56 }, (_, index) => ({
 
 /* `prepended`: the older page has reached the DOM - its rows, the
    virtualizer's prepend margin, or the scroll that absorbs it. */
-type Frame = { elapsedMs: number; textTop: number | null; scrollTop: number; prepended: boolean };
+type Frame = { elapsedMs: number; textTop: number | null; scrollTop: number; maxScrollTop: number; prepended: boolean };
 
 /**
  * Scroll to `startScrollTop` (which pages in 47 and older), then scroll up by
@@ -75,22 +75,18 @@ async function sampleReaderAcrossPrepend(
         elapsedMs: performance.now() - startedAt,
         textTop: textTop(),
         scrollTop: root.scrollTop,
+        maxScrollTop: root.scrollHeight - root.clientHeight,
         prepended: Boolean(document.getElementById("message:message-anchor-46")) ||
           (list !== null && list.style.marginTop !== "" && list.style.marginTop !== "0px") ||
           root.scrollTop > 5_000,
       };
     };
-    /* What the next frame paints: sampled from a ResizeObserver created in
-       that frame. Observers run in creation order after layout, so the
-       newest one sees every correction the app's observers made. */
+    // Read in the task after the frame, as painted-timeline-frames.ts does.
+    // Installing an observer changes the layout delivery order we must test.
+    const afterFrame = new MessageChannel();
     const painted = () => new Promise<ReturnType<typeof sample>>((resolve) => {
-      requestAnimationFrame(() => {
-        const observer = new ResizeObserver(() => {
-          observer.disconnect();
-          resolve(sample());
-        });
-        observer.observe(root);
-      });
+      afterFrame.port1.onmessage = () => resolve(sample());
+      requestAnimationFrame(() => afterFrame.port2.postMessage(null));
     });
     const samples = [sample()];
     for (let frame = 0; frame < count; frame += 1) {
@@ -100,9 +96,14 @@ async function sampleReaderAcrossPrepend(
       }
       samples.push(await painted());
     }
+    afterFrame.port1.close();
+    afterFrame.port2.close();
     return samples;
   }, options);
 
+  await test.info().attach("painted-history-frames", {
+    body: JSON.stringify(frames), contentType: "application/json",
+  });
   expect(await requestedHistoryCursors(page)).toContain(47);
   for (const frame of frames) expect(frame.textTop).not.toBeNull();
   return frames;
@@ -120,21 +121,28 @@ test("loading an older page keeps the message the reader is looking at in place"
   }
 });
 
-test("a reader who keeps scrolling through the prepend is never pulled back or thrown", async ({ page }) => {
-  const STEP = 40;
-  const frames = await sampleReaderAcrossPrepend(page, { startScrollTop: 300, step: STEP, frames: 24, cpuRate: 40 });
-  const prependedAt = frames.findIndex((frame) => frame.prepended);
-  expect(prependedAt).toBeGreaterThan(0);
-  // From the last frame before the page to the end of the gesture.
-  for (let index = prependedAt; index < frames.length; index += 1) {
-    const moved = frames[index]!.textTop! - frames[index - 1]!.textTop!;
-    // Scrolling up moves the text down by at most one step per frame: never
-    // up (thrown), never more than the reader asked for.
-    expect(moved, JSON.stringify(frames)).toBeGreaterThanOrEqual(-1);
-    expect(moved, JSON.stringify(frames)).toBeLessThanOrEqual(STEP + 1);
-  }
-  // And the anchor does not hold the reader still once the page has landed.
-  const after = frames.slice(prependedAt + 2);
-  const travelled = after.at(-1)!.textTop! - after[0]!.textTop!;
-  expect(travelled, JSON.stringify(frames)).toBeGreaterThan((after.length - 1) * STEP * 0.75);
-});
+for (const { direction, step, startScrollTop, frames: frameCount } of [
+  { direction: "up", step: 40, startScrollTop: 300, frames: 24 },
+  // The ten-row tail has less room below the reader. Stop before its end,
+  // where a legitimate clamp would otherwise look like a stuck anchor.
+  { direction: "down", step: -40, startScrollTop: 120, frames: 12 },
+]) {
+  test(`a reader scrolling ${direction} through the prepend is never pulled back or thrown`, async ({ page }) => {
+    const frames = await sampleReaderAcrossPrepend(page, { startScrollTop, step, frames: frameCount, cpuRate: 40 });
+    const prependedAt = frames.findIndex((frame) => frame.prepended);
+    expect(prependedAt).toBeGreaterThan(0);
+    // From the last frame before the page to the end of the gesture.
+    for (let index = prependedAt; index < frames.length; index += 1) {
+      if (step < 0) expect(frames[index - 1]!.maxScrollTop - frames[index - 1]!.scrollTop)
+        .toBeGreaterThanOrEqual(Math.abs(step));
+      const moved = (frames[index]!.textTop! - frames[index - 1]!.textTop!) * Math.sign(step);
+      // Text follows either direction by at most the requested step per frame.
+      expect(moved, JSON.stringify(frames)).toBeGreaterThanOrEqual(-1);
+      expect(moved, JSON.stringify(frames)).toBeLessThanOrEqual(Math.abs(step) + 1);
+    }
+    // And the anchor does not hold the reader still once the page has landed.
+    const after = frames.slice(prependedAt + 2);
+    const travelled = (after.at(-1)!.textTop! - after[0]!.textTop!) * Math.sign(step);
+    expect(travelled, JSON.stringify(frames)).toBeGreaterThan((after.length - 1) * Math.abs(step) * 0.75);
+  });
+}
