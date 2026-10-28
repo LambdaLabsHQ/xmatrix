@@ -7,6 +7,7 @@ import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, channelHistoryFixture, openGeneralChan
    waits there without taking focus, and is answered by a person's own click: "Star on
    GitHub" opens the repository and ends the asking, "Later" keeps it away for
    days. Messages that did not notify this person are not answers to them.
+   On Apps and the other destinations, that column is their own list.
    A phone never shows it. */
 
 const VIEWPORT = { width: 1440, height: 900 };
@@ -78,6 +79,21 @@ test("the ask opens after an Agent's fifth answer and Later keeps it away", asyn
   await answer(10);
   await expect(ask).toHaveCount(0);
   expect(await opened(page)).toEqual([]);
+});
+
+test("the ask is centred on a destination's list", async ({ page }) => {
+  await openWithLiveAgent(page);
+  await page.getByRole("button", { name: "App", exact: true }).click();
+  const list = page.locator(".app-tool-list");
+  await expect(list).toBeVisible();
+  await page.evaluate(() => {
+    for (let index = 0; index < 5; index += 1) window.dispatchEvent(new Event("xmatrix:agent-answered"));
+  });
+  const ask = page.getByRole("complementary").filter({ hasText: ASK });
+  await expect(ask).toBeVisible();
+  const [column, panel] = await Promise.all([list.boundingBox(), ask.boundingBox()]);
+  expect(panel!.x).toBeGreaterThan(column!.x);
+  expect(Math.abs(panel!.x + panel!.width / 2 - (column!.x + column!.width / 2))).toBeLessThanOrEqual(1);
 });
 
 test("starring from the ask opens the repository and ends the asking", async ({ page }) => {
