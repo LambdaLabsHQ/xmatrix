@@ -363,21 +363,26 @@ fact is about.
   on the passage. Escape, or a click anywhere else, closes the box and the
   passage is no longer selected; a comment closed unsent comes back when the
   same passage is selected again.
-  - A comment is a discussion of the passage (§4.3) whose first message is
-    the comment. A live Instance it names (`@claude:2`, live in one of this
-    page's conversations) takes it as the Agent at work on the page does, below; any
-    other Agent the comment mentions starts on it at once. One that
+  - A comment continues the existing conversation about the passage when
+    possible (decided by Daniel 2026-10-28). A live Instance it names
+    (`@claude:2`, or `@claude` for the selected live Agent) takes it as the Agent
+    at work on the page does, below; any other Agent the comment mentions starts
+    on it at once. One that
     names nobody goes to the Agent already at work on the page, nearest the
     passage first, among those in conversations the reader can write in: its
     Instance card stands under the box, as under a conversation's composer,
     while the comment is written (decided by Daniel 2026-10-22: the existing
-    Agent first, a new one only when there is none). Its Instance lives in its
-    own conversation, so the comment calls it there with
-    `@<name>:<n> A comment for you: channel:<discussion>`; it answers in the
-    discussion, and a reply to its answer is relayed back to it (a
-    cross-Channel link). With none there it goes to xMatrix (`@auto`), and an
-    Agent started for it shows on its card once sent.
-  - Its Agent starts at once in a private managed directory, as a
+    Agent first, a new one only when there is none). The comment is sent directly
+    into that Instance's own conversation, addressed to it by its exact name,
+    with the passage and a link back. That conversation is linked to the passage;
+    no new conversation or Instance is created. With no live Agent, the comment
+    continues the section's latest editing conversation when exactly one is
+    available to the reader. With neither destination it starts a discussion
+    (§4.3), whose first message gives it to xMatrix (`@auto`); an Agent started
+    for it shows on its card once sent. Hub authorization still gates every
+    message and link; inaccessible or ambiguous editing provenance selects no
+    conversation.
+  - An Agent newly called for a comment starts at once in a private managed directory, as a
     co-writer's does, unless the comment names a repository (`repo:`,
     `pwd:`), and writes its change into the page, where its card says it is
     at work (one pill, in the card, not a second one above it).

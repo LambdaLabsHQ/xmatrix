@@ -14,6 +14,20 @@ the old table is dropped after the new Hub is verified. See the
 uses a CI-validated forward release preserving configured permissions, not an
 old Channel-policy executor.
 
+## Unreleased: Page comments continue the existing conversation
+
+The Page comment box showed a live Agent but created a new conversation before
+calling its existing Instance. That first message could summon another Agent.
+Comments now go directly to the selected Instance's own conversation, addressed
+to it with the quoted passage and a link back; bare Agent mentions also reuse
+that Instance. With no live Agent, the section's latest unambiguous readable
+editing conversation receives the comment. Only a comment with no existing
+destination or an explicit request for another Agent starts a new discussion.
+Browser coverage checks the actual message destination and absence of Channel
+creation; the existing new-discussion case covers the remaining startup path.
+Beta Web only, no API, schema or native change. Recovery is a CI-validated beta
+Web release reverting the change; existing conversations and messages remain.
+
 ## Unreleased: Google authorization failures retain their cause category
 
 Google's Cloud-session reauthentication subtype was discarded, leaving the

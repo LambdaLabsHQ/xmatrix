@@ -61,9 +61,8 @@ import {
 } from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
-import { commentBody, commentCall, commentTaker } from "./page-comment";
+import { commentBody, commentTaker } from "./page-comment";
 import { instanceCall, pageInstances, type PageInstance } from "./page-instances";
-import type { ConversationCall } from "@/components/dashboard/page-shell-actions";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
 import { usePageRowDrag } from "./page-tree-drag";
@@ -604,7 +603,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     planned?: (conversationId: string) => void;
     /** Hears the first message's stored id once it is sent, or null when it was not confirmed. */
     sent?: (messageId: string | null) => void;
-    call?: ConversationCall }) => Promise<unknown>;
+    existing?: ChannelSnapshot }) => Promise<unknown>;
   /** A Space owner or admin may move the Space's Channels to pages. */
   canMigrate: boolean;
   /** On a phone a page is a pushed screen, like a conversation; the shell's back bar carries its title. */
@@ -1304,10 +1303,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const blockLink = (blockId: string) => `${pageLink()}#${blockId}`;
   // A discussion is where people and Agents meet alike: asking an Agent is mentioning it there.
   const discuss: NonNullable<PageSectionActions["discuss"]> = (blockId, anchor) => startDiscussion(blockId, anchor);
-  // A comment on a passage: the discussion of the passage, started with the comment; the page stays in front of
-  // the reader, the discussion a card beside the passage. An Agent the comment mentions takes it, else the Agent at
-  // work on the page, nearest the passage first, called to it in its own conversation, where its Instance lives;
-  // else xMatrix gives it to one (`@auto`).
+  // Continue the existing Instance's own conversation, or the section's last editing conversation. Only a
+  // comment without either starts a discussion whose first message asks xMatrix to choose an Agent.
   const takerOf = (blockId: string) => commentTaker(liveOnPage, blockId, (id) => Boolean(conversation(id)));
   const commentTakerFace: NonNullable<PageSectionActions["commentTaker"]> = (blockId) => {
     const agent = takerOf(blockId);
@@ -1315,13 +1312,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   const comment: NonNullable<PageSectionActions["comment"]> = (blockId, anchor, text) => {
     const live = liveOnPage.filter((agent) => conversation(agent.conversationId));
-    const { body, taker } = commentBody(text, writers.agents.map((agent) => agent.harness), takerOf(blockId), live);
-    const home = taker && conversation(taker.conversationId);
-    startDiscussion(blockId, anchor, { body,
-      ...(taker && home ? { call: { channel: home, body: (discussionId) => commentCall(taker, discussionId) } } : {}) });
+    const origins = [...new Set(awareness.data?.blocks.find((block) => block.blockId === blockId)
+      ?.updated?.conversationIds ?? [])].filter((id) => conversation(id));
+    const { body, taker, conversationId } = commentBody(text, writers.agents.map((agent) => agent.harness),
+      takerOf(blockId), live, origins.length === 1 ? origins[0] : undefined);
+    const home = conversation(taker?.conversationId ?? conversationId ?? "");
+    startDiscussion(blockId, anchor, { body, ...(home ? { existing: home } : {}) });
   };
   const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
-    said?: { body: string; call?: ConversationCall }) => {
+    said?: { body: string; existing?: ChannelSnapshot }) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
     // A discussion of a section is named by the section; of a passage, by what was written about it, and by the
@@ -1341,7 +1340,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         : firstMessage !== undefined ? automaticConversationName(firstMessage) : discussionTitle(anchor.quote),
       restricted, planned, ...(anchor ? { anchor } : {}),
       ...(firstMessage !== undefined ? { firstMessage, open: false } : quote ? { quote } : {}),
-      ...(said?.call ? { call: said.call } : {}) })
+      ...(said?.existing ? { existing: said.existing } : {}) })
       .then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
   };
