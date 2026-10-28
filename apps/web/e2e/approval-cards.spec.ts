@@ -268,10 +268,27 @@ test("Google Calendar approval reads as the event it would leave, not as fields"
   for (const text of ["Launch review", "Room 4", "a@example.test, b@example.test", "team@example.test", "Walk through the beta checklist"]) {
     await expect(approval.getByText(text, { exact: true })).toBeVisible();
   }
-  await expect(approval.getByText(/Thu, Oct 30 · 3:00\s*–\s*4:00\sPM GMT\+8/)).toBeVisible();
+  await expect(approval.getByText(/Fri, Oct 30 · 3:00\s*–\s*4:00\sPM GMT\+8/)).toBeVisible();
   await expect(approval.getByText("timeZone", { exact: false })).toHaveCount(0);
   await approval.getByRole("button", { name: "Allow once", exact: true }).click();
   expect(await fixtureRequestBodies(page, "connector-answer")).toEqual([{ decision: "allow" }]);
+});
+
+test("a Google Calendar change says what it changes and clears, for which events, and who is emailed", async ({ page }) => {
+  const request = { requestId: "email-request", channelId: E2E_CHANNEL.id, providerId: "googlecalendar", actionId: "update_event",
+    requestedBy: "e2e-user", expiresAt: "2026-10-14T00:00:00.000Z",
+    preview: { change: "update", event: "Weekly sync", calendar: "team@example.test", title: "Weekly planning",
+      start: "2026-11-02T10:00:00-08:00", end: "2026-11-02T10:30:00-08:00", timeZone: "America/Los_Angeles",
+      guests: "a@example.test, b@example.test", optionalGuests: "b@example.test", recurrence: "RRULE:FREQ=WEEKLY;BYDAY=MO",
+      sendUpdates: "externalOnly", series: "all", recurringEventId: "series-1",
+      changes: JSON.stringify({ summary: "Weekly planning", location: "", attendees: [{ email: "a@example.test" }] }) } };
+  await openCards(page, [], [], VALUE_ASKED, [request]);
+  const approval = page.getByRole("region", { name: "Pending approvals" });
+  await expect(approval.getByRole("heading", { name: "Change “Weekly sync” to this?" })).toBeVisible();
+  for (const text of ["Changes title and guests · Clears place · Applies to every event in the series", "a@example.test, b@example.test (optional)",
+    "Weekly on Mon", "Emails only guests outside your organization"]) {
+    await expect(approval.getByText(text, { exact: true })).toBeVisible();
+  }
 });
 
 test("a Google Calendar approval missing its event cannot be allowed, and says what is missing", async ({ page }) => {
