@@ -220,7 +220,7 @@ final class WebContainerTests: XCTestCase {
     }
 
     func testAppleAuthorizationCancellationStaysSilent() {
-        let error = NSError(domain: ASAuthorizationError.errorDomain, code: ASAuthorizationError.canceled.rawValue)
+        let error = NSError(domain: ASAuthorizationError.errorDomain, code: ASAuthorizationError.Code.canceled.rawValue)
         XCTAssertEqual((NativeBridge.failurePayload(error) as? [String: String])?["name"], "AbortError")
     }
 

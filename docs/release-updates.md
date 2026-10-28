@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Apple sign-in failures retain native diagnostic evidence
+
+Apple authorization failures keep up to three native error-domain categories
+and codes, plus the app version, build and iOS version, across the string-based
+iOS bridge. Unknown domains become `other`; descriptions, userInfo values,
+account details and tokens are excluded. The Web captures the native call's
+source-mapped boundary before exchanging a token with the Hub. Older shells
+still supply their existing error text; older Webs accept the diagnostic string.
+Cancellation remains silent and authorization is never automatically replayed.
+This supplies missing evidence for XMATRIX-WEB-S's unknown Apple error 1000;
+it does not establish or fix the underlying authorization failure. No schema
+migration is needed. The native diagnostics require the new TestFlight build;
+recovery uses a CI-validated beta Web/iOS release reverting this change.
+
 ## Unreleased: Keep history anchoring until scrolling and layout settle
 
 An older history page keeps the reader's place while the virtualizer measures

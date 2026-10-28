@@ -4,7 +4,7 @@ import { HUB_ROUTES, sha256Hex, WEB_PROXY_ROUTES, type AuthResponse } from "@xma
 import type { DesktopBridge } from "@/lib/desktop/bridge";
 import { authBaseUrl, type SocialSignInProvider } from "@/lib/auth-client";
 import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
-import { UserFacingProblem } from "@/lib/user-facing-error";
+import { isAbort, UserFacingProblem } from "@/lib/user-facing-error";
 
 /**
  * A desktop or phone app signing in at Google or GitHub without leaving
@@ -63,9 +63,23 @@ export class AppSignInRefused extends Error {
  * A nonce for Sign in with Apple: Apple signs its SHA-256 into the identity
  * token, and the Hub checks the token against the nonce itself.
  */
-export async function appleSignInNonce(): Promise<{ nonce: string; hashed: string }> {
+async function appleSignInNonce(): Promise<{ nonce: string; hashed: string }> {
   const nonce = randomBase64Url(32);
   return { nonce, hashed: await sha256Hex(nonce) };
+}
+
+/** Apple's native authorization, before any token is exchanged with the Hub. */
+export async function authorizeAppWithApple(bridge: DesktopBridge) {
+  if (!bridge.signInWithApple) throw new Error("Native Apple sign-in is unavailable.");
+  const { nonce, hashed } = await appleSignInNonce();
+  try {
+    return { ...await bridge.signInWithApple({ nonce: hashed }), nonce };
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    // WKWebView's injected script creates its Error at /login:1. Capture a
+    // source-mapped boundary here; this message goes to diagnostics, not UI.
+    throw new Error(`Apple sign-in native authorization failed: ${error instanceof Error ? error.message : "unknown native failure"}`);
+  }
 }
 
 function randomBase64Url(bytes: number): string {

@@ -30,7 +30,7 @@ import {
   type DesktopBridge,
 } from "@/lib/desktop/bridge";
 import { requestCliSessionExchange } from "@/lib/desktop/session-exchange";
-import { AppSignInRefused, appleSignInNonce, signInAppWithProvider } from "@/lib/app-sign-in";
+import { AppSignInRefused, authorizeAppWithApple, signInAppWithProvider } from "@/lib/app-sign-in";
 import { NEW_ACCOUNT_FLAG } from "@/components/auth/new-account-step";
 import { Input } from "@/components/ui/input";
 import { APP_SIGN_IN_FINISH_PATH, WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
@@ -713,10 +713,9 @@ function LoginContent() {
     setError("");
     setSocialLoading("apple");
     try {
-      const { nonce, hashed } = await appleSignInNonce();
-      const apple = await desktopBridge.signInWithApple({ nonce: hashed });
+      const apple = await authorizeAppWithApple(desktopBridge);
       rememberSignInMethod("apple");
-      if (await signInWithApple({ ...apple, nonce }) === "two_factor") {
+      if (await signInWithApple(apple) === "two_factor") {
         setStep("two_factor");
         setSocialLoading(null);
         return;
