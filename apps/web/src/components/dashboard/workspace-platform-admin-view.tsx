@@ -23,6 +23,7 @@ import {
   formatAdminAge,
   formatAdminBytes,
   formatAdminCount,
+  formatAdminDecimal,
   platformAdminStatTiles,
 } from "./platform-admin-overview";
 import {
@@ -38,7 +39,6 @@ import {
   adminWeeklyRetention,
   formatAdminChange,
   formatAdminDay,
-  formatAdminDecimal,
   formatAdminPercent,
   type AdminFunnelStep,
   type AdminRetentionCohort,

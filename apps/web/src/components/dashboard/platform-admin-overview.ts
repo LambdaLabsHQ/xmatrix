@@ -23,9 +23,9 @@ export function formatAdminCount(value: number): string {
   if (!Number.isFinite(value)) return "0";
   const rounded = Math.round(value);
   if (Math.abs(rounded) < 1000) return String(rounded);
-  if (Math.abs(rounded) < 1_000_000) return `${trimNumber(rounded / 1000)}k`;
-  if (Math.abs(rounded) < 1_000_000_000) return `${trimNumber(rounded / 1_000_000)}M`;
-  return `${trimNumber(rounded / 1_000_000_000)}B`;
+  if (Math.abs(rounded) < 1_000_000) return `${formatAdminDecimal(rounded / 1000)}k`;
+  if (Math.abs(rounded) < 1_000_000_000) return `${formatAdminDecimal(rounded / 1_000_000)}M`;
+  return `${formatAdminDecimal(rounded / 1_000_000_000)}B`;
 }
 
 export function formatAdminBytes(value: number): string {
@@ -37,7 +37,7 @@ export function formatAdminBytes(value: number): string {
     scaled /= 1024;
     unit += 1;
   }
-  return `${trimNumber(scaled)} ${units[unit]}`;
+  return `${formatAdminDecimal(scaled)} ${units[unit]}`;
 }
 
 /**
@@ -165,7 +165,8 @@ export function adminTime(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function trimNumber(value: number): string {
+/** One figure to one decimal, without a trailing ".0". */
+export function formatAdminDecimal(value: number): string {
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }

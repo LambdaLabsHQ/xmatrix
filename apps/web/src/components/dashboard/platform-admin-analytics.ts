@@ -27,8 +27,6 @@ export const ADMIN_RANGES = [
   { key: "all", label: "All time", short: "All", days: null },
 ] as const;
 
-export type AdminRangeKey = typeof ADMIN_RANGES[number]["key"];
-
 export function adminRange(key: string): typeof ADMIN_RANGES[number] {
   return ADMIN_RANGES.find((range) => range.key === key) ?? ADMIN_RANGES[1];
 }
@@ -163,12 +161,6 @@ export function formatAdminChange(change: number | null): string | undefined {
 
 export function formatAdminPercent(share: number | null): string {
   return share === null || !Number.isFinite(share) ? "—" : `${Math.round(share * 100)}%`;
-}
-
-/** One figure to one decimal, without a trailing ".0". */
-export function formatAdminDecimal(value: number): string {
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 /** Registered accounts at the end of each day, counted back from today's total. */

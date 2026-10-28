@@ -28,6 +28,16 @@ function database(results, { settledThrough = SETTLED_THROUGH, seen = [] } = {})
   }, (query) => seen.push(query));
 }
 
+function readTwoShards(shard0, shard1) {
+  return readPostgresAdminOverviewFromFleet({
+    defaultShardId: "shard-0",
+    physicalShards: [
+      { shardId: "shard-0", database: shard0 },
+      { shardId: "shard-1", database: shard1 },
+    ],
+  }, { now: "2026-08-31T03:00:00.000Z", spaceLimit: 20, userLimit: 20, activityDays: 14 });
+}
+
 const ZERO_ACTIVITY = {
   ownMessages: 0, activeSpaces: 0, runsStarted: 0,
   activeUsers: 0, activeUsers7d: 0, activeUsers30d: 0,
@@ -111,13 +121,7 @@ test("PostgreSQL admin overview merges placed facts and reads global Machines on
     }],
   });
 
-  const overview = await readPostgresAdminOverviewFromFleet({
-    defaultShardId: "shard-0",
-    physicalShards: [
-      { shardId: "shard-0", database: shard0 },
-      { shardId: "shard-1", database: shard1 },
-    ],
-  }, { now: "2026-08-31T03:00:00.000Z", spaceLimit: 20, userLimit: 20, activityDays: 14 });
+  const overview = await readTwoShards(shard0, shard1);
 
   assert.equal(overview.totals.users, 2);
   assert.equal(overview.totals.spaces, 2);
@@ -300,13 +304,7 @@ test("active people are counted once across shards over 1, 7 and 30 days", async
     postgres_admin_activity_v3: activity,
   });
 
-  const overview = await readPostgresAdminOverviewFromFleet({
-    defaultShardId: "shard-0",
-    physicalShards: [
-      { shardId: "shard-0", database: shard0 },
-      { shardId: "shard-1", database: shard1 },
-    ],
-  }, { now: "2026-08-31T03:00:00.000Z", spaceLimit: 20, userLimit: 20, activityDays: 14 });
+  const overview = await readTwoShards(shard0, shard1);
 
   const point = (date) => overview.activity.find((entry) => entry.date === date);
   assert.deepEqual([point("2026-08-18").activeUsers, point("2026-08-18").activeUsers7d,
