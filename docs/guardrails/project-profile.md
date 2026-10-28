@@ -384,7 +384,8 @@ per-connection ingress. See [GCP connector](../connectors/gcp.md).
 
 The Web composer previews Jev's summon intent while typing, with mention bands
 and a declined-mention explanation and Start anyway option at the address. Human-confirmed readings travel with the exact message;
-launch authorization remains server-owned, and unread or unavailable previews
+publication takes completed readings without waiting for previews. Launch
+authorization remains server-owned, and unread or unavailable previews
 retain post-send checks. See [invocation status](../design/mention-invocation/README.md).
 
 Windows Agent children enforce UTF-8 transport settings and use managed PowerShell
