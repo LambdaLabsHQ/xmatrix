@@ -8,7 +8,7 @@ import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { ControlError } from "./control-error.js";
 
 const MAX_SCOPE_BYTES = 300;
-const MAX_PINNED_CHANNELS = 200;
+const PIN_READ_BATCH = 500;
 const IDEMPOTENCY_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 const FOLLOW_UP_SCHEDULES = new Set(["off", "daily", "weekdays", "weekly"]);
 const LOCALE_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
@@ -142,7 +142,6 @@ function normalizedPinnedChannelIds(value: unknown): string[] {
     if (typeof id !== "string" || !id || id.length > 200 || seen.has(id)) continue;
     seen.add(id);
     result.push(id);
-    if (result.length >= MAX_PINNED_CHANNELS) break;
   }
   return result;
 }
@@ -162,17 +161,22 @@ async function readableChannelIds(
   channelIds: readonly string[],
 ): Promise<Set<string>> {
   if (channelIds.length === 0) return new Set();
-  const unique = [...new Set(channelIds)].slice(0, MAX_PINNED_CHANNELS);
-  const rows = await transaction.query<QueryResultRow & { channel_id: string }>({
-    name: "user_preference_visible_channels_v3",
-    text: `SELECT channel.channel_id
-      FROM data.channels channel
-      WHERE channel.space_id=$1 AND channel.channel_id=ANY($3::text[])
-        AND ${channelCapabilityPredicate({ capability: "preference_update", channelAlias: "channel",
-          principalKindSql: "'user'", principalIdSql: "$2" })}`,
-    values: [spaceId, userId, unique], maxRows: unique.length,
-  });
-  return new Set(rows.map((row) => row.channel_id));
+  const unique = [...new Set(channelIds)];
+  const visible = new Set<string>();
+  for (let offset = 0; offset < unique.length; offset += PIN_READ_BATCH) {
+    const batch = unique.slice(offset, offset + PIN_READ_BATCH);
+    const rows = await transaction.query<QueryResultRow & { channel_id: string }>({
+      name: "user_preference_visible_channels_v3",
+      text: `SELECT channel.channel_id
+        FROM data.channels channel
+        WHERE channel.space_id=$1 AND channel.channel_id=ANY($3::text[])
+          AND ${channelCapabilityPredicate({ capability: "preference_update", channelAlias: "channel",
+            principalKindSql: "'user'", principalIdSql: "$2" })}`,
+      values: [spaceId, userId, batch], maxRows: batch.length,
+    });
+    for (const row of rows) visible.add(row.channel_id);
+  }
+  return visible;
 }
 
 /** The pins the user may still read. */

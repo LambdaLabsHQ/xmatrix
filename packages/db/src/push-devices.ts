@@ -2,6 +2,7 @@ import { sha256Hex } from "@xmatrix/protocol";
 
 import type { AuthorityDatabase } from "./contracts.js";
 import { ControlError } from "./control-error.js";
+import { RESOURCE_PAGE_SIZE, resourcePages } from "./resource-pages.js";
 
 export type PushPlatform = "apns" | "fcm" | "webpush";
 
@@ -22,11 +23,8 @@ export class PushDeviceError extends ControlError {
   override name = "PushDeviceError";
 }
 
-// Read and retirement describe one notification's bounded registration set.
-// A SQL chunk limits each write, never the total evidence to be retired.
-const PUSH_DEVICE_LIMITS = { users: 500, devicesPerUser: 20, retirementChunk: 1000 };
-/** A person registers at most this many devices; the oldest make way. */
-export const MAX_PUSH_DEVICES_PER_USER = PUSH_DEVICE_LIMITS.devicesPerUser;
+// These bound individual database operations, never registered devices.
+const PUSH_DEVICE_BATCH = { users: 500, retirement: 1000 };
 const BASE64URL = /^[A-Za-z0-9_-]{1,200}$/u;
 
 function invalid(message: string): PushDeviceError {
@@ -81,13 +79,6 @@ export class PostgresPushDeviceRepository {
             updated_at=clock_timestamp()`,
         values: [deviceId, input.userId, platform, token, keys ? JSON.stringify(keys) : null], maxRows: 0,
       });
-      await tx.query({
-        name: "push_device_trim_v1",
-        text: `DELETE FROM control.push_devices WHERE device_id IN (
-          SELECT device_id FROM control.push_devices WHERE user_id=$1
-          ORDER BY updated_at DESC,device_id OFFSET $2 LIMIT 1000)`,
-        values: [input.userId, MAX_PUSH_DEVICES_PER_USER], maxRows: 0,
-      });
     });
     return { deviceId };
   }
@@ -103,20 +94,23 @@ export class PostgresPushDeviceRepository {
       }));
   }
 
-  /** Every device of the given people, newest first. */
+  /** Every device of the given people, newest first within each recipient batch. */
   async listForUsers(input: { requestId: string; userIds: readonly string[] }): Promise<PushDevice[]> {
-    const userIds = [...new Set(input.userIds)].slice(0, PUSH_DEVICE_LIMITS.users);
+    const userIds = [...new Set(input.userIds)];
     if (userIds.length === 0) return [];
-    const limit = userIds.length * MAX_PUSH_DEVICES_PER_USER;
     return this.database.transaction({ requestId: input.requestId, operation: "push-device.list" }, async (tx) => {
-      const rows = await tx.query<{
-        device_id: string; user_id: string; platform: PushPlatform; token: string; keys_json: unknown;
-      }>({
-        name: "push_device_list_v1",
-        text: `SELECT device_id,user_id,platform,token,keys_json FROM control.push_devices
-          WHERE user_id=ANY($1::text[]) ORDER BY updated_at DESC,device_id LIMIT $2`,
-        values: [userIds, limit], maxRows: limit,
-      });
+      const rows = [];
+      for (let offset = 0; offset < userIds.length; offset += PUSH_DEVICE_BATCH.users) {
+        const users = userIds.slice(offset, offset + PUSH_DEVICE_BATCH.users);
+        for await (const page of resourcePages((after: [string, string] | null) => tx.query<{
+          cursor_at: string; device_id: string; user_id: string; platform: PushPlatform; token: string; keys_json: unknown;
+        }>({ name: "push_device_list_v2", text: `SELECT device_id,user_id,platform,token,keys_json,updated_at::text AS cursor_at
+          FROM control.push_devices WHERE user_id=ANY($1::text[])
+            AND ($2::timestamptz IS NULL OR (updated_at,device_id)<($2::timestamptz,$3::text))
+          ORDER BY updated_at DESC,device_id DESC LIMIT $4`,
+        values: [users, after?.[0] ?? null, after?.[1] ?? null, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE }),
+        (row): [string, string] => [row.cursor_at, row.device_id])) rows.push(...page);
+      }
       return rows.map((row) => ({
         deviceId: row.device_id, userId: row.user_id, platform: row.platform, token: row.token,
         ...(row.platform === "webpush" ? { keys: pushKeys(row.keys_json) } : {}),
@@ -128,16 +122,13 @@ export class PostgresPushDeviceRepository {
   /** Forget devices the push service says are gone (an uninstalled app, an expired subscription). */
   async forget(input: { requestId: string; deviceIds: readonly string[] }): Promise<void> {
     const deviceIds = [...new Set(input.deviceIds)];
-    if (deviceIds.length > PUSH_DEVICE_LIMITS.users * MAX_PUSH_DEVICES_PER_USER) {
-      throw invalid("Retirement evidence exceeds one notification's device capacity");
-    }
     if (deviceIds.length === 0) return;
     await this.database.transaction({ requestId: input.requestId, operation: "push-device.forget" }, async (tx) => {
-      for (let offset = 0; offset < deviceIds.length; offset += PUSH_DEVICE_LIMITS.retirementChunk) {
+      for (let offset = 0; offset < deviceIds.length; offset += PUSH_DEVICE_BATCH.retirement) {
         await tx.query({
           name: "push_device_forget_v1",
           text: "DELETE FROM control.push_devices WHERE device_id=ANY($1::text[])",
-          values: [deviceIds.slice(offset, offset + PUSH_DEVICE_LIMITS.retirementChunk)], maxRows: 0,
+          values: [deviceIds.slice(offset, offset + PUSH_DEVICE_BATCH.retirement)], maxRows: 0,
         });
       }
     });
