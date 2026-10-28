@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: The Apps list groups by connection state and ticks what works
+
+The Apps list put category headings (Code & CI, Chat…) beside Connected, mixing
+a state with what an app does, and connected rows carried no mark. Sections are
+now connection states only: Needs attention, Connected, Disconnected, Not
+connected and Coming soon. Categories are subheadings inside Not connected, and
+each connected row ends in a tick. Unit and browser coverage check the sections,
+the subheadings and the tick. Beta Web only, no API, schema or native change;
+recovery is a CI-validated beta Web release reverting the change.
+
 ## Unreleased: An empty Channel cannot keep another Channel's history
 
 A connected focus request stamps its target before its history arrives. An
