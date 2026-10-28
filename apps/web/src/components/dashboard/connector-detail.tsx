@@ -16,12 +16,13 @@ import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { CloudflareLogins } from "./cloudflare-logins";
+import { ConnectorActivity } from "./connector-activity";
 import {
   ConnectorCredentialForm, ConnectorCredentialRows, ConnectorEventDelivery, connectorGeneratesCredentials,
   connectorReconnectsWithSavedCredentials, connectorTakesCredentials, connectorWritableCredentials,
 } from "./connector-credentials";
 import {
-  ConnectorAction, ConnectorBlock, ConnectorCopyLine, ConnectorEmpty, ConnectorField, ConnectorFold, ConnectorRow,
+  ConnectorAction, ConnectorBlock, ConnectorCopyLine, ConnectorField, ConnectorFold, ConnectorRow,
   ConnectorRows, ConnectorSection, ConnectorSheet,
 } from "./connector-page";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
@@ -76,15 +77,6 @@ function connectorAuthorizationLabel(connector: AppConnectorManifest, connection
     .filter((field) => field && !field.generated);
   if (saved.some((field) => field!.managed) || (oauth && saved.length === 0)) return `${connector.name} sign-in`;
   return saved.length === 1 ? saved[0]!.label : saved.length > 1 ? "saved credentials" : null;
-}
-
-/* Ink, not colour: `completed` is the resting state and says nothing extra,
-   `queued` is true but not what you are watching for, and the two ways a run
-   can stop share the alert ink. */
-function appExecutionStatusClassName(status: SerializedAppConnectorExecution["status"]): string {
-  if (status === "blocked" || status === "failed") return "text-destructive";
-  if (status === "completed") return "text-foreground";
-  return "text-muted-foreground";
 }
 
 export function ConnectorDetailPage({
@@ -209,8 +201,8 @@ export function ConnectorDetailPage({
         {configured ? <ConnectorUseInChannel connector={connector} /> : null}
 
         {configured || executions.length > 0 ? (
-          <ConnectorActivity executions={executions} loading={executionsLoading} error={executionsError}
-            onRefresh={onRefreshExecutions} />
+          <ConnectorActivity executions={executions} members={members} loading={executionsLoading} error={executionsError}
+            credentials={credentials} onRefresh={onRefreshExecutions} onReconnect={() => onConnect()} />
         ) : null}
 
         {configured && connectorWriteActions(connector).length > 0 ? (
@@ -452,47 +444,6 @@ function ConnectorUseInChannel({ connector }: { connector: AppConnectorManifest 
   return (
     <ConnectorSection title="Use it in a channel" note={subscribe.note} testId="connector-use-in-channel">
       <ConnectorCopyLine value={subscribe.command} label="subscribe command" />
-    </ConnectorSection>
-  );
-}
-
-const EXECUTION_STATUS_LABELS: Record<SerializedAppConnectorExecution["status"], string> = {
-  queued: "Queued", planned: "Planned", completed: "Completed", failed: "Failed", blocked: "Blocked",
-};
-
-function ConnectorActivity({ executions, loading, error, onRefresh }: {
-  executions: SerializedAppConnectorExecution[];
-  loading: boolean;
-  error: string | null;
-  onRefresh: () => void;
-}) {
-  return (
-    <ConnectorSection title="Recent activity" testId="connector-activity"
-      action={(
-        <ConnectorAction disabled={loading} onClick={onRefresh} title="Refresh connector activity">
-          <AnimatedIcon icon={RefreshCw} className={cn("size-3.5", loading && "animate-spin")} /> Refresh
-        </ConnectorAction>
-      )}>
-      <ConnectorRows>
-        {executions.map((execution) => (
-          <ConnectorRow key={execution.id} testId="connector-execution"
-            title={execution.actionLabel || execution.actionId || "Default action"}
-            meta={<>
-              {execution.requestedByLabel || execution.requestedBy} · {relativeTime(execution.createdAt)}
-              {execution.resultSummary ? <span className="block">{execution.resultSummary}</span> : null}
-              {execution.reason ? <span className="block first-letter:uppercase">{execution.reason.replace(/_/g, " ")}</span> : null}
-            </>}
-            trailing={(
-              <span className={cn("pr-2 text-[13px] font-semibold", appExecutionStatusClassName(execution.status))}>
-                {EXECUTION_STATUS_LABELS[execution.status] ?? execution.status}
-              </span>
-            )} />
-        ))}
-        {executions.length === 0 ? (
-          <ConnectorEmpty>{loading ? "Loading activity…" : "Nothing has run yet. Commands this app runs appear here."}</ConnectorEmpty>
-        ) : null}
-      </ConnectorRows>
-      {error ? <p role="alert" className="mt-1 text-[13px] font-medium text-destructive">{error}</p> : null}
     </ConnectorSection>
   );
 }

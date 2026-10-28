@@ -1,6 +1,6 @@
 import type { ConnectorAction } from "../provider";
 import { record } from "../command-support";
-import { providerJson, ProviderRequestError } from "../http";
+import { ConnectorRemedy, providerJson, ProviderRequestError } from "../http";
 import { quoteRetrievedText } from "./common";
 import { pageUrl } from "./google-search-console-site";
 import { cell, keyedOptions, mappedChoices } from "./google-report";
@@ -33,7 +33,7 @@ const AUDIT_TIMEOUT_MS = 60_000;
 function apiKey(credentials: Readonly<Record<string, string>>): Record<string, string> {
   const key = credentials.apiKey?.trim();
   if (!key || key.length > 200 || !/^[A-Za-z0-9_-]+$/u.test(key)) {
-    throw new ProviderRequestError(401, "Save a Google API key with the PageSpeed Insights and Chrome UX Report APIs enabled");
+    throw new ConnectorRemedy(401, "Save a Google API key with the PageSpeed Insights and Chrome UX Report APIs enabled", { kind: "credential", field: "apiKey" });
   }
   return { "x-goog-api-key": key };
 }

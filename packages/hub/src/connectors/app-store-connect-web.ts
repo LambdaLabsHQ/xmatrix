@@ -3,7 +3,7 @@ import { appStoreConnect, appleApp, appleResource, BUNDLE_ID, relatedId, type Ap
 import { quoteRetrievedText } from "./actions/common";
 import { cell } from "./actions/google-report";
 import { record, text } from "./event-format";
-import { ProviderRequestError } from "./http";
+import { ConnectorRemedy, ProviderRequestError } from "./http";
 import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, ConnectorActionStatement } from "./provider";
 
 /*
@@ -36,6 +36,7 @@ const MAX_OUTPUT = 12_000;
 const MAX_MESSAGE = 3_000;
 const COOKIE_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/u;
 const THREAD_TYPES = "REJECTION_BINARY,REJECTION_METADATA,REJECTION_REVIEW_SUBMISSION,APP_MESSAGE_ARC,APP_MESSAGE_ARB,APP_MESSAGE_COMM,APP_MESSAGE_INFORMATIONAL";
+const RENEW = { kind: "credential", field: "webSession" } as const;
 const EXPIRED = "The App Store Connect web session is missing or has expired; sign in again under Apps → App Store Connect → Credentials (Sign in to App Store Connect in the xMatrix app)";
 
 /** `name=value; name=value`, as copied from a request's Cookie header, into an ordered map. */
@@ -90,7 +91,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
   let changed = false;
   const call = async (method: "GET" | "POST" | "PATCH" | "DELETE", path: string, query: Record<string, string>,
     body?: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    if (!cookies.size) throw new ProviderRequestError(401, EXPIRED);
+    if (!cookies.size) throw new ConnectorRemedy(401, EXPIRED, RENEW);
     const url = new URL(path, ORIGIN);
     if (url.origin !== ORIGIN || !/^\/(iris\/v1|olympus\/v1)\//u.test(url.pathname)) throw new ProviderRequestError(502, "App Store Connect returned a link outside its website API");
     for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
@@ -101,7 +102,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
     changed = applySetCookies(cookies, setCookies(response.headers)) || changed;
     if (response.status === 401 || (response.status >= 300 && response.status < 400)) {
       await response.body?.cancel();
-      throw new ProviderRequestError(401, EXPIRED);
+      throw new ConnectorRemedy(401, EXPIRED, RENEW);
     }
     const bytes = await response.arrayBuffer();
     if (bytes.byteLength > MAX_BYTES) throw new ProviderRequestError(502, "App Store Connect's answer is too large");
@@ -110,7 +111,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
     try { payload = JSON.parse(new TextDecoder().decode(bytes)); } catch { payload = undefined; }
     // A refusal with Apple's reasons is about the request; a bare 403 is the session.
     const problem = response.ok ? undefined : websiteProblem(payload);
-    if (response.status === 403 && !problem) throw new ProviderRequestError(401, EXPIRED);
+    if (response.status === 403 && !problem) throw new ConnectorRemedy(401, EXPIRED, RENEW);
     if (!response.ok || !payload || typeof payload !== "object") {
       throw new ProviderRequestError(response.ok ? 502 : response.status, response.ok ? "App Store Connect did not answer with JSON; the website may have changed"
         : `App Store Connect's website returned ${response.status}${problem ? `: ${problem}` : ""}`);

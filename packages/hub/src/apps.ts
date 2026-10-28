@@ -150,6 +150,13 @@ export async function listAppSourceRelations(env: PostgresAuthorityBindingEnv, i
 }
 
 /** Every app execution of a Space a user may see, following the cursor. */
+/** A Space member reads what a recorded read needs to run again. */
+export async function appExecutionRetry(env: PostgresAuthorityBindingEnv, input: {
+  spaceId: string; executionId: string; actorUserId: string;
+}) {
+  return appRepository(env).executionRetry({ requestId: crypto.randomUUID(), ...input });
+}
+
 export async function listAppExecutions(env: PostgresAuthorityBindingEnv, input: {
   spaceId: string; actorUserId: string;
 }): Promise<Record<string, unknown>[]> {

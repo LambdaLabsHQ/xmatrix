@@ -10,6 +10,21 @@ each connected row ends in a plugged-in mark. Unit and browser coverage check th
 the subheadings and the mark. Beta Web only, no API, schema or native change;
 recovery is a CI-validated beta Web release reverting the change.
 
+## Unreleased: A failed App run is fixed where it shows
+
+Apps → Recent activity showed a failed private call as a user id and
+"Result: [hidden — private call]", with no cause and no next step. A failure
+now records its remedy: sign in again for a credential, replace one, or
+reconnect. The failed row names the problem and offers that fix in place
+(App Store Connect sign-in in the desktop app, a paste field in the browser,
+Reconnect for OAuth apps), then runs the read again and shows the result.
+Every stopped read has Retry, through a new retry route that runs the recorded
+command as the person asking, with its original visibility. A private call is
+private from the rest of the Space, not from the person it ran for: their row
+shows the original, and the Hub's own guidance is never masked. Hub and beta
+Web, with additive migration 0229 and no host update. Recovery is a
+CI-validated beta reverting the change while keeping the additive columns.
+
 ## Unreleased: An empty Channel cannot keep another Channel's history
 
 A connected focus request stamps its target before its history arrives. An

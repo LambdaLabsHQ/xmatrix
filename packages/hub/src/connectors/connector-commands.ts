@@ -15,7 +15,7 @@ import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
 import { connectorPermissionRepository, connectorActionRequestRepository, connectorCredentialRepository } from "./credentials";
-import { ProviderRequestError } from "./http";
+import { ConnectorRemedy, ProviderRequestError } from "./http";
 import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
 import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
@@ -89,6 +89,17 @@ export function connectorCommands(providerId: string,
   };
 }
 
+/** The fix a failure names, when the Hub worded it. */
+function remedyOf(error: unknown) {
+  return error instanceof ConnectorRemedy ? error.fix : undefined;
+}
+
+/** What a private call's failure records: the Hub's own next step, or the mask
+ * when the failure may carry what the provider returned. */
+export function privateFailure(error: unknown): string {
+  return error instanceof ConnectorRemedy ? error.message : PRIVATE_CONNECTOR_RESULT;
+}
+
 /** A synchronous read returns the original result to its caller. Recorded
  * private calls give execution history a fixed mask rather than an excerpt. */
 export async function callConnectorRead(providerId: string, input: ConnectorCommandInput, actionId: string,
@@ -97,27 +108,27 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
   const manifest = getAppConnectorProvider(providerId);
   const entry = connectorActionCatalog(providerId, { [actionId]: action }).get(actionId);
   if (!manifest || !entry || action.effect !== "read") {
-    throw new ProviderRequestError(403, "Private calls support declared read actions only; use a Channel command for writes");
+    throw new ConnectorRemedy(403, "Private calls support declared read actions only; use a Channel command for writes");
   }
   const parsed = action.parse(statement);
-  if (typeof parsed === "string") throw new ProviderRequestError(400, parsed);
+  if (typeof parsed === "string") throw new ConnectorRemedy(400, parsed);
   const scope = await commandScope(manifest, input);
-  if (typeof scope === "string") throw new ProviderRequestError(403, scope);
+  if (typeof scope === "string") throw new ConnectorRemedy(403, scope);
   const authorize = async () => {
     await authorizeCaller();
     const live = await commandScope(manifest, input);
     if (typeof live === "string" || live.spaceId !== scope.spaceId || live.connectionId !== scope.connectionId) {
-      throw new ProviderRequestError(403, "Connector access changed during the private call");
+      throw new ConnectorRemedy(403, "Connector access changed during the private call");
     }
     const refusal = actionRefusal({ actionId, mode: await connectionActionPolicy(input.env, {
       providerId, connectionId: scope.connectionId, actionId }) });
-    if (refusal) throw new ProviderRequestError(403, refusal);
+    if (refusal) throw new ConnectorRemedy(403, refusal);
   };
   const execute = async () => {
     await authorize();
     const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorize,
       `call:${input.messageId}`);
-    if (typeof context === "string") throw new ProviderRequestError(403, context);
+    if (typeof context === "string") throw new ConnectorRemedy(403, context);
     let result: ConnectorActionResult;
     try { result = await action.execute(context, parsed); }
     // Provider errors can contain the same private values as successes.
@@ -129,7 +140,7 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
     return result;
   };
   let result: ConnectorActionResult | undefined, failure: unknown;
-  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "" }, async () => {
+  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "", retry: resultVisibility }, async () => {
     try {
       result = await execute();
       return { status: "completed", summary: resultVisibility === "private" ? PRIVATE_CONNECTOR_RESULT
@@ -137,8 +148,8 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
     } catch (error) {
       failure = error;
       return { status: error instanceof ProviderRequestError && error.status === 403 ? "blocked" : "failed",
-        summary: resultVisibility === "private" ? PRIVATE_CONNECTOR_RESULT
-          : error instanceof ProviderRequestError ? error.message : "The connector call failed" };
+        summary: resultVisibility === "private" ? privateFailure(error)
+          : error instanceof ProviderRequestError ? error.message : "The connector call failed", remedy: remedyOf(error) };
     }
   });
   if (!result) throw failure;
@@ -245,10 +256,12 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
     } catch (error) {
       const shared = sharedWorkspace(error);
       if (shared) return result("blocked", shared);
+      if (error instanceof ConnectorRemedy && error.status === 403) return result("blocked", error.message);
       return result("failed", error instanceof ProviderRequestError ? error.message : "could not create an approval request");
     }
   }
-  return withExecution(manifest, input, scope, { id: actionId, label, key: "" }, async () => {
+  return withExecution(manifest, input, scope, { id: actionId, label, key: "",
+    ...(action.effect === "read" && !approved ? { retry: "public" as const } : {}) }, async () => {
     if (mode === "disallow") return { status: "blocked", summary: actionRefusal({ actionId, mode })! };
     try {
       const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite,
@@ -263,13 +276,14 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
         const reason = error instanceof ProviderRequestError ? error.message
           : error instanceof DOMException && error.name === "TimeoutError"
             ? "the provider did not answer in time" : "the provider call failed";
-        return { status: "failed", summary: reason +
+        return { status: "failed", remedy: remedyOf(error), summary: reason +
           (context.x?.billingSummary?.() ? `\n${context.x.billingSummary()}` : "") };
       }
     } catch (error) {
       const shared = sharedWorkspace(error);
       if (shared) return { status: "blocked", summary: shared };
-      if (error instanceof ProviderRequestError) return { status: "failed", summary: error.message };
+      if (error instanceof ProviderRequestError) return { status: error instanceof ConnectorRemedy && error.status === 403 ? "blocked" : "failed",
+        summary: error.message, remedy: remedyOf(error) };
       return { status: "failed", summary: error instanceof DOMException && error.name === "TimeoutError"
         ? "the provider did not answer in time" : "the provider call failed" };
     }
@@ -319,7 +333,13 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const credentials = native ? {} : await connectionCredentials(input.env, spaceId, providerId);
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
   const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
-  if (missing.length > 0) return `save ${missing.join(", ")} in Apps → ${getAppConnectorProvider(providerId)!.name} → Credentials`;
+  if (missing.length > 0) {
+    // One field a person types is replaced where the failure shows; anything else comes from connecting again.
+    const typed = (getAppConnectorProvider(providerId)!.credentials ?? []).find((field) =>
+      field.id === missing[0] && !field.generated && !field.managed);
+    throw new ConnectorRemedy(403, `save ${missing.join(", ")} in Apps → ${getAppConnectorProvider(providerId)!.name} → Credentials`,
+      missing.length === 1 && typed ? { kind: "credential", field: typed.id } : { kind: "reconnect" });
+  }
   const instanceId = input.senderKind === "agent" ? input.senderId : undefined;
   const caller = { userId: input.actorUserId,
     ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };

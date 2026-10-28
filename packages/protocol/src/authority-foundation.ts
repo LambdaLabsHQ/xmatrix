@@ -134,6 +134,9 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/completion?source=${encodeURIComponent(source)}&channelId=${encodeURIComponent(channelId)}${parent ? `&parent=${encodeURIComponent(parent)}` : ""}`,
     space_app_executions: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-executions`,
+    /** Runs a failed read again as the person asking, with its original result visibility. */
+    space_app_execution_retry: (spaceId: string, executionId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-executions/${encodeURIComponent(executionId)}/retry`,
     github_app_install: (
       spaceId: string,
       options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }

@@ -31,7 +31,7 @@ async function withDatabase(run) {
   const { client, database, sql } = await connectorDatabase("app-credential-test");
   const space = `credential-space-${crypto.randomUUID()}`;
   const cleanup = async () => {
-    for (const table of ["app_connector_action_requests", "app_connector_credentials", "app_source_relations",
+    for (const table of ["app_connector_executions", "app_connector_action_requests", "app_connector_credentials", "app_source_relations",
       "app_connector_connections",
       "channels", "space_members", "app_slack_workspace_claims"]) await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
   };
@@ -199,6 +199,36 @@ integration("a participant cannot use the Space's connected apps, even in their 
     assert.equal((await apps.getConnection({ requestId: crypto.randomUUID(), connectionId, actorUserId: "member",
       use: true })).connection.id, connectionId, "and in the Space");
     assert.equal((await subscribe("member")).relation.channelId, channelId);
+  });
+});
+
+// A failed read keeps how to fix it and its command, so the person can fix it
+// and run it again where it shows; the command is read only through the retry.
+integration("a failed read records its remedy and runs again only from its own record", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      metadata_json,created_at,updated_at) VALUES ($2||':work',$2,'work','work','open',$2||':rank-work',1,'{}'::jsonb,$1,$1)`,
+    [at, space]);
+    const apps = new PostgresAppRepository(database);
+    const channelId = `${space}:work`, connectionId = `${space}:webhook`, executionId = `run-${space}`;
+    const command = (kind, input) => apps.command({ commandId: crypto.randomUUID(), connectionId, channelId,
+      principal: { kind: "user", id: "member" }, ...input }, kind);
+    await command("record-execution", { executionId, messageId: "message-1", actionId: "web_session",
+      retryCommand: "@webhook:web_session:*", resultVisibility: "private" });
+    await assert.rejects(command("finalize-execution", { executionId, expectedVersion: 1, status: "failed",
+      reason: "expired", remedy: "credential:../secret" }), (error) => error instanceof AppControlError);
+    await command("finalize-execution", { executionId, expectedVersion: 1, status: "failed", reason: "expired",
+      remedy: "credential:webSession" });
+    const listed = (await apps.listExecutions({ requestId: crypto.randomUUID(), spaceId: space, actorUserId: "owner",
+      limit: 10 })).executions.find((row) => row.id === executionId);
+    assert.deepEqual(listed.remedy, { kind: "credential", field: "webSession" });
+    assert.equal(listed.retryable, true);
+    assert.equal(listed.resultVisibility, "private");
+    assert.equal(listed.retryCommand, undefined, "the Space-wide list never carries a command");
+    assert.deepEqual(await apps.executionRetry({ requestId: crypto.randomUUID(), spaceId: space, executionId,
+      actorUserId: "member" }), { channelId, requestedBy: "member", command: "@webhook:web_session:*", visibility: "private" });
+    await assert.rejects(apps.executionRetry({ requestId: crypto.randomUUID(), spaceId: space, executionId,
+      actorUserId: "stranger" }), (error) => error instanceof AppControlError);
   });
 });
 

@@ -62,7 +62,7 @@ export function connectorGeneratesCredentials(connector: AppConnectorManifest): 
   return Boolean(takesIngress(connector) || connector.credentials?.some((field) => field.generated && !field.managed));
 }
 
-type CredentialStoreInput = {
+export type CredentialStoreInput = {
   connector: AppConnectorManifest;
   connection?: SerializedAppConnectorConnection;
   spaceId: string;
@@ -74,7 +74,7 @@ type CredentialStoreInput = {
   afterSave: () => Promise<void>;
 };
 
-function useCredentialStore({ connector, connection, spaceId, token, userId, beforeSave, afterSave }: CredentialStoreInput) {
+export function useCredentialStore({ connector, connection, spaceId, token, userId, beforeSave, afterSave }: CredentialStoreInput) {
   const queryClient = useQueryClient();
   const key = xmatrixQueryKeys.domain({ userId }, "app-connection-credentials", [spaceId, connector.id]);
   const url = WEB_PROXY_ROUTES.space_app_connection_credentials(spaceId, connector.id);
