@@ -56,7 +56,7 @@ use the connector registry. The later sections define provider-specific bounds.
 
 | Layer | Owner | Current contract |
 | --- | --- | --- |
-| Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and default policies are shared with clients |
+| Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and one default permission per provider are shared with clients |
 | Executor | `ConnectorProvider` and `platform-providers.ts` | Provider-owned parse/prepare/execute, authenticated Check and bounded outbound HTTP |
 | Commands | `connector-commands.ts`, `connectors/usage.ts` | Channel commands publish their receipts; `xmatrix call --public` records normal read results; `--private` keeps the invocation visible and masks only the Channel/history result, returning the original to its caller and retaining a protected 30-day Web view for its Human owner. Discover actions with `xmatrix connector list` |
 | Policy and approval | Scoped connector repositories and approval routes | Connection read/ask/write, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
@@ -80,9 +80,12 @@ inbound:  provider webhook ─► Ingress route ─► verify ─► normalize �
                                                    ├─► relation routing ─► Channel message (app author)
                                                    └─► Automation trigger {kind:"event"}
 outbound: Channel message "@provider:action text" (a person, or an Agent's `xmatrix send`)
-            ─► parse ─► policy(channel×action) ─► allow ─► execute ─► execution record + receipt replying to the message
-                                                  ├─► ask ─► approval card ─► execute
-                                                  └─► disallow
+            ─► parse ─► current Run/Channel and connection access
+                        ├─► read action ─► execute ─► execution record + reply
+                        └─► write action ─► connection permission
+                                             ├─► write ─► execute + receipt
+                                             ├─► ask ─► approval card ─► recheck ─► execute + receipt
+                                             └─► read ─► refuse
 ```
 
 ### 3.1 Provider module contract
@@ -530,12 +533,13 @@ backfill is possible for older calls whose originals were never stored.
 `POST /api/connectors/call` accepts `{ command, resultVisibility: "public" |
 "private" }`. The Run token owns the Channel, Instance and author; the owning
 message authority checks its exact Run proof when committing the invocation.
-The existing action catalog, connection, mailbox ownership and Channel policy
-remain authoritative. Run/registration/Channel access and policy are rechecked
-before provider execution and before returning an in-flight result. `ask` and
-`disallow` refuse the call; writes, subscriptions and approval remain on the
-existing Channel command path. Requests are bounded to 32 KiB and original
-results to 256 KiB, with `private, no-store` HTTP responses in both modes.
+The existing action catalog, connection, mailbox ownership and current
+Run/registration/Channel access remain authoritative and are rechecked before
+provider execution and before returning an in-flight result. All three
+connection modes permit reads; write actions are refused by this read-only
+endpoint and use the existing Channel command and approval path. Requests
+are bounded to 32 KiB and original results to 256 KiB, with `private, no-store`
+HTTP responses in both modes.
 Aggregate metering contains only the existing IDs and enums.
 
 Visibility selection is explicit in the CLI: a bare call, or both flags, fails
@@ -653,9 +657,9 @@ text above 12,000 characters is marked as truncated. `update_sheet` takes JSON
 must exactly cover that rectangle. Only scalar strings, finite numbers and
 booleans are accepted, with no null/skipped cells. It writes `RAW`: formula-like
 strings remain literal text. `create_sheet:new <title>` creates a blank
-app-authorized spreadsheet. Writes have separate Channel policies, are sent
-once, and require exact update receipts; ambiguous receipts ask the user to
-check before retrying. Enable Sheets API on the same registered company project.
+app-authorized spreadsheet. Writes follow the connection's read/ask/write
+permission, are sent once, and require exact update receipts; ambiguous receipts
+ask the user to check before retrying. Enable Sheets API on the same registered company project.
 Picker now includes Docs and Sheets, returning a file kind so Apps offers the
 appropriate read command. An older Docs-only Picker reply without a kind
 continues to show a document read command; no access authority is inferred from
@@ -1229,8 +1233,8 @@ api.bitbucket.org; Check reads only the current UUID without persisting it.
 
 The explicit `workspace/repo!id` review flow reads one PR and one comment page,
 returns a bounded untrusted excerpt, and writes a single comment only under the
-Channel write policy. Account fields and structured mentions are omitted; linked
-resources and pagination are inert. Legacy signed repository webhooks retain
+connection's read/ask/write permission. Account fields and structured mentions
+are omitted; linked resources and pagination are inert. Legacy signed repository webhooks retain
 their per-Space setup and do not gain a fabricated global installation binding.
 Registered company credentials, formal release and native acceptance are
 separate requirements; implementation tests do not prove them complete.
@@ -1625,8 +1629,8 @@ Each Space supports twenty independently confirmed groups; each active group
 belongs to one Space for the current app identity. Primary PostgreSQL grants,
 connection generations and exact source subscriptions authorize both delivery
 and the typed `sendMessage` capability. Writes recheck bot membership and current
-Channel policy/grants immediately before posting. Ambiguous provider receipts
-are not retried automatically. Bot removal, lost send permission and group
+Channel access, connection permission and group grants immediately before
+posting. Ambiguous provider receipts are not retried automatically. Bot removal, lost send permission and group
 migration retire the exact group; subsequent joins do not restore authority.
 Human unlink affects only its selected group. Saving manual credentials retires
 all company group grants and pending confirmations for that Space.

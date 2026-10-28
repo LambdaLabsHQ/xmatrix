@@ -120,10 +120,11 @@ CI-validated beta Hub/Web artifacts. Recovery is a CI-validated beta reverting
 the connector while preserving any user-created Google Calendar events.
 
 Native acceptance requires a separately consented account: Check, list a
-calendar, list/read a controlled event, query availability, approve a new test
-event, read it, edit it with the returned ETag, verify the change in Google
-Calendar, then delete only that test event with its current ETag. Also verify
-denied policy and provider revocation; deployment/tool visibility alone is not
+calendar, list/read a controlled event, query availability, create a new test
+event under the configured connection permission, read it, edit it with the
+returned ETag, verify the change in Google Calendar, then delete only that test
+event with its current ETag. Also verify read-mode refusal, ask-mode approval
+and provider revocation; deployment/tool visibility alone is not
 native acceptance. Calendar has no inbound subscriptions in this release.
 
 Sources: [scopes](https://developers.google.com/workspace/calendar/api/auth),
