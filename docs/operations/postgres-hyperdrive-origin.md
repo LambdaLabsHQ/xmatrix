@@ -64,6 +64,15 @@ internal, pool-acquisition or connection-refused labels; other text stays
 unclassified. A missing code or capture-boundary stack remains insufficient
 to diagnose an outage or authorize a transaction replay.
 
+Message authority failures also explicitly report the original exception and
+bounded database evidence, rather than relying on console serialization.
+Slow execution-report owner and Channel lifecycle admission locks sample the
+live wait edge before a lock timeout removes it: only fixed waiter/blocker
+owner categories, state, wait type and capped transaction age are retained.
+The two paths share one additional diagnostic connection per isolate, with
+250 ms connection/query deadlines; fast locks open none. An unavailable or
+busy sampler preserves the original error and existing recovery rules.
+
 Hyperdrive pools in transaction mode. Session state does not survive between
 transactions: use transaction-local settings (`set_config(..., true)` or
 `SET LOCAL`). The Better Auth adapter does not `SET search_path`. Its tables

@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Message Channel lock failures retain their blocker
+
+HUB-AZ timed out while an Agent append waited for a Channel lifecycle lock.
+The event had no holder evidence, and console capture lost the database's
+named-query diagnostics. The message failure boundary now explicitly reports
+the original exception with that bounded evidence once. The existing slow-lock
+sampler also covers Channel lifecycle admission locks, retaining waiter and
+blocker owner categories, states and transaction ages before PostgreSQL removes
+the wait edge. It shares the execution-report sampler's one-connection bound;
+fast locks open no diagnostic connection. Lock order, authorization, public
+errors, retry policy and unknown-COMMIT reconciliation are unchanged. This is
+missing diagnostic coverage, not a confirmed fix for the underlying contention.
+No migration; recovery uses a CI-validated beta Hub reverting this change.
+
 ## Unreleased: Query observers follow the signed-in identity
 
 Changing the signed-in identity already creates a fresh QueryClient, but its

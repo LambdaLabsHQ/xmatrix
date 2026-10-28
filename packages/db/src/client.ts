@@ -26,7 +26,7 @@ import { dingtalkPreparation, dingtalkDecision, dingtalkPreparedPlan, registerDi
   type DingTalkPreparedPlan, type DingTalkPreparedDecision } from "./dingtalk-prepared-port.js";
 
 import { recordDatabaseFailure, linkDatabaseFailures, type DatabaseFailureEvidence } from "./database-failure-evidence.js";
-import { watchExecutionOwnerWait } from "./postgres-lock-wait.js";
+import { watchPostgresLockWait } from "./postgres-lock-wait.js";
 
 const MAX_QUERY_NAME_BYTES = 160;
 const MAX_QUERY_BYTES = 64 * 1024;
@@ -333,7 +333,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
   async query<Row extends QueryResultRow>(input: DatabaseQuery): Promise<readonly Row[]> {
     const query = validatedQuery(input);
     const startedAt = performance.now();
-    const finishWait = watchExecutionOwnerWait(query.name, this.stats.backendPid, this.options);
+    const finishWait = watchPostgresLockWait(query.name, this.stats.backendPid, this.options);
     try {
       const result = await this.client.query<Row>({
         text: query.text,
