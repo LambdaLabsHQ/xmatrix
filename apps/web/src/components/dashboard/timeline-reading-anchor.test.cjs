@@ -75,6 +75,11 @@ function timeline({ userAgent = DESKTOP } = {}) {
   const clock = testClock();
   let contentTop = 100;
   const observers = [];
+  class LayoutObserver {
+    constructor(callback) { this.callback = callback; this.connected = true; observers.push(this); }
+    observe() {}
+    disconnect() { this.connected = false; }
+  }
   const content = { getBoundingClientRect: () => ({ top: contentTop, bottom: contentTop + 100 }) };
   const row = { id: "message:reader", lastElementChild: content, children: [], hasAttribute: () => false };
   const { root, listeners } = listenedRoot({
@@ -102,12 +107,8 @@ function timeline({ userAgent = DESKTOP } = {}) {
     performance: { now: clock.now },
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
-    MutationObserver: class { observe() {} disconnect() {} },
-    ResizeObserver: class {
-      constructor(callback) { this.callback = callback; this.connected = true; observers.push(this); }
-      observe() {}
-      disconnect() { this.connected = false; }
-    },
+    MutationObserver: LayoutObserver,
+    ResizeObserver: LayoutObserver,
   });
   const anchor = exports.useTimelineReadingAnchor(root);
   return {
