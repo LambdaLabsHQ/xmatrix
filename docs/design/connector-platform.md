@@ -455,9 +455,9 @@ default profile and contacts scopes, and the Hub is the boundary the grant
 is not: every user-invoked Gmail action passes an endpoint list in `actions/gmail.ts`
 (GET profile, message list and one message; POST messages/send) and any
 other endpoint is refused before Composio is called. The only write, POST
-messages/send, belongs to `send` and `reply`, whose manifest
-`defaultPolicy: "ask"` stages an immutable email for a Space admin to approve
-once in that Channel (§3.5). A read-only grant would need the company's own
+messages/send, belongs to `send` and `reply`. Gmail inherits the app manifest
+`defaultPermission: "ask"`, staging an immutable email for a Space admin to
+approve once (§3.5). A read-only grant would need the company's own
 Google app verified for `gmail.readonly` (OAuth verification and CASA).
 One Gmail connection holds any number of mailboxes. Its only credential,
 `mailboxes`, lists each mailbox's Composio account, address and owner: a
