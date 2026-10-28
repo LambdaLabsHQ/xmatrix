@@ -298,7 +298,8 @@
     0 18px 55px -34px oklch(0.39 0.06 58 / 0.34);
 }
 
-.xmatrix-app {
+/* A published page (/p/…) reads in the app's inks and paper, as the page does in the app. */
+.xmatrix-app, .public-page {
 
   /* `font-black` is 760 inside the app, not 900. */
   --font-weight-black: 760;
