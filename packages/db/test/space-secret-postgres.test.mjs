@@ -50,6 +50,57 @@ integration("concurrent Agent saves of one alias leave exactly one secret, reada
   } finally { await f.close(); }
 });
 
+integration("a Space creates and reads past 128 secrets without truncating aliases, values or approvals", async () => {
+  const f = await spaceSecretFixture();
+  try {
+    for (let index = 0; index < 128; index++) {
+      await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin,
+        secretRef: `key-${String(index).padStart(3, "0")}`, value: `value-${index}`, access: "auto" });
+    }
+    await f.secret.runCreate(f.run, { secretRef: "last-key", value: "last-value" });
+    const listed = await f.secret.list({ spaceId: f.ids.space, userId: f.ids.owner });
+    assert.equal(listed.secrets.length, 129);
+    assert.equal(listed.secrets.at(-1).secretRef, "last-key");
+    const runList = await f.secret.runList(f.run);
+    assert.equal(runList.secrets.length, 129);
+    assert.deepEqual(runList.secrets.at(-1),
+      { secretRef: "last-key", envName: "LAST_KEY", access: "ask", readable: true });
+    const read = await f.secret.runRead(f.run);
+    assert.equal(read.secrets.length, 129);
+    assert.deepEqual(read.secrets.at(-1), { secretRef: "last-key", envName: "LAST_KEY", value: "last-value" });
+    const status = await f.secret.requestStatus({ userId: f.ids.admin, runId: f.ids.run,
+      channelId: f.ids.channel, secretRef: "last-key" });
+    assert.equal(status.saved, true);
+    assert.equal(status.readable, true);
+    await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin, secretRef: "last-closed", value: "closed-value" });
+    await assert.rejects(f.secret.runRead(f.run, ["last-closed"]), error => error.code === "secret_approval_required");
+    await f.secret.approve({ userId: f.ids.admin, runId: f.ids.run, channelId: f.ids.channel, secretRef: "last-closed" });
+    assert.equal((await f.secret.runRead(f.run, ["last-closed"])).secrets[0].value, "closed-value");
+    const access = await f.secret.accessStatus({ userId: f.ids.admin, runId: f.ids.run,
+      channelId: f.ids.channel, secretRefs: ["last-key", "last-closed"] });
+    assert.deepEqual(access.secrets.map(secret => secret.secretRef), ["last-closed", "last-key"]);
+  } finally { await f.close(); }
+});
+
+integration("large values do not block alias lists, and oversized bulk reads fail without partial disclosure", async () => {
+  const f = await spaceSecretFixture();
+  try {
+    const value = "x".repeat(64 * 1024);
+    for (let index = 0; index < 96; index++) {
+      await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin,
+        secretRef: `large-${String(index).padStart(3, "0")}`, value, access: "auto" });
+    }
+    assert.equal((await f.secret.list({ spaceId: f.ids.space, userId: f.ids.owner })).secrets.length, 96);
+    assert.equal((await f.secret.runList(f.run)).secrets.length, 96);
+    await assert.rejects(f.secret.runRead(f.run), error => error.code === "secret_response_too_large" && error.status === 413);
+    const audit = await f.client.query(`SELECT secret_refs_json FROM data.secret_grant_audit
+      WHERE owner_user_id=$1 AND action='space_read'`, [f.ids.owner]);
+    assert.equal(audit.rows.length, 0, "a refused bulk read returned and audited no values");
+    const named = await f.secret.runRead(f.run, ["large-095"]);
+    assert.deepEqual(named.secrets, [{ secretRef: "large-095", envName: "LARGE_095", value }]);
+  } finally { await f.close(); }
+});
+
 integration("two Spaces keep same-alias values and approvals separate even when a Run's owner belongs to both", async () => {
   const a = await spaceSecretFixture(), b = await spaceSecretFixture();
   try {

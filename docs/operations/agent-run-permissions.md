@@ -70,6 +70,15 @@ delete secrets (Settings -> Secrets, `xmatrix secret set|delete --space`, or
 `PUT|DELETE /api/spaces/:spaceId/secrets`); members and viewers see their
 aliases, never their values.
 
+Spaces have no secret-count quota. Catalog and Run reads traverse ordered SQL
+pages of at most 128 rows without truncating the existing response shape.
+Catalog queries select metadata only, and value queries select ciphertext only
+for secrets the Run may read. The transaction deadline still applies; a request
+over 2 MiB of catalog rows or 8 MiB of value rows fails with
+`secret_response_too_large` (413), returning no partial result. An oversized
+bulk value read can instead name the secrets needed, at most 32 per request.
+These are per-request resource bounds, not limits on stored secrets.
+
 An Agent Run cannot change a secret, but it can ask that secrets stop asking:
 `xmatrix request secret-access <alias>...` posts a card in its Channel listing
 the named secrets that are still `ask`. A Space owner or admin ticks the ones

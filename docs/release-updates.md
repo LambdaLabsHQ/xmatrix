@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Spaces can store more than 128 secrets
+
+A Space with 128 secrets refused the next credential even when it was needed
+for normal work. The Hub removes that storage quota, and catalog, Run value
+and approval reads also work beyond the old boundary. Reads use ordered,
+bounded SQL pages and per-request byte budgets; alias listings do not fetch
+encrypted values. Existing encryption, live Run authorization and admin
+approval remain in force. This ships in the Hub without a schema or client
+change. Recovery is a CI-validated Hub release reverting this change; keep
+stored secrets intact and restore forward support for catalogs above 128
+before relying on an older read implementation.
+
 ## Unreleased: Page links open with a click or tap
 
 Bare URLs and Markdown links in an editable page now open directly in a new
