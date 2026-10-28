@@ -1,14 +1,13 @@
 import Image from "next/image";
-import { Check, Minus } from "lucide-react";
+import { WHY_SCENES } from "@/components/landing/why-scenes";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 
 
 /**
- * xMatrix beside juggling agent tools, row by row. On a wide screen the
- * xMatrix column is one sheet of paper from its name to the last row, so the
- * column itself says which side is which, and its lines are written in as the
- * table scrolls into view; on a phone each topic stacks both answers under
- * one hairline.
+ * xMatrix beside juggling agent tools, row by row. Each side of a row is a
+ * piece of tinted paper, as in the app's asks and choices (no rule, no rim,
+ * no shadow), holding a small playing example above its line: xMatrix on
+ * the warm piece, juggling agent tools on the plain one.
  */
 export function Why({ locale = "en" }: { locale?: Locale }) {
   const copy = landingCopy[locale].why;
@@ -18,24 +17,28 @@ export function Why({ locale = "en" }: { locale?: Locale }) {
         <h2 className="site-display text-center text-3xl font-semibold text-foreground sm:text-5xl lg:text-4xl xl:text-5xl">
           {copy.title}
         </h2>
-        <div className="site-why mx-auto mt-14 flex max-w-5xl flex-col md:grid md:grid-cols-[11rem_minmax(0,1fr)_minmax(0,1fr)] md:grid-rows-[repeat(7,auto)]">
-          <div aria-hidden className="site-paper-sheet hidden md:col-start-2 md:row-span-full md:block" />
-          <p className="hidden items-center gap-2.5 px-7 pt-7 pb-5 text-lg font-semibold text-foreground md:col-start-2 md:row-start-1 md:flex">
-            <Image src="/brand/xmatrix-icon-transparent-128.png" alt="" width={24} height={24} />xMatrix
+        <div className="site-why mx-auto mt-14 grid max-w-5xl grid-cols-2 gap-x-2 gap-y-8 md:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-x-3 md:gap-y-3">
+          <p className="site-why-name site-why-ours flex items-center gap-2 justify-self-start rounded-full px-3 py-1 text-sm font-semibold md:col-start-2 md:justify-self-stretch md:rounded-none md:bg-transparent md:px-1 md:text-lg">
+            <Image src="/brand/xmatrix-icon-transparent-128.png" alt="" width={24} height={24} className="size-4 md:size-6" />
+            xMatrix
           </p>
-          <p className="hidden px-7 pt-7 pb-5 text-lg font-semibold text-muted-foreground md:col-start-3 md:row-start-1 md:block">{copy.others}</p>
+          <p className="site-why-name site-why-theirs justify-self-start rounded-full px-3 py-1 text-sm font-semibold md:justify-self-stretch md:rounded-none md:bg-transparent md:px-1 md:text-lg">
+            {copy.others}
+          </p>
           {copy.rows.map(([topic, ours, theirs], index) => {
-            const row = { gridRow: index + 2 };
+            const [oursScene, theirsScene] = WHY_SCENES[index]!;
             return (
-            <div key={topic} className={`site-why-row py-5 md:contents ${index ? "border-t" : "pt-0"}`}>
-              <h3 style={row} className="text-sm font-semibold text-foreground md:col-start-1 md:border-t md:py-5 md:pr-6">{topic}</h3>
-              <p style={row} className="site-why-ours mt-2 flex gap-2.5 text-[0.9375rem] leading-6 md:col-start-2 md:mx-7 md:mt-0 md:border-t md:py-5">
-                <Check className="mt-1 size-4 shrink-0 md:hidden" aria-label="xMatrix" />{ours}
-              </p>
-              <p style={row} className="mt-1.5 flex gap-2.5 text-sm leading-6 text-muted-foreground md:col-start-3 md:mt-0 md:border-t md:px-7 md:py-5 md:text-[0.9375rem]">
-                <Minus className="mt-1 size-4 shrink-0 md:hidden" aria-label={copy.others} />{theirs}
-              </p>
-            </div>
+              <div key={topic} className="col-span-2 grid gap-2 md:col-span-3 md:grid-cols-subgrid md:gap-x-3 md:gap-y-0">
+                <h3 className="text-sm leading-6 font-semibold text-foreground md:pt-4 md:pr-4">{topic}</h3>
+                <figure className="site-why-panel site-why-ours">
+                  <div className="site-why-scene" aria-hidden>{oursScene(copy.scenes)}</div>
+                  <figcaption className="site-why-caption">{ours}</figcaption>
+                </figure>
+                <figure className="site-why-panel site-why-theirs">
+                  <div className="site-why-scene" aria-hidden>{theirsScene(copy.scenes)}</div>
+                  <figcaption className="site-why-caption">{theirs}</figcaption>
+                </figure>
+              </div>
             );
           })}
         </div>

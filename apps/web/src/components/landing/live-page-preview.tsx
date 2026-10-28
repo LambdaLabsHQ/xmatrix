@@ -8,6 +8,7 @@ import { PageEditor } from "@/components/pages/page-editor";
 import { PagePens, type PagePen } from "@/components/pages/page-chrome";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { editPageMarkdown } from "@/lib/pages/page-markdown-edit";
+import { pageMentions, type PageReferenceTargets } from "@/components/pages/page-reference-chips";
 
 /* The real page editor, bound to a page that lives only in this browser: a person and three Agents
    write it together, as on a live page, with each Agent's face at the right edge beside its line
@@ -24,18 +25,21 @@ const AGENTS: Writer[] = [
 const [CLAUDE, CODEX, CURSOR] = AGENTS as [Writer, Writer, Writer];
 
 // One project split four ways: what each owner did, what everyone agreed, and where it stands.
+// Each workstream is a task: its name in bold, its owner by @, and where it stands, ticked when done.
 const START = {
-  stands: "Kick-off done. Four workstreams, one owner each.",
+  stands: "> Kick-off done. Four workstreams, one owner each.",
   decided: "- Ship to every Space on Friday, behind one switch.",
-  web: "- Web editor · Claude · in progress", mobile: "- Mobile · Codex · in progress",
-  video: "- Launch video · Cursor · not started", docs: "- Docs · Daniel · drafting",
+  web: "- [ ] **Web editor** · @claude — login fix, checks 3/5", mobile: "- [ ] **Mobile app** · @codex — build 2.4 at 60%",
+  video: "- [ ] **Launch video** · @cursor — not started", docs: "- [ ] **Docs** · Daniel — drafting 2 of 5 pages",
 };
 type Slots = typeof START;
 // Where a pass ends, which is all a reader who asks for less motion sees.
 const DONE: Slots = { ...START,
-  stands: "Mobile and video are done. Docs go out Thursday. Launching Friday.",
+  stands: "> Mobile and video are done. Docs go out Thursday. Launching Friday.",
   decided: "- Ship to every Space on Friday, behind one switch.\n- People pay. Agents stay free.",
-  web: "- Web editor · Claude · merged, live in v1.0.464 ✓", mobile: "- Mobile · Codex · merged, TestFlight 2.4 ✓", video: "- Launch video · Cursor · done, on the launch page ✓" };
+  web: "- [x] **Web editor** · @claude — merged, live in `v1.0.464`",
+  mobile: "- [x] **Mobile app** · @codex — merged, in `TestFlight 2.4`",
+  video: "- [x] **Launch video** · @cursor — done, on the launch page" };
 
 function render(slots: Slots): string {
   return [
@@ -45,6 +49,12 @@ function render(slots: Slots): string {
     "## Workstreams", "", [slots.web, slots.mobile, slots.video, slots.docs].join("\n"), "",
   ].join("\n");
 }
+
+/** An @ in the page reads as the app's mention chip: the Agent's face and name. */
+const REFERENCES: PageReferenceTargets = {
+  pageTitle: () => null, channelName: () => null, openPage: () => {}, openChannel: () => {},
+  mentions: pageMentions([], AGENTS.map((agent) => agent.harness!)),
+};
 
 /** What an Agent at the edge says it is doing (pages-view.tsx). */
 const DOING: Record<string, string> = { thinking: "thinking", writing: "writing" };
@@ -93,7 +103,8 @@ function createStage() {
     writing.clientID = writer.id;
     editPageMarkdown(writing, () => render(slots), writer.kind);
     writing.clientID = own;
-    const line = text.trim().split("\n").at(-1)!.replace(/^- /u, "");
+    // The caret follows the words as the page holds them, without the markdown's markers.
+    const line = text.trim().split("\n").at(-1)!.replace(/^(?:- (?:\[[ x]\] )?|> )/u, "").replace(/[`*]/gu, "");
     say(writer, writer.kind === "agent" ? "writing" : "editing", line.slice(-12));
   };
   const reset = (to: Slots) => {
@@ -126,21 +137,21 @@ async function play(stage: Stage, stopped: () => boolean) {
   };
   const settle = (writer: Writer, line: string) => stage.say(writer, writer.kind === "agent" ? "watching" : "viewing", line.slice(-12));
   stage.reset(START);
-  stage.say(CLAUDE, "thinking", "in progress");
-  stage.say(CODEX, "thinking", "in progress");
+  stage.say(CLAUDE, "thinking", "checks 3/5");
+  stage.say(CODEX, "thinking", "at 60%");
   stage.say(CURSOR, "thinking", "not started");
   await sleep(1400);
   // Each owner moves its own line forward, at the same time.
-  const claude = stream(CLAUDE, "web", "- Web editor · Claude · ", "merged, live in v1.0.464 ✓", 32);
+  const claude = stream(CLAUDE, "web", "- [x] **Web editor** · @claude — ", "merged, live in `v1.0.464`", 32);
   await sleep(500);
-  const codex = stream(CODEX, "mobile", "- Mobile · Codex · ", "in review, PR #566", 34);
+  const codex = stream(CODEX, "mobile", "- [ ] **Mobile app** · @codex — ", "in review, PR #566", 34);
   await sleep(700);
-  const cursor = stream(CURSOR, "video", "- Launch video · Cursor · ", "rendering the 1080p cut", 34);
+  const cursor = stream(CURSOR, "video", "- [ ] **Launch video** · @cursor — ", "rendering the 1080p cut", 34);
   await Promise.all([claude, codex, cursor]);
   settle(CODEX, "PR #566");
   settle(CURSOR, "1080p cut");
   await sleep(500);
-  await stream(CLAUDE, "stands", "", "Web is live. Mobile is in review and the video is rendering. On track for Friday.", 28);
+  await stream(CLAUDE, "stands", "> ", "Web is live. Mobile is in review and the video is rendering. On track for Friday.", 28);
   settle(CLAUDE, "for Friday.");
   // A person settles a question, once, for everyone.
   stage.say(PERSON, "editing", "one switch.");
@@ -148,13 +159,13 @@ async function play(stage: Stage, stopped: () => boolean) {
   await stream(PERSON, "decided", "- Ship to every Space on Friday, behind one switch.\n- ", "People pay. Agents stay free.", 60);
   settle(PERSON, "stay free.");
   await sleep(500);
-  const mobile = stream(CODEX, "mobile", "- Mobile · Codex · ", "merged, TestFlight 2.4 ✓", 32);
+  const mobile = stream(CODEX, "mobile", "- [x] **Mobile app** · @codex — ", "merged, in `TestFlight 2.4`", 32);
   await sleep(600);
-  const video = stream(CURSOR, "video", "- Launch video · Cursor · ", "done, on the launch page ✓", 32);
+  const video = stream(CURSOR, "video", "- [x] **Launch video** · @cursor — ", "done, on the launch page", 32);
   await Promise.all([mobile, video]);
-  settle(CODEX, "2.4 ✓");
-  settle(CURSOR, "page ✓");
-  await stream(CLAUDE, "stands", "", "Mobile and video are done. Docs go out Thursday. Launching Friday.", 28);
+  settle(CODEX, "Flight 2.4");
+  settle(CURSOR, "launch page");
+  await stream(CLAUDE, "stands", "> ", "Mobile and video are done. Docs go out Thursday. Launching Friday.", 28);
   settle(CLAUDE, "ing Friday.");
   await sleep(7000);
 }
@@ -209,10 +220,10 @@ export function LivePagePreview() {
   });
 
   return (
-    <div ref={setHost} className="site-live-page" inert>
+    <div ref={setHost} className="site-live-page xmatrix-app" inert>
       <div className="site-live-page-column relative">
         <PagePens pens={pens} room={230} onJump={() => {}} onOpen={() => {}} />
-        <PageEditor session={stage.session} canEdit={false} onAnchorOffsets={setTops} />
+        <PageEditor session={stage.session} canEdit={false} onAnchorOffsets={setTops} references={REFERENCES} />
       </div>
     </div>
   );

@@ -10,6 +10,17 @@ export type Locale = "en" | "zh";
 type Pair = readonly [string, string];
 type Row = readonly [string, string, string];
 
+/** The words inside Why xMatrix's animated examples, one example per row. */
+export interface WhyScenes {
+  terminal: string; thread: string; terminalLine: string; threadLine: string; prLine: string;
+  page: string; web: string; mobile: string; docs: string; progress: readonly [string, string, string]; done: readonly [string, string, string];
+  pings: readonly [string, string, string]; quiet: string;
+  copied: string; paste: string; waiting: string;
+  machines: readonly [string, string, string]; thisMachineOnly: string;
+  decided: string; decision: string; read: string; forgot: string;
+  stop: string; again: string; draft: readonly [string, string, string]; edited: string; agentWaits: string;
+}
+
 export interface LandingCopy {
   /** The homepage in this language, and its language tag. */
   home: string;
@@ -21,7 +32,7 @@ export interface LandingCopy {
   livePage: { title: string; body: string; art: string };
   quickStart: { title: string; body: string; machinesLabel: string; machines: readonly (readonly [string, number])[];
     agents: (count: number) => string; working: string };
-  why: { title: string; others: string; rows: readonly Row[] };
+  why: { title: string; others: string; rows: readonly Row[]; scenes: WhyScenes };
   connectors: { title: string; body: string; label: string };
   pricing: {
     title: string; body: string;
@@ -81,6 +92,15 @@ const en: LandingCopy = {
       ["Decisions", "Agreed once, written once, read by every agent.", "Repeated to each agent, and forgotten between sessions."],
       ["You in the loop", "Edit any line; an agent on that paragraph waits for you.", "Stop the agent, explain again, start over."],
     ],
+    scenes: {
+      terminal: "Terminal", thread: "Thread", terminalLine: "claude › fixing auth…", threadLine: "codex: which branch?", prLine: "Changes requested",
+      page: "Launch", web: "Web editor", mobile: "Mobile app", docs: "Launch video", progress: ["login fix, checks 3/5", "build 2.4 at 60%", "cut 2 of 4 scenes"], done: ["merged, live in `v1.0.464`", "build 2.4 in `TestFlight`", "on the launch page"],
+      pings: ["Claude needs your input", "Codex: which branch?", "Cursor is waiting for you"], quiet: "No pings",
+      copied: "Copied the API from Claude", paste: "Paste it into Codex", waiting: "Cursor waits for both",
+      machines: ["Mac Studio", "Linux server", "Windows"], thisMachineOnly: "this machine only",
+      decided: "Decided", decision: "Ship Friday, behind one switch.", read: "read", forgot: "New session: what did we decide?",
+      stop: "Stop", again: "Let me explain again…", draft: ["The editor saves ", "every change", " to the page."], edited: "every keystroke", agentWaits: "waits for you",
+    },
   },
   connectors: {
     title: "Bring your tools into the conversation.",
@@ -158,6 +178,15 @@ const zh: LandingCopy = {
       ["决定", "定一次、写一次，所有智能体都读得到。", "对每个智能体重复一遍，换个会话就忘了。"],
       ["随时介入", "任何一行都能改；正在写那一段的智能体会等你。", "停下智能体，重新解释，从头再来。"],
     ],
+    scenes: {
+      terminal: "终端", thread: "聊天", terminalLine: "claude › 正在修登录…", threadLine: "codex：用哪个分支？", prLine: "需要修改",
+      page: "发布", web: "网页编辑器", mobile: "手机 App", docs: "发布视频", progress: ["修登录，检查 3/5", "2.4 版构建 60%", "剪了 2/4 个镜头"], done: ["已合并，`v1.0.464` 上线", "2.4 版已进 TestFlight", "已放上发布页"],
+      pings: ["Claude 需要你回复", "Codex：用哪个分支？", "Cursor 在等你"], quiet: "没有打扰",
+      copied: "从 Claude 复制了接口", paste: "再粘贴给 Codex", waiting: "Cursor 等着两边",
+      machines: ["Mac Studio", "Linux 服务器", "Windows"], thisMachineOnly: "只看得到本机",
+      decided: "已决定", decision: "周五发布，用一个开关控制。", read: "已读", forgot: "新会话：我们定了什么？",
+      stop: "停止", again: "我再解释一遍……", draft: ["编辑器会把", "每一次修改", "存进页面。"], edited: "每一次按键", agentWaits: "在等你",
+    },
   },
   connectors: {
     title: "把你的工具带进对话。",

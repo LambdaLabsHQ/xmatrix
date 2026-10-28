@@ -1147,6 +1147,16 @@ html:has(.site-page) {
     0 6px 16px oklch(0.25 0.03 60 / 0.1);
 }
 
+/* The live page and the Why xMatrix pages are drawn by the app's own page (`.xmatrix-app`, for its chips and
+   pens), on the site's warm paper rather than the app's white. */
+.site-live-page-window > .site-live-page.xmatrix-app.xmatrix-app {
+  background: transparent;
+}
+
+.site-why .why-page.xmatrix-app.xmatrix-app {
+  background: var(--site-paper);
+}
+
 .site-live-page {
   padding: 3rem 3.5rem 3.5rem;
   pointer-events: none;
@@ -1157,37 +1167,686 @@ html:has(.site-page) {
   max-width: 44rem;
 }
 
-/* Why xMatrix: one hairline per row, across the page and the sheet. */
-.site-why :is(.site-why-row, h3, p) {
-  border-color: oklch(0 0 0 / 0.08);
+/* Why xMatrix: each side of a row is a piece of tinted paper, as in the
+   app's asks and choices (no rule, no rim, no shadow), holding a small
+   example that plays above its line. xMatrix is the warm piece in ink,
+   juggling agent tools the plain one in faded ink. */
+.site-why {
+  --site-why-ours-tint: color-mix(in oklch, var(--app-wood-panel-base) 35%, var(--background));
+  --site-why-theirs-tint: color-mix(in oklch, var(--site-ink) 5%, var(--background));
 }
 
 .site-why .site-why-ours {
-  font-weight: 500;
+  background: var(--site-why-ours-tint);
   color: var(--site-ink);
 }
 
-/* Each xMatrix line is inked onto its sheet, left to right, as it scrolls
-   into view; without scroll-driven animations it is simply there. */
-@media (prefers-reduced-motion: no-preference) {
-  @supports (animation-timeline: view()) {
-    .site-why p.site-why-ours {
-      animation: site-why-ink linear both;
-      animation-timeline: view();
-      animation-range: entry 0% entry 100%;
-    }
+.site-why .site-why-theirs {
+  background: var(--site-why-theirs-tint);
+  color: var(--site-ink-muted);
+}
+
+.site-why .site-why-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.75rem 0.75rem 1rem;
+  border-radius: 16px;
+}
+
+.site-why .site-why-caption {
+  padding-inline: 0.25rem;
+  font-size: 0.9375rem;
+  line-height: 1.5rem;
+}
+
+.site-why .site-why-ours .site-why-caption {
+  font-weight: 500;
+}
+
+@media (min-width: 768px) {
+  .site-why .site-why-name {
+    background: transparent;
   }
 }
 
-@keyframes site-why-ink {
+/* Why xMatrix scenes: everything below draws the examples (why-scenes.tsx).
+   One 8-second loop; steps 1–5 fall at 10, 24, 38, 52 and 66%. */
+.site-why-scene {
+  position: relative;
+  height: 8.5rem;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--site-ink);
+  font-weight: 400;
+}
+
+.site-why-scene :is([data-in], [data-out], [data-pulse], [data-fly], [data-third]) {
+  animation-duration: 8s;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+
+.site-why-scene p {
+  margin: 0;
+}
+
+.why-page {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--site-paper);
+}
+
+/* The app's page, at the size of an example. */
+.why-page-zoom {
+  position: relative;
+  zoom: 0.74;
+}
+
+.why-page .page-document {
+  padding-bottom: 0;
+  white-space: normal;
+}
+
+.why-page .page-document h2 {
+  font-size: 1.15em;
+}
+
+.why-page .page-document :is(li, p, blockquote) > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.why-page .page-document :is(p, blockquote) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* What a writer just changed arrives in its colour and fades, as on a live page. */
+.why-page .why-fresh-block {
+  border-radius: 6px;
+  animation: why-fresh 1.8s ease-out both;
+}
+
+/* The writer's own pill stands at the right edge, level with what it changed. */
+.why-page-pen {
+  position: absolute;
+  right: 0;
+  margin-top: -2px;
+  animation: why-pen-in 160ms ease-out both;
+}
+
+@keyframes why-fresh {
   from {
-    opacity: 0.2;
-    clip-path: inset(0 100% 0 0);
+    background-color: color-mix(in oklch, var(--why-c) 22%, transparent);
   }
   to {
-    opacity: 1;
-    clip-path: inset(0 0 0 0);
+    background-color: transparent;
   }
+}
+
+@keyframes why-pen-in {
+  from {
+    opacity: 0;
+    translate: 4px 0;
+  }
+}
+
+/* Where an owner's work is: a chip in its colour, a live dot while it runs,
+   solid once it is done. */
+.why-face {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--why-c);
+  color: oklch(1 0 0);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.why-face-mark {
+  padding: 2px;
+  background: var(--site-paper);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--site-ink) 10%, transparent);
+  object-fit: contain;
+}
+
+.why-split {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+
+.why-split > .why-page {
+  flex: 1;
+  height: auto;
+}
+
+.why-split:has(.why-convos) {
+  flex-direction: row;
+  gap: 40px;
+}
+
+.why-quiet,
+.why-readers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--site-ink-muted);
+}
+
+.why-stack {
+  position: relative;
+  height: 100%;
+}
+
+.why-win {
+  position: absolute;
+  top: calc(var(--i) * 30px);
+  left: calc(var(--i) * 11%);
+  width: 74%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--site-paper);
+}
+
+.why-win-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: color-mix(in oklch, var(--site-ink) 7%, var(--site-paper));
+  color: var(--site-ink-muted);
+  font-size: 10px;
+}
+
+.why-lights {
+  width: 22px;
+  height: 6px;
+  background:
+    radial-gradient(circle 3px at 3px 3px, oklch(0.7 0.02 60) 98%, transparent),
+    radial-gradient(circle 3px at 11px 3px, oklch(0.7 0.02 60) 98%, transparent),
+    radial-gradient(circle 3px at 19px 3px, oklch(0.7 0.02 60) 98%, transparent);
+}
+
+.why-win-body {
+  padding: 7px 10px 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
+
+.why-toasts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.why-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--site-paper);
+  color: var(--site-ink);
+}
+
+.why-convos {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.why-convo {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--site-paper);
+}
+
+.why-typing {
+  width: 22px;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--why-c) 35%, transparent);
+}
+
+.why-fly {
+  --why-fly: 40px;
+  position: absolute;
+  top: calc(50% - 3px);
+  left: calc(100% + 4px);
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--why-c);
+}
+
+.why-convos + .why-page {
+  flex: 1;
+  height: 100%;
+}
+
+.why-tabs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.why-tab-strip {
+  display: flex;
+  gap: 2px;
+}
+
+.why-tab {
+  padding: 4px 12px;
+  border-radius: 8px 8px 0 0;
+  font-weight: 600;
+}
+
+.why-tab-body {
+  position: relative;
+  flex: 1;
+  border-radius: 0 8px 8px 8px;
+  background: var(--site-paper);
+}
+
+.why-tab-pane {
+  position: absolute;
+  inset: 14px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.why-kbd {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--site-ink) 8%, transparent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+.why-net {
+  position: relative;
+  height: 100%;
+}
+
+.why-wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.why-wires path {
+  fill: none;
+  stroke: color-mix(in oklch, var(--site-ink) 40%, transparent);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.why-space {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  translate: -50% 0;
+  padding: 3px 14px;
+  border-radius: 999px;
+  background: var(--site-ink);
+  color: var(--site-paper);
+  font-weight: 700;
+}
+
+.why-machines {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.why-machine {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 4px;
+  border-radius: 8px;
+  background: var(--site-paper);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.why-machines-apart {
+  top: 0;
+  gap: 14px;
+}
+
+.why-machine-alone {
+  justify-content: center;
+}
+
+.why-note {
+  color: var(--site-ink-muted);
+  font-size: 9.5px;
+}
+
+.why-reader {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 3px;
+  border-radius: 999px;
+  background: var(--site-paper);
+  color: var(--site-ink);
+}
+
+.why-chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+}
+
+.why-said,
+.why-forgot {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 6px !important;
+}
+
+.why-forgot {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.why-bubble {
+  padding: 4px 9px;
+  border-radius: 10px;
+  background: var(--site-paper);
+}
+
+.why-forgot .why-bubble {
+  color: var(--site-ink-muted);
+  font-style: italic;
+}
+
+.why-para {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.why-para-plain {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--site-paper);
+}
+
+.why-waits {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px !important;
+  color: var(--site-ink-muted);
+}
+
+.why-stop {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--site-ink);
+  color: var(--site-paper);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .why-wires path {
+    animation: why-flow 1.2s linear infinite;
+  }
+
+
+  .site-why-scene [data-in="1"] { animation-name: why-in-1; }
+  .site-why-scene [data-out="1"] { animation-name: why-out-1; }
+  .site-why-scene [data-pulse="1"] { animation-name: why-ring-1; }
+  .site-why-scene [data-fly="1"] { animation-name: why-fly-1; }
+  .site-why-scene [data-in="2"] { animation-name: why-in-2; }
+  .site-why-scene [data-out="2"] { animation-name: why-out-2; }
+  .site-why-scene [data-pulse="2"] { animation-name: why-ring-2; }
+  .site-why-scene [data-fly="2"] { animation-name: why-fly-2; }
+  .site-why-scene [data-in="3"] { animation-name: why-in-3; }
+  .site-why-scene [data-out="3"] { animation-name: why-out-3; }
+  .site-why-scene [data-pulse="3"] { animation-name: why-ring-3; }
+  .site-why-scene [data-fly="3"] { animation-name: why-fly-3; }
+  .site-why-scene [data-in="4"] { animation-name: why-in-4; }
+  .site-why-scene [data-out="4"] { animation-name: why-out-4; }
+  .site-why-scene [data-pulse="4"] { animation-name: why-ring-4; }
+  .site-why-scene [data-fly="4"] { animation-name: why-fly-4; }
+  .site-why-scene [data-in="5"] { animation-name: why-in-5; }
+  .site-why-scene [data-out="5"] { animation-name: why-out-5; }
+  .site-why-scene [data-pulse="5"] { animation-name: why-ring-5; }
+  .site-why-scene [data-fly="5"] { animation-name: why-fly-5; }
+  .site-why-scene [data-third="1"] { animation-name: why-third-1; }
+  .site-why-scene .why-win[data-third="1"] { animation-name: why-front-1; }
+  .site-why-scene .why-tab[data-third="1"] { animation-name: why-tab-1; }
+  .site-why-scene [data-third="2"] { animation-name: why-third-2; }
+  .site-why-scene .why-win[data-third="2"] { animation-name: why-front-2; }
+  .site-why-scene .why-tab[data-third="2"] { animation-name: why-tab-2; }
+  .site-why-scene [data-third="3"] { animation-name: why-third-3; }
+  .site-why-scene .why-win[data-third="3"] { animation-name: why-front-3; }
+  .site-why-scene .why-tab[data-third="3"] { animation-name: why-tab-3; }
+}
+
+/* Without motion every scene rests on its last step. */
+@media (prefers-reduced-motion: reduce) {
+  .site-why-scene :is([data-out], [data-fly]),
+  .site-why-scene .why-tab-pane:not([data-third="1"]) {
+    opacity: 0;
+  }
+}
+
+@keyframes why-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+
+@keyframes why-in-1 {
+  0%, 10% { opacity: 0; transform: translateY(3px); }
+  14%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+@keyframes why-out-1 {
+  0%, 10% { opacity: 1; }
+  14%, 96% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes why-ring-1 {
+  0%, 10%, 28%, 100% { box-shadow: 0 0 0 0 transparent; }
+  13%, 20% { box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--why-c, var(--site-ink)) 45%, transparent); }
+}
+
+@keyframes why-fly-1 {
+  0%, 3% { opacity: 0; transform: none; }
+  4% { opacity: 1; transform: none; }
+  10% { opacity: 1; transform: translateX(var(--why-fly)); }
+  11.5%, 100% { opacity: 0; transform: translateX(var(--why-fly)); }
+}
+
+@keyframes why-in-2 {
+  0%, 24% { opacity: 0; transform: translateY(3px); }
+  28%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+@keyframes why-out-2 {
+  0%, 24% { opacity: 1; }
+  28%, 96% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes why-ring-2 {
+  0%, 24%, 42%, 100% { box-shadow: 0 0 0 0 transparent; }
+  27%, 34% { box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--why-c, var(--site-ink)) 45%, transparent); }
+}
+
+@keyframes why-fly-2 {
+  0%, 17% { opacity: 0; transform: none; }
+  18% { opacity: 1; transform: none; }
+  24% { opacity: 1; transform: translateX(var(--why-fly)); }
+  25.5%, 100% { opacity: 0; transform: translateX(var(--why-fly)); }
+}
+
+@keyframes why-in-3 {
+  0%, 38% { opacity: 0; transform: translateY(3px); }
+  42%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+@keyframes why-out-3 {
+  0%, 38% { opacity: 1; }
+  42%, 96% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes why-ring-3 {
+  0%, 38%, 56%, 100% { box-shadow: 0 0 0 0 transparent; }
+  41%, 48% { box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--why-c, var(--site-ink)) 45%, transparent); }
+}
+
+@keyframes why-fly-3 {
+  0%, 31% { opacity: 0; transform: none; }
+  32% { opacity: 1; transform: none; }
+  38% { opacity: 1; transform: translateX(var(--why-fly)); }
+  39.5%, 100% { opacity: 0; transform: translateX(var(--why-fly)); }
+}
+
+@keyframes why-in-4 {
+  0%, 52% { opacity: 0; transform: translateY(3px); }
+  56%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+@keyframes why-out-4 {
+  0%, 52% { opacity: 1; }
+  56%, 96% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes why-ring-4 {
+  0%, 52%, 70%, 100% { box-shadow: 0 0 0 0 transparent; }
+  55%, 62% { box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--why-c, var(--site-ink)) 45%, transparent); }
+}
+
+@keyframes why-fly-4 {
+  0%, 45% { opacity: 0; transform: none; }
+  46% { opacity: 1; transform: none; }
+  52% { opacity: 1; transform: translateX(var(--why-fly)); }
+  53.5%, 100% { opacity: 0; transform: translateX(var(--why-fly)); }
+}
+
+@keyframes why-in-5 {
+  0%, 66% { opacity: 0; transform: translateY(3px); }
+  70%, 92% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+
+@keyframes why-out-5 {
+  0%, 66% { opacity: 1; }
+  70%, 96% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes why-ring-5 {
+  0%, 66%, 84%, 100% { box-shadow: 0 0 0 0 transparent; }
+  69%, 76% { box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--why-c, var(--site-ink)) 45%, transparent); }
+}
+
+@keyframes why-fly-5 {
+  0%, 59% { opacity: 0; transform: none; }
+  60% { opacity: 1; transform: none; }
+  66% { opacity: 1; transform: translateX(var(--why-fly)); }
+  67.5%, 100% { opacity: 0; transform: translateX(var(--why-fly)); }
+}
+
+@keyframes why-third-1 {
+  0%, 31% { opacity: 1; }
+  33%, 98% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes why-front-1 {
+  0%, 31% { z-index: 3; transform: translateY(-3px); color: var(--site-ink); }
+  33%, 98% { z-index: 1; transform: none; color: var(--site-ink-muted); }
+  100% { z-index: 3; transform: translateY(-3px); color: var(--site-ink); }
+}
+
+@keyframes why-tab-1 {
+  0%, 31% { background-color: var(--site-paper); color: var(--site-ink); }
+  33%, 98% { background-color: transparent; color: var(--site-ink-muted); }
+  100% { background-color: var(--site-paper); color: var(--site-ink); }
+}
+
+@keyframes why-third-2 {
+  0%, 31% { opacity: 0; }
+  33%, 64% { opacity: 1; }
+  66%, 100% { opacity: 0; }
+}
+
+@keyframes why-front-2 {
+  0%, 31% { z-index: 1; transform: none; color: var(--site-ink-muted); }
+  33%, 64% { z-index: 3; transform: translateY(-3px); color: var(--site-ink); }
+  66%, 100% { z-index: 1; transform: none; color: var(--site-ink-muted); }
+}
+
+@keyframes why-tab-2 {
+  0%, 31% { background-color: transparent; color: var(--site-ink-muted); }
+  33%, 64% { background-color: var(--site-paper); color: var(--site-ink); }
+  66%, 100% { background-color: transparent; color: var(--site-ink-muted); }
+}
+
+@keyframes why-third-3 {
+  0%, 64% { opacity: 0; }
+  66%, 98% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes why-front-3 {
+  0%, 64% { z-index: 1; transform: none; color: var(--site-ink-muted); }
+  66%, 98% { z-index: 3; transform: translateY(-3px); color: var(--site-ink); }
+  100% { z-index: 1; transform: none; color: var(--site-ink-muted); }
+}
+
+@keyframes why-tab-3 {
+  0%, 64% { background-color: transparent; color: var(--site-ink-muted); }
+  66%, 98% { background-color: var(--site-paper); color: var(--site-ink); }
+  100% { background-color: transparent; color: var(--site-ink-muted); }
 }
 
 .site-faq summary::-webkit-details-marker {
