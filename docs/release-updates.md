@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Sending does not wait for summon previews
+
+Pressing Enter or Send with an Agent mention previously waited up to six
+seconds for the draft intent preview before the message appeared. Sending
+now takes completed readings for the exact current draft immediately;
+unfinished previews use the existing post-send intent check. Changed drafts
+cannot carry an older reading. This ships in the beta Web, with no API or
+data migration. Recovery is a CI-validated beta Web reverting the change.
+
 ## Unreleased: Page edits in a Channel fold to a summary with a preview
 
 An Agent message that changed a page drew its first three changed lines in

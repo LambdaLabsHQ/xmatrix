@@ -45,8 +45,9 @@ Channel context. Mention bands show the reading. A declined address has a clicka
 underline that opens xMatrix's explanation and a **Start anyway** option at
 that mention. The option writes `launch:force` only on that summon; sending
 still owns publication and launch. Normal summons add no explanatory text,
-and no caption sits below the input. The separate intent/Force pill is removed. Enter finishes or reuses
-the current bounded preview request before publishing. Any edit or Channel
+and no caption sits below the input. The separate intent/Force pill is removed.
+Sending takes only completed readings for the current draft and never waits
+for the preview debounce or an in-flight request. Any edit or Channel
 change discards the old reading. Forced mentions skip preview.
 
 A Human send carries the confirmed readings, bound to exact UTF-16 offsets and
