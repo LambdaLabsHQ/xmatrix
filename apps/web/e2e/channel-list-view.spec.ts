@@ -414,12 +414,12 @@ for (const accounts of [["e2e-user", "other-reader"], ["e2e-user", "other-reader
   });
 }
 
-test("unpinning the last conversation removes Pinned and saves an empty list", async ({ page }) => {
+for (const changedAccount of [false, true]) test(`unpinning the last conversation removes Pinned and saves an empty list (${changedAccount ? "after changing accounts" : "after first sign-in"})`, async ({ page }) => {
   await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
-  const signIn = (id: string) => fixtureJson(page, `unpin-session-${id}`, "**/api/auth/get-session**", {
+  const signIn = (id: string, delayMs = 0) => fixtureJson(page, `unpin-session-${id}`, "**/api/auth/get-session**", {
     user: { id, email: `${id}@xmatrix.test`, name: id },
     session: { token: `session-${id}`, expiresAt: new Date(Date.now() + 60_000).toISOString() },
-  });
+  }, { delayMs });
   const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan",
     updatedAt: "2026-07-01T08:00:00.000Z" };
   const other = { ...E2E_CHANNEL, id: "channel-other", name: "random",
@@ -429,14 +429,16 @@ test("unpinning the last conversation removes Pinned and saves an empty list", a
     channelViewPreference: { pinnedChannelIds: [pinned.id] },
   });
   await fixtureJson(page, "auth-token", "**/api/auth/token**", { token: "test-jwt" });
-  await signIn("e2e-user");
+  await signIn("e2e-user", 200);
   await page.goto(`/app/${pinned.spaceId}/channels/${pinned.name}--${pinned.id}`, { waitUntil: "domcontentloaded" });
   const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
   await expect(sidebar.getByRole("button", { name: "Unpin #launch-plan", exact: true })).toBeVisible();
-  const reads = (await fixtureRequests(page, "channel-view-preference")).length;
-  await signIn("other-reader");
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect.poll(async () => (await fixtureRequests(page, "channel-view-preference")).length).toBeGreaterThan(reads);
+  if (changedAccount) {
+    const reads = (await fixtureRequests(page, "channel-view-preference")).length;
+    await signIn("other-reader");
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(async () => (await fixtureRequests(page, "channel-view-preference")).length).toBeGreaterThan(reads);
+  }
   await sidebar.getByRole("button", { name: "Unpin #launch-plan", exact: true }).click();
   await expect(sidebar.getByText("Pinned", { exact: true })).toHaveCount(0);
   await expect.poll(visibleChannelRowIds(page)).toEqual([other.id, pinned.id]);
