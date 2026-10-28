@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: Automatic Gmail reads use the Hub's Composio key
+
+Live receipts for automatic Gmail reads reported a failure. A stored Composio
+grant holds only account ids, and the Hub adds its project key per call; the
+notification worker read without it. The automatic read now adds the key the
+same way, and a Hub without one fails the read and names Composio. This ships in the Hub.
+
 ## Unreleased: Automatic Gmail reads now reach the Channel
 
 The first release of automatic Gmail reads posted no receipt: each one replied
