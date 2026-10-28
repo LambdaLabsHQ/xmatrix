@@ -7,6 +7,7 @@ import { readGmailMessage } from "./actions/gmail";
 import { commandResult, publishCommandStatus } from "./command-support";
 import type { GmailMailbox } from "./gmail-mailboxes";
 import { ProviderRequestError } from "./http";
+import { oauthClient } from "./oauth";
 import { writeConnectorPrivateResult } from "./private-result-content";
 
 /** Beyond this many arrivals in an hour a mailbox's notifications carry only the message ID. */
@@ -32,7 +33,10 @@ export async function autoReadGmailMessage(env: Env, input: {
   } else {
     try {
       if (!await input.current()) return;
-      outcome = { status: "completed", detail: await readGmailMessage(input.credentials, input.mailbox, id,
+      // A stored Composio grant holds only account ids; the project key is a Hub secret read per call.
+      const key = oauthClient(env, "gmail")?.clientSecret;
+      if (!key) throw new ProviderRequestError(503, "Composio is not configured on this Hub");
+      outcome = { status: "completed", detail: await readGmailMessage({ ...input.credentials, composioApiKey: key }, input.mailbox, id,
         upstreamMeter(env, { spaceId: job.spaceId, connector: "gmail", action: "auto_read" })) };
     } catch (error) {
       outcome = { status: "failed", detail: error instanceof ProviderRequestError ? error.message : "The message could not be read" };
