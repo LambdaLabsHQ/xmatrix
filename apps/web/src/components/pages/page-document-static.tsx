@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef } from "react";
+import { followPageLink, pageLinkAction } from "./page-editor-syntax";
 import { renderPageDocument } from "./page-document-render";
 import type { PageMediaUrl } from "./page-media";
 import type { PageReferenceTargets } from "./page-reference-chips";
@@ -45,6 +46,16 @@ export function PageDocumentStatic({ body, testId, references, mediaUrl, onAncho
   }, [body, references, mediaUrl]);
   return (
     <div ref={host} className="ProseMirror page-document" data-editable="false" translate="no" data-testid={testId}
-      onClick={(event) => { if ((event.target as HTMLElement).tagName === "INPUT") event.preventDefault(); }} />
+      onClick={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.tagName === "INPUT") { event.preventDefault(); return; }
+        const anchor = target.closest("a[href]");
+        const href = anchor?.getAttribute("href") ?? null;
+        if (event.button !== 0 || pageLinkAction({
+          href, alt: event.altKey, shift: event.shiftKey, button: event.button, selecting: false,
+        }) !== "open" || !href) return;
+        event.preventDefault();
+        followPageLink(href, references?.openPage);
+      }} />
   );
 }

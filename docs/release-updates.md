@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: A page's links open on click
+
+A link in a page opens when clicked, including a bare address and a markdown
+link, and including the destination shown beside the caret. A link to another
+page of this app opens that page; any other web address opens in a new tab.
+Alt-click edits the address. This ships in the Web app. No data migration.
+Recovery is a CI-validated beta Web release reverting the change.
+
 ## Unreleased: Page edits in a Channel fold to a summary with a preview
 
 An Agent message that changed a page drew its first three changed lines in

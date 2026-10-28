@@ -3,7 +3,8 @@ const test = require("node:test");
 require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
 const { EditorState, TextSelection } = require("prosemirror-state");
 const { markdownToPageDoc, pageSchema } = require("@xmatrix/protocol/page-document");
-const { markdownShortcuts, syntaxDecorations, typoraBackspace, typoraDelete } = require("./page-editor-syntax.ts");
+const { markdownLinkAt, markdownShortcuts, openableHref, pageLinkAction, syntaxDecorations, typoraBackspace,
+  typoraDelete } = require("./page-editor-syntax.ts");
 
 function caret(markdown, needle, where) {
   const doc = markdownToPageDoc(markdown);
@@ -88,6 +89,22 @@ test("backspace removes the marker nearest the caret", () => {
 
   const cleared = apply(caret("**Hello**", "Hello", "end"), typoraDelete);
   assert.equal(cleared.doc.firstChild.firstChild.marks.length, 0);
+});
+
+test("a plain click opens a web link, including markdown, and alt-click edits it", () => {
+  const base = "https://xmatrix.sh/app/lambda/pages?page=current";
+  assert.equal(pageLinkAction({ href: "https://xmatrix.sh/llms.txt", alt: false, shift: false, button: 0, selecting: false }), "open");
+  const markdown = "see [docs](https://xmatrix.sh/llms.txt) now";
+  assert.equal(markdownLinkAt(markdown, 6), "https://xmatrix.sh/llms.txt");
+  assert.equal(pageLinkAction({ href: markdownLinkAt(markdown, 6), alt: false, shift: false, button: 0, selecting: false }), "open");
+  assert.equal(markdownLinkAt("see https://xmatrix.sh/llms.txt now", 5), "https://xmatrix.sh/llms.txt");
+  assert.equal(markdownLinkAt("see [docs](https://xmatrix.sh/llms.txt \"notes\")", 4), "https://xmatrix.sh/llms.txt");
+  assert.equal(markdownLinkAt("see https://xmatrix.sh/llms.txt now", 0), null);
+  assert.equal(pageLinkAction({ href: "https://xmatrix.sh/llms.txt", alt: true, shift: false, button: 0, selecting: false }), "edit");
+  assert.equal(pageLinkAction({ href: "https://xmatrix.sh/llms.txt", alt: false, shift: false, button: 0, selecting: true }), "ignore");
+  assert.equal(pageLinkAction({ href: "xmatrix:github-file/o/r/a.md", alt: false, shift: false, button: 0, selecting: false }), "ignore");
+  assert.equal(pageLinkAction({ href: "javascript:alert(1)", alt: false, shift: false, button: 0, selecting: false }), "ignore");
+  assert.equal(openableHref("/llms.txt", base), "https://xmatrix.sh/llms.txt");
 });
 
 test("typed markdown becomes the mark or block", () => {

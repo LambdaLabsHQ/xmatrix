@@ -334,7 +334,8 @@ fact is about.
   removes it: one heading level at a time, then the quote, and a mark's
   delimiter drops that mark. Shortcuts still apply marks. A typed URL followed
   by a space becomes a link.
-  Clicking a link's visible destination edits the address.
+  Clicking a link opens it, and so does clicking the destination its markdown
+  shows while the caret is there. Alt-click on either edits the address.
 - **What the caret shows never moves the text under the pointer.** Markers
   stay as they were while the button is down and follow the caret once it is
   up; if the markers it leaves took lines, the page scrolls by that much so

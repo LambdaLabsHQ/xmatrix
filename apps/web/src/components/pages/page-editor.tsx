@@ -41,6 +41,7 @@ import {
   sectionsKey, selectionAnchor, setBlockKind, setLink, sharedPosition, type BlockKind, type CursorPresence, type Discussion,
   type HeadingActions, type ReadCard, type SectionNote,
 } from "./page-editor-setup";
+import { followPageLink, markdownLinkAt, pageLinkAction } from "./page-editor-syntax";
 import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
 import type { WriteAgent } from "./page-write-with";
 import { instanceMention, type PageInstance } from "./page-instances";
@@ -62,6 +63,29 @@ export interface PageReading {
 }
 
 export type { CursorPresence, Discussion, HeadingActions, SectionNote };
+
+/** A markdown link or bare URL under the pointer, when that text is not code and not already a link. */
+function markdownHrefAt(view: EditorView, event: MouseEvent): string | null {
+  const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
+  if (!at) return null;
+  const parent = view.state.doc.resolve(at.pos).parent;
+  if (!parent.isTextblock || parent.type.spec.code) return null;
+  const offset = at.pos - view.state.doc.resolve(at.pos).start();
+  let cursor = 0;
+  let text: string | null = null;
+  let local = 0;
+  parent.forEach((node) => {
+    const start = cursor;
+    cursor += node.nodeSize;
+    if (text !== null || !node.isText || offset < start || offset > start + node.nodeSize) return;
+    if (pageSchema.marks.code.isInSet(node.marks) || pageSchema.marks.link.isInSet(node.marks)) return;
+    text = node.text ?? "";
+    local = offset - start;
+  });
+  const found = text;
+  if (found === null) return null;
+  return markdownLinkAt(found, local) ?? (local > 0 ? markdownLinkAt(found, local - 1) : null);
+}
 
 /**
  * The page, edited as a document (docs/design/pages-live-document.md §4):
@@ -642,11 +666,23 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           showToolbar(readToolbar(blurred));
           return false;
         },
-        click: (_view, event) => {
-          const anchor = (event.target as HTMLElement | null)?.closest("a[href]");
-          if (!anchor || (editable.current && !(event.metaKey || event.ctrlKey))) return false;
+        click: (current, event) => {
+          if (event.button !== 0) return false;
+          const target = event.target instanceof Element ? event.target : null;
+          // The markdown destination is its own widget; the plugin opens that on press.
+          if (target?.closest("[data-edit-link]")) return false;
+          const anchor = target?.closest("a[href]");
+          const href = anchor?.getAttribute("href") ?? markdownHrefAt(current, event);
+          if (event.altKey && editable.current && href) {
+            event.preventDefault();
+            current.dom.dispatchEvent(new CustomEvent("xmatrix-edit-link", { bubbles: true, detail: { href } }));
+            return true;
+          }
+          if (pageLinkAction({
+            href, alt: false, shift: event.shiftKey, button: event.button, selecting: !current.state.selection.empty,
+          }) !== "open" || !href) return false;
           event.preventDefault();
-          window.open((anchor as HTMLAnchorElement).href, "_blank", "noopener,noreferrer");
+          followPageLink(href, referenceTargets.current?.openPage);
           return true;
         },
       },

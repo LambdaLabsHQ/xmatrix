@@ -26,7 +26,7 @@ import { PageSessionChanges, type PageChangeItems, type PageChangeWriter } from 
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { imageView, pageMediaPaste, type LocalMedia, type PageMediaSource, type UploadPageMedia } from "./page-media";
-import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
+import { followPageLink, markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
 import { pageTriggers } from "./page-triggers";
 import { tableCells } from "./page-table-cells-plugin";
 import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
@@ -1304,7 +1304,7 @@ export function editorPlugins(input: {
     typoraKeymap(),
     pageTriggers(),
     markdownShortcuts(),
-    syntaxPlugin(),
+    syntaxPlugin((href) => followPageLink(href, input.references()?.openPage)),
     taskShortcut,
     pageMediaPaste({ upload: input.uploadMedia, local: input.localMedia, onFailure: input.onMediaFailure }),
     pasteLink,

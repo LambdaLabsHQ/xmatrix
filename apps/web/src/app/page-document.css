@@ -19,7 +19,7 @@
 .page-document h3 { font-size: 1.12em; font-weight: 700; margin-top: 1em; }
 .page-document h4, .page-document h5, .page-document h6 { font-weight: 700; margin-top: 0.9em; }
 .page-document > :first-child { margin-top: 0; }
-.page-document a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.page-document a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .page-document code {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.9em;

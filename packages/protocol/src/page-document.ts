@@ -101,7 +101,11 @@ export const pageSchema = new Schema({
       attrs: { href: {}, title: { default: null } }, inclusive: false,
       parseDOM: [{ tag: "a[href]", getAttrs: (dom) => ({ href: (dom as HTMLElement).getAttribute("href"),
         title: (dom as HTMLElement).getAttribute("title") }) }],
-      toDOM: (mark) => ["a", { href: mark.attrs.href, title: mark.attrs.title, rel: "noreferrer" }, 0],
+      toDOM: (mark) => ["a", {
+        href: mark.attrs.href, title: mark.attrs.title, rel: "noreferrer",
+        // A web address opens in its own tab. The editor still takes the click so a page of this app opens here.
+        ...(/^https?:\/\//iu.test(String(mark.attrs.href ?? "")) ? { target: "_blank" } : {}),
+      }, 0],
     },
     strong: { parseDOM: [{ tag: "strong" }, { tag: "b" }], toDOM: () => ["strong", 0] },
     em: { parseDOM: [{ tag: "em" }, { tag: "i" }], toDOM: () => ["em", 0] },

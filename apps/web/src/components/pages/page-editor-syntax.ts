@@ -71,6 +71,83 @@ function syntaxSpans(doc: DocNode, pos: number): SyntaxSpan[] {
   return found;
 }
 
+/** An address a click can follow. `javascript:` and the page's own reference schemes are not. */
+export function openableHref(href: string, base: string): string | null {
+  const trimmed = href.trim();
+  if (!trimmed || /^(?:javascript|data|vbscript):/iu.test(trimmed)) return null;
+  try {
+    const url = new URL(trimmed, base);
+    if (url.protocol !== "http:" && url.protocol !== "https:" && url.protocol !== "mailto:") return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/** A link to a page of this app (`/app/<space>/pages?page=<id>#<block>`). */
+export function appPageTarget(href: string, base: string): { pageId: string; blockId: string | null } | null {
+  try {
+    const url = new URL(href, base);
+    if (url.origin !== new URL(base).origin || !/^\/app\/[^/]+\/pages\/?$/u.test(url.pathname)) return null;
+    const pageId = url.searchParams.get("page");
+    if (!pageId) return null;
+    const blockId = url.hash.length > 1 ? decodeURIComponent(url.hash.slice(1)) : null;
+    return { pageId, blockId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a click on a page's link does. A plain click opens an http(s) or mailto
+ * address, including one written as markdown. Alt-click edits it. A drag or a
+ * non-web address is left to the editor.
+ */
+export function pageLinkAction(input: {
+  href: string | null; alt: boolean; shift: boolean; button: number; selecting: boolean; base?: string;
+}): "open" | "edit" | "ignore" {
+  if (input.button !== 0 || !input.href?.trim()) return "ignore";
+  if (input.alt) return "edit";
+  if (input.shift || input.selecting) return "ignore";
+  return openableHref(input.href, input.base ?? "https://xmatrix.sh") ? "open" : "ignore";
+}
+
+const MARKDOWN_LINK = /\[(?:[^\]\n]*)\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)/gu;
+const BARE_URL = /https?:\/\/[^\s<>)\]]+/gu;
+
+/** The http(s) address of a markdown link or a bare URL covering `offset` in `text`. */
+export function markdownLinkAt(text: string, offset: number): string | null {
+  MARKDOWN_LINK.lastIndex = 0;
+  for (const match of text.matchAll(MARKDOWN_LINK)) {
+    const start = match.index ?? 0;
+    if (offset >= start && offset <= start + match[0].length) return match[1] ?? null;
+  }
+  BARE_URL.lastIndex = 0;
+  for (const match of text.matchAll(BARE_URL)) {
+    const start = match.index ?? 0;
+    if (offset >= start && offset <= start + match[0].length) return match[0];
+  }
+  return null;
+}
+
+/** Opens `href` in the app when it names a page here, otherwise in a new tab. */
+export function followPageLink(href: string, openPage?: (pageId: string, blockId: string | null) => void): void {
+  const base = typeof window === "undefined" ? "https://xmatrix.sh" : window.location.href;
+  const page = openPage ? appPageTarget(href, base) : null;
+  if (page && openPage) {
+    openPage(page.pageId, page.blockId);
+    return;
+  }
+  const target = openableHref(href, base);
+  if (!target || typeof window === "undefined") return;
+  const bridge = window.xmatrixDesktop;
+  if (bridge?.openExternal) {
+    void bridge.openExternal(target);
+    return;
+  }
+  window.open(target, "_blank", "noopener,noreferrer");
+}
+
 function syntaxToken(text: string, href?: string): HTMLElement {
   const span = document.createElement("span");
   span.className = "page-md-syntax";
@@ -79,7 +156,8 @@ function syntaxToken(text: string, href?: string): HTMLElement {
   span.setAttribute("aria-hidden", "true");
   if (href !== undefined) {
     span.dataset.editLink = href;
-    span.title = "Edit link";
+    const base = typeof window === "undefined" ? "https://xmatrix.sh" : window.location.href;
+    span.title = openableHref(href, base) ? "Open link" : "Edit link";
   }
   return span;
 }
@@ -147,11 +225,12 @@ function releaseMarkers(view: EditorView) {
 }
 
 /**
- * A second click on the link the caret is already in edits its address. While the mouse button is held the
- * markers stay as they were: drawn under the pointer as it presses, they would replace the text the browser
- * anchors its drag in, and the drag would only move the caret. They follow the caret once the button is up.
+ * A click on the destination the caret's markdown shows opens it; Alt-click edits the address.
+ * While the mouse button is held the markers stay as they were: drawn under the pointer as it presses,
+ * they would replace the text the browser anchors its drag in, and the drag would only move the caret.
+ * They follow the caret once the button is up.
  */
-export function syntaxPlugin(): Plugin {
+export function syntaxPlugin(openLink: (href: string) => void): Plugin {
   return new Plugin({
     key: syntaxKey,
     state: {
@@ -169,11 +248,14 @@ export function syntaxPlugin(): Plugin {
           const target = event.target;
           const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
           const token = element?.closest<HTMLElement>("[data-edit-link]");
-          if (token) {
+          if (token && event.button === 0 && !event.shiftKey) {
             event.preventDefault();
-            view.dom.dispatchEvent(new CustomEvent("xmatrix-edit-link", {
-              bubbles: true, detail: { href: token.dataset.editLink ?? "" },
-            }));
+            const href = token.dataset.editLink ?? "";
+            const open = !event.altKey && pageLinkAction({
+              href, alt: false, shift: false, button: 0, selecting: false,
+            }) === "open";
+            if (open) openLink(href);
+            else view.dom.dispatchEvent(new CustomEvent("xmatrix-edit-link", { bubbles: true, detail: { href } }));
             return true;
           }
           if (event.button !== 0) return false;
