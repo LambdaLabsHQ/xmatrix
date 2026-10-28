@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryCache, QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import { subscribeResume } from "@/lib/connectivity/connectivity";
 import { shouldRetryXMatrixQuery, xmatrixRetryDelayMs } from "./api-client";
@@ -44,14 +44,33 @@ onlineManager.setEventListener((setOnline) => {
   };
 });
 
+/**
+ * Key of the query tree. Observers keep the client that created them, so a
+ * change from one signed-in account to another, or a sign-out, remounts them
+ * onto the cache their actions write. The first sign-in does not: the open
+ * page has already read a one-time callback or stored where to return.
+ */
+export function queryMountKey(
+  mountKey: string | undefined,
+  previousUserId: string | null | undefined,
+  userId: string | null,
+): string {
+  if (previousUserId === undefined || mountKey === undefined) return userId ?? "anonymous";
+  if (previousUserId && previousUserId !== userId) return userId ?? "anonymous";
+  return mountKey;
+}
+
 export function XMatrixQueryProvider(props: { userId: string | null; children: ReactNode }) {
   const client = useMemo(createClient, [props.userId]);
+  const mountKeyRef = useRef<string | undefined>(undefined);
+  const previousUserIdRef = useRef<string | null | undefined>(undefined);
+  const mountKey = queryMountKey(mountKeyRef.current, previousUserIdRef.current, props.userId);
+  mountKeyRef.current = mountKey;
+  previousUserIdRef.current = props.userId;
 
   useEffect(() => {
     return () => client.clear();
   }, [client]);
 
-  // Query observers retain their creating client. Remount them with the identity
-  // instead of letting old observations drive writes through a new empty cache.
-  return <QueryClientProvider key={props.userId ?? "anonymous"} client={client}>{props.children}</QueryClientProvider>;
+  return <QueryClientProvider key={mountKey} client={client}>{props.children}</QueryClientProvider>;
 }
