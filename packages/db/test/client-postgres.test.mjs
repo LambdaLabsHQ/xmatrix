@@ -109,9 +109,15 @@ integration("execution-owner lock failures retain the live blocker without ident
           await client.query("SELECT pg_sleep(0.15)");
         }, query: client.query.bind(client), end: client.end.bind(client) };
       } });
+    let readyCount = 0, releaseReady;
+    const ready = new Promise(resolve => { releaseReady = resolve; });
     const failures = await Promise.allSettled([1, 2].map(index => concurrent.transaction({
       requestId: `concurrent-${index}`, operation: "runtime.execution-report", placement,
-    }, tx => tx.query({ name: "runtime_execution_report_owner_v4", text: `SELECT id FROM ${table} FOR UPDATE`, maxRows: 1 }))));
+    }, async tx => {
+      if (++readyCount === 2) releaseReady();
+      await ready;
+      return tx.query({ name: "runtime_execution_report_owner_v4", text: `SELECT id FROM ${table} FOR UPDATE`, maxRows: 1 });
+    })));
     assert.ok(failures.every(result => result.status === "rejected" && result.reason.code === "55P03"));
     assert.deepEqual(failures.map(result => databaseFailureEvidence(result.reason)[0].lockWait.status).sort(), ["busy", "sampled"]);
     assert.equal(samples, 1, "concurrent waiting reports share the isolate's one diagnostic slot");
