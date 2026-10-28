@@ -12,6 +12,7 @@ import {
   fixtureChannelCatalog,
   fixtureJson,
   installWorkspaceStubs,
+  routeHumanSocket,
 } from "./workspace-fixtures";
 
 /* Opening a conversation used to show an empty timeline for a quarter of a
@@ -121,10 +122,14 @@ test.describe("desktop", () => {
   test.use(E2E_DESKTOP_CONTEXT);
 
   test("switching to a conversation shows its newest message in the frame that switches", async ({ page }) => {
+    // The focus socket stays open but its history page is delayed; the HTTP
+    // fallback answers the empty Channel while the prior rows are still held.
+    await routeHumanSocket(page, () => {});
     await openWorkspace(page, "/app/personal-sspaceperso/channels/general-cchannelgen");
     await expect(page.locator(`[id="${NEWEST_ROW_ID}"]`)).toBeVisible();
     await conversationOpened(page);
     await openQuietConversation(page);
+    await expect(page.getByText("No messages yet.", { exact: true })).toBeVisible();
 
     await recordPaintedTimelineFrames(page, GENERAL_ROW_ACTIVE);
     await clickConversationRow(page, "channel-general");
