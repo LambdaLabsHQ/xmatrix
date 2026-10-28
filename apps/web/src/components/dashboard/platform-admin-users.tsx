@@ -22,6 +22,7 @@ import {
   formatAdminCount,
 } from "./platform-admin-overview";
 import { AdminDetailHeader, TimeCell, adminTimeColumn, adminAge as age, adminUtc as utc } from "./platform-admin-cells";
+import { adminRecentActiveDays } from "./platform-admin-analytics";
 import { ToolDetailSection, ToolFact, ToolFacts } from "./tool-split";
 import { AdminDailyBars, AdminQueryView, AdminStatGrid } from "./workspace-platform-admin-view";
 
@@ -59,6 +60,10 @@ const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
   {
     key: "lastAccess", label: "Last access", numeric: true, value: (user) => adminTime(user.lastSessionAt),
     render: (user) => <TimeCell value={user.lastSessionAt} fallback="Never" />,
+  },
+  {
+    key: "activeDays", label: "Active days, 30d", numeric: true, value: (user) => adminRecentActiveDays(user),
+    render: (user) => formatAdminCount(adminRecentActiveDays(user)),
   },
   {
     key: "sessions", mobile: false, label: "Sessions", numeric: true, value: (user) => user.activeSessions ?? 0,

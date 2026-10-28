@@ -27,8 +27,8 @@ function shardResults(overrides = {}) {
     postgres_admin_user_machines_v1: [],
     postgres_admin_user_connectors_v2: [],
     postgres_admin_user_runs_v1: [],
-    postgres_admin_user_messages_v1: [{ total: 0, last_7d: 0, last_30d: 0, last_message_at: null }],
-    postgres_admin_user_activity_v1: [],
+    postgres_admin_user_settled_v1: [{ settled_through: "2026-09-28" }],
+    postgres_admin_user_messages_v2: [{ total: 0, last_7d: 0, last_30d: 0, last_message_at: null, activity: [] }],
     postgres_admin_user_pages_v1: [{ pages: 0 }],
     ...overrides,
   };
@@ -52,10 +52,10 @@ test("admin user detail merges shards, reads Machines once, and fills a 30-day s
       { status: "finished", runs: 4, last_30d: 2, last_run_at: "2026-09-20T00:00:00.000Z" },
       { status: "running", runs: 1, last_30d: 1, last_run_at: "2026-09-30T10:00:00.000Z" },
     ],
-    postgres_admin_user_messages_v1: [{
+    postgres_admin_user_messages_v2: [{
       total: 5, last_7d: 2, last_30d: 4, last_message_at: "2026-09-29T00:00:00.000Z",
+      activity: [{ day: "2026-09-29", messages: 2 }],
     }],
-    postgres_admin_user_activity_v1: [{ day: "2026-09-29", messages: 2 }],
     postgres_admin_user_pages_v1: [{ pages: 2 }],
   }), seen0);
   const shard1 = database(shardResults({
@@ -72,10 +72,10 @@ test("admin user detail merges shards, reads Machines once, and fills a 30-day s
     postgres_admin_user_runs_v1: [
       { status: "finished", runs: 1, last_30d: 1, last_run_at: "2026-09-25T00:00:00.000Z" },
     ],
-    postgres_admin_user_messages_v1: [{
+    postgres_admin_user_messages_v2: [{
       total: 1, last_7d: 1, last_30d: 1, last_message_at: "2026-09-30T09:00:00.000Z",
+      activity: [{ day: "2026-09-29", messages: 1 }],
     }],
-    postgres_admin_user_activity_v1: [{ day: "2026-09-29", messages: 1 }],
     postgres_admin_user_pages_v1: [{ pages: 1 }],
   }), seen1);
 
@@ -88,6 +88,9 @@ test("admin user detail merges shards, reads Machines once, and fills a 30-day s
   }, "user-1", NOW);
 
   assert.equal(seen1.some((query) => query.name === "postgres_admin_user_machines_v1"), false);
+  const messageRead = seen0.find((query) => query.name === "postgres_admin_user_messages_v2");
+  assert.equal(messageRead.values[4], "2026-09-29T00:00:00.000Z", "unsettled days start after the settled one");
+  assert.match(messageRead.text, /FROM data\.admin_activity_days/u);
   assert.deepEqual(detail.spaces.map((space) => space.spaceId), ["space-0", "space-1"]);
   assert.deepEqual(detail.spaces[0].billing, {
     plan: "pro", status: "active", seats: 3,
@@ -123,7 +126,7 @@ test("admin user detail skips message scans for a user in no Space and reports t
       postgres_admin_user_agents_v1: many,
     }), seen) }],
   }, "user-1", NOW);
-  assert.equal(seen.some((query) => query.name === "postgres_admin_user_messages_v1"), false);
+  assert.equal(seen.some((query) => query.name === "postgres_admin_user_messages_v2"), false);
   assert.equal(detail.agents.length, 100);
   assert.deepEqual(detail.truncated, ["agents"]);
   assert.equal(detail.messages.total, 0);

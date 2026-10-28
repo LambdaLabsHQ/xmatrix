@@ -46,6 +46,7 @@ import {
 } from "./channel-messages";
 import { getSpace } from "./spaces";
 import { readPostgresAdminOverview } from "./postgres-admin-overview";
+import { withSignups } from "./admin-overview-merge";
 import { readPostgresAdminSpaceDetail } from "./postgres-admin-space-detail";
 import { readPostgresAdminOperations } from "./postgres-admin-operations";
 
@@ -115,6 +116,31 @@ async function auditedPlatformAdmin(
   return authUser;
 }
 
+/**
+ * An audited operator read: authority is proven first, then the audit row is
+ * written while the read runs. The result is returned only once its audit row
+ * is written; a read whose row could not be written is refused.
+ */
+async function auditedPlatformAdminRead<T>(
+  request: Request,
+  env: Env,
+  action: AdminAuditAction,
+  target: { kind: string; id: string } | undefined,
+  read: () => Promise<T>,
+): Promise<T> {
+  const authUser = await requirePlatformAdmin(request, env);
+  const [, result] = await Promise.all([
+    recordAdminAudit(env, {
+      actorUserId: authUser.id,
+      ...(authUser.email ? { actorEmail: authUser.email } : {}),
+      action,
+      ...(target ? { targetKind: target.kind, targetId: target.id } : {}),
+    }),
+    read(),
+  ]);
+  return result;
+}
+
 async function requirePartitionOperator(request: Request, env: Env): Promise<void> {
   if (await operatorTokenAuthorizes(request, env)) return;
   await requirePlatformAdmin(request, env);
@@ -163,23 +189,23 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
   }));
 
   app.get(ADMIN_OVERVIEW_HUB_ROUTE, (c) => jsonErrors(c, async () => {
-    await auditedPlatformAdmin(c.req.raw, c.env, "overview.read");
     const input = {
       now: new Date().toISOString(),
       spaceLimit: adminOverviewRowLimit(c.req.query("spaceLimit")),
       userLimit: adminOverviewUserLimit(c.req.query("userLimit")),
       activityDays: adminOverviewActivityDays(c.req.query("activityDays")),
     };
-    const [overview, directory] = await Promise.all([
-      readPostgresAdminOverview(c.env, input),
-      authDirectoryAdminUsers(c.env, input.now, input.userLimit).catch(() => null),
-    ]);
+    const [overview, directory] = await auditedPlatformAdminRead(c.req.raw, c.env, "overview.read", undefined,
+      () => Promise.all([
+        readPostgresAdminOverview(c.env, input),
+        authDirectoryAdminUsers(c.env, input.now, input.userLimit).catch(() => null),
+      ]));
     if (!overview) {
       return c.json({ error: "Platform overview is unavailable" }, 502);
     }
 
     return c.json(
-      { overview: await withDirectoryUsers(overview, c.env, directory) },
+      { overview: withSignups(await withDirectoryUsers(overview, c.env, directory)) },
       200,
       { "cache-control": "private, no-store" },
     );
@@ -187,12 +213,12 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
 
   app.get(ADMIN_USER_DETAIL_HUB_ROUTE, (c) => jsonErrors(c, async () => {
     const userId = c.req.param("userId");
-    await auditedPlatformAdmin(c.req.raw, c.env, "user.read", { kind: "user", id: userId });
     const now = new Date().toISOString();
-    const [identity, shards] = await Promise.all([
-      authDirectoryAdminUser(c.env, userId, now),
-      readPostgresAdminUserDetail(c.env, userId, now),
-    ]);
+    const [identity, shards] = await auditedPlatformAdminRead(c.req.raw, c.env, "user.read",
+      { kind: "user", id: userId }, () => Promise.all([
+        authDirectoryAdminUser(c.env, userId, now),
+        readPostgresAdminUserDetail(c.env, userId, now),
+      ]));
     if (!identity && shards.spaces.length === 0 && shards.machines.length === 0) {
       return c.json({ error: "User not found" }, 404);
     }
@@ -215,8 +241,8 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
 
   app.get(ADMIN_SPACE_DETAIL_HUB_ROUTE, (c) => jsonErrors(c, async () => {
     const spaceId = c.req.param("spaceId");
-    await auditedPlatformAdmin(c.req.raw, c.env, "space.read", { kind: "space", id: spaceId });
-    const detail = await readPostgresAdminSpaceDetail(c.env, spaceId, new Date().toISOString());
+    const detail = await auditedPlatformAdminRead(c.req.raw, c.env, "space.read", { kind: "space", id: spaceId },
+      () => readPostgresAdminSpaceDetail(c.env, spaceId, new Date().toISOString()));
     if (!detail) return c.json({ error: "Space not found" }, 404);
     if (!detail.space.ownerEmail) {
       const ownerEmail = (await directoryEmails([detail.space.ownerUserId], c.env)).get(detail.space.ownerUserId);
@@ -226,12 +252,13 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
   }));
 
   app.get(ADMIN_OPERATIONS_HUB_ROUTE, (c) => jsonErrors(c, async () => {
-    await auditedPlatformAdmin(c.req.raw, c.env, "operations.read");
-    const operations = await readPostgresAdminOperations(c.env, new Date().toISOString());
+    const operations = await auditedPlatformAdminRead(c.req.raw, c.env, "operations.read", undefined,
+      () => readPostgresAdminOperations(c.env, new Date().toISOString()));
     return c.json({ operations }, 200, { "cache-control": "private, no-store" });
   }));
 
   app.get(ADMIN_AUDIT_HUB_ROUTE, (c) => jsonErrors(c, async () => {
+    // The trail shows its own read, so its row is written before it is listed.
     await auditedPlatformAdmin(c.req.raw, c.env, "audit.read");
     const events = await listAdminAudit(c.env, adminAuditLimit(c.req.query("limit")));
     return c.json({ events }, 200, { "cache-control": "private, no-store" });
@@ -297,6 +324,7 @@ async function withDirectoryUsers(
       messages: product?.messages ?? 0,
       ...(product?.firstSeenAt ? { firstSeenAt: product.firstSeenAt } : {}),
       ...(product?.lastMessageAt ? { lastMessageAt: product.lastMessageAt } : {}),
+      ...(product?.activeDays ? { activeDays: product.activeDays } : {}),
     };
   });
   return {

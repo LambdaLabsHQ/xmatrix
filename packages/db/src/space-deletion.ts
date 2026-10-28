@@ -314,7 +314,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.space_invites", "data.space_join_requests",
     "data.space_member_creation_policies", "data.space_members",
     "data.space_secrets", "data.run_secret_approvals",
-    "data.space_storage_usage", "data.user_space_channel_view_preferences",
+    "data.space_storage_usage", "data.admin_activity_days", "data.user_space_channel_view_preferences",
     "data.user_space_locale_preferences", "data.idempotency_keys", "data.outbox",
     "control.agent_registration_enrollments", "control.channel_space_directory",
     "control.channel_space_routes", "control.entity_space_routes",

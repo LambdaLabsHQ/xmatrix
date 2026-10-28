@@ -4,8 +4,6 @@ const { compileTsModules } = require("./compile-ts-modules.cjs");
 const overview = compileTsModules(__dirname, ["platform-admin-overview", "time-display"]);
 
 const {
-  adminActivityBars,
-  agentMessageShare,
   adminTableCsv,
   adminTime,
   formatAdminAge,
@@ -60,7 +58,7 @@ test("relative age degrades from minutes to an absolute date", () => {
 });
 
 test("stat tiles summarize the platform totals without dropping a metric", () => {
-  const tiles = platformAdminStatTiles({
+  const totals = {
     users: 12,
     spaces: 9,
     channels: 30,
@@ -81,7 +79,8 @@ test("stat tiles summarize the platform totals without dropping a metric", () =>
     enabledScheduledTasks: 5,
     storageLogicalBytes: 1024 * 1024,
     archivedSegmentBytes: 2048,
-  });
+  };
+  const tiles = platformAdminStatTiles(totals);
   const byKey = Object.fromEntries(tiles.map((tile) => [tile.key, tile]));
   assert.equal(byKey.users.value, "12");
   assert.equal(byKey.users.hint, "9 spaces");
@@ -89,26 +88,8 @@ test("stat tiles summarize the platform totals without dropping a metric", () =>
   assert.equal(byKey.messages.hint, "120 in 24h");
   assert.equal(byKey.machines.value, "4");
   assert.equal(byKey.storage.value, "1 MB");
-});
-
-test("agent share is attributed-only and safe when nothing has been sent", () => {
-  assert.equal(agentMessageShare({ humanMessages: 0, agentMessages: 0 }), 0);
-  assert.equal(agentMessageShare({ humanMessages: 25, agentMessages: 75 }), 0.75);
-});
-
-test("activity bars scale against the busiest day and keep empty days", () => {
-  const bars = adminActivityBars([
-    { date: "2026-08-01", messages: 0, humanMessages: 0, agentMessages: 0 },
-    { date: "2026-08-02", messages: 5, humanMessages: 2, agentMessages: 3 },
-    { date: "2026-08-03", messages: 10, humanMessages: 4, agentMessages: 6 },
-  ]);
-  assert.deepEqual(bars.map((bar) => bar.ratio), [0, 0.5, 1]);
-  assert.deepEqual(bars.map((bar) => bar.label), ["08-01", "08-02", "08-03"]);
-
-  const flat = adminActivityBars([
-    { date: "2026-08-01", messages: 0, humanMessages: 0, agentMessages: 0 },
-  ]);
-  assert.equal(flat[0].ratio, 0);
+  assert.equal(platformAdminStatTiles(totals, false).some((tile) => tile.key === "storage"), false,
+    "storage nobody measures is not shown as zero");
 });
 
 test("table sorting is stable, either direction, and keeps missing values last", () => {

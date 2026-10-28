@@ -197,7 +197,10 @@ export interface AdminOperations {
     /** Pending occurrences already past their scheduled time. */
     overdue: number;
   };
-  /** Event delivery queue, by status, and the oldest undelivered event. */
+  /**
+   * Always empty: `data.outbox` keeps publication envelopes no consumer
+   * delivers, so it has no backlog. Kept for clients that still read it.
+   */
   outbox: { byStatus: Record<string, number>; oldestPendingAt?: string; maxAttempts: number };
   billing: {
     subscriptions: AdminOperationsSubscription[];

@@ -6,7 +6,6 @@
  */
 
 import type {
-  AdminActivityPoint,
   AdminPlatformTotals,
   AdminUserSummary,
 } from "@xmatrix/protocol";
@@ -20,19 +19,13 @@ export interface AdminStatTile {
   hint?: string;
 }
 
-export interface AdminActivityBar extends AdminActivityPoint {
-  /** 0-1 height relative to the busiest day in the window. */
-  ratio: number;
-  label: string;
-}
-
 export function formatAdminCount(value: number): string {
   if (!Number.isFinite(value)) return "0";
   const rounded = Math.round(value);
   if (Math.abs(rounded) < 1000) return String(rounded);
-  if (Math.abs(rounded) < 1_000_000) return `${trimNumber(rounded / 1000)}k`;
-  if (Math.abs(rounded) < 1_000_000_000) return `${trimNumber(rounded / 1_000_000)}M`;
-  return `${trimNumber(rounded / 1_000_000_000)}B`;
+  if (Math.abs(rounded) < 1_000_000) return `${formatAdminDecimal(rounded / 1000)}k`;
+  if (Math.abs(rounded) < 1_000_000_000) return `${formatAdminDecimal(rounded / 1_000_000)}M`;
+  return `${formatAdminDecimal(rounded / 1_000_000_000)}B`;
 }
 
 export function formatAdminBytes(value: number): string {
@@ -44,7 +37,7 @@ export function formatAdminBytes(value: number): string {
     scaled /= 1024;
     unit += 1;
   }
-  return `${trimNumber(scaled)} ${units[unit]}`;
+  return `${formatAdminDecimal(scaled)} ${units[unit]}`;
 }
 
 /**
@@ -62,8 +55,9 @@ export function formatAdminAge(value: string | undefined, nowMs: number): string
   return formatRelativeAge(value, nowMs) ?? "";
 }
 
-export function platformAdminStatTiles(totals: AdminPlatformTotals): AdminStatTile[] {
-  return [
+/** Platform totals; storage only where the deployment measures it, rather than a zero it never counted. */
+export function platformAdminStatTiles(totals: AdminPlatformTotals, storageMeasured = true): AdminStatTile[] {
+  const tiles: AdminStatTile[] = [
     {
       key: "users",
       label: "Users",
@@ -107,22 +101,7 @@ export function platformAdminStatTiles(totals: AdminPlatformTotals): AdminStatTi
       hint: `${formatAdminBytes(totals.archivedSegmentBytes)} archived`,
     },
   ];
-}
-
-/** Share of messages authored by agents, 0-1. */
-export function agentMessageShare(totals: AdminPlatformTotals): number {
-  const attributed = totals.humanMessages + totals.agentMessages;
-  if (attributed <= 0) return 0;
-  return totals.agentMessages / attributed;
-}
-
-export function adminActivityBars(points: AdminActivityPoint[]): AdminActivityBar[] {
-  const peak = points.reduce((max, point) => Math.max(max, point.messages), 0);
-  return points.map((point) => ({
-    ...point,
-    ratio: peak > 0 ? point.messages / peak : 0,
-    label: point.date.slice(5),
-  }));
+  return storageMeasured ? tiles : tiles.filter((tile) => tile.key !== "storage");
 }
 
 export function adminUserLabel(
@@ -186,7 +165,8 @@ export function adminTime(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function trimNumber(value: number): string {
+/** One figure to one decimal, without a trailing ".0". */
+export function formatAdminDecimal(value: number): string {
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }

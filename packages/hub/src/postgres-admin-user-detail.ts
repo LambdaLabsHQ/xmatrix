@@ -19,8 +19,8 @@ import {
 import type { AuthorityDatabase } from "@xmatrix/db";
 import type { QueryResultRow } from "pg";
 
-import { POSTGRES_ADMIN_MESSAGE_FACTS_QUERY } from "./postgres-admin-message-facts";
-import { adminActivityUtcWindow } from "./admin-overview-merge";
+import { adminActivityGroups, adminDate } from "./postgres-admin-activity-rollup";
+import { adminActivityUtcWindow, adminDayAfter } from "./admin-overview-merge";
 import {
   adminCount as count,
   adminIso as iso,
@@ -68,9 +68,36 @@ interface RunRow extends QueryResultRow {
 
 interface MessageRow extends QueryResultRow {
   total: Count; last_7d: Count; last_30d: Count; last_message_at: Time | null;
+  activity: Array<{ day: string; messages: Count }>;
 }
 
-interface ActivityRow extends QueryResultRow { day: string; messages: Count }
+interface SettledRow extends QueryResultRow { settled_through: Date | string | null }
+
+/**
+ * One person's messages in their Spaces: their own messages counted, their
+ * Agents' advancing when they were last active. `$5` starts the unsettled
+ * days as read before; the snapshot's own boundary wins if a roll-up landed.
+ */
+const POSTGRES_ADMIN_USER_MESSAGES_QUERY = `WITH rollup_state AS (
+    SELECT settled_through FROM data.admin_activity_rollup WHERE singleton AND settled_through IS NOT NULL
+  ), user_facts AS (
+    SELECT day, author_kind, messages, last_sent_at FROM data.admin_activity_days
+      WHERE space_id = ANY($1::text[]) AND user_id = $2 AND day <= (SELECT settled_through FROM rollup_state)
+    UNION ALL
+    SELECT day, author_kind, messages, last_sent_at FROM (${adminActivityGroups(
+      "message.space_id = ANY($1::text[]) AND message.sent_at >= $5::timestamptz AND (NOT EXISTS (SELECT 1 FROM rollup_state)"
+      + " OR message.sent_at >= ((SELECT settled_through FROM rollup_state) + 1)::timestamp AT TIME ZONE 'UTC')")}) live
+      WHERE user_id = $2
+  ), daily AS (
+    SELECT to_char(day, 'YYYY-MM-DD') AS day, SUM(messages) AS messages FROM user_facts
+      WHERE author_kind = 'user' AND day >= $6::date GROUP BY day ORDER BY day
+  )
+  SELECT COALESCE(SUM(messages) FILTER (WHERE author_kind = 'user'), 0) AS total,
+    COALESCE(SUM(messages) FILTER (WHERE author_kind = 'user' AND day >= $3::date), 0) AS last_7d,
+    COALESCE(SUM(messages) FILTER (WHERE author_kind = 'user' AND day >= $4::date), 0) AS last_30d,
+    MAX(last_sent_at) AS last_message_at,
+    COALESCE((SELECT json_agg(daily ORDER BY day) FROM daily), '[]'::json) AS activity
+  FROM user_facts`;
 
 const ACTIVE_RUN_STATUSES = new Set(["starting", "running"]);
 
@@ -84,9 +111,10 @@ async function readShard(
   now: Date,
   includeMachines: boolean,
 ): Promise<AdminUserShardDetail> {
-  const since7d = new Date(now.getTime() - 7 * 86_400_000);
   const since30d = new Date(now.getTime() - 30 * 86_400_000);
   const window = adminActivityUtcWindow(now.getTime(), ADMIN_USER_DETAIL_ACTIVITY_DAYS);
+  const window7d = adminActivityUtcWindow(now.getTime(), 7);
+  const window30d = adminActivityUtcWindow(now.getTime(), 30);
   const bound = ADMIN_USER_DETAIL_MAX_ROWS;
   return database.transaction({
     requestId: `admin-user-detail:${shardId}`.slice(0, 200),
@@ -178,28 +206,23 @@ async function readShard(
       maxRows: 100,
     });
 
-    const messages = spaceIds.length ? (await transaction.query<MessageRow>({
-      name: "postgres_admin_user_messages_v1",
-      text: `WITH admin_message_facts AS (${POSTGRES_ADMIN_MESSAGE_FACTS_QUERY})
-        SELECT COUNT(*) FILTER (WHERE author_kind = 'user') AS total,
-          COUNT(*) FILTER (WHERE author_kind = 'user' AND created_at >= $3) AS last_7d,
-          COUNT(*) FILTER (WHERE author_kind = 'user' AND created_at >= $4) AS last_30d,
-          MAX(created_at) AS last_message_at
-        FROM admin_message_facts WHERE space_id = ANY($1::text[]) AND activity_user_id = $2`,
-      values: [spaceIds, userId, since7d, since30d],
+    // Settled days come from the rollup; only the days after them are read
+    // from messages, from the boundary read first so that scan is planned on it.
+    const settled = spaceIds.length ? (await transaction.query<SettledRow>({
+      name: "postgres_admin_user_settled_v1",
+      text: "SELECT settled_through FROM data.admin_activity_rollup WHERE singleton",
+      values: [],
       maxRows: 1,
     }))[0] : undefined;
-
-    const activity = spaceIds.length ? await transaction.query<ActivityRow>({
-      name: "postgres_admin_user_activity_v1",
-      text: `SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
-          COUNT(*) AS messages
-        FROM data.messages WHERE space_id = ANY($1::text[]) AND author_kind = 'user'
-          AND author_id = $2 AND deleted_at IS NULL AND created_at >= $3 AND created_at < $4
-        GROUP BY 1 ORDER BY 1`,
-      values: [spaceIds, userId, window.since, window.before],
-      maxRows: ADMIN_USER_DETAIL_ACTIVITY_DAYS,
-    }) : [];
+    const settledThrough = settled?.settled_through ? adminDate(settled.settled_through) : null;
+    const messages = spaceIds.length ? (await transaction.query<MessageRow>({
+      name: "postgres_admin_user_messages_v2",
+      text: POSTGRES_ADMIN_USER_MESSAGES_QUERY,
+      values: [spaceIds, userId, window7d.firstDay, window30d.firstDay,
+        settledThrough === null ? "-infinity" : `${adminDayAfter(settledThrough)}T00:00:00.000Z`, window.firstDay],
+      maxRows: 1,
+    }))[0] : undefined;
+    const activity = messages?.activity ?? [];
 
     const pages = (await transaction.query<{ pages: Count } & QueryResultRow>({
       name: "postgres_admin_user_pages_v1",
