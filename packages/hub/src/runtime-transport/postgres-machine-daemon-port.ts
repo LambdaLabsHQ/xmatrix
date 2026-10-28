@@ -45,7 +45,6 @@ import {
 } from "./runtime-messages";
 import { recordAgentLaunchStage } from "../postgres-observability";
 import { isRecoverableLaunchFailure } from "../live-run-admission";
-import { boundedOccurrenceAt } from "../bounded-occurrence-time";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { wakeMachineChannels } from "../registration-authority-wake";
 import { wakeInstancesAwaitingMachine } from "../registration-launch-dispatch";
@@ -55,6 +54,7 @@ import { machineDaemonCommand } from "../machines";
 import { machineRunLifecycleReport } from "../machine-run-lifecycle-report";
 import { updateAgentLaunch } from "../runtime";
 import { supersededMachineDaemonConnection } from "./runtime-operation-failure";
+import { assertMachineRegistryCausality } from "./machine-registry-causality";
 
 type ExecutableMessage = Exclude<
   MachineDaemonClientMessage,
@@ -735,28 +735,6 @@ function messageRelayLease(message: unknown): MachineCommandLease | undefined {
     return undefined;
   }
   return { leaseOwner, leaseGeneration, entityVersion, daemonEpoch };
-}
-
-function assertMachineRegistryCausality(
-  session: Readonly<MachineDaemonRuntimeSession>,
-  message: ExecutableMessage,
-): void {
-  const causalSnapshot = message.type === "machine_run_snapshot";
-  const causalSpawn = message.type === "machine_spawn_result" && message.ok === true;
-  if (!causalSnapshot && !causalSpawn) return;
-  const advertised = session.capabilities.includes("machine_run_snapshot_causal_v1");
-  const epoch = "registryConnectionEpoch" in message ? message.registryConnectionEpoch : undefined;
-  const sequence = "registrySequence" in message ? message.registrySequence : undefined;
-  const fieldsPresent = epoch !== undefined || sequence !== undefined ||
-    causalSnapshot && message.capturedAt !== undefined;
-  if (!advertised && !fieldsPresent) return;
-  if (!Number.isSafeInteger(epoch) || Number(epoch) < 1 ||
-      causalSnapshot && Number(epoch) !== session.connectionEpoch ||
-      causalSpawn && Number(epoch) > session.connectionEpoch ||
-      !Number.isSafeInteger(sequence) || Number(sequence) < 1) {
-    throw new Error("Machine Daemon registry evidence does not match the active connection");
-  }
-  if (causalSnapshot) boundedOccurrenceAt(message.capturedAt);
 }
 
 function machineCommand(

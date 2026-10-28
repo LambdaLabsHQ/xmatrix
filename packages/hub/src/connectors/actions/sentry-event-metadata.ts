@@ -6,6 +6,7 @@ import { postgresConflictMetadata } from "../../postgres-conflict-diagnostic";
 import { messageSearchFailureMetadata } from "../../postgres-request-failure";
 import { safeServerDiagnosticId } from "../../server-error-diagnostic";
 import { runtimeDatabaseFailureMetadata } from "../../runtime-transport/runtime-database-failure";
+import { machineRegistryCausalityMetadata } from "../../runtime-transport/machine-registry-causality";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
@@ -25,7 +26,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       if (!tag || typeof tag !== "object") continue;
       if (tag.key === "component" && ["hub", "web"].includes(tag.value)) lines.push(`Component: ${tag.value}`);
       if (tag.key === "environment" && token(tag.value)) lines.push(`Environment: ${tag.value}`);
-      if (tag.key === "operation" && ["launch.dispatch.registration", "postgres.transaction-conflict", "postgres.unavailable", "runtime.database", "runtime.machine-credential"].includes(tag.value)) {
+      if (tag.key === "operation" && ["launch.dispatch.registration", "postgres.transaction-conflict", "postgres.unavailable", "runtime.database", "runtime.machine-credential", "runtime.machine-registry"].includes(tag.value)) {
         lines.push(`Capture operation: ${tag.value}`);
       }
       if (tag.key === "operation" && typeof tag.value === "string" &&
@@ -47,6 +48,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
     lines.push(...messageSearchFailureMetadata((extra as Record<string, unknown>).message_search_failure));
     lines.push(...runtimeDatabaseFailureMetadata((extra as Record<string, unknown>).runtime_database_reason));
     lines.push(...machineDaemonCredentialFailureMetadata((extra as Record<string, unknown>).machine_credential_reason));
+    lines.push(...machineRegistryCausalityMetadata(extra as Record<string, unknown>));
     const diagnosticId = safeServerDiagnosticId((extra as Record<string, unknown>).diagnosticId);
     if (diagnosticId) lines.push(`Diagnostic reference: ${diagnosticId}`);
   }

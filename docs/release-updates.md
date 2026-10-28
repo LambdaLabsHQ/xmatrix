@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Machine registry rejections retain their cause
+
+The daemon socket keeps the exact registry fence and legacy compatibility,
+but reports a rejected snapshot or successful spawn with a fixed reason,
+full/partial snapshot category, advertised capability and bounded client
+version. Sentry retains the originating stack and its issue reader exposes
+those fields without report payloads, identities, leases or raw epoch/sequence
+values. HUB-AX's generic console event could not distinguish stale evidence
+from missing or malformed fields; the next event can. This is diagnostic
+coverage, not a confirmed repair of its underlying cause. No schema or client
+update is needed. Recovery uses a CI-validated beta Hub reverting this change.
+
 ## Unreleased: History anchoring regressions fail on the first attempt
 
 The history-prepend reading-position spec overrides shared CI retries and runs
