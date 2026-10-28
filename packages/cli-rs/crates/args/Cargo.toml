@@ -6,3 +6,4 @@ license.workspace = true
 
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
+xmatrix-action-names = { path = "../action-names" }

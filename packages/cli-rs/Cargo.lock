@@ -3193,6 +3193,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "xmatrix-action-names"
+version = "0.0.0"
+
+[[package]]
 name = "xmatrix-cli-account"
 version = "0.0.0"
 dependencies = [
@@ -3230,6 +3234,7 @@ name = "xmatrix-cli-args"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "xmatrix-action-names",
 ]
 
 [[package]]
@@ -3273,6 +3278,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "windows-sys 0.61.2",
+ "xmatrix-action-names",
  "xmatrix-harness",
 ]
 

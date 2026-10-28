@@ -11,6 +11,7 @@ license.workspace = true
 members = [
   ".",
   "crates/account",
+  "crates/action-names",
   "crates/agent",
   "crates/args",
   "crates/channel",
@@ -30,6 +31,7 @@ members = [
 default-members = [
   ".",
   "crates/account",
+  "crates/action-names",
   "crates/agent",
   "crates/args",
   "crates/channel",

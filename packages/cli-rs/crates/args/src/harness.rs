@@ -30,10 +30,8 @@ pub enum HarnessApplyAction {
     Release,
 }
 
-include!("../../../shared/harness_action_names.rs");
-
 impl HarnessApplyAction {
-    harness_action_names!();
+    xmatrix_action_names::harness_action_names!();
 }
 
 #[derive(Subcommand)]
