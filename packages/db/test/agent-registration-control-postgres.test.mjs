@@ -82,6 +82,10 @@ integration("composite registration commands preserve identity, configuration an
       { workspaceReferences: [] });
     assert.equal((await client.query(`SELECT grant_revision FROM ${schema}.space_agent_registration_access`)).rows[0].grant_revision, "2");
     const listing = { spaceId: "a", actorUserId: "owner", requestId: "list" };
+    await rejects(() => repo.list({ ...listing, actorUserId: "outsider" }), "registration_not_found");
+    assert.deepEqual(await repo.list({ ...listing, spaceId: "a", actorUserId: "member",
+      cursor: JSON.stringify(["zzzz", "machine", "codex"]) }), { registrations: [], nextCursor: null },
+    "an authorized empty page is distinct from missing membership");
     let catalog = await repo.list(listing);
     assert.equal(catalog.registrations.length, 1);
     // The daemon's hostname is an observation and never names the Machine.
