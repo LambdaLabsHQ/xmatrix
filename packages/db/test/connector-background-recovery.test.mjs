@@ -3,11 +3,13 @@ import test from "node:test";
 import { ConnectivityBreaker, databaseFailureEvidence, DatabaseCircuitOpenError,
   DatabaseCommitUnknownError, PostgresGmailRoutingRepository, PostgresSentryEventRepository,
   PostgresGoogleChatRoomRepository, PostgresFeishuRoomRepository, PostgresTelegramRoomRepository,
-  PostgresTeamsRoomRepository } from "../dist/index.js";
+  PostgresTeamsRoomRepository, PostgresAppRepository } from "../dist/index.js";
 
 import { wireRecoveryDatabase } from "./wire-recovery.fixture.mjs";
 
 const operations = {
+  "GitHub catalog invalidation": database => new PostgresAppRepository(database).invalidateGitHubRepositoryCatalog({
+    requestId: "invalidate", installationId: "777", limit: 1000 }),
   "Gmail cleanup": database => new PostgresGmailRoutingRepository(database, "fixture-key").cleanup(),
   "Gmail claim": database => new PostgresGmailRoutingRepository(database, "fixture-key").claim(),
   "Sentry claim": database => new PostgresSentryEventRepository(database).claim({ requestId: "claim",
@@ -21,8 +23,11 @@ for (const Repository of [PostgresGoogleChatRoomRepository, PostgresFeishuRoomRe
 /** Wire failures exercise the real transaction owner, including its commit-unknown boundary. */
 function fixture(stage, failures, breaker = new ConnectivityBreaker("fixture")) {
   return wireRecoveryDatabase(stage, failures, { breaker,
-    phaseForQuery: text => /DELETE FROM data\.app_\w+_room_lifecycle/u.test(text) ? "second-delete" : "sql",
+    phaseForQuery: text => /DELETE FROM data\.app_\w+_room_lifecycle/u.test(text) ? "second-delete" :
+      /UPDATE\s+data\.app_connector_connections/u.test(text) ? "invalidation-write" : "sql",
     rowsForQuery: text => /SELECT count\(\*\)/u.test(text) ? [{ count: "0" }] :
+      /SELECT\s+c\.connection_id,c\.space_id FROM data\.app_connector_connections/u.test(text)
+        ? [{ connection_id: "connection", space_id: "linked-space" }] :
       text.startsWith("SELECT pg_try_advisory_xact_lock") ? [{ acquired: true }] : [],
   });
 }
@@ -30,11 +35,13 @@ function fixture(stage, failures, breaker = new ConnectivityBreaker("fixture")) 
 for (const [name, run] of Object.entries(operations)) {
   const stages = [["checkout", "Connection terminated due to connection timeout"],
     ["begin", "Query read timeout"], ["sql", "Connection terminated unexpectedly"],
+    ...(name === "GitHub catalog invalidation" ? [["invalidation-write", "Query read timeout"]] : []),
     ...(name.endsWith("room cleanup") ? [["second-delete", "Query read timeout"]] : [])];
   test(`${name} recovers one lost checkout, BEGIN or SQL response on a fresh session (HUB-97/98/9B)`, async () => {
     for (const [stage, message] of stages) {
       const { database, pools } = fixture(stage, [new Error(message)]);
-      assert.deepEqual(await run(database), name.endsWith("room cleanup") ? undefined : []);
+      assert.deepEqual(await run(database), name === "GitHub catalog invalidation" ? ["linked-space"] :
+        name.endsWith("room cleanup") ? undefined : []);
       assert.equal(pools.length, 2, stage);
       assert.equal(pools.every(pool => pool.ended), true);
       assert.equal(pools[0].queries.includes("COMMIT"), false);
@@ -53,7 +60,8 @@ for (const [name, run] of Object.entries(operations)) {
         assert.equal(error, second);
         const attempts = databaseFailureEvidence(error);
         assert.equal(attempts.length, 2);
-        assert.ok(attempts.every(item => item.phase === (stage === "checkout" ? "pool_checkout" : stage === "sql" || stage === "second-delete" ? "sql" : stage)));
+        assert.ok(attempts.every(item => item.phase === (stage === "checkout" ? "pool_checkout" :
+          ["sql", "second-delete", "invalidation-write"].includes(stage) ? "sql" : stage)));
         return true;
       });
       assert.equal(pools.length, 2, stage);

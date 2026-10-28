@@ -177,6 +177,10 @@ route publication, socket wakes and Channel notices remain outside that boundary
 COMMIT uncertainty still escapes to the existing command receipt and execution
 report reconciliation; it never triggers an immediate replay. This repairs the
 HUB-AN/AP recovery gap without attributing the underlying transport stall.
+GitHub repository-catalog invalidation also replays its database-only cache
+version update once before COMMIT. Linked-installation selection and row locks
+are repeated on the new session; client refresh notifications run afterward.
+Unknown COMMIT still fails the webhook for redelivery, without immediate replay.
 Lock-free page search uses per-statement `single_read` recovery, including its
 membership and accessible-page checks (HUB-99).
 Channel detail reads use the same request-local, per-statement recovery for
@@ -247,8 +251,8 @@ idle in transaction, but does not alone prove it was this request's first
 attempt. An original timeout or rejection remains authoritative; existing
 pre-COMMIT recovery and unknown-commit reconciliation are unchanged.
 
-Placement directory single reads use the same diagnostic capacity after 500 ms
-(HUB-B1). Because transaction pooling provides no stable backend pid before a
+Channel catalog and placement directory single reads use the same diagnostic capacity after 500 ms
+(HUB-B0/B1). Because transaction pooling provides no stable backend pid before a
 single read, each attempt prefixes its SQL with a fresh random diagnostic marker.
 The independent sample matches that exact prefix in active `pg_stat_activity`
 rows and returns the same bounded state, wait class, transaction age and blockers
