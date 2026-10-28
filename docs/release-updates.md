@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Explicit activation keeps mention details open
+
+A mention's delayed hover-close can already be queued when Enter or a click
+pins its details open. Both invocation and prose-detail cards now reject that
+stale hover close after explicit activation. Escape, an outside press, focus
+leaving and ordinary hover-only dismissal retain their existing behavior. A
+controlled-clock browser regression reproduces the old disappearance without
+changing position, timeout or retry tolerances. No API, data or native update
+is needed; recovery uses a CI-validated beta Web reverting the change.
+
 ## Unreleased: Page edits in a Channel fold to a summary with a preview
 
 An Agent message that changed a page drew its first three changed lines in
