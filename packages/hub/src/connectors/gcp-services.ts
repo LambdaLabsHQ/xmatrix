@@ -4,7 +4,7 @@ import { record } from "./event-format";
 
 const APIS = ["appoptimize.googleapis.com", "cloudbilling.googleapis.com", "bigquery.googleapis.com", "cloudasset.googleapis.com",
   "cloudresourcemanager.googleapis.com", "run.googleapis.com", "logging.googleapis.com", "monitoring.googleapis.com", "apikeys.googleapis.com",
-  "searchconsole.googleapis.com", "siteverification.googleapis.com"];
+  "calendar-json.googleapis.com", "searchconsole.googleapis.com", "siteverification.googleapis.com"];
 
 function apiTarget(statement: ConnectorActionStatement): Record<string, string> | string {
   const parts = statement.target.split("/");

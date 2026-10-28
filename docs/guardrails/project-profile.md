@@ -24,6 +24,10 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Google Calendar has a separate Space connection for calendar/event reads,
+availability and approved event writes. Conditional changes retain event ETags
+and resolved calendar IDs. See the [Calendar contract](../connectors/google-calendar.md).
+
 Routine successful stops appear in Instance and invocation state without a
 separate Channel notice; the Web also hides historical typed confirmations.
 Failures and external stop causes retain their explanations. See
