@@ -1,53 +1,35 @@
 "use client";
 
-import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X } from "lucide-react";
+import { X } from "lucide-react";
 import { WEB_PROXY_ROUTES, type ConnectorActionPolicy, type ChannelSnapshot } from "@xmatrix/protocol";
-import { actionClass } from "@/components/ui/action-tone";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { channelTitle } from "@/components/dashboard/channel-links";
-import { ConnectorAction, ConnectorAddRow, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
+import { ConnectorAction, ConnectorEmpty, ConnectorFold, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
 
-/* Per-Channel action policy (docs/design/connector-platform.md §3.5): which
-   write actions are allowed, ask for approval, or are disallowed in a Channel. Space admins edit it;
-   the Hub reads it at execution time. Without a rule an action keeps its own
-   default (`defaultPolicy`, else allow), so the page says the defaults in one
-   sentence and lists only the rules that differ. */
+/* Action policy (docs/design/connector-platform.md §3.5): whether each write
+   action runs, asks for approval or is off. Space admins set it once for the
+   connection; a write action nobody set keeps the app's own default. Channel
+   rules are no longer made: one written before still overrides the setting in
+   its Channel, so it stays listed until someone removes it. */
 
 interface PolicyRow { channelId: string; actionId: string; mode: ConnectorActionPolicy }
+/** A write action's connection default; `inherited` when it is still the app's own. */
+interface DefaultRow { actionId: string; mode: ConnectorActionPolicy; inherited: boolean }
 
 const RULE_LABELS: Record<ConnectorActionPolicy, string> = { allow: "Allowed", ask: "Asks first", disallow: "Disallowed" };
 const CHOICE_LABELS: Record<ConnectorActionPolicy, string> = { allow: "Allow", ask: "Ask first", disallow: "Disallow" };
-const DEFAULT_VERBS: Record<ConnectorActionPolicy, [one: string, many: string]> = {
-  allow: ["runs", "run"], ask: ["asks for approval first", "ask for approval first"], disallow: ["is off", "are off"],
-};
-
 export function connectorWriteActions(connector: AppConnectorManifest) {
   return connector.actions.filter((action) => action.effect === "write");
 }
 
-/** "Unless a channel has a rule of its own, 9 actions run; Dispatch workflow is off." */
-function connectorPolicyDefaults(connector: AppConnectorManifest): string {
-  const actions = connectorWriteActions(connector);
-  const modes = (["allow", "ask", "disallow"] as const).map((mode) => ({
-    mode, named: actions.filter((action) => (action.defaultPolicy ?? "allow") === mode),
-  })).filter(({ named }) => named.length > 0);
-  if (modes.length === 1) {
-    const [one] = DEFAULT_VERBS[modes[0]!.mode];
-    return `${actions.length === 1 ? actions[0]!.label : "Every action"} ${one} unless a channel has a rule of its own.`;
-  }
-  const parts = modes.map(({ mode, named }) => {
-    const [one, many] = DEFAULT_VERBS[mode];
-    if (named.length === 1) return `${named[0]!.label} ${one}`;
-    return named.length === 2 ? `${named.map((action) => action.label).join(" and ")} ${many}` : `${named.length} actions ${many}`;
-  });
-  return `Unless a channel has a rule of its own, ${parts.join("; ")}.`;
+/** One mode for several actions, or null when they differ. */
+function sharedMode(rows: DefaultRow[]): ConnectorActionPolicy | null {
+  return rows.every((row) => row.mode === rows[0]?.mode) ? rows[0]?.mode ?? null : null;
 }
 
 export function ConnectorPolicy({ connector, channels, spaceId, token, userId }: {
@@ -62,65 +44,77 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
   const url = WEB_PROXY_ROUTES.space_app_connection_policies(spaceId, connector.id);
   const policies = useQuery({
     queryKey: key,
-    queryFn: ({ signal }) => xmatrixApiRequest<{ policies?: PolicyRow[] }>({ url, token, signal })
-      .then((payload) => payload.policies ?? []),
+    queryFn: ({ signal }) => xmatrixApiRequest<{ policies?: PolicyRow[]; defaults?: DefaultRow[] }>({ url, token, signal })
+      .then((payload) => {
+        if (!payload.defaults) throw new Error("The Hub did not report this app's connection defaults");
+        return { rules: payload.policies ?? [], defaults: payload.defaults };
+      }),
   });
   const write = useMutation({
     mutationKey: [...key, "put"],
-    mutationFn: (body: { channelId: string; actionId: string; mode: ConnectorActionPolicy | null }) =>
+    mutationFn: (body: { channelId: string; actionId: string; mode: ConnectorActionPolicy | null }
+      | { scope: "connection"; actionIds: string[]; mode: ConnectorActionPolicy | null }) =>
       xmatrixApiRequest({ url, method: "PUT", token, body }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: key }),
   });
   const actions = connectorWriteActions(connector);
-  const [adding, setAdding] = useState(false);
-  const [actionId, setActionId] = useState(actions[0]?.id ?? "");
-  const [channelId, setChannelId] = useState("");
-  const [mode, setMode] = useState<ConnectorActionPolicy>(connector.id === "gmail" ? "ask" : "allow");
   const channelName = (id: string) => { const channel = channels.find((candidate) => candidate.id === id); return channel ? channelTitle(channel) : id; };
   const action = (id: string) => actions.find((candidate) => candidate.id === id);
   const modes: ConnectorActionPolicy[] = ["allow", ...(connector.id === "github" ? [] : ["ask" as const]), "disallow"];
+  const defaults = policies.data?.defaults ?? [];
+  const rules = policies.data?.rules ?? [];
+  const everywhere = sharedMode(defaults);
+  const setDefault = (actionIds: string[], value: ConnectorActionPolicy | null) =>
+    write.mutate({ scope: "connection", actionIds, mode: value });
+  const modeOptions = modes.map((value) => ({ value, label: CHOICE_LABELS[value] }));
+  const defaultActionRow = (row: DefaultRow) => (
+      <ConnectorRow key={row.actionId} testId="connector-policy-default" title={action(row.actionId)?.label ?? row.actionId}
+        meta={row.inherited ? "The app's default" : "Set for this Space"}
+        trailing={<>
+          <GlassSelect value={row.mode} aria-label={action(row.actionId)?.label ?? row.actionId} disabled={write.isPending}
+            onChange={(value) => setDefault([row.actionId], value as ConnectorActionPolicy)} options={modeOptions} />
+          {row.inherited ? null : (
+            <ConnectorAction title="Back to the app's default" disabled={write.isPending} onClick={() => setDefault([row.actionId], null)}>Reset</ConnectorAction>
+          )}
+        </>} />
+  );
   const error = userErrorMessage(write.error ?? policies.error, "Couldn't save the app settings");
 
   return (
     <ConnectorSection title="Permissions" testId="connector-policy"
-      note={connectorPolicyDefaults(connector)}>
-      <ConnectorRows>
-        {(policies.data ?? []).map((row) => (
-          <ConnectorRow key={`${row.actionId}:${row.channelId}`} testId="connector-policy-rule"
-            title={action(row.actionId)?.label ?? row.actionId}
-            meta={<>In #{channelName(row.channelId)} · <span className={row.mode === "disallow" ? "text-destructive" : "text-foreground"}>
-              {RULE_LABELS[row.mode]}</span></>}
+      note={`What agents may do with ${connector.name}. Ask first sends each request to a Space admin to approve.`}>
+      <ConnectorRows testId="connector-policy-defaults">
+        {defaults.length > 1 ? (
+          <ConnectorRow title="Every action" meta={actions.map((candidate) => candidate.label).join(", ")}
             trailing={(
-              <ConnectorAction aria-label={`Reset ${row.actionId} in ${channelName(row.channelId)}`} title="Back to the default"
-                disabled={write.isPending}
-                onClick={() => write.mutate({ channelId: row.channelId, actionId: row.actionId, mode: null })}>
-                <X className="size-3.5" /> Remove
-              </ConnectorAction>
+              <GlassSelect value={everywhere ?? ""} placeholder="Mixed" aria-label="Every action" disabled={write.isPending}
+                onChange={(value) => setDefault(defaults.map((row) => row.actionId), value as ConnectorActionPolicy)} options={modeOptions} />
             )} />
-        ))}
-        {adding ? (
-          <li className="py-2.5">
-            <div className="grid gap-2 sm:grid-cols-[1.3fr_1fr_0.8fr]">
-              <GlassSelect value={actionId} aria-label="Action" onChange={setActionId}
-                options={actions.map((candidate) => ({ value: candidate.id, label: candidate.label }))} />
-              <GlassSelect value={channelId} placeholder="Channel" aria-label="Channel" onChange={setChannelId}
-                options={channels.map((channel) => ({ value: channel.id, label: `#${channelTitle(channel)}` }))} />
-              <GlassSelect value={mode} aria-label="Policy" onChange={(value) => setMode(value as ConnectorActionPolicy)}
-                options={modes.map((value) => ({ value, label: CHOICE_LABELS[value] }))} />
-            </div>
-            <div className="mt-2 flex items-center gap-1">
-              <button type="button" disabled={!actionId || !channelId || write.isPending}
-                className={actionClass({ variant: "secondary", size: "sm" })}
-                onClick={() => write.mutate({ channelId, actionId, mode }, { onSuccess: () => { setAdding(false); setChannelId(""); } })}>
-                {write.isPending ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null} Save rule
-              </button>
-              <ConnectorAction onClick={() => setAdding(false)}>Cancel</ConnectorAction>
-            </div>
-          </li>
-        ) : (
-          <ConnectorAddRow label="Add a channel rule" onClick={() => setAdding(true)} testId="connector-policy-add" />
-        )}
+        ) : null}
       </ConnectorRows>
+      {defaults.length > 1 ? (
+        <ConnectorFold summary="Set each action" testId="connector-policy-each">
+          <ConnectorRows>{defaults.map(defaultActionRow)}</ConnectorRows>
+        </ConnectorFold>
+      ) : <ConnectorRows>{defaults.map(defaultActionRow)}</ConnectorRows>}
+      {rules.length ? (
+        <ConnectorRows testId="connector-policy-rules">
+          <ConnectorEmpty>Older channel rules still override the setting above in their channel. Remove them to use it everywhere.</ConnectorEmpty>
+          {rules.map((row) => (
+            <ConnectorRow key={`${row.actionId}:${row.channelId}`} testId="connector-policy-rule"
+              title={action(row.actionId)?.label ?? row.actionId}
+              meta={<>In #{channelName(row.channelId)} · <span className={row.mode === "disallow" ? "text-destructive" : "text-foreground"}>
+                {RULE_LABELS[row.mode]}</span></>}
+              trailing={(
+                <ConnectorAction aria-label={`Remove the ${row.actionId} rule in ${channelName(row.channelId)}`}
+                  disabled={write.isPending}
+                  onClick={() => write.mutate({ channelId: row.channelId, actionId: row.actionId, mode: null })}>
+                  <X className="size-3.5" /> Remove
+                </ConnectorAction>
+              )} />
+          ))}
+        </ConnectorRows>
+      ) : null}
       {error ? <p role="alert" className="mt-1 text-[13px] font-medium text-destructive">{error}</p> : null}
     </ConnectorSection>
   );
