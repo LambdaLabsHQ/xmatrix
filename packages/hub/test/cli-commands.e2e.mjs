@@ -75,7 +75,8 @@ test("Hub commands answer a person and a Run through the Hub's own routes", asyn
     await acceptSpaceInvite(worker, await inviteToSpace(worker, spaceId, MOCK_TOKEN, "admin"), otherToken);
     const otherHistory = await channelHistory(worker, otherToken, channelId);
     assert.ok(otherHistory.messages.some(row => row.messageId === receipt.messageId));
-    assert.doesNotMatch(otherHistory.messages.find(row => row.messageId === receipt.messageId).body, /connect Gmail/);
+    // Shared guidance, not a result: every member reads the same next step.
+    assert.match(otherHistory.messages.find(row => row.messageId === receipt.messageId).body, /connect Gmail/);
     const otherRead = await worker.fetch(privateUrl, { headers: { Authorization: `Bearer ${otherToken}` } });
     assert.equal(otherRead.status, 404);
     assert.doesNotMatch(await otherRead.text(), /connect Gmail/);
