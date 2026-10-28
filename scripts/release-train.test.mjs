@@ -97,6 +97,24 @@ test("the JavaScript and TypeScript halves read every shipped file exactly once,
   }
 });
 
+test("rust CodeQL traces a cargo check and does not let the compile cache skip rustc", () => {
+  const request = readFileSync(new URL("../.github/workflows/production-release-request.yml", import.meta.url), "utf8");
+  const codeql = request.slice(request.indexOf("\n  codeql:\n"), request.indexOf("\n  gates:\n"));
+  const init = codeql.indexOf("github/codeql-action/init@v4");
+  const check = codeql.indexOf("cargo check --locked --workspace");
+  const analyze = codeql.indexOf("github/codeql-action/analyze@v4");
+  assert.ok(init !== -1 && check !== -1 && analyze !== -1);
+  assert.ok(init < check && check < analyze, "CodeQL traces only commands between init and analyze");
+  assert.match(codeql, /matrix\.language == 'rust' && 'manual'/u);
+  assert.match(codeql, /matrix\.language == 'swift' && 'autobuild'/u);
+  assert.match(codeql, /kache:\s*"false"/u);
+  assert.match(codeql, /unset RUSTC_WRAPPER/u);
+  assert.doesNotMatch(codeql, /setup-kache/u);
+  const action = readFileSync(new URL("../.github/actions/setup-rust-kache/action.yml", import.meta.url), "utf8");
+  assert.match(action, /kache:[\s\S]*default:\s*"true"/u);
+  assert.match(action, /inputs\.kache == 'true' && runner\.os != 'Windows'/u);
+});
+
 test("a stable scope names the stable Web and clients; the hub ships with every beta", () => {
   assert.deepEqual(normalizeScope("all", "stable"), ["web", "cli", "desktop", "android", "ios"]);
   assert.deepEqual(normalizeScope("ios,web,cli", "stable"), ["web", "cli", "ios"]);
