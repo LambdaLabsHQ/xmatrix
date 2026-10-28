@@ -642,11 +642,14 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           showToolbar(readToolbar(blurred));
           return false;
         },
-        click: (_view, event) => {
-          const anchor = (event.target as HTMLElement | null)?.closest("a[href]");
-          if (!anchor || (editable.current && !(event.metaKey || event.ctrlKey))) return false;
+        click: (current, event) => {
+          const anchor = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>("a[href]");
+          if (!anchor) return false;
           event.preventDefault();
-          window.open((anchor as HTMLAnchorElement).href, "_blank", "noopener,noreferrer");
+          // A drag across a link selects its words; only a click or tap opens it.
+          if (event.button !== 0 || !current.dom.ownerDocument.getSelection()?.isCollapsed) return true;
+          if (!["http:", "https:", "mailto:", "tel:"].includes(anchor.protocol)) return true;
+          window.open(anchor.href, "_blank", "noopener,noreferrer");
           return true;
         },
       },
