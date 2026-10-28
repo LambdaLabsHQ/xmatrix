@@ -52,9 +52,8 @@ integration("execution-owner lock failures retain the live blocker without ident
   const isolated = await isolatedPostgres("execution_lock", { migrate: false, runtimeRole: false });
   const connectionString = isolated.url.toString();
   const placement = { spaceId: "space", shardId: "lock-diagnostic", placementEpoch: 1 };
-  const holder = new Client({ connectionString });
+  const holder = isolated.client;
   const table = `execution_wait_${randomUUID().replaceAll("-", "")}`;
-  await holder.connect();
   try {
     await holder.query(`CREATE SCHEMA control;
       CREATE TABLE control.space_placement (space_id text,shard_id text,placement_epoch int,state text,target_shard_id text);
@@ -120,9 +119,7 @@ integration("execution-owner lock failures retain the live blocker without ident
     assert.deepEqual(await database.transaction({ requestId: "fast", operation: "runtime.execution-report", placement },
       tx => tx.query({ name: "runtime_execution_report_owner_v4", text: "SELECT 1 AS ok", maxRows: 1 })), [{ ok: 1 }]);
   } finally {
-    await holder.query("ROLLBACK");
-    await holder.query(`DROP TABLE ${table}`);
-    await holder.end();
-    await isolated.close();
+    try { await holder.query("ROLLBACK"); }
+    finally { await isolated.close(); }
   }
 });
