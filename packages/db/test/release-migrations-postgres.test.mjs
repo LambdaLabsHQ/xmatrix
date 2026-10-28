@@ -3,6 +3,8 @@ import { integration } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { cp, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { applyMigration, loadMigrationManifest } from "../scripts/migrate.mjs";
 
 const execute = promisify(execFile);
@@ -10,10 +12,22 @@ const execute = promisify(execFile);
 integration("release expand migrations refuse unowned indexes and resume once on the same ledger", async () => {
   const isolated = await isolatedPostgres("release_migration", { migrate: false });
   const { client, role, url } = isolated;
+  // Keep the CLI's real package layout and module resolution, but make this
+  // interruption scenario independent of whichever migration was last shipped.
+  const fixtureRoot = await realpath(await mkdtemp(new URL("../node_modules/.release-migration-", import.meta.url)));
   try {
+    await cp(new URL("../scripts", import.meta.url), join(fixtureRoot, "scripts"), { recursive: true });
+    await cp(new URL("../migrations", import.meta.url), join(fixtureRoot, "migrations"), { recursive: true });
+    const baseline = await loadMigrationManifest();
+    const next = baseline.length.toString().padStart(4, "0");
+    await writeFile(join(fixtureRoot, "migrations", `${next}_expand_release_resume_fixture.sql`),
+      "-- xmatrix:online-indexes\nCREATE INDEX CONCURRENTLY release_resume_fixture_idx ON data.messages (sent_at);\n");
+    const following = (baseline.length + 1).toString().padStart(4, "0");
+    await writeFile(join(fixtureRoot, "migrations", `${following}_expand_release_following_fixture.sql`),
+      "CREATE TABLE data.release_following_fixture (id TEXT PRIMARY KEY);\n");
     const revision = "b".repeat(40);
     const invoke = (shard = "shard-0") => execute(process.execPath,
-      [new URL("../scripts/migrate.mjs", import.meta.url).pathname,
+      [join(fixtureRoot, "scripts", "migrate.mjs"),
         "apply", "--existing-expand-only", `--revision=${revision}`], {
         timeout: 35_000,
         env: { ...process.env, DATABASE_URL: url.toString(),
@@ -23,14 +37,8 @@ integration("release expand migrations refuse unowned indexes and resume once on
     assert.equal((await client.query("SELECT to_regclass('control.schema_migrations') AS ledger"))
       .rows[0].ledger, null, "release does not bootstrap an empty database");
 
-    const manifest = await loadMigrationManifest();
-    // Anchor the interrupted online build at the first one a release can still
-    // apply: release refuses a pending contract, so it follows the last one.
-    // Subsequent expand migrations are part of the same release and must also
-    // apply exactly once.
-    const lastContract = manifest.findLastIndex(migration => migration.phase !== "expand");
-    const last = manifest.slice(lastContract + 1).find(migration => migration.onlineIndexes);
-    assert.ok(last, "an online index migration follows the last contract migration");
+    const manifest = await loadMigrationManifest(join(fixtureRoot, "migrations"));
+    const last = manifest[baseline.length];
     const [index] = last.onlineIndexes;
     const indexName = `${index.schema}.${index.name}`;
     const pending = manifest.slice(manifest.indexOf(last));
@@ -64,5 +72,6 @@ integration("release expand migrations refuse unowned indexes and resume once on
       await client.query("ROLLBACK").catch(() => undefined);
     }
     await isolated.close();
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });

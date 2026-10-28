@@ -45,7 +45,7 @@ Channel policies, their command parser and their runtime queries are removed;
 legacy API bodies are rejected rather than interpreted as wider authority.
 Claude's one-row selector ships with the backend. Migration adds the connection
 field and freezes the retired writer after checking the live policy inventory;
-the old table is dropped after the new Hub is verified. See the
+contract migration 0227 drops the old table after the new Hub is verified. See the
 [retirement procedure](operations/connector-permission-retirement.md). Recovery
 uses a CI-validated forward release preserving configured permissions, not an
 old Channel-policy executor.

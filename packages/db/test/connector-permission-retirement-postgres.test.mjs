@@ -5,7 +5,7 @@ import { beginTestSchema, connectionString, integration } from "./postgres-datab
 
 // The deployment guard must detect changed production evidence before retiring
 // authority; permission repository cases cannot prove this migration boundary.
-integration("Channel-policy retirement refuses restrictive rows and freezes old writers without deleting evidence", async () => {
+integration("Channel-policy retirement refuses changed evidence, freezes writers, then drops rules while preserving app permissions", async () => {
   const client = new Client({ connectionString }); await client.connect();
   try {
     const rewrite = await beginTestSchema(client, `retire_policy_${crypto.randomUUID().replaceAll("-", "")}`);
@@ -26,5 +26,9 @@ integration("Channel-policy retirement refuses restrictive rows and freezes old 
       await assert.rejects(client.query(rewrite(sql)), error => error.code === "23514");
       await client.query("ROLLBACK TO SAVEPOINT old_writer");
     }
+    await client.query(rewrite("INSERT INTO data.app_connector_connections (connection_id,permission_mode) VALUES ('r','read'),('a','ask'),('w','write')"));
+    await client.query(rewrite(await readFile(new URL("../migrations/0227_contract_retire_channel_permissions.sql", import.meta.url), "utf8")));
+    assert.equal((await client.query(rewrite("SELECT to_regclass('data.app_connector_action_policies') AS retired"))).rows[0].retired, null);
+    assert.deepEqual((await client.query(rewrite("SELECT permission_mode FROM data.app_connector_connections ORDER BY connection_id"))).rows.map(row => row.permission_mode), ["ask", "read", "write"]);
   } finally { await client.query("ROLLBACK").catch(() => {}); await client.end(); }
 });
