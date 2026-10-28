@@ -1,17 +1,22 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type FaceOf, type PageLineDiff } from "@xmatrix/protocol";
+import { pageAuthorColor, type ClientDefectAction, pageAuthorLabel, pageLineDiff, type FaceOf, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
-import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import {
-  CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
+  ArrowLeft, Bot, Check, ChevronDown, ChevronUp, Globe, Link2, Lock, ShieldCheck, Users, type LucideIcon,
+} from "lucide-react";
+import {
+  CenteredDialogShell, DialogButton, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
+import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { Button } from "@/components/ui/button";
-import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { LiquidGlassCard, LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { Switch } from "@/components/ui/switch";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -158,63 +163,160 @@ export function PageScrollMarks({ marks, viewport, onJump }: { marks: PageScroll
   );
 }
 
-function Toggle({ label, checked, disabled, onChange, children }: {
-  label: string; checked: boolean; disabled?: boolean; onChange: () => void; children?: ReactNode;
+/** One setting in Share: what it does, said plainly, and the control that does it at the row's end. */
+function ShareRow({ icon: Icon, title, detail, children }: {
+  icon: LucideIcon; title: string; detail: ReactNode; children?: ReactNode;
 }) {
   return (
-    <DialogInset as="label" className="flex cursor-pointer items-start gap-3">
-      <input type="checkbox" className="mt-1" checked={checked} disabled={disabled} onChange={onChange} />
-      <span className="min-w-0">
-        <span className="block font-semibold">{label}</span>
-        {children && <span className="mt-0.5 block text-xs text-muted-foreground">{children}</span>}
+    <div className="flex items-center gap-3 py-2">
+      <span aria-hidden="true" className="page-share-icon flex size-8 shrink-0 items-center justify-center rounded-full">
+        <Icon className="size-4" />
       </span>
-    </DialogInset>
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className="block text-[14px] font-semibold">{title}</span>
+        <span className="mt-0.5 block text-[12px] text-muted-foreground">{detail}</span>
+      </span>
+      {children}
+    </div>
   );
 }
 
-/** Who reads the page and how Agents change it (§7): publishing is a Space owner's or admin's act. */
-export function ShareDialog({ open, onClose, canPublish, canEdit, published, restricted, publicUrl, suggestOnly,
-  rulesPage, onTogglePublished, onToggleSuggestOnly, onToggleRulesPage, onCopyLink }: {
-  open: boolean; onClose: () => void;
-  canPublish: boolean; canEdit: boolean; published: boolean; restricted: boolean; publicUrl: string | null;
+/** A setting's switch, held off while its change is on its way. */
+function ShareSwitch({ label, checked, disabled, failure, onChange }: {
+  label: string; checked: boolean; disabled?: boolean;
+  /** What the reader is told when the change does not go through. */
+  failure: ClientDefectAction; onChange: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const change = () => {
+    setBusy(true);
+    setError(null);
+    onChange().catch((cause: unknown) => setError(userErrorMessage(cause, failure)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <span className="flex shrink-0 flex-col items-end">
+      <Switch label={label} checked={checked} disabled={disabled || busy} onChange={change} />
+      {error && <span role="alert" className={cn("mt-1 max-w-40 text-right text-[11px]", statusInkClass("alert"))}>{error}</span>}
+    </span>
+  );
+}
+
+/** Copies a link and says so on the button itself, where the reader is looking. */
+function CopyButton({ text, label, className }: { text: string; label: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  return (
+    <DialogButton className={className} icon={copied ? Check : Link2}
+      onClick={() => void navigator.clipboard.writeText(text).then(() => setCopied(true))}>
+      {copied ? "Copied" : label}
+    </DialogButton>
+  );
+}
+
+/** Where the Share panel stands: under its button, its right edge on the button's, inside the window. */
+function sharePanelPlace(anchor: HTMLElement | null): CSSProperties | null {
+  if (!anchor) return null;
+  const box = anchor.getBoundingClientRect();
+  const width = Math.min(SHARE_PANEL_WIDTH, window.innerWidth - 2 * SHARE_PANEL_EDGE);
+  const left = Math.max(SHARE_PANEL_EDGE, Math.min(box.right - width, window.innerWidth - width - SHARE_PANEL_EDGE));
+  return { top: box.bottom + 8, left, width };
+}
+const SHARE_PANEL_WIDTH = 400;
+const SHARE_PANEL_EDGE = 12;
+
+/**
+ * Share (pages-live-document.md §7) answers two questions: who reads the page, and how it is changed. Each
+ * link stands beside the people it opens for: the page's own link for the Space, the public one for anyone.
+ * It drops from its button as one glass pane, as search does, and every change takes effect as it is switched.
+ */
+export function ShareDialog({ open, anchor, onClose, canPublish, canEdit, published, restricted, members, pageLink,
+  publicUrl, suggestOnly, rulesPage, onTogglePublished, onToggleSuggestOnly, onToggleRulesPage }: {
+  open: boolean;
+  /** The Share button the panel drops from. */
+  anchor: HTMLElement | null;
+  onClose: () => void;
+  canPublish: boolean; canEdit: boolean; published: boolean; restricted: boolean;
+  /** How many people are in the Space, who all read an open page. */
+  members: number;
+  /** The page in the app, for the people in the Space. */
+  pageLink: string;
+  /** The page anyone can read, once it is published. */
+  publicUrl: string | null;
   suggestOnly: boolean | undefined;
   /** Whether this page states the project's rules (open-project-governance.md §4); known to owners and admins. */
   rulesPage: boolean | undefined;
-  onTogglePublished: () => void; onToggleSuggestOnly: () => void; onToggleRulesPage: () => void; onCopyLink: () => void;
+  onTogglePublished: () => Promise<void>; onToggleSuggestOnly: () => Promise<void>; onToggleRulesPage: () => Promise<void>;
 }) {
-  return (
-    <CenteredDialogShell open={open} busy={false} labelledBy="page-share-title" onCancel={onClose}
-      panelClassName="max-w-md">
-      <DialogPanelHeader labelledBy="page-share-title" title="Share this page" />
-      <div className="space-y-2 px-5 py-4">
+  const panel = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<CSSProperties | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => setPlace(sharePanelPlace(anchor));
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [anchor, open]);
+  useEffect(() => open ? listenForOverlayDismissal((event) => {
+    const where = event.target instanceof Node ? event.target : null;
+    // The button toggles the panel itself.
+    if (where && (panel.current?.contains(where) || anchor?.contains(where))) return;
+    onClose();
+  }, onClose) : undefined, [anchor, onClose, open]);
+  if (!open || typeof document === "undefined") return null;
+  const publicLink = publicUrl && typeof window !== "undefined" ? `${window.location.origin}${publicUrl}` : null;
+  const editing = (canEdit && suggestOnly !== undefined) || (canPublish && rulesPage !== undefined);
+  return createPortal(
+    <div ref={panel} className={cn("xmatrix-app fixed z-[var(--z-popover)]", !place && "invisible")}
+      style={place ?? undefined}>
+      <LiquidGlassCard role="dialog" aria-labelledby="page-share-title" data-testid="page-share"
+        className="app-dialog-panel page-share-panel px-4 pb-3 pt-3 text-foreground">
+        <h2 id="page-share-title" className="sr-only">Share this page</h2>
+        <p className="page-share-heading">Who can read</p>
+        <ShareRow icon={restricted ? Lock : Users} title={restricted ? "Only people given access" : "Everyone in this Space"}
+          detail={restricted ? "This page or one above it is restricted."
+            : `${members === 1 ? "1 person" : `${members} people`} and their Agents`}>
+          <CopyButton text={pageLink} label="Copy link" className="h-8 min-w-0 px-3 text-[13px]" />
+        </ShareRow>
         {canPublish && (
-          <Toggle label="Anyone with the link can read this page" checked={published}
-            disabled={!published && restricted} onChange={onTogglePublished}>
-            {!published && restricted ? "A restricted page stays private."
-              : "People without an account read it too, with who is on it now."}
-          </Toggle>
+          <ShareRow icon={Globe} title="Anyone with the link"
+            detail={!published && restricted ? "A restricted page stays in the Space." : "Read-only, no account needed"}>
+            <ShareSwitch label="Anyone with the link can read this page" checked={published}
+              disabled={!published && restricted} failure="Couldn't change who can read this page"
+              onChange={onTogglePublished} />
+          </ShareRow>
         )}
-        {published && publicUrl && (
-          <a className="block px-1 text-xs underline" href={publicUrl} target="_blank" rel="noreferrer">
-            Open the public page
-          </a>
+        {published && publicLink && (
+          <div className="page-share-link mb-1 flex items-center gap-2 rounded-full py-1 pl-3.5 pr-1">
+            <a href={publicLink} target="_blank" rel="noreferrer" title="Open the public page"
+              className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground hover:text-foreground hover:underline">
+              {publicLink.replace(/^https?:\/\//u, "")}
+            </a>
+            <CopyButton text={publicLink} label="Copy" className="h-7 min-w-0 px-2.5 text-[12px]" />
+          </div>
         )}
+        {editing && <p className="page-share-heading mt-2">Who changes it</p>}
         {canEdit && suggestOnly !== undefined && (
-          <Toggle label="Agents suggest; a person accepts" checked={suggestOnly} onChange={onToggleSuggestOnly}>
-            An Agent&apos;s edit becomes a suggestion in History instead of changing the text.
-          </Toggle>
+          <ShareRow icon={Bot} title="Agents only suggest" detail="A person accepts each change in History.">
+            <ShareSwitch label="Agents suggest; a person accepts" checked={suggestOnly}
+              failure="Couldn't change who edits this page" onChange={onToggleSuggestOnly} />
+          </ShareRow>
         )}
         {canPublish && rulesPage !== undefined && (
-          <Toggle label="Space rules: only owners and admins edit this page" checked={rulesPage} onChange={onToggleRulesPage}>
-            Every Agent in this Space reads and follows it; participants read it.
-          </Toggle>
+          <ShareRow icon={ShieldCheck} title="Space rules"
+            detail="Only owners and admins edit it; every Agent in the Space follows it.">
+            <ShareSwitch label="Space rules: only owners and admins edit this page" checked={rulesPage}
+              failure="Couldn't change who edits this page" onChange={onToggleRulesPage} />
+          </ShareRow>
         )}
-      </div>
-      <DialogPanelFooter>
-        <DialogButton onClick={onCopyLink}>Copy link</DialogButton>
-        <DialogButton tone="primary" onClick={onClose}>Done</DialogButton>
-      </DialogPanelFooter>
-    </CenteredDialogShell>
+      </LiquidGlassCard>
+    </div>,
+    document.body
   );
 }
 

@@ -6,6 +6,17 @@ The first release of automatic Gmail reads posted no receipt: each one replied
 to the notification, and an App's message cannot be a reply target, so the
 append was refused. The receipt now follows its notification, and a refused
 receipt is logged by failure kind without mail content. This ships in the Hub.
+## Unreleased: Share says who reads a page and who changes it
+
+A page's Share now opens just under its button as one glass pane. "Who can
+read" names everyone in the Space, with the page's own link beside them, and
+"Anyone with the link" as a switch; once a page is public, its public link
+stands under that switch with its own Copy. "Who changes it" holds the
+Agents-only-suggest and Space-rules switches. Copying confirms on the button,
+and a switch that fails says why beneath itself instead of behind the
+dialog. Before, Copy link only ever gave the in-app link, and a failed
+suggest-only change said nothing. This ships in the beta Web; no API or data
+migration is needed. Recovery is a CI-validated beta Web reverting the change.
 
 ## Unreleased: New Gmail messages arrive already read
 
