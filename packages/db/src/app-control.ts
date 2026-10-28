@@ -13,6 +13,7 @@ import { commandFields } from "./command-fields.js";
 import { spaceMemberRole } from "./space-members.js";
 import { readsOnly } from "./space-roles.js";
 import { readScopedCommandReplay, storeScopedCommandReplay, COMMAND_REPLAY_TTL_MS as REPLAY_TTL_MS } from "./command-replay.js";
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 
 
 export class AppControlError extends ControlError {
@@ -389,7 +390,9 @@ export class PostgresAppRepository {
     if (!/^[1-9][0-9]{0,19}$/u.test(installationId) || !Number.isSafeInteger(input.limit) ||
         input.limit < 1 || input.limit > 1000) throw new AppControlError("invalid_app_request", 400,
       "Invalid GitHub catalog invalidation");
-    return this.database.transaction({ requestId, operation: "app.github-catalog.invalidate" }, async tx => {
+    // Only the database cache fence is replayed. Client notification stays
+    // outside, and a lost COMMIT still fails for webhook redelivery.
+    return retryTransactionBeforeCommit(this.database, { requestId, operation: "app.github-catalog.invalidate" }, async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "app_github_catalog_connections_v1", text: `SELECT
         c.connection_id,c.space_id FROM data.app_connector_connections c
         WHERE c.provider_id='github' AND c.status='configured' AND ${GITHUB_INSTALLATION_LINKED_SQL}

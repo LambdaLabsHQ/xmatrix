@@ -38,7 +38,7 @@ interface DiagnosticClient {
   query(input: { text: string; values: unknown[] }): Promise<QueryResult>;
   end(): Promise<void>;
 }
-// Lock and placement-read diagnostics share at most one extra connection per isolate.
+// Lock and single-read diagnostics share at most one extra connection per isolate.
 let sampling = false;
 const projection = (alias: string) => `json_build_object(
   'state',CASE WHEN ${alias}.state IN ('active','idle in transaction','idle in transaction (aborted)','idle')
@@ -96,7 +96,7 @@ export function watchPostgresLockWait(queryName: string, backendPid: number | un
 export function watchPostgresReadWait(queryName: string, text: string,
   options: { connectionString: string; clientFactory: (config: ClientConfig) => DiagnosticClient },
 ): { text: string; finish: () => Promise<PostgresLockWait | undefined> } | undefined {
-  if (queryName !== "space_placement_resolve_v1") return;
+  if (queryName !== "space_placement_resolve_v1" && !queryName.startsWith("channel_catalog_")) return;
   const prefix = `/* xmatrix-read-${crypto.randomUUID()} */`;
   return { text: `${prefix} ${text}`, finish: watch(prefix, 500, options) };
 }

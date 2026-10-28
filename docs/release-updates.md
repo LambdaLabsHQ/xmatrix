@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Channel catalog stalls retain evidence and GitHub invalidation recovers
+
+HUB-B0 exhausted its existing single-read recovery without source activity
+evidence. Channel catalog reads now share the placement-read diagnostic from
+HUB-B1: each slow attempt samples only its own active source statement, keeping
+fixed state, wait and blocker categories without SQL, parameters, identities or
+the ephemeral marker. Fast reads open no diagnostic connection. This closes a
+diagnostic gap; the underlying stall remains unproven. HUB-B2's database-only
+GitHub catalog invalidation now replays once on a fresh session when a response
+is lost before COMMIT. Unknown COMMIT and answered failures still fail the
+webhook, and notifications remain outside replay. Hub only, no migration;
+recovery uses a CI-validated beta Hub reverting these changes.
+
 ## Unreleased: Placement read timeouts retain origin wait evidence
 
 HUB-B1 exhausted both fresh-connection single-read attempts while resolving a

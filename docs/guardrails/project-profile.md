@@ -73,7 +73,7 @@ recovery remains bounded to the existing attempt. See
 Slow execution-owner locks take one bounded live wait-edge sample per isolate.
 Failure evidence exposes only fixed waiter/blocker categories, states and ages;
 diagnostic failure cannot change the command's error or replay boundary.
-Slow placement directory single reads share that capacity, using a temporary
+Slow Channel catalog and placement directory single reads share that capacity, using a temporary
 per-attempt SQL marker to locate active origin work without a stable backend
 pid. Sentry reads expose the content-free sample, never the marker or SQL.
 

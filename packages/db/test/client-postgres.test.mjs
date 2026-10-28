@@ -248,3 +248,84 @@ integration("placement read timeouts retain each attempt's live origin wait with
     await isolated.close();
   }
 });
+// HUB-B0: placement-read coverage does not protect the Channel catalog's
+// separate query selection, including a retry and its implicit placement lock.
+integration("single-read timeouts retain each attempt's live source activity without private data", async () => {
+  const isolated = await isolatedPostgres("read_activity", { migrate: false, runtimeRole: false });
+  let samples = 0;
+  const database = createAuthorityDatabase({ connectionString: isolated.url.toString(), shardId: "read-activity",
+    statementTimeoutMs: 1000, clientFactory: config => {
+      if (config.application_name === "xmatrix-lock-diagnostic") samples++;
+      return new Client(config);
+    } });
+  try {
+    await assert.rejects(database.transaction({ requestId: "private-request", operation: "channel-catalog.page",
+      statement: "single_read" }, tx => tx.query({ name: "channel_catalog_page_flat_all_v14",
+      text: "SELECT pg_sleep(1.5),$1::text AS private_value", values: ["private-parameter"], maxRows: 1 })), error => {
+      assert.match(error.message, /Query read timeout/u);
+      const attempts = databaseFailureEvidence(error);
+      assert.equal(attempts.length, 2, "the existing fresh-connection retry stays bounded");
+      for (const attempt of attempts) {
+        assert.equal(attempt.code, "QUERY_READ_TIMEOUT");
+        assert.equal(attempt.queryWait?.status, "sampled");
+        assert.equal(attempt.queryWait.waiter.state, "active");
+        assert.equal(attempt.queryWait.waiter.wait, "Timeout");
+        assert.ok(attempt.queryWait.waiter.ageMs < 1000, "each sample identifies its own attempt");
+        assert.deepEqual(attempt.queryWait.blockers, []);
+      }
+      assert.doesNotMatch(JSON.stringify(attempts), /private-|SELECT|pg_sleep|xmatrix-read|postgres:\/\//u);
+      return true;
+    });
+    assert.equal(samples, 2);
+    const fast = createAuthorityDatabase({ connectionString: isolated.url.toString(), shardId: "read-fast",
+      clientFactory: config => {
+        assert.notEqual(config.application_name, "xmatrix-lock-diagnostic");
+        return new Client(config);
+      } });
+    assert.deepEqual(await fast.transaction({ requestId: "fast", operation: "page.links", statement: "single_read" },
+      tx => tx.query({ name: "space_placement_resolve_v1", text: "SELECT 1 AS ok", maxRows: 1 })), [{ ok: 1 }]);
+  } finally { await isolated.close(); }
+});
+
+integration("single-read placement waits retain their blocker and tolerate unavailable diagnostics", async () => {
+  const isolated = await isolatedPostgres("read_fence_wait", { migrate: false, runtimeRole: false });
+  const placement = { spaceId: "private-space", shardId: "read-fence", placementEpoch: 1 };
+  const holder = isolated.client;
+  try {
+    await holder.query(`CREATE SCHEMA control;
+      CREATE TABLE control.space_placement (space_id text,shard_id text,placement_epoch int,state text,target_shard_id text);
+      INSERT INTO control.space_placement VALUES ('private-space','read-fence',1,'active',NULL)`);
+    await holder.query("BEGIN; SET LOCAL application_name='xmatrix-agent-launch-coordinator'");
+    await holder.query("SELECT * FROM control.space_placement FOR UPDATE");
+    for (const available of [true, false]) {
+      let samples = 0;
+      const database = createAuthorityDatabase({ connectionString: isolated.url.toString(), shardId: placement.shardId,
+        lockTimeoutMs: 1500, clientFactory: config => {
+          if (config.application_name === "xmatrix-lock-diagnostic") {
+            samples++;
+            if (!available) throw new Error("private-diagnostic-failure");
+          }
+          return new Client(config);
+        } });
+      await assert.rejects(database.transaction({ requestId: "private-request", operation: "channel-catalog.page",
+        statement: "single_read", placement }, tx => tx.query({ name: "channel_catalog_page_flat_all_v14",
+        text: "SELECT 1 AS ok", maxRows: 1 })), error => {
+        assert.equal(error.code, "55P03");
+        const attempts = databaseFailureEvidence(error);
+        assert.equal(attempts.length, 1, "an answered lock timeout is not replayed");
+        assert.equal(attempts[0].queryWait?.status, available ? "sampled" : "unavailable");
+        if (available) {
+          assert.equal(attempts[0].queryWait.waiter.wait, "Lock");
+          assert.equal(attempts[0].queryWait.blockers[0].owner, "launch");
+        }
+        assert.doesNotMatch(JSON.stringify(attempts), /private-|SELECT|xmatrix-read|postgres:\/\//u);
+        return true;
+      });
+      assert.equal(samples, 1);
+    }
+  } finally {
+    await holder.query("ROLLBACK").catch(() => {});
+    await isolated.close();
+  }
+});
+
