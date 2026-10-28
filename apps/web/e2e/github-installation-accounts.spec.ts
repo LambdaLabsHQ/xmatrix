@@ -23,7 +23,7 @@ async function openGitHub(page: Page, { status = "configured", grant }: { status
     connections: [{ ...connection, status }],
   });
   await fixtureJson(page, "github-executions", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });
-  await fixtureJson(page, "github-policies", /\/app-connections\/github\/policies$/, { policies: [] });
+  await fixtureJson(page, "github-policies", /\/app-connections\/github\/policies$/, { policies: [], defaults: [] });
   await fixtureJson(page, "github-installations", installations, {
     linked: status === "disconnected" ? []
       : [{ installationId: "111", login: "LambdaLabsHQ", type: "Organization", repositorySelection: "selected" }],
