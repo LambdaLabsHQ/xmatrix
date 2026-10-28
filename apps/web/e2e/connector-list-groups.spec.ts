@@ -23,7 +23,7 @@ async function openApps(page: Page, { providers = [], connections = [], app, per
 
 const page_ = (page: Page) => page.locator(".app-tool-detail-scroll:visible");
 
-test("Apps groups by connection state: needs a hand, connected (ticked), then not connected by category", async ({ page }) => {
+test("Apps groups by connection state: needs a hand, connected (plugged in), then not connected by category", async ({ page }) => {
   await openApps(page, { connections: [connection("sentry", "Sentry", "error"), connection("linear", "Linear", "configured")] });
 
   const groups = page.locator(".app-connectors-list .app-tool-list-group");

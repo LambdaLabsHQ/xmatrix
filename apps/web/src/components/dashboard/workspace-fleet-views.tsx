@@ -104,6 +104,7 @@ import { Input } from "@/components/ui/input";
 
 import { Face } from "@/components/dashboard/face";
 import { ListSectionHeading } from "./list-section-heading";
+import { Plugged } from "./plugged-icon";
 
 import {
   workspaceKey,
@@ -1385,8 +1386,9 @@ export function AppsView({
     const connection = connectionsByProvider.get(connector.id);
     const needsAttention = connection?.status === "error";
     const connected = connection?.status === "configured";
-    // The group says the state; a row marks what works and says what stopped.
-    const StateIcon = needsAttention ? AlertTriangle : connected ? Check : null;
+    // The group says the state; a row ends in the state's mark: plugged in
+    // when it works, a warning when it stopped (with what stopped under it).
+    const StateIcon = needsAttention ? AlertTriangle : connected ? Plugged : null;
     const stateLabel = needsAttention ? "Needs attention" : "Connected";
     return (
       <ToolListRow key={connector.id} testId="connector-row"
