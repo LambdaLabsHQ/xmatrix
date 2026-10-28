@@ -35,12 +35,19 @@ function database({ secrets = [], approvals = [], roles = { "owner-1": "member",
         run_status: "running", execution_key: "execution-1", instance_channel_id: "channel-1",
         instance_status: "online", ...live }];
       case "space_secret_member_role_v1": return roles[query.values[1]] ? [{ role: roles[query.values[1]] }] : [];
-      case "space_secret_run_views_v2": return secrets
+      case "space_secret_run_views_v2":
+      case "space_secret_run_values_v2": return secrets
         .filter((row) => !query.values[2] || query.values[2].includes(row.secret_ref))
+        .filter((row) => !query.values[3] || row.secret_ref > query.values[3])
+        .toSorted((a, b) => a.secret_ref.localeCompare(b.secret_ref))
+        .slice(0, query.values[4])
         .map((row) => ({ ...row, readable: row.access === "auto" || approvals.includes(row.secret_ref) }));
       case "space_secret_write_read_v1":
       case "space_secret_approve_read_v1": return secrets.filter((row) => row.secret_ref === query.values[1]);
-      case "space_secret_list_v2": return secrets;
+      case "space_secret_list_v2": return secrets
+        .filter((row) => !query.values[1] || row.secret_ref > query.values[1])
+        .toSorted((a, b) => a.secret_ref.localeCompare(b.secret_ref)).slice(0, query.values[2]);
+      case "space_secret_write_count_v1": return [{ count: secrets.length }];
       case "space_secret_insert_v1": return [{ space_id: query.values[0], secret_ref: query.values[1],
         env_name: query.values[2], description: query.values[3], access: query.values[4],
         created_by_user_id: query.values[8], created_at: at, updated_at: at }];
@@ -88,7 +95,7 @@ test("naming no secret reads only those the Run may read now", async () => {
   assert.deepEqual(result.secrets.map((secret) => secret.secretRef), ["open-key"]);
   const listed = await repository(db).runList(run);
   assert.deepEqual(listed.secrets.map(({ secretRef, readable }) => [secretRef, readable]),
-    [["open-key", true], ["closed-key", false]]);
+    [["closed-key", false], ["open-key", true]]);
   assert.equal(JSON.stringify(listed).includes("open"), true);
   assert.equal(JSON.stringify(listed).includes("\"value\""), false, "listing reads no value");
 });
@@ -101,7 +108,7 @@ test("reads recheck the live Run, its execution key, registration and the owner'
     { roles: { "owner-1": "participant" } }, { roles: {} }]) {
     const db = database({ secrets: rows, ...scenario });
     await assert.rejects(repository(db).runRead(run, ["github"]));
-    assert.equal(db.calls.some((call) => call.name === "space_secret_run_views_v2"), false,
+    assert.equal(db.calls.some((call) => /^space_secret_run_(views|values)_v2$/u.test(call.name)), false,
       `${JSON.stringify(scenario)} refuses before any secret is read`);
   }
 });
@@ -115,7 +122,7 @@ test("secrets are read on the Space's own shard, and only for the Space the Run'
   const elsewhere = database({ secrets: [await secretRow("github", "auto", "gh-value")] });
   await assert.rejects(repository(elsewhere).runRead({ ...run, spaceId: "space-2" }, ["github"]),
     (error) => error.code === "request_context_mismatch");
-  assert.equal(elsewhere.calls.some((call) => call.name === "space_secret_run_views_v2"), false);
+  assert.equal(elsewhere.calls.some((call) => /^space_secret_run_(views|values)_v2$/u.test(call.name)), false);
   const card = database({ secrets: [await secretRow("github", "ask", "gh-value")] });
   await repository(card).approve({ userId: "admin-1", runId: "run-1", channelId: "channel-1", secretRef: "github" });
   assert.deepEqual(card.contexts.find((context) => context.placement).placement.spaceId, "space-1",

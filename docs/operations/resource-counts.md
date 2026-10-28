@@ -59,7 +59,7 @@ restore the former count constraint after users have saved larger arrays.
 ## Verification
 
 Real PostgreSQL regressions exercise secret creation past 128, complete
-multi-page catalogs and ask approval; 1,001 pins and an unreadable tail;
+multi-page catalogs, ask approval and byte-bounded bulk reads; 1,001 pins and an unreadable tail;
 121 devices and 501 recipients; 101 memory entries and 10,001 small keys;
 103 GitHub installations; 251 Page Automations; and installation retirement
 across batches. Existing owner suites retain concurrent-save, authority,

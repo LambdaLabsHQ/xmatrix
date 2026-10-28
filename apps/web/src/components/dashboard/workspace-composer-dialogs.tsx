@@ -941,7 +941,7 @@ export const Composer = memo(function Composer({
         sourceRevision: 1, sourceBodyHash, selections }, {
         spaceId: space?.id ?? channel?.spaceId ?? "", body, bodyHash: sourceBodyHash, revision: 1,
       }) : undefined;
-      const summonIntents = body === outgoingDraft.body ? await draftIntents.readBeforeSend() : [];
+      const summonIntents = body === outgoingDraft.body ? draftIntents.readings : [];
       if (invocationScopeRef.current !== sendScope) {
         // The composer moved to another conversation, which ends its uploads.
         for (const upload of uploads) {

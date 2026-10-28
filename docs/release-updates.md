@@ -1,5 +1,26 @@
 # Release Updates
 
+## Unreleased: Spaces can store more than 128 secrets
+
+A Space with 128 secrets refused the next credential even when it was needed
+for normal work. The Hub removes that storage quota, and catalog, Run value
+and approval reads also work beyond the old boundary. Reads use ordered,
+bounded SQL pages and per-request byte budgets; alias listings do not fetch
+encrypted values. Existing encryption, live Run authorization and admin
+approval remain in force. This ships in the Hub without a schema or client
+change. Recovery is a CI-validated Hub release reverting this change; keep
+stored secrets intact and restore forward support for catalogs above 128
+before relying on an older read implementation.
+
+## Unreleased: Page links open with a click or tap
+
+Bare URLs and Markdown links in an editable page now open directly in a new
+tab. Before, opening them required Ctrl/⌘, leaving phone readers without that
+gesture. Dragging across link text still selects it, and its visible Markdown
+destination still opens the address editor. This ships in the beta Web; no
+schema or native change is needed. Recovery is a CI-validated beta Web release
+reverting the change.
+
 ## Unreleased: Explicit activation keeps mention details open
 
 A mention's delayed hover-close can already be queued when Enter or a click
@@ -9,6 +30,15 @@ leaving and ordinary hover-only dismissal retain their existing behavior. A
 controlled-clock browser regression reproduces the old disappearance without
 changing position, timeout or retry tolerances. No API, data or native update
 is needed; recovery uses a CI-validated beta Web reverting the change.
+
+## Unreleased: Sending does not wait for summon previews
+
+Pressing Enter or Send with an Agent mention previously waited up to six
+seconds for the draft intent preview before the message appeared. Sending
+now takes completed readings for the exact current draft immediately;
+unfinished previews use the existing post-send intent check. Changed drafts
+cannot carry an older reading. This ships in the beta Web, with no API or
+data migration. Recovery is a CI-validated beta Web reverting the change.
 
 ## Unreleased: Page edits in a Channel fold to a summary with a preview
 

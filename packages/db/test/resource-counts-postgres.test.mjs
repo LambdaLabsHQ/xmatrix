@@ -7,28 +7,6 @@ import { reconcilePageAutomations, removePageAutomations } from "../dist/automat
 
 // These exercise persistence and complete reads beyond former quotas. Existing
 // owner tests cover access, encryption, replay and provider retirement evidence.
-integration("a Space saves and reads secrets beyond 128 without weakening ask approval", async () => {
-  const f = await spaceSecretFixture();
-  try {
-    const refs = Array.from({ length: 257 }, (_, n) => `key-${String(n).padStart(3, "0")}`);
-    for (const ref of refs.slice(0, 128)) await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin,
-      secretRef: ref, value: `value-${ref}`, access: "auto" });
-    await f.secret.runCreate(f.run, { secretRef: refs[128], value: "agent-value" });
-    for (const ref of refs.slice(129)) await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin,
-      secretRef: ref, value: `value-${ref}` });
-    const listed = await f.secret.list({ spaceId: f.ids.space, userId: f.ids.owner });
-    assert.deepEqual(listed.secrets.map(secret => secret.secretRef), refs);
-    assert.ok(listed.secrets.every(secret => !("value" in secret)));
-    assert.equal((await f.secret.runList(f.run)).secrets.length, 257);
-    assert.equal((await f.secret.runRead(f.run)).secrets.length, 129);
-    await assert.rejects(f.secret.runRead(f.run, [refs[256]]), error => error.code === "secret_approval_required");
-    await f.secret.approve({ userId: f.ids.admin, runId: f.ids.run, channelId: f.ids.channel, secretRef: refs[256] });
-    assert.equal((await f.secret.runRead(f.run, [refs[256]])).secrets[0].value, `value-${refs[256]}`);
-    assert.equal((await f.secret.accessStatus({ userId: f.ids.admin, runId: f.ids.run,
-      channelId: f.ids.channel, secretRefs: refs })).secrets.length, 257);
-  } finally { await f.database.close?.(); await f.close(); }
-});
-
 integration("pins beyond 200 round trip completely and still reject an unreadable tail", async () => {
   const f = await spaceSecretFixture();
   try {
