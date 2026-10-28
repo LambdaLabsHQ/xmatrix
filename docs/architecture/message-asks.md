@@ -159,6 +159,11 @@ continues to report uncertainty rather than allocate new work.
 
 ## Next model: invocation outcomes and fact recovery
 
+Provider quota now has a separate, narrow [opt-in recovery owner](../operations/agent-quota-recovery.md).
+It covers a refused invocation or an exhausted Instance whose ordinary handoff
+found nobody eligible. It does not turn unaddressed Ask rows into automatic work
+or replace the existing Instance continuation lock.
+
 This section is the required contract for extending beyond unaddressed speech,
 not a claim that those paths already use Ask rows.
 
@@ -198,6 +203,8 @@ purged, not reconstructed from later speech.
 
 An authorized blocked request records its durable intent and fixed deadline
 (24 hours from initial authorization, never extended by reconnect or replay).
+An explicit provider-quota wait uses its documented fixed 35-day bound to cover
+monthly subscription resets; the broader model's default remains 24 hours.
 The change to its blocking fact writes a durable wake obligation. Registering a
 wait rechecks the fact/version after the wait commits, so an online transition
 cannot fall between observing offline and publishing the wait. Bounded batches

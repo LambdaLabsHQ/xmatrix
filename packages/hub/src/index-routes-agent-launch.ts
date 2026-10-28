@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { registerQuotaRetryRoutes } from "./index-routes-quota-retry";
 
 import type { Env } from "./types";
 import { registerAgentRebornRoutes } from "./index-routes-agent-reborn";
@@ -14,6 +15,7 @@ import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel, wakeAgentLaunch
 const NO_STORE = { "cache-control": "private, no-store" };
 
 export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
+  registerQuotaRetryRoutes(app);
   registerAgentRegistrationRoutes(app);
   registerAgentRoutingRoutes(app);
   registerAgentRebornRoutes(app);

@@ -84,6 +84,7 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
   "registration_access_changes",
   "registration_stop_intents",
   "registration_launch_intents",
+  "agent_quota_retries",
   "run_agent_registrations",
   // An approval lets one Run read a secret; it stays with the Runs.
   "run_secret_approvals",
@@ -173,6 +174,7 @@ const BLOCKER_QUERIES = Object.freeze({
   channel_transfer_proposals: "space_id = $1 OR target_space_id = $1",
   agent_launches: "space_id = $1",
   agent_reborn_intents: "space_id = $1",
+  agent_quota_retries: "space_id = $1",
   app_gmail_routes: "space_id = $1",
   app_connector_action_requests: "space_id = $1",
   app_connector_connections: "space_id = $1",

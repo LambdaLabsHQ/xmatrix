@@ -233,7 +233,7 @@ export async function connectorSubscriptionChannel(sql, spaceId, index, provider
  * A fresh Space with one open conversation for message tests: clears what an
  * earlier run left in `tables` for that Space, then places and creates both.
  */
-export async function seedMessageSpace(client, { space, channel, at, tables }) {
+export async function seedMessageSpace(client, { space, channel, at, tables, members = [] }) {
   for (const table of tables) await client.query(`DELETE FROM ${table} WHERE space_id=$1`, [space]);
   await client.query(`DELETE FROM control.space_placement WHERE space_id=$1`, [space]);
   await seedTestSpacePlacement(client, space, at);
@@ -244,4 +244,8 @@ export async function seedMessageSpace(client, { space, channel, at, tables }) {
     (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,metadata_json,
      created_at,updated_at,activity_at)
     VALUES ($3,$2,'Conversation',$3,'open',$4,1,'{}',$1,$1,$1)`, [at, space, channel, `rank:${channel}`]);
+  if (members.length) await client.query(`INSERT INTO data.space_members
+    (space_id,user_id,role,version,created_at,updated_at)
+    SELECT $1,id,role,1,$2::timestamptz,$2::timestamptz FROM jsonb_to_recordset($3::jsonb) AS member(id text,role text)`,
+  [space, at, JSON.stringify(members)]);
 }

@@ -9,6 +9,12 @@ This repository implements xMatrix, the multi-agent coordination/runtime layer. 
 Agents run on the subscriptions and credentials their users supply; Space
 billing is independent of compute.
 
+Provider quota failures keep automatic handoff. When nobody eligible can take
+over, the task's owner can explicitly choose to wait for a fresh provider quota
+reading. The Channel coordinator retains that choice, source and cancellation
+fences; browser closure does not discard it. See
+[quota recovery](../operations/agent-quota-recovery.md).
+
 ## Default Documentation Language
 
 English is the default language for repository documentation, guardrails, release docs, and tool instructions. Chinese may be used for existing Chinese design notes or when maintainers explicitly ask for Chinese output.

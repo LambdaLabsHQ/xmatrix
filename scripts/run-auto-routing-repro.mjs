@@ -119,6 +119,7 @@ try {
     "packages/db/test/message-run-locks-postgres.test.mjs",
     "packages/db/test/first-message-launch-choice-postgres.test.mjs",
     "packages/db/test/message-asks-postgres.test.mjs",
+    "packages/db/test/agent-quota-retry-postgres.test.mjs",
     "packages/db/test/legacy-hostname-retirement-postgres.test.mjs",
     // Schema drift, Machine query plans and online migration recovery need real PostgreSQL.
     "packages/db/test/migration-index-drift-postgres.test.mjs",

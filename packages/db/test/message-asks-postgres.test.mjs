@@ -34,9 +34,8 @@ integration("unaddressed publications require one current author choice and neve
   const authored = id => tx(transaction => messageAuthoredForActor(transaction, { spaceId: "space", channelId: id,
     messageId: `xmatrix-summon:${id}`, authorKind: "system", authorId: "xmatrix", actorUserId: "owner" }));
   try {
-    await seedMessageSpace(f.client, { space: "space", channel: "seed", at: new Date().toISOString(), tables: [] });
-    await f.run(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
-      VALUES('space','owner','owner',1,now(),now()),('space','other','member',1,now(),now())`);
+    await seedMessageSpace(f.client, { space: "space", channel: "seed", at: new Date().toISOString(), tables: [],
+      members: [{ id: "owner", role: "owner" }, { id: "other", role: "member" }] });
     for (const harness of ["codex", "claude"]) {
       await f.run(`INSERT INTO data.agent_registrations(owner_user_id,machine_id,harness,version,created_at,updated_at)
         VALUES('owner','machine',$1,1,now(),now())`, [harness]);

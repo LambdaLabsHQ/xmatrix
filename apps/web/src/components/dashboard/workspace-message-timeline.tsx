@@ -291,6 +291,8 @@ import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
 import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
 import { TurnFailureNotice } from "@/components/dashboard/turn-failure-notice";
+import { QuotaRetryNotice } from "./quota-retry-notice";
+import { quotaRetryOfferId } from "@xmatrix/protocol";
 import { turnFailureEvidenceOf, turnFailuresContinuedByLaterSpeech } from "@/components/dashboard/turn-failure";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
@@ -1869,6 +1871,7 @@ export const MessageRow = memo(function MessageRow({
   const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
   const offlineNotice = signedOutNotice ? null : machineOfflineNoticeOf(message.metadata);
   const turnFailure = signedOutNotice ? null : turnFailureEvidenceOf(message.metadata);
+  const quotaRetryId = quotaRetryOfferId(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
@@ -2681,6 +2684,9 @@ export const MessageRow = memo(function MessageRow({
               />
             ) : routingDecision ? (
               <RoutingDecisionBoard decision={routingDecision} />
+            ) : quotaRetryId && channel ? (
+              <QuotaRetryNotice id={quotaRetryId} channelId={channel.id} body={displayBody} spaceId={channel.spaceId??null}
+                token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
             ) : signedOutNotice ? (
               <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} spaceId={channel?.spaceId ?? null} token={token}
                 userId={currentUserIdentityId.replace(/^user:/, "")}

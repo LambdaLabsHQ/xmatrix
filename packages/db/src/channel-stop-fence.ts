@@ -29,6 +29,16 @@ export async function fenceChannelRunsForStop(tx: DatabaseTransaction, input: {
 }): Promise<number> {
   const stopRequest = { sourceMessageId: input.sourceMessageId, actorUserId: input.actorUserId,
     requestedAt: input.at };
+  await tx.query({ name: "channel_stop_quota_wait_v1", text: `UPDATE data.agent_quota_retries q
+    SET state='cancelled',next_check_at=NULL,updated_at=clock_timestamp() FROM data.channels c
+    WHERE q.space_id=$1 AND q.channel_id=$2 AND c.space_id=q.space_id AND c.channel_id=q.channel_id
+      AND (q.state IN ('offered','waiting','dispatching') OR (q.state='dispatched' AND EXISTS (
+        SELECT 1 FROM data.agent_reborn_intents pending WHERE pending.channel_id=q.channel_id
+          AND pending.state IN ('waiting','prepared') AND pending.run_input_json->'quotaRetry'->>'id'=q.retry_id)))
+      AND ($4::text IS NULL OR q.source_run_id=$4)
+      AND ${channelCapabilityPredicate({ capability: "runtime_terminalize", channelAlias: "c",
+        principalKindSql: "'user'", principalIdSql: "$3::text" })}`,
+    values: [input.spaceId,input.channelId,input.actorUserId,input.scope.kind==="run"?input.scope.runId:null],maxRows:0 });
   // Explicit Ask choices may be committed before their summon reaches
   // admission. A stop of the Channel cancels those intents even with no Run.
   // The append and Ask claim hold the Channel lock, so a later deliberate pick
