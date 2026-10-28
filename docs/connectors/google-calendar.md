@@ -75,6 +75,11 @@ explicit `sendUpdates`: `all`, `externalOnly` or `none`. This controls Google's
 guest notifications; Google documents that some mail may still be sent even
 when notifications are disabled. Notifications, exact changed fields and the
 recurring-series/occurrence impact are included in the approval preview.
+`externalOnly` means guests who do not use Google Calendar, regardless of
+their organization. Hub validation and approval copy consume one shared
+notification-mode definition in the protocol package. A recurrence is shown
+in words only when every clause can be represented; extended rules, including
+week start (`WKST`) and exact cutoff (`UNTIL`), remain visible in full.
 
 Create an event with a unique base32hex ID (lowercase `a`–`v`, digits `0`–`9`,
 5–1024 characters; a lowercase UUID with hyphens removed works):
