@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Page links open with a click or tap
+
+Bare URLs and Markdown links in an editable page now open directly in a new
+tab. Before, opening them required Ctrl/⌘, leaving phone readers without that
+gesture. Dragging across link text still selects it, and its visible Markdown
+destination still opens the address editor. This ships in the beta Web; no
+schema or native change is needed. Recovery is a CI-validated beta Web release
+reverting the change.
+
 ## Unreleased: Explicit activation keeps mention details open
 
 A mention's delayed hover-close can already be queued when Enter or a click
