@@ -9,6 +9,15 @@ Other account switches keep their existing request destination. No schema or
 native bridge change is needed; recovery is a CI-validated beta Web reverting
 the change. The existing browser regression protects the transition.
 
+## Unreleased: Keep standalone Agent launch context within its budget
+
+The shared bootstrap and Channel reporting text uses shorter wording while
+retaining identity, access, approach, progress, final-reply and working-mode
+requirements. This restores the existing 9,000-byte standalone/old-Hub launch
+budget without raising its limit or weakening the contract. Hub-delivered
+launches and the CLI's compiled fallback share the same text; no protocol or
+schema migration is needed. Recovery is a CI-validated beta reverting the text.
+
 ## Unreleased: Binary-only installation and Agent setup boundaries
 
 The Unix and PowerShell installers can install an integrity-verified binary
