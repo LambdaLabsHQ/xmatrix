@@ -1054,7 +1054,7 @@ integration("Sentry uninstall leaves a replacement UUID intact and failures roll
   });
 });
 
-integration("Sentry uninstall fanout overflow fails before changing any binding or lifecycle", async () => {
+integration("Sentry uninstall retires every binding even when the batch size is one", async () => {
   await withSentryAuthority(async first => {
     await withSentryAuthority(async second => {
       const binding = first.base.oauthInstallation;
@@ -1065,11 +1065,10 @@ integration("Sentry uninstall fanout overflow fails before changing any binding 
         fields: { ...second.fields, oauthInstallationId: first.installationId } });
       const retire = limit => first.credentials.retireSentryInstallation({ requestId: crypto.randomUUID(),
         appClientId: binding.appClientId, appUuid: sentryApp, installationId: binding.installationId, at, limit });
-      await assert.rejects(retire(1), error => error.status === 503);
-      assert.equal((await first.connectionRow()).status, "configured");
-      assert.equal((await second.connectionRow()).status, "configured");
-      assert.equal((await first.sql("SELECT retired_at FROM data.app_sentry_installation_lifecycle WHERE installation_uuid=$1::uuid", [first.installationId])).rows[0].retired_at, null);
-      assert.equal(await retire(50), 2);
+      assert.equal(await retire(1), 2);
+      assert.equal((await first.connectionRow()).status, "disconnected");
+      assert.equal((await second.connectionRow()).status, "disconnected");
+      assert.notEqual((await first.sql("SELECT retired_at FROM data.app_sentry_installation_lifecycle WHERE installation_uuid=$1::uuid", [first.installationId])).rows[0].retired_at, null);
       assert.equal(await retire(50), 0);
     });
   });
@@ -1183,6 +1182,16 @@ integration("only an admin's GitHub Connect records who linked an installation, 
       await upsert({ metadata: { installationIds: ["222"] } });
       assert.deepEqual((await record("owner", ["222"], 88)).recorded, ["222"]);
       assert.deepEqual(await links(), [{ installationId: "222", githubUserId: 88 }], "the unlinked one's record is gone");
+      const installationIds = Array.from({ length: 103 }, (_, index) => String(1000 + index));
+      await upsert({ metadata: { installationIds: installationIds.slice(0, 32) } });
+      for (const installationId of installationIds.slice(32)) {
+        await upsert({ metadataAppend: { installationIds: installationId } });
+      }
+      for (let offset = 0; offset < installationIds.length; offset += 100) {
+        await record("owner", installationIds.slice(offset, offset + 100));
+      }
+      assert.deepEqual((await links()).map(link => link.installationId), installationIds,
+        "every installation and its linker survive beyond the former 32-item quota and a database page");
     } finally {
       await sql("DELETE FROM data.app_github_installation_links WHERE space_id=$1", [space]);
     }
@@ -1192,7 +1201,7 @@ integration("only an admin's GitHub Connect records who linked an installation, 
 integration("a GitHub install appends its installation and keeps every other installation and config", async () => {
   await withDatabase(async ({ database, space }) => {
     const apps = new PostgresAppRepository(database);
-    const upsert = (commandId, body) => apps.upsert({ commandId, spaceId: space, actorUserId: "owner",
+    const upsert = (commandId, body) => apps.upsert({ commandId: `${space}:${commandId}`, spaceId: space, actorUserId: "owner",
       provider: githubPolicy, body, at });
     // An existing Space: a legacy single installation plus a default repository and write channel.
     await upsert("configure", { status: "configured", authMode: "oauth", metadata: { installationId: "111",

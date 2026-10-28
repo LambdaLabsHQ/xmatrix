@@ -24,6 +24,13 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Saved resources do not inherit fixed cardinality quotas from query bounds.
+Space secrets, Channel pins, push registrations, memory entries, GitHub links,
+Page Automation reconciliation and Sentry/Discord installation bindings retain
+complete sets through bounded batches. Request sizes, byte budgets,
+authorization and transaction deadlines remain explicit. See
+[resource counts](../operations/resource-counts.md).
+
 Page links open with an ordinary click or tap while the document is editable,
 including bare URLs and Markdown labels. Drag selection and address editing
 remain available. See [live documents](../design/pages-live-document.md#42-surface).

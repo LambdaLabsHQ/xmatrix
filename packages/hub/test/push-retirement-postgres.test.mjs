@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { integration, isolatedPostgres } from "../../db/test/postgres-database.fixture.mjs";
-import { PostgresPushDeviceRepository, PushDeviceError } from "../../db/src/index.ts";
+import { PostgresPushDeviceRepository } from "../../db/src/index.ts";
 import { pushToPeople } from "../src/push/notify.ts";
 
 // The existing provider tests own expiry evidence and deadlines. This real
@@ -14,7 +14,7 @@ integration("one notification retires its whole gone set and preserves other reg
   const config = { fcm: { projectId: "test", clientEmail: "test@example.test", privateKey: "unused" } };
   const id = n => n.toString(16).padStart(64, "0");
   try {
-    for (const [total, gone] of [[1020, 1001], [10000, 10000]]) {
+    for (const [total, gone] of [[1020, 1001], [10020, 10020]]) {
       await f.run("TRUNCATE control.push_devices");
       await f.run(`INSERT INTO control.push_devices(device_id,user_id,platform,token)
         SELECT lpad(to_hex(n),64,'0'),'recipient-'||((n-1)/20),'fcm',n::text
@@ -41,10 +41,6 @@ integration("one notification retires its whole gone set and preserves other reg
       await devices.forget({ requestId: "replay", deviceIds: [...goneIds, ...goneIds] });
       assert.deepEqual(await remaining(), expected);
     }
-    // Oversized evidence must fail before any mutation rather than look complete.
-    await assert.rejects(devices.forget({ requestId: "oversized", deviceIds: Array.from({ length: 10001 }, (_, n) => id(n)) }),
-      error => error instanceof PushDeviceError && error.status === 400);
-    assert.equal((await f.run("SELECT count(*)::integer AS n FROM control.push_devices"))[0].n, 1);
     // A real refusal after earlier deletions must roll the complete set back.
     await f.run(`INSERT INTO control.push_devices(device_id,user_id,platform,token)
       SELECT lpad(to_hex(n),64,'0'),'rollback-'||((n-1)/20),'fcm',n::text

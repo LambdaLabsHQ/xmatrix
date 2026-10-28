@@ -46,12 +46,12 @@ exercised at the provider-send/registration-forget boundary, alongside the
 deadline, concurrency, retry and late-response regressions in
 `packages/hub/test/push-delivery.test.mjs`.
 
-Registration lookup admits at most 500 people with 20 devices each. Retirement
-shares that capacity and deduplicates the complete gone set; it never truncates
-evidence to the SQL write size. A single database transaction deletes chunks of
-at most 1,000 exact device IDs, with at most ten writes under the existing
-transaction budget. Failure rolls back all chunks; replay is harmless.
-Oversized evidence is refused before any mutation. The isolated PostgreSQL
-notification regression verifies the 1,001-device case, full 10,000-device
-capacity, mixed outcomes, replay, transaction rollback/retry and preservation of
-non-target registrations.
+Registration preserves every valid device; adding a device does not evict an older
+one. Lookup reads all requested people in groups of 500 and their devices in
+100-row keyset pages. Those are query sizes, not recipient or device quotas.
+Retirement deduplicates the complete provider-confirmed gone set and deletes
+chunks of at most 1,000 exact device IDs in one transaction. The existing
+transaction deadline bounds the work; a failed chunk rolls back all changes.
+Replay is harmless. The isolated PostgreSQL notification regression covers more
+than 10,000 devices and 500 recipients, mixed outcomes, rollback/retry and
+preservation of non-target registrations. See [resource counts](resource-counts.md).

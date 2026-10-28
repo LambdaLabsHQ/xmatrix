@@ -74,11 +74,11 @@ export async function spaceSecretFixture() {
 
   const run = { runId: ids.run, ownerUserId: ids.owner, spaceId: ids.space, channelId: ids.channel, instanceId: ids.instance,
     executionKey: context.executionKey };
-  return { ids, client, context, secret, run,
+  return { ids, client, database, context, secret, run,
     async close() {
       try {
         // Exact fixture rows only; never truncate a shared integration database.
-        for (const table of ["page_revisions", "page_access", "pages", "space_control_heads"]) {
+        for (const table of ["page_revisions", "page_access", "pages", "user_space_channel_view_preferences", "idempotency_keys", "space_control_heads"]) {
           await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]);
         }
         await client.query("DELETE FROM control.scoped_control_command_replays WHERE scope_kind='space' AND scope_id=$1", [ids.space]);
