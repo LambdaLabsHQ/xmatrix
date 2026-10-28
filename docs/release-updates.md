@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Installer progress emits complete UTF-8 characters
+
+The Unix download bar repeats full Unicode strings rather than passing them
+through byte-oriented `tr`. Its spinner indexes complete symbols in a Bash
+array, so even a C locale cannot split a multibyte character. This keeps
+terminal output and captured install logs valid UTF-8 for both known and
+unknown content lengths. Download integrity and installation behavior are
+unchanged; a CI-validated beta Web reverting this change is the recovery path.
+
 ## Unreleased: Delayed components validate their frozen release
 
 CLI, Desktop, Android and iOS component jobs verify consistent manifests, the
