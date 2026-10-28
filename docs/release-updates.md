@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Google Calendar connects separately
+
+Spaces can connect Google Calendar to read calendars, search events in an
+explicit time interval and check availability, then create, edit or delete an
+event under Channel policy (writes ask by default). It uses a separate scoped
+Google grant; existing Drive and other Google connections do not gain calendar
+access. Approvals resolve the calendar and show the proposed event, guest
+notifications and recurring-series impact. Edits/deletion retain the exact
+ETag so concurrent changes fail safely; ambiguous writes are not replayed.
+Enable Calendar API and consent to its scopes before native acceptance. Hub
+and beta Web only, no migration; recovery uses a CI-validated beta reverting
+the connector and preserves events already created in Google Calendar.
+
 ## Unreleased: The @ menu says once what each row does
 
 Every row of the `@` menu now says one thing: what choosing it does. `auto`

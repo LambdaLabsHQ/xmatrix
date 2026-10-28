@@ -217,6 +217,26 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   },
   {
     ...actionConnector({
+      id: "googlecalendar", name: "Google Calendar", kind: "docs",
+      description: "Read calendars, events and availability; create, edit and delete events under the Channel action policy.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events.freebusy"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent", include_granted_scopes: "false" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS],
+      actions: [
+        readAction("list_calendars", "List calendars", "List up to 100 subscribed calendars with their id, time zone and access role. Follow nextPageToken explicitly.", '* [{"pageToken":"…"}]'),
+        readAction("list_events", "Read or search events", "Read a bounded interval with explicit UTC offsets; expands recurring events. Up to 100 events per page, at most 366 days per interval. Retain event id and etag for changes.", '<calendar id|primary> {"timeMin":"RFC3339","timeMax":"RFC3339","q":"optional search","maxResults":50,"pageToken":"optional"}'),
+        readAction("get_event", "Read event", "Read one exact event, its guests and recurrence, and current etag for safe changes.", "<calendar id|primary> <event id>"),
+        readAction("freebusy", "Check availability", "Read busy intervals for one calendar; unavailable or denied calendars are never reported as free.", '<calendar id|primary> {"timeMin":"RFC3339","timeMax":"RFC3339"}'),
+        gatedWriteAction("create_event", "Create event", "Create an event with an explicit base32hex id, title, start and end. Supports all-day dates, IANA time zones, guests and recurrence. Choose guest notifications with sendUpdates; unconfirmed writes are never automatically retried.", '<calendar id|primary> {"id":"unique base32hex id","summary":"Title","start":{"dateTime":"RFC3339"},"end":{"dateTime":"RFC3339"},"sendUpdates":"all|externalOnly|none"}'),
+        gatedWriteAction("update_event", "Edit event", "Patch selected event content with the exact current etag; stale edits fail instead of overwriting others. Attendee and recurrence arrays replace the complete field. A recurring master changes the series; an instance id changes one occurrence.", '<calendar id|primary> {"eventId":"…","etag":"quoted etag from get_event","sendUpdates":"all|externalOnly|none","summary":"New title"}'),
+        gatedWriteAction("delete_event", "Delete event", "Delete the exact event only while its etag still matches. A recurring master deletes the series; an instance id cancels one occurrence. Choose guest notifications explicitly.", '<calendar id|primary> {"eventId":"…","etag":"quoted etag from get_event","sendUpdates":"all|externalOnly|none"}'),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events.freebusy"], secretRefs: [] },
+  },
+  {
+    ...actionConnector({
       id: "googleanalytics", name: "Google Analytics", kind: "observability",
       description: "Read Google Analytics 4 properties and traffic reports for the properties the connected Google account can see. Read-only.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",

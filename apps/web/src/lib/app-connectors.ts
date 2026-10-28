@@ -106,6 +106,11 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Read a site's Yandex quality index, indexed pages, site problems and top queries.",
     "Queue a changed page for Yandex recrawl.",
   ],
+  googlecalendar: [
+    "Check who is free and find a time before an agent proposes a meeting.",
+    "Read today's and this week's events as context for planning and follow-ups.",
+    "Add, move or cancel an event once a Space admin allows it in the channel.",
+  ],
   gmail: [
     "Find a sign-up or login verification email and open its link without leaving the agent.",
     "Read receipts, alerts and replies from the connected mailbox as task context.",

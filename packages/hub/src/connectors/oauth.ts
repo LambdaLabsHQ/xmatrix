@@ -30,6 +30,7 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   google: { scope: "https://www.googleapis.com/auth/drive.file", name: "per-file" },
   googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
   googleadsense: { scope: "https://www.googleapis.com/auth/adsense.readonly", name: "AdSense" },
+  googlecalendar: { scope: "https://www.googleapis.com/auth/calendar.events", name: "Google Calendar" },
   googleanalytics: { scope: "https://www.googleapis.com/auth/analytics.readonly", name: "Google Analytics" },
   googleads: { scope: "https://www.googleapis.com/auth/adwords", name: "Google Ads" },
   googlebusinessprofile: { scope: "https://www.googleapis.com/auth/business.manage", name: "Business Profile" },
@@ -47,17 +48,16 @@ export function grantFieldsForgottenOnDisconnect(providerId: string): Record<str
 }
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlecalendar: "google", googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
   const expires = Number(payload.expires_in);
   const scopes = typeof payload.scope === "string" ? payload.scope.split(/\s+/u).filter(Boolean) : [];
-  const expected = providerId === "googlesearchconsole"
-    ? [scope, "https://www.googleapis.com/auth/siteverification"] : [scope];
+  const expected = APP_CONNECTOR_PROVIDER_MANIFESTS.find(candidate => candidate.id === providerId)!.oauth!.scopes;
   // Old Search Console grants remain refreshable; only a new consent can add verification.
   const validScopes = scopes.includes(scope) && new Set(scopes).size === scopes.length &&
-    scopes.every(value => expected.includes(value)) && (!initial || scopes.length === expected.length);
+    scopes.every(value => expected.includes(value)) && ((!initial && providerId === "googlesearchconsole") || scopes.length === expected.length);
   if (!Number.isFinite(expires) || expires <= 0 || expires > 86_400 ||
       typeof payload.token_type !== "string" || payload.token_type.toLowerCase() !== "bearer" ||
       ((initial || payload.scope !== undefined) && !validScopes) ||
@@ -357,7 +357,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     }
   }
   const afterNotionUnauthorized = providerId === "notion" && options.unauthorized === true;
-  const completeGoogleGrant = providerId === "gcp" || providerId === "googleads";
+  const completeGoogleGrant = providerId === "gcp" || providerId === "googleads" || providerId === "googlecalendar";
   if (completeGoogleGrant && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
     throw new ProviderRequestError(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`);
