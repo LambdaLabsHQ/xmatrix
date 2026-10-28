@@ -1,5 +1,10 @@
 name: Setup Rust toolchain and kache
 description: Install the reviewed Rust toolchain, put cargo on PATH, and enable the pinned kache compile cache.
+inputs:
+  kache:
+    description: Install the kache rustc wrapper. CodeQL must leave this off so a cache hit cannot skip rustc.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -137,12 +142,12 @@ runs:
         }
 
     - name: Set up kache on Unix
-      if: runner.os != 'Windows'
+      if: inputs.kache == 'true' && runner.os != 'Windows'
       shell: bash
       run: bash .github/scripts/setup-kache.sh
 
     - name: Set up kache on Windows
-      if: runner.os == 'Windows'
+      if: inputs.kache == 'true' && runner.os == 'Windows'
       shell: powershell
       env:
         # Pass the authoritative Actions identity rather than a host fallback.
