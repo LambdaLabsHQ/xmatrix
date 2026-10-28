@@ -34,7 +34,7 @@ type Frame = { textTop: number | null; scrollTop: number; prepended: boolean };
  */
 async function sampleReaderAcrossPrepend(
   page: Page,
-  options: { startScrollTop: number; step: number; frames: number },
+  options: { startScrollTop: number; step: number; frames: number; cpuRate?: number },
 ): Promise<Frame[]> {
   await openGeneralChannelWithPagedHistory(page, HISTORY);
   const timeline = page.locator(".app-message-timeline");
@@ -43,7 +43,7 @@ async function sampleReaderAcrossPrepend(
   // A constrained renderer exposes delayed virtualizer measurements that
   // otherwise finish between our scroll and the next painted frame.
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 8 });
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: options.cpuRate ?? 8 });
 
   const frames = await timeline.evaluate(async (root, { startScrollTop, step, frames: count }) => {
     root.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
@@ -117,7 +117,7 @@ test("loading an older page keeps the message the reader is looking at in place"
 
 test("a reader who keeps scrolling through the prepend is never pulled back or thrown", async ({ page }) => {
   const STEP = 40;
-  const frames = await sampleReaderAcrossPrepend(page, { startScrollTop: 300, step: STEP, frames: 24 });
+  const frames = await sampleReaderAcrossPrepend(page, { startScrollTop: 300, step: STEP, frames: 24, cpuRate: 40 });
   const prependedAt = frames.findIndex((frame) => frame.prepended);
   expect(prependedAt).toBeGreaterThan(0);
   // From the last frame before the page to the end of the gesture.
@@ -126,10 +126,10 @@ test("a reader who keeps scrolling through the prepend is never pulled back or t
     // Scrolling up moves the text down by at most one step per frame: never
     // up (thrown), never more than the reader asked for.
     expect(moved).toBeGreaterThanOrEqual(-1);
-    expect(moved).toBeLessThanOrEqual(STEP + 1);
+    expect(moved, JSON.stringify(frames)).toBeLessThanOrEqual(STEP + 1);
   }
   // And the anchor does not hold the reader still once the page has landed.
   const after = frames.slice(prependedAt + 2);
   const travelled = after.at(-1)!.textTop! - after[0]!.textTop!;
-  expect(travelled).toBeGreaterThan((after.length - 1) * STEP * 0.75);
+  expect(travelled, JSON.stringify(frames)).toBeGreaterThan((after.length - 1) * STEP * 0.75);
 });

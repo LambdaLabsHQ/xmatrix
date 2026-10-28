@@ -19,7 +19,7 @@ interface ReadingAnchor {
   offset: number;
 }
 
-/* A settled prepend stops being corrected after this long without drift, so
+/* A settled prepend stops being corrected after this long without activity, so
    later growth (a new message, a late image) behaves like any other layout. */
 const READING_ANCHOR_SETTLE_MS = 750;
 /* Hard ceiling for a continuously changing prepend. Slow renderers can take
@@ -95,7 +95,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
     const { rowId } = pending.anchor;
     let { offset } = pending.anchor;
     const startedAt = performance.now();
-    let lastDriftAt = startedAt;
+    let lastActivityAt = startedAt;
     let corrected = false;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -113,15 +113,35 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       offset = expected;
       if (Math.abs(drift) >= 0.5) {
         root.scrollTop += drift;
-        lastDriftAt = performance.now();
+        lastActivityAt = performance.now();
       }
       heldScrollTop = root.scrollTop;
+    };
+
+    // Input can move the scroller before its queued scroll event is delivered.
+    // A layout correction in that gap must credit the reader's movement first.
+    let inputScrollTop: number | null = null;
+    const followInput = () => {
+      if (inputScrollTop === null) return;
+      offset -= root.scrollTop - inputScrollTop;
+      inputScrollTop = null;
+      heldScrollTop = root.scrollTop;
+    };
+    const onInput = (event: Event) => {
+      if (event.type === "pointermove" && (event as PointerEvent).buttons === 0) return;
+      if (SCROLLING_MOVES_NO_ROWS) {
+        release();
+        return;
+      }
+      followInput();
+      inputScrollTop = root.scrollTop;
+      lastActivityAt = performance.now();
     };
 
     /* ResizeObserver callbacks run after layout and before paint, and after
        the virtualizer's own animation-frame scroll adjustments, so the
        correction always has the last word in the frame the reader sees. */
-    const observer = new ResizeObserver(() => {
+    const correctLayout = () => {
       if (performance.now() - startedAt > READING_ANCHOR_MAX_MS) {
         release();
         return;
@@ -131,12 +151,21 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
         release();
         return;
       }
+      // Stable text can still be followed by another slow virtualizer measure.
+      // Release only after the layout and the reader have both gone quiet.
+      lastActivityAt = performance.now();
+      followInput();
       corrected = true;
       hold(top, offset);
-    });
+    };
+    const observer = new ResizeObserver(correctLayout);
     observeTimelineBoxes(root, observer);
     const row = root.ownerDocument.getElementById(rowId);
     if (row && root.contains(row)) observer.observe(row, { box: "border-box" });
+    // A virtualizer margin or padding swap can move the text without changing
+    // any observed border box. Follow that commit before its next paint too.
+    const mutations = new MutationObserver(correctLayout);
+    mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] });
 
     /* The reader keeps scrolling while the page settles. Their scroll moves
        the anchor on purpose, so the held place follows it; the virtualizer
@@ -151,7 +180,9 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
         release();
         return;
       }
+      if (root.scrollTop !== heldScrollTop) lastActivityAt = performance.now();
       if (!corrected) return;
+      followInput();
       const top = anchorTop();
       if (top === null) {
         release();
@@ -160,11 +191,13 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       hold(top, offset - (root.scrollTop - heldScrollTop));
     };
     root.addEventListener("scroll", onScroll, { passive: true });
+    const inputEvents = ["wheel", "touchmove", "keydown", "pointermove"] as const;
+    for (const event of inputEvents) root.addEventListener(event, onInput, { passive: true });
 
     const scheduleSettle = () => {
-      const idle = performance.now() - lastDriftAt;
+      const idle = performance.now() - lastActivityAt;
       settleTimer = setTimeout(() => {
-        if (performance.now() - lastDriftAt >= READING_ANCHOR_SETTLE_MS) release();
+        if (performance.now() - lastActivityAt >= READING_ANCHOR_SETTLE_MS) release();
         else scheduleSettle();
       }, Math.max(0, READING_ANCHOR_SETTLE_MS - idle));
     };
@@ -174,9 +207,11 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
 
     releaseRef.current = () => {
       observer.disconnect();
+      mutations.disconnect();
       if (settleTimer !== null) clearTimeout(settleTimer);
       clearTimeout(deadlineTimer);
       root.removeEventListener("scroll", onScroll);
+      for (const event of inputEvents) root.removeEventListener(event, onInput);
     };
   }, [release, root]);
 

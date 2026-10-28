@@ -102,6 +102,7 @@ function timeline({ userAgent = DESKTOP } = {}) {
     performance: { now: clock.now },
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
+    MutationObserver: class { observe() {} disconnect() {} },
     ResizeObserver: class {
       constructor(callback) { this.callback = callback; this.connected = true; observers.push(this); }
       observe() {}
@@ -181,8 +182,14 @@ test("elsewhere the anchor follows the reader's scroll and keeps holding", () =>
   const view = timeline();
   view.start();
   view.resize();
-  view.scrollBy(-80);
-  assert.equal(view.active(), true);
+  for (let at = 500; at <= 2_000; at += 500) {
+    view.advance(at);
+    view.scrollBy(-80);
+    assert.equal(view.active(), true);
+  }
+  view.advance(2_750);
+  assert.equal(view.active(), false);
+  assert.equal(view.pendingTimers(), 0);
 });
 
 /* An older page waits for the timeline to rest (timeline-scroll-rest). */

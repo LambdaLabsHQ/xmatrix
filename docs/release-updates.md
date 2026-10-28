@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Keep history anchoring until scrolling and layout settle
+
+An older history page keeps the reader's place while the virtualizer measures
+it. The quiet timer now follows scrolling and layout activity, including
+measurements that need no correction, instead of treating stable text as a
+settled list. Margin/padding swaps that move text without resizing a border box
+are also corrected. Pending input movement is credited before those corrections
+even when the browser has not delivered its scroll event yet, so anchoring does
+not cancel the reader's scroll. The existing quiet-release and ten-second
+deadline remain bounded; iPhone momentum still releases the anchor instead of
+writing a scroll. No protocol or schema change is needed. Recovery is a
+CI-validated beta Web reverting this fix.
+
 ## Unreleased: Starting two-step sign-in over abandons the old app handoff
 
 After signing out, the two-step page replaces the document with the cleaned
