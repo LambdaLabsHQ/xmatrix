@@ -182,10 +182,20 @@ async function tokenRequest(client: OAuthClient, grant: Record<string, string>, 
     ...(oauth.clientAuth === "basic" ? {} : { client_id: client.clientId, client_secret: client.clientSecret }) };
   const headers: Record<string, string> = oauth.clientAuth === "basic"
     ? { authorization: `Basic ${btoa(`${client.clientId}:${client.clientSecret}`)}` } : {};
+  // Google distinguishes Cloud session policy from ordinary expiration/revocation
+  // with error_subtype. Never echo arbitrary provider descriptions or subtypes.
+  const describeError = GOOGLE_GRANTS[client.manifest.id] ? (payload: Record<string, unknown>): string => {
+    const name = GOOGLE_GRANTS[client.manifest.id]!.name;
+    if (payload.error === "invalid_grant") return payload.error_subtype === "invalid_rapt"
+      ? `${name} session requires reauthentication (invalid_grant, invalid_rapt); reconnect this app`
+      : `${name} authorization expired or was revoked (invalid_grant); reconnect this app`;
+    if (payload.error === "invalid_client") return `${name} OAuth application credentials were rejected; a Space admin must check the company app configuration`;
+    return `${name} OAuth token request failed`;
+  } : undefined;
   const exchange = () => oauth.tokenRequest === "json"
-    ? providerJson(oauth.tokenUrl, { method: "POST", headers, json: body })
+    ? providerJson(oauth.tokenUrl, { method: "POST", headers, json: body, describeError })
     : providerJson(oauth.tokenUrl, { method: "POST",
-      headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) });
+      headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body), describeError });
   // Only the company X app's token endpoint is an operator-paid upstream.
   const payload = await (client.manifest.id === "x" ? metered(meter, "x", "oauth_token", exchange) : exchange()).catch(error => {
       if (["pagerduty", "discord", "x"].includes(client.manifest.id) && error instanceof ProviderRequestError) {

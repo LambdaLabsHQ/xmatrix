@@ -207,3 +207,26 @@ test("disconnecting a Google or Composio connection forgets its grant but keeps 
   assert.equal(grantFieldsForgottenOnDisconnect("notion"), undefined);
   assert.equal(grantFieldsForgottenOnDisconnect("github"), undefined);
 });
+
+// Google uses the same error code for expired/revoked grants and a Cloud
+// session policy. Preserve the typed distinction without echoing provider text.
+test("Google token refusals distinguish Cloud reauthentication and never echo arbitrary provider details", async () => {
+  const google = { CONNECTOR_GOOGLE_CLIENT_ID: "client", CONNECTOR_GOOGLE_CLIENT_SECRET: "secret" };
+  const values = { oauthToken: "old", oauthRefreshToken: "refresh", oauthExpiresAt: "1" };
+  for (const [payload, expected] of [
+    [{ error: "invalid_grant", error_subtype: "invalid_rapt" }, /Google Cloud session requires reauthentication.*invalid_rapt/u],
+    [{ error: "invalid_grant" }, /Google Cloud authorization expired or was revoked.*invalid_grant/u],
+    [{ error: "invalid_client" }, /Google Cloud OAuth application credentials were rejected/u],
+    [{ error: "unknown-private-detail", error_subtype: "private-subtype" }, /Google Cloud OAuth token request failed/u],
+  ]) {
+    const fetch = stubFetch([{ status: 400, body: { ...payload, error_description: "private-token-or-mailbox" } }]);
+    try {
+      await assert.rejects(refreshOAuthFields(google, "gcp", values), error => {
+        assert.match(error.message, expected);
+        assert.doesNotMatch(error.message, /private-token-or-mailbox|unknown-private-detail|private-subtype/u);
+        return true;
+      });
+      assert.equal(fetch.calls.length, 1, "an authorization refusal is not retried");
+    } finally { fetch.restore(); }
+  }
+});
