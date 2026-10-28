@@ -140,6 +140,11 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       lastInputAt = lastActivityAt;
       if (deadlineTimer !== null) clearTimeout(deadlineTimer);
       deadlineTimer = setTimeout(release, READING_ANCHOR_MAX_MS);
+      // Credit movement at the end of the input task, before the virtualizer
+      // can mix its own compensated scroll into the queued scroll event.
+      queueMicrotask(() => {
+        if (inputScrollTop !== null && root.scrollTop !== inputScrollTop) followInput();
+      });
     };
 
     /* ResizeObserver callbacks run after layout and before paint, and after
@@ -192,9 +197,14 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
         release();
         return;
       }
-      hold(top, offset - (root.scrollTop - heldScrollTop));
+      // A virtualizer scroll that compensates its layout leaves the text in
+      // place. It must not move the reader's target if scroll runs before resize.
+      const expected = Math.abs(top - offset) < 0.5
+        ? offset
+        : offset - (root.scrollTop - heldScrollTop);
+      hold(top, expected);
     };
-    root.addEventListener("scroll", onScroll, { passive: true });
+    root.addEventListener("scroll", onScroll, { passive: true, capture: true });
     const inputEvents = ["wheel", "touchmove", "keydown", "pointermove"] as const;
     for (const event of inputEvents) root.addEventListener(event, onInput, { passive: true });
 
@@ -214,7 +224,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       mutations.disconnect();
       if (settleTimer !== null) clearTimeout(settleTimer);
       if (deadlineTimer !== null) clearTimeout(deadlineTimer);
-      root.removeEventListener("scroll", onScroll);
+      root.removeEventListener("scroll", onScroll, true);
       for (const event of inputEvents) root.removeEventListener(event, onInput);
     };
   }, [release, root]);

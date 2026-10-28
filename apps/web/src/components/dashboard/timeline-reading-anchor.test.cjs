@@ -75,12 +75,14 @@ function timeline({ userAgent = DESKTOP } = {}) {
   const clock = testClock();
   let contentTop = 100;
   const observers = [];
+  const microtasks = [];
+  const flushInput = () => { while (microtasks.length) microtasks.shift()(); };
   class LayoutObserver {
     constructor(callback) { this.callback = callback; this.connected = true; observers.push(this); }
     observe() {}
     disconnect() { this.connected = false; }
   }
-  const content = { getBoundingClientRect: () => ({ top: contentTop, bottom: contentTop + 100 }) };
+  const content = { getBoundingClientRect: () => ({ top: contentTop - root.scrollTop, bottom: contentTop + 100 - root.scrollTop }) };
   const row = { id: "message:reader", lastElementChild: content, children: [], hasAttribute: () => false };
   const { root, listeners } = listenedRoot({
     scrollTop: 0,
@@ -107,6 +109,7 @@ function timeline({ userAgent = DESKTOP } = {}) {
     performance: { now: clock.now },
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
+    queueMicrotask: (callback) => microtasks.push(callback),
     MutationObserver: LayoutObserver,
     ResizeObserver: LayoutObserver,
   });
@@ -117,14 +120,16 @@ function timeline({ userAgent = DESKTOP } = {}) {
     resize() { for (const observer of observers) if (observer.connected) observer.callback(); },
     scrollDrift() { contentTop += 1; listeners.get("scroll")?.(); },
     /** Someone else scrolls the timeline: the reader, or the virtualizer. */
-    scrollBy(delta, { input = false } = {}) {
+    scrollBy(delta, { input = false, emit = true } = {}) {
       if (input) listeners.get("wheel")?.({ type: "wheel" });
       root.scrollTop += delta;
-      contentTop -= delta;
-      listeners.get("scroll")?.();
+      flushInput();
+      if (emit) listeners.get("scroll")?.();
     },
     /** A row above grows; the next resize puts the reader's row back. */
     growAbove(delta) { contentTop += delta; },
+    compensate(delta) { contentTop += delta; root.scrollTop += delta; },
+    textTop: () => content.getBoundingClientRect().top,
     advance: clock.advance,
     active: () => observers.some((observer) => observer.connected) || listeners.size > 0,
     pendingTimers: clock.pending,
@@ -143,6 +148,20 @@ test("continuous scroll drift without another resize still releases at the deadl
   view.advance(10_000);
   assert.equal(view.active(), false);
   assert.equal(view.pendingTimers(), 0);
+});
+
+test("virtualizer compensation before the queued scroll is not counted as reader input", () => {
+  for (const layoutFirst of [true, false]) {
+    const view = timeline();
+    view.start();
+    view.resize();
+    view.scrollBy(-40, { input: true, emit: false });
+    view.compensate(44);
+    if (layoutFirst) view.resize();
+    view.scrollBy(0);
+    if (!layoutFirst) view.resize();
+    assert.equal(view.textTop(), 140);
+  }
 });
 
 test("continued reader input renews the deadline, passive drift cannot renew it", () => {

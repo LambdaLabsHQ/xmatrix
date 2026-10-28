@@ -117,21 +117,26 @@ test("loading an older page keeps the message the reader is looking at in place"
   }
 });
 
-test("a reader who keeps scrolling through the prepend is never pulled back or thrown", async ({ page }) => {
-  const STEP = 40;
-  const frames = await sampleReaderAcrossPrepend(page, { startScrollTop: 300, step: STEP, frames: 24, cpuRate: 40 });
-  const prependedAt = frames.findIndex((frame) => frame.prepended);
-  expect(prependedAt).toBeGreaterThan(0);
-  // From the last frame before the page to the end of the gesture.
-  for (let index = prependedAt; index < frames.length; index += 1) {
-    const moved = frames[index]!.textTop! - frames[index - 1]!.textTop!;
-    // Scrolling up moves the text down by at most one step per frame: never
-    // up (thrown), never more than the reader asked for.
-    expect(moved).toBeGreaterThanOrEqual(-1);
-    expect(moved, JSON.stringify(frames)).toBeLessThanOrEqual(STEP + 1);
-  }
-  // And the anchor does not hold the reader still once the page has landed.
-  const after = frames.slice(prependedAt + 2);
-  const travelled = after.at(-1)!.textTop! - after[0]!.textTop!;
-  expect(travelled, JSON.stringify(frames)).toBeGreaterThan((after.length - 1) * STEP * 0.75);
+test.describe(() => {
+  // This known pressure regression must block its release on the first failure.
+  test.describe.configure({ retries: 0 });
+
+  test("a reader who keeps scrolling through the prepend is never pulled back or thrown", async ({ page }) => {
+    const STEP = 40;
+    const frames = await sampleReaderAcrossPrepend(page, { startScrollTop: 300, step: STEP, frames: 24, cpuRate: 40 });
+    const prependedAt = frames.findIndex((frame) => frame.prepended);
+    expect(prependedAt).toBeGreaterThan(0);
+    // From the last frame before the page to the end of the gesture.
+    for (let index = prependedAt; index < frames.length; index += 1) {
+      const moved = frames[index]!.textTop! - frames[index - 1]!.textTop!;
+      // Scrolling up moves the text down by at most one step per frame: never
+      // up (thrown), never more than the reader asked for.
+      expect(moved, JSON.stringify(frames)).toBeGreaterThanOrEqual(-1);
+      expect(moved, JSON.stringify(frames)).toBeLessThanOrEqual(STEP + 1);
+    }
+    // And the anchor does not hold the reader still once the page has landed.
+    const after = frames.slice(prependedAt + 2);
+    const travelled = after.at(-1)!.textTop! - after[0]!.textTop!;
+    expect(travelled, JSON.stringify(frames)).toBeGreaterThan((after.length - 1) * STEP * 0.75);
+  });
 });
