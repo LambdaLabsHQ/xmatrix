@@ -8,7 +8,7 @@ export function compareBytes(left: Uint8Array, right: Uint8Array): number {
 }
 
 /** Concatenate byte buffers in order into a newly owned buffer. */
-export function concatenateBytes(parts: readonly Uint8Array[]): Uint8Array {
+export function concatenateBytes(parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
   const output = new Uint8Array(parts.reduce((sum, part) => sum + part.byteLength, 0));
   let offset = 0;
   for (const part of parts) {

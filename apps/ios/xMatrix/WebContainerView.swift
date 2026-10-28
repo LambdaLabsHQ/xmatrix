@@ -43,7 +43,7 @@ struct WebContainerView: UIViewRepresentable {
     /// switching tabs never boots, reloads or rebuilds anything. A page per tab
     /// used to start the whole app again on each first visit, and iOS suspends
     /// or reclaims a hidden page, which reloaded it on the way back.
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         private(set) var webView: WKWebView?
         private var bridge: NativeBridge?
         private var pageCoordinator: PageCoordinator?
@@ -55,6 +55,10 @@ struct WebContainerView: UIViewRepresentable {
         private let runScript: (WKWebView, String) -> Void
         /// Runs a script that answers true or false.
         private let askScript: (WKWebView, String, @escaping (Bool) -> Void) -> Void
+        /// While the left edge is dragged: the screen being swiped away, and
+        /// the paper it uncovers until the page has gone Back under it.
+        private var swipeCover: UIView?
+        private var swipeBackdrop: UIView?
 
         func attach(to containerView: UIView) {
             self.containerView = containerView
@@ -174,10 +178,13 @@ struct WebContainerView: UIViewRepresentable {
             let webView = webViewFactory(configuration)
             // WebKit's own swipe walked the browser history and showed a
             // snapshot of whatever the page was before; the edge swipe goes
-            // Back the way the page does instead.
+            // Back the way the page does instead, following the finger. It
+            // runs alongside the page's own touches and scrolling, which
+            // otherwise took the drag first.
             webView.allowsBackForwardNavigationGestures = false
             let edgeSwipe = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgeSwipe(_:)))
             edgeSwipe.edges = .left
+            edgeSwipe.delegate = self
             webView.addGestureRecognizer(edgeSwipe)
             let pageCoordinator = PageCoordinator(owner: self)
             webView.navigationDelegate = pageCoordinator
@@ -267,16 +274,74 @@ struct WebContainerView: UIViewRepresentable {
             }
         }
 
-        /// The left-edge swipe, once it travelled far or fast enough, is the
-        /// page's Back: to the parent screen, or closing the top layer.
+        /// The left-edge swipe moves the screen with the finger. Let go far or
+        /// fast enough, it is the page's Back: to the parent screen, or closing
+        /// the top layer. Short of that, the screen settles back in place.
         @objc func handleEdgeSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
-            guard gesture.state == .ended, let view = gesture.view else { return }
-            edgeSwipeEnded(distance: gesture.translation(in: view).x, speed: gesture.velocity(in: view).x)
+            guard let view = gesture.view else { return }
+            let distance = gesture.translation(in: view).x
+            switch gesture.state {
+            case .began: edgeSwipeBegan()
+            case .changed: edgeSwipeMoved(distance: distance)
+            case .ended: edgeSwipeEnded(distance: distance, speed: gesture.velocity(in: view).x)
+            case .cancelled, .failed: settleEdgeSwipe(wentBack: false)
+            default: break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        func edgeSwipeBegan() {
+            guard swipeCover == nil, let webView, let containerView,
+                  let cover = webView.snapshotView(afterScreenUpdates: false) else { return }
+            cover.frame = webView.frame
+            cover.layer.shadowColor = UIColor.black.cgColor
+            cover.layer.shadowOpacity = 0.12
+            cover.layer.shadowRadius = 12
+            cover.layer.shadowOffset = CGSize(width: -4, height: 0)
+            cover.layer.shadowPath = UIBezierPath(rect: cover.bounds).cgPath
+            let backdrop = UIView(frame: webView.frame)
+            backdrop.backgroundColor = WebContainerView.shellBackground
+            containerView.insertSubview(backdrop, aboveSubview: webView)
+            containerView.insertSubview(cover, aboveSubview: backdrop)
+            swipeBackdrop = backdrop
+            swipeCover = cover
+        }
+
+        func edgeSwipeMoved(distance: CGFloat) {
+            swipeCover?.transform = CGAffineTransform(translationX: max(0, distance), y: 0)
         }
 
         func edgeSwipeEnded(distance: CGFloat, speed: CGFloat) {
-            guard let webView, distance > 80 || speed > 600 else { return }
-            runScript(webView, "window.__xmatrixNativeBack?.();")
+            guard let webView, distance > 80 || speed > 600 else {
+                settleEdgeSwipe(wentBack: false)
+                return
+            }
+            askScript(webView, "window.__xmatrixNativeBack?.() === true") { [weak self] wentBack in
+                self?.settleEdgeSwipe(wentBack: wentBack)
+            }
+        }
+
+        /// The page has gone Back under the swiped screen, which slides off to
+        /// show it; with nothing to go Back to, the screen returns.
+        private func settleEdgeSwipe(wentBack: Bool) {
+            guard let cover = swipeCover else { return }
+            let backdrop = swipeBackdrop
+            swipeCover = nil
+            swipeBackdrop = nil
+            if wentBack { backdrop?.removeFromSuperview() }
+            let width = cover.bounds.width
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+                cover.transform = wentBack ? CGAffineTransform(translationX: width, y: 0) : .identity
+            } completion: { _ in
+                cover.removeFromSuperview()
+                backdrop?.removeFromSuperview()
+            }
         }
 
         fileprivate func navigationFinished() {

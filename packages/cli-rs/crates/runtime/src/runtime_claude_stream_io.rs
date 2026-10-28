@@ -41,7 +41,6 @@ use crate::runtime_claude_stream_session::ClaudeWatchdogTimings;
 use crate::runtime_claude_turn::claude_control_response_outcome;
 use crate::runtime_claude_turn::claude_inbound_control_response;
 use crate::runtime_claude_turn::claude_liveness_probe_control_request;
-use crate::runtime_claude_turn::claude_model_catalog;
 use crate::runtime_claude_turn::claude_result_is_cli_originated;
 use crate::runtime_claude_turn::save_claude_resume_session_id;
 use crate::runtime_claude_turn::{
@@ -363,7 +362,7 @@ fn claude_observed_presentation(
     overlay: &[String],
 ) -> crate::AgentPresentationSnapshot {
     let facts = controls.parameter_facts();
-    let models = facts.models.unwrap_or_else(claude_model_catalog);
+    let models = facts.models.unwrap_or_default();
     let model = controls.current();
     let effort = controls.current_effort();
     let mut parameters =

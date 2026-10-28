@@ -75,6 +75,9 @@ test("private originals are fetched only for their owner and stay outside shared
   await conversationOpened(page);
   const original = page.getByTestId("private-connector-result");
   await expect(original).toHaveText(value, { timeout: 20_000 });
+  // The original scrolls in its own box; a rounded corner there would clip its first glyph.
+  await expect(original).toHaveCSS("border-top-left-radius", "0px");
+  await original.screenshot({ path: test.info().outputPath("private-connector-result.png") });
   await expect(page.getByTestId("connector-receipt").nth(0)).toContainText("visible to you");
   await expect(page.getByTestId("connector-receipt").nth(1)).not.toContainText(value);
   const reads = (await fixtureRequests(page, "private-original")).map(url => new URL(url).pathname);

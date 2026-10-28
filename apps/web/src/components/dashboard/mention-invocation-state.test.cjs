@@ -6,7 +6,7 @@ require("./typescript-require.cjs").installTypeScriptRequire();
 const {
   summonView, invocationVendorHarness, addressedAgentFace, launchFace, continuationFaces,
   splitMentionRejections, continuationView, splitMentionContinuations, splitHandoffMentions, handoffView,
-  handoffSuccessorLaunch, segmentMessageInteraction,
+  handoffSuccessorLaunch, segmentMessageInteraction, instanceCallView,
 } = require("./mention-invocation-state.ts");
 const { agentFaceUrl, staticFace } = require("@xmatrix/protocol");
 
@@ -341,4 +341,26 @@ test("a connector command is one connector.v1 segment, whole or by its command",
     .map(part => [part.presentationRef, part.text]),
   [["connector.v1", "@github:comment:o/r#7"], [null, " ship "]]);
   assert.deepEqual(segmentMessageInteraction(body, {}).map(part => part.presentationRef), [null]);
+});
+
+test("a page's call to a live Instance says what the Instance is doing with it, to the end", () => {
+  const startedAt = "2026-10-27T22:25:00.000Z";
+  const now = Date.parse(startedAt) + 45_000;
+  const call = { name: "grok:1", busy: false, sent: true, failure: null, now };
+  const execution = { startedAt, updatedAt: startedAt, state: "running" };
+  const said = (view) => [view.label, view.steps.find((step) => step.state === "current")?.status ?? null];
+  assert.deepEqual(said(instanceCallView({ ...call, sent: false })), ["Starting", "Sending"]);
+  assert.deepEqual(said(instanceCallView(call)), ["Sent", "Sent"]);
+  // Taken by a busy Instance only after what it is doing: it is queued, not started.
+  assert.deepEqual(said(instanceCallView({ ...call, busy: true })), ["Queued", "Queued"]);
+  assert.deepEqual(said(instanceCallView({ ...call, busy: true, execution })), ["Working", "Working 45s"]);
+  assert.deepEqual(said(instanceCallView({ ...call, execution: { ...execution, state: "accepted" }, now: now + 120_000 })),
+    ["Working", "Working 2 min"]);
+  const replied = instanceCallView({ ...call, execution: { ...execution, state: "completed",
+    finalReply: { messageId: "r", committedAt: startedAt } } });
+  assert.equal(replied.label, "Replied");
+  assert.equal(replied.tone, "success");
+  assert.equal(instanceCallView({ ...call, execution: { ...execution, state: "completed" } }).label, "Done");
+  assert.equal(instanceCallView({ ...call, execution: { ...execution, state: "interrupted" } }).label, "Failed");
+  assert.equal(instanceCallView({ ...call, failure: "Its conversation is no longer open to you." }).label, "Failed");
 });

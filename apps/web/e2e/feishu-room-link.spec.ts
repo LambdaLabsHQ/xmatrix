@@ -30,7 +30,7 @@ test("Feishu selection requires tenant and group; private confirmation alone doe
   await fixtureJson(page, "feishu-start", link, challenge(), { method: "POST" }); await start(page);
   await expect(page.getByText("@xMatrix link " + nonce, { exact: true })).toBeVisible();
   expect(await fixtureRequestBodies(page, "feishu-start")).toEqual([{ tenantKey: "tenantA", chatId: "oc_AbCd" }]);
-  await expect(page.getByTestId("connector-row").filter({ hasText: "Feishu" }).getByRole("img", { name: "Disconnected" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Disconnected" }).getByTestId("connector-row").filter({ hasText: "Feishu" })).toBeVisible();
   expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage }, url: location.href }))).not.toContain(nonce);
   await expect(page.getByText("Saving your own app credentials or generating a manual ingress URL replaces all linked company app groups.", { exact: true })).toBeVisible();
 });
@@ -41,12 +41,12 @@ test("Feishu refresh exposes several independently authorized groups and unlink 
   await fixtureJson(page, "feishu-connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections: [{ ...connection, status: "configured" }] });
   await page.getByRole("button", { name: "Refresh connection", exact: true }).click();
   await expect(page.getByText("@xMatrix link " + nonce, { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Connected Feishu group:", { exact: false })).toHaveCount(2);
-  await expect(page.getByText("Feishu company app", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("chat-link-binding")).toHaveCount(2);
+  await expect(page.getByText("via Feishu company app", { exact: false })).toBeVisible();
   await fixtureJson(page, "feishu-unlink", link, { ok: true }, { method: "DELETE" });
   await page.getByRole("button", { name: "Unlink group", exact: true }).first().click();
   expect(await fixtureRequestBodies(page, "feishu-unlink")).toEqual([{ tenantKey: "tenantA", chatId: "oc_AbCd" }]);
-  await expect(page.getByText("Connected Feishu group:", { exact: false })).toHaveCount(1);
+  await expect(page.getByTestId("chat-link-binding")).toHaveCount(1);
   await expect(page.getByText("tenantB/oc_Other", { exact: true })).toBeVisible();
 });
 test("Feishu denial does not retry or reveal a nonce; leaving detail fences a late confirmation", async ({ page }) => {

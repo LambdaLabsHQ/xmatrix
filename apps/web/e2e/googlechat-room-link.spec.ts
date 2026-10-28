@@ -42,8 +42,8 @@ test(`${label} confirmation stays private and cannot mark a connection active be
   await fixtureJson(page, "chat-start", link, challenge(provider), { method: "POST" });
   await start(page, provider);
   await expect(page.getByText(command, { exact: true })).toBeVisible();
-  const row = page.getByTestId("connector-row").filter({ hasText: label });
-  await expect(row.getByRole("img", { name: "Disconnected" })).toBeVisible();
+  const row = (group: string) => page.getByRole("region", { name: group }).getByTestId("connector-row").filter({ hasText: label });
+  await expect(row("Disconnected")).toBeVisible();
   expect(await fixtureRequestBodies(page, "chat-start")).toEqual([provider === "teams" ? {} : { chatSpace: room }]);
   expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage }, url: location.href }))).not.toContain(nonce);
   await fixtureJson(page, "chat-bound", link, { binding: { chatSpace: selected, sourceRef: provider + ":room-fixture" } }, { method: "GET" });
@@ -51,9 +51,9 @@ test(`${label} confirmation stays private and cannot mark a connection active be
     connections: [{ ...connection, id: E2E_SPACE.id + ":" + provider, providerId: provider, providerName: label, status: "configured", lastCheckedAt: new Date().toISOString() }] });
   await page.getByRole("button", { name: "Refresh connection", exact: true }).click();
   await expect(page.getByText(command, { exact: true })).toHaveCount(0);
-  await expect(page.getByText(provider === "teams" ? "Connected Teams conversation:" : "Connected Chat space:", { exact: false })).toBeVisible();
-  await expect(row.getByRole("img", { name: "Connected" })).toBeVisible();
-  await expect(page.getByText(provider === "teams" ? "Microsoft Teams company app" : "Google Chat app", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("chat-link-binding")).toContainText(selected);
+  await expect(row("Connected")).toBeVisible();
+  await expect(page.getByText(provider === "teams" ? "via Microsoft Teams company app" : "via Google Chat app", { exact: false })).toBeVisible();
   await expect(page.getByText(`Saving a manual ${provider === "teams" ? "Workflows" : "incoming"} webhook replaces the linked app connection.`, { exact: true })).toBeVisible();
 });
 

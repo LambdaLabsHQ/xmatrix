@@ -198,6 +198,7 @@ pub(crate) fn model_catalog_presentation_with_commands(
             parameter_revision: 0,
             supported_efforts: Vec::new(),
             commands: commands.unwrap_or_default(),
+            commands_reported: false,
             status_chips: Vec::new(),
             usage,
         },
@@ -296,16 +297,18 @@ fn scan_command_tokens_from_dir(dir: &std::path::Path) -> Vec<String> {
                     .extension()
                     .and_then(|e| e.to_str())
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-                    && let Some(token) = normalize_slash_command_token(stem) {
-                        tokens.push(token);
-                    }
+                && let Some(token) = normalize_slash_command_token(stem)
+            {
+                tokens.push(token);
+            }
         } else if path.is_dir() {
             // Skill-style: dir/SKILL.md or just dir name as command.
             let skill_md = path.join("SKILL.md");
             if skill_md.is_file()
-                && let Some(token) = normalize_slash_command_token(&name) {
-                    tokens.push(token);
-                }
+                && let Some(token) = normalize_slash_command_token(&name)
+            {
+                tokens.push(token);
+            }
         }
     }
     tokens.sort();

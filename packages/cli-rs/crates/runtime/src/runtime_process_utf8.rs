@@ -593,6 +593,19 @@ impl MacosSleepGuard {
 }
 
 pub async fn run(mut cli: Cli) -> error::Result<()> {
+    if (env_flag("XMATRIX_HEADLESS") || env_flag("XMATRIX_AGENT_SESSION"))
+        && matches!(
+            &cli.command,
+            Some(Commands::Setup {
+                command: SetupCommand::Daemon { .. } | SetupCommand::Install { daemon: true, .. },
+                ..
+            })
+        )
+    {
+        return Err(CliError::Auth(
+            "Agent runs cannot configure the installation daemon host; ask the owner to complete machine setup in their terminal".into(),
+        ));
+    }
     // Refuse before the lifetime binding and the status heartbeat: a nested
     // command must leave its parent Run's status file untouched.
     if let Some(Commands::External(args)) = &cli.command

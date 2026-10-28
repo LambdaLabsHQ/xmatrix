@@ -209,6 +209,17 @@ exhaustion; a COMMIT phase indicates uncertainty and must not authorize replay.
 A missing database projection means the task failed outside an observed database
 call; use the task and mapped stack rather than inferring a database outage.
 
+Each new failure also snapshots its owning session's wall, queue, checkout,
+BEGIN, cumulative SQL, longest SQL and COMMIT durations, plus attempted round
+trips and queries. The issue reader exposes this bounded numeric projection
+beside each failure; historical events without it remain readable. Compare the
+failed round trip with the session's other stages before calling it an isolated
+stall (HUB-AV exhausted its SQL retry in BEGIN). Snapshots precede rollback and
+retry and never combine progress from separate replay sessions. Single reads
+that recover within one session retain that session's cumulative progress.
+These timings include Worker-local waiting and do not prove network or server
+latency. There is no extra SQL, broader retry or COMMIT replay.
+
 ## Agent lifecycle locks
 
 First-reply observation runs after the Agent message commits. It checks current
@@ -226,6 +237,16 @@ registration authority. This matches Human stop messages (Channel before Run),
 avoids shared-lock upgrades, and prevents reciprocal cross-Channel writes from
 locking the same Channels in opposite orders. Stops and revocations committed
 after preparation still refuse publication.
+
+Instance connection claims discover their owning Channel without holding the
+Run, take its exclusive lifecycle lock, then re-read and lock the current
+Run/Instance before registration admission. A changed Channel refuses the
+claim. Capacity-retry control and registration withdrawal preparation take the
+same Channel lock before locking their Runs. These paths therefore order
+behind stop messages and appends, including initial
+admission, without upgrading a shared Channel lock while holding the Run.
+Stops and registration withdrawals committed during the wait remain effective
+(HUB-AW); reconnect cannot revive the stopped execution.
 
 ## Failover and restarts
 

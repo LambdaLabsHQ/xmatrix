@@ -96,6 +96,18 @@ test("authentication preserves a valid raw JSON body and its inclusive byte boun
   assert.deepEqual(await response.json(), { body: value });
 });
 
+test("authentication refuses an oversized cloned body before the other reader finishes", async t => {
+  const source = new ReadableStream({ start(controller) {
+    controller.enqueue(new Uint8Array(AUTH_LIMIT_BYTES + 1));
+  } });
+  const [body, sibling] = source.tee();
+  t.after(async () => { await sibling.cancel(); });
+  const response = app().request("/api/auth/oauth2/register", { method: "POST", body, duplex: "half" });
+  const answer = await Promise.race([response, new Promise(resolve => setImmediate(() => resolve(null)))]);
+  assert.equal(answer?.status, 413);
+  assert.equal(body.locked, false);
+});
+
 test("authentication preserves OAuth form bytes for the raw handler", async () => {
   const body = "grant_type=authorization_code&code=a%2Bb&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback";
   const response = await app().request("/api/auth/oauth2/token", {

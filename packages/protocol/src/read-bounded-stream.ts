@@ -1,8 +1,9 @@
 import { concatenateBytes } from "./bytes.js";
 
-/** Bound streamed bytes before allocating a joined body; release on every exit. */
+/** Bound streamed bytes before allocating a joined body; release on every exit.
+ * Rejection never waits for upstream cancellation (a tee waits for its sibling). */
 export async function readBoundedStream(stream: ReadableStream<Uint8Array> | null, maximumBytes: number,
-  tooLarge: () => Error, signal?: AbortSignal): Promise<Uint8Array> {
+  tooLarge: () => Error, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
   signal?.throwIfAborted();
   if (!stream) return new Uint8Array();
   const reader = stream.getReader();
@@ -18,7 +19,7 @@ export async function readBoundedStream(stream: ReadableStream<Uint8Array> | nul
       if (done) break;
       total += value.byteLength;
       if (total > maximumBytes) {
-        await reader.cancel().catch(() => undefined);
+        void reader.cancel().catch(() => undefined);
         throw tooLarge();
       }
       chunks.push(value);

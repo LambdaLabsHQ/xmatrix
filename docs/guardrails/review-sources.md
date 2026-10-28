@@ -1,5 +1,24 @@
 # Guardrail Review Sources
 
+- 2026-10-27 bounded stream audit: reviewed the request/authentication,
+  connector, harness registry and Apple JSON collectors against protocol's
+  existing reader. Their repeated collection loops also waited for upstream
+  cancellation, which a native tee holds until its other branch finishes.
+  These callers now provide limits, errors and existing signals to one shared
+  collector; overflow cancels without awaiting cleanup and always releases the
+  reader. Native tee regressions failed on the previous shared reader and
+  authentication boundary. Domain parsing, authorization and streaming media
+  ownership remain separate. See [security profile](profile-security.md).
+
+- 2026-10-27 HUB-AV session evidence: reviewed Feishu cleanup's exhausted
+  pre-COMMIT replay and the client-owned timings. Failure snapshots expose only
+  bounded numeric session stages and progress through the existing Sentry
+  projection; legacy events remain readable. Wire-fault reporting coverage
+  fails before the change and protects separate SQL/BEGIN attempts, one event,
+  destruction of both checkouts and no third retry. Connector tests reject
+  unknown or malformed nested fields. Recovery and release authority are
+  unchanged; see [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 - 2026-10-21 Web per release channel (P0#4 text): maintainer direction (Daniel)
   that beta and stable are told apart by version for the Web too, not only for
   clients. Every beta now deploys the beta Web (`beta.xmatrix.sh`); a stable
@@ -1059,3 +1078,7 @@ Latest refresh: 2026-08-11.
 - 2026-10-17 OAuth and Space-secret isolation review: Daniel requested a cross-Space credential audit. Reviewed OAuth start/completion, encrypted connector resolution, Composio account selection, Channel-derived connector execution, GitHub Run-bound repository tokens, live Run secret reads/approvals, local secret injection and migrations 0123/0126. PostgreSQL-backed route regressions reproduced state issuance to a non-admin of the target Space and grant exchange after admin revocation; the existing credential write still enforced admin authority. Both external-call entry points now check current target-Space authority before proceeding, without decrypting an old grant. The separate GitHub callback also allowed a forwarded connect link to attribute another authorizer's installations to the initiating Space; anonymous callbacks now only hand off state/code, authenticated completion verifies that initiator and Space authority, and the v2 grant purpose refuses earlier installation-selection grants. Real two-Space tests cover same-alias values, approval separation, forged Run Space and ciphertext transplantation. Historical owner-secret copies and their retained creator-bound envelopes are documented separately from current authorization, as is same-OS-user execution; synthetic tests do not establish whether production copies were unwanted or whether historical disclosure occurred. See [Space credential isolation](../operations/space-credential-isolation.md).
 
 - 2026-10-26 authentication collection resource review: traced public Better Auth sign-in and OAuth registration collection schemas, the upstream Zod size-check fix (which leaves unbounded collections unchanged), the Hub global body limit and the shared stream reader. Authentication now reads at most 64 KiB of actual body bytes before parsing, cancels oversized streams regardless of Content-Length, and passes admitted raw JSON/form bodies unchanged. General requests and attachment uploads keep their existing bounds. The existing request-body owner tests cover the smaller boundary, deceptive lengths, cancellation and admitted formats; the oversized-collection and deceptive-length regressions fail on the prior middleware.
+
+- 2026-10-27 maintainer-directed data-driven capability audit: reviewed all eight guardrail/profile/evidence documents and repository-wide model, effort, parameter and command catalog producers/consumers. Native Claude Code 2.1.312 initialize omits Ultracode in model rows while its built-in effort hint declares it. Removed the static Claude alias/effort inventory, added generic native workflow-mode discovery, and made empty native command catalogs authoritative for Claude and ACP. P1 #7 now explicitly prohibits invented capability inventories and cosmetic relocation into JSON, preserving the ten-guardrail structure. The July 12 Claude no-enumeration workaround is superseded; source-backed command metadata remains bounded by native observations. Source ownership, inspected paths and compatibility limits are recorded in [the audit](../operations/provider-capability-audit.md); test and release receipts belong to the implementation PR and task conversation.
+
+- 2026-10-27 capability audit follow-up: pre-discovery regression probes reproduced documentation passthrough inventories both in ACP's initial adapter snapshot and Claude's session command helper. The shared presence merge alone did not own every command construction path. Session controls and presence now share one native-precedence merge; Claude/ACP keep unknown commands unavailable before initial discovery as well as after empty replacement. Fixed typed controls retain their separate xMatrix protocol binding.

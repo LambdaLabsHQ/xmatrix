@@ -88,8 +88,13 @@ export interface AdminUserSummary {
   profileCompleted?: boolean;
   providers?: string[];
   firstSeenAt?: string;
-  /** Latest retained message from this user or their Agents; counts stay user-authored. */
+  /** Latest message from this user or their Agents; counts stay user-authored. */
   lastMessageAt?: string;
+  /**
+   * UTC days, as days since 1970-01-01, on which this person sent a message of
+   * their own within the overview's activity window. Absent from an older Hub.
+   */
+  activeDays?: number[];
 }
 
 /** Authentication-directory metrics. Session activity is not a page-view count. */
@@ -102,12 +107,26 @@ export interface AdminUserAccessSummary {
   activeUsersLast30d: number;
 }
 
-/** One UTC day of platform message volume, oldest first. */
+/**
+ * One UTC day of platform activity, oldest first, by the day messages were
+ * sent. The optional fields are absent from an older Hub.
+ */
 export interface AdminActivityPoint {
   date: string;
   messages: number;
   humanMessages: number;
   agentMessages: number;
+  /** Text a Space member typed themselves: what makes a person active. */
+  ownMessages?: number;
+  /** People with a message of their own that day, and in the 7 and 30 days ending on it. */
+  activeUsers?: number;
+  activeUsers7d?: number;
+  activeUsers30d?: number;
+  /** Spaces where a member sent a message of their own. */
+  activeSpaces?: number;
+  /** Accounts registered that day; absent when the user inventory was cut off. */
+  signups?: number;
+  runsStarted?: number;
 }
 
 export interface AdminStorageCategory {
@@ -147,7 +166,7 @@ export const ADMIN_OVERVIEW_MAX_USER_ROWS = 10_000;
 export const ADMIN_OVERVIEW_DEFAULT_ROWS = 50;
 
 /** Maximum days of daily activity the Hub will aggregate in one read. */
-export const ADMIN_OVERVIEW_MAX_ACTIVITY_DAYS = 90;
+export const ADMIN_OVERVIEW_MAX_ACTIVITY_DAYS = 365;
 
 export const ADMIN_OVERVIEW_DEFAULT_ACTIVITY_DAYS = 14;
 

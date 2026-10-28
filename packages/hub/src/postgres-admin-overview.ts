@@ -10,16 +10,25 @@ import {
   type PostgresAuthorityFleet,
 } from "./postgres-authority-fleet";
 import type { Env } from "./types";
-import { POSTGRES_ADMIN_OVERVIEW_QUERY } from "./postgres-admin-overview-query";
+import { adminDate } from "./postgres-admin-activity-rollup";
+import {
+  POSTGRES_ADMIN_OVERVIEW_QUERY,
+  POSTGRES_ADMIN_OVERVIEW_STATE_QUERY,
+  POSTGRES_ADMIN_OVERVIEW_UNROLLED_QUERY,
+} from "./postgres-admin-overview-query";
 import {
   adminActivityUtcWindow,
+  adminDayAfter,
   emptyAdminPlatformTotals,
   mergeAdminOverviewPartitions,
+  withActiveUsers,
+  type AdminUserDays,
 } from "./admin-overview-merge";
 
 const ADMIN_OVERVIEW_USER_BOUND = 10_000;
 const ADMIN_OVERVIEW_STORAGE_CATEGORY_BOUND = 1_000;
 const ADMIN_OVERVIEW_MACHINE_OWNER_BOUND = 10_000;
+const ADMIN_OVERVIEW_ACTIVE_USER_BOUND = 10_000;
 
 interface AdminOverviewInput {
   now: string;
@@ -77,6 +86,19 @@ interface ActivityRow extends QueryResultRow {
   messages: string | number;
   human_messages: string | number;
   agent_messages: string | number;
+  own_messages: string | number;
+  active_spaces: string | number;
+  runs_started: string | number;
+}
+
+interface UserDaysRow extends QueryResultRow {
+  user_id: string;
+  days: Array<string | number>;
+  total_count: string | number;
+}
+
+interface RollupStateRow extends QueryResultRow {
+  settled_through: Date | string | null;
 }
 
 interface StorageRow extends QueryResultRow {
@@ -97,6 +119,7 @@ interface MachineRow extends QueryResultRow {
 interface PostgresAdminOverviewPartition {
   overview: AdminPlatformOverview;
   machines: MachineRow[];
+  userDays: AdminUserDays[];
 }
 
 function numberValue(value: string | number | null | undefined): number {
@@ -116,6 +139,25 @@ function timestamp(value: Date | string | null): string | undefined {
   return result;
 }
 
+/** The shard's last settled day, read before the aggregate so its live scan is planned on a real bound. */
+async function readSettledThrough(
+  database: AuthorityDatabase,
+  shardId: string,
+): Promise<string | null> {
+  const state = (await database.transaction({
+    requestId: `admin-overview-state:${shardId}`.slice(0, 200),
+    operation: "admin.overview.state",
+    statement: "single_read",
+  }, (transaction) => transaction.query<RollupStateRow>({
+    name: "postgres_admin_overview_state_v1",
+    text: POSTGRES_ADMIN_OVERVIEW_STATE_QUERY,
+    values: [],
+    maxRows: 1,
+  })))[0];
+  if (!state) throw new Error("PostgreSQL admin activity roll-up state is missing");
+  return state.settled_through === null ? null : adminDate(state.settled_through);
+}
+
 async function readShardPartition(
   database: AuthorityDatabase,
   shardId: string,
@@ -124,30 +166,42 @@ async function readShardPartition(
 ): Promise<PostgresAdminOverviewPartition> {
   const now = new Date(input.now);
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1_000);
-  const since7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000);
   const activityWindow = adminActivityUtcWindow(now.getTime(), input.activityDays);
+  const today = activityWindow.lastDay;
+  const settledThrough = await readSettledThrough(database, shardId);
+  const values = [since24h, today, input.spaceLimit + 1,
+    activityWindow.firstDay, today, includeGlobalMachines];
   return database.transaction({
     requestId: `admin-overview:${shardId}`.slice(0, 200),
     operation: "admin.overview.read",
     statement: "single_read",
   }, async (transaction) => {
     const result = (await transaction.query<QueryResultRow & {
+      settled_through: Date | string | null;
       totals: TotalsRow[];
       spaces: SpaceRow[];
       users: UserRow[];
+      user_days: UserDaysRow[];
       activity: ActivityRow[];
       storage: StorageRow[];
       machines: MachineRow[];
-    }>({
-      name: "postgres_admin_overview_v1",
+    }>(settledThrough === null ? {
+      name: "postgres_admin_overview_unrolled_v1",
+      text: POSTGRES_ADMIN_OVERVIEW_UNROLLED_QUERY,
+      values,
+      maxRows: 1,
+    } : {
+      name: "postgres_admin_overview_v2",
       text: POSTGRES_ADMIN_OVERVIEW_QUERY,
-      values: [since24h, since7d, input.spaceLimit + 1,
-        activityWindow.since, activityWindow.before, includeGlobalMachines],
+      values: [...values, `${adminDayAfter(settledThrough)}T00:00:00.000Z`],
       maxRows: 1,
     }))[0];
+    if (settledThrough !== null && (result?.settled_through ?? null) === null) {
+      throw new Error("PostgreSQL admin activity roll-up state disappeared during the read");
+    }
     const totals = result?.totals[0];
     if (!totals) throw new Error("PostgreSQL admin overview totals are unavailable");
-    const { spaces: spaceRows, users: userRows, activity: activityRows,
+    const { spaces: spaceRows, users: userRows, user_days: userDayRows, activity: activityRows,
       storage: storageRows, machines: machineRows } = result!;
     // The outer row is a JSON envelope: prove the nested inventory bounds too.
     if (spaceRows.length > input.spaceLimit + 1 || activityRows.length > input.activityDays) {
@@ -156,6 +210,10 @@ async function readShardPartition(
     if (userRows.length > ADMIN_OVERVIEW_USER_BOUND ||
         numberValue(userRows[0]?.total_count) > ADMIN_OVERVIEW_USER_BOUND) {
       throw new Error("PostgreSQL admin overview user bound was reached");
+    }
+    if (userDayRows.length > ADMIN_OVERVIEW_ACTIVE_USER_BOUND ||
+        numberValue(userDayRows[0]?.total_count) > ADMIN_OVERVIEW_ACTIVE_USER_BOUND) {
+      throw new Error("PostgreSQL admin overview active-user bound was reached");
     }
     if (storageRows.length > ADMIN_OVERVIEW_STORAGE_CATEGORY_BOUND) {
       throw new Error("PostgreSQL admin overview storage-category bound was reached");
@@ -226,6 +284,9 @@ async function readShardPartition(
           messages: numberValue(row.messages),
           humanMessages: numberValue(row.human_messages),
           agentMessages: numberValue(row.agent_messages),
+          ownMessages: numberValue(row.own_messages),
+          activeSpaces: numberValue(row.active_spaces),
+          runsStarted: numberValue(row.runs_started),
         })),
         storage: storageRows.map((row) => ({
           category: row.category,
@@ -239,6 +300,10 @@ async function readShardPartition(
         },
       },
       machines: machineRows.map((row) => ({ ...row })),
+      userDays: userDayRows.map((row) => ({
+        userId: row.user_id,
+        days: row.days.map((day) => numberValue(day)),
+      })),
     };
   });
 }
@@ -279,9 +344,12 @@ export async function readPostgresAdminOverviewFromFleet(
     storage: [],
     truncated: { spaces: false, users: false },
   };
-  return mergeAdminOverviewPartitions(
-    input,
-    [...partitions.map((partition) => partition.overview), machinePartition],
+  return withActiveUsers(
+    mergeAdminOverviewPartitions(
+      input,
+      [...partitions.map((partition) => partition.overview), machinePartition],
+    ),
+    partitions.flatMap((partition) => partition.userDays),
   );
 }
 

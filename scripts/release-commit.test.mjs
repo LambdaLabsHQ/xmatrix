@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 import { releaseCommitProblem, verifyRelease, verifyReleaseCommit, verifyReleaseCut } from "./release-commit.mjs";
 import { isReleaseCommitOfMain } from "./production-release-policy.mjs";
-import { stampVersionText, versionedPaths } from "./version.mjs";
+import { stampVersionText } from "./version.mjs";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+import { fixtureRepository } from "./release-commit-test-fixture.mjs";
+import { readRepoFile } from "./script-test-fixture.mjs";
+
 const a = "a".repeat(40);
 const b = "b".repeat(40);
 
@@ -38,41 +38,6 @@ test("a release commit is one child of its source differing only by the version 
   assert.match(releaseCommitProblem({ deploySha: "short", sourceSha: b, parents: [b] }), /full commit SHAs/u);
 });
 
-function fixtureRepository() {
-  const root = mkdtempSync(path.join(tmpdir(), "xmatrix-release-commit-"));
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-  git("init", "--quiet", "--initial-branch=main");
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Test");
-  git("config", "commit.gpgsign", "false");
-  for (const file of versionedPaths) {
-    mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
-    writeFileSync(path.join(root, file), readFileSync(path.join(repoRoot, file), "utf8"));
-  }
-  writeFileSync(path.join(root, "source.txt"), "source\n");
-  git("add", "--all");
-  git("commit", "--quiet", "--message", "source");
-  const commit = (message, edit) => {
-    edit();
-    git("commit", "--quiet", "--all", "--message", message);
-    return git("rev-parse", "HEAD");
-  };
-  const stamp = (next) => () => {
-    for (const file of versionedPaths) {
-      const target = path.join(root, file);
-      writeFileSync(target, stampVersionText(file, readFileSync(target, "utf8"), next));
-    }
-  };
-  // A release cut from `base`: its version stamp, plus newer main content when `carry` is set.
-  const cut = (base, next, { carry = false } = {}) => {
-    git("checkout", "--quiet", "--detach", base);
-    return commit(`Release ${next}`, () => {
-      stamp(next)();
-      if (carry) writeFileSync(path.join(root, "source.txt"), "later\n");
-    });
-  };
-  return { root, git, commit, stamp, cut, source: git("rev-parse", "HEAD") };
-}
 
 test("verification accepts the stamped release commit and nothing more", () => {
   const repo = fixtureRepository();
@@ -134,7 +99,7 @@ test("a stable cut is the stamped release commit of a revision main contains, at
 });
 
 test("a release stamps every manifest with its version, and iOS with the three numbers Apple takes", () => {
-  const project = readFileSync(path.join(repoRoot, "apps/ios/xMatrix.xcodeproj/project.pbxproj"), "utf8");
+  const project = readRepoFile("apps/ios/xMatrix.xcodeproj/project.pbxproj");
   const stamped = stampVersionText("apps/ios/xMatrix.xcodeproj/project.pbxproj", project, "1.0.606-beta.3");
   const marketing = [...stamped.matchAll(/MARKETING_VERSION = ([^;]+);/gu)].map((match) => match[1]);
   assert.ok(marketing.length > 0);

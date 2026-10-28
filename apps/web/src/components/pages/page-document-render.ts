@@ -2,6 +2,7 @@ import { markdownToPageDoc, pageDocBlocks, pageSchema } from "@xmatrix/protocol/
 import { DOMSerializer, type Node as DocNode } from "prosemirror-model";
 import { pageMediaElement, type PageMediaUrl } from "./page-media";
 import { drawPageReferences, type PageReferenceTargets } from "./page-reference-chips";
+import { markShortCells } from "./page-table-cells";
 
 /**
  * Markdown drawn as the live editor draws a page (pages-live-document.md §4):
@@ -41,6 +42,7 @@ export function renderPageDocument(markdown: string, target: HTMLElement, refere
     const media = pageMediaElement(image.getAttribute("src") ?? "", image.alt, mediaUrl ? { url: mediaUrl } : undefined);
     if (media) image.replaceWith(media);
   }
+  markShortCells(target);
   if (references) drawPageReferences(target, references);
   return headings;
 }

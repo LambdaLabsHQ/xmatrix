@@ -43,8 +43,8 @@ function chipDecorations(doc: DocNode, automations: Map<string, SerializedAutoma
       status.contentEditable = "false";
       status.dataset.state = current;
       status.textContent = automation
-        ? `${formatAutomationCadence(automation.intervalMinutes)} · ${automation.enabled
-          ? formatAutomationNext(automation.nextRunAt) : "paused"}`
+        ? `${formatAutomationCadence(automation)} · ${automation.enabled
+          ? formatAutomationNext(automation.nextRunAt) : automation.once && automation.lastRunAt ? "done" : "paused"}`
         : "not found";
       if (automation) {
         status.title = automation.lastChannelId ? "Open its last run" : "Open its conversation";
@@ -56,7 +56,7 @@ function chipDecorations(doc: DocNode, automations: Map<string, SerializedAutoma
       }
       return status;
     }, { side: 1, ignoreSelection: true,
-      key: `automation:${id}:${current}:${automation?.intervalMinutes}:${automation?.nextRunAt}` }));
+      key: `automation:${id}:${current}:${automation?.intervalMinutes}:${automation?.nextRunAt}:${automation?.lastRunAt}` }));
   });
   return DecorationSet.create(doc, decorations);
 }

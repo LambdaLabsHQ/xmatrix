@@ -36,7 +36,6 @@ function operationsResults(overrides = {}) {
     postgres_admin_operations_automations_v1: [{ total: 0, enabled: 0, with_error: 0 }],
     postgres_admin_operations_occurrences_v1: [],
     postgres_admin_operations_overdue_v1: [{ overdue: 0 }],
-    postgres_admin_operations_outbox_v1: [],
     postgres_admin_operations_subscriptions_v1: [],
     postgres_admin_operations_webhooks_v1: [],
     postgres_admin_operations_webhook_outcomes_v1: [],
@@ -60,10 +59,6 @@ test("admin operations merge shards, read Machines once, and count per-Machine w
     postgres_admin_operations_active_runs_v1: [{ active: 1 }],
     postgres_admin_operations_run_statuses_v1: [{ status: "failed", total: 1 }, { status: "running", total: 1 }],
     postgres_admin_operations_run_days_v1: [{ day: "2026-09-30", started: 2, failed: 1 }],
-    postgres_admin_operations_outbox_v1: [
-      { status: "pending", total: 3, oldest_pending_at: "2026-09-30T10:00:00.000Z", max_attempts: 2 },
-      { status: "delivered", total: 9, oldest_pending_at: null, max_attempts: null },
-    ],
     postgres_admin_operations_paid_calls_v1: [
       { kind: "jev", status: "settled", outcome: "ok", calls: 3, units: 30, credits: 300 },
       { kind: "jev", status: "reserved", outcome: null, calls: 1, units: 10, credits: 100 },
@@ -78,9 +73,6 @@ test("admin operations merge shards, read Machines once, and count per-Machine w
     ],
     postgres_admin_operations_harness_spaces_v1: [{ harness: "claude", spaces: 1 }, { harness: "codex", spaces: 1 }],
     postgres_admin_operations_run_statuses_v1: [{ status: "failed", total: 2 }],
-    postgres_admin_operations_outbox_v1: [
-      { status: "pending", total: 1, oldest_pending_at: "2026-09-30T09:00:00.000Z", max_attempts: 5 },
-    ],
     postgres_admin_operations_subscriptions_v1: [{
       space_id: "space-1", space_name: "One", plan: "pro", status: "past_due", seat_quantity: 3,
       billing_provider: "stripe", current_period_end: null, cancel_at_period_end: false,
@@ -107,9 +99,9 @@ test("admin operations merge shards, read Machines once, and count per-Machine w
   assert.deepEqual(operations.runs.byStatus, { failed: 3, running: 1 });
   assert.equal(operations.runs.daily.length, 30);
   assert.deepEqual(operations.runs.daily.at(-1), { date: "2026-09-30", started: 2, failed: 1 });
-  assert.deepEqual(operations.outbox, {
-    byStatus: { pending: 4, delivered: 9 }, oldestPendingAt: "2026-09-30T09:00:00.000Z", maxAttempts: 5,
-  });
+  assert.deepEqual(operations.outbox, { byStatus: {}, maxAttempts: 0 },
+    "the outbox has no consumer, so it has no backlog and is never scanned");
+  assert.equal(seen1.some((name) => name.includes("outbox")), false);
   assert.deepEqual(operations.billing.byStatus, { past_due: 1 });
   assert.equal(operations.billing.subscriptions[0].provider, "stripe");
   assert.deepEqual(operations.paidCalls, [{

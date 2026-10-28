@@ -954,6 +954,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       off();
       if (madeSession.current === live) return;
       live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false); setChangesOpen(false);
+      setHeadRevision(null);
       setOffline(false); edited.current = false;
     };
   }, [spaceId, pageId, pending, hasToken, userId, userName, queryClient]);
@@ -1094,7 +1095,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     openPage: (id, blockId) => referenceActions.current.onOpenSection(id, blockId),
     openChannel: (id) => referenceActions.current.onOpenConversation(id),
     mentions,
-  }), [mentions, tree.data]);
+    // Everyone reading the page sees whether an Instance an `@` called is free, from its live presence here.
+    instanceStatus: (conversationId, name) => liveOnPage.find((agent) =>
+      agent.conversationId === conversationId && agent.name === name)?.status ?? null,
+  }), [liveOnPage, mentions, tree.data]);
   // An empty page someone is co-writing asks for its first line, naming who writes the next.
   const onboardingCopy = useOnboardingCopy(spaceId, token, userId ?? undefined);
   // What Agents co-writing the page suggest (§4.2), laid over it change by change.
@@ -1244,12 +1248,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const callInstanceRef = useRef<((instance: PageInstance, blockId: string | null, summon: PageSummon) => Promise<void>) | null>(null);
   // The `@`s this reader called Agents with on the page, each showing how its call goes.
   const { summons, add: addSummon, update: updateSummon } = usePageSummons();
-  const pageSummons = useMemo<PageSummons>(() => ({ list: summons.filter((summon) => summon.pageId === page?.pageId), token }),
-    [page?.pageId, summons, token]);
+  const pageSummons = useMemo<PageSummons>(() => ({ list: summons.filter((summon) => summon.pageId === page?.pageId), token,
+    conversationName: (id) => referenceActions.current.conversation(id)?.name ?? null,
+    instanceStatus: (id, name) => liveOnPage.find((agent) => agent.conversationId === id && agent.name === name)?.status ?? null,
+    openConversation: (id) => referenceActions.current.onOpenConversation(id) }),
+    [liveOnPage, page?.pageId, summons, token]);
   // Typing `[[`, `#` and `@` on the page completes as it does in the composer; an `@` calls the Agent to the page.
   const referenceCatalog = useMessageReferenceCatalog();
   // The Instances live in this page's conversations, which an `@` calls by name rather than starting another.
-  const instances = useMemo(() => pageInstances(liveOnPage, (id) => Boolean(conversation(id))), [conversation, liveOnPage]);
+  const instances = useMemo(() => pageInstances(liveOnPage, (id) => conversation(id)?.name ?? null), [conversation, liveOnPage]);
   const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
     spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents, instances,
     readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
@@ -1489,7 +1496,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     onOpenConversation(conversationId, at ? { messageId: at.messageId, sequence: at.sequence } : undefined);
   };
   // Who wrote what (page-blame.tsx), read once per head revision when the reader first asks.
-  const blame: PageBlameSource | undefined = spaceId && pageId && !pending ? {
+  // The document can sync before the session announces its head. Reading then
+  // would cache under null and read the same revision again when it arrives.
+  const blame: PageBlameSource | undefined = spaceId && pageId && !pending && headRevision !== null ? {
     read: () => queryClient.fetchQuery({
       queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-blame",
         [spaceId, pageId, blameRevision.current]),

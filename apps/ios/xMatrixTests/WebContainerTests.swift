@@ -1,6 +1,7 @@
 import XCTest
 import WebKit
 import StoreKit
+import AuthenticationServices
 @testable import xMatrix
 
 @MainActor
@@ -140,15 +141,32 @@ final class WebContainerTests: XCTestCase {
     }
 
     func testEdgeSwipeGoesBackInThePageNotThroughHistory() {
-        var scripts: [String] = []
-        let (coordinator, container) = makeCoordinator { scripts.append($1) }
+        var asked: [String] = []
+        var pageWentBack = true
+        let (coordinator, container) = makeCoordinator(askScript: { _, script, answer in
+            asked.append(script)
+            answer(pageWentBack)
+        })
         defer { withExtendedLifetime(container) {} }
         coordinator.load(AppConfiguration.mobileTabURL(.messages))
         XCTAssertFalse(page(coordinator).allowsBackForwardNavigationGestures)
         coordinator.edgeSwipeEnded(distance: 20, speed: 100)
-        XCTAssertEqual(scripts, [])
+        XCTAssertEqual(asked, [])
         coordinator.edgeSwipeEnded(distance: 120, speed: 0)
-        XCTAssertEqual(scripts, ["window.__xmatrixNativeBack?.();"])
+        XCTAssertEqual(asked, ["window.__xmatrixNativeBack?.() === true"])
+        pageWentBack = false
+        coordinator.edgeSwipeEnded(distance: 0, speed: 900)
+        XCTAssertEqual(asked.count, 2)
+    }
+
+    func testEdgeSwipeRunsAlongsideThePageTouches() {
+        let (coordinator, container) = makeCoordinator()
+        defer { withExtendedLifetime(container) {} }
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        let edgeSwipe = page(coordinator).gestureRecognizers?.compactMap { $0 as? UIScreenEdgePanGestureRecognizer }.first
+        XCTAssertEqual(edgeSwipe?.edges, .left)
+        XCTAssertTrue(edgeSwipe?.delegate === coordinator)
+        XCTAssertTrue(coordinator.gestureRecognizer(edgeSwipe!, shouldRecognizeSimultaneouslyWith: UIPanGestureRecognizer()))
     }
 
     func testReportedViewPicksTheActiveTab() {
@@ -188,6 +206,39 @@ final class WebContainerTests: XCTestCase {
         for error in errors {
             XCTAssertEqual(NativeBridge.failurePayload(error) as? String, error.localizedDescription)
         }
+    }
+
+    func testAppleAuthorizationFailureKeepsBoundedCodesWithoutPrivateErrorDetails() throws {
+        let privateCause = NSError(domain: "private-account@example.test", code: 42,
+                                   userInfo: [NSLocalizedDescriptionKey: "secret-token"])
+        let underlying = NSError(domain: "AKAuthenticationError", code: -7026,
+                                 userInfo: [NSUnderlyingErrorKey: privateCause])
+        let error = NSError(domain: ASAuthorizationError.errorDomain, code: 1000,
+                            userInfo: [NSUnderlyingErrorKey: underlying,
+                                       NSLocalizedDescriptionKey: "private-account@example.test secret-token"])
+        let message = try XCTUnwrap(NativeBridge.failurePayload(error) as? String)
+        XCTAssertTrue(message.hasPrefix("Apple authorization failed: authorization:1000 > authentication:-7026 > other:42;"), message)
+        XCTAssertTrue(message.contains("; app="), message)
+        XCTAssertTrue(message.contains("; build="), message)
+        XCTAssertTrue(message.contains("; ios="), message)
+        XCTAssertLessThanOrEqual(message.count, 300)
+        XCTAssertFalse(message.contains("private-account"))
+        XCTAssertFalse(message.contains("secret-token"))
+
+        var deep = privateCause
+        for _ in 0..<10 {
+            deep = NSError(domain: "AKAuthenticationError", code: -1, userInfo: [NSUnderlyingErrorKey: deep])
+        }
+        let nested = NSError(domain: ASAuthorizationError.errorDomain, code: 1000,
+                             userInfo: [NSUnderlyingErrorKey: deep])
+        let bounded = try XCTUnwrap(NativeBridge.failurePayload(nested) as? String)
+        XCTAssertTrue(bounded.hasPrefix("Apple authorization failed: authorization:1000 > authentication:-1 > authentication:-1 > more;"), bounded)
+        XCTAssertLessThanOrEqual(bounded.count, 300)
+    }
+
+    func testAppleAuthorizationCancellationStaysSilent() {
+        let error = NSError(domain: ASAuthorizationError.errorDomain, code: ASAuthorizationError.Code.canceled.rawValue)
+        XCTAssertEqual((NativeBridge.failurePayload(error) as? [String: String])?["name"], "AbortError")
     }
 
     func testBridgeReportsVisibilityAndView() {

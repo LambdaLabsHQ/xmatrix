@@ -6,7 +6,7 @@ the xMatrix app, without opening a database console.
 ## What it shows
 
 `Platform admin` is an app view (`/app/<space>/admin`, plus a rail entry and a
-"Platform" group in **More**) with four sections. Every list is the same
+"Platform" group in **More**) with these sections. Every list is the same
 `AdminTable`: search, sortable headers, 50-row pages, CSV export, and its
 search/sort/page state in the address (`?item=<section>&<id>q=…&<id>sort=…`).
 
@@ -16,12 +16,27 @@ direction button. Search, 50-row pagination, CSV export, and user-detail links
 retain the same address state as desktop. Storage bars and user detail fit
 narrow screens without horizontal scrolling.
 
-- **Overview**: platform totals (users, Spaces, active/archived Channels,
-  messages, Agents, running Runs, Machines, Automations, storage), registered
-  user access (active 24h/7d/30d, verified, profiles completed), messages per
-  day for a 7/14/30/90-day window, and storage by category.
+- **Overview**: one read of a year of UTC days, sliced locally into 7, 30 and
+  90 days or all time (`&range=`), so changing the range asks the Hub nothing.
+  It shows, for the range and against the range before it: people active,
+  average daily active, stickiness (average daily ÷ 30-day active), new
+  accounts, messages people wrote, all messages, active Spaces and Runs
+  started; daily, 7-day and 30-day active people; new and total registered
+  accounts; the activation of accounts registered in the range (Space,
+  Machine, Agent, a message of their own, active in the last 7 days); weekly
+  retention by registration week; messages per day by people, Agents and apps;
+  a sortable daily table with CSV; and the platform totals. Storage appears
+  only where the deployment measures it.
+
+  A person is **active** on a UTC day they send a message of their own: text a
+  member of the Space typed (`xmatrix.message.text`, not a `system:` or
+  `scheduled-message:` id), the same definition as the new-user funnel.
+  Agents' messages, onboarding notices, scheduled posts and imports do not
+  count. Session refreshes (the CLI and apps included) are shown beside it as
+  "signed in", never as activity.
 - **Users**: every registered user with sign-in methods, registration, last
-  access, sessions, Spaces, Agents, Machines, and messages. Opening a user
+  access, sessions, active days in the last 30, Spaces, Agents, Machines, and
+  messages. Opening a user
   (`&user=<id>`) reads `GET /api/admin/users/:userId`: account facts, usage
   (messages 7d/30d, Runs by status, Spaces owned, pages created), their own
   messages per day for 30 days, and tables of their Spaces (role, members,
@@ -30,6 +45,10 @@ narrow screens without horizontal scrolling.
   sessions (signed in, last active, expires).
 - **Spaces**: name, owner, members, Channels, Agents, messages, 7-day messages,
   created, last activity.
+- **Operations**: Machines and their runtimes, Runs, and Automations. It
+  reports no event-delivery backlog: `data.outbox` keeps publication envelopes
+  that no consumer delivers (see `postgres-lifecycle-retention.md`), so its
+  pending rows are not a queue, and counting them meant scanning the table.
 - **Audit**: `GET /api/admin/audit`, every operator read and action, newest first.
 
 ### Connector activity in user details
@@ -80,8 +99,10 @@ the same thing as holding a content-read authority over other people's work.
 
 Every admin read and action writes a row to `control.admin_audit_events`
 (actor, action, target kind and id, time) on the directory shard **before** its
-result is returned; a request whose row cannot be written is refused. Reading
-the trail is itself recorded. Actions: `overview.read`, `user.read`,
+result is returned; a request whose row cannot be written is refused. Once
+authority is proven, a read writes its row while it reads, and answers only
+after the row is written; an action writes its row before it acts. Reading the
+trail is itself recorded, before the trail is listed. Actions: `overview.read`, `user.read`,
 `audit.read`, `handles.backfill`, `agent-senders.repair`.
 
 ## Authority
@@ -138,30 +159,41 @@ back in.
 
 ## Cost and bounds
 
-The PostgreSQL overview executes one metadata-only SQL statement per physical
-shard; shards are read concurrently. A materialized CTE reads live message
-metadata (`space_id`, `author_id`, `author_kind`, `created_at`) through a covering
-index and shares it between totals, per-Space, human-user and daily aggregates.
-User activity takes the latest send-time Agent owner from an indexed timestamp
-lookup per user; only legacy messages without a sender preview join persisted
-Instance/Run bindings, through a separate partial index. It no longer decodes
-every Agent preview or joins every message to Instances/Runs just to find each
-user's latest activity. Counts, deletion filtering and ownership semantics are
-unchanged. The indexes build concurrently through the ordinary expand migration
-path while ordinary message writes continue. No message content is returned.
-All aggregates in a shard still share one statement snapshot and one SQL round
-trip.
+Message activity is read from settled days. `data.admin_activity_days` holds,
+per Space, UTC send day, author kind and the person a message counts for (the
+author for people, the send-time owner for Agents, nobody for apps), the number
+of retained messages, how many were the person's own, and the latest send
+time. The scheduled tick settles each shard once a day, at minute 41 of the
+hour: a day settles two days after it began (`settled_through` is the day
+before yesterday), from the messages present then, in one transaction that
+replaces that day's rows. A shard's first roll-up reads its whole history once;
+until then the overview reads every message, as before.
 
-After operator authorization and the required audit write, the auth directory
-inventory and physical-shard aggregates run concurrently. Each read still
-checks current authority, records its audit row, and returns `private,
-no-store`; no server response cache substitutes for either check. The Web's
-existing 60-second query cache is scoped to account and Hub. Changing the
-activity range retains that account's current result while the next request
-loads; a forbidden response hides it.
+The overview reads each shard's `settled_through` first, then one statement:
+settled rows plus the retained messages sent after them, through the
+`sent_at` index. The statement re-reads the boundary in its own snapshot and
+uses the later of the two, so a roll-up that commits in between never counts a
+day twice. The cost follows days and people, not messages: on production the
+whole history settles into about 1,100 rows. What a settled day does not
+change: a message that reaches xMatrix more than a day after it was sent, or
+is deleted after its day settled. Deleting a Space purges its days; a Space
+move carries them with its messages.
+
+Shards are read concurrently. Daily, 7-day and 30-day active people are counted
+across shards from each person's active days, so a person in Spaces on two
+shards counts once; new accounts per day come from the registered-user
+inventory and are left out when that inventory was cut off. A user's detail
+reads its message counts and 30-day series the same way.
+
+After operator authorization the audit write, the auth directory inventory
+and the physical-shard aggregates run concurrently. Each read still checks
+current authority, records its audit row, and returns `private, no-store`; no
+server response cache substitutes for either check. The Web's 60-second query
+cache is scoped to account and Hub, and Overview, Users and Spaces share one
+read.
 
 Space rows are capped at 200 and user rows at 10,000; activity windows are at
-most 90 days. The response reports `truncated` when a table is cut off. Nested
+most 365 days. The response reports `truncated` when a table is cut off. Nested
 JSON inventories retain explicit overflow checks as well as SQL limits.
 
 Activity windows are exact UTC calendar days, including the current UTC day.
@@ -183,7 +215,9 @@ lookups rather than failing the entire read.
   `packages/protocol/src/auth-capabilities.ts`
 - Authority: `packages/hub/src/admin-platform-access.ts`
 - Route: `packages/hub/src/index-routes-admin.ts`
-- Aggregate: `packages/hub/src/postgres-admin-overview.ts`
+- Aggregate: `packages/hub/src/postgres-admin-overview.ts`; settled days:
+  `packages/hub/src/postgres-admin-activity-rollup.ts`,
+  `packages/db/migrations/0223_expand_admin_activity_rollup.sql`
 - User detail: `packages/hub/src/postgres-admin-user-detail.ts`,
   `authDirectoryAdminUser` in `packages/hub/src/auth-authority.ts`
 - Audit: `packages/hub/src/admin-audit.ts`,
@@ -194,4 +228,5 @@ lookups rather than failing the entire read.
   `packages/hub/test/postgres-admin-user-detail.test.mjs`,
   `apps/web/e2e/platform-admin.spec.ts`,
   `packages/hub/test/admin-platform-access.test.mjs`,
-  `apps/web/src/components/dashboard/platform-admin-overview.test.cjs`
+  `apps/web/src/components/dashboard/platform-admin-overview.test.cjs`,
+  `apps/web/src/components/dashboard/platform-admin-analytics.test.cjs`

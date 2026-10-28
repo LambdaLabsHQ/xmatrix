@@ -8,10 +8,13 @@ set -euo pipefail
 #   XMATRIX_SKIP_DAEMON_AUTOSTART
 #   XMATRIX_CONNECT         Setup id from xMatrix's "Bring your agents in"
 #                           command; the same as `--connect <id>`
+#   XMATRIX_INSTALL_BINARY_ONLY=1  Install only the verified binary; do not
+#                           change shell PATH, sign in or configure a daemon.
 #
 # Options:
 #   --connect <id>          Connect this machine to the xMatrix page that
 #                           showed the command: approve the terminal there.
+#   --binary-only          Install the binary without configuring this computer.
 # The installer never uses sudo. System locations such as /usr/local/bin are
 # only used when XMATRIX_INSTALL_DIR points at a directory the user can write.
 
@@ -325,13 +328,19 @@ header() {
 }
 
 CONNECT_ID="${XMATRIX_CONNECT:-}"
+BINARY_ONLY="${XMATRIX_INSTALL_BINARY_ONLY:-0}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --binary-only) BINARY_ONLY=1; shift ;;
     --connect) CONNECT_ID="${2:-}"; shift 2 || shift ;;
     --connect=*) CONNECT_ID="${1#--connect=}"; shift ;;
     *) shift ;;
   esac
 done
+if [ "$BINARY_ONLY" = "1" ] && [ -n "$CONNECT_ID" ]; then
+  error "--binary-only cannot be combined with --connect or XMATRIX_CONNECT"
+  exit 1
+fi
 
 header
 
@@ -415,8 +424,10 @@ curl_file() {
         f=$((pct * w / 100))
         e=$((w - f))
         filled="" empty=""
-        [ "$f" -gt 0 ] && filled=$(printf '%*s' "$f" '' | tr ' ' '━')
-        [ "$e" -gt 0 ] && empty=$(printf '%*s' "$e" '' | tr ' ' '─')
+        printf -v filled '%*s' "$f" ''
+        printf -v empty '%*s' "$e" ''
+        filled=${filled// /━}
+        empty=${empty// /─}
         mb=$(awk "BEGIN{printf \"%.1f/%.1f MB\", ${cur}/1048576, ${total}/1048576}" 2>/dev/null) || mb=""
         printf "\r    \033[36m%s\033[0m\033[2m%s %3d%%" "$filled" "$empty" "$pct"
         [ -n "$mb" ] && printf "  %s" "$mb"
@@ -425,23 +436,25 @@ curl_file() {
       sleep 0.1
     done
     # Final 100%
-    bar_full=$(printf '%*s' "$w" '' | tr ' ' '━')
+    printf -v bar_full '%*s' "$w" ''
+    bar_full=${bar_full// /━}
     total_mb=$(awk "BEGIN{printf \"%.1f MB\", ${total}/1048576}" 2>/dev/null) || total_mb=""
     printf "\r    \033[36m%s\033[0m\033[2m 100%%" "$bar_full"
     [ -n "$total_mb" ] && printf "  %s" "$total_mb"
     printf "\033[K\033[0m\n"
   else
     # ── Spinner fallback ──
-    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 cur=0 mb="" fc=0 final_mb=""
+    local -a spin=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local i=0 cur=0 mb="" fc=0 final_mb=""
     while kill -0 "$pid" 2>/dev/null; do
       if [ -f "$output" ]; then
         cur=$(wc -c < "$output" 2>/dev/null | tr -d ' ') || true
         mb=$(awk "BEGIN{printf \"%.1f\", ${cur:-0}/1048576}" 2>/dev/null) || mb="?"
-        printf "\r    \033[2m${spin:$i:1} %s MB downloaded\033[K\033[0m" "$mb"
+        printf "\r    \033[2m%s %s MB downloaded\033[K\033[0m" "${spin[$i]}" "$mb"
       else
-        printf "\r    \033[2m${spin:$i:1} starting...\033[K\033[0m"
+        printf "\r    \033[2m%s starting...\033[K\033[0m" "${spin[$i]}"
       fi
-      i=$(( (i + 1) % ${#spin} ))
+      i=$(( (i + 1) % ${#spin[@]} ))
       sleep 0.08
     done
     if [ -f "$output" ]; then
@@ -550,8 +563,12 @@ fi
 
 dim "Location: $INSTALL_DIR/$INSTALLED_BIN"
 echo ""
-add_to_path
-print_path_result
-setup_daemon "$INSTALL_DIR/$INSTALLED_BIN"
+if [ "$BINARY_ONLY" = "1" ]; then
+  info "Binary-only install: PATH, sign-in and daemon setup were skipped"
+else
+  add_to_path
+  print_path_result
+  setup_daemon "$INSTALL_DIR/$INSTALLED_BIN"
+fi
 info "Run ${BOLD}${GREEN}$BIN_NAME --help${RESET} to get started"
 echo ""

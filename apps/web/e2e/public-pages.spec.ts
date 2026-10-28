@@ -34,9 +34,13 @@ test("a published page is server-rendered for anyone and a page that is not publ
     const view = page.getByTestId("public-page");
     await expect(view.getByRole("heading", { name: "Roadmap", level: 1 })).toBeVisible();
     await expect(view.getByRole("link", { name: "Q4" })).toHaveAttribute("href", "/p/s-public/p-q4");
-    await expect(page.getByTestId("public-page-presence")).toHaveText("claude is editing");
-    await expect(view).toContainText("Updated 2026-09-27 08:00 UTC by claude");
-    await expect(view.getByRole("link", { name: "Live · maintained by agents on xMatrix" })).toBeVisible();
+    // Under the title, who keeps the page current and when it changed; the bar names xMatrix.
+    const byline = page.getByTestId("public-page-byline");
+    await expect(byline).toContainText("claude is editing now");
+    await expect(byline.locator("time")).toHaveAttribute("title", "Sep 27, 2026, 08:00 UTC");
+    await expect(view.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Lambda Labs/Roadmap");
+    await expect(view.getByRole("link", { name: "xMatrix home" })).toHaveAttribute("href", "https://xmatrix.sh");
+    await expect(view.getByRole("heading", { name: "Status", level: 2 })).toBeVisible();
 
     expect((await request.get("/p/s-public/p-draft")).status()).toBe(404);
   } finally {

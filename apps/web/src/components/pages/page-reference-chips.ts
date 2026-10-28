@@ -6,6 +6,7 @@ import { pageSchema } from "@xmatrix/protocol/page-document";
 import type { Node as DocNode } from "prosemirror-model";
 import { type EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import { identityStatusDotClass } from "@/components/dashboard/identity-avatar";
 import { mentionChipLabel } from "@/components/dashboard/mention-read-state";
 
 /**
@@ -28,6 +29,8 @@ export interface PageReferenceTargets {
   mentions?: PageMentions;
   /** An `@` at `from`…`to` this reader called an Agent with: drawn instead with the state of that call. */
   summonAt?: (state: EditorState, from: number, to: number) => SummonedMention | null;
+  /** Whether the Instance `name` live in a conversation is free or busy now; null once it is not live there. */
+  instanceStatus?: (conversationId: string, name: string) => string | null;
 }
 
 /** The chip of an `@` that called an Agent, which another part of the page draws into. */
@@ -159,6 +162,43 @@ function mentionChip(text: string, mention: PageMention, token: string): HTMLSpa
   return chip;
 }
 
+/**
+ * An `@` that called a live Instance, which the page writes as its name and its conversation (page-instances.ts): one
+ * chip, the Instance's face with whether it is free now, its name, and the conversation it was called in.
+ */
+function instanceChip(mention: HTMLSpanElement, channelId: string, targets: PageReferenceTargets, name: string,
+  status: string | null): HTMLSpanElement {
+  mention.classList.add("app-mention-chip-instance");
+  mention.dataset.testid = "page-instance-chip";
+  if (status) {
+    const dot = document.createElement("span");
+    dot.className = `app-mention-chip-status app-presence-status-dot ${identityStatusDotClass(status)}`;
+    dot.setAttribute("aria-hidden", "true");
+    mention.querySelector(".app-mention-chip-avatar")?.append(dot);
+  }
+  const conversation = targets.channelName(channelId);
+  const where = document.createElement("span");
+  where.className = "app-mention-chip-conversation";
+  where.textContent = `# ${conversation ?? "Conversation"}`;
+  mention.title = `@${name} in # ${conversation ?? "a conversation you can't open"}${status === "busy" ? " · Busy" : ""}`;
+  mention.append(where);
+  if (conversation === null) return mention;
+  mention.setAttribute("role", "button");
+  mention.tabIndex = 0;
+  mention.setAttribute("aria-label", `Open @${name} in # ${conversation}`);
+  mention.addEventListener("mousedown", (event) => event.preventDefault());
+  const open = (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    targets.openChannel(channelId);
+  };
+  mention.addEventListener("click", open);
+  mention.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") open(event);
+  });
+  return mention;
+}
+
 /** A reference or a mention in a run of text, and the chip it reads as; null where it stays as typed. */
 interface TextChip { start: number; end: number; key: string; draw: () => HTMLElement; mention?: true }
 
@@ -175,6 +215,21 @@ function textChips(value: string, targets: PageReferenceTargets): TextChip[] {
       const mention = mentions.byToken.get(match.token);
       if (!mention) continue;
       const text = value.slice(match.start, match.end);
+      // An `@` followed by its conversation called the Instance there: the two read as one chip.
+      const called = /^ channel:([0-9a-f-]{36})\b/u.exec(value.slice(match.end));
+      if (called) {
+        const channelId = called[1]!;
+        const name = text.replace(/^[@＠]/u, "");
+        const status = targets.instanceStatus?.(channelId, name) ?? null;
+        const end = match.end + called[0].length;
+        for (let index = chips.length - 1; index >= 0; index--) {
+          if (chips[index]!.start >= match.end && chips[index]!.end <= end) chips.splice(index, 1);
+        }
+        chips.push({ start: match.start, end,
+          key: `instance:${text}:${channelId}:${targets.channelName(channelId) ?? ""}:${status ?? ""}:${mention.imageUrl ?? ""}`,
+          draw: () => instanceChip(mentionChip(text, mention, match.token), channelId, targets, name, status), mention: true });
+        continue;
+      }
       chips.push({ start: match.start, end: match.end, key: `mention:${text}:${mention.label}:${mention.imageUrl ?? ""}`,
         draw: () => mentionChip(text, mention, match.token), mention: true });
     }

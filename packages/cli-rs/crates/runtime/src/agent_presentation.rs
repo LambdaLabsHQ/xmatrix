@@ -19,6 +19,7 @@ pub(crate) struct AgentPresentationFacts {
     pub(crate) parameter_revision: u64,
     pub supported_efforts: Vec<protocol::AgentModelReasoningEffort>,
     pub commands: Vec<protocol::AgentInstanceCommand>,
+    pub(crate) commands_reported: bool,
     pub status_chips: Vec<protocol::AgentStatusChip>,
     pub(crate) usage: Option<protocol::LlmUsage>,
 }
@@ -124,10 +125,14 @@ impl AgentPresentationAdapter for BuiltinAgentPresentationAdapter {
         }
     }
 
-    /// Claude's `system/init.slash_commands` lists everything its headless
-    /// session runs; interactive-only commands answer "isn't available".
+    /// Claude stream and ACP enumerate their native passthrough commands.
+    /// Until that inventory arrives, documentation is metadata, not evidence
+    /// that an installed runtime offers a command.
     fn overlay_is_complete(&self) -> bool {
-        matches!(self, Self::Claude)
+        matches!(
+            self,
+            Self::Claude | Self::Grok | Self::Kimi | Self::GenericAcp { .. }
+        )
     }
 }
 
@@ -205,8 +210,7 @@ pub(crate) fn agent_commands_for_runtime(
     has_efforts: bool,
     _supports_goal: bool,
 ) -> Option<Vec<protocol::AgentInstanceCommand>> {
-    let raw = agent_command_catalog_json_for_runtime(runtime)?;
-    commands_from_catalog_json(raw, has_models, has_efforts)
+    agent_commands_for_runtime_with_overlay(runtime, has_models, has_efforts, &[])
 }
 
 fn commands_from_catalog_json(
@@ -275,10 +279,7 @@ fn commands_from_catalog_json(
     (!commands.is_empty()).then_some(commands)
 }
 
-fn catalog_controls(
-    has_models: bool,
-    has_efforts: bool,
-) -> Vec<protocol::AgentInstanceCommand> {
+fn catalog_controls(has_models: bool, has_efforts: bool) -> Vec<protocol::AgentInstanceCommand> {
     [
         ("/model", "Switch model", "agent-models", has_models),
         ("/effort", "Switch effort", "agent-efforts", has_efforts),
@@ -363,10 +364,16 @@ pub(crate) fn agent_commands_for_runtime_with_overlay(
     has_efforts: bool,
     overlay_tokens: &[String],
 ) -> Option<Vec<protocol::AgentInstanceCommand>> {
-    let base =
-        agent_commands_for_runtime(runtime, has_models, has_efforts, true).unwrap_or_default();
-    let merged = merge_commands_with_token_overlay(base, overlay_tokens);
-    (!merged.is_empty()).then_some(merged)
+    let adapter = agent_presentation_adapter_for_runtime(runtime);
+    let commands = commands_for_inventory(
+        agent_command_catalog_json_for_runtime(runtime),
+        has_models,
+        has_efforts,
+        &[],
+        overlay_tokens,
+        adapter.overlay_is_complete(),
+    );
+    (!commands.is_empty()).then_some(commands)
 }
 
 /// Resolve a requested model against a catalog, or say why it cannot be.
@@ -532,21 +539,23 @@ fn meter_tags_from_usage(
     tags
 }
 
-fn normalized_presentation(
-    source: &str,
+/// One catalog/native merge for session command controls and every presence
+/// frame. Callers cannot bypass native precedence with a docs-derived list.
+fn commands_for_inventory(
     catalog_json: Option<&str>,
-    facts: &AgentPresentationFacts,
+    has_models: bool,
+    has_efforts: bool,
+    reported_commands: &[protocol::AgentInstanceCommand],
     command_overlay: &[String],
-    overlay_is_complete: bool,
-) -> AgentPresentationSnapshot {
-    let has_models = !facts.models.is_empty();
-    let has_efforts = facts.effort.is_some() || models_support_efforts(&facts.models);
+    native_is_authoritative: bool,
+) -> Vec<protocol::AgentInstanceCommand> {
     let mut catalog_commands = catalog_json
         .and_then(|raw| commands_from_catalog_json(raw, has_models, has_efforts))
         .unwrap_or_default();
-    if overlay_is_complete && !command_overlay.is_empty() {
+    if native_is_authoritative {
         let live: HashSet<String> = command_overlay
             .iter()
+            .chain(reported_commands.iter().map(|command| &command.token))
             .filter_map(|raw| normalize_slash_command_token(raw))
             .map(|token| token.to_ascii_lowercase())
             .collect();
@@ -560,9 +569,28 @@ fn normalized_presentation(
     catalog_commands.extend(catalog_controls(has_models, has_efforts));
     // Live commands are authoritative for their own tokens; the docs catalog
     // supplies typed controls and commands the provider cannot enumerate.
-    let mut commands = merge_commands_with_token_overlay(
-        merge_command_lists(facts.commands.clone(), catalog_commands),
+    merge_commands_with_token_overlay(
+        merge_command_lists(reported_commands.to_vec(), catalog_commands),
         command_overlay,
+    )
+}
+
+fn normalized_presentation(
+    source: &str,
+    catalog_json: Option<&str>,
+    facts: &AgentPresentationFacts,
+    command_overlay: &[String],
+    overlay_is_complete: bool,
+) -> AgentPresentationSnapshot {
+    let has_models = !facts.models.is_empty();
+    let has_efforts = facts.effort.is_some() || models_support_efforts(&facts.models);
+    let mut commands = commands_for_inventory(
+        catalog_json,
+        has_models,
+        has_efforts,
+        &facts.commands,
+        command_overlay,
+        overlay_is_complete || facts.commands_reported,
     );
     if let Some(parameters) = facts.parameters.as_deref() {
         crate::harness_parameters::add_commands(&mut commands, parameters);
@@ -597,7 +625,8 @@ fn normalized_presentation(
         model,
         models: facts.models_reported.then(|| facts.models.clone()),
         effort: facts.effort.clone(),
-        commands: (facts.parameters.is_some() || !commands.is_empty()).then_some(commands),
+        commands: (facts.commands_reported || facts.parameters.is_some() || !commands.is_empty())
+            .then_some(commands),
         parameters: facts.parameters.clone(),
         status_chips: (!chips.is_empty()).then_some(chips),
         usage: facts.usage.clone(),
@@ -1003,15 +1032,10 @@ fn usage_from_acp_update(map: &serde_json::Map<String, Value>) -> Option<protoco
     .then_some(usage)
 }
 
-fn observe_acp_presentation(
-    value: &Value,
-    facts: &mut AgentPresentationFacts,
-    source: &str,
-) {
+fn observe_acp_presentation(value: &Value, facts: &mut AgentPresentationFacts, source: &str) {
     let model = facts.model.clone();
     let revision = facts.parameter_revision;
-    facts.usage =
-        super::merge_llm_usage(facts.usage.clone(), super::extract_llm_usage(value));
+    facts.usage = super::merge_llm_usage(facts.usage.clone(), super::extract_llm_usage(value));
     observe_acp_node(value, facts, source, 0);
     if revision != facts.parameter_revision {
         // session/new and session/load can also carry a model inventory.
@@ -1043,8 +1067,10 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
     if let Some(commands) = map
         .get("availableCommands")
         .or_else(|| map.get("available_commands"))
+        .filter(|value| value.is_array())
     {
         facts.commands = commands_from_acp_value(commands);
+        facts.commands_reported = true;
     }
     if map.get("availableModels").is_some()
         || map.get("available_models").is_some()
@@ -1065,9 +1091,10 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
                 .models
                 .iter()
                 .find(|item| item.id.eq_ignore_ascii_case(&model))
-                && selected.default_reasoning_effort.is_some() {
-                    facts.effort = selected.default_reasoning_effort.clone();
-                }
+                && selected.default_reasoning_effort.is_some()
+            {
+                facts.effort = selected.default_reasoning_effort.clone();
+            }
         }
     } else if let Some(model) = clean_string(
         map.get("currentModelId")

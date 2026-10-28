@@ -6,9 +6,15 @@ name: CI ledger
 # the commit the run named, re-derives its content key and pushes only
 # refs/ci-ledger/<job>/<key>. Later runs of identical content (the squash
 # merge, the release train, a re-run) then skip those jobs.
+#
+# A release train's CI jobs belong to Production Release Request, not to a CI
+# run. That request can vouch only when it was dispatched on the default
+# branch, and only for a commit the same release-commit proof accepts. Public
+# Snapshot CI stays in the trigger list so a manual dispatch is seen and
+# skipped: it is not a release of the default branch.
 on:
   workflow_run:
-    workflows: [CI, Public Snapshot CI]
+    workflows: [CI, Public Snapshot CI, Production Release Request]
     types: [completed]
 
 permissions:
@@ -17,11 +23,18 @@ permissions:
 
 jobs:
   record:
-    # Manual dispatches are diagnostic runs, not ledger proof. The recorder
-    # only verifies push heads and pull request merge commits.
+    # Manual snapshot dispatches are diagnostic runs, not ledger proof. The
+    # recorder verifies push heads, pull request merge commits, and a
+    # default-branch Production Release Request. workflow_run.name is the
+    # run-name, which this request sets to the train title, so the gate matches
+    # the workflow path. The request's subject is proved again in
+    # scripts/ci-ledger.mjs before anything is written.
     if: >-
       github.event.workflow_run.head_repository.full_name == github.repository &&
-      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'pull_request')
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'pull_request' ||
+        (github.event.workflow_run.path == '.github/workflows/production-release-request.yml' &&
+          github.event.workflow_run.event == 'workflow_dispatch' &&
+          github.event.workflow_run.head_branch == github.event.repository.default_branch))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -38,4 +51,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node scripts/ci-ledger.mjs record-run "$RUN_ID"

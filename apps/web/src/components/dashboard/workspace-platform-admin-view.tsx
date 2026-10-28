@@ -11,30 +11,43 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
  * on 403 is a UI courtesy, not the security boundary.
  */
 
-import { useState, type ReactNode } from "react";
-import {
-  ADMIN_OVERVIEW_DEFAULT_ACTIVITY_DAYS,
-  type AdminPlatformOverview,
-} from "@xmatrix/protocol";
+import { useMemo, type ReactNode } from "react";
+import type { AdminActivityPoint, AdminPlatformOverview } from "@xmatrix/protocol";
 import { Loader2, RefreshCw, Shield } from "lucide-react";
 
 import { noticeClass } from "@/components/ui/status-tone";
 import { ContentSkeleton } from "./content-skeleton";
 import { EmptyToolState } from "./workspace-admin-views";
-import { isForbidden, usePlatformOverview } from "./platform-admin-data";
+import { isForbidden, useAdminParam, usePlatformOverview } from "./platform-admin-data";
 import {
-  adminActivityBars,
-  agentMessageShare,
   formatAdminAge,
   formatAdminBytes,
   formatAdminCount,
+  formatAdminDecimal,
   platformAdminStatTiles,
 } from "./platform-admin-overview";
+import {
+  ADMIN_RANGES,
+  adminActivationFunnel,
+  adminBucketPoints,
+  adminChange,
+  adminDayNumber,
+  adminPeriod,
+  adminPeriodFigures,
+  adminRange,
+  adminRegisteredSeries,
+  adminWeeklyRetention,
+  formatAdminChange,
+  formatAdminDay,
+  formatAdminPercent,
+  type AdminFunnelStep,
+  type AdminRetentionCohort,
+} from "./platform-admin-analytics";
+import { ADMIN_INK, AdminBarChart, AdminLineChart, AdminSparkline } from "./admin-charts";
+import { AdminTable, type AdminColumn } from "./admin-table";
 import { ToolDetailSection } from "./tool-split";
 import { AdminPaperAction } from "./admin-paper";
 import { ErrorNotice } from "@/components/ui/error-notice";
-
-const ACTIVITY_RANGES = [7, 14, 30, 90] as const;
 
 /** The states every admin read shares: forbidden, failed, loading, empty. */
 export function AdminReadState({ error, loading, hasData, emptyTitle, emptyBody, children }: {
@@ -118,8 +131,9 @@ export function AdminQueryView<Data>({ query, generatedAt, title, lead, emptyTit
 }
 
 export function PlatformAdminView({ token }: { token?: string }) {
-  const [activityDays, setActivityDays] = useState<number>(ADMIN_OVERVIEW_DEFAULT_ACTIVITY_DAYS);
-  const overviewQuery = usePlatformOverview(token, activityDays);
+  const [rangeParam, setRangeParam] = useAdminParam("range");
+  const range = adminRange(rangeParam || "30d");
+  const overviewQuery = usePlatformOverview(token);
   const overview = overviewQuery.data ?? null;
 
   return (
@@ -130,23 +144,44 @@ export function PlatformAdminView({ token }: { token?: string }) {
           generatedAt={overview?.generatedAt} />
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/60 pb-1">
-        <div role="group" aria-label="Activity range" className="mr-auto flex gap-4">
-          {ACTIVITY_RANGES.map((days) => (
-            <AdminPaperAction key={days} aria-pressed={activityDays === days}
-              onClick={() => setActivityDays(days)}>{days}d</AdminPaperAction>
+        <div role="group" aria-label="Range" className="mr-auto flex gap-4">
+          {ADMIN_RANGES.map((option) => (
+            <AdminPaperAction key={option.key} aria-pressed={range.key === option.key} title={option.label}
+              onClick={() => setRangeParam(option.key === "30d" ? "" : option.key)}>{option.short}</AdminPaperAction>
           ))}
         </div>
+        {overview && <PeriodLabel overview={overview} rangeKey={range.key} />}
       </div>
       <AdminReadState error={overviewQuery.error} loading={overviewQuery.isFetching} hasData={Boolean(overview)}
         emptyTitle="No platform data yet"
         emptyBody="Platform statistics appear once the hub has spaces and messages to report.">
-        {overview && <OverviewBody overview={overview} />}
+        {overview && <OverviewBody overview={overview} rangeKey={range.key} />}
       </AdminReadState>
     </div>
   );
 }
 
-function OverviewBody({ overview }: { overview: AdminPlatformOverview }) {
+function PeriodLabel({ overview, rangeKey }: { overview: AdminPlatformOverview; rangeKey: string }) {
+  const { current } = adminPeriod(overview.activity, rangeKey);
+  if (!current.length) return null;
+  return (
+    <span className="text-[11px] tabular-nums text-muted-foreground">
+      {formatAdminDay(current[0]!.date)} – {formatAdminDay(current.at(-1)!.date)}, UTC
+    </span>
+  );
+}
+
+function OverviewBody({ overview, rangeKey }: { overview: AdminPlatformOverview; rangeKey: string }) {
+  const range = adminRange(rangeKey);
+  const period = useMemo(() => adminPeriod(overview.activity, rangeKey), [overview.activity, rangeKey]);
+  const days = period.current.length;
+  const figures = useMemo(() => adminPeriodFigures(period.current, overview.users, period.start, period.end),
+    [period, overview.users]);
+  const before = useMemo(() => period.previous
+    ? adminPeriodFigures(period.previous, overview.users, period.start - days, period.start - 1)
+    : null, [period, days, overview.users]);
+  // An older Hub sends message volume only.
+  const measured = period.current.some((point) => point.activeUsers !== undefined);
   return (
     <>
       {overview.truncated.messageMetrics && (
@@ -155,111 +190,298 @@ function OverviewBody({ overview }: { overview: AdminPlatformOverview }) {
           Space, user, Channel, Agent, run, Machine, task, and storage totals remain complete.
         </p>
       )}
+      {measured ? (
+        <>
+          <ToolDetailSection title={before ? `At a glance, change from the ${range.label} before` : "At a glance"}>
+            <AdminStatGrid stats={glanceStats(period.current, figures, before)} />
+          </ToolDetailSection>
+          <ActivePeople points={period.current} overview={overview} />
+          <NewAccounts points={period.current} overview={overview} />
+          <ToolDetailSection title={range.days ? `Activation of accounts from the last ${range.label}` : "Activation of every account"}>
+            <AdminFunnel steps={adminActivationFunnel(overview, period.start, period.end)} />
+          </ToolDetailSection>
+          <ToolDetailSection title="Weekly retention">
+            <AdminRetention cohorts={adminWeeklyRetention(overview.users, period.end)} />
+          </ToolDetailSection>
+        </>
+      ) : (
+        <p role="status" className={noticeClass("attention", "rounded-lg px-4 py-3")}>
+          This Hub reports message volume only. Active people, new accounts, and retention appear once it is updated.
+        </p>
+      )}
+      <MessagesPerDay points={period.current} />
+      {measured && (
+        <ToolDetailSection title="Daily numbers">
+          <AdminTable id="d" label="Daily numbers" rows={[...period.current].reverse()} columns={DAILY_COLUMNS}
+            rowKey={(point) => point.date} defaultSort="date" empty="No days in this range." />
+        </ToolDetailSection>
+      )}
       <ToolDetailSection title="Platform">
-        <AdminStatGrid stats={platformAdminStatTiles(overview.totals).map((tile) => ({
+        <AdminStatGrid stats={platformAdminStatTiles(overview.totals, overview.storage.length > 0).map((tile) => ({
           label: tile.label, value: tile.value, hint: tile.hint,
         }))} />
-      </ToolDetailSection>
-      {overview.userAccess && <UserAccess overview={overview} />}
-      <ToolDetailSection title="Messages per day">
-        <ActivityChart overview={overview} />
       </ToolDetailSection>
       {overview.storage.length > 0 && <Storage overview={overview} />}
     </>
   );
 }
 
-/** Large numbers on the paper, a short line under each. No card around them. */
-export function AdminStatGrid({ stats }: { stats: Array<{ label: string; value: string; hint?: string }> }) {
+type Stat = { label: string; value: string; hint?: string; change?: string; trend?: readonly number[] };
+
+function glanceStats(
+  points: readonly AdminActivityPoint[],
+  figures: ReturnType<typeof adminPeriodFigures>,
+  before: ReturnType<typeof adminPeriodFigures> | null,
+): Stat[] {
+  const series = (read: (point: AdminActivityPoint) => number | undefined) => points.map((point) => read(point) ?? 0);
+  const change = (current: number | null, previous: number | null | undefined) =>
+    formatAdminChange(adminChange(current, previous));
+  const today = points.at(-1);
+  const agentShare = figures.humanMessages + figures.agentMessages > 0
+    ? figures.agentMessages / (figures.humanMessages + figures.agentMessages) : null;
+  return [
+    { label: "Active people", value: formatAdminCount(figures.activePeople),
+      change: change(figures.activePeople, before?.activePeople), hint: "Sent a message of their own",
+      trend: series((point) => point.activeUsers7d) },
+    { label: "Daily active, average", value: formatAdminDecimal(figures.averageDailyActive),
+      change: change(figures.averageDailyActive, before?.averageDailyActive),
+      hint: `${formatAdminCount(today?.activeUsers ?? 0)} so far today`, trend: series((point) => point.activeUsers) },
+    { label: "Stickiness", value: formatAdminPercent(figures.stickiness),
+      change: change(figures.stickiness, before?.stickiness), hint: "Daily active ÷ 30-day active",
+      trend: points.map((point) => point.activeUsers30d ? (point.activeUsers ?? 0) / point.activeUsers30d : 0) },
+    { label: "New accounts", value: figures.signups === null ? "—" : formatAdminCount(figures.signups),
+      change: change(figures.signups, before?.signups), trend: series((point) => point.signups) },
+    { label: "Messages people wrote", value: formatAdminCount(figures.ownMessages),
+      change: change(figures.ownMessages, before?.ownMessages), trend: series((point) => point.ownMessages) },
+    { label: "All messages", value: formatAdminCount(figures.messages),
+      change: change(figures.messages, before?.messages),
+      hint: agentShare === null ? undefined : `${formatAdminPercent(agentShare)} of people's and Agents' by Agents`,
+      trend: series((point) => point.messages) },
+    { label: "Active Spaces, daily average", value: formatAdminDecimal(figures.averageActiveSpaces),
+      change: change(figures.averageActiveSpaces, before?.averageActiveSpaces), trend: series((point) => point.activeSpaces) },
+    { label: "Runs started", value: formatAdminCount(figures.runsStarted),
+      change: change(figures.runsStarted, before?.runsStarted), trend: series((point) => point.runsStarted) },
+  ];
+}
+
+/**
+ * Large numbers on the paper, a short line under each: what changed against
+ * the range before, what the figure means, and its trend. No card around them.
+ */
+export function AdminStatGrid({ stats }: { stats: Array<Stat> }) {
   return (
     <dl className="app-admin-stat-grid grid grid-cols-2 gap-x-6 gap-y-4 p-3 sm:grid-cols-3 lg:grid-cols-4">
       {stats.map((stat) => (
         <div key={stat.label} className="min-w-0">
           <dt className="text-xs text-muted-foreground">{stat.label}</dt>
-          <dd className="my-0.5 text-2xl font-semibold leading-tight tabular-nums">{stat.value}</dd>
-          {stat.hint && <dd className="text-[11px] leading-4 text-muted-foreground">{stat.hint}</dd>}
+          <dd className="my-0.5 text-2xl font-semibold leading-tight">{stat.value}</dd>
+          {(stat.change || stat.hint) && (
+            <dd className="text-[11px] leading-4 text-muted-foreground">
+              {stat.change && <span className="font-medium text-foreground">{stat.change}</span>}
+              {stat.change && stat.hint && <br />}
+              {stat.hint}
+            </dd>
+          )}
+          {stat.trend && <dd><AdminSparkline values={stat.trend} label={`${stat.label} by day`} /></dd>}
         </div>
       ))}
     </dl>
   );
 }
 
-function UserAccess({ overview }: { overview: AdminPlatformOverview }) {
-  const access = overview.userAccess!;
-  const percentage = (value: number) =>
-    access.registeredUsers > 0 ? Math.round((value / access.registeredUsers) * 100) : 0;
-  const share = (value: number) => `${percentage(value)}% of users`;
+function ActivePeople({ points, overview }: { points: readonly AdminActivityPoint[]; overview: AdminPlatformOverview }) {
+  const access = overview.userAccess;
   return (
-    <ToolDetailSection title="Registered users">
-      <AdminStatGrid stats={[
-        { label: "Registered", value: formatAdminCount(access.registeredUsers), hint: "Authentication directory" },
-        { label: "Active 24h", value: formatAdminCount(access.activeUsersLast24h), hint: share(access.activeUsersLast24h) },
-        { label: "Active 7d", value: formatAdminCount(access.activeUsersLast7d), hint: share(access.activeUsersLast7d) },
-        { label: "Active 30d", value: formatAdminCount(access.activeUsersLast30d), hint: share(access.activeUsersLast30d) },
-        { label: "Email verified", value: formatAdminCount(access.emailVerifiedUsers), hint: share(access.emailVerifiedUsers) },
-        { label: "Profiles completed", value: formatAdminCount(access.completedProfiles), hint: share(access.completedProfiles) },
-      ]} />
+    <ToolDetailSection title="Active people">
+      <AdminLineChart label="People active each day, and over the 7 and 30 days ending on it"
+        dates={points.map((point) => point.date)} series={[
+          { key: "daily", label: "daily", color: ADMIN_INK[0], values: points.map((point) => point.activeUsers ?? 0) },
+          { key: "weekly", label: "7-day", color: ADMIN_INK[1], values: points.map((point) => point.activeUsers7d ?? 0) },
+          { key: "monthly", label: "30-day", color: ADMIN_INK[2], values: points.map((point) => point.activeUsers30d ?? 0) },
+        ]} />
       <p className="mt-3 text-xs text-muted-foreground">
-        Activity is based on authentication session updates, not page views.
+        Active on a UTC day: sent a message of their own in a Space they belong to. Agents&apos; messages,
+        scheduled posts and imports do not count.
+        {access && <> Signed in (any session, the CLI and apps included): {formatAdminCount(access.activeUsersLast24h)} in
+          24h · {formatAdminCount(access.activeUsersLast7d)} in 7d · {formatAdminCount(access.activeUsersLast30d)} in 30d,
+          of {formatAdminCount(access.registeredUsers)} registered.</>}
       </p>
     </ToolDetailSection>
   );
 }
 
-/** Daily bars with a per-day tooltip; shared by the overview and a user's detail. */
-export function AdminDailyBars({ points, label }: {
-  points: Array<{ date: string; messages: number; title?: string }>;
-  label: string;
-}) {
-  const bars = adminActivityBars(points.map((point) => ({
-    date: point.date, messages: point.messages, humanMessages: 0, agentMessages: 0,
-  })));
-  const peak = bars.reduce((max, bar) => Math.max(max, bar.messages), 0);
-  if (peak === 0) return <p className="text-sm text-muted-foreground">No messages in this window.</p>;
+function sumPoints(bucket: readonly AdminActivityPoint[]): Omit<AdminActivityPoint, "date"> {
+  const total = (read: (point: AdminActivityPoint) => number | undefined) =>
+    bucket.reduce((sum, point) => sum + (read(point) ?? 0), 0);
+  return {
+    messages: total((point) => point.messages),
+    humanMessages: total((point) => point.humanMessages),
+    agentMessages: total((point) => point.agentMessages),
+    ownMessages: total((point) => point.ownMessages),
+    signups: total((point) => point.signups),
+    runsStarted: total((point) => point.runsStarted),
+  };
+}
+
+function NewAccounts({ points, overview }: { points: readonly AdminActivityPoint[]; overview: AdminPlatformOverview }) {
+  const registered = adminRegisteredSeries(points, overview.userAccess?.registeredUsers ?? overview.totals.users);
+  if (!registered) {
+    return (
+      <ToolDetailSection title="New accounts">
+        <p className="text-sm text-muted-foreground">New accounts appear when the full registered-user list could be read.</p>
+      </ToolDetailSection>
+    );
+  }
+  const bars = adminBucketPoints(points, sumPoints);
+  return (
+    <ToolDetailSection title="New accounts">
+      <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
+        <AdminBarChart label={bars.length < points.length ? "New accounts per week" : "New accounts per day"}
+          dates={bars.map((bar) => bar.date)} days={bars.map((bar) => bar.days)}
+          series={[{ key: "signups", label: "new", color: ADMIN_INK[0], values: bars.map((bar) => bar.signups ?? 0) }]} />
+        <AdminLineChart label="Registered accounts" height={148} dates={points.map((point) => point.date)}
+          series={[{ key: "registered", label: "registered", color: ADMIN_INK[0], values: registered }]} />
+      </div>
+    </ToolDetailSection>
+  );
+}
+
+function MessagesPerDay({ points }: { points: readonly AdminActivityPoint[] }) {
+  const bars = adminBucketPoints(points, sumPoints);
+  const weekly = bars.length < points.length;
+  return (
+    <ToolDetailSection title={weekly ? "Messages per week" : "Messages per day"}>
+      <AdminBarChart label={`Messages per ${weekly ? "week" : "day"} by who sent them`}
+        dates={bars.map((bar) => bar.date)} days={bars.map((bar) => bar.days)} series={[
+          { key: "people", label: "people", color: ADMIN_INK[0], values: bars.map((bar) => bar.humanMessages) },
+          { key: "agents", label: "Agents", color: ADMIN_INK[1], values: bars.map((bar) => bar.agentMessages) },
+          { key: "other", label: "apps and xMatrix", color: ADMIN_INK[2],
+            values: bars.map((bar) => Math.max(0, bar.messages - bar.humanMessages - bar.agentMessages)) },
+        ]} />
+    </ToolDetailSection>
+  );
+}
+
+function AdminFunnel({ steps }: { steps: readonly AdminFunnelStep[] }) {
+  const registered = steps[0]?.people ?? 0;
+  if (registered === 0) return <p className="text-sm text-muted-foreground">No account registered in this range.</p>;
+  return (
+    <ol className="space-y-2.5">
+      {steps.map((step) => {
+        const share = step.people / registered;
+        return (
+          <li key={step.key} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 sm:flex">
+            <span className="min-w-0 truncate text-xs text-muted-foreground sm:w-48 sm:shrink-0">{step.label}</span>
+            <span className="col-span-3 row-start-2 h-1.5 overflow-hidden rounded-full bg-muted sm:flex-1">
+              <span className="block h-full rounded-full bg-chart-1" style={{ width: `${share > 0 ? Math.max(share * 100, 1) : 0}%` }} />
+            </span>
+            <span className="shrink-0 text-right text-xs font-semibold tabular-nums sm:w-12">{formatAdminCount(step.people)}</span>
+            <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:w-10">{formatAdminPercent(share)}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function AdminRetention({ cohorts }: { cohorts: readonly AdminRetentionCohort[] }) {
+  if (!cohorts.some((cohort) => cohort.people > 0)) {
+    return <p className="text-sm text-muted-foreground">No account registered in the last eight weeks.</p>;
+  }
+  const weeks = cohorts[0]?.weeks.length ?? 0;
   return (
     <>
-      <div className="flex h-32 items-end gap-[2px]" role="img" aria-label={`${label}, peaking at ${peak}`}>
-        {bars.map((bar, index) => (
-          <div key={bar.date} title={points[index].title ?? `${bar.date}: ${bar.messages} messages`}
-            className="group flex h-full flex-1 items-end">
-            <div className="w-full rounded-t bg-chart-1 transition-opacity group-hover:opacity-80"
-              style={{ height: `${Math.max(bar.ratio * 100, bar.messages > 0 ? 3 : 0)}%` }} />
-          </div>
-        ))}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] border-separate border-spacing-[2px] text-xs tabular-nums">
+          <thead>
+            <tr className="text-[11px] text-muted-foreground">
+              <th scope="col" className="pb-1 pr-3 text-left font-normal">Registered in the week of</th>
+              <th scope="col" className="pb-1 pr-3 text-right font-normal">People</th>
+              {Array.from({ length: weeks }, (_, week) => (
+                <th key={week} scope="col" className="pb-1 text-center font-normal">{week === 0 ? "Week 0" : `+${week}`}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {cohorts.map((cohort) => (
+              <tr key={cohort.week}>
+                <th scope="row" className="whitespace-nowrap pr-3 text-left font-normal">{formatAdminDay(cohort.week)}</th>
+                <td className="pr-3 text-right">{formatAdminCount(cohort.people)}</td>
+                {cohort.weeks.map((cell, week) => (
+                  <td key={week} className="h-7 min-w-10 rounded-[4px] text-center"
+                    title={cell ? `${cell.active} of ${cohort.people} active` : undefined}
+                    style={cell && cohort.people > 0 ? {
+                      background: `color-mix(in oklab, var(--chart-1) ${Math.round(8 + cell.share * 80)}%, transparent)`,
+                      color: cell.share > 0.55 ? "var(--app-panel-paper, var(--background))" : undefined,
+                    } : undefined}>
+                    {cell && cohort.people > 0 ? formatAdminPercent(cell.share) : ""}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-      <div className="mt-1 flex justify-between text-[11px] tabular-nums text-muted-foreground">
-        <span>{bars[0]?.label}</span>
-        <span>peak {formatAdminCount(peak)}</span>
-        <span>{bars.at(-1)?.label}</span>
-      </div>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Share of each week&apos;s new accounts who sent a message of their own in each week after registering.
+      </p>
     </>
   );
 }
 
-/** Daily message bars whose tooltip splits each day into human and agent messages. */
+const DAILY_COLUMNS: AdminColumn<AdminActivityPoint>[] = [
+  { key: "date", label: "Day (UTC)", value: (point) => adminDayNumber(point.date),
+    render: (point) => <span className="whitespace-nowrap font-bold tabular-nums">{point.date}</span> },
+  { key: "active", mobile: "metric", label: "Active", numeric: true, value: (point) => point.activeUsers,
+    render: (point) => formatAdminCount(point.activeUsers ?? 0) },
+  { key: "active7", mobile: "metric", label: "7-day", numeric: true, value: (point) => point.activeUsers7d,
+    render: (point) => formatAdminCount(point.activeUsers7d ?? 0) },
+  { key: "active30", mobile: "metric", label: "30-day", numeric: true, value: (point) => point.activeUsers30d,
+    render: (point) => formatAdminCount(point.activeUsers30d ?? 0) },
+  { key: "signups", mobile: "metric", label: "New", numeric: true, value: (point) => point.signups,
+    render: (point) => point.signups === undefined ? "—" : formatAdminCount(point.signups) },
+  { key: "own", label: "People wrote", numeric: true, value: (point) => point.ownMessages,
+    render: (point) => formatAdminCount(point.ownMessages ?? 0) },
+  { key: "messages", label: "Messages", numeric: true, value: (point) => point.messages,
+    render: (point) => formatAdminCount(point.messages) },
+  { key: "agents", mobile: false, label: "By Agents", numeric: true, value: (point) => point.agentMessages,
+    render: (point) => formatAdminCount(point.agentMessages) },
+  { key: "spaces", label: "Active Spaces", numeric: true, value: (point) => point.activeSpaces,
+    render: (point) => formatAdminCount(point.activeSpaces ?? 0) },
+  { key: "runs", label: "Runs", numeric: true, value: (point) => point.runsStarted,
+    render: (point) => formatAdminCount(point.runsStarted ?? 0) },
+];
+
+/** Daily bars with a readout of the hovered day; shared by a user's and a Space's detail and Operations. */
+export function AdminDailyBars({ points, label, unit = "messages" }: {
+  points: Array<{ date: string; messages: number }>;
+  label: string;
+  unit?: string;
+}) {
+  if (!points.some((point) => point.messages > 0)) {
+    return <p className="text-sm text-muted-foreground">No {unit} in this window.</p>;
+  }
+  return (
+    <AdminBarChart label={label} dates={points.map((point) => point.date)}
+      series={[{ key: "count", label: unit, color: ADMIN_INK[0], values: points.map((point) => point.messages) }]} />
+  );
+}
+
+/** Daily messages split into people's and Agents' messages. */
 export function AdminMessageBars({ activity, label }: {
   activity: Array<{ date: string; messages: number; humanMessages: number; agentMessages: number }>;
   label: string;
 }) {
+  if (!activity.some((point) => point.messages > 0)) {
+    return <p className="text-sm text-muted-foreground">No messages in this window.</p>;
+  }
   return (
-    <AdminDailyBars label={label} points={activity.map((point) => ({
-      date: point.date,
-      messages: point.messages,
-      title: `${point.date}: ${point.messages} messages (${point.humanMessages} human, ${point.agentMessages} agent)`,
-    }))} />
-  );
-}
-
-function ActivityChart({ overview }: { overview: AdminPlatformOverview }) {
-  const share = Math.round(agentMessageShare(overview.totals) * 100);
-  return (
-    <>
-      <p className="mb-3 text-xs text-muted-foreground">
-        {formatAdminCount(overview.totals.messagesLast7d)} in the last 7 days · {share}% authored by agents
-      </p>
-      <AdminMessageBars label={`Daily message volume for the last ${overview.activityDays} days`}
-        activity={overview.activity} />
-    </>
+    <AdminBarChart label={label} dates={activity.map((point) => point.date)} series={[
+      { key: "people", label: "people", color: ADMIN_INK[0], values: activity.map((point) => point.humanMessages) },
+      { key: "agents", label: "Agents", color: ADMIN_INK[1], values: activity.map((point) => point.agentMessages) },
+      { key: "other", label: "apps and xMatrix", color: ADMIN_INK[2],
+        values: activity.map((point) => Math.max(0, point.messages - point.humanMessages - point.agentMessages)) },
+    ]} />
   );
 }
 

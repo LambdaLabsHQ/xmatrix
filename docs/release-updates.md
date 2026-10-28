@@ -1,5 +1,247 @@
 # Release Updates
 
+## Unreleased: An App's page leads with the one thing to do
+
+Every App's page is rebuilt around one lead. Its name, what it does and one
+status line come first. When the reader has something to do (connect,
+reconnect, fix a broken connection) that one step is a tinted sheet with the
+page's only solid action; a credentials-only app shows its form there instead
+of below twenty command descriptions. A working app shows no call to action.
+Below come what it reaches (accounts, mailboxes, logins, groups), the command
+that subscribes a channel, recent activity, permissions (its defaults in one
+sentence, then each channel rule), settings, the command reference folded,
+and Disconnect last. Every part uses the same rows, quiet actions and "add"
+row. The Apps list groups what needs attention, what is connected and what
+was disconnected, then every other app once under its category.
+
+## Unreleased: Native scrolling stays free while older history settles
+
+After an older history page loads, a layout callback no longer consumes a
+wheel or other pending scroll before the browser has moved the timeline.
+That race could mistake the subsequent movement for layout drift and pull
+the reader back in either direction. The anchor keeps waiting for movement;
+its own corrections and compensated virtualizer changes update the pending
+baseline without claiming reader input. Existing quiet and maximum lifetimes
+still apply. This ships in the beta Web; no API or data migration is needed.
+Recovery is a CI-validated beta Web reverting the change.
+
+## Unreleased: Shared pages read as the page does in the app
+
+A published page (`/p/…`) is set with the live editor's styles on the app's
+paper: headings, lists and tables come out formatted instead of bare text. A
+thin bar carries where the page sits and the xMatrix mark; the title stands
+large, with the faces of who keeps the page current and when it last changed
+under it; the page's sections are rules at the right edge. In the app and on a
+shared page, tables drop their cell grid for hairline rows, columns fit their
+content and short cells keep to one line, and a page's reminders read as their
+names in ink instead of sky-blue pills. Web only; recovery is a beta Web
+reverting this change.
+
+## Unreleased: The iOS swipe back follows the finger again
+
+On iPhone, dragging from the left edge moves the screen with the finger again.
+Let go far or fast enough and the screen goes Back to its parent (a
+conversation to its channel list, a page to the page list) and slides off;
+short of that it settles back. #1027 had replaced WebKit's history swipe with
+one that acted only on release and waited behind the page's own scrolling, so
+the gesture felt gone. Back still never walks browser history. This ships in
+the iOS app (TestFlight); Web and Android are unchanged. Recovery is a new
+iOS build reverting this change.
+
+## Unreleased: Machine registry rejections retain their cause
+
+The daemon socket keeps the exact registry fence and legacy compatibility,
+but reports a rejected snapshot or successful spawn with a fixed reason,
+full/partial snapshot category, advertised capability and bounded client
+version. Sentry retains the originating stack and its issue reader exposes
+those fields without report payloads, identities, leases or raw epoch/sequence
+values. HUB-AX's generic console event could not distinguish stale evidence
+from missing or malformed fields; the next event can. This is diagnostic
+coverage, not a confirmed repair of its underlying cause. No schema or client
+update is needed. Recovery uses a CI-validated beta Hub reverting this change.
+
+## Unreleased: History anchoring regressions fail on the first attempt
+
+The history-prepend reading-position spec overrides shared CI retries and runs
+each case once. A measured jump can no longer become a successful stable gate
+by passing a retry. Assertions and CPU throttling are unchanged; unrelated Web
+specs retain their existing retry policy. This tightens the existing test gate
+without changing deployment, signing or publication authority. A known reading
+regression is repaired on main and verified in a new beta before another stable
+request; runner setup failures retain the existing failed-job recovery path.
+
+## Unreleased: Archive the nested Desktop publisher
+
+Archive Release Assets recognizes the exact historical and nested Desktop
+publisher names, as it already does for Android. The nested publisher's successful
+job previously failed the archive's component proof despite a complete scoped
+production receipt. Both names appearing together remain ambiguous and fail;
+missing CLI, unrelated jobs, wrong source/attempt/scope and incomplete receipts
+remain rejected. This only repairs mirroring of sealed R2 artifacts to GitHub;
+deployment, signing and channel publication are unchanged. Migration uses the
+existing workflow, and recovery reruns that archive for the same successful
+production SHA, run, attempt and scope without rebuilding or moving tags.
+
+## Unreleased: Apple sign-in failures retain native diagnostic evidence
+
+Apple authorization failures keep up to three native error-domain categories
+and codes, plus the app version, build and iOS version, across the string-based
+iOS bridge. Unknown domains become `other`; descriptions, userInfo values,
+account details and tokens are excluded. The Web captures the native call's
+source-mapped boundary before exchanging a token with the Hub. Older shells
+still supply their existing error text; older Webs accept the diagnostic string.
+Cancellation remains silent and authorization is never automatically replayed.
+This supplies missing evidence for XMATRIX-WEB-S's unknown Apple error 1000;
+it does not establish or fix the underlying authorization failure. No schema
+migration is needed. The native diagnostics require the new TestFlight build;
+recovery uses a CI-validated beta Web/iOS release reverting this change.
+
+## Unreleased: Keep history anchoring until scrolling and layout settle
+
+An older history page keeps the reader's place while the virtualizer measures
+it. The quiet timer now follows scrolling and layout activity, including
+measurements that need no correction, instead of treating stable text as a
+settled list. Margin/padding swaps that move text without resizing a border box
+are also corrected. Pending input movement is credited before those corrections
+even when the browser has not delivered its scroll event yet, so anchoring does
+not cancel the reader's scroll. The existing quiet-release and ten-second
+deadline remain bounded; iPhone momentum still releases the anchor instead of
+writing a scroll. No protocol or schema change is needed. Recovery is a
+CI-validated beta Web reverting this fix.
+
+## Unreleased: Installer progress emits complete UTF-8 characters
+
+The Unix download bar repeats full Unicode strings rather than passing them
+through byte-oriented `tr`. Its spinner indexes complete symbols in a Bash
+array, so even a C locale cannot split a multibyte character. This keeps
+terminal output and captured install logs valid UTF-8 for both known and
+unknown content lengths. Download integrity and installation behavior are
+unchanged; a CI-validated beta Web reverting this change is the recovery path.
+
+## Unreleased: Delayed components validate their frozen release
+
+CLI, Desktop, Android and iOS component jobs verify consistent manifests, the
+remote annotated tag and its exact SHA, then the clean checkout's tag/version
+and main-history or version-stamp proof. The train still enforces ascending
+versions when it cuts a new tag, and component channel pointers still move
+only forward. A later parallel Hub tag is not a new version floor for a
+component that was already authorized.
+
+In 1.11.2-beta.12, Desktop started after CLI publication and a Hub-only beta.13
+had been tagged. Its late global version-order check rejected that frozen
+release before Desktop published, although Web and CLI had succeeded.
+Migration uses the same release workflows with the shared corrected check;
+there is no new deployment, signing or authorization path. Immutable old
+tags remain untouched. Recovery is a new CI-validated beta containing this
+fix and the failed beta's intents; retrying its old immutable script cannot
+repair the check. The real-Git regression reproduces that failure and keeps
+new-cut downgrades, wrong remote SHAs, tag/version mismatches and dirty
+checkouts rejected.
+
+## Unreleased: Starting two-step sign-in over abandons the old app handoff
+
+After signing out, the two-step page replaces the document with the cleaned
+sign-in URL before showing another email form. Previously the form could
+appear while client navigation still retained the old app continuation.
+Other account switches keep their existing request destination. No schema or
+native bridge change is needed; recovery is a CI-validated beta Web reverting
+the change. The existing browser regression protects the transition.
+
+## Unreleased: Keep standalone Agent launch context within its budget
+
+The shared bootstrap and Channel reporting text uses shorter wording while
+retaining identity, access, approach, progress, final-reply and working-mode
+requirements. This restores the existing 9,000-byte standalone/old-Hub launch
+budget without raising its limit or weakening the contract. Hub-delivered
+launches and the CLI's compiled fallback share the same text; no protocol or
+schema migration is needed. Recovery is a CI-validated beta reverting the text.
+
+## Unreleased: Binary-only installation and Agent setup boundaries
+
+The Unix and PowerShell installers can install an integrity-verified binary
+without changing shell PATH, sign-in, daemon services, tasks or processes.
+Use `--binary-only`, `-BinaryOnly` or `XMATRIX_INSTALL_BINARY_ONLY=1`; connection
+setup is rejected in this mode. Default interactive installation is unchanged.
+
+Agent Runs now refuse `setup daemon` and `setup install --daemon` before
+Profile admission or installation, matching the existing Human-only Profile
+registry and DaemonHost-start boundary. The owner completes connection setup
+in their terminal; a Run cannot use installation setup to change its own
+identity. No schema migration is needed. Recovery uses a CI-validated beta
+reverting this change. See [local connection Profiles](operations/local-connection-profiles.md).
+
+## Unreleased: A page's @ to a live Instance says which one and how the call goes
+
+Calling a live Instance with `@` on a page now writes the conversation it was
+called in beside its name, so another Instance of the same name (each
+conversation has its own `grok:1`) no longer takes it as its own and answers
+twice. The `@` menu names each Instance's conversation and marks busy ones,
+listing free ones first. On the page the call is one chip, `@grok:1 # Daily
+costs`, with the Instance's live presence for every reader. The caller's chip
+follows the call: Sent, Queued while the Instance finishes something else,
+Working with its time, then Replied (opening the reply), Done or Failed. The
+Agent bootstrap says an `@` naming another conversation is not addressed to it.
+
+This is a Web change plus a CLI bootstrap line; older CLIs still receive the
+call correctly but lack the hint. No Hub or data migration. Recovery is a
+CI-validated beta Web and CLI release reverting the change.
+
+## Unreleased: Agent controls follow native capability data
+
+Claude controls now derive models and effort choices only from native
+initialize data. Discovery merges the built-in effort command's declared
+workflow modes with each model's own reasoning levels, so Ultracode and
+future modes using that grammar are selectable without a per-name patch.
+The static alias/effort fallback is removed. Missing discovery leaves controls
+unavailable while ordinary work may continue; explicit parameter requests
+still fail. Native command inventories, including empty ACP inventories and
+Claude overlays, also prevent documentation lists from restoring absent
+passthrough commands. That precedence applies before the first discovery as
+well, through one shared merge for session controls and presence. Fixed
+protocol bindings remain separate from choices.
+
+This needs a CLI/daemon release and restart or reborn of existing Instances;
+no Hub, Web or data migration is needed. Older harnesses without native
+catalogs lose guessed controls. Recovery uses a CI-validated CLI beta
+reverting the change. See the [capability audit](operations/provider-capability-audit.md).
+
+## Unreleased: A release train records the gates it passed
+
+Production Release Request now writes the full-tier CI jobs it passed into
+the content ledger, under the tree those jobs tested. The recorder accepts
+that workflow only from the default branch, and only a commit the dispatch
+SHA may ship: the SHA itself, its beta version stamp, or a stable stamp of a
+source that SHA contains. The recorder identifies that request by its workflow
+path: the request's run-name replaces `workflow_run.name` with the train
+title. The stamp check is the same one the gate runs
+before it checks the release commit out. Manual Public Snapshot CI still
+does not record. A later train of the same tree skips gates this run already
+passed; if the ledger is missing, those gates run in full.
+
+## Unreleased: Bounded body reads reject without waiting for cleanup
+
+Oversized authentication and connector bodies no longer wait for upstream
+cancellation to finish before returning their existing error. A cloned stream
+can otherwise wait for another reader indefinitely. Authentication/request,
+connector, harness registry and Apple JSON readers now use the same protocol
+collector; limits and domain errors remain with their owners, and existing
+request/deadline signals also cover body reads. Reader locks always release.
+No schema, client or UI change is required. Recovery is a CI-validated beta Hub
+release reverting the change.
+
+## Unreleased: Exhausted database recovery retains session progress
+
+Feishu lifecycle cleanup already retries a lost pre-COMMIT response once on a
+fresh session. HUB-AV lost the cleanup SQL response and then the new BEGIN
+response; its event could not show the rest of either session's progress.
+Failures now retain bounded stage durations and attempted query/round-trip
+counts, and Sentry issue reads display them beside the failure. Old events
+remain readable. No SQL, parameters, identities or driver messages are added,
+and no extra queries, retries or COMMIT replays are introduced. This diagnoses
+repeated loss; it does not establish or fix its underlying transport cause.
+No migration or client update is needed. Recovery uses a CI-validated beta Hub
+release reverting the change.
+
 ## Unreleased: Auth public-key reads recover a lost database response
 
 JWT verification loads public keys with one independent `single_read`, avoiding
