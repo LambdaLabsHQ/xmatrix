@@ -1847,7 +1847,6 @@ export const MessageRow = memo(function MessageRow({
     // A thread root is a quote of the command. An edit no longer matches the fenced body.
     ...(contextOnly || message.editedAt ? {} : { stops: agentStops, stopReceiptsLoaded }),
     rejections: contextOnly ? [] : invocationRejections,
-    ...(connectorInvocation ? { connector: connectorInvocation } : {}),
     ...(controlInvocations.length ? { controls: controlInvocations } : {}),
     ...(!contextOnly && message.commandNotices ? { notices: message.commandNotices } : {}),
     continuations: contextOnly || message.editedAt ? [] : continuationInvocations,
@@ -1861,7 +1860,7 @@ export const MessageRow = memo(function MessageRow({
     ...(!contextOnly && !message.editedAt ? { sentAt: message.sentAt } : {}),
     ...(message.sequence ? { sequence: message.sequence } : {}),
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
-  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, connectorInvocation, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
+  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   // Only the Hub writes an App's system fact, so only there does a receipt's text read as one.
   const connectorReceipt = useMemo(() => message.senderKind === "app" && message.provenance === "system_fact"
     ? parseConnectorReceipt(message.body) : undefined, [message.senderKind, message.provenance, message.body]);
@@ -2709,7 +2708,8 @@ export const MessageRow = memo(function MessageRow({
               <MentionReadMessageScopeProvider scope={mentionReadMessageScope}>
                 {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
                 <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                  <RichMessageContent body={displayBody} collapsed={collapsible && !expanded} components={markdownComponents} />
+                  <RichMessageContent body={displayBody} collapsed={collapsible && !expanded} components={markdownComponents}
+                    connector={connectorInvocation} />
                 </div>
               </MentionReadMessageScopeProvider>
             )}

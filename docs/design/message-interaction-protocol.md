@@ -77,6 +77,14 @@ The initial presentation references are `mention.v1`, `launch.v1`, `handoff.v1`,
 `reborn.v1`, `stop.v1`, `runtime-control.v1`, `connector.v1` and `launch-choice.v1`.
 Web rendering consumes these contracts separately from the execution adapters.
 
+Connector command presentation claims the original first-line statement from
+`parseConnectorInvocation` before Markdown rendering. The Hub's execution adapter
+uses the same statement parser. Mailboxes, URLs, escapes, entities and formatting
+punctuation inside that span remain literal command arguments rather than splitting
+the command into Markdown nodes. The remaining body keeps Markdown rendering and
+its original source offsets. Quotes, code and edited messages do not acquire an
+executable command chip.
+
 A command's answer is drawn on the command, the way a summon's progress is drawn
 on its `@`, and it is not a message. When the Hub answers a model or effort
 switch, a stop that fenced no Run, or a refused reborn or handoff, it records the

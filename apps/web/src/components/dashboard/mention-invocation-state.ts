@@ -1,6 +1,6 @@
 import { agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, parsePresentedRoutingDecision, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type PresentedRoutingDecision, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
-  type AutoLaunchMention, type ConnectorInvocation, type AgentControlInvocation, type AgentControlOutcomeRecord,
+  type AutoLaunchMention, type AgentControlInvocation, type AgentControlOutcomeRecord,
   parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
 import { noticesNaming, type CommandNotice } from "./command-notices";
 
@@ -518,7 +518,6 @@ export type InteractionSegment<Target = unknown> =
     outcome?: AgentControlOutcomeRecord; notice?: CommandNotice }
   | { presentationRef: "handoff.v1" | "reborn.v1"; text: string; refused: readonly CommandNotice[];
     agentName: string; ordinal: number }
-  | { presentationRef: "connector.v1"; text: string; invocation: ConnectorInvocation }
   | { presentationRef: "mention.v1"; text: string; target: Target; token?: string };
 
 export interface InteractionRecords<Target> {
@@ -527,8 +526,6 @@ export interface InteractionRecords<Target> {
   launches?: readonly SerializedAgentLaunch[];
   /** The message's own stop command, when this run is that command's text. */
   stop?: { invocation: AgentStopInvocation; receipts: readonly SerializedAgentStop[] };
-  /** The message's own connector command, when this run is that command's text. */
-  connector?: ConnectorInvocation;
   /** The message's own model and effort statements, when it is one. */
   controls?: readonly AgentControlInvocation[];
   /** Hub receipts for this message's command (command-notices.ts). */
@@ -576,7 +573,7 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
       return out;
     });
   };
-  const { stop, connector, controls, notices } = records;
+  const { stop, controls, notices } = records;
   if (controls?.length) {
     const receipt = notices?.find(notice => notice.controlOutcomes) ?? notices?.[0];
     controls.forEach((invocation, index) => claim(invocation.text, { presentationRef: "runtime-control.v1",
@@ -586,12 +583,6 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
   }
   if (stop) claim(stop.invocation.text, { presentationRef: "stop.v1", text: stop.invocation.text,
     invocation: stop.invocation, receipts: stop.receipts });
-  if (connector) {
-    // Markdown inside the statement splits it across runs; the command itself still lights up.
-    const command = connector.text.slice(0, connector.commandEnd - connector.start);
-    const whole = connector.text !== command && text.includes(connector.text);
-    claim(whole ? connector.text : command, { presentationRef: "connector.v1", text: whole ? connector.text : command, invocation: connector });
-  }
   segments = refine(segments, (run, offset) => splitMentionContinuations(run, records.continuations ?? [],
     start => allowed(start + offset)).map(part => part.kind === "continuation"
     ? { presentationRef: part.record.kind === "reborn" ? "reborn.v1" : "handoff.v1", text: part.text, record: part.record }
