@@ -48,20 +48,21 @@ const VISIBILITY: Record<string, string> = { private: "Private: only guests see 
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
-export function calendarEventDraft(preview: Record<string, string>): CalendarEventDraft {
+/** The event the preview describes, or what is wrong with the preview. */
+export function calendarEventDraft(preview: Record<string, string>): CalendarEventDraft | { problem: string } {
   const change = preview.change;
   if (change !== "create" && change !== "update" && change !== "delete") {
-    throw new Error(`Google Calendar approval preview has no valid change (got ${JSON.stringify(change)})`);
+    return { problem: `Google Calendar approval preview has no valid change (got ${JSON.stringify(change)})` };
   }
   for (const key of ["calendar", "title", "start", "end", "timeZone"] as const) {
-    if (!preview[key]) throw new Error(`Google Calendar approval preview is missing ${key}`);
+    if (!preview[key]) return { problem: `Google Calendar approval preview is missing ${key}` };
   }
   const { sendUpdates, series } = preview;
-  if (sendUpdates !== undefined && !(sendUpdates in SEND_UPDATES)) throw new Error(`Google Calendar approval preview has an unknown sendUpdates ${JSON.stringify(sendUpdates)}`);
-  if (series !== undefined && series !== "all" && series !== "this") throw new Error(`Google Calendar approval preview has an unknown series ${JSON.stringify(series)}`);
+  if (sendUpdates !== undefined && !(sendUpdates in SEND_UPDATES)) return { problem: `Google Calendar approval preview has an unknown sendUpdates ${JSON.stringify(sendUpdates)}` };
+  if (series !== undefined && series !== "all" && series !== "this") return { problem: `Google Calendar approval preview has an unknown series ${JSON.stringify(series)}` };
   let changes: Record<string, unknown> | undefined;
   if (preview.changes !== undefined) {
-    try { changes = JSON.parse(preview.changes) as Record<string, unknown>; } catch { throw new Error("Google Calendar approval preview has changes that are not JSON"); }
+    try { changes = JSON.parse(preview.changes) as Record<string, unknown>; } catch { return { problem: "Google Calendar approval preview has changes that are not JSON" }; }
   }
   return {
     change, calendar: preview.calendar!, title: preview.title!, start: preview.start!, end: preview.end!, timeZone: preview.timeZone!,

@@ -66,7 +66,8 @@ export function ConnectorActionApproval({ request, token, userId }: {
   let calendar: CalendarEventDraft | null = null;
   let previewError: string | null = app ? null : `This web version does not know the app ${request.providerId}; reload to update it`;
   if (app && request.providerId === "googlecalendar") {
-    try { calendar = calendarEventDraft(request.preview); } catch (failure) { previewError = (failure as Error).message; }
+    const parsed = calendarEventDraft(request.preview);
+    if ("problem" in parsed) previewError = parsed.problem; else calendar = parsed;
   }
   const question = calendar ? calendarApprovalQuestion(calendar)
     : request.providerId === "gmail" ? "Send this email?" : `Allow ${app?.name ?? request.providerId} ${request.actionId}?`;
