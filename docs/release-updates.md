@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Native scrolling stays free while older history settles
+
+After an older history page loads, a layout callback no longer consumes a
+wheel or other pending scroll before the browser has moved the timeline.
+That race could mistake the subsequent movement for layout drift and pull
+the reader back in either direction. The anchor keeps waiting for movement;
+its own corrections and compensated virtualizer changes update the pending
+baseline without claiming reader input. Existing quiet and maximum lifetimes
+still apply. This ships in the beta Web; no API or data migration is needed.
+Recovery is a CI-validated beta Web reverting the change.
+
 ## Unreleased: Shared pages read as the page does in the app
 
 A published page (`/p/…`) is set with the live editor's styles on the app's
