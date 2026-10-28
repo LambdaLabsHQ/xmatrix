@@ -235,8 +235,9 @@ latency. There is no extra SQL, broader retry or COMMIT replay.
 
 ## Agent lifecycle locks
 
-Execution-report owner queries that remain in flight for 500 ms (or half the
-configured lock timeout, if shorter) sample `pg_blocking_pids` and
+Execution-report owner, Agent Channel lifecycle lock and message append's
+combined authorization preflight queries that remain in flight for 500 ms
+(or half the configured lock timeout, if shorter) sample `pg_blocking_pids` and
 `pg_stat_activity` through an independent read-only statement. A lock timeout
 has already removed its wait edge, so sampling after that error cannot recover
 the holder. The opening round trip obtains the origin backend pid without an

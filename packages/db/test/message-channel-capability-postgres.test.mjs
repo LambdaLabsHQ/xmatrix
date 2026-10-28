@@ -9,12 +9,12 @@ import { MessageAuthorityError } from "../dist/message-authority-error.js";
 
 
 
-integration("active Message authorization shares lifecycle locks with writers and blocks archive", async () => {
+integration("active Message authorization shares lifecycle locks with writers and blocks access changes", async () => {
   assert.ok(connectionString, "XMATRIX_TEST_POSTGRES_URL is required");
   const id = `message-lifecycle-${crypto.randomUUID()}`;
   const writer = new Client({ connectionString, application_name: `${id}-writer` });
-  const archiver = new Client({ connectionString, application_name: `${id}-archiver` });
-  await Promise.all([writer.connect(), archiver.connect()]);
+  const configurer = new Client({ connectionString, application_name: `${id}-configurer` });
+  await Promise.all([writer.connect(), configurer.connect()]);
   const scope = { spaceId: id, channelId: id, principal: { kind: "user", id } };
 
   try {
@@ -34,26 +34,26 @@ integration("active Message authorization shares lifecycle locks with writers an
       capability: "message_active_command", error: (failure) => new MessageAuthorityError(
         failure.code, failure.status, failure.message) });
 
-    await archiver.query("SET lock_timeout = '250ms'");
+    await configurer.query("SET lock_timeout = '250ms'");
     await assert.rejects(
-      archiver.query("UPDATE data.channels SET archived_at=now() WHERE space_id=$1 AND channel_id=$1", [id]),
+      configurer.query("UPDATE data.channels SET mode='closed' WHERE space_id=$1 AND channel_id=$1", [id]),
       (error) => error?.code === "55P03",
-      "archive must wait for an admitted Message writer",
+      "an access change must wait for an admitted Message writer",
     );
 
     await writer.query("COMMIT");
-    const archived = await archiver.query(
-      "UPDATE data.channels SET archived_at=now() WHERE space_id=$1 AND channel_id=$1 RETURNING archived_at",
+    const changed = await configurer.query(
+      "UPDATE data.channels SET mode='closed' WHERE space_id=$1 AND channel_id=$1 RETURNING mode",
       [id],
     );
-    assert.ok(archived.rows[0]?.archived_at);
+    assert.equal(changed.rows[0]?.mode, "closed");
   } finally {
     await writer.query("ROLLBACK").catch(() => {});
-    await archiver.query("RESET lock_timeout").catch(() => {});
+    await configurer.query("RESET lock_timeout").catch(() => {});
     for (const table of ["channels", "space_members", "spaces"]) {
       await writer.query(`DELETE FROM data.${table} WHERE space_id=$1`, [id]).catch(() => {});
     }
-    await Promise.all([writer.end(), archiver.end()]);
+    await Promise.all([writer.end(), configurer.end()]);
   }
 });
 

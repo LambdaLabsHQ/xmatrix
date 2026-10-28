@@ -14,6 +14,19 @@ Older clients retain the ordinary failure text. Recovery is a CI-validated beta
 reverting the feature while retaining the additive table. See
 [quota recovery](operations/agent-quota-recovery.md).
 
+## Unreleased: Message preflight lock failures retain their blocker
+
+HUB-B3 timed out while append's combined authorization preflight waited for
+the Channel row. The existing execution-owner and Agent Channel-lock sampler
+did not cover this query. It now shares their one bounded diagnostic connection
+per isolate, retaining only fixed waiter/blocker state, owner category and capped
+transaction age. Real PostgreSQL append coverage checks a held Channel lock,
+unavailable diagnostics, the original rejection, no partial message and a
+successful uncontended retry without extra sampling. This closes missing
+diagnostics; the underlying holder remains unproven. No lock, authorization,
+deadline or replay policy changes. Hub only, no migration; recovery is a
+CI-validated beta reverting this diagnostic change.
+
 ## Unreleased: Channel catalog stalls retain evidence and GitHub invalidation recovers
 
 HUB-B0 exhausted its existing single-read recovery without source activity

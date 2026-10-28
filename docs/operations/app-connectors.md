@@ -311,7 +311,8 @@ read uncached before execution and immediately before each mutation:
   per-action settings remain.
 
 Ask stages before the normal execution record. Approved dispatch rechecks
-Channel access, policy, account generation, credentials and mailbox ownership.
+Channel access, connection permission, account generation, credentials and mailbox
+ownership.
 It freezes the actual Gmail reply recipient before approval and never fetches
 new headers to redirect the approved email. Expired or changed requests must
 be recreated. Consumed or uncertain writes are not automatically retried.

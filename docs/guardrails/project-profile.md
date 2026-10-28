@@ -522,5 +522,7 @@ Hub-authored turn-failure notices use the existing unmetered system message
 kind while preserving Run authorization and replay identity. Registration launch
 and PostgreSQL conflict reports retain the original exception, correlated
 bounded query evidence and, for deadlocks, a content-free wait graph readable
-through Sentry. See [Agent turn failures](../operations/agent-turn-failures.md)
+through Sentry. Slow execution-owner, Agent Channel-lock and combined message
+append preflight queries share one bounded live blocker sampler per isolate.
+See [Agent turn failures](../operations/agent-turn-failures.md)
 and [Runtime delivery errors](../operations/runtime-delivery-errors.md).

@@ -230,10 +230,19 @@ const STAR_ASK_WIDTH = 288;
    the pane in, and the lens folds it into a ring along the rim. */
 const STAR_ASK_GLASS: LiquidGlassMaterial = { veil: "oklch(0.985 0.004 85 / 0.6)" };
 
+/** The list column on screen. The conversation list comes first in the document;
+    a destination's list is drawn in its place and is the one with a box then. */
+function listColumn(): DOMRect | null {
+  for (const node of document.querySelectorAll(".app-sidebar, .app-tool-list")) {
+    const rect = node.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return rect;
+  }
+  return null;
+}
+
 /** Centred over the foot of the list column; beside Help where no list shows. */
 function starAskPlace(anchor: DOMRect): StarAskPlace {
-  const list = Array.from(document.querySelectorAll(".app-sidebar"), (node) => node.getBoundingClientRect())
-    .find((rect) => rect.width > 0);
+  const list = listColumn();
   if (!list) return { left: anchor.right + 8, bottom: Math.max(12, window.innerHeight - anchor.bottom), width: STAR_ASK_WIDTH };
   const width = Math.min(STAR_ASK_WIDTH, list.width - 24);
   return { left: Math.round(list.left + (list.width - width) / 2), bottom: 16, width };
@@ -263,18 +272,31 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
     if (rect) setPos({ left: rect.right + 8, bottom: Math.max(12, window.innerHeight - rect.bottom) });
   }, [open]);
 
-  // The list column is dragged wider, and a destination without a list hides it.
+  // The list column is dragged wider. A destination swaps its own list in for
+  // the conversation list without resizing the window.
   useLayoutEffect(() => {
     if (!starPrompt.asking || isMobile) return;
     const place = () => {
       const anchor = anchorRef.current?.getBoundingClientRect();
       if (anchor) setAskPlace(starAskPlace(anchor));
     };
-    place();
     const observer = new ResizeObserver(place);
+    const watchLists = () => {
+      for (const list of document.querySelectorAll(".app-sidebar, .app-tool-list")) observer.observe(list);
+    };
+    place();
+    watchLists();
     observer.observe(document.documentElement);
-    for (const list of document.querySelectorAll(".app-sidebar")) observer.observe(list);
-    return () => observer.disconnect();
+    const panel = document.querySelector(".app-main");
+    const swapped = new MutationObserver(() => {
+      watchLists();
+      place();
+    });
+    if (panel) swapped.observe(panel, { childList: true });
+    return () => {
+      observer.disconnect();
+      swapped.disconnect();
+    };
   }, [starPrompt.asking, isMobile]);
 
   useEffect(() => {

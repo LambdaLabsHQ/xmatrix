@@ -86,7 +86,8 @@ async function sample(selector: number | string, config: ClientConfig,
 export function watchPostgresLockWait(queryName: string, backendPid: number | undefined,
   options: { connectionString: string; lockTimeoutMs: number; clientFactory: (config: ClientConfig) => DiagnosticClient },
 ): (() => Promise<PostgresLockWait | undefined>) | undefined {
-  if (!["runtime_execution_report_owner_v4", "channel_lifecycle_lock_runtime_new_work_v1"].includes(queryName) ||
+  if (!["runtime_execution_report_owner_v4", "channel_lifecycle_lock_runtime_new_work_v1",
+    "message_append_preflight_v4"].includes(queryName) ||
       !backendPid) return;
   return watch(backendPid, Math.min(500, Math.max(1, Math.floor(options.lockTimeoutMs / 2))), options);
 }

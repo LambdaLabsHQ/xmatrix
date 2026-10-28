@@ -91,8 +91,8 @@ Sources: [website installation](https://developer.work.weixin.qq.com/document/pa
 
 Use only provider-verified opaque company, agent and member ids. Company app
 messages are addressed to explicit visible members; they are not the current
-group-robot webhook flow. A Space must grant exact recipients, and Channel policy
-must be checked again immediately before dispatch. A native app must not inherit
+group-robot webhook flow. A Space must grant exact recipients; current Channel
+access and connection permission must be checked again immediately before dispatch. A native app must not inherit
 manual webhook authority or broadcast to `@all`, departments or tags by default.
 A Check reads live application/scope and recipient evidence without sending a
 message. Native message receipts must reject nonempty `invaliduser`,
