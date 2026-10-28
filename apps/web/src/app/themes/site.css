@@ -1218,3 +1218,78 @@ html:has(.site-page) {
     animation: none;
   }
 }
+
+/* A published page (/p/…): the page on the app's paper, set as the live editor
+   sets it (page-document.css), under one floating wood sign that says whose
+   project it is and that it lives on xMatrix. */
+.public-page {
+  background: var(--app-panel-paper);
+  color: var(--foreground);
+}
+.public-page-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 14px 24px 18px;
+  background: linear-gradient(var(--app-panel-paper) 65%, transparent);
+}
+.public-page-sign.app-material-wood-panel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 16px 0 8px;
+  border-radius: 999px;
+  color: oklch(0.2 0.04 58);
+  font-size: 14px;
+  font-weight: 650;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.45), inset 1px 0 0 oklch(1 0 0 / 0.18),
+    inset 0 -1px 0 oklch(0 0 0 / 0.3), inset -1px 0 0 oklch(0 0 0 / 0.18),
+    0 12px 22px -12px oklch(0 0 0 / 0.5) !important;
+}
+.public-page-space { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.public-page-presence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.public-page-presence > span { display: inline-flex; align-items: center; gap: 6px; }
+.public-page-sheet {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 18px 24px 72px;
+}
+.public-page-document.page-document { white-space: normal; padding-bottom: 0; }
+.public-page-children {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 40px;
+  font-size: 15px;
+}
+.public-page-children a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
+.public-page-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 56px;
+  padding-top: 16px;
+  border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.public-page-byline { display: inline-flex; align-items: center; gap: 8px; }
+.public-page-face { width: 20px; height: 20px; border-radius: 999px; object-fit: cover; }
+.public-page-join { color: var(--foreground); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.public-page-made { margin-left: auto; color: inherit; }
+.public-page-made:hover { color: var(--foreground); }

@@ -1,7 +1,3 @@
-import type { Node as DocNode } from "prosemirror-model";
-import { Plugin } from "prosemirror-state";
-import { Decoration, DecorationSet } from "prosemirror-view";
-
 /**
  * A table's columns fit what they hold, so a long cell would squeeze its
  * short neighbours until "10/28 三" or "16:00 租板" broke in two. A cell
@@ -20,28 +16,6 @@ export function isShortCell(text: string): boolean {
 }
 
 export const SHORT_CELL_CLASS = "page-cell-short";
-
-function shortCells(doc: DocNode): DecorationSet {
-  const decorations: Decoration[] = [];
-  doc.descendants((node, pos) => {
-    if (node.type.spec.tableRole === "header_cell" || node.type.spec.tableRole === "cell") {
-      if (isShortCell(node.textContent)) decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: SHORT_CELL_CLASS }));
-      return false;
-    }
-    return node.isBlock;
-  });
-  return DecorationSet.create(doc, decorations);
-}
-
-export function tableCells(): Plugin {
-  return new Plugin<DecorationSet>({
-    state: {
-      init: (_config, editor) => shortCells(editor.doc),
-      apply: (tr, value) => tr.docChanged ? shortCells(tr.doc) : value,
-    },
-    props: { decorations(editor) { return this.getState(editor); } },
-  });
-}
 
 /** The same for a page drawn without the editor. */
 export function markShortCells(target: HTMLElement) {

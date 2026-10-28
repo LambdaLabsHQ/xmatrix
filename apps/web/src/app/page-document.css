@@ -100,6 +100,11 @@
   border-bottom-color: var(--border);
 }
 .page-document tr:last-child > td { border-bottom: 0; }
+/* A page drawn from markdown HTML (the public page) has a head and a body in its table, so the scrolling is the
+   wrapper's and the table stays a table. */
+.page-document .page-table-scroll { max-width: 100%; overflow-x: auto; }
+.page-document .page-table-scroll > table { display: table; width: 100%; overflow: visible; }
+.page-document .page-table-scroll > table > :is(thead, tbody) { display: revert; }
 .page-document .selectedCell { background: color-mix(in oklab, var(--primary) 12%, transparent); }
 /* Typora markers: the line's own type, muted, so a heading's # is the heading's size. */
 .page-document .page-md-syntax {
@@ -567,7 +572,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   cursor: pointer;
   user-select: none;
 }
-.page-automation-status::before {
+.page-automation-status::before, .page-automation-chip[data-state="public"]::before {
   content: "";
   width: 0.95em;
   height: 0.95em;
@@ -576,6 +581,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .page-automation-status[data-state="missing"] { color: var(--destructive); cursor: default; }
+/* A public reader sees a reminder's name behind its clock, and no schedule. */
+.page-automation-chip[data-state="public"] { display: inline-flex; align-items: baseline; gap: 0.35em; }
+.page-automation-chip[data-state="public"]::before { align-self: center; color: var(--muted-foreground); }
 .page-automation-status:hover:not(:disabled) { color: var(--foreground); }
 
 /* A GitHub file the page embeds (§6.5): text on the page's paper, with its
