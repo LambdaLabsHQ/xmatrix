@@ -416,11 +416,21 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       messageId: input.sourceMessageId, actorUserId: input.actorUserId, body: input.body });
     await assertQuotaRetryAdmission(tx, { channelId: input.channelId, actorUserId: input.actorUserId, admission: input.quotaRetry,
       sourceMessageId: input.sourceMessageId, selectionIndex: input.selectionIndex });
-    if (!input.quotaRetry) await tx.query({ name: "quota_retry_superseded_by_launch_v1", text: `UPDATE data.agent_quota_retries
+    if (!input.quotaRetry) {
+      // Recovery reads happen before routing, outside this transaction. If a
+      // different command admitted this same publication while routing ran,
+      // do not cancel its quota choice or allocate another attempt.
+      const existing = await tx.query({ name: "registration_launch_source_claim_v1", text: `SELECT 1
+        FROM data.registration_launch_intents WHERE channel_id=$1 AND source_message_id=$2 AND selection_index=$3
+          AND actor_user_id=$4 AND command_id<>$5 AND state<>'aborted' LIMIT 1`,
+      values:[input.channelId,input.sourceMessageId,input.selectionIndex,input.actorUserId,input.commandId],maxRows:1 });
+      if (existing.length) throw new RegistrationAccessError("registration_launch_changed",409);
+      await tx.query({ name: "quota_retry_superseded_by_launch_v1", text: `UPDATE data.agent_quota_retries
       SET state='cancelled',next_check_at=NULL,updated_at=clock_timestamp()
       WHERE channel_id=$1 AND source_message_id=$2 AND selection_index=$3 AND kind='launch'
         AND state IN ('offered','waiting','dispatching')`,
-    values:[input.channelId,input.sourceMessageId,input.selectionIndex],maxRows:0 });
+      values:[input.channelId,input.sourceMessageId,input.selectionIndex],maxRows:0 });
+    }
     const selection = source?.selections[input.selectionIndex];
     if (!source || !selection || (selection.target.kind === "capability" ? selection.target.harness !== input.key.harness
       : selection.target.kind === "registration" ? selection.target.key.spaceId !== input.key.spaceId ||
@@ -635,9 +645,16 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       const source = await readMessageInvocationSelections(tx, { deriveFromText: true, spaceId: this.placement.spaceId,
         channelId: input.channelId, messageId: input.sourceMessageId, actorUserId: input.actorUserId, body: input.body });
       if (!source?.selections[input.selectionIndex]) throw new RegistrationAccessError("registration_invocation_target_mismatch", 403);
-      const rows = await tx.query({ name: "registration_launch_recover_v1", text: `SELECT launch_request_json,source_body_hash,
-        source_revision,channel_id,source_message_id,selection_index,state FROM data.registration_launch_intents
-        WHERE actor_user_id=$1 AND command_id=$2`, values: [input.actorUserId,input.commandId], maxRows: 1 });
+      const rows = await tx.query({ name: "registration_launch_recover_v2", text: `SELECT * FROM (
+        SELECT command_id,launch_request_json,source_body_hash,source_revision,channel_id,source_message_id,selection_index,state
+          FROM data.registration_launch_intents WHERE actor_user_id=$1 AND command_id=$2
+        UNION ALL
+        SELECT command_id,launch_request_json,source_body_hash,source_revision,channel_id,source_message_id,selection_index,state
+          FROM data.registration_launch_intents WHERE actor_user_id=$1 AND channel_id=$3 AND source_message_id=$4
+            AND selection_index=$5 AND state<>'aborted' AND command_id<>$2
+            AND launch_request_json->'quotaRetry'->>'id' IS NOT NULL
+        ) attempt ORDER BY (state='aborted'),(command_id=$2) DESC LIMIT 1`,
+      values: [input.actorUserId,input.commandId,input.channelId,input.sourceMessageId,input.selectionIndex], maxRows: 1 });
       if (rows[0] && Number(rows[0].source_revision) !== source.sourceRevision) {
         throw new RegistrationAccessError("registration_source_changed", 409);
       }
@@ -655,7 +672,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     // Dispatch callers can carry services and transient picker state. Only
     // these source fields may overlay the immutable persisted launch request.
-    return this.prepare({ ...row.launch_request_json, commandId: input.commandId, actorUserId: input.actorUserId,
+    return this.prepare({ ...row.launch_request_json, commandId: String(row.command_id), actorUserId: input.actorUserId,
       channelId: input.channelId, sourceMessageId: input.sourceMessageId,
       selectionIndex: input.selectionIndex, body: input.body });
   }

@@ -6,13 +6,15 @@ import type { AgentQuotaRetry } from "@xmatrix/protocol";
 test.use(E2E_DESKTOP_CONTEXT);
 const id = "a".repeat(64);
 const channel = { ...E2E_CHANNEL, messageCount: 2, lastMessageSequence: 2, updatedAt: E2E_NOW };
+const originalError = "You've hit your session limit · resets 10:20am (UTC)";
 
-async function openOffer(page: Parameters<typeof openWorkspaceWithStubs>[0], canChoose = true) {
+async function openOffer(page: Parameters<typeof openWorkspaceWithStubs>[0], canChoose = true, providerError = true) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [channel] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${channel.id}/history**`, { messages: [
     { messageId: "ask", channelId: channel.id, sequence: 1, body: "@claude finish the task", sentAt: E2E_NOW, from: E2E_USER_SENDER },
     { messageId: "quota-offer", channelId: channel.id, sequence: 2, sentAt: E2E_NOW,
-      body: "No Agent could take over this task.", from: { ...E2E_USER_SENDER, label: "xMatrix" },
+      body: (providerError ? `xMatrix could not complete this claude turn: ${originalError}\nFailure reference: quota-failure\n\n` : "") +
+        "No Agent could take over this task.", from: { ...E2E_USER_SENDER, label: "xMatrix" },
       metadata: { kind: "xmatrix.quota-retry-offer", xmatrixQuotaRetryId: id, xmatrixProvenance: "system_fact", xmatrixSystemNotice: true } },
   ], hasMore: false });
   const value = (state: AgentQuotaRetry["state"]) => ({ id, state, canChoose, expiresAt: new Date(Date.now()+86_400_000).toISOString() });
@@ -22,7 +24,7 @@ async function openOffer(page: Parameters<typeof openWorkspaceWithStubs>[0], can
     { status: 202, json: value("waiting") }, { status: 202, json: value("cancelled") },
   ] } });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
-  return { card: page.getByRole("group", { name: "No Agent can take over right now" }),
+  return { card: page.getByRole("group", { name: providerError ? originalError : "Provider account usage limit reached" }),
     actions: () => fixtureRequestBodies(page, "quota-choice"),
     showWaitingOnReload: async () => {
       await fixtureJson(page, "quota-read", pattern, value("waiting"), { method: "GET" });
@@ -50,7 +52,7 @@ test("waiting requires an explicit choice, survives reload and can be cancelled 
 });
 
 test("other readers see the offer but cannot enroll its author's work", async ({ page }) => {
-  const { card, actions } = await openOffer(page, false);
+  const { card, actions } = await openOffer(page, false, false);
   await expect(card.getByRole("status")).toHaveText("Retry automatically when quota recovers?");
   await expect(card.getByRole("button")).toHaveCount(0);
   expect(await actions()).toEqual([]);

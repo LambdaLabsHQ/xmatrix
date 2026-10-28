@@ -26,6 +26,26 @@ import { executeRegistrationLaunchDispatch, prepareRegistrationReborn } from "./
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import type { Env } from "./types";
 import type { HandoffSuccessor } from "./handoff-successor";
+async function quotaSourceMessage(input: {
+  database: AuthorityDatabase; spaceId: string; channelId: string; actorUserId: string; messageId: string; sequence?: number;
+}) {
+  let sequence = input.sequence;
+  if (sequence === undefined) {
+    const [source] = await input.database.transaction({ requestId: crypto.randomUUID(), operation: "quota-retry.source-sequence" },
+      tx => tx.query<{ timeline_sequence: string }>({ name: "quota_retry_source_sequence_v1",
+        text: `SELECT timeline_sequence FROM data.messages WHERE space_id=$1 AND channel_id=$2 AND message_id=$3
+          AND deleted_at IS NULL AND recalled_at IS NULL`, values: [input.spaceId,input.channelId,input.messageId],maxRows:1 }));
+    if (!source) return undefined;
+    sequence = Number(source.timeline_sequence);
+  }
+  // The existing content authority checks the reader and hydrates the private
+  // immutable payload. A directory lookup never substitutes for that read.
+  const page = await new PostgresMessageRepository(input.database).history({
+    requestId: crypto.randomUUID(),spaceId: input.spaceId,channelId: input.channelId,
+    principal: { kind:"user",id:input.actorUserId },beforeSequence:sequence+1,limit:1,
+  });
+  return page.messages.map(postgresProductMessage).find(message => message.messageId === input.messageId);
+}
 export async function quotaRetryRepository(env: Env, channelId: string, database?: AuthorityDatabase) {
   const authorities = runtimePlacement(env);
   const route = await new PostgresChannelSpaceDirectory(authorities.directory).resolve(
@@ -99,12 +119,22 @@ export async function offerUsageLimitRecovery(env: Env, input: HandoffSuccessor)
       runId: input.sourceRunId,
     },
   });
+  const source = { database,spaceId:placement.spaceId,channelId:input.channelId,actorUserId:input.actorUserId };
+  const handoff = await quotaSourceMessage({ ...source,messageId:input.sourceMessageId });
+  const metadata = handoff?.metadata as Record<string,unknown> | undefined;
+  const failure = metadata?.xmatrixUsageLimitHandoff === true && typeof metadata.sourceMessageId === "string"
+    ? await quotaSourceMessage({ ...source,messageId:metadata.sourceMessageId }) : undefined;
+  const failureMetadata = failure?.metadata as Record<string,unknown> | undefined;
+  const sender = failure?.from as Record<string,unknown> | undefined;
+  const original = failureMetadata?.xmatrixTurnFailure === true && sender?.instanceId === input.sourceInstanceId
+    && typeof failure?.body === "string" ? failure.body : undefined;
   await dispatchProductAgentSystemNotice({
     env,
     actorUserId: input.actorUserId,
     channelId: input.channelId,
     sourceMessageId: input.sourceMessageId,
-    body: "No Agent could take over this task. You can wait for its provider quota to recover and retry automatically.",
+    body: [original,"No Agent could take over this task. You can wait for its provider quota to recover and retry automatically."]
+      .filter(Boolean).join("\n\n"),
     metadata: { kind: AGENT_QUOTA_RETRY_NOTICE_KIND, xmatrixQuotaRetryId: id },
   });
 }
@@ -146,15 +176,8 @@ async function retryLaunch(
   database: AuthorityDatabase,
 ) {
   const { placement, directory } = await quotaRetryRepository(env, channelId, database);
-  const page = await new PostgresMessageRepository(database).history({
-    requestId: crypto.randomUUID(),
-    spaceId: placement.spaceId,
-    channelId,
-    principal: { kind: "user", id: row.actor_user_id },
-    beforeSequence: Number(row.source_sequence) + 1,
-    limit: 1,
-  });
-  const message = page.messages.map(postgresProductMessage).find((m) => m.messageId === row.source_message_id);
+  const message = await quotaSourceMessage({ database,spaceId:placement.spaceId,channelId,
+    actorUserId:row.actor_user_id,messageId:row.source_message_id,sequence:Number(row.source_sequence) });
   if (!message || typeof message.body !== "string")
     throw new RegistrationAccessError("invocation_source_unavailable", 409);
   const evaluatorFor = jevEvaluator(env, {

@@ -8,6 +8,11 @@ uses the same offer. An offer is not permission to retry: rendering it, reading
 it on another device, reconnecting a machine or expiring the routing hold does
 not select waiting.
 
+The provider's original error leads the recovery card, including its reset hint;
+the explanation then describes the failed handoff and the optional wait. A
+pre-launch quota check has no provider error text, so it uses a usage-limit
+heading. Waiting, retrying and cancellation appear in the separate status line.
+
 Only the authenticated Human whose task/Instance owns that offer can choose to
 wait. The additive Channel quota-retry API reads and changes the offer by its
 server-generated ID; clients cannot supply a prompt, registration, due time or

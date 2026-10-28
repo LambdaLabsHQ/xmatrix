@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   admitRegisteredSpawn, connectAgent, createRoutableAgent, homeSpaceId, inTestTransaction, json, MOCK_TOKEN, randomUUID,
-  REGISTERED_DAEMON_CAPABILITIES, sendSpawnResult, startPgHubWorker,
+  REGISTERED_DAEMON_CAPABILITIES, sendSpawnResult, startPgHubWorker, testPostgresUrl,
 } from "./agent-launch-postgres.fixture.mjs";
 import { channelHistory, sleep, waitForChannelHistoryMessage } from "./agent-mention-spawn.fixture.mjs";
 import { githubAppPrivateKey, githubInstallationCatalog, grantRegistrationRepository } from "./registration-launch.fixture.mjs";
 import { recordRegistrationUsageLimit } from "../../db/dist/agent-registration-quota-probe.js";
+import { createAuthorityDatabase, PostgresRegistrationLaunchRepository } from "@xmatrix/db";
 
 /**
  * docs/same-machine-instance-handoff.md §2.1–2.2, end to end against a local
@@ -80,8 +81,9 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       await inTestTransaction(tx => recordRegistrationUsageLimit(tx, {
         ownerUserId: userId, machineId: machineA, harness: "claude", resetsAt: new Date(Date.now()+3_600_000).toISOString(),
       }));
+      const body = `@claude repo:${repository} machine:${machineA} fix the bug`;
       const response = await worker.fetch(`/api/channels/${channel.id}/messages`, { method: "POST", headers,
-        body: JSON.stringify({ body: `@claude repo:${repository} machine:${machineA} fix the bug` }) });
+        body: JSON.stringify({ body }) });
       assert.equal(response.status, 200, await response.clone().text());
       const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
         message => message.metadata?.kind === "xmatrix.quota-retry-offer", "initial quota wait offer", 30_000);
@@ -98,6 +100,18 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       assert.match(command.prompt, /fix the bug/);
       const launches = await inTestTransaction(tx => tx.query({ text: "SELECT launch_id FROM data.agent_launches WHERE channel_id=$1", values: [channel.id] }));
       assert.equal(launches.length, 1);
+      const database = createAuthorityDatabase({ connectionString: testPostgresUrl(), shardId: "shard-0" });
+      const authority = new PostgresRegistrationLaunchRepository(database, database,
+        { spaceId, shardId: "shard-0", placementEpoch: 1 });
+      let choices = 0;
+      const replay = await authority.dispatchFromMessage({ commandId: `registration-launch:${notice.metadata.sourceMessageId}`,
+        actorUserId: userId, channelId: channel.id, sourceMessageId: notice.metadata.sourceMessageId, body }, async () => {
+        choices++;
+        throw new Error("Already admitted work must not select another Agent");
+      });
+      assert.equal(choices, 0, "late replay of the original dispatch recovers the quota retry's existing attempt");
+      assert.equal(replay.prepared.length, 1);
+      assert.equal(replay.prepared[0].runId, command.runId);
       return;
     }
 
@@ -174,6 +188,8 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
     if (waitForQuota) {
       const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
         message => message.metadata?.kind === "xmatrix.quota-retry-offer", "quota wait offer", 30_000);
+      assert.ok(notice.body.startsWith("xMatrix could not complete this claude turn: You've hit your session limit · resets 10:20am (UTC)"),
+        "the recovery offer preserves the provider's original error and reset hint");
       const id = notice.metadata.xmatrixQuotaRetryId;
       const { read, pick } = quotaChoice(worker, channel.id, id, headers);
       assert.equal((await read()).state, "offered");

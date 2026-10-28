@@ -6,6 +6,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { useOnboardingLocale } from "@/lib/onboarding-locale";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 import { ProblemCard } from "./problem-card";
+import { turnFailureSummary } from "./turn-failure";
 /** Mounting only reads the offer. The author explicitly selects waiting;
  * the Hub's durable coordinator works even while every browser is closed. */
 export function QuotaRetryNotice({
@@ -92,11 +93,11 @@ export function QuotaRetryNotice({
   return (
     <ProblemCard
       icon={<Clock className="size-[18px]" />}
-      title={zh ? "暂时没有 Agent 能接手" : "No Agent can take over right now"}
+      title={turnFailureSummary(body) || (zh ? "供应商账号已达到用量上限" : "Provider account usage limit reached")}
       explanation={
         zh
-          ? "选择等待后，xMatrix 会在确认供应商额度恢复时重试。关闭网页也会保留，等待最多 35 天。"
-          : "Choose to wait and xMatrix will retry once it confirms provider quota is available. You can close this page. Waiting lasts up to 35 days."
+          ? "目前没有其他 Agent 能接手。你可以选择等待，xMatrix 会在确认额度恢复后自动重试。关闭网页也会保留，等待最多 35 天。"
+          : "No other Agent can take over right now. Choose to wait and xMatrix will retry once it confirms quota is available. You can close this page. Waiting lasts up to 35 days."
       }
       status={
         state
