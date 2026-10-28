@@ -84,6 +84,17 @@ content and short cells keep to one line, and a page's reminders read as their
 names in ink instead of sky-blue pills. Web only; recovery is a beta Web
 reverting this change.
 
+## Unreleased: The iOS swipe back shows its parent once
+
+An iPhone edge swipe now reveals the parent screen directly. The Web page
+commits Back synchronously under UIKit's moving snapshot, without starting a
+second Web animation of the outgoing conversation. This fixes the appearance
+of returning to the current conversation before reaching its channel list.
+The existing iOS bridge is unchanged, so the fix reaches current TestFlight
+apps through the beta Web; no new native build or migration is required.
+Chevron, Android and browser Back keep their Web transitions. Recovery is a
+new beta Web reverting this change.
+
 ## Unreleased: The iOS swipe back follows the finger again
 
 On iPhone, dragging from the left edge moves the screen with the finger again.
