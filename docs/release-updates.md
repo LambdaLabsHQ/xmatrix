@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: An empty Channel cannot keep another Channel's history
+
+A connected focus request stamps its target before its history arrives. An
+empty fallback page could therefore mistake the previous Channel's retained
+rows for the target's current window and keep them. Returning to the previous
+Channel then showed a blank until the next read restored its render authority.
+The empty-page guard and merge base now verify the rows' Channel as well as
+the focus refs. The existing painted-frame switch case covers a connected
+socket with a delayed focus page and an empty HTTP fallback; it fails before
+the fix. Beta Web only, no API, schema or native change; recovery uses a
+CI-validated beta Web reverting this change.
+
 ## Unreleased: Slow Channel opens keep their messages in place
 
 A Channel's hidden virtual list could finish measuring after the 1.2-second

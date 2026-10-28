@@ -970,9 +970,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     // A later empty refresh must not replace a focus page that already
     // landed. Click-delayed effect work used to win this race and paint
     // "No messages yet." after user_focus_channel had already answered.
+    // Focus stamps the target ref before its page arrives; retained rows
+    // still belong to the previous Channel until they are actually replaced.
     if (
       channelMessages.length === 0 &&
       historyRef.current.length > 0 &&
+      historyRef.current.every((entry) => entry.channelId === channelId) &&
       selectedChannelIdRef.current === channelId &&
       historyChannelIdRef.current === channelId
     ) {
@@ -1003,7 +1006,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   /** The window held for a Channel: its presented rows when selected, else its cache. */
   const heldChannelWindow = useCallback((channelId: string, absentHasOlder: boolean) => {
-    if (selectedChannelIdRef.current === channelId && historyChannelIdRef.current === channelId) {
+    if (selectedChannelIdRef.current === channelId && historyChannelIdRef.current === channelId &&
+        historyRef.current.every((entry) => entry.channelId === channelId)) {
       return { messages: historyRef.current, hasOlder: hasOlderMessagesRef.current };
     }
     const cached = historyCacheRef.current.get(channelId);
