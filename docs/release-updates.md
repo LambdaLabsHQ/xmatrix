@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: The iOS swipe back follows the finger again
+
+On iPhone, dragging from the left edge moves the screen with the finger again.
+Let go far or fast enough and the screen goes Back to its parent (a
+conversation to its channel list, a page to the page list) and slides off;
+short of that it settles back. #1027 had replaced WebKit's history swipe with
+one that acted only on release and waited behind the page's own scrolling, so
+the gesture felt gone. Back still never walks browser history. This ships in
+the iOS app (TestFlight); Web and Android are unchanged. Recovery is a new
+iOS build reverting this change.
+
 ## Unreleased: Machine registry rejections retain their cause
 
 The daemon socket keeps the exact registry fence and legacy compatibility,
