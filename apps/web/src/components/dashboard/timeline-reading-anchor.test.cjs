@@ -117,7 +117,12 @@ function timeline({ userAgent = DESKTOP } = {}) {
     resize() { for (const observer of observers) if (observer.connected) observer.callback(); },
     scrollDrift() { contentTop += 1; listeners.get("scroll")?.(); },
     /** Someone else scrolls the timeline: the reader, or the virtualizer. */
-    scrollBy(delta) { root.scrollTop += delta; contentTop -= delta; listeners.get("scroll")?.(); },
+    scrollBy(delta, { input = false } = {}) {
+      if (input) listeners.get("wheel")?.({ type: "wheel" });
+      root.scrollTop += delta;
+      contentTop -= delta;
+      listeners.get("scroll")?.();
+    },
     /** A row above grows; the next resize puts the reader's row back. */
     growAbove(delta) { contentTop += delta; },
     advance: clock.advance,
@@ -140,6 +145,26 @@ test("continuous scroll drift without another resize still releases at the deadl
   assert.equal(view.pendingTimers(), 0);
 });
 
+test("continued reader input renews the deadline, passive drift cannot renew it", () => {
+  const view = timeline();
+  view.start();
+  view.resize();
+  for (let time = 500; time <= 12_000; time += 500) {
+    view.advance(time);
+    view.scrollBy(-40, { input: true });
+    assert.equal(view.active(), true);
+  }
+  // Keep the layout noisy after the reader stops: it still has a hard limit.
+  for (let time = 12_500; time < 22_000; time += 500) {
+    view.advance(time);
+    view.scrollDrift();
+    assert.equal(view.active(), true);
+  }
+  view.advance(22_000);
+  assert.equal(view.active(), false);
+  assert.equal(view.pendingTimers(), 0);
+});
+
 test("quiet layout releases early and cancels its deadline", () => {
   const view = timeline();
   view.start();
@@ -155,6 +180,8 @@ test("explicit release and replacement cancel every previous timer", () => {
   const view = timeline();
   view.start();
   view.resize();
+  view.advance(300);
+  view.scrollBy(-40, { input: true });
   view.advance(500);
   view.start();
   view.resize();

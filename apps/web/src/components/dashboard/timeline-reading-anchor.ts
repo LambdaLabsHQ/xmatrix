@@ -22,10 +22,9 @@ interface ReadingAnchor {
 /* A settled prepend stops being corrected after this long without activity, so
    later growth (a new message, a late image) behaves like any other layout. */
 const READING_ANCHOR_SETTLE_MS = 750;
-/* Hard ceiling for a continuously changing prepend. Slow renderers can take
-   more than three seconds to finish the virtualizer's measurements and final
-   scroll compensation. Keep that correction window open; the much shorter
-   quiet-period timer still releases an ordinarily settled prepend. */
+/* Passive layout drift cannot keep an anchor alive indefinitely. Further
+   reader input renews this bounded window, so it cannot expire mid-scroll on
+   a slow renderer. The quiet timer still releases an ordinarily settled page. */
 const READING_ANCHOR_MAX_MS = 10_000;
 
 /* The row wrapper carries the anchor id; its last child is the message row
@@ -96,8 +95,10 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
     let { offset } = pending.anchor;
     const startedAt = performance.now();
     let lastActivityAt = startedAt;
+    let lastInputAt = startedAt;
     let corrected = false;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
 
     const anchorTop = (): number | null => {
       const content = readingAnchorContent(root, rowId);
@@ -136,13 +137,16 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       followInput();
       inputScrollTop = root.scrollTop;
       lastActivityAt = performance.now();
+      lastInputAt = lastActivityAt;
+      if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+      deadlineTimer = setTimeout(release, READING_ANCHOR_MAX_MS);
     };
 
     /* ResizeObserver callbacks run after layout and before paint, and after
        the virtualizer's own animation-frame scroll adjustments, so the
        correction always has the last word in the frame the reader sees. */
     const correctLayout = () => {
-      if (performance.now() - startedAt > READING_ANCHOR_MAX_MS) {
+      if (performance.now() - lastInputAt > READING_ANCHOR_MAX_MS) {
         release();
         return;
       }
@@ -202,14 +206,14 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       }, Math.max(0, READING_ANCHOR_SETTLE_MS - idle));
     };
     scheduleSettle();
-    // Scroll corrections can keep the quiet timer busy without another resize.
-    const deadlineTimer = setTimeout(release, READING_ANCHOR_MAX_MS);
+    // Only reader input renews this deadline, never passive scroll corrections.
+    deadlineTimer = setTimeout(release, READING_ANCHOR_MAX_MS);
 
     releaseRef.current = () => {
       observer.disconnect();
       mutations.disconnect();
       if (settleTimer !== null) clearTimeout(settleTimer);
-      clearTimeout(deadlineTimer);
+      if (deadlineTimer !== null) clearTimeout(deadlineTimer);
       root.removeEventListener("scroll", onScroll);
       for (const event of inputEvents) root.removeEventListener(event, onInput);
     };

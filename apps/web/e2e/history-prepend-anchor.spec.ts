@@ -25,7 +25,7 @@ const HISTORY = Array.from({ length: 56 }, (_, index) => ({
 
 /* `prepended`: the older page has reached the DOM - its rows, the
    virtualizer's prepend margin, or the scroll that absorbs it. */
-type Frame = { textTop: number | null; scrollTop: number; prepended: boolean };
+type Frame = { elapsedMs: number; textTop: number | null; scrollTop: number; prepended: boolean };
 
 /**
  * Scroll to `startScrollTop` (which pages in 47 and older), then scroll up by
@@ -46,6 +46,7 @@ async function sampleReaderAcrossPrepend(
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: options.cpuRate ?? 8 });
 
   const frames = await timeline.evaluate(async (root, { startScrollTop, step, frames: count }) => {
+    const startedAt = performance.now();
     root.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
     root.scrollTo({ top: startScrollTop });
     const rootTop = root.getBoundingClientRect().top;
@@ -68,6 +69,7 @@ async function sampleReaderAcrossPrepend(
     const sample = () => {
       const list = root.querySelector<HTMLElement>("[data-testid='virtuoso-item-list']");
       return {
+        elapsedMs: performance.now() - startedAt,
         textTop: textTop(),
         scrollTop: root.scrollTop,
         prepended: Boolean(document.getElementById("message:message-anchor-46")) ||
