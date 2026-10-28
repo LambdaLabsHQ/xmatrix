@@ -203,7 +203,7 @@ test("the list adds a newly committed conversation from the Space catalog revisi
       }));
     });
   });
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const pageResponse = (revision: number, channels: typeof E2E_CHANNEL[]) => ({
     protocolVersion: 1,
     catalogRevision: revision,
@@ -215,18 +215,22 @@ test("the list adds a newly committed conversation from the Space catalog revisi
     nextCursor: null,
     counts: { active: channels.length, archive: 0, unread: 0, mentions: 0 },
   });
-  await fixtureRule(page, {
-    id: "flat-catalog-revision",
-    pattern: /\/api\/xmatrix\/channels\/page\?.*view=flat/u,
-    responder: { kind: "sequence", responses: [
-      { json: pageResponse(1, [E2E_CHANNEL]) },
-      { json: pageResponse(2, [thread, E2E_CHANNEL]) },
-    ] },
+  const catalogPattern = /\/api\/xmatrix\/channels\/page\?.*view=flat/u;
+  await fixtureJson(page, "flat-catalog-revision", catalogPattern, pageResponse(1, [E2E_CHANNEL]));
+  await page.goto(`/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, {
+    waitUntil: "domcontentloaded",
   });
 
   await expect(page.locator(`[data-channel-row-id="${E2E_CHANNEL.id}"]`)).toBeVisible();
+  // Extra initial reads must not manufacture a catalog revision before its commit.
+  const reads = (await fixtureRequests(page, "flat-catalog-revision")).length;
+  await page.evaluate(spaceId => window.dispatchEvent(new CustomEvent(
+    "xmatrix:channel-catalog-change", { detail: { spaceId, kind: "structure" } },
+  )), E2E_SPACE.id);
+  await expect.poll(async () => (await fixtureRequests(page, "flat-catalog-revision")).length).toBeGreaterThan(reads);
   await expect(page.locator(`[data-channel-row-id="${thread.id}"]`)).toHaveCount(0);
   await expect.poll(() => Boolean(publishCatalogChange)).toBe(true);
+  await fixtureJson(page, "flat-catalog-revision", catalogPattern, pageResponse(2, [thread, E2E_CHANNEL]));
   publishCatalogChange!();
   await expect(page.locator(`[data-channel-row-id="${thread.id}"]`)).toBeVisible();
 });
