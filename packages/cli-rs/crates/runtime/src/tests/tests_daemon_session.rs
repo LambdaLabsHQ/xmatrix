@@ -4,6 +4,15 @@ use super::run_worktree;
 use super::select_headless_wrapper_executable;
 use super::{CodexTurnRequest, ImageBlockShape, MachineWorktreeDisposition, prompt_content_blocks};
 
+fn restore_daemon_test_env<const N: usize>(names: [&str; N], previous: [Option<std::ffi::OsString>; N]) {
+    for (name, value) in names.into_iter().zip(previous) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+}
+
 fn daemon_test_session(token: &str) -> super::config::CliSession {
     super::config::CliSession {
         token: token.to_string(),
@@ -1867,12 +1876,7 @@ fn a_refused_run_credential_is_refreshed_once_before_registering_again() {
             refresh.await.unwrap();
         }
     });
-    for (name, value) in names.into_iter().zip(previous) {
-        match value {
-            Some(value) => unsafe { std::env::set_var(name, value) },
-            None => unsafe { std::env::remove_var(name) },
-        }
-    }
+    restore_daemon_test_env(names, previous);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -2169,15 +2173,7 @@ fn claude_reborn_in_a_foreign_cwd_is_refused_before_spawn() {
         "{missing}"
     );
 
-    for (name, value) in ["XMATRIX_CONFIG_DIR", "CLAUDE_CONFIG_DIR"]
-        .into_iter()
-        .zip(previous)
-    {
-        match value {
-            Some(value) => unsafe { std::env::set_var(name, value) },
-            None => unsafe { std::env::remove_var(name) },
-        }
-    }
+    restore_daemon_test_env(["XMATRIX_CONFIG_DIR", "CLAUDE_CONFIG_DIR"], previous);
     let _ = std::fs::remove_dir_all(root);
 }
 

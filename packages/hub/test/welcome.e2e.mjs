@@ -81,7 +81,7 @@ test("once an agent is in, xMatrix says so in the welcome, once", () =>
       text: `UPDATE data.machine_daemons SET metadata_json=jsonb_set(metadata_json,'{harnesses}',$2::jsonb)
         WHERE machine_id=$1`,
       values: [machineId, JSON.stringify({ schemaVersion: 1, capturedAt: new Date().toISOString(),
-        items: [{ id: "codex", installed: true, probeStatus: "ok", login }] })],
+        items: [{ id: "codex", installed: true, probeStatus: "ok", version: "0.130.0", login }] })],
     }));
     // Registration alone does not mean the provider's program can answer.
     // The stored fallback text must agree with the Web's sign-in card.
