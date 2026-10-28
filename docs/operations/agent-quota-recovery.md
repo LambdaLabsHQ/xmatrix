@@ -12,6 +12,8 @@ The provider's original error leads the recovery card, including its reset hint;
 the explanation then describes the failed handoff and the optional wait. A
 pre-launch quota check has no provider error text, so it uses a usage-limit
 heading. Waiting, retrying and cancellation appear in the separate status line.
+Each completed choice restarts the bounded status read and discards crossed,
+older reads; a lost browser response does not replace the Hub's stored choice.
 
 Only the authenticated Human whose task/Instance owns that offer can choose to
 wait. The additive Channel quota-retry API reads and changes the offer by its

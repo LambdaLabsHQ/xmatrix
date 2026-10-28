@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, E2E_USER_SENDER,
-  fixtureJson, fixtureRule, fixtureRequestBodies, openWorkspaceWithStubs } from "./workspace-fixtures";
+  fixtureJson, fixtureRule, fixtureRequestBodies, fixtureRequests, releaseFixture, openWorkspaceWithStubs } from "./workspace-fixtures";
 import type { AgentQuotaRetry } from "@xmatrix/protocol";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -25,6 +25,7 @@ async function openOffer(page: Parameters<typeof openWorkspaceWithStubs>[0], can
   ] } });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
   return { card: page.getByRole("group", { name: providerError ? originalError : "Provider account usage limit reached" }),
+    pattern, value,
     actions: () => fixtureRequestBodies(page, "quota-choice"),
     showWaitingOnReload: async () => {
       await fixtureJson(page, "quota-read", pattern, value("waiting"), { method: "GET" });
@@ -34,9 +35,10 @@ async function openOffer(page: Parameters<typeof openWorkspaceWithStubs>[0], can
 }
 
 test("waiting requires an explicit choice, survives reload and can be cancelled without another send", async ({ page }) => {
-  const { card, actions, showWaitingOnReload } = await openOffer(page);
+  const { card, actions, showWaitingOnReload, pattern, value } = await openOffer(page);
   await expect(card.getByRole("button", { name: "Retry when quota recovers" })).toBeVisible();
   expect(await actions()).toEqual([]);
+  await fixtureJson(page, "quota-read", pattern, value("waiting"), { method: "GET" });
   await card.getByRole("button", { name: "Retry when quota recovers" }).click();
   await expect(card.getByRole("status")).toHaveText("Queued, waiting for provider quota");
   expect(await actions()).toEqual([{ action: "wait" }]);
@@ -45,6 +47,7 @@ test("waiting requires an explicit choice, survives reload and can be cancelled 
   await page.reload();
   await expect(card.getByRole("button", { name: "Cancel waiting" })).toBeVisible();
   expect(await actions()).toEqual([{ action: "wait" }]);
+  await fixtureJson(page, "quota-read", pattern, value("cancelled"), { method: "GET" });
   await card.getByRole("button", { name: "Cancel waiting" }).click();
   await expect(card.getByRole("status")).toHaveText("Waiting cancelled");
   expect(await actions()).toEqual([{ action: "wait" }, { action: "cancel" }]);
@@ -56,4 +59,24 @@ test("other readers see the offer but cannot enroll its author's work", async ({
   await expect(card.getByRole("status")).toHaveText("Retry automatically when quota recovers?");
   await expect(card.getByRole("button")).toHaveCount(0);
   expect(await actions()).toEqual([]);
+});
+
+test("a choice restarts polling and a crossed older read cannot restore its previous state", async ({ page }) => {
+  await page.clock.install();
+  const { card, pattern, value } = await openOffer(page);
+  await expect(card.getByRole("button", { name: "Retry when quota recovers" })).toBeVisible();
+  await fixtureRule(page, { id: "quota-choice", pattern, method: "POST",
+    responder: { kind: "deferred", status: 202, json: value("waiting") } });
+  await fixtureRule(page, { id: "quota-stale-read", pattern, method: "GET",
+    responder: { kind: "deferred", json: value("offered") } });
+  await card.getByRole("button", { name: "Retry when quota recovers" }).click();
+  await page.clock.fastForward(30_001);
+  await expect.poll(() => fixtureRequests(page, "quota-stale-read")).toHaveLength(1);
+  await fixtureJson(page, "quota-current-read", pattern, value("dispatched"), { method: "GET" });
+  await releaseFixture(page, "quota-choice");
+  await expect(card.getByRole("status")).toHaveText("Retry submitted");
+  await releaseFixture(page, "quota-stale-read");
+  await page.clock.runFor(100);
+  await expect(card.getByRole("status")).toHaveText("Retry submitted");
+  expect(await fixtureRequestBodies(page, "quota-choice")).toEqual([{ action: "wait" }]);
 });
