@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Google authorization failures retain their cause category
+
+Google's Cloud-session reauthentication subtype was discarded, leaving the
+same `invalid_grant` message as an expired or revoked authorization. Google
+token requests now retain that typed distinction and identify rejected company
+app credentials, using fixed text without arbitrary provider details. Refresh
+scheduling, credential persistence and approval remain unchanged. Existing
+OAuth boundary coverage reproduces the missing subtype on prior code and
+checks refusal without retry or private-detail disclosure. Hub only, no
+migration; recovery is a CI-validated beta reverting this diagnostic change.
+See [Google grant expiration](operations/google-oauth-grants.md).
+
 ## Unreleased: Google Calendar connects separately
 
 Spaces can connect Google Calendar to read calendars, search events in an

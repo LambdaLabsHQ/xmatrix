@@ -1080,3 +1080,6 @@ Older receipts without a retained caller remain context. To diagnose delivery,
 check the App author, reply reference, Hub-only
 `xmatrixConnectorRequesterInstanceId` metadata, and the recipient's rest state;
 mutable Agent names and provider text are not routing authority.
+
+Google token failures and the Testing-to-production reconsent boundary are
+documented in [Google OAuth grant expiration](google-oauth-grants.md).
