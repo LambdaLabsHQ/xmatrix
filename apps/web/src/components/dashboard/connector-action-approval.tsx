@@ -4,7 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2, Send, X } from "lucide-react";
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { actionClass } from "@/components/ui/action-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -62,15 +62,16 @@ export function ConnectorActionApproval({ request, token, userId }: {
     } catch (failure) { setError(userErrorMessage(failure, "Couldn't record your decision")); }
     finally { setBusy(false); }
   }
+  const app = APP_CONNECTOR_PROVIDER_MANIFESTS.find(manifest => manifest.id === request.providerId);
   let calendar: CalendarEventDraft | null = null;
-  let previewError: string | null = null;
-  if (request.providerId === "googlecalendar") {
+  let previewError: string | null = app ? null : `This web version does not know the app ${request.providerId}; reload to update it`;
+  if (app && request.providerId === "googlecalendar") {
     try { calendar = calendarEventDraft(request.preview); } catch (failure) { previewError = (failure as Error).message; }
   }
   const question = calendar ? calendarApprovalQuestion(calendar)
-    : request.providerId === "gmail" ? "Send this email?" : `Allow ${request.providerId} ${request.actionId}?`;
+    : request.providerId === "gmail" ? "Send this email?" : `Allow ${app?.name ?? request.providerId} ${request.actionId}?`;
   return (
-    <AskCard who={request.providerId} kind="Action approval" icon={<Send className="size-3.5" />}
+    <AskCard who={app?.name ?? request.providerId} kind="Action approval" icon={<Send className="size-3.5" />}
       open={!settled} question={question}
       detail="Your answer covers this request only. The next request asks again."
       status={settled ? { tone: "settled", label: settled } : null}>

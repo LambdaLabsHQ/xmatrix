@@ -1,4 +1,4 @@
-import { Bell, CalendarDays, MapPin, Repeat, Users } from "lucide-react";
+import { Bell, CalendarDays, Eye, MapPin, Repeat, Users } from "lucide-react";
 
 /**
  * The event a Google Calendar write would leave behind, read as an event and
@@ -27,6 +27,12 @@ export interface CalendarEventDraft {
   sendUpdates?: "all" | "externalOnly" | "none";
   /** For one event of a repeating series: the whole series or this occurrence. */
   series?: "all" | "this";
+  /** Who sees the event's details, when not the calendar's default. */
+  visibility?: string;
+  /** `transparent` when the event leaves the time free. */
+  transparency?: string;
+  /** Why the guest list shown may be incomplete. */
+  guestsIncomplete?: string;
   /** The exact PATCH body of an update, in Google's field names; `[]` or `""` clears a field. */
   changes?: Record<string, unknown>;
 }
@@ -36,7 +42,9 @@ const SEND_UPDATES = { all: "Emails every guest", externalOnly: "Emails only gue
 /** Google's field names, in the words the card uses for them. */
 const FIELD_NAMES: Record<string, string> = {
   summary: "title", start: "time", end: "time", location: "place", description: "notes", attendees: "guests", recurrence: "repeat",
+  visibility: "visibility", transparency: "busy status",
 };
+const VISIBILITY: Record<string, string> = { private: "Private: only guests see the details", confidential: "Private: only guests see the details", public: "Public: anyone with the calendar sees the details" };
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -66,6 +74,9 @@ export function calendarEventDraft(preview: Record<string, string>): CalendarEve
     ...(sendUpdates ? { sendUpdates: sendUpdates as keyof typeof SEND_UPDATES } : {}),
     ...(series ? { series } : {}),
     ...(changes ? { changes } : {}),
+    ...(preview.visibility ? { visibility: preview.visibility } : {}),
+    ...(preview.transparency ? { transparency: preview.transparency } : {}),
+    ...(preview.guestsIncomplete ? { guestsIncomplete: preview.guestsIncomplete } : {}),
   };
 }
 
@@ -158,6 +169,7 @@ export function CalendarEventPreview({ draft, locale }: { draft: CalendarEventDr
   const repeats = draft.recurrence && draft.recurrence !== NO_RECURRENCE ? draft.recurrence.split("\n").map(line => line.trim()).filter(Boolean) : [];
   const scope = draft.series === "all" ? (removed ? "Every event in the series" : "Applies to every event in the series")
     : draft.series === "this" ? (removed ? "Only this occurrence" : "Applies to this occurrence only") : null;
+  const visibility = draft.visibility && draft.visibility !== "default" ? VISIBILITY[draft.visibility] ?? draft.visibility : null;
   const changeSummary = draft.change === "update" && draft.changes ? calendarChangeSummary(draft.changes) : "";
   return (
     <div className="mt-3 flex min-w-0 gap-3" data-calendar-event={draft.change}>
@@ -167,7 +179,7 @@ export function CalendarEventPreview({ draft, locale }: { draft: CalendarEventDr
       </div>
       <div className={`min-w-0 flex-1 text-sm ${removed ? "text-muted-foreground" : ""}`}>
         <p className="text-[15px] font-bold leading-snug [overflow-wrap:anywhere]">{draft.title}</p>
-        <p className="mt-0.5">{calendarEventWhen(draft, locale)}</p>
+        <p className="mt-0.5">{calendarEventWhen(draft, locale)}{draft.transparency === "transparent" ? " · Shows as free" : ""}</p>
         {changeSummary || scope ? <p className="mt-1 font-semibold">{[changeSummary, scope].filter(Boolean).join(" · ")}</p> : null}
         {repeats.length ? <p className="mt-1.5 flex min-w-0 items-start gap-1.5 text-muted-foreground">
           <Repeat className="mt-0.5 size-3.5 shrink-0" aria-label="Repeats" />
@@ -185,6 +197,11 @@ export function CalendarEventPreview({ draft, locale }: { draft: CalendarEventDr
           <CalendarDays className="mt-0.5 size-3.5 shrink-0" aria-label="Calendar" />
           <span className="[overflow-wrap:anywhere]">{draft.calendar}</span>
         </p>
+        {draft.guestsIncomplete ? <p className="mt-1 text-destructive">{draft.guestsIncomplete}</p> : null}
+        {visibility ? <p className="mt-1 flex min-w-0 items-start gap-1.5 text-muted-foreground">
+          <Eye className="mt-0.5 size-3.5 shrink-0" aria-label="Visibility" />
+          <span>{visibility}</span>
+        </p> : null}
         {draft.sendUpdates ? <p className="mt-1 flex min-w-0 items-start gap-1.5 text-muted-foreground">
           <Bell className="mt-0.5 size-3.5 shrink-0" aria-label="Notifications" />
           <span>{SEND_UPDATES[draft.sendUpdates]}</span>

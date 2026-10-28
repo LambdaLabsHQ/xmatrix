@@ -280,13 +280,13 @@ test("a Google Calendar change says what it changes and clears, for which events
     preview: { change: "update", event: "Weekly sync", calendar: "team@example.test", title: "Weekly planning",
       start: "2026-11-02T10:00:00-08:00", end: "2026-11-02T10:30:00-08:00", timeZone: "America/Los_Angeles",
       guests: "a@example.test, b@example.test", optionalGuests: "b@example.test", recurrence: "RRULE:FREQ=WEEKLY;BYDAY=MO",
-      sendUpdates: "externalOnly", series: "all", recurringEventId: "series-1",
+      sendUpdates: "externalOnly", series: "all", recurringEventId: "series-1", visibility: "private", transparency: "transparent",
       changes: JSON.stringify({ summary: "Weekly planning", location: "", attendees: [{ email: "a@example.test" }] }) } };
   await openCards(page, [], [], VALUE_ASKED, [request]);
   const approval = page.getByRole("region", { name: "Pending approvals" });
   await expect(approval.getByRole("heading", { name: "Change “Weekly sync” to this?" })).toBeVisible();
   for (const text of ["Changes title and guests · Clears place · Applies to every event in the series", "a@example.test, b@example.test (optional)",
-    "Weekly on Mon", "Emails only guests outside your organization"]) {
+    "Weekly on Mon", "Emails only guests outside your organization", "Private: only guests see the details", "Google Calendar asks · Action approval"]) {
     await expect(approval.getByText(text, { exact: true })).toBeVisible();
   }
 });
