@@ -99,6 +99,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't restart the Agent",
   "Couldn't restore the Space",
   "Couldn't restore the purchase",
+  "Couldn't run it again",
   "Couldn't run the Automation",
   "Couldn't save secret",
   "Couldn't save setup status",

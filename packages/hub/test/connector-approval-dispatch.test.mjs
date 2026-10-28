@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as protocol from "@xmatrix/protocol";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
-import { ProviderRequestError } from "../src/connectors/http.ts";
+import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts";
 import { commandResult } from "../src/connectors/command-support.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 
@@ -14,7 +14,7 @@ async function dispatcher({ providerId, spaceId, mode, repository, publish = asy
       withExecution: async (manifest, _input, _scope, action, run) => commandResult(manifest.name, action.id, await run()),
       publishCommandStatus: publish },
     "./credentials": { connectorPermissionRepository: () => ({ mode }), connectorActionRequestRepository: () => repository },
-    "./http": { ProviderRequestError },
+    "./http": { ConnectorRemedy, ProviderRequestError },
     "../usage-cost-metering": metering,
     ...imports,
   };

@@ -1,5 +1,5 @@
 import { connectorReceiptBody, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
-import type { AppConnectorProviderManifest } from "@xmatrix/protocol";
+import type { AppConnectorProviderManifest, AppConnectorRemedy, ConnectorResultVisibility } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
 import { getChannel } from "../spaces";
@@ -60,25 +60,39 @@ function executionExcerpt(value: string, maximum: number): string {
   return excerpt.trimEnd();
 }
 
+/** How a command ended; a fixable failure names its fix. */
+export interface CommandOutcome {
+  status: "completed" | "failed" | "blocked";
+  summary: string;
+  remedy?: AppConnectorRemedy;
+}
+
+/** A remedy as its execution stores it: `reconnect` or `credential:<field>`. */
+function remedyCode(remedy: AppConnectorRemedy): string {
+  return remedy.kind === "reconnect" ? "reconnect" : `credential:${remedy.field}`;
+}
+
 /** The Channel's receipt for one command: the action, its outcome and what it returned. */
-export function commandResult(name: string, actionId: string,
-  outcome: { status: "completed" | "failed" | "blocked"; summary: string }): string {
+export function commandResult(name: string, actionId: string, outcome: CommandOutcome): string {
   return `${name} ${actionId}: ${outcome.status}; ${outcome.summary}${/[.!?。`]$/u.test(outcome.summary.trimEnd()) ? "" : "."}`;
 }
 
-/** Records one execution, runs it, and finalizes it with its receipt. */
+/** Records one execution, runs it, and finalizes it with its receipt. A read
+ * keeps its command and result visibility so the person can run it again. */
 export async function withExecution(
   manifest: AppConnectorProviderManifest,
   input: ConnectorCommandInput,
   scope: CommandScope,
-  action: { id: string; label: string; key: string },
-  run: () => Promise<{ status: "completed" | "failed" | "blocked"; summary: string }>,
+  action: { id: string; label: string; key: string; retry?: ConnectorResultVisibility },
+  run: () => Promise<CommandOutcome>,
 ): Promise<string> {
+  const retryCommand = action.retry && input.body.trim() && utf8ByteLength(input.body.trim()) <= 4_000 ? input.body.trim() : undefined;
   const executionId = `app-execution:${input.messageId}${action.key}:${manifest.id}:${action.id}`.slice(0, 240);
   await appCommand(input.env, "record-execution", {
     commandId: `product:${manifest.id}-record:${input.messageId}${action.key}`.slice(0, 200),
     executionId, connectionId: scope.connectionId, channelId: input.channelId, messageId: input.messageId,
     actionId: action.id, actionLabel: action.label.slice(0, 120), requestedByLabel: input.actorUserId,
+    ...(retryCommand ? { retryCommand, resultVisibility: action.retry } : {}),
     principal: scope.principal,
   });
   const outcome = await run();
@@ -87,7 +101,7 @@ export async function withExecution(
     executionId, expectedVersion: 1, status: outcome.status,
     ...(outcome.status === "completed"
       ? { resultSummary: executionExcerpt(outcome.summary, 1_000), resultChannelId: input.channelId }
-      : { reason: executionExcerpt(outcome.summary, 500) }),
+      : { reason: executionExcerpt(outcome.summary, 500), ...(outcome.remedy ? { remedy: remedyCode(outcome.remedy) } : {}) }),
     principal: scope.principal,
   });
   return commandResult(manifest.name, action.id, outcome);
