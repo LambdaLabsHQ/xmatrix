@@ -4,6 +4,7 @@ import { Client, Pool } from "pg";
 import { randomUUID } from "node:crypto";
 
 import { createAuthorityDatabase, databaseFailureEvidence } from "../dist/index.js";
+import { lockAgentRunChannels } from "../dist/agent-channel-access.js";
 
 
 integration("a real driver read timeout destroys its pooled connection without a rollback deadline", async () => {
@@ -132,5 +133,49 @@ integration("execution-owner lock failures retain the live blocker without ident
   } finally {
     try { await holder.query("ROLLBACK"); }
     finally { await isolated.close(); }
+  }
+});
+
+// HUB-AZ waits on the Channel before locking a Run. The execution-owner test
+// never enters this shared lifecycle lock, so it missed this diagnostic gap.
+integration("Agent message Channel lock failures retain either Channel's live blocker", async () => {
+  const isolated = await isolatedPostgres("channel_lock", { migrate: false, runtimeRole: false });
+  const holder = isolated.client;
+  let samples = 0;
+  const database = createAuthorityDatabase({ connectionString: isolated.url.toString(), shardId: "shard-0",
+    applicationName: "xmatrix-hub-message-authority", lockTimeoutMs: 1500,
+    clientFactory: config => {
+      if (config.application_name === "xmatrix-lock-diagnostic") samples++;
+      return new Client(config);
+    } });
+  try {
+    await holder.query("CREATE SCHEMA data; CREATE TABLE data.channels (channel_id text PRIMARY KEY)");
+    await holder.query("INSERT INTO data.channels VALUES ('private-a'),('private-b')");
+    for (const channel of ["private-a", "private-b"]) {
+      await holder.query("BEGIN; SET LOCAL application_name='xmatrix-agent-launch-coordinator'");
+      await holder.query("SELECT 1 FROM data.channels WHERE channel_id=$1 FOR UPDATE", [channel]);
+      await assert.rejects(database.transaction({ requestId: "private-request", operation: "message.append" },
+        tx => lockAgentRunChannels(tx, "private-b", "private-a")), error => {
+        assert.equal(error.code, "55P03");
+        const [evidence] = databaseFailureEvidence(error);
+        assert.equal(evidence.queryName, "channel_lifecycle_lock_runtime_new_work_v1");
+        assert.equal(evidence.lockWait?.status, "sampled");
+        assert.equal(evidence.lockWait.waiter.owner, "message");
+        assert.equal(evidence.lockWait.waiter.wait, "Lock");
+        assert.equal(evidence.lockWait.blockers[0].owner, "launch");
+        assert.equal(evidence.lockWait.blockers[0].state, "idle in transaction");
+        assert.ok(evidence.lockWait.blockers[0].ageMs >= 1);
+        assert.doesNotMatch(JSON.stringify(evidence), /private-|SELECT|postgres:\/\//u);
+        return true;
+      });
+      await holder.query("ROLLBACK");
+    }
+    assert.equal(samples, 2, "each failed Channel wait samples once");
+    await database.transaction({ requestId: "fast", operation: "message.append" },
+      tx => lockAgentRunChannels(tx, "private-b", "private-a"));
+    assert.equal(samples, 2, "uncontended Channel locks open no diagnostic connection");
+  } finally {
+    await holder.query("ROLLBACK").catch(() => {});
+    await isolated.close();
   }
 });

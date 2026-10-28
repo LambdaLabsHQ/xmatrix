@@ -38,7 +38,7 @@ interface DiagnosticClient {
   query(input: { text: string; values: unknown[] }): Promise<QueryResult>;
   end(): Promise<void>;
 }
-// At most one extra connection per isolate, only while the execution-owner query is slow.
+// At most one extra connection per isolate, only while a selected lock query is slow.
 let sampling = false;
 const projection = (alias: string) => `json_build_object(
   'state',CASE WHEN ${alias}.state IN ('active','idle in transaction','idle in transaction (aborted)','idle')
@@ -82,10 +82,11 @@ async function sample(backendPid: number, config: ClientConfig,
 }
 
 /** The owner awaits any started sample; fast queries cancel the timer without opening a connection. */
-export function watchExecutionOwnerWait(queryName: string, backendPid: number | undefined,
+export function watchPostgresLockWait(queryName: string, backendPid: number | undefined,
   options: { connectionString: string; lockTimeoutMs: number; clientFactory: (config: ClientConfig) => DiagnosticClient },
 ): (() => Promise<PostgresLockWait | undefined>) | undefined {
-  if (queryName !== "runtime_execution_report_owner_v4" || !backendPid) return;
+  if (!["runtime_execution_report_owner_v4", "channel_lifecycle_lock_runtime_new_work_v1"].includes(queryName) ||
+      !backendPid) return;
   let pending: Promise<PostgresLockWait> | undefined;
   const timer = setTimeout(() => {
     pending = sample(backendPid, { connectionString: options.connectionString }, options.clientFactory);
