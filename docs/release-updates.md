@@ -63,9 +63,13 @@ update is needed. Recovery uses a CI-validated beta Hub reverting this change.
 ## Unreleased: History anchoring regressions fail on the first attempt
 
 The history-prepend reading-position spec overrides shared CI retries and runs
-each case once. A measured jump can no longer become a successful stable gate
-by passing a retry. Assertions and CPU throttling are unchanged; unrelated Web
-specs retain their existing retry policy. This tightens the existing test gate
+each case once. Frames are read in a task posted after animation-frame work,
+without installing a ResizeObserver that changes layout delivery order. Both
+scroll directions are covered, and raw frame coordinates are attached to the
+result. The downward case stays short of the finite tail and verifies that it
+has room to move. A measured jump cannot become a successful stable gate by
+passing a retry. Position tolerances and CPU throttling are unchanged; unrelated
+Web specs retain their existing retry policy. This tightens the existing test gate
 without changing deployment, signing or publication authority. A known reading
 regression is repaired on main and verified in a new beta before another stable
 request; runner setup failures retain the existing failed-job recovery path.
