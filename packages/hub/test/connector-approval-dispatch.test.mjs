@@ -102,3 +102,22 @@ test("X allow uploads freeze input and queue once; only the durable executor per
   assert.equal((await commands.executeDurableXUpload({}, stage)).status, "blocked");
   assert.equal(writes, 1, "a current denial prevents provider I/O");
 });
+
+// The generic Gmail case owns ask/allow/deny. Calendar additionally owns the
+// structured preview handoff: falling back to raw JSON hides the real destination.
+test("Calendar approval stores the prepared event preview without executing the write", async () => {
+  let staged, writes = 0;
+  const preview = { change: "update", calendar: "owner@example.com", title: "Changed meeting", start: "2026-10-29", end: "2026-10-30", sendUpdates: "all" };
+  const commands = await dispatcher({ providerId: "googlecalendar", spaceId: "s", mode: async () => null,
+    repository: { find: async () => null, create: async input => { staged = input; return { requestId: input.requestId, status: "pending" }; } },
+    imports: { "./connection-credentials": { connectionCredentials: async () => ({ oauthToken: "a" }) },
+      "../workspace-resource-notification": { notifyWorkspaceResource: async () => {} } } });
+  const action = { effect: "write", requires: ["oauthToken"], parse: () => ({ calendar: "primary" }),
+    prepare: async () => ({ calendar: "owner@example.com", preview: JSON.stringify(preview), body: '{"summary":"Changed meeting"}' }),
+    execute: async () => { writes++; return { summary: "updated" }; } };
+  const result = await commands.runConnectorAction("googlecalendar", { env: {}, channelId: "c", messageId: "m", actorUserId: "owner", senderKind: "agent", senderId: "instance" }, "update_event", action, { target: "primary", text: "event JSON" });
+  assert.match(result, /awaiting approval/u);
+  assert.deepEqual(staged.payload.preview, preview);
+  assert.equal(staged.payload.prepared.calendar, "owner@example.com");
+  assert.equal(writes, 0);
+});

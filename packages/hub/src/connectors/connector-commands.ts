@@ -251,7 +251,8 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
       if (typeof context === "string") return result("blocked", context);
       const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
-      const preview = providerId === "gmail"
+      const preview = providerId === "googlecalendar" ? JSON.parse(prepared.preview!) as Record<string, string>
+        : providerId === "gmail"
         ? Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]))
         : providerId === "x" && actionId === "accounts" ? { account: "Connected X accounts owned by the requesting member", text: "List handles and account IDs" }
         : providerId === "x" ? { account: `@${prepared.accountUsername} (X account ${prepared.accountId})`,

@@ -19,6 +19,7 @@ import { GITLAB_ACTIONS, verifyGitLab } from "./actions/gitlab";
 import { JIRA_ACTIONS, verifyJira } from "./actions/jira";
 import { LINEAR_ACTIONS, verifyLinear } from "./actions/linear";
 import { NOTION_ACTIONS, verifyNotion } from "./actions/notion";
+import { GOOGLE_CALENDAR_ACTIONS, verifyGoogleCalendar } from "./actions/google-calendar";
 import { GOOGLE_ACTIONS, verifyGoogle } from "./actions/google";
 import { GOOGLE_SEARCH_CONSOLE_ACTIONS, verifyGoogleSearchConsole } from "./actions/google-search-console";
 import { BING_WEBMASTER_ACTIONS, verifyBingWebmaster } from "./actions/bing-webmaster";
@@ -85,6 +86,7 @@ const PROVIDERS: Record<string, {
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },
   notion: { actions: NOTION_ACTIONS, verify: verifyNotion },
+  googlecalendar: { actions: GOOGLE_CALENDAR_ACTIONS, verify: verifyGoogleCalendar },
   google: { actions: GOOGLE_ACTIONS, verify: verifyGoogle },
   googlesearchconsole: { actions: GOOGLE_SEARCH_CONSOLE_ACTIONS, verify: verifyGoogleSearchConsole },
   bingwebmaster: { actions: BING_WEBMASTER_ACTIONS, verify: verifyBingWebmaster },

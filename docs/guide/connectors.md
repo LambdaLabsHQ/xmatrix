@@ -84,6 +84,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Stripe | `stripe` | Every event of an object | |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, sitemaps, properties, verification |
+| Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event` (writes ask by default; [guide](../connectors/google-calendar.md)) |
 | Google Analytics | `googleanalytics` | | `list_properties`, `report` |
 | Google Ads | `googleads` | | `list_accounts`, `read_account`, `query`, `validate_mutations`; `mutate`, `set_campaign_status` (ask by default) |
 | Google Business Profile | `googlebusinessprofile` | | `list_accounts`, `list_locations`, `performance`, `reviews`, `reply_review` |

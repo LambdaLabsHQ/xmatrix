@@ -242,6 +242,14 @@ Testing users must meet Google's verification requirements.
 See [Search Console API](https://developers.google.com/webmaster-tools/v1/api_reference_index)
 and [Site Verification API](https://developers.google.com/site-verification/v1).
 
+Google Calendar is a separate `googlecalendar` connection on the company Google
+client, with calendar-list read, event read/write and free/busy scopes. Its
+seven bounded actions use existing private reads and per-request approvals;
+prepared writes freeze the resolved calendar ID, exact changes and event ETag.
+No calendar ACL writes or inbound subscriptions are exposed. See the
+[Calendar contract](../connectors/google-calendar.md) for API setup, concurrency,
+notification, recurrence and native acceptance boundaries.
+
 Google Analytics is a separate `googleanalytics` connection on the same
 company Google client, holding only
 `https://www.googleapis.com/auth/analytics.readonly`; like Search Console, the
