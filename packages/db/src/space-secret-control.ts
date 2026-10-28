@@ -5,16 +5,20 @@ import {
   type SpaceSecretAccess, type SpaceSecretEntry,
 } from "@xmatrix/protocol";
 
-import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import type { AuthorityDatabase, DatabaseQuery, DatabaseTransaction } from "./contracts.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { requireChannelCapability } from "./channel-capability-policy.js";
 import { inActiveSpace } from "./page-control.js";
 import { PostgresChannelSpaceDirectory } from "./placement.js";
 import { decryptSpaceSecretValue, encryptSpaceSecretValue, secretHmac } from "./secret-value-control.js";
 
-const MAX_SPACE_SECRETS = 128;
+const SECRET_READ_PAGE_ROWS = 128;
+const MAX_CATALOG_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_SECRET_READ_BYTES = 8 * 1024 * 1024;
 const MAX_VALUE_BYTES = 64 * 1024;
 const SECRET_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u;
+const SECRET_METADATA_COLUMNS = `s.space_id,s.secret_ref,s.env_name,s.description,s.access,
+  s.created_by_user_id,s.created_at,s.updated_at`;
 
 export class SpaceSecretError extends ControlError {
   override name = "SpaceSecretError";
@@ -118,13 +122,37 @@ async function liveRunSpace(tx: DatabaseTransaction, run: RunSecretCaller, use: 
   return run.spaceId;
 }
 
-async function runViews(tx: DatabaseTransaction, spaceId: string, runId: string, refs?: string[]) {
-  const rows = await tx.query({ name: "space_secret_run_views_v1", text: `SELECT s.*,
+/** Read the complete catalog without turning a query's row budget into a Space
+ * quota. Each keyset page has its own SQL bound; the transaction deadline and
+ * response byte budget bound the complete operation. */
+async function secretRows(tx: DatabaseTransaction, query: (after: string | null) => DatabaseQuery,
+  maxBytes: number): Promise<QueryResultRow[]> {
+  const rows: QueryResultRow[] = [];
+  let bytes = 0;
+  let after: string | null = null;
+  for (;;) {
+    const page: readonly QueryResultRow[] = await tx.query(query(after));
+    for (const row of page) {
+      bytes += utf8ByteLength(JSON.stringify(row));
+      if (bytes > maxBytes) throw new SpaceSecretError("secret_response_too_large", 413,
+        "Secret response exceeds the request byte budget");
+      rows.push(row);
+    }
+    if (page.length < SECRET_READ_PAGE_ROWS) return rows;
+    after = String(page[page.length - 1]!.secret_ref);
+  }
+}
+
+async function runViews(tx: DatabaseTransaction, spaceId: string, runId: string, refs?: string[], values = false) {
+  return secretRows(tx, (after) => ({ name: values ? "space_secret_run_values_v2" : "space_secret_run_views_v2",
+    text: `SELECT ${SECRET_METADATA_COLUMNS}${values ? `,s.value_version,
+    CASE WHEN s.access='auto' OR a.run_id IS NOT NULL THEN s.encrypted_value_json END AS encrypted_value_json` : ""},
     (s.access='auto' OR a.run_id IS NOT NULL) AS readable FROM data.space_secrets s
     LEFT JOIN data.run_secret_approvals a ON a.run_id=$2 AND a.secret_ref=s.secret_ref AND a.space_id=s.space_id
-    WHERE s.space_id=$1 AND ($3::text[] IS NULL OR s.secret_ref=ANY($3::text[])) ORDER BY s.secret_ref`,
-  values: [spaceId, runId, refs ?? null], maxRows: MAX_SPACE_SECRETS });
-  return rows;
+    WHERE s.space_id=$1 AND ($3::text[] IS NULL OR s.secret_ref=ANY($3::text[]))
+      AND ($4::text IS NULL OR s.secret_ref>$4) ORDER BY s.secret_ref LIMIT $5`,
+    values: [spaceId, runId, refs ?? null, after, SECRET_READ_PAGE_ROWS], maxRows: SECRET_READ_PAGE_ROWS }),
+  values ? MAX_SECRET_READ_BYTES : MAX_CATALOG_RESPONSE_BYTES);
 }
 
 export class PostgresSpaceSecretRepository {
@@ -142,8 +170,11 @@ export class PostgresSpaceSecretRepository {
       if (!memberRole || !SECRET_READERS.includes(memberRole)) {
         throw new SpaceSecretError("forbidden", 403, "Only a Space member sees its secrets");
       }
-      const rows = await tx.query({ name: "space_secret_list_v1", text: `SELECT * FROM data.space_secrets
-        WHERE space_id=$1 ORDER BY secret_ref`, values: [input.spaceId], maxRows: MAX_SPACE_SECRETS });
+      const rows = await secretRows(tx, (after) => ({ name: "space_secret_list_v2",
+        text: `SELECT ${SECRET_METADATA_COLUMNS} FROM data.space_secrets s
+          WHERE s.space_id=$1 AND ($2::text IS NULL OR s.secret_ref>$2) ORDER BY s.secret_ref LIMIT $3`,
+        values: [input.spaceId, after, SECRET_READ_PAGE_ROWS], maxRows: SECRET_READ_PAGE_ROWS }),
+      MAX_CATALOG_RESPONSE_BYTES);
       return { secrets: rows.map(entry), canManage: SECRET_ADMINS.includes(memberRole) };
     });
   }
@@ -191,7 +222,7 @@ export class PostgresSpaceSecretRepository {
     if (refs === null) throw new SpaceSecretError("invalid_request", 400, "secretRefs is invalid");
     return this.inSpace(run.spaceId, "space-secret.run-read", async (tx) => {
       const spaceId = await liveRunSpace(tx, run, "read");
-      const rows = await runViews(tx, spaceId, run.runId, refs);
+      const rows = await runViews(tx, spaceId, run.runId, refs, true);
       for (const ref of refs ?? []) {
         const row = rows.find((candidate) => candidate.secret_ref === ref);
         // CLIs keep waiting on a request card while the refusal says "is not
@@ -312,12 +343,6 @@ export class PostgresSpaceSecretRepository {
     if (current && mode === "create") throw new SpaceSecretError("secret_already_exists", 409,
       "This Space already has a secret with this alias");
     if (!current && value === undefined) throw new SpaceSecretError("secret_value_required", 400, "A new secret needs its value");
-    if (!current) {
-      const count = await tx.query({ name: "space_secret_write_count_v1", text: `SELECT count(*)::int AS count
-        FROM data.space_secrets WHERE space_id=$1`, values: [spaceId], maxRows: 1 });
-      if (Number(count[0]?.count ?? 0) >= MAX_SPACE_SECRETS) throw new SpaceSecretError("secret_limit_reached", 409,
-        `A Space holds at most ${MAX_SPACE_SECRETS} secrets`);
-    }
     const envName = input.envName !== undefined ? envNameOf(input.envName) : current ? String(current.env_name) : defaultSecretEnvName(ref);
     const description = input.description !== undefined ? descriptionOf(input.description) : current?.description ?? null;
     const access = input.access ?? (current ? String(current.access) : "ask");
@@ -356,9 +381,9 @@ async function approveRun(tx: DatabaseTransaction, spaceId: string, runId: strin
 
 /** The named secrets the Space holds, each with how it is read; one it does not hold is left out. */
 async function accessStatus(tx: DatabaseTransaction, spaceId: string, refs: string[], userId: string) {
-  const rows = await tx.query({ name: "space_secret_access_status_v1", text: `SELECT secret_ref,env_name,access
-    FROM data.space_secrets WHERE space_id=$1 AND secret_ref=ANY($2::text[]) ORDER BY secret_ref`,
-  values: [spaceId, refs], maxRows: MAX_SPACE_SECRETS });
+  const rows = await tx.query({ name: "space_secret_access_status_v2", text: `SELECT secret_ref,env_name,access
+    FROM data.space_secrets WHERE space_id=$1 AND secret_ref=ANY($2::text[]) ORDER BY secret_ref LIMIT $3`,
+  values: [spaceId, refs, refs.length], maxRows: refs.length });
   return { secrets: rows.map((row) => ({ secretRef: String(row.secret_ref), envName: String(row.env_name),
     access: String(row.access) as SpaceSecretAccess })),
     canApprove: SECRET_ADMINS.includes((await role(tx, spaceId, userId)) ?? "") };

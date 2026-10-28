@@ -246,6 +246,9 @@ write checks it again after the provider request; another Space's admin role
 does not authorize the flow. See [connector platform](../design/connector-platform.md)
 and [Space credential isolation](../operations/space-credential-isolation.md)
 for historical secret copies and the local OS-user boundary.
+Space secret storage has no count quota; complete catalog reads use bounded
+keyset queries and per-request byte budgets, preserving existing API shapes
+and live Run/admin approval checks. See [Agent Run permissions](../operations/agent-run-permissions.md#space-secrets).
 The separate GitHub App callback also hands off to authenticated completion;
 forwarded links cannot attach another person's installations, and earlier
 installation-selection grants must be reauthorized under the new grant purpose.
