@@ -138,7 +138,6 @@ import type {
   ObservabilityEvent,
   SerializedAppConnectorConnection,
   SerializedAppConnectorExecution,
-  ChannelSnapshot,
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -1059,12 +1058,10 @@ export function AppsView({
   connectors: catalog,
   currentSpace,
   token,
-  channels,
 }: {
   connectors: AppConnectorManifest[];
   currentSpace: SerializedSpace | null;
   token?: string;
-  channels: ChannelSnapshot[];
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -1417,7 +1414,7 @@ export function AppsView({
   const detail = connector && token && currentSpace && user?.id ? (
     <ConnectorDetailPage key={connector.id} connector={connector} Icon={connectorIcon(connector)}
       connection={selectedConnection} spaceId={currentSpace.id} token={token} userId={user.id}
-      members={currentSpace.members} channels={channels}
+      members={currentSpace.members}
       oauth={oauthProviders.includes(connector.id)} native={nativeProviders.includes(connector.id)}
       executions={selectedExecutions} executionsLoading={loadingExecutions} executionsError={executionsError}
       notice={setupNotice} error={connectionsError}
