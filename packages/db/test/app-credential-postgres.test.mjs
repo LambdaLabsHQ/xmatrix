@@ -12,6 +12,8 @@ import {
   PostgresSpaceControlRepository,
 } from "../dist/index.js";
 
+import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "@xmatrix/protocol";
+
 const at = "2026-10-02T00:00:00.000Z";
 const material = "test-secret-catalog-key";
 
@@ -1134,8 +1136,8 @@ integration("revoked Space administration cannot commit a previously started Dis
 });
 
 const githubPolicy = { id: "github", name: "GitHub", authMode: "oauth", scopes: ["metadata:read", "issues:read"],
-  secretRefs: [], capabilities: [], metadataFields: ["repository", "installationId", "installationIds",
-    "commentWriteChannelId"] };
+  secretRefs: [], capabilities: [], metadataFields: APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === "github")
+    .connectionMetadata.map(field => field.id) };
 
 // Who handed an installation to the Space is a fact only GitHub Connect
 // records: a Space admin, for installations the Space links now; a link it
@@ -1182,17 +1184,19 @@ integration("only an admin's GitHub Connect records who linked an installation, 
   });
 });
 
-integration("a GitHub install appends its installation and keeps every other installation and config", async () => {
+integration("GitHub Connect rejects retired Channel config and preserves workflow settings when appending installations", async () => {
   await withDatabase(async ({ database, space }) => {
     const apps = new PostgresAppRepository(database);
     const upsert = (commandId, body) => apps.upsert({ commandId: `${space}:${commandId}`, spaceId: space, actorUserId: "owner",
       provider: githubPolicy, body, at });
-    // An existing Space: a legacy single installation plus a default repository and write channel.
+    await assert.rejects(upsert("retired-field", { metadata: { commentWriteChannelId: "chan-1" } }),
+      error => error.status === 400 && error.code === "invalid_app_request");
+    // An existing Space: a single installation plus a default repository and workflow selection.
     await upsert("configure", { status: "configured", authMode: "oauth", metadata: { installationId: "111",
-      repository: "org/repo", commentWriteChannelId: "chan-1" } });
+      repository: "org/repo", actionsWorkflowIds: ["production-release-request.yml"] } });
     const second = await upsert("setup-2", { status: "configured", metadataAppend: { installationIds: "222" } });
     assert.deepEqual(second.connection.metadata, { installationId: "111", installationIds: ["222"],
-      repository: "org/repo", commentWriteChannelId: "chan-1" });
+      repository: "org/repo", actionsWorkflowIds: ["production-release-request.yml"] });
     // Concurrent installs of two more orgs serialize on the row lock; neither drops the other.
     await Promise.all([upsert("setup-3", { metadataAppend: { installationIds: "333" } }),
       upsert("setup-4", { metadataAppend: { installationIds: "444" } })]);
@@ -1202,7 +1206,7 @@ integration("a GitHub install appends its installation and keeps every other ins
     assert.equal(repeated.connection.metadata.installationIds.filter((id) => id === "222").length, 1);
     assert.equal(repeated.connection.metadata.installationId, "111");
     assert.equal(repeated.connection.metadata.repository, "org/repo");
-    assert.equal(repeated.connection.metadata.commentWriteChannelId, "chan-1");
+    assert.deepEqual(repeated.connection.metadata.actionsWorkflowIds, ["production-release-request.yml"]);
     await assert.rejects(upsert("bad-field", { metadataAppend: { notAField: "1" } }), error => error.status === 400);
     await assert.rejects(upsert("not-a-list", { metadataAppend: { repository: "x/y" } }), error => error.status === 400);
   });
