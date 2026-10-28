@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Starting two-step sign-in over abandons the old app handoff
+
+After signing out, the two-step page replaces the document with the cleaned
+sign-in URL before showing another email form. Previously the form could
+appear while client navigation still retained the old app continuation.
+Other account switches keep their existing request destination. No schema or
+native bridge change is needed; recovery is a CI-validated beta Web reverting
+the change. The existing browser regression protects the transition.
+
 ## Unreleased: Binary-only installation and Agent setup boundaries
 
 The Unix and PowerShell installers can install an integrity-verified binary
