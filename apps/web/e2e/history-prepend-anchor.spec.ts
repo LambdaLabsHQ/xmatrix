@@ -28,7 +28,7 @@ const HISTORY = Array.from({ length: 56 }, (_, index) => ({
 
 /* `prepended`: the older page has reached the DOM - its rows, the
    virtualizer's prepend margin, or the scroll that absorbs it. */
-type Frame = { textTop: number | null; scrollTop: number; prepended: boolean };
+type Frame = { elapsedMs: number; textTop: number | null; scrollTop: number; prepended: boolean };
 
 /**
  * Scroll to `startScrollTop` (which pages in 47 and older), then scroll up by
@@ -49,6 +49,7 @@ async function sampleReaderAcrossPrepend(
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: options.cpuRate ?? 8 });
 
   const frames = await timeline.evaluate(async (root, { startScrollTop, step, frames: count }) => {
+    const startedAt = performance.now();
     root.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
     root.scrollTo({ top: startScrollTop });
     const rootTop = root.getBoundingClientRect().top;
@@ -71,6 +72,7 @@ async function sampleReaderAcrossPrepend(
     const sample = () => {
       const list = root.querySelector<HTMLElement>("[data-testid='virtuoso-item-list']");
       return {
+        elapsedMs: performance.now() - startedAt,
         textTop: textTop(),
         scrollTop: root.scrollTop,
         prepended: Boolean(document.getElementById("message:message-anchor-46")) ||
@@ -128,7 +130,7 @@ test("a reader who keeps scrolling through the prepend is never pulled back or t
     const moved = frames[index]!.textTop! - frames[index - 1]!.textTop!;
     // Scrolling up moves the text down by at most one step per frame: never
     // up (thrown), never more than the reader asked for.
-    expect(moved).toBeGreaterThanOrEqual(-1);
+    expect(moved, JSON.stringify(frames)).toBeGreaterThanOrEqual(-1);
     expect(moved, JSON.stringify(frames)).toBeLessThanOrEqual(STEP + 1);
   }
   // And the anchor does not hold the reader still once the page has landed.
