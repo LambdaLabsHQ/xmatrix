@@ -1,5 +1,29 @@
 # Release Updates
 
+## Unreleased: Welcome text and provider quota recovery agree with the UI
+
+The welcome conversation's stored fallback text now excludes Agents whose
+program is reported signed out, matching its live Web card, and reads every
+registration page. It remains a one-time historical message; the Web card
+continues to reflect registrations arriving later. Provider quota refusal
+text identifies the provider account limit and asks the person to choose
+another Agent or resend after their provider resets it; unavailable reset
+times are not invented. This ships in the Hub and beta Web with no migration.
+Recovery is a CI-validated beta reverting the text change.
+
+## Unreleased: Run credentials recover after computer sleep
+
+The daemon now measures its one-minute token reuse window by the wall clock,
+and wrappers check wall-clock refresh deadlines at most every 15 seconds.
+macOS monotonic timers stop during sleep while the Hub's ten-minute Run
+credential continues to expire; a long sleep could therefore reuse an expired
+credential and fail relay registration. Initial registration refreshes a
+refused Run credential through its existing daemon grant and retries once;
+repeat refusal and revoked Run authority still fail. Real local broker and
+WebSocket coverage checks recovery and the retry bound. This ships in the CLI
+and Desktop seed with no protocol or data migration. Recovery is a CI-validated
+beta reverting the client change; existing Runs and grants are preserved.
+
 ## Unreleased: Page comments continue the existing conversation
 
 The Page comment box showed a live Agent but created a new conversation before

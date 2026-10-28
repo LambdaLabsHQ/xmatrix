@@ -77,6 +77,18 @@ test("once an agent is in, xMatrix says so in the welcome, once", () =>
     } finally {
       await daemon.close?.();
     }
+    const report = (login) => inWorkerTransaction(worker, tx => tx.query({
+      text: `UPDATE data.machine_daemons SET metadata_json=jsonb_set(metadata_json,'{harnesses}',$2::jsonb)
+        WHERE machine_id=$1`,
+      values: [machineId, JSON.stringify({ schemaVersion: 1, capturedAt: new Date().toISOString(),
+        items: [{ id: "codex", installed: true, probeStatus: "ok", login }] })],
+    }));
+    // Registration alone does not mean the provider's program can answer.
+    // The stored fallback text must agree with the Web's sign-in card.
+    await report("signed_out");
+    assert.equal((await welcome(call, space.id)).status, 200);
+    assert.deepEqual((await steps(call, channelId)).map(step => step.stage), ["bring-agents"]);
+    await report("signed_in");
     const first = await welcome(call, space.id);
     assert.equal(first.status, 200, JSON.stringify(first.body));
     // A new harness changes the welcome's generated body, but the first

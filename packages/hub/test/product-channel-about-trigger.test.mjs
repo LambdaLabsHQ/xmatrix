@@ -26,7 +26,7 @@ test("quota-exhausted dispatch publishes a source-bound failure receipt without 
   assert.equal(notices[0].channelId, input.channelId);
   assert.equal(notices[0].sourceMessageId, input.messageId);
   assert.equal(notices[0].replyToMessageId, input.messageId);
-  assert.match(notices[0].body, /Agent launch failed:.*used up its provider quota.*No launch was allocated.*registration_quota_exhausted/);
+  assert.match(notices[0].body, /Agent launch failed:.*used up their provider account quota.*Choose another Agent.*send your message again.*No launch was allocated.*registration_quota_exhausted/);
   assert.doesNotMatch(notices[0].body, /may already|started successfully/);
   await assert.rejects(dispatchProductMessageLaunches(input, dispatch, async () => { throw new Error("offline"); }),
     AgentLaunchHandoverUnavailable, "a missing receipt must fail the request so an idempotent retry can publish it");

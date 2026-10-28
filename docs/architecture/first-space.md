@@ -50,9 +50,12 @@ is how to connect one.
   - `agents-in`, once the Space has an enabled agent that can answer; the Web
     asks again when it sees one, and the Hub checks the fact before writing.
     An agent of the person's own whose machine reports its program signed out
-    (`login: "signed_out"`) answers nothing, so it does not count: the step
-    names the program and the machine ("Claude Code on mac-mini is not signed
-    in") and offers the harness sign-in in place, and no card is shown
+    (`login: "signed_out"`) answers nothing, so it does not count in either
+    the stored fallback body or the live Web card. The stored body is the
+    first published snapshot; the Web card follows later registrations and
+    sign-in reports. The step names the program and the machine ("Claude Code
+    on mac-mini is not signed in") and offers the harness sign-in in place, and
+    no card is shown
     while no agent can answer.
   Once an agent can answer, the step offers one card for each way of working,
   each a single click: start a new conversation and just say it (routing picks
