@@ -115,7 +115,7 @@ jobs:
               hub: "hub / deploy",
               web: "web / deploy",
               cli: "cli / release",
-              desktop: "desktop / publish-desktop-release",
+              desktop: ["desktop / publish-desktop-release", "desktop / publish-desktop-release / release"],
               android: ["android / release", "android / release / release"],
               ios: "ios / upload",
             };

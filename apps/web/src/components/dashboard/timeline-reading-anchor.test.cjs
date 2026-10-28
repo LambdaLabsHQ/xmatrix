@@ -75,7 +75,14 @@ function timeline({ userAgent = DESKTOP } = {}) {
   const clock = testClock();
   let contentTop = 100;
   const observers = [];
-  const content = { getBoundingClientRect: () => ({ top: contentTop, bottom: contentTop + 100 }) };
+  const microtasks = [];
+  const flushInput = () => { while (microtasks.length) microtasks.shift()(); };
+  class LayoutObserver {
+    constructor(callback) { this.callback = callback; this.connected = true; observers.push(this); }
+    observe() {}
+    disconnect() { this.connected = false; }
+  }
+  const content = { getBoundingClientRect: () => ({ top: contentTop - root.scrollTop, bottom: contentTop + 100 - root.scrollTop }) };
   const row = { id: "message:reader", lastElementChild: content, children: [], hasAttribute: () => false };
   const { root, listeners } = listenedRoot({
     scrollTop: 0,
@@ -102,11 +109,9 @@ function timeline({ userAgent = DESKTOP } = {}) {
     performance: { now: clock.now },
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
-    ResizeObserver: class {
-      constructor(callback) { this.callback = callback; this.connected = true; observers.push(this); }
-      observe() {}
-      disconnect() { this.connected = false; }
-    },
+    queueMicrotask: (callback) => microtasks.push(callback),
+    MutationObserver: LayoutObserver,
+    ResizeObserver: LayoutObserver,
   });
   const anchor = exports.useTimelineReadingAnchor(root);
   return {
@@ -115,9 +120,16 @@ function timeline({ userAgent = DESKTOP } = {}) {
     resize() { for (const observer of observers) if (observer.connected) observer.callback(); },
     scrollDrift() { contentTop += 1; listeners.get("scroll")?.(); },
     /** Someone else scrolls the timeline: the reader, or the virtualizer. */
-    scrollBy(delta) { root.scrollTop += delta; contentTop -= delta; listeners.get("scroll")?.(); },
+    scrollBy(delta, { input = false, emit = true } = {}) {
+      if (input) listeners.get("wheel")?.({ type: "wheel" });
+      root.scrollTop += delta;
+      flushInput();
+      if (emit) listeners.get("scroll")?.();
+    },
     /** A row above grows; the next resize puts the reader's row back. */
     growAbove(delta) { contentTop += delta; },
+    compensate(delta) { contentTop += delta; root.scrollTop += delta; },
+    textTop: () => content.getBoundingClientRect().top,
     advance: clock.advance,
     active: () => observers.some((observer) => observer.connected) || listeners.size > 0,
     pendingTimers: clock.pending,
@@ -138,6 +150,40 @@ test("continuous scroll drift without another resize still releases at the deadl
   assert.equal(view.pendingTimers(), 0);
 });
 
+test("virtualizer compensation before the queued scroll is not counted as reader input", () => {
+  for (const layoutFirst of [true, false]) {
+    const view = timeline();
+    view.start();
+    view.resize();
+    view.scrollBy(-40, { input: true, emit: false });
+    view.compensate(44);
+    if (layoutFirst) view.resize();
+    view.scrollBy(0);
+    if (!layoutFirst) view.resize();
+    assert.equal(view.textTop(), 140);
+  }
+});
+
+test("continued reader input renews the deadline, passive drift cannot renew it", () => {
+  const view = timeline();
+  view.start();
+  view.resize();
+  for (let time = 500; time <= 12_000; time += 500) {
+    view.advance(time);
+    view.scrollBy(-40, { input: true });
+    assert.equal(view.active(), true);
+  }
+  // Keep the layout noisy after the reader stops: it still has a hard limit.
+  for (let time = 12_500; time < 22_000; time += 500) {
+    view.advance(time);
+    view.scrollDrift();
+    assert.equal(view.active(), true);
+  }
+  view.advance(22_000);
+  assert.equal(view.active(), false);
+  assert.equal(view.pendingTimers(), 0);
+});
+
 test("quiet layout releases early and cancels its deadline", () => {
   const view = timeline();
   view.start();
@@ -153,6 +199,8 @@ test("explicit release and replacement cancel every previous timer", () => {
   const view = timeline();
   view.start();
   view.resize();
+  view.advance(300);
+  view.scrollBy(-40, { input: true });
   view.advance(500);
   view.start();
   view.resize();
@@ -181,8 +229,14 @@ test("elsewhere the anchor follows the reader's scroll and keeps holding", () =>
   const view = timeline();
   view.start();
   view.resize();
-  view.scrollBy(-80);
-  assert.equal(view.active(), true);
+  for (let at = 500; at <= 2_000; at += 500) {
+    view.advance(at);
+    view.scrollBy(-80);
+    assert.equal(view.active(), true);
+  }
+  view.advance(2_750);
+  assert.equal(view.active(), false);
+  assert.equal(view.pendingTimers(), 0);
 });
 
 /* An older page waits for the timeline to rest (timeline-scroll-rest). */

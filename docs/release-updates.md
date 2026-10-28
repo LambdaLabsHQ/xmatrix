@@ -1,5 +1,83 @@
 # Release Updates
 
+## Unreleased: History anchoring regressions fail on the first attempt
+
+The history-prepend reading-position spec overrides shared CI retries and runs
+each case once. A measured jump can no longer become a successful stable gate
+by passing a retry. Assertions and CPU throttling are unchanged; unrelated Web
+specs retain their existing retry policy. This tightens the existing test gate
+without changing deployment, signing or publication authority. A known reading
+regression is repaired on main and verified in a new beta before another stable
+request; runner setup failures retain the existing failed-job recovery path.
+
+## Unreleased: Archive the nested Desktop publisher
+
+Archive Release Assets recognizes the exact historical and nested Desktop
+publisher names, as it already does for Android. The nested publisher's successful
+job previously failed the archive's component proof despite a complete scoped
+production receipt. Both names appearing together remain ambiguous and fail;
+missing CLI, unrelated jobs, wrong source/attempt/scope and incomplete receipts
+remain rejected. This only repairs mirroring of sealed R2 artifacts to GitHub;
+deployment, signing and channel publication are unchanged. Migration uses the
+existing workflow, and recovery reruns that archive for the same successful
+production SHA, run, attempt and scope without rebuilding or moving tags.
+
+## Unreleased: Apple sign-in failures retain native diagnostic evidence
+
+Apple authorization failures keep up to three native error-domain categories
+and codes, plus the app version, build and iOS version, across the string-based
+iOS bridge. Unknown domains become `other`; descriptions, userInfo values,
+account details and tokens are excluded. The Web captures the native call's
+source-mapped boundary before exchanging a token with the Hub. Older shells
+still supply their existing error text; older Webs accept the diagnostic string.
+Cancellation remains silent and authorization is never automatically replayed.
+This supplies missing evidence for XMATRIX-WEB-S's unknown Apple error 1000;
+it does not establish or fix the underlying authorization failure. No schema
+migration is needed. The native diagnostics require the new TestFlight build;
+recovery uses a CI-validated beta Web/iOS release reverting this change.
+
+## Unreleased: Keep history anchoring until scrolling and layout settle
+
+An older history page keeps the reader's place while the virtualizer measures
+it. The quiet timer now follows scrolling and layout activity, including
+measurements that need no correction, instead of treating stable text as a
+settled list. Margin/padding swaps that move text without resizing a border box
+are also corrected. Pending input movement is credited before those corrections
+even when the browser has not delivered its scroll event yet, so anchoring does
+not cancel the reader's scroll. The existing quiet-release and ten-second
+deadline remain bounded; iPhone momentum still releases the anchor instead of
+writing a scroll. No protocol or schema change is needed. Recovery is a
+CI-validated beta Web reverting this fix.
+
+## Unreleased: Installer progress emits complete UTF-8 characters
+
+The Unix download bar repeats full Unicode strings rather than passing them
+through byte-oriented `tr`. Its spinner indexes complete symbols in a Bash
+array, so even a C locale cannot split a multibyte character. This keeps
+terminal output and captured install logs valid UTF-8 for both known and
+unknown content lengths. Download integrity and installation behavior are
+unchanged; a CI-validated beta Web reverting this change is the recovery path.
+
+## Unreleased: Delayed components validate their frozen release
+
+CLI, Desktop, Android and iOS component jobs verify consistent manifests, the
+remote annotated tag and its exact SHA, then the clean checkout's tag/version
+and main-history or version-stamp proof. The train still enforces ascending
+versions when it cuts a new tag, and component channel pointers still move
+only forward. A later parallel Hub tag is not a new version floor for a
+component that was already authorized.
+
+In 1.11.2-beta.12, Desktop started after CLI publication and a Hub-only beta.13
+had been tagged. Its late global version-order check rejected that frozen
+release before Desktop published, although Web and CLI had succeeded.
+Migration uses the same release workflows with the shared corrected check;
+there is no new deployment, signing or authorization path. Immutable old
+tags remain untouched. Recovery is a new CI-validated beta containing this
+fix and the failed beta's intents; retrying its old immutable script cannot
+repair the check. The real-Git regression reproduces that failure and keeps
+new-cut downgrades, wrong remote SHAs, tag/version mismatches and dirty
+checkouts rejected.
+
 ## Unreleased: Starting two-step sign-in over abandons the old app handoff
 
 After signing out, the two-step page replaces the document with the cleaned

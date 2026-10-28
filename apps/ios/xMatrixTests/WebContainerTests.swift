@@ -1,6 +1,7 @@
 import XCTest
 import WebKit
 import StoreKit
+import AuthenticationServices
 @testable import xMatrix
 
 @MainActor
@@ -188,6 +189,39 @@ final class WebContainerTests: XCTestCase {
         for error in errors {
             XCTAssertEqual(NativeBridge.failurePayload(error) as? String, error.localizedDescription)
         }
+    }
+
+    func testAppleAuthorizationFailureKeepsBoundedCodesWithoutPrivateErrorDetails() throws {
+        let privateCause = NSError(domain: "private-account@example.test", code: 42,
+                                   userInfo: [NSLocalizedDescriptionKey: "secret-token"])
+        let underlying = NSError(domain: "AKAuthenticationError", code: -7026,
+                                 userInfo: [NSUnderlyingErrorKey: privateCause])
+        let error = NSError(domain: ASAuthorizationError.errorDomain, code: 1000,
+                            userInfo: [NSUnderlyingErrorKey: underlying,
+                                       NSLocalizedDescriptionKey: "private-account@example.test secret-token"])
+        let message = try XCTUnwrap(NativeBridge.failurePayload(error) as? String)
+        XCTAssertTrue(message.hasPrefix("Apple authorization failed: authorization:1000 > authentication:-7026 > other:42;"), message)
+        XCTAssertTrue(message.contains("; app="), message)
+        XCTAssertTrue(message.contains("; build="), message)
+        XCTAssertTrue(message.contains("; ios="), message)
+        XCTAssertLessThanOrEqual(message.count, 300)
+        XCTAssertFalse(message.contains("private-account"))
+        XCTAssertFalse(message.contains("secret-token"))
+
+        var deep = privateCause
+        for _ in 0..<10 {
+            deep = NSError(domain: "AKAuthenticationError", code: -1, userInfo: [NSUnderlyingErrorKey: deep])
+        }
+        let nested = NSError(domain: ASAuthorizationError.errorDomain, code: 1000,
+                             userInfo: [NSUnderlyingErrorKey: deep])
+        let bounded = try XCTUnwrap(NativeBridge.failurePayload(nested) as? String)
+        XCTAssertTrue(bounded.hasPrefix("Apple authorization failed: authorization:1000 > authentication:-1 > authentication:-1 > more;"), bounded)
+        XCTAssertLessThanOrEqual(bounded.count, 300)
+    }
+
+    func testAppleAuthorizationCancellationStaysSilent() {
+        let error = NSError(domain: ASAuthorizationError.errorDomain, code: ASAuthorizationError.Code.canceled.rawValue)
+        XCTAssertEqual((NativeBridge.failurePayload(error) as? [String: String])?["name"], "AbortError")
     }
 
     func testBridgeReportsVisibilityAndView() {

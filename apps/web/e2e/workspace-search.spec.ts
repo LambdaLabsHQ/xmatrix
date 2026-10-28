@@ -226,7 +226,11 @@ test("the search panel drops from the control that opened it, one glass with not
   await stubMessageSearch(page);
   for (const path of [`channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, "pages"]) {
     await page.goto(`/app/${E2E_SPACE.id}/${path}`, { waitUntil: "domcontentloaded" });
+    const reranks = (await fixtureRequests(page, "search-rerank")).length;
     const { control, panel } = await openSearchFromControl(page);
+    // Closing after the delayed response must work too, rather than passing
+    // only when the click beats the rerank request.
+    await expect.poll(async () => (await fixtureRequests(page, "search-rerank")).length).toBeGreaterThan(reranks);
     const field = (await page.locator(".app-search-panel-field").boundingBox())!;
     const close = (await panel.getByRole("button", { name: "Close search" }).boundingBox())!;
     expect(field.y + field.height / 2).toBeCloseTo(control.y + control.height / 2, 0);

@@ -142,6 +142,25 @@ function runInstallHelpers(scriptBody) {
   return result;
 }
 
+test("download progress stays valid UTF-8 with and without content length, even in C locale", unixOnly, (t) => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "xmatrix-progress-"));
+  t.after(() => fs.rmSync(workDir, { recursive: true, force: true }));
+  for (const hasLength of [true, false]) {
+    const result = spawnSync("bash", ["-c", [
+      "set -euo pipefail",
+      '_curl() { if [ "$1" = "-fsSLI" ]; then',
+      hasLength ? "printf 'Content-Length: 4\\n'" : ":",
+      'else printf data > "$4"; sleep 0.2; fi; }',
+      extractFunction("curl_file"),
+      'curl_file https://example.invalid/qa "$1"',
+    ].join("\n"), "qa-progress", path.join(workDir, "download")], { env: { ...process.env, LC_ALL: "C" } });
+    assert.equal(result.status, 0, result.stderr.toString());
+    const output = new TextDecoder("utf-8", { fatal: true }).decode(result.stdout);
+    assert.match(output, hasLength ? /100%/ : /downloaded/);
+    assert.equal(fs.readFileSync(path.join(workDir, "download"), "utf8"), "data");
+  }
+});
+
 test("the default install dir is always ~/.local/bin even when /usr/local/bin is on PATH", unixOnly, (t) => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "xmatrix-install-dir-"));
   t.after(() => fs.rmSync(workDir, { recursive: true, force: true }));

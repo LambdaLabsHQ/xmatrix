@@ -9,6 +9,9 @@ import {
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
+// A measured reading-position jump must block release on its first attempt,
+// rather than becoming a successful stable gate after a retry.
+test.describe.configure({ retries: 0 });
 
 /* Rows of uneven height, three hours apart. The prepended page is measured
    rather than estimated, the old first row loses its day divider once its
@@ -25,7 +28,7 @@ const HISTORY = Array.from({ length: 56 }, (_, index) => ({
 
 /* `prepended`: the older page has reached the DOM - its rows, the
    virtualizer's prepend margin, or the scroll that absorbs it. */
-type Frame = { textTop: number | null; scrollTop: number; prepended: boolean };
+type Frame = { elapsedMs: number; textTop: number | null; scrollTop: number; prepended: boolean };
 
 /**
  * Scroll to `startScrollTop` (which pages in 47 and older), then scroll up by
@@ -34,7 +37,7 @@ type Frame = { textTop: number | null; scrollTop: number; prepended: boolean };
  */
 async function sampleReaderAcrossPrepend(
   page: Page,
-  options: { startScrollTop: number; step: number; frames: number },
+  options: { startScrollTop: number; step: number; frames: number; cpuRate?: number },
 ): Promise<Frame[]> {
   await openGeneralChannelWithPagedHistory(page, HISTORY);
   const timeline = page.locator(".app-message-timeline");
@@ -43,9 +46,10 @@ async function sampleReaderAcrossPrepend(
   // A constrained renderer exposes delayed virtualizer measurements that
   // otherwise finish between our scroll and the next painted frame.
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 8 });
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: options.cpuRate ?? 8 });
 
   const frames = await timeline.evaluate(async (root, { startScrollTop, step, frames: count }) => {
+    const startedAt = performance.now();
     root.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
     root.scrollTo({ top: startScrollTop });
     const rootTop = root.getBoundingClientRect().top;
@@ -68,6 +72,7 @@ async function sampleReaderAcrossPrepend(
     const sample = () => {
       const list = root.querySelector<HTMLElement>("[data-testid='virtuoso-item-list']");
       return {
+        elapsedMs: performance.now() - startedAt,
         textTop: textTop(),
         scrollTop: root.scrollTop,
         prepended: Boolean(document.getElementById("message:message-anchor-46")) ||
@@ -117,7 +122,7 @@ test("loading an older page keeps the message the reader is looking at in place"
 
 test("a reader who keeps scrolling through the prepend is never pulled back or thrown", async ({ page }) => {
   const STEP = 40;
-  const frames = await sampleReaderAcrossPrepend(page, { startScrollTop: 300, step: STEP, frames: 24 });
+  const frames = await sampleReaderAcrossPrepend(page, { startScrollTop: 300, step: STEP, frames: 24, cpuRate: 40 });
   const prependedAt = frames.findIndex((frame) => frame.prepended);
   expect(prependedAt).toBeGreaterThan(0);
   // From the last frame before the page to the end of the gesture.
@@ -125,11 +130,11 @@ test("a reader who keeps scrolling through the prepend is never pulled back or t
     const moved = frames[index]!.textTop! - frames[index - 1]!.textTop!;
     // Scrolling up moves the text down by at most one step per frame: never
     // up (thrown), never more than the reader asked for.
-    expect(moved).toBeGreaterThanOrEqual(-1);
-    expect(moved).toBeLessThanOrEqual(STEP + 1);
+    expect(moved, JSON.stringify(frames)).toBeGreaterThanOrEqual(-1);
+    expect(moved, JSON.stringify(frames)).toBeLessThanOrEqual(STEP + 1);
   }
   // And the anchor does not hold the reader still once the page has landed.
   const after = frames.slice(prependedAt + 2);
   const travelled = after.at(-1)!.textTop! - after[0]!.textTop!;
-  expect(travelled).toBeGreaterThan((after.length - 1) * STEP * 0.75);
+  expect(travelled, JSON.stringify(frames)).toBeGreaterThan((after.length - 1) * STEP * 0.75);
 });
