@@ -204,7 +204,7 @@ test("shared client publication refuses unknown components and tags that are not
   }
 });
 
-test("archival proves old or nested Android publication and rejects ambiguous or unrelated evidence", async () => {
+test("archival proves old or nested client publication and rejects ambiguous or unrelated evidence", async () => {
   const workflow = parse(fs.readFileSync(new URL("../.github/workflows/archive-release-assets.yml", import.meta.url), "utf8"));
   const script = Object.values(workflow.jobs).flatMap((job) => job.steps ?? [])
     .find((step) => step.name === "Require the completed exact-scope production train").with.script;
@@ -228,6 +228,24 @@ test("archival proves old or nested Android publication and rejects ambiguous or
     const result = await authorize([name]);
     assert.deepEqual(result.errors, []);
     assert.equal(result.outputs.recover_receipt, "false");
+  }
+  const desktopScope = { SOURCE_SCOPE: "cli,desktop" };
+  const desktopReceipt = { name: "deployment receipt (cli,desktop)", status: "completed", conclusion: "success", steps: [] };
+  const desktopPublishers = ["desktop / publish-desktop-release", "desktop / publish-desktop-release / release"];
+  for (const name of desktopPublishers) {
+    const result = await authorize(["cli / release", name], desktopScope, desktopReceipt);
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.outputs.recover_receipt, "false");
+  }
+  for (const names of [
+    ["cli / release", ...desktopPublishers],
+    [desktopPublishers[1]],
+    ["cli / release"],
+    ["cli / release", `${desktopPublishers[1]} / unrecognized`],
+  ]) {
+    const result = await authorize(names, desktopScope, desktopReceipt);
+    assert.equal(result.errors.length, 1);
+    assert.deepEqual(result.outputs, {});
   }
   const historical = { name: "deployment receipt", steps: [{ name: "Record successful android component deployment", conclusion: "success" }] };
   assert.deepEqual((await authorize(["android / release"], {}, historical)).errors, []);

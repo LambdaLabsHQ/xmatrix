@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Archive the nested Desktop publisher
+
+Archive Release Assets recognizes the exact historical and nested Desktop
+publisher names, as it already does for Android. The nested publisher's successful
+job previously failed the archive's component proof despite a complete scoped
+production receipt. Both names appearing together remain ambiguous and fail;
+missing CLI, unrelated jobs, wrong source/attempt/scope and incomplete receipts
+remain rejected. This only repairs mirroring of sealed R2 artifacts to GitHub;
+deployment, signing and channel publication are unchanged. Migration uses the
+existing workflow, and recovery reruns that archive for the same successful
+production SHA, run, attempt and scope without rebuilding or moving tags.
+
 ## Unreleased: Apple sign-in failures retain native diagnostic evidence
 
 Apple authorization failures keep up to three native error-domain categories
