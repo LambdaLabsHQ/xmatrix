@@ -122,8 +122,14 @@ integration("every Space- or Channel-keyed table is either purged or deliberatel
       WHERE t.table_type='BASE TABLE' AND c.table_schema IN ('data','control')
         AND c.column_name IN ('space_id','channel_id','source_space_id','target_space_id')
       ORDER BY 1`);
+    // A NOT VALID false check freezes a retired table's insert/update writers
+    // while its evidence waits for contract deletion after the new Hub deploy.
+    const frozen = (await client.query(`SELECT n.nspname||'.'||c.relname AS name FROM pg_constraint k
+      JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE k.contype='c' AND NOT k.convalidated AND k.conname LIKE 'retired_%'
+        AND pg_get_expr(k.conbin,k.conrelid)='false' AND n.nspname IN ('data','control')`)).rows.map(row => row.name);
     const classified = new Set([...SPACE_PURGE_STEPS.map((step) => step.table),
-      ...Object.keys(SPACE_PURGE_EXCLUDED_TABLES)]);
+      ...Object.keys(SPACE_PURGE_EXCLUDED_TABLES), ...frozen]);
     assert.deepEqual(rows.map((row) => row.name).filter((name) => !classified.has(name)), []);
     const { rows: tables } = await client.query(`SELECT table_schema||'.'||table_name AS name
       FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema IN ('data','control')`);

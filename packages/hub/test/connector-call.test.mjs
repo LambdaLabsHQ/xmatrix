@@ -28,7 +28,7 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 // their own PostgreSQL tests own membership, registration and grant validation.
 // Here we protect private response delivery, policy admission, and masking
 // before result persistence, which public Channel-command tests cannot see.
-function fixture({ mode = null, failAtAuthorization, otherMailbox = false, changeConnection = false, changePolicy = false } = {}) {
+function fixture({ mode = null, failAtAuthorization, otherMailbox = false, changeConnection = false } = {}) {
   const checks = [], reports = [], policies = [], appends = [], persisted = [], privateRecords = [];
   let scopes = 0;
   const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
@@ -55,7 +55,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, chang
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "member", machineId: "machine", harness: "codex" }) },
     "../app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
     "./command-support": support,
-    "./credentials": { connectorActionPolicyRepository: () => ({ mode: async input => { policies.push(input); return changePolicy && policies.length >= 2 ? "disallow" : mode; } }) },
+    "./credentials": { connectorPermissionRepository: () => ({ mode: async input => { policies.push(input); return mode; } }) },
     "./connection-credentials": { connectionCredentials: async () => credentials },
     "./http": { ProviderRequestError },
     "../usage-cost-metering": metering,
@@ -157,11 +157,11 @@ test("result visibility is strictly typed and cannot be coerced into a public re
   }
 });
 
-test("private reads cannot bypass ask/disallow, perform writes, or read another member's mailbox", async () => {
-  for (const mode of ["ask", "disallow"]) {
+test("private reads stay available in every app mode, never write, and respect mailbox ownership", async () => {
+  for (const mode of ["read", "ask", "write"]) {
     const f = fixture({ mode });
-    const { result, calls } = await fetched([], () => f.request({ command: `@gmail:read:${id}` }));
-    assert.equal(result.status, 403); assert.equal(calls.length, 0);
+    const { result, calls } = await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}` }));
+    assert.equal(result.status, 200); assert.equal(calls.length, 1);
   }
   for (const command of ["@gmail:send:other@example.com Subject\nBody", "@gmail:policy:read allow", "@gmail:subscribe:*"]) {
     const f = fixture();
@@ -172,8 +172,8 @@ test("private reads cannot bypass ask/disallow, perform writes, or read another 
   assert.equal(result.status, 403); assert.equal(calls.length, 0);
 });
 
-test("Run, connection or policy revocation withholds both successful and failed in-flight private reads", async () => {
-  for (const options of [{ failAtAuthorization: 3 }, { failAtAuthorization: 4 }, { changeConnection: true }, { changePolicy: true }]) {
+test("Run or connection revocation withholds both successful and failed in-flight private reads", async () => {
+  for (const options of [{ failAtAuthorization: 3 }, { failAtAuthorization: 4 }, { changeConnection: true }]) {
     for (const response of [gmail(privateText), { body: { status: 403, data: { error: { message: privateText } } } }]) {
       const f = fixture(options);
       const { result, calls } = await fetched([response], () => f.request({ command: `@gmail:read:${id}` }));

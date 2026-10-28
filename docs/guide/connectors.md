@@ -178,7 +178,7 @@ With App Store Connect connected, an agent can take a build from upload to the s
 - `create_version` creates the next version with manual release; add `release=after_approval` to let Apple publish it as soon as it is approved. App Review contact and sign-in details carry over from the previous version without appearing in the conversation.
 - `set_build` takes the build number you uploaded, once Apple has processed it. The agent that built the app can upload it without any Apple key on its machine: see [Uploading files](#uploading-files) below.
 - `submit` sends the version to App Review. If Apple refuses because the listing is incomplete, the receipt says what is missing.
-- `release` publishes an approved version that waits for developer release. Add `phased` to roll it out over 7 days; `pause_phased_release` holds that rollout, `resume_phased_release` continues it, and `complete_phased_release` publishes it to everyone. The release itself cannot be undone. A Space admin can turn any of these off in a conversation, for example `@appstoreconnect:policy:release deny`.
+- `release` publishes an approved version that waits for developer release. Add `phased` to roll it out over 7 days; `pause_phased_release` holds that rollout, `resume_phased_release` continues it, and `complete_phased_release` publishes it to everyone. The release itself cannot be undone. A Space admin can stop writes by setting the App Store Connect permission to Read only.
 
 `@appstoreconnect:status:com.example.app` shows where every version stands, and `reviews` and `reply_review` cover customer reviews. A version on another platform is written `macos/1.2.0`, `tvos/1.2.0` or `visionos/1.2.0`.
 
@@ -299,19 +299,9 @@ conversation's **Pending approvals** with its sender, recipient, subject and
 body. A Space admin chooses **Allow once** or **Disallow**. Approving one email
 does not approve the next one; nothing is sent while the request waits.
 
-In Apps → Gmail → Channel action policy, choose **Allow**, **Ask**, or
-**Disallow** for send and reply in each conversation:
-
-```text
-@gmail:policy:send ask
-@gmail:policy:reply ask
-@gmail:policy:send allow
-@gmail:policy:send disallow
-@gmail:policy:send default
-```
-
-**Allow** runs immediately, **Ask** requests approval every time, and
-**Disallow** blocks the action. **Default** removes the override. Existing
-explicit Allow/Disallow rules remain in force; `deny` remains a Disallow alias.
-Other apps keep their current defaults; generic executable actions can also
-use Ask. GitHub's specialized commands support Allow/Disallow only.
+In Apps → Gmail → Permissions, choose **Read only**, **Ask first**, or
+**Read and write**. One setting applies to the entire connection in every
+conversation: reads are available in all three modes, Ask stages each change,
+and Read and write runs changes directly. There are no Channel rules or
+per-action settings. Calendar defaults to Read and write; Gmail, Google Ads,
+X and Linear default to Ask first. GitHub supports Read only or Read and write.

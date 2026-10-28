@@ -3,7 +3,7 @@
    (docs/design/connector-platform.md §3.5). */
 export const GITHUB_COMMAND_ACTIONS = [
   "subscribe", "unsubscribe", "merge", "rerun_failed_jobs", "dispatch_workflow",
-  "comment", "create_issue", "close_issue", "reopen_issue", "review", "policy",
+  "comment", "create_issue", "close_issue", "reopen_issue", "review",
 ] as const;
 
 const GITHUB_COMMAND = new RegExp(

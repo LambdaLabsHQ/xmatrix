@@ -18,24 +18,8 @@ function writeAction(id: string, label: string, description: string, usage: stri
   return { id, label, description, usage, effect: "write", completion: { trailingDelimiter: ":" } };
 }
 
-/* A write that asks a Space admin to approve each individual request. */
-function gatedWriteAction(id: string, label: string, description: string, usage: string): Action {
-  return { ...writeAction(id, label, description, usage), defaultPolicy: "ask" };
-}
-
 function readAction(id: string, label: string, description: string, usage: string): Action {
   return { id, label, description, usage, effect: "read", completion: { trailingDelimiter: ":" } };
-}
-
-/* Every provider with write actions takes the per-Channel policy command. */
-function withPolicy(actions: Action[]): Action[] {
-  return actions.length === 0 ? [] : [...actions, {
-    id: "policy",
-    label: "Set action policy",
-    description: "Space admins: allow an action, ask for approval each time, disallow it, or reset its default in this channel.",
-    usage: "<action> allow|ask|disallow|default",
-    completion: { trailingDelimiter: ":" },
-  }];
 }
 
 type ConnectorBase = {
@@ -43,6 +27,7 @@ type ConnectorBase = {
   name: string;
   kind: AppConnectorProviderKind;
   description: string;
+  defaultPermission?: "read" | "ask" | "write";
   credentials: Credential[];
   oauth?: AppConnectorProviderManifest["oauth"];
 };
@@ -50,6 +35,7 @@ type ConnectorBase = {
 /* The fields every platform-built manifest shares. */
 function baseManifest(input: ConnectorBase): Omit<AppConnectorProviderManifest, "actions"> {
   return { id: input.id, name: input.name, kind: input.kind, status: "available", description: input.description,
+    defaultPermission: input.defaultPermission ?? "write",
     auth: { type: "api-token", scopes: [], secretRefs: [] }, ...(input.oauth ? { oauth: input.oauth } : {}),
     credentials: input.credentials };
 }
@@ -62,6 +48,7 @@ function eventConnector(input: ConnectorBase & {
 }): AppConnectorProviderManifest {
   return {
     ...baseManifest(input),
+    defaultPermission: input.defaultPermission ?? (input.actions?.some(action => action.effect === "write") ? "write" : "read"),
     events: {
       source: input.source,
       features: input.features,
@@ -80,13 +67,13 @@ function eventConnector(input: ConnectorBase & {
         description: `Stop posting ${input.name} events for a ${input.source.label.toLowerCase()} into the current channel.`,
         completion: { trailingDelimiter: ":" },
       },
-      ...withPolicy(input.actions ?? []),
+      ...(input.actions ?? []),
     ],
   };
 }
 
 function actionConnector(input: ConnectorBase & { actions: Action[] }): AppConnectorProviderManifest {
-  return { ...baseManifest(input), actions: withPolicy(input.actions) };
+  return { ...baseManifest(input), defaultPermission: input.defaultPermission ?? (input.actions.some(action => action.effect === "write") ? "write" : "read"), actions: input.actions };
 }
 
 const SLUG = "^[a-z0-9][a-z0-9_.-]{0,99}$";
@@ -101,6 +88,7 @@ const OAUTH_TOKEN_CREDENTIALS: Credential[] = [
 export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   actionConnector({
     id: "x", name: "X", kind: "chat",
+      defaultPermission: "ask",
     description: "Connect company and personal X accounts separately. Every command names its account; publishing asks for approval by default. Only the connecting member and their Agents use that account. Results are visible in the calling Channel. API usage is billed by X; quote-posting requires Enterprise API access.",
     oauth: { authorizeUrl: "https://x.com/i/oauth2/authorize", tokenUrl: "https://api.x.com/2/oauth2/token",
       scopes: ["tweet.read", "users.read", "tweet.write", "media.write", "offline.access"],
@@ -111,9 +99,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       readAction("accounts", "List connected accounts", "List only the X accounts this caller owns; no tokens are returned.", "*"),
       readAction("read_post", "Read post", "Read one post as an explicitly selected connected account.", "<account>/<post id>"),
       readAction("timeline", "Read account posts", "Read at most 10 recent posts of the selected connected account.", "<account>"),
-      gatedWriteAction("post", "Publish post", "Publish as the explicitly selected account. Optional mediaReceipt must come from this account and Channel's video upload. Asks for approval of the exact account and content by default.", '<account> {"text":"…","mediaReceipt":"optional upload_video receipt"}'),
-      gatedWriteAction("quote", "Quote post (Enterprise)", "Publish a quote as the selected account. X requires Enterprise API access; unavailable on self-serve pay-per-use.", "<account>/<post id> <text>"),
-      gatedWriteAction("upload_video", "Upload video", "Upload one MP4 attachment from this Channel to the selected account. At most 64 MiB; separate approval is needed to publish the uploaded video.", "<account> <message id>/<attachment id>"),
+      writeAction("post", "Publish post", "Publish as the explicitly selected account. Optional mediaReceipt must come from this account and Channel's video upload. Asks for approval of the exact account and content by default.", '<account> {"text":"…","mediaReceipt":"optional upload_video receipt"}'),
+      writeAction("quote", "Quote post (Enterprise)", "Publish a quote as the selected account. X requires Enterprise API access; unavailable on self-serve pay-per-use.", "<account>/<post id> <text>"),
+      writeAction("upload_video", "Upload video", "Upload one MP4 attachment from this Channel to the selected account. At most 64 MiB; separate approval is needed to publish the uploaded video.", "<account> <message id>/<attachment id>"),
       readAction("media_status", "Read video processing status", "Check one uploaded video's processing state for its account-bound receipt.", "<account> <upload_video receipt>"),
     ],
   }),
@@ -218,7 +206,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "googlecalendar", name: "Google Calendar", kind: "docs",
-      description: "Read calendars, events and availability; create, edit and delete events under the Channel action policy.",
+      description: "Read calendars, events and availability; create, edit and delete events under the app permission.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events.freebusy"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "consent", include_granted_scopes: "false" } },
@@ -228,9 +216,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         readAction("list_events", "Read or search events", "Read a bounded interval with explicit UTC offsets; expands recurring events. Up to 100 events per page, at most 366 days per interval. Retain event id and etag for changes.", '<calendar id|primary> {"timeMin":"RFC3339","timeMax":"RFC3339","q":"optional search","maxResults":50,"pageToken":"optional"}'),
         readAction("get_event", "Read event", "Read one exact event, its guests and recurrence, and current etag for safe changes.", "<calendar id|primary> <event id>"),
         readAction("freebusy", "Check availability", "Read busy intervals for one calendar; unavailable or denied calendars are never reported as free.", '<calendar id|primary> {"timeMin":"RFC3339","timeMax":"RFC3339"}'),
-        gatedWriteAction("create_event", "Create event", "Create an event with an explicit base32hex id, title, start and end. Supports all-day dates, IANA time zones, guests and recurrence. Choose guest notifications with sendUpdates; unconfirmed writes are never automatically retried.", '<calendar id|primary> {"id":"unique base32hex id","summary":"Title","start":{"dateTime":"RFC3339"},"end":{"dateTime":"RFC3339"},"sendUpdates":"all|externalOnly|none"}'),
-        gatedWriteAction("update_event", "Edit event", "Patch selected event content with the exact current etag; stale edits fail instead of overwriting others. Attendee and recurrence arrays replace the complete field. A recurring master changes the series; an instance id changes one occurrence.", '<calendar id|primary> {"eventId":"…","etag":"quoted etag from get_event","sendUpdates":"all|externalOnly|none","summary":"New title"}'),
-        gatedWriteAction("delete_event", "Delete event", "Delete the exact event only while its etag still matches. A recurring master deletes the series; an instance id cancels one occurrence. Choose guest notifications explicitly.", '<calendar id|primary> {"eventId":"…","etag":"quoted etag from get_event","sendUpdates":"all|externalOnly|none"}'),
+        writeAction("create_event", "Create event", "Create an event with an explicit base32hex id, title, start and end. Supports all-day dates, IANA time zones, guests and recurrence. Choose guest notifications with sendUpdates; unconfirmed writes are never automatically retried.", '<calendar id|primary> {"id":"unique base32hex id","summary":"Title","start":{"dateTime":"RFC3339"},"end":{"dateTime":"RFC3339"},"sendUpdates":"all|externalOnly|none"}'),
+        writeAction("update_event", "Edit event", "Patch selected event content with the exact current etag; stale edits fail instead of overwriting others. Attendee and recurrence arrays replace the complete field. A recurring master changes the series; an instance id changes one occurrence.", '<calendar id|primary> {"eventId":"…","etag":"quoted etag from get_event","sendUpdates":"all|externalOnly|none","summary":"New title"}'),
+        writeAction("delete_event", "Delete event", "Delete the exact event only while its etag still matches. A recurring master deletes the series; an instance id cancels one occurrence. Choose guest notifications explicitly.", '<calendar id|primary> {"eventId":"…","etag":"quoted etag from get_event","sendUpdates":"all|externalOnly|none"}'),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events.freebusy"], secretRefs: [] },
@@ -254,6 +242,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "googleads", name: "Google Ads", kind: "observability",
+      defaultPermission: "ask",
       description: "Create and manage advertising campaigns, budgets, targeting and creatives; enable or pause campaigns and read spend and conversions for the selected advertiser account.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/adwords"], tokenField: "oauthToken",
@@ -269,8 +258,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         readAction("read_account", "Read selected account", "Confirm the selected advertiser, currency and report time zone.", "<customer ID>"),
         readAction("query", "Query campaigns and performance", "Read campaigns, budgets, creatives, targeting, spend and conversions with a bounded SELECT GAQL query. LIMIT is 1-250 (default 250); dates use the account time zone and Micros are integer millionths of its currency.", "<customer ID> <SELECT GAQL query>"),
         readAction("validate_mutations", "Validate advertising changes", "Validate 1-25 linked Google Ads configuration operations without changing resources or enabling ads. Uses the selected customer and explicit currency.", '<customer ID> {"currencyCode":"USD","mutateOperations":[…]}'),
-        gatedWriteAction("mutate", "Configure advertising", "Atomically create or update budgets, campaigns, ad groups, creatives, assets and targeting. New campaigns must be PAUSED; no account, payer or access changes, removal or campaign activation. Monetary Micros fields are decimal strings in the explicit account currency. Unconfirmed writes are never automatically retried.", '<customer ID> {"currencyCode":"USD","mutateOperations":[…]}'),
-        gatedWriteAction("set_campaign_status", "Enable or pause campaign", "Enable or pause one campaign. Enabling binds the explicit currency and current non-shared average daily budget. Google can spend above the average on a day; it is not a hard daily spending cap.", '<customer ID>/<campaign ID> {"status":"PAUSED"} or {"status":"ENABLED","currencyCode":"USD","expectedDailyBudgetMicros":"10000000"}'),
+        writeAction("mutate", "Configure advertising", "Atomically create or update budgets, campaigns, ad groups, creatives, assets and targeting. New campaigns must be PAUSED; no account, payer or access changes, removal or campaign activation. Monetary Micros fields are decimal strings in the explicit account currency. Unconfirmed writes are never automatically retried.", '<customer ID> {"currencyCode":"USD","mutateOperations":[…]}'),
+        writeAction("set_campaign_status", "Enable or pause campaign", "Enable or pause one campaign. Enabling binds the explicit currency and current non-shared average daily budget. Google can spend above the average on a day; it is not a hard daily spending cap.", '<customer ID>/<campaign ID> {"status":"PAUSED"} or {"status":"ENABLED","currencyCode":"USD","expectedDailyBudgetMicros":"10000000"}'),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/adwords"], secretRefs: [] },
@@ -325,6 +314,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",
+      defaultPermission: "ask",
       description: "Search and read with xmatrix call --public for normal results or --private to mask the Channel/history result. Both record invocation parameters; private originals go to the caller and its Human owner’s protected Web view for 30 days. Sending search/read with xmatrix send publishes results normally. Signs in through Composio. Each mailbox serves only its owner and their Agents. Sending and replying ask for approval by default.",
       oauth: { authorizeUrl: "https://backend.composio.dev/api/v3.1/connected_accounts/link",
         tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "mailboxes", flow: "composio" },
@@ -332,8 +322,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       actions: [
         readAction("search", "Search mail", 'The 10 newest messages per mailbox matching a Gmail query, with id, sender, subject and snippet. Use xmatrix call --private to mask results in the Channel and execution history, or --public to publish normally. Invocation parameters are visible in both modes; never put a credential in them. Use * for all available mailboxes or name one connected mailbox; put the query after it, e.g. @gmail:search:* is:unread newer_than:1h.', "*|<mailbox> [gmail search]"),
         readAction("read", "Read message", "Headers, text body and every link of one message. Use xmatrix call --private to mask results in the Channel and execution history, or --public to publish normally. Invocation parameters are visible in both modes; never put a credential in them. The Hub does not extract credentials or automatically create secrets.", "<message id>"),
-        gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Asks a Space admin to approve each request by default.", "<to address> [from:<mailbox>] <subject>\n<body>"),
-        gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Asks a Space admin to approve each request by default.", "<message id> <body>"),
+        writeAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Asks a Space admin to approve each request by default.", "<to address> [from:<mailbox>] <subject>\n<body>"),
+        writeAction("reply", "Reply", "Reply in the thread of one message, to its sender. Asks a Space admin to approve each request by default.", "<message id> <body>"),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://mail.google.com/"], secretRefs: [] },
@@ -436,6 +426,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   }),
   eventConnector({
     id: "linear",
+      defaultPermission: "ask",
     name: "Linear",
     kind: "issue-tracker",
     description: "Route Linear issue, comment, and project updates into channels so agents pick up work where it is discussed.",
