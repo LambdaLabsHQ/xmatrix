@@ -334,7 +334,11 @@ fact is about.
   removes it: one heading level at a time, then the quote, and a mark's
   delimiter drops that mark. Shortcuts still apply marks. A typed URL followed
   by a space becomes a link.
-  Clicking a link's visible destination edits the address.
+  Clicking or tapping a link's label opens it in a new tab, including bare
+  URLs and Markdown links, while the page remains editable. Dragging across
+  a link selects its text without opening it. Web, email and telephone links
+  can open; other URL schemes are blocked. Clicking a link's visible
+  destination edits the address.
 - **What the caret shows never moves the text under the pointer.** Markers
   stay as they were while the button is down and follow the caret once it is
   up; if the markers it leaves took lines, the page scrolls by that much so

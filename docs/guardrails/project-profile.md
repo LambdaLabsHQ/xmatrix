@@ -24,6 +24,10 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Page links open with an ordinary click or tap while the document is editable,
+including bare URLs and Markdown labels. Drag selection and address editing
+remain available. See [live documents](../design/pages-live-document.md#42-surface).
+
 Agent Runs cannot configure the installation DaemonHost through setup commands,
 matching the existing host-start and Profile-registry boundary. Installer
 binary-only mode verifies and installs the published binary without shell,
