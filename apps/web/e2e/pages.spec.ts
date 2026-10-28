@@ -914,8 +914,19 @@ test("an owner may start a Space's pages from a repository or a first page, and 
   await fixtureJson(browser, "page-publish", /\/pages\/p-first\/publication$/u,
     { page: { ...page("p-first", null, "First document", "V"), publishedAt: NOW } }, { method: "PUT" });
   await browser.getByTestId("pages-view").getByRole("button", { name: "Share" }).click();
-  await browser.getByLabel("Anyone with the link can read this page").click();
+  // Share drops from its button and says who reads the page now, the Space's own link beside them.
+  const share = browser.getByTestId("page-share");
+  await expect(share).toContainText("Everyone in this Space");
+  await expect(share.getByRole("button", { name: "Copy link" })).toBeVisible();
+  await fixtureJson(browser, "page-tree-published", pageTree,
+    { pages: [{ ...page("p-first", null, "First document", "V"), publishedAt: NOW }] }, { method: "GET" });
+  await browser.getByRole("switch", { name: "Anyone with the link can read this page" }).click();
   await expect.poll(async () => fixtureRequestBodies(browser, "page-publish")).toEqual([{ published: true }]);
+  // Once public, the public link stands under the switch that made it.
+  await expect(share.getByRole("link", { name: /\/p\/[^/]+\/p-first$/u })).toBeVisible();
+  await expect(browser.getByRole("switch", { name: "Anyone with the link can read this page" })).toBeChecked();
+  await browser.keyboard.press("Escape");
+  await expect(share).toBeHidden();
   // Once an Agent drafts the move, the page says so until it is applied, however many pages exist.
   await fixtureJson(browser, "migration-proposed", /\/api\/xmatrix\/spaces\/[^/]+\/page-migration$/u,
     { spaceId: E2E_SPACE.id, state: "proposed", version: 1, drafter: null, draft: { pages: [] }, sources: [], report: null },
