@@ -130,21 +130,39 @@ test("changed drafts discard the old reading and forced summons skip preview", a
   expect((await fixtureRequestBodies(page, "draft-decline")).length).toBe(1);
 });
 
-test("Enter finishes the draft preview before publishing and reuses an in-flight request", async ({ page }) => {
-  await install(page, "hello", {});
-  const reading = { start: 0, end: 7, mention: "@claude", choice: "reference" };
-  await fixtureRule(page, { id: "slow-preview", pattern: "**/api/xmatrix/channels/channel-general/summon-intent",
-    responder: { kind: "static", delayMs: 500, json: { readings: [reading] } } });
-  await fixtureJson(page, "quick-send", "**/api/xmatrix/channels/channel-general/messages", {});
-  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  const input = page.locator(".composer-textarea").first();
-  await input.fill("@claude is the Agent name");
-  await input.press("Enter");
-  await expect.poll(async () => (await fixtureRequestBodies(page, "quick-send")).length).toBe(1);
-  const [sent] = await fixtureRequestBodies(page, "quick-send") as Array<{ summonIntents: unknown[] }>;
-  expect(sent.summonIntents).toEqual([reading]);
-  expect((await fixtureRequestBodies(page, "slow-preview")).length).toBe(1);
-});
+for (const previewStarted of [false, true]) {
+  test(`Enter publishes while the preview is ${previewStarted ? "in flight" : "debouncing"}`, async ({ page }) => {
+    await install(page, "hello", {});
+    await fixtureJson(page, "old-preview", "**/api/xmatrix/channels/channel-general/summon-intent", {
+      readings: [{ start: 0, end: 7, mention: "@claude", choice: "summon" }],
+    });
+    await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+    const input = page.locator(".composer-textarea").first();
+    await input.fill("@claude fix it");
+    await expect(page.locator('.composer-textarea .app-mention-chip[data-intent="summon"]').first()).toBeVisible();
+    // Freeze the debounce and deadline so a send can only pass by proceeding
+    // independently of the preview; the response stays held until after it sends.
+    await page.clock.install();
+    await page.clock.pauseAt(new Date());
+    await fixtureRule(page, { id: "slow-preview", pattern: "**/api/xmatrix/channels/channel-general/summon-intent",
+      responder: { kind: "deferred", json: { readings: [
+        { start: 0, end: 7, mention: "@claude", choice: "reference" },
+      ] } } });
+    await fixtureJson(page, "quick-send", "**/api/xmatrix/channels/channel-general/messages", {});
+    const body = "@claude is the Agent name";
+    await input.fill(body);
+    if (previewStarted) {
+      await page.clock.runFor(400);
+      await expect.poll(async () => (await fixtureRequestBodies(page, "slow-preview")).length).toBe(1);
+    }
+    await input.press("Enter");
+    await expect.poll(async () => (await fixtureRequestBodies(page, "quick-send")).length).toBe(1);
+    const [sent] = await fixtureRequestBodies(page, "quick-send") as Array<{ body: string; summonIntents?: unknown[] }>;
+    expect(sent.body).toBe(body);
+    expect(sent.summonIntents).toBeUndefined();
+    expect((await fixtureRequestBodies(page, "slow-preview")).length).toBe(previewStarted ? 1 : 0);
+  });
+}
 
 test("an unavailable preview leaves sending usable with the ordinary intent check", async ({ page }) => {
   await install(page, "hello", {});

@@ -11,22 +11,21 @@ const DEADLINE_MS = 6_000;
 type Reading = { key: string; readings: DraftSummonIntent[] };
 type Request = { key: string; controller: AbortController; promise: Promise<DraftSummonIntent[]> };
 
-/** Preview only the exact current Channel, body and selections. Sending can
- * finish the same bounded request immediately rather than wait for debounce.
+/** Preview only the exact current Channel, body and selections. Sending uses
+ * completed readings without waiting for the debounce or an in-flight request.
  * The Human confirms this reading on send; all launch authorization stays at
  * the ordinary message/registration authority. Older clients still read on send. */
 export function useDraftSummonIntents(input: {
   token: string | null; channelId: string | undefined; body: string;
   selections?: ReadonlyArray<{ start: number; end: number; text: string }>;
-}): { readings: DraftSummonIntent[]; fresh: boolean; reading: boolean;
-  readBeforeSend: () => Promise<DraftSummonIntent[]> } {
+}): { readings: DraftSummonIntent[]; fresh: boolean; reading: boolean } {
   const { token, channelId, body, selections } = input;
   const ranges = useMemo(() => draftSummonRanges(body, selections).slice(0, MAX_READ), [body, selections]);
   const key = JSON.stringify([token, channelId, body, ranges]);
   const [last, setLast] = useState<Reading | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const request = useRef<Request | null>(null);
-  const readBeforeSend = useCallback(async () => {
+  const readPreview = useCallback(async () => {
     if (!token || !channelId || !ranges.length) return [];
     if (last?.key === key) return last.readings;
     if (request.current?.key === key) return request.current.promise;
@@ -60,8 +59,8 @@ export function useDraftSummonIntents(input: {
     return promise;
   }, [token, channelId, body, ranges, key, last]);
   // The reading function changes after a result; the draft key owns cancellation.
-  const readRef = useRef(readBeforeSend);
-  readRef.current = readBeforeSend;
+  const readRef = useRef(readPreview);
+  readRef.current = readPreview;
   useEffect(() => {
     if (!token || !channelId || !ranges.length) return;
     setPending(key);
@@ -74,6 +73,5 @@ export function useDraftSummonIntents(input: {
   }, [key]);
   const enabled = !!token && !!channelId && ranges.length > 0;
   const fresh = enabled && last?.key === key;
-  return { readings: fresh ? last.readings : [], fresh, reading: enabled && pending === key,
-    readBeforeSend };
+  return { readings: fresh ? last.readings : [], fresh, reading: enabled && pending === key };
 }

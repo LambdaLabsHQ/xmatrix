@@ -254,6 +254,9 @@ write checks it again after the provider request; another Space's admin role
 does not authorize the flow. See [connector platform](../design/connector-platform.md)
 and [Space credential isolation](../operations/space-credential-isolation.md)
 for historical secret copies and the local OS-user boundary.
+Space secret storage has no count quota; complete catalog reads use bounded
+keyset queries and per-request byte budgets, preserving existing API shapes
+and live Run/admin approval checks. See [Agent Run permissions](../operations/agent-run-permissions.md#space-secrets).
 The separate GitHub App callback also hands off to authenticated completion;
 forwarded links cannot attach another person's installations, and earlier
 installation-selection grants must be reauthorized under the new grant purpose.
@@ -388,7 +391,8 @@ per-connection ingress. See [GCP connector](../connectors/gcp.md).
 
 The Web composer previews Jev's summon intent while typing, with mention bands
 and a declined-mention explanation and Start anyway option at the address. Human-confirmed readings travel with the exact message;
-launch authorization remains server-owned, and unread or unavailable previews
+publication takes completed readings without waiting for previews. Launch
+authorization remains server-owned, and unread or unavailable previews
 retain post-send checks. See [invocation status](../design/mention-invocation/README.md).
 
 Windows Agent children enforce UTF-8 transport settings and use managed PowerShell

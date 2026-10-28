@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Spaces can store more than 128 secrets
+
+A Space with 128 secrets refused the next credential even when it was needed
+for normal work. The Hub removes that storage quota, and catalog, Run value
+and approval reads also work beyond the old boundary. Reads use ordered,
+bounded SQL pages and per-request byte budgets; alias listings do not fetch
+encrypted values. Existing encryption, live Run authorization and admin
+approval remain in force. This ships in the Hub without a schema or client
+change. Recovery is a CI-validated Hub release reverting this change; keep
+stored secrets intact and restore forward support for catalogs above 128
+before relying on an older read implementation.
+
 ## Unreleased: Page links open with a click or tap
 
 Bare URLs and Markdown links in an editable page now open directly in a new
@@ -19,19 +31,14 @@ controlled-clock browser regression reproduces the old disappearance without
 changing position, timeout or retry tolerances. No API, data or native update
 is needed; recovery uses a CI-validated beta Web reverting the change.
 
-## Unreleased: Execution report lock failures retain their blocker
+## Unreleased: Sending does not wait for summon previews
 
-HUB-AY lost a Run-lock response, then its one fresh-session replay hit a lock
-timeout. The event did not identify the holder. A slow execution-owner query
-now takes one bounded, independent read of the live PostgreSQL wait edge,
-before a lock timeout erases it. Failures retain waiter and blocker state,
-transaction age and fixed owner categories; SQL, parameters, backend ids and
-user identities stay out of the event and Sentry issue reader. Fast queries
-open no extra connection, and each isolate permits only one concurrent sample.
-Unavailable diagnostics preserve the original error. Existing replay and
-unknown-COMMIT boundaries are unchanged. This is missing diagnostic coverage,
-not a confirmed repair of the underlying contention. Hub only, no migration;
-recovery is a CI-validated beta Hub reverting the change.
+Pressing Enter or Send with an Agent mention previously waited up to six
+seconds for the draft intent preview before the message appeared. Sending
+now takes completed readings for the exact current draft immediately;
+unfinished previews use the existing post-send intent check. Changed drafts
+cannot carry an older reading. This ships in the beta Web, with no API or
+data migration. Recovery is a CI-validated beta Web reverting the change.
 
 ## Unreleased: Page edits in a Channel fold to a summary with a preview
 
@@ -1730,3 +1737,17 @@ selection fill. This restores the established mention geometry contract without
 changing keyboard selection, routing or profile permissions. No migration or
 native update is needed; recovery is a CI-validated beta Web release reverting
 the change.
+
+## Unreleased: Execution report lock failures retain their blocker
+
+HUB-AY lost a Run-lock response, then its one fresh-session replay hit a lock
+timeout. The event did not identify the holder. A slow execution-owner query
+now takes one bounded, independent read of the live PostgreSQL wait edge,
+before a lock timeout erases it. Failures retain waiter and blocker state,
+transaction age and fixed owner categories; SQL, parameters, backend ids and
+user identities stay out of the event and Sentry issue reader. Fast queries
+open no extra connection, and each isolate permits only one concurrent sample.
+Unavailable diagnostics preserve the original error. Existing replay and
+unknown-COMMIT boundaries are unchanged. This is missing diagnostic coverage,
+not a confirmed repair of the underlying contention. Hub only, no migration;
+recovery is a CI-validated beta Hub reverting the change.
