@@ -283,7 +283,7 @@ test("a day settles two days after it began", () => {
 
 test("active people are counted once across shards over 1, 7 and 30 days", async () => {
   const day = (date) => Math.round(Date.parse(`${date}T00:00:00.000Z`) / 86_400_000);
-  const activity = (query) => Array.from({ length: 14 }, (_, offset) => ({
+  const activity = () => Array.from({ length: 14 }, (_, offset) => ({
     day: new Date(Date.UTC(2026, 7, 18 + offset)).toISOString().slice(0, 10),
     messages: 0, human_messages: 0, agent_messages: 0,
   }));

@@ -60,9 +60,9 @@ export function withActiveUsers(
   if (!first) return overview;
   const start = adminDayNumber(first.date);
   const length = overview.activity.length;
-  const daily = new Array<number>(length).fill(0);
-  const weekly = new Array<number>(length).fill(0);
-  const monthly = new Array<number>(length).fill(0);
+  const daily = Array.from({ length }, () => 0);
+  const weekly = Array.from({ length }, () => 0);
+  const monthly = Array.from({ length }, () => 0);
   const byUser = new Map<string, Set<number>>();
   for (const entry of userDays) {
     const days = byUser.get(entry.userId) ?? new Set<number>();

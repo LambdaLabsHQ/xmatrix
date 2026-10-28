@@ -166,11 +166,12 @@ export function formatAdminPercent(share: number | null): string {
 /** Registered accounts at the end of each day, counted back from today's total. */
 export function adminRegisteredSeries(points: readonly AdminActivityPoint[], registered: number): number[] | null {
   if (points.some((point) => point.signups === undefined)) return null;
-  const totals: number[] = new Array(points.length);
-  let count = registered;
+  const after = points.map((point) => point.signups ?? 0);
+  let later = 0;
+  const totals = after.map(() => 0);
   for (let index = points.length - 1; index >= 0; index--) {
-    totals[index] = count;
-    count -= points[index]!.signups ?? 0;
+    totals[index] = registered - later;
+    later += after[index]!;
   }
   return totals;
 }

@@ -71,7 +71,7 @@ test("period figures count distinct people, average complete days, and leave out
   assert.equal(figures.signups, 3);
   assert.equal(figures.averageActiveSpaces, 2);
   assert.equal(figures.runsStarted, 6);
-  const withoutSignups = points.map(({ signups, ...point }) => point);
+  const withoutSignups = points.map((point) => ({ ...point, signups: undefined }));
   assert.equal(adminPeriodFigures(withoutSignups, users, end - 2, end).signups, null);
 });
 
