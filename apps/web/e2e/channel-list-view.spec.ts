@@ -262,16 +262,19 @@ test("a message for a conversation the list has not paged in brings its row with
   const shown = { ...far, id: "channel-shown", name: "shown" };
   let send: ((frame: unknown) => void) | undefined;
   await routeHumanSocket(page, (frame, reply) => { if (frame.type === "human_connect") send = reply; });
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, far, shown] });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, far, shown] });
   await fixtureRule(page, {
     id: "flat-open-only", pattern: /\/api\/xmatrix\/channels\/page\?.*view=flat/u,
     responder: { kind: "static", json: { protocolVersion: 1, catalogRevision: 1, nextCursor: null,
       rows: [{ channel: E2E_CHANNEL, ownActivityAt: E2E_CHANNEL.updatedAt }], counts: { active: 3, unread: 0, mentions: 0 } } },
   });
-  send = undefined;
-  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   await expect.poll(visibleChannelRowIds(page)).toEqual([E2E_CHANNEL.id]);
   await expect.poll(() => Boolean(send)).toBe(true);
+  // This fixture keeps the paged snapshot fixed to exercise message promotion,
+  // not a reconnect reread. Finish startup's refresh window before arrivals.
+  await page.clock.install();
+  await page.clock.runFor(1_000);
   const message = (channelId: string, sequence: number, body: string) => ({ type: "channel_message_received", message: {
     messageId: `${channelId}-${sequence}`, channelId, sequence, body, sentAt: new Date().toISOString(),
     reactions: [], annotations: [], attachments: [],

@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Message catalog checks start after bootstrap refreshes
+
+The unpaged-message browser case now installs its fixed catalog before one
+navigation and drains startup's refresh window before injecting arrivals.
+Previously a reconnect and the synthetic messages could share one window:
+the normal full-refresh path then read the fixture's permanently old catalog
+instead of exercising message promotion. The two-message count and the
+shared snapshot without viewer read state keep their original assertions.
+No product, API, schema, timeout, retry policy or native behavior changes.
+
 ## Unreleased: Page link editing checks start at the selected text
 
 The Page link browser case now verifies that closing its discussion returns
