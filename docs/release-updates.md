@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Shared pages read as the page does in the app
+
+A published page (`/p/…`) is set with the live editor's styles on the app's
+paper: headings, lists and tables come out formatted instead of bare text. A
+thin bar carries where the page sits and the xMatrix mark; the title stands
+large, with the faces of who keeps the page current and when it last changed
+under it; the page's sections are rules at the right edge. In the app and on a
+shared page, tables drop their cell grid for hairline rows, columns fit their
+content and short cells keep to one line, and a page's reminders read as their
+names in ink instead of sky-blue pills. Web only; recovery is a beta Web
+reverting this change.
+
 ## Unreleased: The iOS swipe back follows the finger again
 
 On iPhone, dragging from the left edge moves the screen with the finger again.
