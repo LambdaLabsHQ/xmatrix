@@ -598,7 +598,10 @@ fn claude_presence_frame_carries_the_effort_chip_and_command() {
     let presentation = agent_presentation_adapter_for_runtime("claude").present(
         &AgentPresentationFacts {
             model: Some("claude-opus-5".to_string()),
-            models: claude_model_catalog(),
+            models: crate::claude_parameters::initialize_facts(&serde_json::json!({
+                "models": [{"value":"default", "resolvedModel":"claude-opus-5",
+                    "supportedEffortLevels":["high"]}]
+            }), None).models.unwrap(),
             models_reported: true,
             effort: Some("auto".to_string()),
             ..AgentPresentationFacts::default()

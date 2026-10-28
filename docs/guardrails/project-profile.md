@@ -24,6 +24,20 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Agent Runs cannot configure the installation DaemonHost through setup commands,
+matching the existing host-start and Profile-registry boundary. Installer
+binary-only mode verifies and installs the published binary without shell,
+login or daemon setup. See [local connection Profiles](../operations/local-connection-profiles.md).
+
+Provider capability catalogs are derived from native model/effort/parameter
+and command observations. Claude has no static model or effort fallback;
+workflow modes use its native effort argument grammar. Claude and ACP
+command inventories remain unavailable before discovery, and explicit empty
+observations cannot restore documentation inventories; session controls and
+presence share the same merge. See the
+[capability audit](../operations/provider-capability-audit.md) for source
+ownership and rollout limits.
+
 Instance connection, capacity-retry control and registration withdrawal acquire
 the Channel lifecycle lock before Run locks, then recheck current state and registration authority.
 Concurrent stops can commit without a lock-order deadlock, and reconnect cannot

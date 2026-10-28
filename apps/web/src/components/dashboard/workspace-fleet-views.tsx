@@ -129,7 +129,8 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
-import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCredentials, connectorWritableCredentials } from "./connector-credentials";
+import { ConnectorCredentials, connectorGeneratesCredentials, connectorReconnectsWithSavedCredentials, connectorTakesCredentials,
+  connectorWritableCredentials } from "./connector-credentials";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 import { GmailMailboxes } from "./gmail-mailboxes";
 import { CloudflareLogins } from "./cloudflare-logins";
@@ -1472,7 +1473,10 @@ export function AppsView({
         : available ? "Not connected" : "Coming soon",
       summary: configured ? connector.id === "x" ? "Connected accounts are available to their owners and their Agents" : "Ready in every channel in this space"
         : needsAttention ? connection.error || "The connection needs to be authorized again"
-          : connection ? "Reconnect to resume channel delivery"
+          : connection ? connectorTakesCredentials(connector) && connectorWritableCredentials(connector).length > 0
+            && !oauthProviders.includes(connector.id) && !nativeProviders.includes(connector.id)
+            && !connectorReconnectsWithSavedCredentials(connector, connection)
+            ? "Save its credentials below to connect again" : "Reconnect to resume channel delivery"
             : available ? "Connect an account and choose what xMatrix can access" : "This connector is not available yet",
     };
   };
@@ -1547,6 +1551,12 @@ export function AppsView({
                 <LogOut /> {disconnectingProviderId === connector.id ? "Disconnecting" : "Disconnect"}
               </Button>
             </>
+          ) : state.available && !oauthProviders.includes(connector.id) && !nativeProviders.includes(connector.id)
+            && connectorReconnectsWithSavedCredentials(connector, state.connection) ? (
+            <Button size="sm" variant="outline" disabled={updating || checking} onClick={() => void checkConnector(connector)}
+              title={`Reconnect ${connector.name} with its saved credentials`}>
+              {checking ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />} Reconnect
+            </Button>
           ) : state.available && (connector.id === "github" || oauthProviders.includes(connector.id) || nativeProviders.includes(connector.id)
             || connectorWritableCredentials(connector).length === 0) ? (
             <Button size="sm" variant="outline" disabled={updating || checking} onClick={() => void configureConnector(connector)}>

@@ -12,7 +12,7 @@ import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { declinedIntentCopy, type DeclinedIntent } from "./summon-intent";
 import { noteJevReading } from "./jev-filled-tags";
 import type { AgentControlInvocation, AgentControlOutcomeRecord, AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
-import { summonView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
+import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
 import type { CommandNotice } from "./command-notices";
 import { MentionChipFace } from "./mention-chip-face";
 import { formatZonedDateTime } from "./time-display";
@@ -21,6 +21,7 @@ import { MentionReplyRecovery } from "./mention-reply-recovery";
 import { parsePresentedRoutingDecision, RoutingDecisionBoard, routingSelectionNote } from "./routing-decision-board";
 import { HandoffArrowLabel } from "./handoff-arrow";
 import { useAppPortalContainer } from "./app-portal-container";
+import { useNow } from "./agent-work-intent";
 
 const InvocationPopoverContext = createContext<{
   openId: string | null; setOpenId: Dispatch<SetStateAction<string | null>>;
@@ -390,27 +391,23 @@ export function MentionSummonSent({ name, failure }: { name: string; failure: st
 }
 
 /**
- * An `@` that called a live Instance by name, in its own conversation: nothing starts, so the chip says whether the
- * Instance took the message, from its execution of it.
+ * An `@` that called a live Instance by name, in its own conversation: nothing starts, so the chip follows what the
+ * Instance does with the message (instanceCallView), and names the conversation it was called in, which opens from it.
  */
-export function MentionInstanceCallChip({ name, harness, sent, execution, failure }: {
-  name: string; harness: string; sent: boolean; execution?: SerializedAgentMessageExecution; failure: string | null;
+export function MentionInstanceCallChip({ name, harness, conversation, busy, sent, execution, failure, onOpenConversation }: {
+  name: string; harness: string; conversation: string | null; busy: boolean; sent: boolean;
+  execution?: SerializedAgentMessageExecution; failure: string | null; onOpenConversation?: () => void;
 }) {
-  const failed = failure ?? (execution && (execution.state === "failed" || execution.state === "interrupted")
-    ? "Its turn on this did not finish. Its conversation says why." : null);
-  const view: InvocationView = failed
-    ? { ...invocationChipStatus("Failed", failed), terminal: true,
-      steps: [{ label: "Message sent", state: failure ? "failed" : "done" }] }
-    : execution
-      ? { ...invocationChipStatus("Started", `${name} took it in its conversation.`), terminal: true,
-        steps: [{ label: "Message sent", state: "done" }, { label: "Taken by the Instance", state: "done", at: execution.startedAt }] }
-      : sent
-        ? { ...invocationChipStatus("Starting", `Sent to ${name} in its conversation.`), terminal: false,
-          steps: [{ label: "Message sent", state: "done" }, { label: "Taken by the Instance", status: "Sent", state: "current" }] }
-        : { ...invocationChipStatus("Starting", `Telling ${name} in its conversation.`, true), terminal: false,
-          steps: [{ label: "Message sent", status: "Sending", state: "current" }] };
+  const working = execution?.state === "accepted" || execution?.state === "running";
+  const now = useNow(working ? 1_000 : 60_000);
+  const view = instanceCallView({ name, busy, sent, execution, failure, now });
+  const open = onOpenConversation && conversation !== null
+    ? <button type="button" className="app-invocation-open" onClick={onOpenConversation}>
+      {execution?.finalReply ? "Open the reply" : `Open # ${conversation}`}</button>
+    : undefined;
   return <InvocationChip label={name} name={name} face={{ kind: "agent", name, harness }} sourceAddress={`@${name}`}
-    subtitle="Live Instance" view={view} />;
+    labelContent={<>@{name}{conversation !== null && <span className="app-mention-chip-conversation"># {conversation}</span>}</>}
+    subtitle={conversation !== null ? `Live Instance in # ${conversation}` : "Live Instance"} view={view} context={open} />;
 }
 
 function InvocationChip({ label, labelContent, announcement, name, instanceOrdinal, destinationName, face, sourceAddress, subtitle, invocationId, errorCode,

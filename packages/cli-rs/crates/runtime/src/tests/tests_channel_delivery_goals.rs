@@ -391,63 +391,6 @@ fn claude_stream_extra_args_applies_agent_instructions_as_system_prompt() {
     }));
 }
 
-#[test]
-fn claude_model_catalog_lists_switchable_aliases() {
-    let catalog = claude_model_catalog();
-    let ids: Vec<&str> = catalog.iter().map(|entry| entry.id.as_str()).collect();
-    assert_eq!(
-        ids,
-        [
-            "default",
-            "fable",
-            "opus",
-            "sonnet",
-            "sonnet[1m]",
-            "haiku",
-            "opusplan"
-        ]
-    );
-    // The hub dedupes by `model` and echoes it back on switch, so id and
-    // model must match and stay unique.
-    for entry in &catalog {
-        assert_eq!(entry.id, entry.model);
-    }
-    assert_eq!(catalog[0].is_default, Some(true));
-}
-
-/// Every alias must advertise the effort levels, because the only thing that
-/// makes `/effort` reachable at all — the Composer completion, the `Effort`
-/// chip, and the hub's own validation of a requested level — is this catalog.
-/// Claude reports no effort on any stream event, so an empty list here is the
-/// difference between a working control and a silently missing one.
-#[test]
-fn claude_model_catalog_advertises_effort_levels() {
-    for entry in claude_model_catalog() {
-        let levels: Vec<String> = entry
-            .supported_reasoning_efforts
-            .unwrap_or_default()
-            .into_iter()
-            .map(|level| level.reasoning_effort)
-            .collect();
-        assert_eq!(
-            levels,
-            ["low", "medium", "high", "xhigh", "max", "ultracode"],
-            "{}",
-            entry.id
-        );
-        // The account/model default is not observable from this runtime, so
-        // claiming one would be a guess.
-        assert_eq!(entry.default_reasoning_effort, None, "{}", entry.id);
-    }
-    // `auto` is a valid `/effort` argument that this runtime deliberately
-    // does not offer; see `claude_effort_catalog`.
-    let offered: Vec<String> = claude_effort_catalog()
-        .into_iter()
-        .map(|level| level.reasoning_effort)
-        .collect();
-    assert!(!offered.iter().any(|level| level == "auto"));
-}
-
 /// The transcript is the only place the *real* effort appears, so the watcher
 /// has to read it there. Checked against 2.1.273 transcripts: an unpinned
 /// sonnet session records `high`, and a session launched `--effort high` and

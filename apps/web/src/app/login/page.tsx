@@ -815,6 +815,12 @@ function LoginContent() {
     // Starting over abandons this app handoff, even if sign-out gets no answer.
     if (step === "two_factor") query.delete("continue");
     await logout({ redirectTo: `/login?${query}` });
+    if (step === "two_factor") {
+      // Do not expose another sign-in while Next is still committing the URL
+      // change: this component would still carry the abandoned app handoff.
+      window.location.replace(`/login?${query}`);
+      return;
+    }
     changeEmail();
     setSecondCode("");
     setLoading(false);
