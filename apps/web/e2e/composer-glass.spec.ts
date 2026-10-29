@@ -200,7 +200,7 @@ test.describe("mock-auth app fixture", () => {
       await installMockAppFixtures(page);
       await page.goto("/app/fixture-space/channels/launch");
       await expect(page.locator(".app-message-timeline").getByText("Mobile list pass is ready for screenshot review.")).toBeVisible();
-      await page.locator(".xmatrix-app-shell").evaluate((shell) => {
+      await page.locator(".xmatrix-app-shell:not([aria-busy])").evaluate((shell) => {
         shell.classList.add("xmatrix-app-native-dock");
       });
 

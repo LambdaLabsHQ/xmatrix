@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { QueryClient, useQuery } from "@tanstack/react-query";
 import {
   admitAppCompatibility,
@@ -8,12 +8,10 @@ import {
   detectAppCompatibilityIdentity,
 } from "@/lib/app-client-compatibility";
 import { xmatrixHubOrigin } from "@/lib/query/api-client";
+import { StartupShell } from "@/components/dashboard/workspace-channel-sidebar";
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 
 const RETRY_DELAY_MS = 2000;
-const TRICKLE_INTERVAL_MS = 120;
-const INITIAL_PROGRESS = 0.04;
-// How far into the current step the trickle may creep before the step resolves.
-const STEP_TRICKLE_CEILING = 0.9;
 
 export function AppPreparationGate(props: { children: React.ReactNode }) {
   // Admission contains no user data. Keep its observers stable when AuthProvider
@@ -32,7 +30,6 @@ export function AppPreparationGate(props: { children: React.ReactNode }) {
     retry: true,
     retryDelay: RETRY_DELAY_MS,
   }, admissionClient);
-  const [progress, setProgress] = useState(INITIAL_PROGRESS);
   const compatibility = useQuery({
     queryKey: ["app-client-compatibility", hubOrigin, identity.data?.identity],
     enabled: Boolean(identity.data),
@@ -50,31 +47,32 @@ export function AppPreparationGate(props: { children: React.ReactNode }) {
   }, admissionClient);
   const ready = compatibility.data === true || (compatibility.data === undefined && identity.data?.remembered === true);
 
-  useEffect(() => {
-    if (ready) return;
-    const target = STEP_TRICKLE_CEILING;
-    const timer = setInterval(() => {
-      setProgress((current) => current + (target - current) * 0.06);
-    }, TRICKLE_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [ready]);
+  // The server cannot see a native shell; its frame lands right after hydration.
+  const frame = useSyncExternalStore(noSubscription, nativeFrame, browserFrame);
 
   if (ready) return props.children;
-  return (
-    <main aria-busy="true" className="flex min-h-dvh items-center justify-center bg-[#f4f0e8] px-6">
-      <div
-        role="progressbar"
-        aria-label="Preparing"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(progress * 100)}
-        className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-black/10"
-      >
-        <div
-          className="h-full rounded-full bg-[#7c654c] transition-[width] duration-300 ease-out"
-          style={{ width: `${Math.min(progress, 1) * 100}%` }}
-        />
-      </div>
-    </main>
-  );
+  // The app's own first frame, waiting on the same screen it will open on.
+  return <StartupShell {...frame} />;
+}
+
+type StartupFrame = { desktopFrameClass?: string; showMobileTabDock: boolean };
+const BROWSER_FRAME: StartupFrame = { showMobileTabDock: true };
+const FRAMES = new Map<string, StartupFrame>([
+  ["darwin", { desktopFrameClass: "xmatrix-desktop-macos", showMobileTabDock: true }],
+  ["win32", { desktopFrameClass: "xmatrix-desktop-windows", showMobileTabDock: true }],
+  ["ios", { showMobileTabDock: false }],
+]);
+
+function noSubscription() {
+  return () => {};
+}
+
+function browserFrame(): StartupFrame {
+  return BROWSER_FRAME;
+}
+
+function nativeFrame(): StartupFrame {
+  const bridge = getDesktopBridge();
+  if (bridge?.client === "ios") return FRAMES.get("ios")!;
+  return FRAMES.get(bridge?.platform ?? "") ?? BROWSER_FRAME;
 }

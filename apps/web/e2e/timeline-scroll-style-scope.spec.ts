@@ -58,7 +58,7 @@ test("scrolling the timeline restyles the rows, never the whole app", async ({ p
 
   // What restyling the whole app costs: an inherited property changed on its root.
   const wholeApp = Math.max(...await restyledDuring(async () => {
-    await page.locator(".xmatrix-app-shell").evaluate((root) => {
+    await page.locator(".xmatrix-app-shell:not([aria-busy])").evaluate((root) => {
       (root as HTMLElement).style.setProperty("--style-scope-probe", "1");
       void (root as HTMLElement).offsetHeight;
     });

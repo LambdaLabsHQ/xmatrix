@@ -4601,6 +4601,70 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   animation: app-content-skeleton-pulse 1.4s ease-in-out infinite;
 }
 
+/* What the startup frame is waiting for (StartupShell). Timed by CSS alone so
+   the server's first frame says it before any script runs: nothing for a
+   normal start, "Connecting" once the wait is noticeable, then a slow-network
+   line with a reload. */
+@keyframes app-startup-status-in {
+  from { opacity: 0; pointer-events: none; }
+  to { opacity: 1; pointer-events: auto; }
+}
+
+@keyframes app-startup-status-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.app-startup-status {
+  display: grid;
+  justify-items: center;
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+}
+
+.app-startup-status > * {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 2rem;
+  padding: 0 0.9rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  color: color-mix(in oklch, var(--foreground) 72%, transparent);
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.app-startup-status-connecting {
+  animation: app-startup-status-in 300ms ease-out 2s both, app-startup-status-out 200ms ease-in 6s forwards;
+}
+
+.app-startup-status-trying {
+  animation: app-startup-status-in 300ms ease-out 6.2s both, app-startup-status-out 200ms ease-in 15s forwards;
+}
+
+.app-startup-status > .app-startup-status-offline {
+  opacity: 1;
+}
+
+.app-startup-status-slow {
+  color: var(--foreground);
+  animation: app-startup-status-in 300ms ease-out 15.2s both;
+}
+
+.xmatrix-app a.app-startup-status-slow:hover {
+  background: color-mix(in oklch, var(--foreground) 7%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-startup-status-connecting,
+  .app-startup-status-trying { animation-duration: 1ms, 1ms; }
+  .app-startup-status-slow { animation-duration: 1ms; }
+}
+
 .app-content-skeleton {
   display: flex;
   flex-direction: column;
