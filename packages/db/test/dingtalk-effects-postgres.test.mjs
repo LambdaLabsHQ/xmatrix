@@ -27,7 +27,8 @@ integration('DingTalk true append/fire owners consume opaque source capabilities
   await assert.rejects(f.messages.append({...input,principal:{kind:'user',id:'other'}},cap),denied);
   await assert.rejects(f.messages.append({...input,prepared:{...input.prepared,bodyHash:'f'.repeat(64)}},cap),denied);
   const result=await f.messages.append(input,cap);assert.equal(result.messageId,cap.effectId);assert.equal(await count(f),1);
-  assert.deepEqual(await f.messages.append(input,cap),result);
+  const { liveRouting: _routing, ...receipt } = result;
+  assert.deepEqual(await f.messages.append(input,cap),receipt);
   const ac=await f.cap('automation');assert.notEqual(ac.effectId,cap.effectId);
   assert.equal(await operation(f,'automation',ac),f.channelId);
   const stored=(await f.sql('SELECT trigger_events FROM data.automations WHERE automation_id=$1',[f.automationId])).rows[0];

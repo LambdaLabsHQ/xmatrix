@@ -188,6 +188,15 @@ GitHub repository-catalog invalidation also replays its database-only cache
 version update once before COMMIT. Linked-installation selection and row locks
 are repeated on the new session; client refresh notifications run afterward.
 Unknown COMMIT still fails the webhook for redelivery, without immediate replay.
+Message append also owns one fresh session per attempt (HUB-B6). A lost
+response during opening or SQL, including the final live-routing read after
+publication writes, closes the failed session and replays the database-only
+transaction once. Placement fences, authorization, reply targets and attention
+recipients are checked again; no abandoned recipient set survives the retry.
+Delivery and provider effects stay outside the transaction. An answered database
+or domain rejection is not replayed; a second transport loss retains both
+failures. Unknown COMMIT still escapes to the Hub's existing append receipt
+reconciliation, never to immediate replay.
 Lock-free page search uses per-statement `single_read` recovery, including its
 membership and accessible-page checks (HUB-99).
 Channel detail reads use the same request-local, per-statement recovery for

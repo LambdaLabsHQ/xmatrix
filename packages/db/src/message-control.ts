@@ -1,3 +1,4 @@
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import { recordMessageAskAtAppend } from "./message-asks.js";
 import { authorizeDingTalkEffect, finishDingTalkEffect, type DingTalkEffectAuthority } from "./dingtalk-effect-authority.js";
 import { lockAgentRunChannels, requireAgentChannelAccess } from "./agent-channel-access.js";
@@ -1395,25 +1396,28 @@ export class PostgresMessageRepository {
           ? presentationResidual : null,
       };
     });
-    let targets = new Map<string, "mention" | "broadcast" | "reply">();
+    const initialTargets = new Map<string, "mention" | "broadcast" | "reply">();
     for (const target of input.attentionTargets ?? []) {
       const subjectId = bounded(target.subjectId, "attentionTargets.subjectId");
       if (!/^(?:user|agent):.+$/u.test(subjectId) ||
           (target.kind !== "mention" && target.kind !== "broadcast")) {
         throw new MessageAuthorityError("invalid_attention_target", 400, "Attention target is invalid");
       }
-      targets.set(subjectId, target.kind);
+      initialTargets.set(subjectId, target.kind);
     }
-    if (targets.size > MAX_ATTENTION_TARGETS) {
+    if (initialTargets.size > MAX_ATTENTION_TARGETS) {
       throw new MessageAuthorityError("attention_target_limit_exceeded", 400, "Attention targets exceed 1000");
     }
     const placement = await this.placement(
       requestId, "message.append", spaceId, input.placement,
     );
-    return this.database.transaction({
+    return retryTransactionBeforeCommit(this.database, {
       requestId, operation: "message.append",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
     }, async (transaction) => {
+      // Every attempt rechecks authority and resolves its own reply/mention
+      // recipients; abandoned work must not leak targets into the fresh snapshot.
+      let targets = new Map(initialTargets);
       if (dingtalkEffect) {
         if (principal.kind!=="user" || senderKind!=="app" || senderId!=="dingtalk" || input.runProof ||
           input.finalReplyExecutionId || input.invocationSelections!==undefined || input.attachments?.length ||

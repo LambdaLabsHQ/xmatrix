@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Message append recovers a lost pre-COMMIT response
+
+HUB-B6 lost its final live-routing read after publication writes, before COMMIT.
+The database-only append now closes that session and retries once on a fresh
+connection, checking authority and rebuilding reply/attention recipients for
+each attempt. Real PostgreSQL coverage verifies one committed message, mutation
+and outbox entry, fresh reply targets, bounded repeated loss and the unchanged
+unknown-COMMIT boundary. Delivery remains outside the transaction; unknown
+commits use existing receipt reconciliation. This repairs recovery without
+attributing the underlying disconnect. Hub only, no migration or client change;
+recovery is a CI-validated beta Hub reverting this change. See
+[PostgreSQL recovery](operations/postgres-hyperdrive-origin.md).
+
 ## Unreleased: Stackless Durable Object outages retain their HTTP caller
 
 HUB-B5 reached the common HTTP outage handler without an originating stack;

@@ -66,7 +66,9 @@ export async function effectFixture(run, constructors={}) {
 /** Pause after an actual query has executed, holding its real locks. */
 export function pauseQuery(database,name,after=()=>{},matches=()=>true) {
   let arrived,release;const waiting=new Promise(r=>arrived=r),resume=new Promise(r=>release=r);
-  return { waiting,release,database: { ...database,transaction: (context,run)=>database.transaction(context,tx=>run({ ...tx,query: async q => {
+  const observed=target=>({ ...target,openSession:()=>observed(target.openSession()),close:()=>target.close?.(),
+    transaction: (context,run)=>target.transaction(context,tx=>run({ ...tx,query: async q => {
     const rows=await tx.query(q);if(q.name===name && matches(q)){await after(q);arrived();await resume;}return rows;
-  } })) } };
+  } })) });
+  return { waiting,release,database:observed(database) };
 }
