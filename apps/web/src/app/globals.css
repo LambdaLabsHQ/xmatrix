@@ -4639,12 +4639,20 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 }
 
 .app-startup-status-connecting {
-  animation: app-startup-status-in 300ms ease-out 2s both, app-startup-status-out 200ms ease-in 10s forwards;
+  animation: app-startup-status-in 300ms ease-out 2s both, app-startup-status-out 200ms ease-in 6s forwards;
+}
+
+.app-startup-status-trying {
+  animation: app-startup-status-in 300ms ease-out 6.2s both, app-startup-status-out 200ms ease-in 15s forwards;
+}
+
+.app-startup-status > .app-startup-status-offline {
+  opacity: 1;
 }
 
 .app-startup-status-slow {
   color: var(--foreground);
-  animation: app-startup-status-in 300ms ease-out 10.2s both;
+  animation: app-startup-status-in 300ms ease-out 15.2s both;
 }
 
 .xmatrix-app a.app-startup-status-slow:hover {
@@ -4652,7 +4660,8 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-startup-status-connecting { animation-duration: 1ms, 1ms; }
+  .app-startup-status-connecting,
+  .app-startup-status-trying { animation-duration: 1ms, 1ms; }
   .app-startup-status-slow { animation-duration: 1ms; }
 }
 

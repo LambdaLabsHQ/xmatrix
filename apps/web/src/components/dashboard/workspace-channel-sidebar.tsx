@@ -100,6 +100,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -1021,20 +1022,43 @@ export function StartupShell({
 }
 
 /* What the startup frame is waiting for, said only once the wait is long
-   enough to notice: one tile of tinted paper on the slab, no shadow, never a
+   enough to notice, one step at a time (connecting, still trying on a slow
+   network, then a reload): one tile of tinted paper on the slab, no shadow, never a
    bare link. CSS alone times it, so it works in the server's first frame
    before any script has run; the slow tile is a plain link to this page, so
    it reloads without one. */
 function StartupStatus() {
+  // Once scripts run, an offline device says so at once instead of counting
+  // down; the app reconnects by itself when the network returns.
+  const online = useSyncExternalStore(subscribeToNetwork, () => navigator.onLine, () => true);
+  if (!online) {
+    return (
+      <div className="app-startup-status" role="status">
+        <span className="app-paper-tile app-startup-status-offline">
+          You’re offline. xMatrix will connect when the network is back.
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="app-startup-status" role="status">
       <span className="app-paper-tile app-startup-status-connecting">Connecting to xMatrix…</span>
+      <span className="app-paper-tile app-startup-status-trying">The network is slow. Still trying to connect…</span>
       <a href="" className="app-paper-tile app-startup-status-slow">
         <RotateCw className="size-3.5" aria-hidden="true" />
-        Slow network · Reload
+        Still not connected · Reload
       </a>
     </div>
   );
+}
+
+function subscribeToNetwork(onChange: () => void) {
+  window.addEventListener("online", onChange);
+  window.addEventListener("offline", onChange);
+  return () => {
+    window.removeEventListener("online", onChange);
+    window.removeEventListener("offline", onChange);
+  };
 }
 
 /** The second line of a conversation row, shared by the phone list and the desktop list. */
