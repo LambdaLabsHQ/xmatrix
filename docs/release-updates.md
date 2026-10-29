@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Each app start reports how long it took for the person
+
+Once per page load the app sends when it first reached its shell, signed in,
+its Channel list and its first messages (ms since navigation; absent when not
+reached), its device, and whether it painted this device's cached list
+(`warm`/`cold`). The Hub writes one diagnostics point per start under the
+person's keyed hash (`startup`/`startup_timing`, doubles 3–6), with no Space,
+Channel or content. Nothing waits on it. Hub and Web; an older Hub answers 404
+and the start simply goes uncounted.
+
 ## Unreleased: The Apps list groups by connection state and ticks what works in green
 
 The Apps list put category headings (Code & CI, Chat…) beside Connected, mixing

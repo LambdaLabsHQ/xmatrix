@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import {
-  HUB_ROUTES, parseDesktopDaemonFailureReport, parseOnboardingFunnelEvent,
-  type DesktopDaemonFailureReport, type OnboardingFunnelEvent,
+  HUB_ROUTES, parseDesktopDaemonFailureReport, parseOnboardingFunnelEvent, parseStartupTimingReport,
+  STARTUP_TIMING_STAGES, type DesktopDaemonFailureReport, type OnboardingFunnelEvent, type StartupTimingReport,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { diagnosticsDataPoint } from "./diagnostics";
@@ -21,6 +21,9 @@ export function registerOnboardingFunnelRoutes(app: Hono<{ Bindings: Env }>): vo
   // The App's logs stay on the machine; this is the only copy the Hub sees.
   diagnosticsReportRoute(app, HUB_ROUTES.observable_desktop_daemon_failure, parseDesktopDaemonFailureReport,
     { error: "Not a daemon start failure", code: "invalid_daemon_failure" }, desktopDaemonFailureDataPoint);
+  // How long the app took to open, as the person's own screen measured it.
+  diagnosticsReportRoute(app, HUB_ROUTES.observable_startup_timing, parseStartupTimingReport,
+    { error: "Not a startup timing", code: "invalid_startup_timing" }, startupTimingDataPoint);
 }
 
 function diagnosticsReportRoute<T>(
@@ -56,4 +59,13 @@ export async function desktopDaemonFailureDataPoint(report: DesktopDaemonFailure
   const point = await diagnosticsDataPoint({ userId, hashKey, routeGroup: "desktop", eventType: "daemon_start_failed",
     clientKind: report.platform, reason: report.stage, status: report.appVersion });
   return { ...point, blobs: [...point.blobs ?? [], report.detail], doubles: [...point.doubles ?? [], report.exitCode ?? -1] };
+}
+
+/** index1 the person's keyed hash; blob1 `startup`, blob2 the device, blob3
+ * `startup_timing`, blob4 `warm` or `cold`; doubles 3–6 the shell, signed-in,
+ * list and messages times in ms since navigation, -1 for a stage not reached. */
+export async function startupTimingDataPoint(report: StartupTimingReport, userId: string, hashKey: string | undefined) {
+  const point = await diagnosticsDataPoint({ userId, hashKey, routeGroup: "startup", eventType: "startup_timing",
+    clientKind: report.device, reason: report.cache });
+  return { ...point, doubles: [...point.doubles ?? [], ...STARTUP_TIMING_STAGES.map((stage) => report[stage] ?? -1)] };
 }
