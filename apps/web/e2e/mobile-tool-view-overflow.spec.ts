@@ -133,7 +133,7 @@ test("a long secret alias does not push the settings column off the surface", as
       updatedAt: E2E_NOW,
     }],
   });
-  await page.goto("/app/personal-sspaceperso/settings?item=secrets");
+  await page.goto("/app/personal-sspaceperso/settings?section=secrets");
 
   await expect(page.getByText("OPENROUTER_API_KEY_PRODUCTION_FLEET_ROTATION_2026")).toBeVisible();
   expect(await contentPastRightEdge(page)).toEqual([]);

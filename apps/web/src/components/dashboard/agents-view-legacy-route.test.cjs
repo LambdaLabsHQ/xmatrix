@@ -32,7 +32,7 @@ test("agents is the canonical Agents view and roles is only a legacy alias", () 
   assert.equal(viewForRouteSegment("agents"), "agents");
   assert.equal(viewForRouteSegment("roles"), "agents");
   assert.equal(appRouteInfo("/app/lambda/agents").view, "agents");
-  assert.equal(appRouteInfo("/app/lambda/roles?item=abc").view, "agents");
+  assert.equal(appRouteInfo("/app/lambda/roles?agent=abc").view, "agents");
   assert.equal(appRouteInfo("/app?view=roles").view, "agents");
   assert.equal(appRouteInfo("/app?view=agents").view, "agents");
 });

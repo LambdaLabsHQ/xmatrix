@@ -336,34 +336,44 @@ export function pagesViewPath(spacePath: string, pageId: string | null, conversa
   return search ? `${spacePath}?${search}` : spacePath;
 }
 
-/** A list destination's address names the item open in it (`?item=<key>`), so it can be shared. */
-export function toolItemPath(viewPath: string, item: string | null): string {
-  return item ? `${viewPath}?item=${encodeURIComponent(item)}` : viewPath;
+/** Each destination names the selected domain object, never an anonymous item. */
+export function viewSelectionParameter(view: AppView): string | null {
+  switch (view) {
+    case "apps": return "connector";
+    case "agents": return "agent";
+    case "machines": case "local": return "machine";
+    case "automation": return "schedule";
+    case "settings": case "admin": return "section";
+    case "team": return "space";
+    default: return null;
+  }
 }
 
-/**
- * The mention menu opens What it's good at with `edit=profile`. That marker is
- * part of an Agents address while it is there; other list addresses do not carry it.
- */
+/** A destination keeps only the domain selection it owns during Space URL normalization. */
+export function viewSelectionPath(viewPath: string, location: string): string {
+  const parameter = viewSelectionParameter(appRouteInfo(viewPath).view);
+  const url = parseAppLocation(location);
+  const selected = parameter ? url.searchParams.get(parameter)?.trim() : null;
+  return selected ? `${viewPath}?${parameter}=${encodeURIComponent(selected)}` : viewPath;
+}
+
+/** Preserve the explicit request to focus this harness's profile as the Space URL hydrates. */
 export function agentsProfileEditPath(viewPath: string, location: string): string {
-  const item = toolItemSelection(location);
-  const path = toolItemPath(viewPath, item);
-  return item && parseAppLocation(location).searchParams.get("edit") === "profile" ? `${path}&edit=profile` : path;
+  const url = parseAppLocation(location);
+  const path = viewSelectionPath(viewPath, location);
+  return url.searchParams.get("agent") && url.searchParams.get("edit") === "profile" ? `${path}&edit=profile` : path;
 }
 
 /**
- * Admin filters and Settings/Apps provider return parameters live in the
- * query. Canonicalizing their Space path must preserve those parameters until
- * the owning view consumes them.
+ * Settings/admin filters and Apps' single-use provider returns survive Space
+ * URL hydration until their owning view consumes them. Retired item addresses
+ * are discarded, never interpreted as another destination's selection.
  */
 export function adminViewPath(viewPath: string, location: string): string {
-  const query = parseAppLocation(location).searchParams.toString();
-  return query ? `${viewPath}?${query}` : viewPath;
-}
-
-/** The item a list destination's address names; the reverse of `toolItemPath`. */
-export function toolItemSelection(location: string): string | null {
-  return parseAppLocation(location).searchParams.get("item")?.trim() || null;
+  const url = parseAppLocation(location);
+  url.searchParams.delete("item");
+  const query = url.searchParams.toString();
+  return `${viewPath}${query ? `?${query}` : ""}${url.hash}`;
 }
 
 /** What a Pages view address names; the reverse of `pagesViewPath`. */

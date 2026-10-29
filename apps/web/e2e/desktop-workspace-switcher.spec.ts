@@ -165,6 +165,7 @@ test("Team lists every workspace and tags the one you are in", async ({ page }) 
 
   // Another Space offers to switch to it.
   await personal.click();
+  await expect(page).toHaveURL(/\/team\?space=space-personal$/u);
   await expect(view.getByRole("heading", { level: 2, name: E2E_SPACE.name })).toBeVisible();
   await expect(view.getByRole("button", { name: `Open ${E2E_SPACE.name}` })).toBeVisible();
 

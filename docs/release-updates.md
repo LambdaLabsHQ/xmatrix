@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Shared links name the selected object
+
+An Apps link such as `?connector=stripe` previously stayed on the list because
+detail selection read `item`, while only OAuth returns interpreted `connector`.
+Apps now uses `connector` for opening, switching and closing details, including
+OAuth and Gmail returns. The old Apps `item` parameter is removed without an
+alias. The shared item hook and helpers are removed; Agents use `agent`,
+Machines use `machine`, Schedules use `schedule`, Settings/admin use `section`,
+and Team uses `space`. Existing item-only links return to their destination
+list; this is an intentional address change across Web consumers. Beta Web only, no protocol
+or schema change. Recovery is a CI-validated beta Web reverting this change.
+
 ## Unreleased: A new Page keeps its first pasted image
 
 Pasting an image or video into an empty new Page captured its still-null id

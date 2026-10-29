@@ -14,7 +14,7 @@ export function GitHubConnectReturn() {
     const outcome = GITHUB_CONNECT_OUTCOMES.find((known) => known === reported) ?? "failed";
     keepGitHubConnectReturn(outcome, query.get("grant"));
     const space = query.get("space");
-    window.location.replace(takeGitHubReturnPath(outcome) ?? (space ? `/app/${encodeURIComponent(space)}/apps` : "/app"));
+    window.location.replace(takeGitHubReturnPath(outcome) ?? (space ? `/app/${encodeURIComponent(space)}/apps?connector=github` : "/app"));
   }, []);
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-5 px-6 py-12">

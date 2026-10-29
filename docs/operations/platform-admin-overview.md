@@ -8,7 +8,7 @@ the xMatrix app, without opening a database console.
 `Platform admin` is an app view (`/app/<space>/admin`, plus a rail entry and a
 "Platform" group in **More**) with these sections. Every list is the same
 `AdminTable`: search, sortable headers, 50-row pages, CSV export, and its
-search/sort/page state in the address (`?item=<section>&<id>q=…&<id>sort=…`).
+search/sort/page state in the address (`?section=<section>&<id>q=…&<id>sort=…`).
 
 On phones, the section list opens each section as a screen with a way back.
 Table rows become labelled list rows; sorting uses an inline selector and a

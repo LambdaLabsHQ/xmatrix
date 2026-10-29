@@ -185,7 +185,7 @@ test("a secret card takes the value on the paper, then leads to the Space's secr
 
   // Whoever may answer the card can go on to edit, rotate or delete the secret.
   await page.locator('[data-ask-card="settled"]').getByRole("button", { name: "Manage" }).click();
-  await expect(page).toHaveURL(/\/settings\?item=secrets$/);
+  await expect(page).toHaveURL(/\/settings\?section=secrets$/);
   await expect(page.getByRole("heading", { name: "Secrets", level: 2 })).toBeVisible();
 });
 
