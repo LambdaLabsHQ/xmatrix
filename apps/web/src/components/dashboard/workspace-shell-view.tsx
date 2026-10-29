@@ -1,6 +1,5 @@
 "use client";
 
-import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
 import { ChannelDeletionDialog } from "./channel-deletion-dialog";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
@@ -30,7 +29,7 @@ import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content"
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
 import { closeToolItem } from "./tool-split";
-import { Loader2, Maximize2, X } from "lucide-react";
+import { Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
 import {
@@ -73,7 +72,7 @@ import {
   usePendingChannelNavigation,
   CONVERSATION_QUERY,
   useChannelCatalogPaging,
-  ColdStartChannelCatalog,
+  StartupShell,
 } from "./workspace-shell-modules";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { usePlatformAdminCapability } from "./use-platform-admin-capability";
@@ -983,26 +982,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   ) : undefined, [desktopBridge, desktopUpdateStatus, installUpdateFromRail]);
 
   if (loading || !user) {
-    if (cachedCatalogChannels.length > 0) {
-      return (
-        <ColdStartChannelCatalog
-          channels={cachedCatalogChannels}
-          desktopFrameClass={desktopFrameClass}
-          showMobileTabDock={!isIOSNativeShell}
-        />
-      );
-    }
     return (
-      <div
-        className={cn(
-          "xmatrix-app xmatrix-app-shell flex h-dvh w-screen max-w-[100dvw] items-center justify-center overflow-hidden bg-background text-foreground",
-          desktopFrameClass
-        )}
-      >
-        <LiquidGlassFilter />
-        <div className="app-ambient pointer-events-none fixed inset-0" />
-        <AnimatedIcon icon={Loader2} className="size-6 animate-spin" />
-      </div>
+      <StartupShell
+        channels={cachedCatalogChannels}
+        desktopFrameClass={desktopFrameClass}
+        showMobileTabDock={!isIOSNativeShell}
+      />
     );
   }
 

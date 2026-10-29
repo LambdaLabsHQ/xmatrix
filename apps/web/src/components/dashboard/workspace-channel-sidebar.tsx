@@ -24,7 +24,7 @@ import {
   CHANNEL_ROW_TITLE_CLASS_NAME,
   CHANNEL_ROW_TITLE_LINE_CLASS_NAME,
 } from "./row-frames";
-import { channelRowIndentPx, SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME } from "./workspace-shell-constants";
+import { channelRowIndentPx, DESKTOP_SIDEBAR_DEFAULT_WIDTH_PX, SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME } from "./workspace-shell-constants";
 
 import {
   ChannelPinState,
@@ -905,27 +905,34 @@ export function channelActivityAt(channel: ChannelSnapshot): string | undefined 
   return Date.parse(channel.updatedAt) > Date.parse(sentAt) ? channel.updatedAt : sentAt;
 }
 
-/* The pre-auth paint is the same screen the authenticated shell renders, only
+/* The startup paint is the same screen the signed-in shell renders, only
    inert: same root, same material planks (.app-rail/.app-sidebar/
-   .app-mobile-chat-pane carry the wood textures), same row
-   components. Hand-writing a second list here is what made cold start flash a
-   white page with a layout nothing else in the app uses — the durable catalog
-   is a data-plane cache and must not bring its own presentation with it. */
-export function ColdStartChannelCatalog({
-  channels,
+   .app-mobile-chat-pane carry the wood textures), same row components. With
+   the account's last list on this device it shows those rows; without one,
+   the list's own skeleton. It is the first frame the server sends, so the
+   app never opens on an empty page, and it says what it is waiting for once
+   the wait is long enough to notice (StartupStatus). */
+export function StartupShell({
+  channels = [],
   desktopFrameClass,
   showMobileTabDock,
 }: {
-  channels: ChannelSnapshot[];
+  /** The account's last list on this device; empty paints the skeleton. */
+  channels?: ChannelSnapshot[];
   /** `xmatrix-desktop-macos` / `xmatrix-desktop-windows` under Electron. */
   desktopFrameClass?: string;
   /** False under the iOS shell, whose tab bar is native. */
   showMobileTabDock: boolean;
 }) {
-  /* The same width the authenticated sidebar restores, so the plank keeps its
-     size when auth lands. Read once: this screen never resizes. */
-  const [desktopSidebarWidth] = useState(readStoredDesktopSidebarWidth);
+  /* The width the signed-in sidebar restores, so the plank keeps its size
+     when the shell lands. The server cannot read it: the first frame uses the
+     default and the stored width replaces it before the hydrated paint. */
+  const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(DESKTOP_SIDEBAR_DEFAULT_WIDTH_PX);
+  useLayoutEffect(() => setDesktopSidebarWidth(readStoredDesktopSidebarWidth()), []);
   const inert = () => {};
+  const rows = (row: (channel: ChannelSnapshot) => ReactNode) => channels.length > 0
+    ? <ChannelSectionRows channels={channels} row={row} />
+    : <ChannelListSkeleton />;
 
   return (
     <div
@@ -933,6 +940,7 @@ export function ColdStartChannelCatalog({
         "xmatrix-app xmatrix-app-shell relative isolate m-0 flex h-dvh w-screen max-w-[100dvw] justify-start overflow-hidden bg-background text-foreground",
         desktopFrameClass
       )}
+      aria-busy="true"
     >
       {desktopFrameClass === "xmatrix-desktop-windows" && (
         <div className="app-windows-caption-band" aria-hidden="true" />
@@ -940,7 +948,7 @@ export function ColdStartChannelCatalog({
       <LiquidGlassFilter />
       <div className="app-ambient pointer-events-none fixed inset-0" />
       {showMobileTabDock && <MobileTabDock activeView="messages" onChangeView={inert} />}
-      {/* Rail and sidebar keep the desktop silhouette so the authenticated
+      {/* Rail and sidebar keep the desktop silhouette so the signed-in
           shell drops in without a layout jump. */}
       <aside
         className="app-rail hidden w-16 shrink-0 flex-col items-center bg-sidebar py-3 md:flex"
@@ -954,7 +962,7 @@ export function ColdStartChannelCatalog({
         >
           <div className="app-material-scroll-viewport min-h-0 flex-1 overflow-y-auto">
             <div className="app-material-scroll-content pointer-events-none min-h-full py-2 text-[15px] md:pt-0">
-              <ChannelSectionRows channels={channels} row={(channel) => (
+              {rows((channel) => (
                 <ChannelNavItem
                   key={channel.id}
                   channel={channel}
@@ -965,7 +973,7 @@ export function ColdStartChannelCatalog({
                   onTogglePinned={inert}
                   onOpenContextMenu={inert}
                 />
-              )} />
+              ))}
             </div>
           </div>
         </aside>
@@ -981,7 +989,7 @@ export function ColdStartChannelCatalog({
             <div className="app-material-scroll-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
               <div className="app-material-scroll-content min-h-full shrink-0">
                 <div className="app-mobile-chat-list pointer-events-none">
-                  <ChannelSectionRows channels={channels} row={(channel) => (
+                  {rows((channel) => (
                     <MobileChannelChatRow
                       key={channel.id}
                       displayChannel={channel}
@@ -992,19 +1000,37 @@ export function ColdStartChannelCatalog({
                       onOpen={inert}
                       onOpenActions={inert}
                     />
-                  )} />
+                  ))}
                 </div>
+                <StartupStatus />
               </div>
             </div>
           </div>
-          {/* The desktop reading slab: empty here, but present, so the message
-              surface does not pop in over bare ambient when auth lands. */}
+          {/* The desktop reading slab, present so the message surface does not
+              pop in over bare ambient when the shell lands. */}
           <div className="hidden min-h-0 min-w-0 flex-1 overflow-hidden md:flex">
-            <section className="app-message-surface relative flex min-w-0 flex-1 flex-col overflow-hidden" />
+            <section className="app-message-surface relative flex min-w-0 flex-1 flex-col items-center justify-center overflow-hidden">
+              <StartupStatus />
+            </section>
           </div>
         </main>
       </div>
     </div>
+  );
+}
+
+/* What the startup frame is waiting for, said only once the wait is long
+   enough to notice. CSS alone times it, so it works in the server's first
+   frame before any script has run; the reload is a plain link to this page. */
+function StartupStatus() {
+  return (
+    <p className="app-startup-status" role="status">
+      <span className="app-startup-status-connecting">Connecting to xMatrix…</span>
+      <span className="app-startup-status-slow">
+        Still connecting. The network may be slow.{" "}
+        <a href="" className="app-startup-status-reload">Reload</a>
+      </span>
+    </p>
   );
 }
 
