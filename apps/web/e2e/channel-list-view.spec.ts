@@ -378,12 +378,11 @@ for (const accounts of [["e2e-user", "other-reader"], ["e2e-user", "other-reader
       readSequence: 6, attention: { channelId: "channel-asked", unreadAttentionCount: 2, lastMessageSequence: 8,
         primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: E2E_CHANNEL.updatedAt } };
     await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [asked] });
-    await fixtureJson(page, "auth-token", "**/api/auth/token**", { token: "test-jwt" });
     // Due for renewal, so every focus reads the session again.
     const signIn = (step: number) => fixtureJson(page, `auth-session-${step}`, "**/api/auth/get-session**", {
       user: { id: accounts[step], email: `${accounts[step]}@xmatrix.test`, name: accounts[step] },
       session: { token: `session-${step}`, expiresAt: new Date(Date.now() + 60_000).toISOString() },
-    });
+    }, { headers: { "set-auth-jwt": "test-jwt" } });
     await signIn(0);
     await page.goto(`/app/${asked.spaceId}/channels/${asked.name}--${asked.id}`, { waitUntil: "domcontentloaded" });
     const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
@@ -419,7 +418,7 @@ for (const changedAccount of [false, true]) test(`unpinning the last conversatio
   const signIn = (id: string, delayMs = 0) => fixtureJson(page, `unpin-session-${id}`, "**/api/auth/get-session**", {
     user: { id, email: `${id}@xmatrix.test`, name: id },
     session: { token: `session-${id}`, expiresAt: new Date(Date.now() + 60_000).toISOString() },
-  }, { delayMs });
+  }, { delayMs, headers: { "set-auth-jwt": "test-jwt" } });
   const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan",
     updatedAt: "2026-07-01T08:00:00.000Z" };
   const other = { ...E2E_CHANNEL, id: "channel-other", name: "random",
@@ -428,7 +427,6 @@ for (const changedAccount of [false, true]) test(`unpinning the last conversatio
     spaces: [E2E_SPACE], channels: [pinned, other],
     channelViewPreference: { pinnedChannelIds: [pinned.id] },
   });
-  await fixtureJson(page, "auth-token", "**/api/auth/token**", { token: "test-jwt" });
   await signIn("e2e-user", 200);
   await page.goto(`/app/${pinned.spaceId}/channels/${pinned.name}--${pinned.id}`, { waitUntil: "domcontentloaded" });
   const sidebar = page.locator(".app-workspace-panel > .app-sidebar");

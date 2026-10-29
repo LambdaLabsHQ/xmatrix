@@ -104,7 +104,17 @@ export async function loadBetterAuthSession(): Promise<{
   session: WebAuthSession | null;
   user: AuthUser | null;
 }> {
-  const sessionResponse = await authClient.getSession().catch((error) => {
+  // The Hub's jwt plugin answers a signed-in get-session with its bearer in
+  // `set-auth-jwt` (exposed to this origin), so the session and the token
+  // arrive in one round trip instead of a second /token request.
+  let sessionJwt: string | null = null;
+  const sessionResponse = await authClient.getSession({
+    fetchOptions: {
+      onSuccess: (context) => {
+        sessionJwt = context.response.headers.get("set-auth-jwt")?.trim() || null;
+      },
+    },
+  }).catch((error) => {
     console.warn("[auth] sign-in service unreachable", error);
     throw new TransientAuthSessionError();
   });
@@ -139,9 +149,12 @@ export async function loadBetterAuthSession(): Promise<{
     return { session: null, user: null };
   }
 
-  const token = await fetchBetterAuthJwt();
+  const token: string | null = sessionJwt;
   if (!token) {
-    return { session: null, user: null };
+    // The app's own account route hands a page no Hub credentials, so a
+    // session seen through it is not a browser session.
+    if (accountCallsThroughApp) return { session: null, user: null };
+    throw new Error("The sign-in service returned a session without its set-auth-jwt token");
   }
 
   const user: AuthUser = {
@@ -519,31 +532,6 @@ export async function listConnectedOAuthApps(): Promise<ConnectedOAuthApp[]> {
 /** Removes an app: it can no longer reach this person's xMatrix. */
 export async function removeConnectedOAuthApp(consentId: string): Promise<void> {
   await oauthRequest("/oauth2/delete-consent", { method: "POST", body: JSON.stringify({ id: consentId }) });
-}
-
-async function fetchBetterAuthJwt(): Promise<string | null> {
-  const response = await xmatrixRawResponse(`${getAuthBaseUrl()}/api/auth/token`, {
-    credentials: "include",
-    cache: "no-store",
-  }).catch((error) => {
-    console.warn("[auth] sign-in service unreachable", error);
-    throw new TransientAuthSessionError();
-  });
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      return null;
-    }
-    if (isTransientAuthStatus(response.status)) {
-      throw new TransientAuthSessionError();
-    }
-    throw new Error("Failed to fetch Better Auth token");
-  }
-  const payload = (await response.json().catch(() => ({}))) as { token?: string };
-  const token = payload.token?.trim();
-  if (!token) {
-    throw new Error("Better Auth token response was incomplete");
-  }
-  return token;
 }
 
 function expiresAtSeconds(value: string | Date | undefined): number | undefined {

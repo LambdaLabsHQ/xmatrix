@@ -27,6 +27,15 @@ Supporting measures:
 ## Implemented critical path
 
 App admission is keyed by Hub origin, component, version, protocol, and platform.
+The admission a device remembers across loads (`xmatrix.app-admitted`) omits the
+version: a release of the same client starts at once, subject to its own bundled
+policy, while the Hub is asked again in the background and a refusal still opens
+the upgrade wall. Signed-in `get-session` responses carry the bearer in the
+exposed `set-auth-jwt` header, so Web sign-in is one Hub round trip; there is no
+separate `/api/auth/token` read. App routes preconnect to the Hub (credentialed
+and anonymous pools) while the scripts download. The presentation-only Channel
+list snapshot is written (debounced) whenever the loaded list changes, so the
+pre-auth cold-start list reflects what the account last saw.
 The page-lifetime admission cache survives the per-user QueryClient replacement;
 it shares in-flight work and does not cache failures. The preparation gate's
 observers use a separate, gate-owned QueryClient containing only client identity
