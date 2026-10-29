@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Stackless Durable Object outages retain their HTTP caller
+
+HUB-B5 reached the common HTTP outage handler without an originating stack;
+its console report discarded the route, leaving only the common capture stack.
+The original exception now reaches Sentry once with its registered method and
+route template, or the fixed PageSession/Harness watch boundary, and boolean
+platform flags. The issue reader exposes only that bounded diagnostic, never
+path values, request data or identities. Different routes retain independent
+fingerprints. Existing 503 responses and replay boundaries are unchanged.
+HUB-88/9C share this diagnostic gap; their underlying invalidation remains
+unproven. Hub only, no migration or client update. Recovery is a CI-validated
+beta Hub reverting this diagnostic change. See
+[Runtime delivery errors](operations/runtime-delivery-errors.md).
+
 ## Unreleased: Bounded schema collections reject oversized input early
 
 The Hub authentication and AI SDK dependency graph now resolves Zod 4 to
