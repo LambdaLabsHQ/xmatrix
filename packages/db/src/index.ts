@@ -266,7 +266,7 @@ export type {
 export {
   readsOnly,
 } from "./space-roles.js";
-export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessReleaseTarget } from "./machine-harness-actions.js";
+export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessRelease, type HarnessReleaseTarget } from "./machine-harness-actions.js";
 export { readLatestWorktreeListing, readWorktreeActionStatus } from "./machine-worktree-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 

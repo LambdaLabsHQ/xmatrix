@@ -141,26 +141,34 @@ export async function readRecentHarnessActions(database: AuthorityDatabase, inpu
     });
 }
 
+/** A preset's registry version, or none for a preset without a registry. */
+export interface HarnessRelease { presetId: string; version?: string }
+
 export interface HarnessReleaseTarget {
   presetId: string; ownerUserId: string; ownerEmail: string; machineId: string; hostId: string; daemonId: string;
 }
 
-/** A release is told again to the same Machine at most this often, so a
- * daemon that cannot reach the registry is not asked every minute. */
+/** A release is told again to the same Machine at most this often until it
+ * is installed, so a daemon that cannot update yet is not asked every minute. */
 const RELEASE_REPEAT_INTERVAL = "30 minutes";
+/** A preset without a registry has no version to compare; its update command
+ * is run this often and decides for itself. */
+const UNVERSIONED_REPEAT_INTERVAL = "24 hours";
 /** Rows one target read may return, within the database client's result bound. */
 const RELEASE_TARGET_ROWS = 5_000;
 
 /**
  * For each preset's latest version: online, capable daemons whose reported
- * inventory has the preset installed but has not seen that version as its
- * latest, and that were not told about a release of this preset recently. The
- * daemon's own inventory is the only state: once it reports the new latest
- * version it is no longer a target. Every preset is read in one statement, so
- * a pass costs one transaction however many presets are watched.
+ * inventory has the preset installed with its automatic-update switch on and
+ * another version installed, and that were not told about this preset
+ * recently. The daemon's own inventory is the only state: once it reports the
+ * latest version installed it is no longer a target. A release without a
+ * version (a preset without a registry) targets every such daemon daily. Every
+ * preset is read in one statement, so a pass costs one transaction however
+ * many presets are watched.
  */
 export async function readHarnessReleaseTargets(database: AuthorityDatabase, input: {
-  requestId: string; releases: readonly { presetId: string; version: string }[]; limit?: number;
+  requestId: string; releases: readonly HarnessRelease[]; limit?: number;
 }): Promise<HarnessReleaseTarget[]> {
   if (input.releases.length === 0) return [];
   // One statement returns at most RELEASE_TARGET_ROWS; each preset gets an
@@ -169,7 +177,7 @@ export async function readHarnessReleaseTargets(database: AuthorityDatabase, inp
     Math.floor(RELEASE_TARGET_ROWS / input.releases.length)));
   return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-release-targets", statement: "single_read" },
     async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v3", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v4", text: `SELECT
         release.preset_id,target.owner_user_id,target.owner_email,target.machine_id,target.hostname,target.daemon_id
         FROM unnest($2::text[],$3::text[]) WITH ORDINALITY AS release(preset_id,version,position)
         CROSS JOIN LATERAL (SELECT
@@ -180,16 +188,19 @@ export async function readHarnessReleaseTargets(database: AuthorityDatabase, inp
                 CASE WHEN jsonb_typeof(daemon.metadata_json->'harnesses'->'items')='array'
                   THEN daemon.metadata_json->'harnesses'->'items' ELSE '[]'::jsonb END) item
               WHERE item->>'id'=release.preset_id AND item->'installed'='true'::jsonb
-                AND item->>'latestVersion' IS DISTINCT FROM release.version)
+                AND item->>'autoUpdate'='enabled'
+                AND (release.version='' OR item->>'version' IS DISTINCT FROM release.version))
             AND NOT EXISTS (SELECT 1 FROM data.machine_daemon_commands command
               WHERE command.owner_user_id=daemon.owner_user_id AND command.machine_id=daemon.machine_id
                 AND command.command_type='harness_action' AND command.payload_json->>'presetId'=release.preset_id
                 AND command.payload_json->>'action'='release'
-                AND command.created_at>clock_timestamp()-$4::interval)
+                AND command.created_at>clock_timestamp()-
+                  (CASE WHEN release.version='' THEN $6 ELSE $4 END)::interval)
           ORDER BY daemon.daemon_id LIMIT $5) target
         ORDER BY release.position,target.daemon_id`,
       values: [MACHINE_HARNESS_RELEASE_CAPABILITY, input.releases.map(release => release.presetId),
-        input.releases.map(release => release.version), RELEASE_REPEAT_INTERVAL, limit],
+        input.releases.map(release => release.version ?? ""), RELEASE_REPEAT_INTERVAL, limit,
+        UNVERSIONED_REPEAT_INTERVAL],
       maxRows: limit * input.releases.length });
       return rows.map(row => ({ presetId: String(row.preset_id), ownerUserId: String(row.owner_user_id),
         ownerEmail: String(row.owner_email), machineId: String(row.machine_id), hostId: String(row.hostname ?? ""),

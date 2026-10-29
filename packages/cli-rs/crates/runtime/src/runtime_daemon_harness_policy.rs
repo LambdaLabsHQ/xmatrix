@@ -248,27 +248,19 @@ pub(crate) fn schedules_updates(management: &HarnessManagement) -> bool {
     ) && management.update.current().is_some()
 }
 
-/// Whether the daemon runs this harness's update recipe itself: for a harness
-/// that never updates itself, while the owner's policy is on; for one whose
-/// updater runs only in interactive sessions (never in an xMatrix launch),
-/// whenever its switch shows on.
+/// Whether the daemon runs this harness's update recipe itself: whenever its
+/// automatic-update switch shows on and it has a recipe. A harness's own
+/// updater is not relied on, since an xMatrix launch is headless and many
+/// updaters run only interactively or refuse the install layout they find.
 pub(crate) fn daemon_runs_updates(preset: &AgentPreset, policy: &HarnessPolicy) -> bool {
-    runs_updates(preset, policy, || effective_auto_update(preset, policy))
+    runs_updates(preset, || effective_auto_update(preset, policy))
 }
 
-fn runs_updates(
-    preset: &AgentPreset,
-    policy: &HarnessPolicy,
-    observed: impl FnOnce() -> &'static str,
-) -> bool {
-    let Some(management) = preset.management.as_ref() else {
-        return false;
-    };
-    if schedules_updates(management) {
-        return policy.auto_update(&preset.id) == Some(true);
-    }
-    management.auto_update.interactive_only
-        && management.update.current().is_some()
+fn runs_updates(preset: &AgentPreset, observed: impl FnOnce() -> &'static str) -> bool {
+    preset
+        .management
+        .as_ref()
+        .is_some_and(|management| management.update.current().is_some())
         && observed() == "enabled"
 }
 
@@ -635,20 +627,26 @@ mod tests {
     }
 
     #[test]
-    fn daemon_updates_harnesses_whose_updater_never_runs_in_a_launch() {
+    fn daemon_updates_every_harness_whose_switch_shows_on() {
         let preset = |id| agent_preset_by_id(id).unwrap();
-        let empty = HarnessPolicy::default();
+        // The switch alone decides, whoever would otherwise update the harness:
+        // Claude (interactive-only updater), Cursor (self-updater that never
+        // runs in a headless launch) and Codex (no updater) alike.
+        for id in ["claude", "cursor", "codex", "copilot"] {
+            assert!(runs_updates(preset(id), || "enabled"), "{id}");
+            assert!(!runs_updates(preset(id), || "disabled"), "{id}");
+            assert!(!runs_updates(preset(id), || "unknown"), "{id}");
+        }
+        // Without an update recipe there is nothing to run.
+        assert!(!runs_updates(preset("zcode"), || "enabled"));
+        // A harness without an updater shows on only while the owner's policy is.
         let mut on = HarnessPolicy::default();
         on.0.insert("codex".into(), true);
-        // Claude's updater skips --print, so its switch alone decides.
-        assert!(runs_updates(preset("claude"), &empty, || "enabled"));
-        assert!(!runs_updates(preset("claude"), &empty, || "disabled"));
-        assert!(!runs_updates(preset("claude"), &empty, || "unknown"));
-        // A harness without an updater waits for the owner's policy.
-        assert!(!runs_updates(preset("codex"), &empty, || "enabled"));
-        assert!(runs_updates(preset("codex"), &on, || "disabled"));
-        // One that updates itself in a launch is left to do so.
-        assert!(!runs_updates(preset("copilot"), &empty, || "enabled"));
+        assert!(daemon_runs_updates(preset("codex"), &on));
+        assert!(!daemon_runs_updates(
+            preset("codex"),
+            &HarnessPolicy::default()
+        ));
     }
 
     #[test]

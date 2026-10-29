@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Automatic harness updates keep trying until installed
+
+With the Machines switch on, harnesses still sat weeks behind. The Hub stopped
+telling a daemon once it had seen a new version, the daemon queued that update
+in memory only, and the update waited for every Run on the machine to end.
+Self-updating harnesses were assumed to update themselves, but they do not in
+xMatrix's headless launches. Now, while the switch is on, the daemon runs the
+official update. The Hub tells it every 30 minutes until the inventory shows
+the latest version installed, and daily for harnesses without a registry. Only
+live Runs of that same harness delay it. Hub and daemon, no schema change.
+Recovery is a CI-validated beta revert.
 ## Unreleased: Shared links name the selected object
 
 An Apps link such as `?connector=stripe` previously stayed on the list because

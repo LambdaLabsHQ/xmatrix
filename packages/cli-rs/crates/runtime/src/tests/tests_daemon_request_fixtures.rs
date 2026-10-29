@@ -47,6 +47,7 @@ fn test_daemon_run_child(request: &TestRunRequest, pid: u32) -> super::DaemonRun
         execution_key: request.execution_key.clone(),
         agent_id: request.agent_id.clone(),
         agent_name: Some(request.agent_name.clone()),
+        agent_preset_id: None,
         auth_capability: Some("run-auth-capability".to_string()),
         request_capability: Some("request-capability".to_string()),
         request_context: Some(super::DaemonRequestAgentContext {

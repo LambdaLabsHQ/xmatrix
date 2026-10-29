@@ -112,9 +112,9 @@ pub struct AutoUpdate {
     /// environment, so their variables count as set.
     #[serde(default)]
     pub env_files: Vec<String>,
-    /// The built-in updater runs only in interactive sessions, never in the
-    /// headless mode xMatrix launches, so the daemon runs `update` in its
-    /// place — beside live sessions, as the updater itself would.
+    /// The built-in updater runs only in interactive sessions and its `update`
+    /// installs beside running sessions, so the daemon's automatic update runs
+    /// at once instead of waiting for this harness's live Runs to end.
     #[serde(default)]
     pub interactive_only: bool,
 }
