@@ -30,6 +30,7 @@ import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content"
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
 import { closeViewSelection } from "./url-query-state";
+import { ConnectionStatus } from "./connection-status";
 import { Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
@@ -1576,6 +1577,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <main
           className="app-main relative flex min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-card/80"
         >
+          <ConnectionStatus />
           <TopWorkspaceBar
             page={openedPage}
             onClosePage={closePage}

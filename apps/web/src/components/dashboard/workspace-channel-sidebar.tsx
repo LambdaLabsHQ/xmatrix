@@ -136,6 +136,7 @@ import { mobileChatTimeLabel } from "./time-display";
 
 import { channelTitle, spaceAppPath } from "@/components/dashboard/channel-links";
 import { ChannelListSkeleton, useEmptySurfaceSkeleton } from "@/components/dashboard/content-skeleton";
+import { subscribeToNetwork } from "./connection-status";
 import { channelRowsForPaint } from "./channel-list-paint";
 
 import { getDesktopBridge } from "@/lib/desktop/bridge";
@@ -1060,15 +1061,6 @@ function StartupStatus() {
       </a>
     </div>
   );
-}
-
-function subscribeToNetwork(onChange: () => void) {
-  window.addEventListener("online", onChange);
-  window.addEventListener("offline", onChange);
-  return () => {
-    window.removeEventListener("online", onChange);
-    window.removeEventListener("offline", onChange);
-  };
 }
 
 /** The second line of a conversation row, shared by the phone list and the desktop list. */
