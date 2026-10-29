@@ -2859,15 +2859,17 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     // The Pages view's URL also names the open page and the conversation open
     // beside it, so the pair can be shared.
     const viewPath = appViewPath(selectedChannel, view, currentSpaceId, spaces);
+    const preservesReturn = view === "admin" || view === "settings" || view === "apps";
+    const location = preservesReturn ? currentLoginReturnPath() : currentBrowserLocation();
     // Beside a page, the address is what names the conversation: opening and
     // closing one change it, and the selection follows it (also on Back).
     // A list destination's address names its open item the same way.
     const canonicalPath = view === "pages"
       ? pagesViewPath(viewPath, selectedPageId, routeInfo.conversationKey)
-      : view === "admin" || view === "settings" || view === "apps" ? adminViewPath(viewPath, currentBrowserLocation())
+      : preservesReturn ? adminViewPath(viewPath, location)
       : view === "agents" ? agentsProfileEditPath(viewPath, currentBrowserLocation())
       : SPLIT_TOOL_VIEWS.includes(view) ? viewSelectionPath(viewPath, currentBrowserLocation()) : viewPath;
-    if (currentBrowserLocation() !== canonicalPath) {
+    if (location !== canonicalPath) {
       replaceBrowserPath(canonicalPath);
       setBrowserPath(canonicalPath);
     }

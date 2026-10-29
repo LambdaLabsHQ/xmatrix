@@ -5,7 +5,8 @@ const { adminViewPath, viewSelectionPath } = require("./workspace-shell-navigati
 
 test("Apps canonicalization removes item and preserves connector return parameters", () => {
   const path = adminViewPath("/app/lambda/apps",
-    "/app/space-id/apps?item=github&connector=gmail&gmailWatchState=state&gmailWatchCode=code&oauth=connected");
+    "/app/space-id/apps?item=github&connector=gmail&gmailWatchState=state&gmailWatchCode=code&oauth=connected#detail");
+  assert.equal(new URL(path, "https://xmatrix.test").hash, "#detail");
   const query = new URL(path, "https://xmatrix.test").searchParams;
   assert.equal(query.has("item"), false);
   assert.equal(query.get("connector"), "gmail");
