@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: A desktop window always appears and says when the app cannot load
+
+A new window shows within 1.5 s even while the app's page is still on its way.
+A main-frame load that fails (not a cancelled navigation) shows a tinted-paper
+status in the window, "can't be reached" or "offline", with Try again; it
+retries when the network returns and every 15 s, and a crashed renderer
+reloads. Desktop only.
+
 ## Unreleased: Android opens its own copy when the edge answers with a server error
 
 A main-frame 5xx from the Web origin (an edge error page) now opens the copy
