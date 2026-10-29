@@ -115,6 +115,15 @@ test("publisher delivery uses the retained grant to retrieve the same event and 
   assert.equal(f.queries.every(query => query.accountId === account && query.appClientId === env.CONNECTOR_STRIPE_CLIENT_ID), true);
 });
 
+test("Stripe's API may confirm an own-account event with account null without accepting null from the webhook", async t => {
+  const payload = publisherEvent();
+  const f = publisherFixture(t, () => Response.json({ ...payload, account: null }));
+  assert.deepEqual(await (await sendPublisher(payload, f)).json(), { ok: true, events: 1, delivered: 1 });
+  assert.equal((await sendPublisher({ ...payload, account: null }, f)).status, 400);
+  assert.equal(f.reads.length, 1);
+  assert.equal(f.appends.length, 1);
+});
+
 test("an unreadable or mismatched publisher event never posts or fires Automations", async t => {
   const payload = publisherEvent(); let reply;
   const f = publisherFixture(t, () => reply());

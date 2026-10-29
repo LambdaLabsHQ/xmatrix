@@ -52,7 +52,7 @@ export async function handleStripePublisherDelivery(input: { env: Env; request: 
       // Use Stripe's content, not the signed sender's copy. Another account, event or mode proves nothing.
       if (confirmed.object !== "event" || confirmed.id !== payload.id || confirmed.type !== payload.type ||
           confirmed.created !== payload.created || confirmed.livemode !== true ||
-          confirmed.account !== undefined) return [];
+          confirmed.account !== undefined && confirmed.account !== null) return [];
       return [stripeEvent({ ...confirmed, account: accountId })];
     } catch (error) {
       // Revoked/removed grants and unreadable events never fall back to operator credentials.
