@@ -216,3 +216,24 @@ test("a connected account event is delivered and deauthorization retires without
   assert.equal((await send(undated, again)).status, 400);
   assert.equal(again.retirements.length, 0);
 });
+
+test("paid invoices, successful payments and subscription creation reach the subscribed Channel with their actual status", async t => {
+  const created = Math.floor(Date.now() / 1000);
+  for (const [index, [type, object, label, amount]] of [
+    ["invoice.paid", { id: "in_paid", amount_paid: 1200, amount_due: 9999, currency: "usd", status: "paid" }, "Invoice paid", "1200"],
+    ["payment_intent.succeeded", { id: "pi_paid", amount: 2400, currency: "usd", status: "succeeded" }, "Payment succeeded", "2400"],
+    ["customer.subscription.created", { id: "sub_new", status: "incomplete" }, "Subscription created", undefined],
+  ].entries()) {
+    const payload = { id: `evt_success${index}`, object: "event", type, created, livemode: true, data: { object } };
+    const f = publisherFixture(t, () => Response.json(payload));
+    assert.deepEqual(await (await send({ ...payload, account }, f)).json(), { ok: true, events: 1, delivered: 1 });
+    assert.deepEqual(await (await sendPublisher(payload, f)).json(), { ok: true, events: 1, delivered: 1 });
+    for (const posted of f.appends) {
+      assert.match(posted.body, new RegExp(label));
+      assert.ok(posted.body.includes(`Event: ${type}`));
+      assert.ok(posted.body.includes(`Status: ${object.status}`));
+      if (amount) assert.ok(posted.body.includes(`Amount: ${amount} USD (minor units)`));
+      else assert.doesNotMatch(posted.body, /Invoice paid|Payment succeeded|Amount:/);
+    }
+  }
+});

@@ -1,6 +1,11 @@
 # Release Updates
 
-## Unreleased: Stripe events from the App's own publishing account
+## Unreleased: Stripe payment notifications include the App's publishing account
+
+Stripe Channel notifications cover paid invoices, successful payments and
+subscription creation as well as failures, disputes and later subscription
+changes. Subscription creation keeps its real status and does not imply a
+successful payment. Amounts are labeled as Stripe minor units.
 
 Stripe excludes an App's publishing account from Connect webhooks, even after
 OAuth installation. A separate operator-configured own-account endpoint now

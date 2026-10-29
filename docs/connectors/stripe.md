@@ -18,6 +18,21 @@ usable, while an account whose credential was refused asks for reconnection.
 One Check has a time budget; a timeout asks for another Check rather than
 scanning an arbitrarily large account list in one request.
 
+Company webhooks select `invoice.paid` for paid subscription invoices,
+`payment_intent.succeeded` for successful payments, `invoice.payment_failed`,
+`payment_intent.payment_failed`, `charge.dispute.created`,
+`charge.dispute.updated`, `charge.dispute.closed`,
+`charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`,
+`customer.subscription.created`, `customer.subscription.updated`,
+`customer.subscription.deleted`, `customer.subscription.paused`,
+`customer.subscription.resumed`, and `account.application.deauthorized`.
+Use `@stripe:subscribe:* events` in a Channel to receive these from every
+retained account. Invoice and payment events are separate Stripe events, so
+one purchase can produce both. Subscription creation preserves its actual
+status (including `incomplete`) and does not claim payment. Amounts are
+explicitly labeled as Stripe minor units. See [subscription events](https://docs.stripe.com/billing/subscriptions/webhooks)
+and [payment status](https://docs.stripe.com/payments/payment-intents/verifying-status).
+
 All retained accounts share the Space connection's subscriptions, such as
 `@stripe:subscribe:invoice events`. Messages and Automation summaries identify
 the account. **Remove** forgets only the inspected account generation in this

@@ -83,14 +83,18 @@ export function stripeEvent(payload: Record<string, unknown>) {
   const type = text(payload.type);
   const object = record(record(payload.data).object);
   const account = /^acct_[A-Za-z0-9]{1,64}$/u.test(text(payload.account)) ? text(payload.account) : undefined;
+  const label = ({ "invoice.paid": "Invoice paid", "payment_intent.succeeded": "Payment succeeded",
+    "customer.subscription.created": "Subscription created" } as Record<string, string>)[type] ?? type;
+  const amount = type === "invoice.paid" ? object.amount_paid : type === "invoice.payment_failed" ? object.amount_due ?? object.amount : object.amount;
   return connectorEvent({
     eventId: `stripe:${text(payload.id)}`,
     sourceRef: `stripe:${sourceToken(type.split(".")[0]) || "*"}`,
     feature: "events",
-    summary: `${type} ${text(object.id)}${account ? ` (${account})` : ""}`,
-    provider: account ? `Stripe · ${account}` : "Stripe", title: `${type} — ${text(object.id)}`,
+    summary: `${label} ${text(object.id)}${account ? ` (${account})` : ""}`,
+    provider: account ? `Stripe · ${account}` : "Stripe", title: `${label} — ${text(object.id)}`,
     details: [account ? `Account: ${account}` : undefined,
-      text(object.amount) ? `Amount: ${text(object.amount)} ${text(object.currency).toUpperCase()}` : undefined,
+      label !== type ? `Event: ${type}` : undefined,
+      text(amount) ? `Amount: ${text(amount)} ${text(object.currency).toUpperCase()} (minor units)` : undefined,
       text(object.status) ? `Status: ${text(object.status)}` : undefined],
   });
 }
