@@ -12,6 +12,11 @@ recovery is a CI-validated beta Web release reverting the change.
 
 ## Unreleased: Stripe payment notifications include the App's publishing account
 
+Temporary refresh conflicts, storage/network failures and rate limits in the
+publisher's event confirmation return 503 for Stripe to retry. Confirmed
+401/403/404 read refusals remain acknowledged without delivery; temporary failures no
+longer silently lose a notification. No configuration, schema or scope change.
+
 Stripe Channel notifications cover paid invoices, successful payments and
 subscription creation as well as failures, disputes and later subscription
 changes. Subscription creation keeps its real status and does not imply a

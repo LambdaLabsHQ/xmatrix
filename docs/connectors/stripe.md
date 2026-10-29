@@ -99,8 +99,11 @@ type, timestamp and mode. Delivery renders Stripe's retrieved content, labels
 it with the configured publisher account, and rechecks that same grant
 generation before Channel append and Automation dispatch. Unreadable events,
 removed grants and grants replaced during confirmation do not deliver.
-Upstream server errors retry without falling back to an operator token or a
-pasted parent credential. Confirmation has a bounded request budget. The
+A Stripe 401/403/404 read refusal is acknowledged without delivery.
+Refresh lease contention, storage or transport failures, rate limits and
+upstream server errors return a sanitized 503 so Stripe retries, without
+falling back to an operator token or a pasted parent credential.
+Confirmation has a bounded request budget. The
 platform endpoint still ignores all events without `account`.
 
 ## Release and recovery
