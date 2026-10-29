@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 /**
  * `/roles` was the Agents screen's address while Agents could be given Roles.
  * Published iOS builds and bookmarks still open it, so it lands on
- * Agents with the same query (`?item=` names the open agent). Remove it with
+ * Agents with the same query (`?agent=` names the open agent). Remove it with
  * the `roles` entry in `LEGACY_VIEW_SEGMENTS`.
  */
 export default async function LegacyRolesRoutePage({

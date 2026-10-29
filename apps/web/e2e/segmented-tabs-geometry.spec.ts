@@ -67,7 +67,7 @@ const BILLING = {
 async function openBilling(page: Page) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
   await fixtureJson(page, "geometry-billing", /\/api\/xmatrix\/spaces\/[^/]+\/billing$/u, { billing: BILLING });
-  await page.goto("/app/personal-sspaceperso/settings?item=billing");
+  await page.goto("/app/personal-sspaceperso/settings?section=billing");
   await expect(page.getByRole("tab", { name: "Monthly" })).toBeVisible();
 }
 

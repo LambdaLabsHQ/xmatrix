@@ -221,7 +221,7 @@ it belongs in the repository.**
 3. **Tools.** Machines, Schedules, Agents, App, Team, Settings and Platform
    admin, in that order. Each reads like conversations and pages: its list in
    the panel's list column, the item chosen from it on the paper beside it
-   (`?item=<key>` names it), pushed over the list on a phone. Schedules lists a
+   (a domain query field names it: `connector`, `agent`, `machine`, `schedule`, `section` or `space`), pushed over the list on a phone. Schedules lists a
    Space's Automations page by page and makes none; This Machine is the first
    row of Machines on the desktop app; Settings, Platform admin and Team list
    their sections. (Discover and Role Studio left Agents with the retired

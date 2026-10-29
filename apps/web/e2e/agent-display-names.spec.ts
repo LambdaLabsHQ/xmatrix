@@ -265,14 +265,14 @@ test("a Machine tag and its hover card open that Machine's page, only for a Mach
   const tip = page.locator("[data-machine-load-tip]");
   await expect(tip).toContainText("Grok");
   await tip.click();
-  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?item=machine%3Agrok$/);
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?machine=machine%3Agrok$/);
   await expect(page.locator('[data-testid="machine-row"]').filter({ hasText: "Grok" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Grok" })).toBeVisible();
 
   // The tag itself opens the same page.
   await page.goBack();
   await ownTag.locator("[data-status-chip=machine]").click();
-  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?item=machine%3Agrok$/);
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?machine=machine%3Agrok$/);
 });
 
 test("a picked mention is the message's chip in the draft: face and @name in one pill, text still the draft", async ({ page }, testInfo) => {

@@ -306,6 +306,7 @@ fn persisted_daemon_run_from_child(managed: &DaemonRunChild) -> PersistedDaemonR
         repo_pool_binding: managed.repo_pool_binding.clone(),
         agent_id: managed.agent_id.clone(),
         agent_name: managed.agent_name.clone(),
+        agent_preset_id: managed.agent_preset_id.clone(),
         status_file_path: managed.status_file_path.clone(),
         stdout_log_path: managed.stdout_log_path.clone(),
         stderr_log_path: managed.stderr_log_path.clone(),
@@ -965,6 +966,7 @@ fn daemon_run_child_from_persisted(
         repo_pool_binding: run.repo_pool_binding.clone(),
         agent_id: run.agent_id.clone(),
         agent_name: run.agent_name.clone(),
+        agent_preset_id: run.agent_preset_id.clone(),
         auth_capability: None,
         request_capability: None,
         request_context: run.request_context.clone(),
@@ -1421,6 +1423,7 @@ async fn register_daemon_child(
             repo_pool_binding: spawned.repo_pool_binding,
             agent_id: spawned.agent_id,
             agent_name: Some(spawned.agent_name),
+            agent_preset_id: spawned.agent_preset_id,
             auth_capability: spawned
                 ._auth_grant
                 .as_ref()

@@ -215,7 +215,7 @@ test("a page's Automation is listed under its page on the page tree, says what i
   await expect(page.getByText("Up next")).toBeVisible();
 
   await scheduleRow(page, "Existing schedule").click();
-  await expect(page).toHaveURL(/[?&]item=task-local/);
+  await expect(page).toHaveURL(/[?&]schedule=task-local/);
   await expect(page.locator(".app-tool-detail").getByText(`${goals.title} › Architecture`)).toBeVisible();
   await page.goBack();
   await expect(page.getByText("Up next")).toBeVisible();
@@ -237,7 +237,7 @@ test("a conversation's details open its Automation in Schedules instead of offer
   await details.getByRole("button", { name: "Edit Existing schedule" }).click();
   await details.getByRole("button", { name: "Open in Schedules" }).click();
   await expect(page.getByLabel("Name")).toHaveValue("Existing schedule");
-  await expect(page).toHaveURL(/[?&]item=task-local/);
+  await expect(page).toHaveURL(/[?&]schedule=task-local/);
 });
 
 test("Automation refreshes task state while the page remains open", async ({ page }) => {

@@ -151,8 +151,8 @@ recipe or control for one; anything else is refused when issued.
   readable control nor a default. Machines shows one switch per installed
   harness. `auto_update_on/off` set the harness's own control where it has
   one; for a harness that only notifies or has no updater, `auto_update_on`
-  means the daemon runs its official update recipe on a schedule while no Run
-  of that harness is live.
+  records the daemon policy. While the switch shows on, the daemon runs the
+  official update recipe until the latest version is installed.
 
 The Durable Object machine authority does not support harness actions; its
 status query answers 501.
@@ -192,25 +192,30 @@ applied when the daemon launches a Run of that preset. Enabling removes inherite
 disable switches; disabling injects only the registry-named env/flag.
 No currently registered preset uses a TOML control; those controls remain unsupported.
 
-The daemon runs a harness's update recipe itself in two cases: a
-notify/manual/unknown harness with an update recipe while policy is "on", and a
-harness whose built-in updater runs only in interactive sessions
-(`autoUpdate.interactiveOnly`, Claude Code: `--print` never checks) while its
-observed switch is enabled.
+The daemon runs a harness's update recipe itself whenever the harness has one
+and its automatic-update switch shows `enabled` (for a notify/manual/unknown
+harness, while policy is "on"). A harness's own updater is never relied on:
+xMatrix launches are headless, and built-in updaters skip them or refuse the
+install layout they find (Cursor, Kimi under scoop, npm-global Gemini and
+OpenCode all stayed on old versions with the switch on).
 
-Official registries publish no push feed, so Hub's minute cron reads each
-preset's `management.latest` (npm `<package>/latest` or PyPI `<package>/json`;
-five-second timeout, 1 MiB body, validated version). For every online daemon
-reporting `machine_harness_release_v1` whose stored inventory has that preset
-installed with a different `latestVersion`, and that was not told about this
-preset in the last 30 minutes, Hub issues a `release` harness action naming the
-preset only. The daemon reads the registry itself, never a version from Hub, and
-if it owns the harness's updates and the installed version differs, updates: an
+Updates converge on state, not on an event. Official registries publish no push
+feed, so Hub's minute cron reads each preset's `management.latest` (npm
+`<package>/latest` or PyPI `<package>/json`; five-second timeout, 1 MiB body,
+validated version). For every online daemon reporting
+`machine_harness_release_v1` whose stored inventory has that preset installed
+with `autoUpdate: "enabled"` and an installed `version` other than the latest,
+and that was not told about this preset in the last 30 minutes, Hub issues a
+`release` harness action naming the preset only. A preset with an update recipe
+but no registry is told the same way once a day, without a version. The daemon
+reads the registry itself, never a version from Hub, and when the installed
+version differs (or there is no registry) runs the update: an
 `interactiveOnly` harness at once, beside live sessions as its own updater
-would; any other when the daemon's last live Run exits. Each `(preset,
-version)` is attempted once per daemon process. The action's re-probed item
-carries the new `latestVersion`, which ends the notices. Older daemons are never
-issued or leased a `release` action.
+would; any other only while no Run of that harness is live (each Run records its
+preset; a Run row from an older daemon that does not counts as every harness).
+A busy harness, a failed update or a daemon restart keeps nothing in memory:
+the inventory still shows the old version, so Hub tells the daemon again on a
+later pass. Older daemons are never issued or leased a `release` action.
 
 Inventory items observe explicit native JSON switches, scoped launch controls or
 the recorded daemon policy. Missing, malformed or unobservable native settings

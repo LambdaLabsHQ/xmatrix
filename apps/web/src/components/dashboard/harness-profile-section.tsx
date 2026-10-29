@@ -13,7 +13,7 @@ import { useOnboardingLocale } from "@/lib/onboarding-locale";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
-import { agentHarnessItemId } from "./agent-list-groups";
+import { agentHarnessSelectionId } from "./agent-list-groups";
 import { ToolDetailSection } from "./tool-split";
 import { parseAppLocation } from "./workspace-shell-navigation";
 
@@ -45,7 +45,7 @@ export function HarnessProfileSection({ registration, token, onSaved }: {
     if (!editable) return;
     const url = parseAppLocation(window.location.href);
     if (url.searchParams.get("edit") !== "profile") return;
-    if (url.searchParams.get("item") !== agentHarnessItemId(harness)) return;
+    if (url.searchParams.get("agent") !== agentHarnessSelectionId(harness)) return;
     fieldRef.current?.focus();
   }, [editable, harness]);
   // A Hub that does not report profiles has nothing to show or edit.

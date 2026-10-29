@@ -36,7 +36,8 @@ import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { AgentHarnessDetail } from "./agent-harness-detail";
-import { AgentListGroups, agentHarnessItemId, agentListGroups } from "./agent-list-groups";
+import { useUrlParameter } from "./url-query-state";
+import { AgentListGroups, agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
 import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
@@ -56,7 +57,7 @@ import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
   ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolSplit,
-  ToolStateDot, useToolItem,
+  ToolStateDot,
 } from "./tool-split";
 import { ErrorNotice } from "@/components/ui/error-notice";
 
@@ -114,7 +115,7 @@ export function MyAgentsView({
   /* A switch shows its new position at once and holds it until the agent list
      confirms it; waiting for the list's reload made a flip look ignored. */
   const [switching, setSwitching] = useState<{ id: string; on: boolean } | null>(null);
-  const [item, select] = useToolItem();
+  const [selectedAgentId, select] = useUrlParameter("agent");
 
   const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
   const copy = useOnboardingCopy(spaceId, token, currentUserId);
@@ -137,10 +138,10 @@ export function MyAgentsView({
   const now = useNow(AGENT_USAGE_REFRESH_MS);
   const groups = agentListGroups(catalog.data, { conversationTitle, now });
   const rows = groups.flatMap((group) => group.rows);
-  const chosen = rows.find((row) => row.id === item);
-  // A desktop shows the list's first item, its first agent, beside it until another is chosen.
+  const chosen = rows.find((row) => row.id === selectedAgentId);
+  // A desktop shows the first harness beside the list until another is chosen.
   const shownGroup = chosen ? undefined
-    : groups.find((group) => agentHarnessItemId(group.harness) === item) ?? (item ? undefined : groups[0]);
+    : groups.find((group) => agentHarnessSelectionId(group.harness) === selectedAgentId) ?? (selectedAgentId ? undefined : groups[0]);
 
   const list = (
     <ToolList title="Agents" createLead="avatar" create={{ label: "Manage machines", onCreate: onOpenMachines }}>
@@ -155,8 +156,8 @@ export function MyAgentsView({
       ) : rows.length === 0 ? (
         <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
       ) : (
-        <AgentListGroups groups={groups} selectedId={item} currentUserId={currentUserId} headingsOpen
-          shownId={shownGroup ? agentHarnessItemId(shownGroup.harness) : undefined}
+        <AgentListGroups groups={groups} selectedId={selectedAgentId} currentUserId={currentUserId} headingsOpen
+          shownId={shownGroup ? agentHarnessSelectionId(shownGroup.harness) : undefined}
           onSelect={(id) => { select(id); setEditingId(null); }} />
       )}
       {ready && (newCandidates.length > 0 || fleet.daemons.isError) && <ToolListGroup title="Installed on your machines" count={newCandidates.length}>
@@ -324,7 +325,7 @@ export function MyAgentsView({
 
   return (
     <div className="app-agents-view flex min-h-0 min-w-0 flex-1">
-      <ToolSplit label="Agents" open={Boolean(item)} list={list} detail={detail} />
+      <ToolSplit label="Agents" open={Boolean(selectedAgentId)} list={list} detail={detail} />
     </div>
   );
 }

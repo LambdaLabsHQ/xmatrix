@@ -14,7 +14,7 @@ import { registrationTupleId } from "./use-registration-command";
 export type AgentListGroup = ReturnType<typeof agentListGroups>[number];
 
 /** The list item that is a runtime itself, beside the ids of its locations. */
-export function agentHarnessItemId(harness: string): string {
+export function agentHarnessSelectionId(harness: string): string {
   return `agent:${harness}`;
 }
 
@@ -43,12 +43,12 @@ export function AgentListGroups({ groups, selectedId, shownId, currentUserId, li
   currentUserId: string;
   /** Rows each runtime shows before the rest are asked for (see ToolListGroup). */
   limit?: number;
-  /** A heading is an item of its own (`agentHarnessItemId`): what is set on the runtime, not on a location. */
+  /** A heading is an item of its own (`agentHarnessSelectionId`): what is set on the runtime, not on a location. */
   headingsOpen?: boolean;
   onSelect: (id: string) => void;
 }) {
   return groups.map((group) => {
-    const headingId = agentHarnessItemId(group.harness);
+    const headingId = agentHarnessSelectionId(group.harness);
     return (
       <ToolListGroup key={group.harness} title={group.harness} count={group.rows.length} identity limit={limit}
         onTitle={headingsOpen ? () => onSelect(headingId) : undefined}

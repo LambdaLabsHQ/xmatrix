@@ -28,7 +28,7 @@ import { ManageSecretsProvider } from "./secret-request-card";
 import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
-import { closeToolItem } from "./tool-split";
+import { closeViewSelection } from "./url-query-state";
 import { Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
@@ -663,13 +663,13 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   }, [channels, currentSpaceId, machines, user?.id]);
   const machineLinks = useMemo<MachineLinks>(() => ({
     machines: machineTargets,
-    onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
+    onOpenMachine: (machineId) => changeAppViewRef.current("machines", `machine=${encodeURIComponent(machineId)}`),
   }), [machineTargets]);
-  const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
+  const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "section=secrets"), []);
   const spaceAllowance = useSpaceAllowance(user?.id, currentSpaceId);
   const composerAllowance = useMemo(() => user ? {
     userId: user.id,
-    onOpenBilling: () => changeAppViewRef.current("settings", SPACE_BILLING_SECTION),
+    onOpenBilling: () => changeAppViewRef.current("settings", `section=${SPACE_BILLING_SECTION}`),
   } : undefined, [user]);
   // The route owns whether a page is open; its tree entry may arrive later.
   // Keep the back bar and its content spacing while the title is loading.
@@ -849,7 +849,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     else if (phonePageConversation) closePageConversation();
     else if (phonePageOpen) closePage();
     else if (view === "messages" && selectedChannel) backToChannelList();
-    else if (SPLIT_TOOL_VIEWS.includes(view) && closeToolItem()) return true;
+    else if (SPLIT_TOOL_VIEWS.includes(view) && closeViewSelection()) return true;
     else if (view !== "messages" && view !== "more" && MORE_TAB_VIEWS.includes(view)) backToMore();
     else return false;
     return true;

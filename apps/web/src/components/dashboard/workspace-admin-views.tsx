@@ -1316,7 +1316,7 @@ export function TeamView({
     </div>
   );
   return (
-    <SectionedToolView title="Team" defaultKey={currentSpace?.id} sections={[
+    <SectionedToolView title="Team" selectionParameter="space" defaultKey={currentSpace?.id} sections={[
       ...spaces.map((space): ToolSection => {
         const current = space.id === currentSpace?.id;
         return {

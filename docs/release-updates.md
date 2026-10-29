@@ -9,6 +9,28 @@ skeletons no longer name a section before the list arrives. A tinted-paper
 status, timed by CSS so it works before scripts run, says "Connecting to
 xMatrix…" after 2 s, that it is still trying on a slow network after 6 s, and
 offers a reload after 15 s; an offline device says so at once. Web only.
+## Unreleased: Automatic harness updates keep trying until installed
+
+With the Machines switch on, harnesses still sat weeks behind. The Hub stopped
+telling a daemon once it had seen a new version, the daemon queued that update
+in memory only, and the update waited for every Run on the machine to end.
+Self-updating harnesses were assumed to update themselves, but they do not in
+xMatrix's headless launches. Now, while the switch is on, the daemon runs the
+official update. The Hub tells it every 30 minutes until the inventory shows
+the latest version installed, and daily for harnesses without a registry. Only
+live Runs of that same harness delay it. Hub and daemon, no schema change.
+Recovery is a CI-validated beta revert.
+## Unreleased: Shared links name the selected object
+
+An Apps link such as `?connector=stripe` previously stayed on the list because
+detail selection read `item`, while only OAuth returns interpreted `connector`.
+Apps now uses `connector` for opening, switching and closing details, including
+OAuth and Gmail returns. The old Apps `item` parameter is removed without an
+alias. The shared item hook and helpers are removed; Agents use `agent`,
+Machines use `machine`, Schedules use `schedule`, Settings/admin use `section`,
+and Team uses `space`. Existing item-only links return to their destination
+list; this is an intentional address change across Web consumers. Beta Web only, no protocol
+or schema change. Recovery is a CI-validated beta Web reverting this change.
 
 ## Unreleased: A new Page keeps its first pasted image
 
