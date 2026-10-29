@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: Android opens its own copy when the edge answers with a server error
+
+A main-frame 5xx from the Web origin (an edge error page) now opens the copy
+of the app the Android shell carries, as a network failure already did, so the
+person sees the app's startup frame and its connecting status instead of an
+error page. Android only.
+
 ## Unreleased: Startup reads answer in time and failures show in place
 
 A sign-in session read (Web and native) now gives up after 15 s and counts as

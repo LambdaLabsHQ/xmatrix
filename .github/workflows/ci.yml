@@ -283,7 +283,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"web-unit","partitions":"web-unit","shard":"","primary":true},{"name":"web-build","partitions":"web-build","shard":"","primary":true},{"name":"web-check","partitions":"web-check","shard":"","primary":false}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true},{"name":"web (performance)","partitions":"web-browser","shard":"performance","primary":false},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
+        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"web-unit","partitions":"web-unit","shard":"","primary":false,"scope":"product"},{"name":"web-build","partitions":"web-build","shard":"","primary":true,"scope":"product"},{"name":"web-check","partitions":"web-check","shard":"","primary":false,"scope":"product"}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true,"scope":"product"},{"name":"web (performance)","partitions":"web-browser","shard":"performance","primary":false,"scope":"web-browser"},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false,"scope":"web-browser"},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false,"scope":"web-browser"},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false,"scope":"web-browser"},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false,"scope":"web-browser"}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true,"scope":"product"}]') }}
     # Long tests must not occupy production upload/deploy runners.
     runs-on: &linux_runner ${{ fromJSON(inputs.linux_runner || '"ubuntu-24.04"') }}
     env:
@@ -311,16 +311,21 @@ jobs:
           key: next-cache-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
           restore-keys: next-cache-${{ hashFiles('pnpm-lock.yaml') }}-
       # Turbo's content-addressed cache replays an unchanged build or unit
-      # test run instead of repeating it. Unit tests and the browser shards
-      # run different tasks, so each kind keeps its own entry.
+      # test run instead of repeating it. Product jobs share one scope;
+      # browser shards keep another. Actions matches restore-keys by prefix
+      # and then picks the newest cache, so a scope must not be a prefix of
+      # another: `web` is a prefix of `web-browser`, and product jobs were
+      # restoring the browser cache. `primary` is the single writer for the
+      # product scope (a second save of the same key fails the job). Browser
+      # shard 1 writes `web-browser`.
       - name: Restore the Turbo cache
         id: turbo-cache
         if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted'
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/xmatrix/turbo
-          key: turbo-${{ runner.os }}-${{ matrix.primary && 'web' || 'web-browser' }}-${{ github.sha }}
-          restore-keys: turbo-${{ runner.os }}-${{ matrix.primary && 'web' || 'web-browser' }}-
+          key: turbo-${{ runner.os }}-${{ matrix.scope }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-${{ matrix.scope }}-
       - name: Restore Playwright browsers and Linux libraries
         if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.shard != ''
         uses: actions/cache@v6
@@ -346,7 +351,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/xmatrix/turbo
-          key: turbo-${{ runner.os }}-${{ matrix.primary && 'web' || 'web-browser' }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-${{ matrix.scope }}-${{ github.sha }}
 
   hub:
     # The complete Hub suite. Every push runs this exact-SHA deploy gate, so
