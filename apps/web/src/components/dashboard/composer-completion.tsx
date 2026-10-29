@@ -457,7 +457,7 @@ export function useComposerCompletion({
     if (!activeReference) return [];
     if (activeReference.kind === "channel") {
       return channelReferenceCandidates(referenceCatalog?.channels ?? [], activeReference.query,
-        referenceSpaceId, channel?.id ?? null);
+        referenceSpaceId, channel?.id ?? null, referenceCatalog?.channelActivityMs);
     }
     if (activeReference.section === null) {
       return pageReferenceCandidates(referencePages.data ?? [], activeReference.query);
@@ -466,7 +466,7 @@ export function useComposerCompletion({
     return document && document.pageId === sectionPageId
       ? sectionReferenceCandidates(document, pageBlocks(document.body), activeReference.section)
       : [];
-  }, [activeReference, channel?.id, referenceCatalog?.channels, referencePages.data, referenceSpaceId,
+  }, [activeReference, channel?.id, referenceCatalog?.channels, referenceCatalog?.channelActivityMs, referencePages.data, referenceSpaceId,
     sectionDocument.data, sectionPageId]);
   const showSlashSuggestions =
     enabled &&

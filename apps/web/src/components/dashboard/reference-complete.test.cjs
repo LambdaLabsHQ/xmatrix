@@ -43,6 +43,24 @@ test("channel candidates stay in the Space, rank prefixes first and put the curr
   assert.equal(channelReferenceCandidates(channels, "train", "s", null)[0].detail, "Ships");
 });
 
+test("completion ranks as search does: title match first, then the most recently active", () => {
+  const active = { [channels[0].id]: 1, [channels[1].id]: 5 };
+  assert.deepEqual(channelReferenceCandidates(channels, "", "s", null, (id) => active[id] ?? 0).map((c) => c.label),
+    ["general", "release-train"]);
+  assert.deepEqual(channelReferenceCandidates(channels, "", "s", channels[1].id, (id) => active[id] ?? 0).map((c) => c.label),
+    ["release-train", "general"]);
+  const pages = [
+    { pageId: "a", parentPageId: null, title: "Release notes", updatedAt: "2026-01-01T00:00:00.000Z" },
+    { pageId: "b", parentPageId: null, title: "Old roadmap", updatedAt: "2026-02-01T00:00:00.000Z" },
+    { pageId: "c", parentPageId: null, title: "Roadmap", updatedAt: "2026-01-01T00:00:00.000Z" },
+    { pageId: "d", parentPageId: null, title: "Road trip", updatedAt: "2026-10-01T00:00:00.000Z" },
+    { pageId: "e", parentPageId: null, title: "Offroad", updatedAt: "2026-10-02T00:00:00.000Z" },
+  ];
+  assert.deepEqual(pageReferenceCandidates(pages, "").map((c) => c.pageId), ["e", "d", "b", "a", "c"]);
+  assert.deepEqual(pageReferenceCandidates(pages, "roadmap").map((c) => c.pageId), ["c", "b"]);
+  assert.deepEqual(pageReferenceCandidates(pages, "road").map((c) => c.pageId), ["d", "b", "c", "e"]);
+});
+
 test("page and section candidates, and what a pick writes", () => {
   const pages = [
     { pageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", parentPageId: null, title: "Roadmap" },

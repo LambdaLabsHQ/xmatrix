@@ -12,6 +12,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties,
 } from "react";
 import { useStableCallback } from "./workspace-shell-helpers";
+import { channelRecentActivityMs } from "./workspace-shell-helpers-extra";
 import { CrossSpaceReadCard, useChannelPendingCrossSpaceReads } from "./cross-space-read-card";
 import { useQueries } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -80,7 +81,7 @@ import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
-import { AGENT_PRESETS, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { AGENT_PRESETS, WEB_PROXY_ROUTES, type ChannelSnapshot } from "@xmatrix/protocol";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { useOnboardingLocale } from "@/lib/onboarding-locale";
 import { harnessSpaceKey } from "./harness-space-switch";
@@ -644,9 +645,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     () => (channelReferencesRef.current = channelReferences(channelReferencesRef.current, channels)),
     [channels],
   );
+  const channelsByIdRef = useRef(new Map<string, ChannelSnapshot>());
+  channelsByIdRef.current = useMemo(() => new Map(channels.map((channel) => [channel.id, channel])), [channels]);
   const messageReferenceCatalog = useMemo<MessageReferenceCatalog>(() => ({
     channels: referenceChannels,
     pages: pageTree.data,
+    channelActivityMs: (channelId) => {
+      const channel = channelsByIdRef.current.get(channelId);
+      return channel ? channelRecentActivityMs(channel) : 0;
+    },
     onOpenChannel: (channelId) => navigateToChannelRef.current(channelId),
   }), [referenceChannels, pageTree.data]);
   const changeAppViewRef = useRef(changeAppView);
