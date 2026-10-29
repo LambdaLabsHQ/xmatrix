@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: The app starts one Hub round trip sooner and paints its last list
+
+Web sign-in now takes the bearer from the `set-auth-jwt` header the Hub's jwt
+plugin already returns on a signed-in `get-session`, instead of a second
+`/api/auth/token` request, so every launch reaches its first reads one Hub
+round trip sooner. A remembered compatibility admission is keyed by Hub,
+component, protocol and platform rather than the exact version, so the first
+load after a release no longer waits behind the preparation bar; the Hub is
+still asked in the background and a refusal still opens the upgrade wall. The
+presentation-only Channel list snapshot is now written whenever the list
+settles, so a returning account sees its last list while its session is
+confirmed; it remains inert and user-partitioned. App routes preconnect to the
+Hub while scripts download. Web only. See
+[Channel startup performance](performance/channel-startup.md).
+
 ## Unreleased: Message append recovers a lost pre-COMMIT response
 
 HUB-B6 lost its final live-routing read after publication writes, before COMMIT.

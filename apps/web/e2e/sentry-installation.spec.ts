@@ -94,11 +94,10 @@ test("conflicting or repeated callback identities cannot consume a code", async 
 test("signed-out callbacks keep codes out of login URLs and resume on a real auth focus refresh", async ({ page }) => {
   await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
   let signedIn = false;
-  await page.route("**/api/auth/get-session**", route => route.fulfill({ json: signedIn ? {
+  await page.route("**/api/auth/get-session**", route => route.fulfill(signedIn ? { json: {
     user: { id: "e2e-user", email: "e2e@xmatrix.test", name: "E2E Tester" },
     session: { token: "test-session", expiresAt: "2099-01-01T00:00:00.000Z" },
-  } : null }));
-  await page.route("**/api/auth/token**", route => route.fulfill({ json: { token: "test-jwt" } }));
+  }, headers: { "set-auth-jwt": "test-jwt", "access-control-expose-headers": "set-auth-jwt" } } : { json: null }));
   const writes = await installStubs(page);
   await page.goto(callback);
   const login = page.getByRole("link", { name: "Sign in to xMatrix" });
