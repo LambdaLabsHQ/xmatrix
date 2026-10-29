@@ -972,6 +972,7 @@ test("Team starts with management actions instead of count-only summary cards", 
   await expect(page.locator(".app-topbar")).toContainText("Team");
   // A phone lists Team's sections first; the Space's own opens over the list.
   await page.locator('[data-testid="tool-section-row"]').filter({ hasText: "Lambda Labs" }).tap();
+  await expect(page).toHaveURL(/\/team\?space=space-team$/u);
   await expect(page.getByRole("heading", { name: "Lambda Labs", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create team" })).toHaveCount(0);
   await expect(page.locator(".app-metric-card")).toHaveCount(0);
