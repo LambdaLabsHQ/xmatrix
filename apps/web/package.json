@@ -20,7 +20,7 @@
     "pretypecheck": "pnpm --filter @xmatrix/protocol build",
     "typecheck": "tsc --noEmit",
     "prebuild:cloudflare": "pnpm --filter @xmatrix/protocol build",
-    "build:cloudflare": "opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion",
+    "build:cloudflare": "opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion && node scripts/populate-static-page-cache.mjs",
     "preview": "pnpm build:cloudflare && opennextjs-cloudflare preview",
     "deploy": "pnpm build:cloudflare && opennextjs-cloudflare deploy",
     "test:e2e:mock-app": "cross-env PLAYWRIGHT_REUSE_SERVER=0 playwright test --project=mock-app",

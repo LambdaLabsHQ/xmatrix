@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Opening the app no longer waits for a page to be rendered
+
+`/app`, where every desktop, iOS and browser launch starts, was rendered by the
+Web Worker on each request; on a fresh connection a cold Worker took 0.7–2.1 s
+before the first byte. The page is the same for everyone (the startup frame;
+sign-in and the signed-out redirect happen in the browser), so it is now
+prerendered once per build and the Worker answers with that copy before any
+route code loads, as it already did for other prerendered pages such as sign-in.
+The copies ship in the same deploy as the scripts they name, and every cache is
+told to revalidate them (`public, max-age=0, must-revalidate`), so a deploy never
+serves a page naming removed scripts. Deep links under `/app/<space>/…` are still
+rendered per request. Beta Web only, no API, schema or native change; recovery is
+a CI-validated beta Web release reverting the change.
+
 ## Unreleased: Launching the app reopens the last conversation
 
 Opening the bare `/app` now goes straight to the conversation this account

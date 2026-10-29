@@ -76,6 +76,34 @@ test("Web redirects before assets or OpenNext and preserves secure routing", asy
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test("Web makes every cache revalidate prerendered pages", async () => {
+  const dir = await mkdtemp(`${tmpdir()}/xmatrix-prerendered-`);
+  try {
+    await mkdir(`${dir}/.open-next`);
+    await writeFile(`${dir}/.open-next/worker.js`, `export default { fetch: (request) => {
+      const path = new URL(request.url).pathname;
+      const cacheControl = path === "/app" ? "s-maxage=31536000, stale-while-revalidate=2592000"
+        : path === "/" ? "s-maxage=31536000" : "private, no-cache, no-store, max-age=0, must-revalidate";
+      return new Response("page:" + path, { headers: { "cache-control": cacheControl, etag: "page-hash", "x-opennext-cache": "HIT" } });
+    } };`);
+    await writeFile(`${dir}/package.json`, '{"type":"module"}');
+    await writeFile(`${dir}/worker.mjs`, await readFile(new URL("../apps/web/worker.mjs", import.meta.url)));
+    const { default: worker } = await import(pathToFileURL(`${dir}/worker.mjs`));
+    for (const [path, cacheControl] of [
+      ["/app", "public, max-age=0, must-revalidate"],
+      ["/", "public, max-age=0, must-revalidate"],
+      ["/app/space/channels/general--1", "private, no-cache, no-store, max-age=0, must-revalidate"],
+    ]) {
+      const response = await worker.fetch(new Request(`https://xmatrix.sh${path}`, { headers: { rsc: "1" } }), {
+        ASSETS: { fetch: async () => new Response(null, { status: 404 }) },
+      }, {});
+      assert.equal(response.headers.get("cache-control"), cacheControl, path);
+      assert.equal(response.headers.get("etag"), "page-hash");
+      assert.equal(await response.text(), `page:${path}`);
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test("the rendered Web config runs the TLS guard before static assets", async () => {
   const config = JSON.parse(await renderComponent("web", resolveProfile(await loadProfile("ci"))));
   assert.equal(config.main, "worker.mjs");

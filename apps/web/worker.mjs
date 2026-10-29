@@ -41,6 +41,16 @@ export default {
       }
       await asset.body?.cancel();
     }
-    return handler.fetch(request, env, ctx);
+    const response = await handler.fetch(request, env, ctx);
+    // A prerendered page (`/app` among them) is answered from this build's copy
+    // with `s-maxage` for a year. Its HTML names this build's chunks, which the
+    // next deploy removes, so no cache may keep it past a deploy: every cache,
+    // shared or not, asks again each time.
+    if (/^s-maxage=/.test(response.headers.get("cache-control") ?? "")) {
+      const revalidated = new Response(response.body, response);
+      revalidated.headers.set("cache-control", "public, max-age=0, must-revalidate");
+      return revalidated;
+    }
+    return response;
   },
 };
