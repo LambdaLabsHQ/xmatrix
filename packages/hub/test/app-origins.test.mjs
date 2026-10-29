@@ -55,3 +55,22 @@ test("the beta Web shares the session only from inside the cookie domain", () =>
     assert.throws(() => resolveAuthCookieDomain({ ...env, APP_BETA_URL }), /APP_BETA_URL must be an HTTPS origin inside/u);
   }
 });
+
+test("the Web uploads a file's bytes straight, with its checksum, and only into an intent's scope", async () => {
+  const app = new Hono();
+  registerDirectReadCors(app);
+  const preflight = (path, method = "PUT") => app.request(path, {
+    method: "OPTIONS",
+    headers: { origin: "https://xmatrix.sh", "access-control-request-method": method },
+  }, env);
+  const upload = await preflight("/api/relay-v2/private-r2/uploads/intent-1/scope/space%3Aspace-1");
+  assert.equal(upload.status, 204);
+  assert.equal(upload.headers.get("access-control-allow-origin"), "https://xmatrix.sh");
+  assert.equal(upload.headers.get("access-control-allow-methods"), "PUT");
+  assert.match(upload.headers.get("access-control-allow-headers"), /x-xmatrix-content-sha256/u);
+  for (const path of ["/api/relay-v2/private-r2/uploads/intent-1", "/api/relay-v2/private-r2/uploads/intent-1/staging/scope/s"]) {
+    assert.equal((await preflight(path)).headers.get("access-control-allow-origin"), null, path);
+  }
+  assert.equal((await preflight("/api/relay-v2/private-r2/uploads/intent-1/scope/s", "POST"))
+    .headers.get("access-control-allow-origin"), null);
+});

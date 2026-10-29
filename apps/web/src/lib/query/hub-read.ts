@@ -24,6 +24,15 @@ function admittedIdentity() {
 }
 
 /**
+ * Where this page asks the Hub straight, and the headers it asks with; null when it asks through the Web.
+ * The caller still sends its own bearer, and goes through the Web when the Hub refuses it from here.
+ */
+export function directHubRequest(token: string): { origin: string; headers: Record<string, string> } | null {
+  const identity = readsFromHub() && token ? admittedIdentity() : null;
+  return identity ? { origin: xmatrixHubOrigin(), headers: clientCompatibilityHeaders(identity) } : null;
+}
+
+/**
  * A request the Hub answers straight to this page, skipping the Web's Worker: a read, or the ticket a page's live
  * session opens with. The Web answers it when the Hub will not from here: no admitted client identity yet, no answer
  * across origins, a token the Hub no longer takes (the Web renews it from the session), or a client identity it
@@ -34,12 +43,12 @@ export async function hubReadResponse(input: { hubPath: string; webUrl: string; 
   const json: Record<string, string> = input.body === undefined ? {} : { "content-type": "application/json" };
   const init = { method: input.method ?? "GET", signal: input.signal,
     ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }) };
-  const identity = readsFromHub() && input.token ? admittedIdentity() : null;
-  if (identity) {
+  const direct = directHubRequest(input.token);
+  if (direct) {
     try {
-      const response = await xmatrixRawResponse(`${xmatrixHubOrigin()}${input.hubPath}`, {
+      const response = await xmatrixRawResponse(`${direct.origin}${input.hubPath}`, {
         ...init,
-        headers: { Authorization: `Bearer ${input.token}`, ...json, ...clientCompatibilityHeaders(identity) },
+        headers: { Authorization: `Bearer ${input.token}`, ...json, ...direct.headers },
         credentials: "omit",
         // A mode that skips the HTTP cache makes Chrome skip its preflight cache too and ask again before every
         // request, a second trip to the Hub. The Hub marks every direct answer no-store, so none is kept.
