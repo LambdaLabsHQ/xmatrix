@@ -9,6 +9,17 @@ Page id. A browser regression reproduces the null owner id before the fix.
 Beta Web only, no schema or protocol change; recovery is a CI-validated beta
 Web reverting this change.
 
+## Unreleased: Unchanged Page edits preserve a word being typed
+
+A repeated Markdown write could parse an unchanged projection back into the
+live document and remove the trailing space a reader had just typed. The next
+word then joined the preceding one. The Hub's fragment writer and the parallel
+Web preview writer now leave an unchanged projection alone; empty documents
+still initialize and actual edits still apply. Real Yjs regressions reproduce
+`Shipped andverified` on both old paths. This independently establishes the
+bug; the original browser first attempt has no trace proving its timing. Hub
+and Web, no migration or native update; recovery is a CI-validated beta revert.
+
 ## Unreleased: Agents can upload Page images and videos
 
 Agents previously could only preserve images pasted by a person; new local
