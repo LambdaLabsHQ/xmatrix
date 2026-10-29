@@ -37,10 +37,10 @@ commands keep working.
 
 - `automation list|update|pause|resume|cancel-execution|delete`
   (`cli-commands-automation.ts`). Output is unchanged.
-- `call "<connector command>" --public|--private [--json]` (`cli-commands-call.ts`) is a new
+- `call "<connector command>" [--private|--public] [--json]` (`cli-commands-call.ts`) is a new
   Hub-defined command, available without updating a CLI that supports Hub
   commands. It calls `/api/connectors/call` with the caller's own credential;
-  both modes record the invocation and parameters. Private results are masked in shared Channel receipts and execution history; the caller receives the original, and its Human owner sees a protected value in the Web for 30 days. A mode is required so old bare calls cannot silently disclose content.
+  both modes record the invocation and parameters. Private results are masked in shared Channel receipts and execution history; the caller receives the original, and its Human owner sees a protected value in the Web for 30 days. Results are public unless `--private` is given explicitly.
   See [connector delivery](../design/connector-platform.md).
 
 Moving another command: add it to the Hub table with the same options and
