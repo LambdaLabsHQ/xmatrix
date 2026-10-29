@@ -37,8 +37,8 @@
     "Sign in to the dedicated xMatrix reviewer test account supplied separately. Use its isolated test Space with administrator rights.",
     "Open the Space Apps page and choose Connect with Stripe. For app review, use the normal public OAuth installation path; the external test path is for implementation testing only.",
     "Select the reviewer-owned Stripe account, inspect the five read-only permissions, authorize, and return to xMatrix. No client ID, account ID, signing secret, or API key is entered by the connecting user.",
-    "In the isolated test channel, subscribe to invoice, payment_intent, dispute, and subscription event sources as described by the released connector guide.",
-    "Use Stripe test events for the reviewer test account. Verify events reach its selected channel and do not reach a separate unconnected Space.",
+    "In the isolated test channel, send @stripe:subscribe:* events to receive the selected event types from every retained account.",
+    "Use Stripe test events for the reviewer test account. Verify paid-invoice, successful-payment and subscription notifications reach its selected channel and do not reach a separate unconnected Space. Subscription creation alone must not claim payment.",
     "Disconnect or uninstall the integration and verify subsequent events no longer reach the Space."
   ],
   "submission_open_work": [
