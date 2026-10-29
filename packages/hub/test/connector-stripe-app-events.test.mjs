@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { handleStripeAppDelivery } from "../src/connectors/stripe-app-ingress.ts";
 import { handleStripePublisherDelivery } from "../src/connectors/stripe-publisher-ingress.ts";
 import { ProviderRequestError } from "../src/connectors/http.ts";
+import { AppControlError } from "@xmatrix/db";
 
 const secret = ["sk", "live", "fixtureNotARealKey"].join("_");
 const signing = "whsec_fixtureNotARealSecret";
@@ -179,11 +180,18 @@ test("the actual publisher HTTP route verifies before lookup and sanitizes upstr
   const { Hono } = await import("hono");
   const { compileCommonJsSourceModule } = await import("./support/commonjs-source-module.mjs");
   const route = await compileCommonJsSourceModule(new URL("../src/index-routes-connectors.ts", import.meta.url));
-  const payload = publisherEvent(); let unavailable = false;
+  const payload = publisherEvent(); let unavailable = false, transient;
   const f = publisherFixture(t, () => {
     if (unavailable) throw new ProviderRequestError(503, "private-provider-response");
+    if (transient === "transport") throw new TypeError("private-network-failure");
+    if (transient === "rate-limit") return Response.json({ error: { message: "private-rate-limit" } }, { status: 429 });
     return Response.json(payload);
   });
+  const grant = f.dependencies.grant;
+  f.dependencies.grant = async (...args) => {
+    if (transient === "lease") throw new AppControlError("stripe_refresh_in_progress", 503, "private-refresh-lease", true);
+    return grant(...args);
+  };
   const imports = { "@xmatrix/protocol": await import("@xmatrix/protocol"),
     "./connectors/stripe-publisher-ingress": { handleStripePublisherDelivery: input => handleStripePublisherDelivery(input, f.dependencies) } };
   const noop = () => {}, app = new Hono();
@@ -197,6 +205,15 @@ test("the actual publisher HTTP route verifies before lookup and sanitizes upstr
   unavailable = true;
   const failed = await app.fetch(request(sign(JSON.stringify(payload), publisherSigning).header), publisherEnv);
   assert.equal(failed.status, 503); assert.doesNotMatch(await failed.text(), /private-provider-response|retained-account-token/);
+  unavailable = false;
+  // A 200 would acknowledge and permanently lose these retryable deliveries.
+  for (transient of ["lease", "transport", "rate-limit"]) {
+    const retry = await app.fetch(request(sign(JSON.stringify(payload), publisherSigning).header), publisherEnv);
+    assert.equal(retry.status, 503, transient);
+    assert.doesNotMatch(await retry.text(), /private-|retained-account-token/);
+  }
+  assert.equal(f.appends.length, 1);
+  assert.equal(f.automations.length, 1);
 });
 
 test("a connected account event is delivered and deauthorization retires without posting", async () => {

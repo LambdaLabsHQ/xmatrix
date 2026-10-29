@@ -55,9 +55,10 @@ export async function handleStripePublisherDelivery(input: { env: Env; request: 
           confirmed.account !== undefined && confirmed.account !== null) return [];
       return [stripeEvent({ ...confirmed, account: accountId })];
     } catch (error) {
-      // Revoked/removed grants and unreadable events never fall back to operator credentials.
-      if (error instanceof ProviderRequestError && error.status >= 500) throw error;
-      return [];
+      // Only an authoritative refusal proves this grant cannot read the event.
+      // Lease contention, storage/transport failures and rate limits must retry.
+      if (error instanceof ProviderRequestError && [401, 403, 404].includes(error.status)) return [];
+      throw error;
     }
   });
   return Response.json({ ok: true, events: delivered > 0 ? 1 : 0, delivered });
