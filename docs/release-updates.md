@@ -17,6 +17,16 @@ so Hub recovery is a CI-validated forward fix that keeps that store. Do not
 roll the Hub back to the old single-grant reader after adoption. Web recovery
 can revert its UI independently. See [Stripe accounts](connectors/stripe.md).
 
+## Unreleased: The app opens on its own frame and says what it waits for
+
+The preparation progress bar and the signed-in shell's full-screen spinner are
+gone. Both waits render one `StartupShell`: the wood frame with the account's
+last list, or the list's skeleton, from the server's first frame onward. List
+skeletons no longer name a section before the list arrives. A tinted-paper
+status, timed by CSS so it works before scripts run, says "Connecting to
+xMatrix…" after 2 s, that it is still trying on a slow network after 6 s, and
+offers a reload after 15 s; an offline device says so at once. Web only.
+
 ## Unreleased: Automatic harness updates keep trying until installed
 
 With the Machines switch on, harnesses still sat weeks behind. The Hub stopped

@@ -140,6 +140,8 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
         responder: { kind: "channelCatalog", channels, held: true },
       });
       await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+      // The startup frame paints the same skeleton; measure the shell's own.
+      await page.locator(".xmatrix-app-shell:not([aria-busy])").waitFor();
 
       const list = page.getByRole("status", { name: "Loading channels" }).locator("visible=true");
       await expect(list).toBeVisible();
