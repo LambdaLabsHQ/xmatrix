@@ -8176,8 +8176,8 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   color: var(--m-ink-attention, var(--accent));
 }
 
-/* A connected App is plugged in, in the same green as a free person's or
-   Agent's presence dot. */
+/* A connected App's tick is the same green as a free person's or Agent's
+   presence dot. */
 .xmatrix-app .app-tool-state-icon[data-state="connected"] {
   color: oklch(0.696 0.17 162.48);
 }
