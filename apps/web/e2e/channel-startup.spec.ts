@@ -101,7 +101,7 @@ test("a build the Hub admitted before opens on the next load while the Hub is as
   await expect(page.getByRole("progressbar", { name: "Preparing" })).toHaveCount(0);
 });
 
-test("resolving an anonymous session does not repeat compatibility admission", async ({ page }) => {
+test("resolving an anonymous session does not repeat compatibility admission, and takes its token from the session read", async ({ page }) => {
   await page.addInitScript(() => {
     (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true;
   });
@@ -110,14 +110,49 @@ test("resolving an anonymous session does not repeat compatibility admission", a
     responder: { kind: "deferred", json: {
       user: { id: "e2e-user", email: "e2e@xmatrix.test", name: "E2E Tester" },
       session: { token: "test-session", expiresAt: "2099-01-01T00:00:00.000Z" },
-    } } });
+    }, headers: { "set-auth-jwt": "test-jwt" } } });
   await fixtureJson(page, "startup-auth-token", "**/api/auth/token**", { token: "test-jwt" });
   await page.goto("/app/personal-sspaceperso/channels/general--channel-general", { waitUntil: "domcontentloaded" });
   await expect.poll(async () => (await fixtureRequests(page, "client-compatibility")).length).toBe(1);
   await releaseFixture(page, "startup-auth-session");
-  await expect.poll(async () => (await fixtureRequests(page, "startup-auth-token")).length).toBeGreaterThan(0);
   await expect.poll(async () => (await fixtureRequests(page, "channel-catalog")).length).toBeGreaterThan(0);
+  // The session read carried the bearer; a second /token round trip would delay every read.
+  expect(await fixtureRequests(page, "startup-auth-token")).toHaveLength(0);
   expect(await fixtureRequests(page, "client-compatibility")).toHaveLength(1);
+});
+
+test("a returning account sees the list it last had while its session is confirmed", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true;
+  });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const session = {
+    user: { id: "e2e-user", email: "e2e@xmatrix.test", name: "E2E Tester" },
+    session: { token: "test-session", expiresAt: "2099-01-01T00:00:00.000Z" },
+  };
+  await fixtureJson(page, "signed-in-session", "**/api/auth/get-session**", session,
+    { headers: { "set-auth-jwt": "test-jwt" } });
+  // As on a real network, the list answers after this account's disk store has opened.
+  await fixtureRule(page, { id: "held-catalog", pattern: /\/api\/xmatrix\/channels\/(?:page|resolve)(?:\?.*)?$/,
+    responder: { kind: "channelCatalog", channels: [E2E_CHANNEL], held: true } });
+  await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => page.evaluate(async () => (await indexedDB.databases())
+    .some(({ name }) => name?.startsWith("xmatrix-product-tail-cache")))).toBe(true);
+  await releaseFixture(page, "held-catalog");
+  const sidebar = page.locator(".app-sidebar");
+  await expect(sidebar.getByText("general", { exact: true })).toBeVisible();
+  // The list reached this device's disk once it had settled.
+  await expect.poll(() => page.evaluate(() =>
+    window.localStorage.getItem("xmatrix-product-tail-cache:last-catalog-user"))).toBe("e2e-user");
+
+  await fixtureRule(page, { id: "held-session", pattern: "**/api/auth/get-session**",
+    responder: { kind: "deferred", json: session, headers: { "set-auth-jwt": "test-jwt" } } });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect.poll(async () => (await fixtureRequests(page, "held-session")).length).toBeGreaterThan(0);
+  await expect(sidebar.getByText("general", { exact: true })).toBeVisible();
+  await releaseFixture(page, "held-session");
+  await releaseFixture(page, "held-catalog");
+  await expect(page.getByRole("button", { name: "general", exact: true })).toBeVisible();
 });
 
 // A native session completes after admission, replacing the account QueryClient.

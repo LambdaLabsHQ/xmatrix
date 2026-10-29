@@ -254,6 +254,17 @@ export function useWorkspaceShellTailCache(deps: {
     };
   }, [user?.id, mobileListFixture, channelsRef]);
 
+  // Keep the pre-auth list current: the next cold start paints the rows this
+  // account last saw while its session is still being confirmed. A list that
+  // lands before the store opens is written by the boot effect above.
+  useEffect(() => {
+    if (channels.length === 0) return;
+    const timer = window.setTimeout(() => {
+      void productTailCacheStoreRef.current?.putCatalog(channels);
+    }, PRODUCT_TAIL_CACHE_PERSIST_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [channels]);
+
   // Admission: every fresh catalog re-judges both directions — loaded
   // candidates may open, and previously admitted channels still made of disk
   // bytes must close (and durably purge) when the catalog's content watermark
