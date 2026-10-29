@@ -20,6 +20,11 @@ export function setHumanPushConnected(next: boolean): void {
   window.dispatchEvent(new CustomEvent("xmatrix:human-push", { detail: { connected: next } }));
 }
 
+/** Whether the Human socket is connected right now. */
+export function humanPushConnected(): boolean {
+  return connected;
+}
+
 /**
  * Poll only while the Human socket is down and the tab is visible. A connected
  * socket is woken by `workspace_resource_changed` instead.

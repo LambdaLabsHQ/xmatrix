@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: The open app says when it is offline or reconnecting
+
+A tinted-paper tile over the reading column, just under the top band, says
+"You're offline" while the browser is offline, and "Reconnecting to xMatrix…"
+when the live connection has dropped for more than 4 s after it had connected.
+It disappears when the connection returns; nothing on screen is blocked. Web
+only.
+
 ## Unreleased: A desktop window always appears and says when the app cannot load
 
 A new window shows within 1.5 s even while the app's page is still on its way.
