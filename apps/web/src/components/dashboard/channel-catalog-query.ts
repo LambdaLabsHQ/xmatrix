@@ -9,7 +9,7 @@ import {
   type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
-import { requireJson, xmatrixRawResponse } from "@/lib/query/api-client";
+import { requireJson, xmatrixRawResponse, XMatrixApiError } from "@/lib/query/api-client";
 import { fetchChannelCatalog } from "./workspace-admin-views";
 
 export interface NormalizedChannelCatalogQuery {
@@ -57,12 +57,23 @@ async function requestCatalogPage(input: {
   signal?: AbortSignal;
 }): Promise<ChannelSnapshotCatalogPage> {
   // The shared transport turns a dropped connection into a retryable error, so
-  // Query retries it instead of showing the browser's "Failed to fetch".
+  // Query retries it instead of showing the browser's "Failed to fetch". An
+  // attempt that gets no answer in time is the same failure: the list says so
+  // and retries instead of keeping its skeleton forever.
+  const deadline = AbortSignal.timeout(CATALOG_PAGE_ATTEMPT_TIMEOUT_MS);
+  const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline;
+  const unanswered = (error: unknown): never => {
+    if (deadline.aborted && !input.signal?.aborted) {
+      throw new XMatrixApiError({ message: "The conversation list did not answer in time", status: 0,
+        code: "network_error", retryable: true });
+    }
+    throw error;
+  };
   const response = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_catalog_page}?${input.params}`, {
     headers: { Authorization: `Bearer ${input.token}` },
-    signal: input.signal,
+    signal,
     cache: "no-store",
-  });
+  }).catch(unanswered);
   if (response.status === 404 || response.status === 426) {
     const legacy = await fetchChannelCatalog(input.token, { spaceId: input.spaceId });
     const rows = legacyRows(legacy.channels, input.legacyQuery);
@@ -71,8 +82,11 @@ async function requestCatalogPage(input: {
       counts: { active: rows.length, unread: 0, mentions: 0 },
     };
   }
-  return decodeChannelCatalogPage(await requireJson<ChannelCatalogPage>(response, input.signal));
+  return decodeChannelCatalogPage(await requireJson<ChannelCatalogPage>(response, signal).catch(unanswered));
 }
+
+/** One catalog page attempt; the history read allows the same. */
+const CATALOG_PAGE_ATTEMPT_TIMEOUT_MS = 20_000;
 
 export async function fetchChannelCatalogPage(input: {
   token: string;

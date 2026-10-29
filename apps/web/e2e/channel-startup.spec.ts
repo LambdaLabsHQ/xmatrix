@@ -278,3 +278,26 @@ test("Electron reads history from the Hub", async ({ page }) => {
   await page.goto("/app/personal-sspaceperso/channels/general--channel-general", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Electron browser history ready", { exact: true })).toBeVisible();
 });
+
+test("a conversation whose messages cannot be read says so instead of loading forever", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await fixtureJson(page, "refused-history", "**/channels/channel-general/history**",
+    { error: "History is unavailable", code: "invalid_request" }, { status: 400 });
+  await page.goto("/app/personal-sspaceperso/channels/general--channel-general", { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".app-empty-conversation-body").getByText(/Couldn't load messages/u)).toBeVisible();
+  await expect(page.locator(".app-message-timeline-skeleton")).toHaveCount(0);
+});
+
+test("the reading pane does not call the Space empty while its list is still arriving", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await fixtureRule(page, { id: "held-list", pattern: /\/api\/xmatrix\/channels\/(?:page|resolve)(?:\?.*)?$/,
+    responder: { kind: "channelCatalog", channels: [E2E_CHANNEL], held: true } });
+  await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+  await page.locator(".xmatrix-app-shell:not([aria-busy])").waitFor();
+  await expect.poll(async () => (await fixtureRequests(page, "held-list")).length).toBeGreaterThan(0);
+  await expect(page.locator(".app-message-timeline-skeleton")).toBeVisible();
+  await expect(page.getByText("No conversations yet")).toHaveCount(0);
+  await releaseFixture(page, "held-list");
+  await expect(page.locator(".app-message-timeline-skeleton")).toHaveCount(0);
+  await expect(page.getByText("No conversations yet")).toHaveCount(0);
+});
