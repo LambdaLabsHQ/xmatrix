@@ -180,7 +180,7 @@ test("the actual publisher HTTP route verifies before lookup and sanitizes upstr
   const { Hono } = await import("hono");
   const { compileCommonJsSourceModule } = await import("./support/commonjs-source-module.mjs");
   const route = await compileCommonJsSourceModule(new URL("../src/index-routes-connectors.ts", import.meta.url));
-  const payload = publisherEvent(); let unavailable = false, transient;
+  const payload = publisherEvent(); let unavailable = false, transient, refusal;
   const f = publisherFixture(t, () => {
     if (unavailable) throw new ProviderRequestError(503, "private-provider-response");
     if (transient === "transport") throw new TypeError("private-network-failure");
@@ -190,6 +190,7 @@ test("the actual publisher HTTP route verifies before lookup and sanitizes upstr
   const grant = f.dependencies.grant;
   f.dependencies.grant = async (...args) => {
     if (transient === "lease") throw new AppControlError("stripe_refresh_in_progress", 503, "private-refresh-lease", true);
+    if (refusal) throw new AppControlError("stripe_account_refused", refusal, "private-account-refusal");
     return grant(...args);
   };
   const imports = { "@xmatrix/protocol": await import("@xmatrix/protocol"),
@@ -212,8 +213,15 @@ test("the actual publisher HTTP route verifies before lookup and sanitizes upstr
     assert.equal(retry.status, 503, transient);
     assert.doesNotMatch(await retry.text(), /private-|retained-account-token/);
   }
+  transient = undefined;
+  for (refusal of [401, 403, 404]) {
+    const ignored = await app.fetch(request(sign(JSON.stringify(payload), publisherSigning).header), publisherEnv);
+    assert.equal(ignored.status, 200);
+    assert.deepEqual(await ignored.json(), { ok: true, events: 0, delivered: 0 });
+  }
   assert.equal(f.appends.length, 1);
   assert.equal(f.automations.length, 1);
+  assert.equal(f.retirements.length, 0);
 });
 
 test("a connected account event is delivered and deauthorization retires without posting", async () => {
