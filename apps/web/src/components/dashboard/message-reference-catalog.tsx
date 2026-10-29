@@ -15,6 +15,11 @@ export type ChannelReference = Pick<ChannelSnapshot, "id" | "spaceId" | "name" |
 export type MessageReferenceCatalog = {
   channels: readonly ChannelReference[];
   pages?: readonly { pageId: string; title: string }[];
+  /**
+   * When a channel was last active, read from the live list at the moment of asking, so `#` completion ranks
+   * recent channels first while the references themselves stay the same between messages.
+   */
+  channelActivityMs: (channelId: string) => number;
   onOpenChannel: (channelId: string) => void;
 };
 

@@ -5,7 +5,7 @@
  * nor a page below a person because of its kind. Pure; no React.
  */
 
-/** 0 the whole title, 1 the title's start, 2 anywhere in the title, 3 only in other text. */
+/** 0 the whole title, 1 the start of the title or of a word in it, 2 anywhere in the title, 3 only in other text. */
 export type SearchMatchTier = 0 | 1 | 2 | 3;
 
 export type SearchRank = { tier: SearchMatchTier; activityMs: number };
@@ -20,7 +20,7 @@ export function searchMatchTier(needle: string, title: string): SearchMatchTier 
   const text = normalizeSearchNeedle(title);
   if (!wanted) return 3;
   if (text === wanted) return 0;
-  if (text.startsWith(wanted)) return 1;
+  if (text.startsWith(wanted) || text.split(/[\s\-_/·]+/u).some((word) => word.startsWith(wanted))) return 1;
   return text.includes(wanted) ? 2 : 3;
 }
 
