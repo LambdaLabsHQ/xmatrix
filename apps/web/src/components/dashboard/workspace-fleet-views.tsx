@@ -49,7 +49,7 @@ import {
 import { machineOs } from "./machine-os";
 import {
   ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSplit,
-  ToolStateDot, useToolItem,
+  ToolStateDot,
 } from "./tool-split";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -120,6 +120,7 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { groupConnectorsForList, orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
+import { useUrlParameter } from "./url-query-state";
 import { ConnectorDetailPage } from "./connector-detail";
 import { connectorGeneratesCredentials } from "./connector-credentials";
 
@@ -746,7 +747,7 @@ export function MachinesView({
   token,
   spaceId,
   thisMachine,
-  defaultItem,
+  defaultMachineId,
 }: {
   machines: MachineSummary[];
   loading: boolean;
@@ -766,8 +767,8 @@ export function MachinesView({
     /** Its page, given the Hub's record of it (versions, last seen, load) to show beside the daemon. */
     content: (hubRecord: { facts: React.ReactNode; load: React.ReactNode } | null) => React.ReactNode;
   } | null;
-  /** The item shown when the address names none (this machine, opened from setup). */
-  defaultItem?: string;
+  /** The Machine shown when the address names none (this machine, opened from setup). */
+  defaultMachineId?: string;
 }) {
   // A saved name shows at once; the next Machine refresh carries it too.
   const [renamed, setRenamed] = useState<Record<string, string>>({});
@@ -784,7 +785,7 @@ export function MachinesView({
   const [assigned, setAssigned] = useState<Record<string, boolean>>({});
   const [assignBusy, setAssignBusy] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
-  const [item, select] = useToolItem();
+  const [selectedMachineId, select] = useUrlParameter("machine");
   // Load samples expire after 90 seconds; re-judge freshness between refreshes.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -864,8 +865,8 @@ export function MachinesView({
   const thisRecord = listed.find(isThis);
   // This machine is a row like any other; until the Hub lists it, it leads the list under its own name.
   const ordered = thisMachine && !identityUnavailable && !thisRecord ? [null, ...listed] : listed;
-  const chosenKey = item ?? defaultItem ?? null;
-  const showingThis = Boolean(thisMachine) && (chosenKey === THIS_MACHINE_ITEM
+  const chosenKey = selectedMachineId ?? defaultMachineId ?? null;
+  const showingThis = Boolean(thisMachine) && (chosenKey === THIS_MACHINE_SELECTION
     || Boolean(thisRecord && chosenKey === thisRecord.id));
   const chosen = showingThis ? null : listed.find((machine) => machine.id === chosenKey);
   const shown = showingThis ? null : chosen ?? (thisMachine ? null : listed[0]);
@@ -897,12 +898,12 @@ export function MachinesView({
             machine ? machineStateLine(machine) : thisMachine!.summary,
             machine && !autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
           return (
-            <MachineListRow key={machine?.id ?? THIS_MACHINE_ITEM} machine={machine} name={name}
+            <MachineListRow key={machine?.id ?? THIS_MACHINE_SELECTION} machine={machine} name={name}
               platform={local ? thisMachine!.platform : machinePlatform(machine!)} online={online} hosted={Boolean(host)}
               selected={local ? showingThis : machine!.id === chosen?.id}
-              shownBeside={local ? showThisBeside && !item
+              shownBeside={local ? showThisBeside && !selectedMachineId
                 : !chosen && !showingThis && !showThisBeside && machine!.id === shown?.id}
-              onSelect={() => select(local ? THIS_MACHINE_ITEM : machine!.id)}
+              onSelect={() => select(local ? THIS_MACHINE_SELECTION : machine!.id)}
               now={now}
               subtitle={local ? <>{thisTag}{facts ? <> · {facts}</> : null}</> : facts} />
           );
@@ -926,7 +927,7 @@ export function MachinesView({
     const titleControl = "flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
     detail = (
       <ToolDetail
-        key={machine?.id ?? THIS_MACHINE_ITEM}
+        key={machine?.id ?? THIS_MACHINE_SELECTION}
         onBack={() => select(null)}
         backLabel="Machines"
         context="Machines"
@@ -1045,11 +1046,11 @@ export function MachinesView({
     );
   }
 
-  return <ToolSplit label="Machines" open={Boolean(item)} list={list} detail={detail} />;
+  return <ToolSplit label="Machines" open={Boolean(selectedMachineId)} list={list} detail={detail} />;
 }
 
 /** The address key of the desktop app's own machine in the Machines list. */
-export const THIS_MACHINE_ITEM = "this-machine";
+export const THIS_MACHINE_SELECTION = "this-machine";
 
 const NO_CONNECTIONS: SerializedAppConnectorConnection[] = [];
 const NO_EXECUTIONS: SerializedAppConnectorExecution[] = [];
@@ -1065,8 +1066,8 @@ export function AppsView({
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  // The connector open beside the list is named in the address, like every rail destination's item.
-  const [connectorItem, selectConnector] = useToolItem();
+  // The address is the only source of the selected connector.
+  const [connectorId, selectConnector] = useUrlParameter("connector");
   const setSelectedConnectorId = (id: string) => selectConnector(id, { replace: true });
   const [connectionActionError, setConnectionsError] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<{ tone: "success" | "warning"; message: string } | null>(null);
@@ -1127,7 +1128,7 @@ export function AppsView({
   });
   const connections = connectionsQuery.data ?? NO_CONNECTIONS;
   const connectors = useMemo(() => orderConnectorsForList(catalog, connections), [catalog, connections]);
-  const selectedConnectorId = connectorItem ?? connectors[0]?.id ?? "";
+  const selectedConnectorId = connectorId ?? connectors[0]?.id ?? "";
   const executions = executionsQuery.data ?? NO_EXECUTIONS;
   const connectionsError = connectionActionError ?? userErrorMessage(connectionsQuery.error, "Couldn't load app connections");
   const executionsError = executionActionError ?? userErrorMessage(executionsQuery.error, "Couldn't load app actions");
@@ -1152,18 +1153,17 @@ export function AppsView({
 
   useEffect(() => {
     const url = new URL(window.location.href);
+    url.searchParams.delete("item");
     const outcome = url.searchParams.get("oauth");
     const providerId = url.searchParams.get("connector");
     if (providerId === "gmail" && (url.searchParams.has("gmailWatchState") || url.searchParams.has("gmailWatch"))) {
       // The mailbox view consumes its single-use code after connection data loads.
-      // Select it without claiming that the notification grant has completed.
+      // The connector in the address already opens Gmail; do not claim the grant completed.
       if (url.searchParams.get("gmailWatch") === "failed") {
         setSetupNotice({ tone: "warning", message: "Gmail notification authorization did not finish. Turn notifications on to try again." });
         url.searchParams.delete("gmailWatch");
       }
-      url.searchParams.delete("connector");
       window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-      setSelectedConnectorId("gmail");
       return;
     }
     if (!outcome || !providerId) return;
@@ -1179,10 +1179,8 @@ export function AppsView({
         ? "X authorization did not finish. Use Add X account to try again."
         : `${name} did not finish connecting. Try again, or paste a token under Credentials.` });
     url.searchParams.delete("oauth");
-    url.searchParams.delete("connector");
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    // Selecting writes ?item= to the address; consume callback params first so cleanup keeps that selection.
-    setSelectedConnectorId(providerId);
+    // The connector remains the single selected detail while return flags are consumed.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, on return from the provider
   }, []);
 
@@ -1194,13 +1192,11 @@ export function AppsView({
         tone: "success",
         message: "GitHub is connected. Open Configure to set channel routing, or manage repository access on GitHub.",
       });
-      setSelectedConnectorId("github");
     } else if (status === "updated") {
       setSetupNotice({
         tone: "success",
         message: "GitHub access was updated. Repository selection and App permissions now match GitHub.",
       });
-      setSelectedConnectorId("github");
     } else if (status === "pending") {
       setSetupNotice({
         tone: "warning",
@@ -1213,14 +1209,12 @@ export function AppsView({
         tone: "success",
         message: "GitHub confirmed your accounts. Choose which ones this Space reaches under GitHub accounts.",
       });
-      setSelectedConnectorId("github");
     } else {
       setSetupNotice({
         tone: "warning",
         message: "GitHub did not finish connecting to this space. Try Connect GitHub again.",
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, on return from GitHub
   }, []);
 
   const loadExecutions = useCallback(async () => {
@@ -1395,8 +1389,8 @@ export function AppsView({
               const needsAttention = connection?.status === "error";
               return (
                 <ToolListRow key={connector.id} testId="connector-row"
-                  selected={Boolean(connectorItem) && connector.id === selectedConnector?.id}
-                  shownBeside={!connectorItem && connector.id === selectedConnector?.id}
+                  selected={Boolean(connectorId) && connector.id === selectedConnector?.id}
+                  shownBeside={!connectorId && connector.id === selectedConnector?.id}
                   onSelect={() => selectConnector(connector.id)}
                   leading={<Icon className="size-7" />}
                   title={connector.name}
@@ -1435,7 +1429,7 @@ export function AppsView({
 
   return (
     <div className="app-connectors-view flex min-h-0 min-w-0 flex-1">
-      <ToolSplit label="Apps" open={Boolean(connectorItem)} list={list} detail={detail} />
+      <ToolSplit label="Apps" open={Boolean(connectorId)} list={list} detail={detail} />
     </div>
   );
 }

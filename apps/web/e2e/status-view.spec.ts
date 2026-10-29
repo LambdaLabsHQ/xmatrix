@@ -102,7 +102,7 @@ test.describe("on a phone", () => {
     await expect(page.getByTestId("status-schedule-row").filter({ visible: true }).first()).toContainText("Nightly sync");
 
     await rows.nth(0).tap();
-    await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?item=/u);
+    await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?machine=/u);
     await expect(page.locator(".app-tool-detail:visible").getByRole("heading", { level: 2, name: "busy-box" })).toBeVisible();
   });
 });
@@ -143,6 +143,6 @@ test("on a desktop Status lists agents, machines and schedules folded to one scr
   await expect(page.getByTestId("status-machine-row").filter({ visible: true })).toHaveCount(machines.length);
 
   await list.getByTestId("schedule-row").first().click();
-  await expect(page).toHaveURL(/\?item=soon$/u);
+  await expect(page).toHaveURL(/\?schedule=soon$/u);
   await expect(page.locator(".app-tool-detail:visible").getByRole("heading", { level: 2, name: "Nightly sync" })).toBeVisible();
 });

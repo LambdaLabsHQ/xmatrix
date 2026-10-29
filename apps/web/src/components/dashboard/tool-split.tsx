@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, createContext, useContext, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Children, createContext, useContext, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronLeft, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ListColumnResizeHandle } from "./list-column-resize";
@@ -14,7 +14,7 @@ import {
   LIST_ROW_TITLE_CLASS_NAME,
   LIST_ROW_TITLE_LINE_CLASS_NAME,
 } from "./row-frames";
-import { parseAppLocation, pushBrowserPath, replaceBrowserPath, toolItemSelection } from "./workspace-shell-navigation";
+import { useUrlParameter } from "./url-query-state";
 
 /*
  * Every rail destination reads the way conversations and pages do: the rail,
@@ -23,50 +23,6 @@ import { parseAppLocation, pushBrowserPath, replaceBrowserPath, toolItemSelectio
  * a phone the list is the screen and the item is pushed over it, with a way
  * back. Nothing here is a board or a card: tone is the only surface.
  */
-
-const ITEM_PARAM = "item";
-const ITEM_EVENT = "xmatrix:tool-item";
-
-function subscribe(onChange: () => void) {
-  window.addEventListener("popstate", onChange);
-  window.addEventListener(ITEM_EVENT, onChange);
-  return () => {
-    window.removeEventListener("popstate", onChange);
-    window.removeEventListener(ITEM_EVENT, onChange);
-  };
-}
-
-function readItem(): string | null {
-  return toolItemSelection(window.location.href);
-}
-
-function selectToolItem(next: string | null, options: { replace?: boolean } = {}) {
-  if (next === readItem()) return;
-  const url = parseAppLocation(window.location.href);
-  if (next) url.searchParams.set(ITEM_PARAM, next);
-  else url.searchParams.delete(ITEM_PARAM);
-  const path = `${url.pathname}${url.search}${url.hash}`;
-  // Moving between items replaces; opening one from the bare list is a step Back returns from.
-  if (options.replace || readItem()) replaceBrowserPath(path);
-  else pushBrowserPath(path);
-  window.dispatchEvent(new Event(ITEM_EVENT));
-}
-
-/** Back from an open item to its destination's list. False when none is open. */
-export function closeToolItem(): boolean {
-  if (!readItem()) return false;
-  selectToolItem(null);
-  return true;
-}
-
-/**
- * The item a destination has open, named in its address (`?item=<key>`) so it
- * can be shared and Back closes it. The destination's own path is kept.
- */
-export function useToolItem(): [string | null, (item: string | null, options?: { replace?: boolean }) => void] {
-  const item = useSyncExternalStore(subscribe, readItem, () => null);
-  return [item, selectToolItem];
-}
 
 export function ToolSplit({ list, detail, open, label }: {
   list: ReactNode;
@@ -408,15 +364,16 @@ export type ToolSection = {
  * admin: the list names the sections and the paper shows one. On a desktop
  * the first is shown until another is chosen; on a phone the list comes first.
  */
-export function SectionedToolView({ title, sections, label = title, defaultKey }: {
+export function SectionedToolView({ title, sections, label = title, defaultKey, selectionParameter = "section" }: {
   title: string;
   sections: ToolSection[];
+  selectionParameter?: "section" | "space";
   label?: string;
   /** The section shown on a desktop while the address names none. */
   defaultKey?: string;
 }) {
-  const [item, select] = useToolItem();
-  const chosen = sections.find((section) => section.key === item);
+  const [sectionKey, select] = useUrlParameter(selectionParameter);
+  const chosen = sections.find((section) => section.key === sectionKey);
   const shown = chosen ?? sections.find((section) => section.key === defaultKey) ?? sections[0];
   const createSection = sections.find((section) => section.create);
   return (

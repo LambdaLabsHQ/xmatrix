@@ -95,7 +95,7 @@ On a phone the screen is named by its URL and has one fixed parent; Back goes to
 | A conversation | its Space's channel list |
 | A conversation beside a page | the page |
 | A page | the page list |
-| A destination's open item (`?item=`) | that destination's list |
+| A destination's domain selection (`?connector=`, `?agent=`, `?machine=`, `?schedule=`, `?section=` or `?space=`) | that destination's list |
 | A More child | More |
 | A dock tab's own screen | nothing (Back leaves the app) |
 

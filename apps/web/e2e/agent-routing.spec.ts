@@ -133,7 +133,7 @@ for (const mobile of [false, true]) {
       await expect(page.getByRole("option", { name: /^auto\s*Picks an Agent by what each is good at$/u })).toBeVisible();
       await expect(page.getByRole("option").filter({ hasText: /^codex$/u })).toBeVisible();
       await page.getByRole("button", { name: "Say what codex is good at" }).click();
-      await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
+      await expect(page).toHaveURL(/\/agents\?agent=agent%3Acodex&edit=profile$/u);
       const text = page.getByLabel("What codex is good at");
       await expect(text).toHaveValue("");
       await expect(text).toBeFocused();
@@ -186,7 +186,7 @@ test.describe("what an agent is good at, in Chinese", () => {
     await draft.fill("@");
     await expect(page.getByRole("option", { name: /^auto\s*按各 Agent 适合做什么自动分配$/u })).toBeVisible();
     await page.getByRole("button", { name: "写下 codex 适合做什么" }).click();
-    await expect(page).toHaveURL(/\/agents\?item=agent%3Acodex&edit=profile$/u);
+    await expect(page).toHaveURL(/\/agents\?agent=agent%3Acodex&edit=profile$/u);
     const text = page.getByLabel("codex 适合做什么");
     await expect(text).toHaveValue("");
     await expect(text).toBeFocused();

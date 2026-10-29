@@ -2,6 +2,13 @@
 
 App connectors route app context into xMatrix channels through typed provider manifests, space-level connection records, and Hub-side executors. Connection records may store provider ids, status, scopes, enabled channel ids, configured agent ids, secret reference names, and bounded metadata only. They must not store provider tokens, webhook secrets, installation access tokens, or OAuth refresh tokens.
 
+Apps opens a provider with `/app/<space>/apps?connector=<provider>`, for example
+`?connector=stripe`. The same parameter owns selection from a shared link,
+the list and OAuth returns; Back to the list removes it. Apps no longer reads
+or writes `item`, and removes it when normalizing an old address. Other tool
+destinations likewise name their domain object (`agent`, `machine`, `schedule`,
+`section` or `space`); the anonymous selection contract is retired.
+
 ## Current Providers
 
 - Linear provides task search/editing, assignments, states, labels, projects,

@@ -77,4 +77,6 @@ test("returning from GitHub lands on Apps with the outcome and the grant, past t
   await expect.poll(async () => (await fixtureRequests(page, "github-installations"))
     .some((url) => url.endsWith("?grant=grant-2"))).toBe(true);
   expect(page.url()).not.toContain("grant");
+  expect(new URL(page.url()).searchParams.get("connector")).toBe("github");
+  expect(new URL(page.url()).searchParams.has("item")).toBe(false);
 });
