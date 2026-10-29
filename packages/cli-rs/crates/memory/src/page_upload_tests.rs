@@ -3,6 +3,9 @@ use std::net::TcpListener;
 
 use serde_json::{Value, json};
 
+#[path = "../../core/tests/support/http_fixture.rs"]
+mod http_fixture;
+
 // The CLI upload contract is separate from the Hub's ACL owner test: the CLI
 // must send the real bytes, bind the Page ref, and print usable Markdown.
 #[tokio::test]
@@ -31,14 +34,7 @@ async fn local_upload_sends_bytes_and_returns_markdown_only_after_binding() {
                     break;
                 }
             }
-            let length = headers
-                .lines()
-                .find_map(|line| {
-                    line.to_ascii_lowercase()
-                        .strip_prefix("content-length:")
-                        .map(|value| value.trim().parse::<usize>().unwrap())
-                })
-                .unwrap_or(0);
+            let length = http_fixture::content_length(&headers).unwrap_or(0);
             let mut bytes = vec![0; length];
             input.read_exact(&mut bytes).unwrap();
             assert!(
