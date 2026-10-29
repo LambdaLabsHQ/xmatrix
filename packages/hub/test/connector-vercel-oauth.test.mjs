@@ -136,6 +136,7 @@ test("the callback writes credentials only after verified state, provider scope 
   let validState = true;
   let signedIn = "admin";
   let checkPasses = true;
+  let stripeConnects = 0;
   const effects = [];
   const dependencies = {
     "./github-connect-authorization": githubAuthorization,
@@ -164,6 +165,10 @@ test("the callback writes credentials only after verified state, provider scope 
     "./connectors/vercel-api": { vercelCompletionUrl },
     "./connectors/gmail-mailboxes": { addConnectedMailbox: async () => assert.fail("only a Gmail Connect adds a mailbox") },
     "./connectors/x-accounts": { connectXAccount: async () => assert.fail("only an X Connect adds an X account") },
+    "./connectors/stripe-accounts": { connectStripeAccount: async () => {
+      stripeConnects += 1;
+      assert.fail("Vercel Connect cannot add a Stripe account");
+    } },
     "./connectors/cloudflare-api": { connectCloudflareLogin: async () => assert.fail("only a Cloudflare Connect adds a login") },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
     "./index-shared": { connectorHubOrigin: () => "https://hub.test", requireAuth: async () => ({}),
@@ -205,4 +210,5 @@ test("the callback writes credentials only after verified state, provider scope 
   signedIn = "admin";
   checkPasses = false;
   assert.match((await invoke({})).url, /oauth=failed/);
+  assert.equal(stripeConnects, 0, "no Vercel outcome may call Stripe Connect, even if the callback catches the error");
 });
