@@ -51,9 +51,11 @@ export async function verifyStripeAccounts(env: Env, spaceId: string): Promise<b
   const repository = connectorStripeAccountRepository(env);
   if (!await repository.hasAccounts(spaceId)) return false;
   let after: string | undefined, lastError: unknown;
+  const deadline = Date.now() + 30_000;
   do {
     const ids = await repository.activeAccounts(spaceId, after);
     for (const id of ids) {
+      if (Date.now() >= deadline) throw new ProviderRequestError(503, "Stripe account checks timed out; try Check again");
       let grant: StripeAccountGrant | undefined;
       try {
         grant = await stripeAccountCredentials(env, spaceId, id);

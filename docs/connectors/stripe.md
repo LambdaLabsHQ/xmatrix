@@ -15,6 +15,8 @@ The five permissions remain `event_read`, `invoice_read`, `payment_intent_read`,
 read one event through `event_read`; an empty event list passes and a refusal
 fails. At least one working retained grant keeps a multi-account connection
 usable, while an account whose credential was refused asks for reconnection.
+One Check has a time budget; a timeout asks for another Check rather than
+scanning an arbitrarily large account list in one request.
 
 All retained accounts share the Space connection's subscriptions, such as
 `@stripe:subscribe:invoice events`. Messages and Automation summaries identify
