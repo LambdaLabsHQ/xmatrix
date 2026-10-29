@@ -891,6 +891,34 @@ export function resolveCurrentSpaceId({
   );
 }
 
+/** The address of the conversation an account last had open on this device:
+ * ids only, so a launch on the bare app can open it again at once. */
+const LAST_CONVERSATION_STORAGE_PREFIX = "xmatrix:last-conversation:";
+const CONVERSATION_ADDRESS = /^\/app\/[^/?#]+\/channels\/[^/?#]+$/u;
+
+export function conversationAddress(location: string): string | null {
+  const path = location.split(/[?#]/u)[0];
+  return CONVERSATION_ADDRESS.test(path) ? path : null;
+}
+
+export function readLastConversation(userId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return conversationAddress(window.localStorage.getItem(`${LAST_CONVERSATION_STORAGE_PREFIX}${userId}`) ?? "");
+  } catch {
+    return null;
+  }
+}
+
+export function writeLastConversation(userId: string, address: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(`${LAST_CONVERSATION_STORAGE_PREFIX}${userId}`, address);
+  } catch {
+    // Without it the next launch opens the list, as before.
+  }
+}
+
 export function writeWorkingSpaceCache(userId: string, spaceId: string) {
   if (typeof window === "undefined") return;
   try {

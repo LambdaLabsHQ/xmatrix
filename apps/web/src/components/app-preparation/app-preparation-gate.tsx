@@ -10,6 +10,7 @@ import {
 import { xmatrixHubOrigin } from "@/lib/query/api-client";
 import { StartupShell } from "@/components/dashboard/workspace-channel-sidebar";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
+import { markStartup } from "@/lib/startup-timing";
 
 const RETRY_DELAY_MS = 2000;
 
@@ -49,6 +50,10 @@ export function AppPreparationGate(props: { children: React.ReactNode }) {
 
   // The server cannot see a native shell; its frame lands right after hydration.
   const frame = useSyncExternalStore(noSubscription, nativeFrame, browserFrame);
+
+  useEffect(() => {
+    if (ready) markStartup("shell");
+  }, [ready]);
 
   if (ready) return props.children;
   // The app's own first frame, waiting on the same screen it will open on.

@@ -41,6 +41,13 @@ async function openAsMacDesktop(page: Page, { fullScreen = false } = {}) {
   }, fullScreen);
   await openGeneralChannelWithHistory(page, E2E_CHANNEL, channelHistoryFixture(6, "frame"));
   await expect(page.locator(".xmatrix-app.xmatrix-desktop-macos .app-workspace-panel")).toBeVisible();
+  await expectConversationOpen(page);
+}
+
+/* The startup frame draws the same rail and paper until the shell replaces it,
+   so the frame is measured once the conversation is open. */
+async function expectConversationOpen(page: Page) {
+  await expect(page.locator("main").getByText("Message 6.", { exact: false })).toBeVisible();
 }
 
 async function box(page: Page, selector: string) {
@@ -92,6 +99,7 @@ test("in a browser the rail and paper run to the window's edges under one band",
   await page.setViewportSize(VIEWPORT);
   await openGeneralChannelWithHistory(page, E2E_CHANNEL, channelHistoryFixture(6, "frame"));
   await expect(page.locator(".app-workspace-panel")).toBeVisible();
+  await expectConversationOpen(page);
 
   await expectFlushToWindow(page);
   expect((await box(page, ".app-rail")).width).toBe(64);
@@ -204,6 +212,7 @@ test("on iPad the materials run under the status bar and home indicator while co
   }, inset);
   await openGeneralChannelWithHistory(page, E2E_CHANNEL, channelHistoryFixture(6, "frame"));
   await expect(page.locator(".app-workspace-panel")).toBeVisible();
+  await expectConversationOpen(page);
 
   const rail = await box(page, ".app-rail");
   const panel = await box(page, ".app-workspace-panel");

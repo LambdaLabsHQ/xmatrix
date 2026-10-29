@@ -2,7 +2,7 @@ import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
 import {
   E2E_CHANNEL, E2E_SPACE, E2E_USER_SENDER, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT,
-  installWorkspaceStubs, fixtureRule, fixtureJson, fixtureRequests, releaseFixture, channelHistoryFixture,
+  installWorkspaceStubs, fixtureRule, fixtureJson, fixtureRequests, fixtureRequestBodies, releaseFixture, channelHistoryFixture,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -312,4 +312,33 @@ test("the open app says it is offline while it is, and stops saying so when the 
   await expect(status).toContainText("You’re offline");
   await context.setOffline(false);
   await expect(status).toHaveCount(0);
+});
+
+test("an app start reports how long each stage took, once", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await fixtureJson(page, "startup-timing", "**/api/xmatrix/observable/startup-timing", null,
+    { method: "POST", status: 204 });
+  await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+  await expect.poll(async () => (await fixtureRequests(page, "startup-timing")).length, { timeout: 15_000 }).toBe(1);
+  const [report] = await fixtureRequestBodies(page, "startup-timing");
+  expect(report).toMatchObject({ device: "desktop_web", cache: "cold" });
+  for (const stage of ["shell", "signedIn", "list"]) expect(typeof report[stage]).toBe("number");
+  expect(report.shell as number).toBeLessThanOrEqual(report.list as number);
+});
+
+test("launching the bare app reopens the conversation last open on this device, or its list if it cannot", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await page.goto("/app/personal-sspaceperso/channels/general--channel-general", { waitUntil: "domcontentloaded" });
+  await page.locator(".xmatrix-app-shell:not([aria-busy])").waitFor();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("xmatrix:last-conversation:e2e-user")))
+    .toBe("/app/personal-sspaceperso/channels/general--channel-general");
+
+  await page.goto("/app", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/app/personal-sspaceperso/channels/general--channel-general");
+
+  // A conversation this account can no longer read leaves the launch on its list.
+  await fixtureJson(page, "refused-history", "**/channels/channel-general/history**",
+    { error: "Not a member", code: "forbidden" }, { status: 403 });
+  await page.goto("/app", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/app/personal-sspaceperso/channels");
 });

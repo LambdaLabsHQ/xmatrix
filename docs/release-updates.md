@@ -11,6 +11,39 @@ starts are held and sent. Measured in [Channel startup](performance/channel-star
 Beta Web only, no API, schema or native change; recovery is a CI-validated beta
 Web release reverting the change.
 
+## Unreleased: Opening the app no longer waits for a page to be rendered
+
+`/app`, where every desktop, iOS and browser launch starts, was rendered by the
+Web Worker on each request; on a fresh connection a cold Worker took 0.7–2.1 s
+before the first byte. The page is the same for everyone (the startup frame;
+sign-in and the signed-out redirect happen in the browser), so it is now
+prerendered once per build and the Worker answers with that copy before any
+route code loads, as it already did for other prerendered pages such as sign-in.
+The copies ship in the same deploy as the scripts they name, and every cache is
+told to revalidate them (`public, max-age=0, must-revalidate`), so a deploy never
+serves a page naming removed scripts. Deep links under `/app/<space>/…` are still
+rendered per request. Beta Web only, no API, schema or native change; recovery is
+a CI-validated beta Web release reverting the change.
+
+## Unreleased: Launching the app reopens the last conversation
+
+Opening the bare `/app` now goes straight to the conversation this account
+last had open on this device (its address, ids only, kept per user in
+localStorage), as soon as the account is known, so its history read starts
+with the first reads. A notification's `/app?channel=` and `?view=` launches
+keep naming their own screen. When that conversation can no longer be read,
+the launch settles on its Space's list. Web only.
+
+## Unreleased: Each app start reports how long it took for the person
+
+Once per page load the app sends when it first reached its shell, signed in,
+its Channel list and its first messages (ms since navigation; absent when not
+reached), its device, and whether it painted this device's cached list
+(`warm`/`cold`). The Hub writes one diagnostics point per start under the
+person's keyed hash (`startup`/`startup_timing`, doubles 3–6), with no Space,
+Channel or content. Nothing waits on it. Hub and Web; an older Hub answers 404
+and the start simply goes uncounted.
+
 ## Unreleased: The Apps list groups by connection state and ticks what works in green
 
 The Apps list put category headings (Code & CI, Chat…) beside Connected, mixing

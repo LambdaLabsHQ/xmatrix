@@ -181,6 +181,9 @@ import {
   readChannelMentionClearedAt,
   readChannelReadCounts,
   readWorkingSpaceCache,
+  conversationAddress,
+  readLastConversation,
+  writeLastConversation,
   resolveCurrentSpaceId,
   spacesAuthorityReady,
   channelsAfterAgentInstanceOffline,
@@ -2808,6 +2811,38 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     () => spaces.find((space) => space.id === currentSpaceId) || null,
     [currentSpaceId, spaces]
   );
+  /* A launch on the bare app reopens the conversation this account last had
+     open on this device, as soon as the account is known: its address names
+     the conversation, so its history read starts with the first reads instead
+     of after a click. If that conversation can no longer be read, the launch
+     settles on its list instead. */
+  const lastConversationCheckedRef = useRef(false);
+  const reopenedConversationRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!authenticatedUserId || lastConversationCheckedRef.current) return;
+    lastConversationCheckedRef.current = true;
+    // Only the bare app: a notification's `/app?channel=` or a `?view=` names its own screen.
+    if (currentBrowserLocation(browserPath) !== "/app") return;
+    const address = readLastConversation(authenticatedUserId);
+    if (!address) return;
+    reopenedConversationRef.current = address;
+    replaceBrowserPath(address);
+    setBrowserPath(address);
+  }, [authenticatedUserId, browserPath]);
+  useEffect(() => {
+    const address = conversationAddress(browserPath);
+    if (authenticatedUserId && address) writeLastConversation(authenticatedUserId, address);
+  }, [authenticatedUserId, browserPath]);
+  useEffect(() => {
+    const reopened = reopenedConversationRef.current;
+    if (!reopened || !historyError || browserPath !== reopened) return;
+    reopenedConversationRef.current = null;
+    const list = reopened.slice(0, reopened.lastIndexOf("/"));
+    setHistoryError(null);
+    replaceBrowserPath(list);
+    setBrowserPath(list);
+  }, [browserPath, historyError]);
+
   /* On a bare entry (no space in the URL), land in the working workspace
      instead of spaces[0]. Explicit deep links (route already carries a space)
      are respected. Wait for the cloud read unless the local mirror already

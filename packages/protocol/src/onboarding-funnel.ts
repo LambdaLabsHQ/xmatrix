@@ -27,7 +27,8 @@ export type OnboardingFunnelEvent = { step: OnboardingFunnelStep; surface: Onboa
   /** Which first task, for `starter_chosen` only. */
   starter?: OnboardingStarter };
 
-const member = <T extends string>(values: readonly T[], value: unknown): value is T =>
+/** Whether a reported value is one of a fixed list. */
+export const isOneOf = <T extends string>(values: readonly T[], value: unknown): value is T =>
   (values as readonly unknown[]).includes(value);
 
 /** One step as a client reports it; anything else is not counted. */
@@ -35,10 +36,10 @@ export function parseOnboardingFunnelEvent(value: unknown): OnboardingFunnelEven
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const event = value as Record<string, unknown>;
   if (Object.keys(event).some(key => !["step", "surface", "device", "starter"].includes(key)) ||
-      !member(ONBOARDING_FUNNEL_STEPS, event.step) || !member(ONBOARDING_SURFACES, event.surface) ||
-      !member(ONBOARDING_DEVICES, event.device)) return undefined;
+      !isOneOf(ONBOARDING_FUNNEL_STEPS, event.step) || !isOneOf(ONBOARDING_SURFACES, event.surface) ||
+      !isOneOf(ONBOARDING_DEVICES, event.device)) return undefined;
   if ((event.step === "starter_chosen") !== (event.starter !== undefined) ||
-      (event.starter !== undefined && !member(ONBOARDING_STARTERS, event.starter))) return undefined;
+      (event.starter !== undefined && !isOneOf(ONBOARDING_STARTERS, event.starter))) return undefined;
   return { step: event.step, surface: event.surface, device: event.device,
     ...(event.starter !== undefined ? { starter: event.starter as OnboardingStarter } : {}) };
 }

@@ -26,3 +26,11 @@ test("a failed daemon start carries the stage, App version, exit code and the CL
     "user-1", "key");
   assert.equal(noCode.doubles[2], -1);
 });
+
+test("an app start carries the device, whether it painted from this device's cache, and each stage it reached", async () => {
+  const { startupTimingDataPoint } = await import("../src/index-routes-onboarding-funnel.ts");
+  const point = await startupTimingDataPoint({ device: "phone", cache: "warm", shell: 180, signedIn: 640, list: 900 }, "user-1", "key");
+  assert.match(point.indexes[0], /^[0-9a-f]{16}$/u);
+  assert.deepEqual(point.blobs.slice(0, 4), ["startup", "phone", "startup_timing", "warm"]);
+  assert.deepEqual(point.doubles.slice(2), [180, 640, 900, -1]);
+});

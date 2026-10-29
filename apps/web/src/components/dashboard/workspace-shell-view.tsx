@@ -32,6 +32,7 @@ import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
 import { closeViewSelection } from "./url-query-state";
 import { ConnectionStatus } from "./connection-status";
+import { markStartup, reportStartupTiming, STARTUP_REPORT_SETTLE_MS } from "@/lib/startup-timing";
 import { Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
@@ -1004,6 +1005,29 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const railUpdateControl = useMemo(() => desktopBridge ? (
     <DesktopUpdateRailButton status={desktopUpdateStatus} onInstall={installUpdateFromRail} />
   ) : undefined, [desktopBridge, desktopUpdateStatus, installUpdateFromRail]);
+
+  // How long this start took for the person (lib/startup-timing.ts): each
+  // stage the first time it is reached, sent once the list has settled.
+  const startedWarmRef = useRef(false);
+  useEffect(() => {
+    if (cachedCatalogChannels.length > 0) startedWarmRef.current = true;
+  }, [cachedCatalogChannels.length]);
+  useEffect(() => {
+    if (user) markStartup("signedIn");
+  }, [user]);
+  const listReached = channels.length > 0;
+  useEffect(() => {
+    if (listReached) markStartup("list");
+  }, [listReached]);
+  useEffect(() => {
+    if (timeline.length > 0) markStartup("messages");
+  }, [timeline.length]);
+  useEffect(() => {
+    if (!token || !listReached) return;
+    const timer = window.setTimeout(
+      () => reportStartupTiming(token, startedWarmRef.current ? "warm" : "cold"), STARTUP_REPORT_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [token, listReached]);
 
   if (loading || !user) {
     return (

@@ -262,6 +262,37 @@ measurement of cold network fetches. Desktop/mobile failure recovery and catalog
 invalidation are covered separately, including changes during an in-flight
 prefetch and interactive reads overtaking queued speculation.
 
+## Prerendered app page
+
+`/app` (rewritten to `/workspace` by `middleware.ts`) is prerendered (○ in
+`next build`): no server component on the route reads cookies, headers or
+search params, the gate and shell are client components, and the signed-out
+redirect runs in the browser, so the page carries no per-request data. OpenNext
+reads it from a read-only cache in the Worker's static assets
+(`open-next.config.ts`: static-assets incremental cache with cache
+interception), keyed by build id under `cdn-cgi/_next_cache/` and copied there
+by `apps/web/scripts/populate-static-page-cache.mjs`, which fails the build if
+`/workspace` was not prerendered. Interception answers the HTML and its RSC
+payload before any route module loads; middleware, next.config headers and the
+rewrite still apply. The copies are uploaded in the same `wrangler deploy` as
+the chunks they name. `worker.mjs` replaces OpenNext's
+`s-maxage=31536000` on every prerendered response with
+`public, max-age=0, must-revalidate`, so no shared or browser cache keeps a page
+past a deploy; the Cloudflare zone does not cache Worker responses, so the year
+bought nothing and only risked a proxy serving removed chunks. The Hub preconnect
+hint stays as `<link rel="preconnect">` at the top of `<head>`; the prerendered
+response no longer repeats it as a `Link` header. `/app/<space>/…` deep links
+stay per-request (dynamic segments; prerendering them would need a writable
+per-path cache and would still miss on every new link).
+
+Local `wrangler dev` of the production OpenNext build, fresh Worker per sample,
+first-request TTFB: `/app` 1.37–1.76 s before, 0.15–0.28 s after (warm 0.02–0.06
+s). The isolate's own start is not removed: on the deployed beta a cold Worker
+answering a static file measured 0.5–0.7 s, which remains the floor for a cold
+`/app`. Serving the HTML without the Worker (assets-first routing) is not used:
+it matches paths only, so the router's RSC requests for `/app` would receive the
+HTML and fall back to full page loads.
+
 ## Native repeat-start asset caching
 
 The Web Worker applies `public, max-age=31536000, immutable` only to successful
