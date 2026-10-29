@@ -20,6 +20,7 @@ import {
   type IpcMainInvokeEvent,
   type MessageBoxOptions,
   type MenuItemConstructorOptions,
+  net,
   shell,
 } from "electron";
 import { autoUpdater } from "electron-updater";
@@ -74,6 +75,7 @@ import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-e
 import { desktopUpdateFeedUrl, desktopWebUrl, isDesktopWebOrigin } from "./release-channel";
 import { daemonFailureNeedsLogin, redactDaemonDetail } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
+import { isVisibleLoadFailure, loadFailurePage } from "./load-failure";
 import { planWindowOpen } from "./window-navigation";
 import { signInServiceId } from "./sign-in-services";
 import { signInWithWindow } from "./sign-in-window";
@@ -338,6 +340,9 @@ function newWindowPosition(openedFrom: BrowserWindow | null) {
   return cascadeBounds(anchor, display.workArea, size);
 }
 
+/** Longest a new window stays hidden waiting for its first paint. */
+const WINDOW_SHOW_DEADLINE_MS = 1_500;
+
 function createWindow(targetUrl?: string): BrowserWindow {
   applyDesktopNativeTheme();
   const openedFrom = primaryWindow();
@@ -365,7 +370,26 @@ function createWindow(targetUrl?: string): BrowserWindow {
   });
   appWindows.push(window);
 
-  window.loadURL(targetUrl || getStartUrl());
+  const startUrl = targetUrl || getStartUrl();
+  // A failed load is not handled by the page, which never arrived: the window
+  // shows what happened in the app's paper and tries again on its own.
+  window.loadURL(startUrl).catch(() => undefined);
+  window.webContents.on("did-fail-load", (_event, errorCode, _description, validatedUrl, isMainFrame) => {
+    if (!isVisibleLoadFailure(errorCode, isMainFrame, validatedUrl)) return;
+    const failedUrl = validatedUrl || startUrl;
+    void window.loadURL(loadFailurePage(failedUrl, !net.isOnline(), DEFAULT_SHELL_BACKGROUND_COLOR))
+      .catch(() => undefined);
+    if (!window.isVisible()) window.show();
+  });
+  window.webContents.on("render-process-gone", (_event, details) => {
+    if (details.reason !== "clean-exit" && !window.isDestroyed()) window.webContents.reload();
+  });
+  // The page paints its own startup frame quickly; a slow server must not
+  // leave the app looking unlaunched.
+  const showAnyway = setTimeout(() => {
+    if (!window.isDestroyed() && !window.isVisible()) window.show();
+  }, WINDOW_SHOW_DEADLINE_MS);
+  window.once("show", () => clearTimeout(showAnyway));
 
   window.webContents.on("did-finish-load", () => {
     sendUpdateStatus();
