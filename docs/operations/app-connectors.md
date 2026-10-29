@@ -9,6 +9,9 @@ or writes `item`, and removes it when normalizing an old address. Other tool
 destinations likewise name their domain object (`agent`, `machine`, `schedule`,
 `section` or `space`); the anonymous selection contract is retired.
 
+Stripe's multi-account consent, storage, revocation, migration and recovery
+contract is documented in [Stripe accounts](../connectors/stripe.md).
+
 ## Current Providers
 
 - Linear provides task search/editing, assignments, states, labels, projects,

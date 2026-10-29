@@ -6,6 +6,7 @@ async function setup(page: Page) {
   await fixtureJson(page, "providers", /\/api\/xmatrix\/connectors\/oauth\/providers\?/, { providers: ["stripe", "notion"] });
   await fixtureJson(page, "connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections: [] });
   await fixtureJson(page, "executions", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });
+  await fixtureJson(page, "stripe-accounts", /\/app-connections\/stripe\/accounts$/, { accounts: [], after: null });
 }
 
 const detail = (page: Page) => page.locator(".app-tool-detail-scroll:visible");

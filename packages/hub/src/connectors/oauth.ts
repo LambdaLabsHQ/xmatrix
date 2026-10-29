@@ -123,10 +123,10 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
   const { oauth } = client.manifest;
   const claims = { providerId: client.manifest.id, spaceId: input.spaceId, userId: input.userId,
     nonce: crypto.randomUUID(), expiresAt: (input.now ?? Date.now()) + STATE_TTL_MS,
-    ...(oauth.pkce || client.manifest.id === "discord" ? { clientId: client.clientId, redirectUri: input.redirectUri } : {}),
-    ...(["discord", "x"].includes(client.manifest.id) ? { connectionSnapshot: input.connectionSnapshot } : {}),
+    ...(oauth.pkce || ["discord", "stripe"].includes(client.manifest.id) ? { clientId: client.clientId, redirectUri: input.redirectUri } : {}),
+    ...(["discord", "x", "stripe"].includes(client.manifest.id) ? { connectionSnapshot: input.connectionSnapshot } : {}),
     ...(client.manifest.id === "x" && input.accountId ? { accountId: input.accountId } : {}),
-    ...(client.manifest.id === "discord" ? { authorizationStartedAt: input.now ?? Date.now() } : {}) };
+    ...(["discord", "stripe"].includes(client.manifest.id) ? { authorizationStartedAt: input.now ?? Date.now() } : {}) };
   const state = await signGitHubAppState(claims, client.clientSecret);
   if (oauth.flow === "composio") {
     const callback = new URL(input.redirectUri);
@@ -162,7 +162,7 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
 
 /** The state's claims, verified with the provider's own client secret; undefined when forged or expired. */
 export async function verifyOAuthState(env: Env, state: string):
-  Promise<{ client: OAuthClient; spaceId: string; userId: string; connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } } | undefined> {
+  Promise<{ client: OAuthClient; spaceId: string; userId: string; connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string }; authorizationStartedAt?: number } | undefined> {
   if (!state || state.length > 4_096) return undefined;
   let providerId = "";
   try {
@@ -174,14 +174,16 @@ export async function verifyOAuthState(env: Env, state: string):
   if (!client) return undefined;
   const claims = await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined);
   if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" ||
-      typeof claims.userId !== "string" || ((client.manifest.oauth.pkce || client.manifest.id === "discord") && !validPkceClaims(client, claims))) return undefined;
+      typeof claims.userId !== "string" || ((client.manifest.oauth.pkce || ["discord", "stripe"].includes(client.manifest.id)) && !validPkceClaims(client, claims))) return undefined;
   const snapshot = claims.connectionSnapshot as { connectionVersion: number; credentialVersion: number; connectionGeneration: string } | undefined;
-  if (["discord", "x"].includes(client.manifest.id) && (!snapshot || !Number.isSafeInteger(snapshot.connectionVersion) || snapshot.connectionVersion < 1 ||
+  if (["discord", "x", "stripe"].includes(client.manifest.id) && (!snapshot || !Number.isSafeInteger(snapshot.connectionVersion) || snapshot.connectionVersion < 1 ||
       !Number.isSafeInteger(snapshot.credentialVersion) || snapshot.credentialVersion < 0 ||
       typeof snapshot.connectionGeneration !== "string" || !snapshot.connectionGeneration || snapshot.connectionGeneration.length > 1024)) return undefined;
   if (client.manifest.id === "x" && claims.accountId !== undefined &&
       (typeof claims.accountId !== "string" || !/^[1-9][0-9]{0,19}$/u.test(claims.accountId))) return undefined;
-  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(["discord", "x"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}) };
+  if (client.manifest.id === "stripe" && (!Number.isSafeInteger(claims.authorizationStartedAt) || Number(claims.authorizationStartedAt) > Date.now() ||
+      Number(claims.authorizationStartedAt) < Date.now() - STATE_TTL_MS)) return undefined;
+  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(["discord", "x", "stripe"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}), ...(client.manifest.id === "stripe" ? { authorizationStartedAt: Number(claims.authorizationStartedAt) } : {}) };
 }
 
 async function tokenRequest(client: OAuthClient, grant: Record<string, string>, meter?: UpstreamMeter): Promise<Record<string, unknown>> {

@@ -20,6 +20,7 @@ import { ControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
 import { getAppConnection, upsertAppConnection } from "./apps";
 import type { Env } from "./types";
 import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
+import { connectStripeAccount } from "./connectors/stripe-accounts";
 import { connectXAccount } from "./connectors/x-accounts";
 import { connectCloudflareLogin } from "./connectors/cloudflare-api";
 import { upstreamMeter } from "./usage-cost-metering";
@@ -71,6 +72,12 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
       billingKey: `oauth:${await sha256Hex(state)}`, action: "connect" }).meter
       : upstreamMeter(env, { spaceId: verified.spaceId, connector: providerId, action: "connect" });
     const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state, meter);
+    if (providerId === "stripe") {
+      if (!verified.connectionSnapshot || verified.authorizationStartedAt === undefined) throw new Error("Restart Stripe Connect");
+      await connectStripeAccount(env, { spaceId: verified.spaceId, actorUserId: verified.userId, fields: grant.fields,
+        appClientId: verified.client.clientId, authorizedAt: verified.authorizationStartedAt, snapshot: verified.connectionSnapshot });
+      return appsRedirect(env, verified.spaceId, providerId, "connected");
+    }
     if (providerId === "x") {
       if (!verified.connectionSnapshot) throw new Error("Restart X Connect");
       await connectXAccount(env, { spaceId: verified.spaceId, actorUserId: verified.userId,
@@ -165,8 +172,8 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
         creditsWaived: c.req.param("spaceId") === platformAdminSpaceId(c.env) });
     }
     let connectionSnapshot;
-    if (["discord", "x"].includes(client.manifest.id)) {
-      const providerId = client.manifest.id as "discord" | "x";
+    if (["discord", "x", "stripe"].includes(client.manifest.id)) {
+      const providerId = client.manifest.id as "discord" | "x" | "stripe";
       const existing = await getAppConnection(c.env, { connectionId: `${spaceId}:${providerId}`, actorUserId: user.id })
         .catch((error: unknown) => { if (error instanceof ControlError && error.status === 404) return null; throw error; });
       if (!existing) {

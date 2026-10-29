@@ -333,3 +333,6 @@ export { databaseFailureEvidence, parseDatabaseFailureEvidence } from "./databas
 
 export { PostgresMessageAskRepository, readMessageAsks } from "./message-asks.js";
 export { PostgresQuotaRetryRepository, assertQuotaRetryAdmission, type QuotaRetryWork } from "./agent-quota-retry.js";
+
+export { PostgresStripeAccountRepository, type StripeAccountGrant,
+  type StripeAccountSnapshot, type StripeRefreshClaim } from "./stripe-account-control.js";

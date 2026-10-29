@@ -73,17 +73,17 @@ export function validateStripeGrant(payload: Record<string, unknown>, expectedAc
   return account;
 }
 
-/** Check reads the connected account and requires it to be the granted one. A pasted webhook secret has no token to check. */
+/** Check uses the app's existing event_read permission; account profile access requires a separate permission. */
 export async function verifyStripe(credentials: Readonly<Record<string, string>>): Promise<void> {
   if (!credentials.oauthToken) return;
   if (!STRIPE_ACCOUNT_ID.test(credentials.stripeUserId ?? "")) {
     throw new ProviderRequestError(401, "Stripe OAuth requires a complete expiring grant; reconnect");
   }
-  const account = await providerJson("https://api.stripe.com/v1/account", {
+  const events = await providerJson("https://api.stripe.com/v1/events?limit=1", {
     headers: { authorization: `Basic ${btoa(`${credentials.oauthToken}:`)}` },
     describeError: () => "Stripe refused the connected account",
   });
-  if (account.id !== credentials.stripeUserId) {
-    throw new ProviderRequestError(502, "Stripe account does not match this connection");
+  if (events.object !== "list" || !Array.isArray(events.data)) {
+    throw new ProviderRequestError(502, "Stripe did not confirm event access for this account");
   }
 }

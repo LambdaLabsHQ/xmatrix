@@ -1,5 +1,22 @@
 # Release Updates
 
+## Unreleased: A Space keeps every Stripe account it connects
+
+Connecting another merchant previously replaced the Space's single Stripe
+grant. Each account now has an independently encrypted grant, refresh lease
+and event binding, shown under Stripe accounts with Add and Remove actions.
+Stripe's own picker still authorizes one merchant at a time. Uninstalling or
+removing one merchant leaves the others connected. Check reads events using
+the existing `event_read` permission, including an empty list, and fails on
+a refusal; it no longer requests account profiles with an ungranted permission.
+
+Hub and beta Web, with additive migration 0231 and no client protocol change.
+The new Hub adopts each old verified grant atomically under its parent lock;
+pending copies cannot route events. Retained grants use the new account store,
+so Hub recovery is a CI-validated forward fix that keeps that store. Do not
+roll the Hub back to the old single-grant reader after adoption. Web recovery
+can revert its UI independently. See [Stripe accounts](connectors/stripe.md).
+
 ## Unreleased: Automatic harness updates keep trying until installed
 
 With the Machines switch on, harnesses still sat weeks behind. The Hub stopped

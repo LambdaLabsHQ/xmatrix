@@ -20,12 +20,15 @@ function sign(raw, key = signing, at = Math.floor(Date.now() / 1000)) {
 function fixture() {
   const queries = [], appends = [], retirements = [];
   const apps = {
-    async oauthEventConnections(input) { queries.push(input); return [{ connectionId: "space-a:stripe", spaceId: "space-a", credentialVersion: 2 }]; },
     async connectorEventRoutes() { return [{ channelId: "space-a:ch", authorityRootUserId: "owner", features: ["events"] }]; },
-    async retireStripeAccount(input) { retirements.push(input); return 1; },
+  };
+  const accounts = {
+    async eventConnections(input) { queries.push(input); return [{ connectionId: "space-a:stripe", spaceId: "space-a", credentialVersion: 2, grantGeneration: "11111111-1111-4111-8111-111111111111" }]; },
+    async retireAccount(input) { retirements.push(input); return 1; },
   };
   const dependencies = {
     apps: () => apps,
+    accounts: () => accounts,
     credentials: () => ({ async resolve() { throw new Error("platform delivery must not read a Space secret"); } }),
     async append(_env, _channel, input) { appends.push(input); return Response.json({}); },
     async automations() {},
@@ -55,11 +58,12 @@ test("a connected account event is delivered and deauthorization retires without
   const created = Math.floor(Date.now() / 1000);
   const payload = { id: "evt_1", type: "invoice.payment_failed", account, created, data: { object: { id: "in_1", amount: 500, currency: "usd" } } };
   assert.deepEqual(await (await send(payload, f)).json(), { ok: true, events: 1, delivered: 1 });
-  assert.equal(f.queries[0].installationId, account);
+  assert.equal(f.queries[0].accountId, account);
   assert.equal(f.appends.length, 1);
+  assert.match(JSON.stringify(f.appends[0]), /acct_fixtureA/);
   const deauth = { id: "evt_2", type: "account.application.deauthorized", account, created, data: { object: { id: account } } };
   assert.deepEqual(await (await send(deauth, f)).json(), { ok: true, events: 0, delivered: 0, retired: 1 });
-  assert.equal(f.retirements[0].installationId, account);
+  assert.equal(f.retirements[0].accountId, account);
   assert.equal(f.appends.length, 1);
   const undated = { ...deauth, id: "evt_3", created: undefined };
   const again = fixture();

@@ -1,4 +1,5 @@
 import { trimEnd } from "@xmatrix/protocol";
+import { PostgresStripeAccountRepository } from "@xmatrix/db";
 import { PostgresGmailRoutingRepository } from "@xmatrix/db";
 import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppPermissionRepository, PostgresAppActionRequestRepository, PostgresAppCredentialRepository,
   PostgresAppRepository, PostgresWeComSuiteRepository, PostgresTelegramRoomRepository, PostgresFeishuAppRepository, PostgresFeishuRoomRepository, PostgresSentryEventRepository, PostgresGoogleChatRoomRepository, PostgresTeamsRoomRepository, type AuthorityDatabase } from "@xmatrix/db";
@@ -24,6 +25,10 @@ function appPolicyDatabase(env: Env, receipt = false): AuthorityDatabase {
 
 export function connectorCredentialRepository(env: Env): PostgresAppCredentialRepository {
   return new PostgresAppCredentialRepository(appPolicyDatabase(env), env.XMATRIX_SECRET_CATALOG_KEY?.trim() ?? "");
+}
+
+export function connectorStripeAccountRepository(env: Env): PostgresStripeAccountRepository {
+  return new PostgresStripeAccountRepository(appPolicyDatabase(env), env.XMATRIX_SECRET_CATALOG_KEY?.trim() ?? "");
 }
 
 export function connectorAppRepository(env: Env): PostgresAppRepository {

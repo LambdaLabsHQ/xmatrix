@@ -81,13 +81,15 @@ export const receiveBuildkiteDelivery = createSignedJsonReceiver({ name: "Buildk
 export const receiveStripeDelivery = createSignedJsonReceiver({ name: "Stripe", secretField: "signingSecret", proof: STRIPE_SIGNATURE }, (_, payload) => {
   const type = text(payload.type);
   const object = record(record(payload.data).object);
+  const account = /^acct_[A-Za-z0-9]{1,64}$/u.test(text(payload.account)) ? text(payload.account) : undefined;
   return { ok: true, events: [connectorEvent({
     eventId: `stripe:${text(payload.id)}`,
     sourceRef: `stripe:${sourceToken(type.split(".")[0]) || "*"}`,
     feature: "events",
-    summary: `${type} ${text(object.id)}`,
-    provider: "Stripe", title: `${type} — ${text(object.id)}`,
-    details: [text(object.amount) ? `Amount: ${text(object.amount)} ${text(object.currency).toUpperCase()}` : undefined,
+    summary: `${type} ${text(object.id)}${account ? ` (${account})` : ""}`,
+    provider: account ? `Stripe · ${account}` : "Stripe", title: `${type} — ${text(object.id)}`,
+    details: [account ? `Account: ${account}` : undefined,
+      text(object.amount) ? `Amount: ${text(object.amount)} ${text(object.currency).toUpperCase()}` : undefined,
       text(object.status) ? `Status: ${text(object.status)}` : undefined],
   })] };
 });
