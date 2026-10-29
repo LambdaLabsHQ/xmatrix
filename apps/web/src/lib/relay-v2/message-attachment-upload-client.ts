@@ -7,6 +7,7 @@ import {
 } from "@xmatrix/protocol/relay-v2/message-attachment";
 import { lowercaseHex } from "@xmatrix/protocol";
 import { XMatrixApiError, shouldRetryXMatrixQuery, xmatrixRawResponse, xmatrixRetryDelayMs } from "../query/api-client";
+import { directHubRequest } from "../query/hub-read";
 const HASH_CHUNK_BYTES = 4 * 1024 * 1024;
 const UPLOAD_INTENT_TTL_MS = 60 * 60 * 1_000;
 
@@ -220,10 +221,11 @@ export async function prepareMessageAttachmentUpload(input: {
     intentDeadline.done();
   }
 
-  await new Promise<void>((resolve, reject) => {
+  const put = (url: string, headers: Record<string, string>) => new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("PUT", webProxyPath(uploadPath));
+    request.open("PUT", url);
     request.setRequestHeader("Authorization", `Bearer ${input.token}`);
+    for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
     request.setRequestHeader("content-type", input.mimeType);
     request.setRequestHeader(RELAY_V2_BLOB_UPLOAD_CHECKSUM_HEADER, contentHash);
     // Rearmed only by real byte advancement, so a transfer that stops moving is
@@ -299,6 +301,22 @@ export async function prepareMessageAttachmentUpload(input: {
       reject(error instanceof Error ? error : new Error("Failed to upload attachment"));
     }
   });
+  // The body goes to the Hub straight when this page may ask it directly: the Web's Worker reads a whole request
+  // into memory before answering it, so through the Web the browser sees no progress while the Worker re-sends
+  // the file, and a large one stalls out. The Hub streams it into storage as it arrives. A token or client the
+  // Hub does not take from here, or no answer across origins, sends it through the Web, as reads do.
+  const direct = directHubRequest(input.token);
+  if (direct) {
+    try {
+      await put(`${direct.origin}${uploadPath}`, direct.headers);
+    } catch (error) {
+      if (!(error instanceof XMatrixApiError) || !(error.status === 401 || error.status === 426 ||
+          error.code === "network_error")) throw error;
+      await put(webProxyPath(uploadPath), {});
+    }
+  } else {
+    await put(webProxyPath(uploadPath), {});
+  }
 
   input.onProgress?.(100);
   return {

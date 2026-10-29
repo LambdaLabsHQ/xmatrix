@@ -626,6 +626,14 @@ fn read_body(body: Option<String>, file: Option<PathBuf>, stdin: bool) -> error:
 
 pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error::Result<()> {
     match command {
+        PageCommand::Upload { page, file, space } => {
+            let space = resolve_space(hub_url, token, space).await?;
+            println!(
+                "{}",
+                crate::page_upload::upload(hub_url, token, &space, &page, &file).await?
+            );
+            Ok(())
+        }
         PageCommand::Linked { conversation } => {
             let conversation = conversation.or_else(run_conversation).ok_or_else(|| {
                 CliError::Launch("page linked needs --conversation outside a Run".into())

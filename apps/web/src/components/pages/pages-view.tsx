@@ -757,8 +757,13 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // Images and videos pasted into the page are the Space's private files, read and uploaded as this reader.
   const mediaUrl = useCallback((file: string) => spaceId && pageId ? pageApi.mediaUrl(spaceId, pageId, file) : undefined,
     [spaceId, pageId]);
-  const uploadMedia = useCallback((file: File, onProgress: (percent: number) => void) =>
-    pageApi.uploadMedia(spaceId!, pageId!, token, file, onProgress), [spaceId, pageId, token]);
+  const uploadMedia = useCallback(async (file: File, onProgress: (percent: number) => void) => {
+    // A first paste is itself the write that makes the Page. Share that
+    // in-flight creation and bind the file only after its permanent id exists.
+    const writing = pageId ?? await session?.make();
+    if (!spaceId || !writing) throw new Error("The page is not ready for media uploads");
+    await pageApi.uploadMedia(spaceId, writing, token, file, onProgress);
+  }, [spaceId, pageId, session, token]);
   const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
   const baselineFor = useRef<typeof opened>(null);
   useEffect(() => {

@@ -13,7 +13,7 @@ const endpoint = /\/api\/xmatrix\/spaces\/[^/]+\/app-connections\/sentry\/check$
 
 async function open(page: Page, status = "error") {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await fixtureJson(page, "sentry-providers", "**/api/xmatrix/connectors/oauth/providers", { providers: ["sentry"] });
+  await fixtureJson(page, "sentry-providers", `**/api/xmatrix/connectors/oauth/providers?spaceId=${E2E_SPACE.id}`, { providers: ["sentry"] });
   await fixtureJson(page, "sentry-connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, {
     connections: [{ ...connection, status, error: status === "error" ? connection.error : null }],
   });

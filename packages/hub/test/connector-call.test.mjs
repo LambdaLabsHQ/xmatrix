@@ -100,11 +100,18 @@ test("private CLI call sends arguments directly and prints only its own result",
   assert.equal(JSON.parse(output.stdout).summary, privateText);
   assert.match((await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", "--help"], call)).stdout, /calling Agent and its Human owner/);
   assert.equal(calls.length, 1, "help never runs an action");
-  for (const flags of [[], ["--private", "--public"]]) {
-    const invalid = await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", `@gmail:read:${id}`, ...flags], call);
-    assert.equal(invalid.exitCode, 2);
+  const invalid = await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", `@gmail:read:${id}`, "--private", "--public"], call);
+  assert.equal(invalid.exitCode, 2);
+  assert.equal(calls.length, 1, "conflicting flags never run an action");
+});
+
+test("CLI calls are public unless --private is explicit", async () => {
+  for (const flags of [[], ["--public"]]) {
+    const calls = [];
+    await runCliCommand([CONNECTOR_CALL_COMMAND], {}, ["call", `@gmail:read:${id}`, ...flags],
+      async (...args) => { calls.push(args); return { summary: "ok" }; });
+    assert.deepEqual(calls, [["POST", protocol.HUB_ROUTES.connector_call, { command: `@gmail:read:${id}`, resultVisibility: "public" }]]);
   }
-  assert.equal(calls.length, 1, "old bare calls cannot silently start publishing parameters or results");
 });
 
 test("normal and private calls record the same invocation; only the private Channel/history result is masked", async () => {

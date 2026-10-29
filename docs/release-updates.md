@@ -1,5 +1,58 @@
 # Release Updates
 
+## Unreleased: The app opens on its own frame and says what it waits for
+
+The preparation progress bar and the signed-in shell's full-screen spinner are
+gone. Both waits render one `StartupShell`: the wood frame with the account's
+last list, or the list's skeleton, from the server's first frame onward. List
+skeletons no longer name a section before the list arrives. A tinted-paper
+status, timed by CSS so it works before scripts run, says "Connecting to
+xMatrix…" after 2 s, that it is still trying on a slow network after 6 s, and
+offers a reload after 15 s; an offline device says so at once. Web only.
+
+## Unreleased: A new Page keeps its first pasted image
+
+Pasting an image or video into an empty new Page captured its still-null id
+while the first write was creating it. The media ref then failed to bind.
+The editor now awaits that same creation before uploading against the permanent
+Page id. A browser regression reproduces the null owner id before the fix.
+Beta Web only, no schema or protocol change; recovery is a CI-validated beta
+Web reverting this change.
+
+## Unreleased: Unchanged Page edits preserve a word being typed
+
+A repeated Markdown write could parse an unchanged projection back into the
+live document and remove the trailing space a reader had just typed. The next
+word then joined the preceding one. The Hub's fragment writer and the parallel
+Web preview writer now leave an unchanged projection alone; empty documents
+still initialize and actual edits still apply. Real Yjs regressions reproduce
+`Shipped andverified` on both old paths. This independently establishes the
+bug; the original browser first attempt has no trace proving its timing. Hub
+and Web, no migration or native update; recovery is a CI-validated beta revert.
+
+## Unreleased: Agents can upload Page images and videos
+
+Agents previously could only preserve images pasted by a person; new local
+images were refused with an editor-only instruction. `xmatrix page upload
+<page> <file>` now uploads images and videos to the Page's private content and
+returns Markdown for ordinary edits or live writing. The Hub checks current
+Page write access and canonical Space/Page/hash refs on every binding, including
+replays. Text never causes an implicit local-file upload. Hub and CLI, no schema
+or wire migration; older CLIs continue to preserve existing media. Recovery is
+a CI-validated beta reverting the change. See [Page media](design/pages-live-document.md#66-images-and-videos).
+
+## Unreleased: Pasted page images upload to the Hub straight
+
+Pasting an image into a page sat at about 80% and then the image vanished.
+The Web's Worker (OpenNext) reads a whole request into memory before its route
+runs, so the upload body sent through it showed no progress while the Worker
+re-sent it, and the 30-second stall watchdog gave the upload up. The browser
+now sends the body straight to the Hub from the app's own origin, with its
+bearer and client identity and never a cookie, as page reads already do; a
+`401`, `426` or no answer across origins goes through the Web. Message
+attachments share the path. Hub and Web, no migration. Recovery is reverting
+#1196. See [Client resilience](architecture/client-resilience.md).
+
 ## Unreleased: The app starts one Hub round trip sooner and paints its last list
 
 Web sign-in now takes the bearer from the `set-auth-jwt` header the Hub's jwt

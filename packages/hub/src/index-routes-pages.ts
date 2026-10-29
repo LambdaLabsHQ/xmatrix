@@ -57,6 +57,22 @@ function repository(env: Env): PostgresPageRepository {
   return new PostgresPageRepository(database(env), { creditsWaivedSpaceId: platformAdminSpaceId(env) });
 }
 
+/** A private media ref may only be bound by a writer of its target Page. */
+export async function authorizePageMediaCommit(env: Env, authUser: AuthUser, value: Record<string, unknown>): Promise<void> {
+  if (value.ownerKind !== "page_media") return;
+  const spaceId = typeof value.visibilityScopeId === "string" && value.visibilityScopeId.startsWith("space:")
+    ? value.visibilityScopeId.slice("space:".length) : "";
+  const pageId = typeof value.ownerId === "string" ? value.ownerId : "";
+  if (!spaceId || !pageId || typeof value.refId !== "string" ||
+      !value.refId.startsWith(`page-media:${pageId}:`) ||
+      !/^[0-9a-f]{64}$/u.test(value.refId.slice(`page-media:${pageId}:`.length))) {
+    throw new PageControlError("invalid_request", 400, "Page media requires its canonical Page and Space reference");
+  }
+  const page = await repository(env).access({ requestId: crypto.randomUUID(), spaceId, pageId,
+    principal: runPrincipalOf(authUser), write: true });
+  if (!page.canEdit) throw new PageControlError("page_edit_forbidden", 403);
+}
+
 /**
  * The conversations a page's links name, as the caller sees them beside the
  * page (pages-live-document.md §4.4); the most recently linked first.

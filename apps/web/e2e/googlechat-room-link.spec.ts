@@ -16,7 +16,7 @@ const labelFor = (provider: Provider) => provider === "teams" ? "Microsoft Teams
 async function open(page: Page, provider: Provider) {
   const label = labelFor(provider);
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await fixtureJson(page, "native-providers", "**/api/xmatrix/connectors/oauth/providers", { providers: [], nativeProviders: [provider] });
+  await fixtureJson(page, "native-providers", `**/api/xmatrix/connectors/oauth/providers?spaceId=${E2E_SPACE.id}`, { providers: [], nativeProviders: [provider] });
   await fixtureJson(page, "chat-connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections: [] });
   await fixtureJson(page, "chat-create", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections\/(?:googlechat|teams)$/, { connection: { ...connection, id: E2E_SPACE.id + ":" + provider, providerId: provider, providerName: label } }, { method: "PATCH" });
   await fixtureJson(page, "chat-executions", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });

@@ -38,7 +38,7 @@ export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
     const actions = manifest.actions.flatMap((action) => action.effect ? [{
       command: `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`,
       effect: action.effect, description: action.description + (action.effect === "read" && executable.has(action.id)
-        ? ` For a masked Channel result, run xmatrix call "@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}" --private; use --public for a normal result. Invocation parameters are visible in both modes; private originals are also visible to the calling Agent’s Human owner in the Web for 30 days.` : ""),
+        ? ` Run xmatrix call "@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}" for a normal Channel result; add --private only to mask the result. Invocation parameters are visible in both modes; private originals are also visible to the calling Agent’s Human owner in the Web for 30 days.` : ""),
     }] : []);
     return actions.length > 0 ? [{ provider: manifest.id, name: manifest.name, actions }] : [];
   });
