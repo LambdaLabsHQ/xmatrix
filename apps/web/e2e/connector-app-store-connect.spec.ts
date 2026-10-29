@@ -14,7 +14,7 @@ async function open(page: Page, credentialFields: string[], { status = "disconne
   status?: string; executions?: unknown[]; before?: () => Promise<void>;
 } = {}) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await fixtureJson(page, "oauth-providers", "**/api/xmatrix/connectors/oauth/providers", { providers: [], nativeProviders: [] });
+  await fixtureJson(page, "oauth-providers", `**/api/xmatrix/connectors/oauth/providers?spaceId=${E2E_SPACE.id}`, { providers: [], nativeProviders: [] });
   await fixtureJson(page, "connections", connections, { connections: [connection(status, credentialFields)] });
   await fixtureJson(page, "credentials", /\/app-connections\/appstoreconnect\/credentials$/, { credentialFields });
   await fixtureJson(page, "save-credentials", /\/app-connections\/appstoreconnect\/credentials$/, { credentialFields },

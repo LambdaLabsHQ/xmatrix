@@ -6,7 +6,7 @@ const endpoint = /\/api\/xmatrix\/spaces\/[^/]+\/app-connections\/telegram\/link
 const confirmation = () => ({ chatSpace: room, nonce, botUsername, expiresAt: new Date(Date.now()+180000).toISOString() });
 async function openTelegram(page: Page) {
   await openWorkspaceWithStubs(page, { channels: [E2E_CHANNEL], spaces: [E2E_SPACE] });
-  await fixtureJson(page, "telegram-provider", "**/api/xmatrix/connectors/oauth/providers", { nativeProviders: ["telegram"], providers: [] });
+  await fixtureJson(page, "telegram-provider", `**/api/xmatrix/connectors/oauth/providers?spaceId=${E2E_SPACE.id}`, { nativeProviders: ["telegram"], providers: [] });
   await fixtureJson(page, "telegram-rows", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections: [] });
   await fixtureJson(page, "telegram-prepare", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections\/telegram$/, { connection: { id: `${E2E_SPACE.id}:telegram`, providerId: "telegram", status: "disconnected" } }, { method: "PATCH" });
   await fixtureJson(page, "telegram-activity", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });
