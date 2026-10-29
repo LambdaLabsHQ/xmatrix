@@ -7,6 +7,13 @@ tinted-paper tile over the app's paper, "can't be reached" or "offline", with
 Try again; it retries when the network returns (NWPathMonitor) and every 15 s,
 and a page whose web process iOS reclaimed reloads instead of staying blank.
 iOS only.
+## Unreleased: A desktop window always appears and says when the app cannot load
+
+A new window shows within 1.5 s even while the app's page is still on its way.
+A main-frame load that fails (not a cancelled navigation) shows a tinted-paper
+status in the window, "can't be reached" or "offline", with Try again; it
+retries when the network returns and every 15 s, and a crashed renderer
+reloads. Desktop only.
 
 ## Unreleased: Android opens its own copy when the edge answers with a server error
 
