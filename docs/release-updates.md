@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: The iOS app says when its page cannot load and retries
+
+A main-frame load that fails (not a cancelled navigation) now shows a
+tinted-paper tile over the app's paper, "can't be reached" or "offline", with
+Try again; it retries when the network returns (NWPathMonitor) and every 15 s,
+and a page whose web process iOS reclaimed reloads instead of staying blank.
+iOS only.
+
 ## Unreleased: Android opens its own copy when the edge answers with a server error
 
 A main-frame 5xx from the Web origin (an edge error page) now opens the copy
