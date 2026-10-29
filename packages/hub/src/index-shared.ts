@@ -731,7 +731,7 @@ export function requestFailure(error: unknown, context?: () => ErrorReportContex
     return { status: 403, body: { error: message }, headers: {} };
   }
   // An outage the driver or runtime says a replay can survive; a defect stays a reported 500.
-  const transient = transientFailure(error);
+  const transient = transientFailure(error, context);
   if (transient) return transient;
   // Every failure answered as a 500 is unexpected; it is reported with what the
   // route was doing, and the answer quotes the report so a person can cite it.

@@ -175,7 +175,7 @@ export async function answerHarnessReleaseWatch(
     observeHarnessWatch(env, "runtime", "completed", started, result.issued);
     return response;
   } catch (error) {
-    const failure = transientFailure(error);
+    const failure = transientFailure(error, () => ({ operation: "HarnessReleaseWatch.runtime" }));
     observeHarnessWatch(env, "runtime", failure ? "deferred" : "failed", started);
     if (failure) return failureResponse(failure, { "cache-control": "no-store" });
     throw error;

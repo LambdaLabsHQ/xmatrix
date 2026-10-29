@@ -1,6 +1,8 @@
 import { ControlError, DetailedControlError } from "@xmatrix/db";
 import { reportPostgresConflict } from "./postgres-conflict-diagnostic";
 import { reportPostgresUnavailable } from "./postgres-request-failure";
+import type { ErrorReportContext } from "@xmatrix/protocol/error-reporting";
+import { reportDurableObjectUnavailable } from "./durable-object-request-failure";
 
 import { DURABLE_OBJECT_RETRY_AFTER_SECONDS, transientDurableObjectFailure } from "./durable-object-failure";
 import {
@@ -61,9 +63,9 @@ export function transientError(error: unknown): boolean {
  * A Durable Object or PostgreSQL outage a replay can survive, or a transaction
  * that lost a conflict; null when the failure is neither.
  */
-export function transientFailure(error: unknown): RequestFailure | null {
+export function transientFailure(error: unknown, context?: () => ErrorReportContext): RequestFailure | null {
   if (transientDurableObjectFailure(error)) {
-    console.error("Durable Object is briefly unavailable", error);
+    reportDurableObjectUnavailable(error, context);
     return { status: 503, body: { error: "xMatrix is restarting; try again", code: "service_restarting", retryable: true },
       headers: { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) } };
   }

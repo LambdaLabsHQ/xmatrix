@@ -58,9 +58,17 @@ reporter then retains the SDK's synchronous capture stack and labels its
 mechanism `stack_origin=capture_boundary`; Sentry issue reads show
 `stack=capture boundary (origin unavailable)`. These source-mapped frames locate
 the console/reporting call, not the original storage operation. Original stacks
-are preserved when available. For HUB-9C and HUB-88, use the next event's capture
-caller to identify the responsible DO path, then establish whether delivery or
-commit already occurred before choosing recovery. The route-directory
+are preserved when available. HUB-B5 showed that the shared HTTP outage boundary
+alone cannot identify that path. Transient DO failures now report the original
+exception once with the registered HTTP method/route template (never path values,
+URLs or request data), or the fixed PageSession/Harness watch boundary, plus the
+platform's boolean retryable/overloaded flags. The issue reader exposes that
+bounded projection. Unsupported caller shapes remain `unavailable`, and unlike
+routes have separate fingerprints even when their platform messages match.
+For HUB-B5/88/9C, read this boundary and the flags alongside mapped frames on
+recurrence, then establish whether delivery or commit already occurred before
+choosing recovery. This is diagnostic coverage, not a confirmed repair of the
+underlying DO invalidation; HTTP 503 and replay policy are unchanged. The route-directory
 register/unregister path (HUB-9E) that was once that caller is gone: no cell
 registers anywhere, and the directory's namespace answers 410. Message delivery
 still does not replay an unknown commit.
