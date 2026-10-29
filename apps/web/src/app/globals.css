@@ -4655,6 +4655,31 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   animation: app-startup-status-in 300ms ease-out 15.2s both;
 }
 
+/* The open app's connection status (connection-status.tsx): the startup
+   status's paper tile, floating over the reading column just under the top
+   band, never in it. */
+.app-connection-status {
+  position: absolute;
+  top: calc(52px + env(safe-area-inset-top, 0px) + 8px);
+  left: 50%;
+  z-index: 60;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.app-connection-status > .app-paper-tile {
+  display: inline-flex;
+  align-items: center;
+  height: 2rem;
+  padding: 0 0.9rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: color-mix(in oklch, var(--foreground) 72%, transparent);
+  animation: app-startup-status-in 200ms ease-out both;
+}
+
 .xmatrix-app a.app-startup-status-slow:hover {
   background: color-mix(in oklch, var(--foreground) 7%, var(--app-panel-paper, oklch(0.976 0.005 85)));
 }

@@ -301,3 +301,15 @@ test("the reading pane does not call the Space empty while its list is still arr
   await expect(page.locator(".app-message-timeline-skeleton")).toHaveCount(0);
   await expect(page.getByText("No conversations yet")).toHaveCount(0);
 });
+
+test("the open app says it is offline while it is, and stops saying so when the network returns", async ({ page, context }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+  await page.locator(".xmatrix-app-shell:not([aria-busy])").waitFor();
+  const status = page.locator(".app-connection-status");
+  await expect(status).toHaveCount(0);
+  await context.setOffline(true);
+  await expect(status).toContainText("You’re offline");
+  await context.setOffline(false);
+  await expect(status).toHaveCount(0);
+});
