@@ -18,7 +18,7 @@ async function openGitHub(page: Page, { status = "configured", grant }: { status
     await page.addInitScript((value) => window.sessionStorage.setItem("xmatrix:github-grant", value), grant);
   }
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await fixtureJson(page, "github-providers", "**/api/xmatrix/connectors/oauth/providers", { providers: ["github"] });
+  await fixtureJson(page, "github-providers", `**/api/xmatrix/connectors/oauth/providers?spaceId=${E2E_SPACE.id}`, { providers: ["github"] });
   await fixtureJson(page, "github-connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, {
     connections: [{ ...connection, status }],
   });

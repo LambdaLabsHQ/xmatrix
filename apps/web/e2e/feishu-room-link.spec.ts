@@ -10,7 +10,7 @@ const connection = { id: E2E_SPACE.id + ":feishu", spaceId: E2E_SPACE.id, provid
   credentialFields: [], version: 1, createdBy: "e2e-user", createdAt: E2E_NOW, updatedAt: E2E_NOW };
 async function open(page: Page) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await fixtureJson(page, "feishu-native", "**/api/xmatrix/connectors/oauth/providers", { providers: [], nativeProviders: ["feishu"] });
+  await fixtureJson(page, "feishu-native", `**/api/xmatrix/connectors/oauth/providers?spaceId=${E2E_SPACE.id}`, { providers: [], nativeProviders: ["feishu"] });
   await fixtureJson(page, "feishu-connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections: [] });
   await fixtureJson(page, "feishu-create", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections\/feishu$/, { connection }, { method: "PATCH" });
   await fixtureJson(page, "feishu-executions", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });
