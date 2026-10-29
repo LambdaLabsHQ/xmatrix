@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
-import { exchangeOAuthGrant, grantFieldsForgottenOnDisconnect, oauthAuthorizeUrl, oauthClient, refreshOAuthFields } from "../src/connectors/oauth.ts";
+import { exchangeOAuthGrant, grantFieldsForgottenOnDisconnect, oauthAuthorizeUrl, oauthClient, refreshOAuthFields, verifyOAuthState } from "../src/connectors/oauth.ts";
 import { stripeAuthorizeEndpoint, stripeConnectOffered, verifyStripe } from "../src/connectors/stripe-oauth.ts";
 
 const secret = ["sk", "live", "fixtureNotARealKey"].join("_");
@@ -31,10 +31,14 @@ test("Stripe Connect stays hidden until the secret trio and one audience are bot
 test("Stripe authorize carries only client id, redirect and state, and the grant records the account", async () => {
   const client = oauthClient(trio, "stripe");
   const url = new URL(await oauthAuthorizeUrl(client, { spaceId: "space-accept", userId: "admin-1",
+    connectionSnapshot: { connectionVersion: 2, credentialVersion: 0, connectionGeneration: "generation-1" },
     redirectUri: "https://xmatrix-hub.xmatrix.sh/api/connectors/oauth/callback",
     authorizeUrl: `https://marketplace.stripe.com${external}` }));
   assert.equal(url.pathname, external);
   assert.deepEqual([...url.searchParams.keys()].sort(), ["client_id", "redirect_uri", "state"]);
+  const verified = await verifyOAuthState(trio, url.searchParams.get("state"));
+  assert.equal(verified.connectionSnapshot.connectionVersion, 2);
+  assert.ok(verified.authorizationStartedAt <= Date.now());
   await assert.rejects(oauthAuthorizeUrl(client, { spaceId: "s", userId: "u", redirectUri: "https://hub.test/cb",
     authorizeUrl: "https://example.com/oauth/v2/authorize" }), /not configured/);
 
@@ -51,7 +55,7 @@ test("Stripe authorize carries only client id, redirect and state, and the grant
     assert.ok(Math.abs(Number(exchanged.fields.oauthExpiresAt) - Date.now() - 3_600_000) < 5_000);
   } finally { fetch.restore(); }
   assert.deepEqual(Object.keys(grantFieldsForgottenOnDisconnect("stripe")).sort(),
-    ["oauthExpiresAt", "oauthRefreshToken", "oauthToken", "stripeUserId"]);
+    ["oauthExpiresAt", "oauthRefreshToken", "oauthToken", "stripeAccounts", "stripeUserId"]);
 });
 
 test("Stripe refresh requires the same account and a pasted secret does not call Stripe", async () => {
@@ -77,13 +81,17 @@ test("Stripe refresh requires the same account and a pasted secret does not call
   const idle = stubFetchResponses([], { allowUnexpected: false });
   try { await verifyStripe({ signingSecret: "whsec_fixture" }); assert.equal(idle.calls.length, 0); }
   finally { idle.restore(); }
-  const check = stubFetchResponses([{ body: { id: "acct_fixtureA" } }]);
+  const check = stubFetchResponses([{ body: { object: "list", data: [] } }]);
   try {
     await verifyStripe({ oauthToken: "fixture-access", stripeUserId: "acct_fixtureA" });
     assert.equal(check.calls[0].headers.get("authorization"), `Basic ${btoa("fixture-access:")}`);
+    assert.equal(check.calls[0].url, "https://api.stripe.com/v1/events?limit=1");
   } finally { check.restore(); }
   const wrong = stubFetchResponses([{ body: { id: "acct_other" } }]);
-  try { await assert.rejects(verifyStripe({ oauthToken: "fixture-access", stripeUserId: "acct_fixtureA" }), /does not match/); }
+  try { await assert.rejects(verifyStripe({ oauthToken: "fixture-access", stripeUserId: "acct_fixtureA" }), /did not confirm event access/); }
   finally { wrong.restore(); }
+  const denied = stubFetchResponses([{ status: 403, body: { error: { message: "permission denied" } } }]);
+  try { await assert.rejects(verifyStripe({ oauthToken: "fixture-access", stripeUserId: "acct_fixtureA" }), /Stripe refused/); }
+  finally { denied.restore(); }
   assert.equal(client.manifest.oauth.flow, "stripe-app");
 });

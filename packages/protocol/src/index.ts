@@ -644,3 +644,5 @@ export * from "./page-assistant-output.js";
 export { GOOGLE_CALENDAR_SEND_UPDATES, isGoogleCalendarSendUpdates } from "./google-calendar.js";
 export type { GoogleCalendarSendUpdates } from "./google-calendar.js";
 export { AGENT_QUOTA_RETRY_NOTICE_KIND, quotaRetryOfferId, type AgentQuotaRetry, type AgentQuotaRetryAdmission } from "./agent-quota-retry.js";
+
+export type { StripeAccountView, StripeAccountPage } from "./stripe-accounts.js";

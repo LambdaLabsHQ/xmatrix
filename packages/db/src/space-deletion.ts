@@ -284,7 +284,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
   ...[
     "data.agent_launches", "data.agent_message_executions", "data.agent_reborn_intents",
     "data.agent_registration_commands",
-    "data.app_gmail_routes", "data.app_connector_action_requests",
+    "data.app_gmail_routes", "data.app_stripe_account_grants", "data.app_connector_action_requests",
     "data.app_sentry_event_jobs", "data.app_dingtalk_inbound_jobs", "data.app_dingtalk_inbound_scopes",
     "data.app_dingtalk_inbound_attempts", "data.app_dingtalk_company_attempts", "data.app_dingtalk_company_grants",
     "data.app_feishu_link_attempts", "data.app_feishu_room_bindings",

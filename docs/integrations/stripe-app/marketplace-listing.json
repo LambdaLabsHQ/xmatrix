@@ -42,8 +42,7 @@
     "Disconnect or uninstall the integration and verify subsequent events no longer reach the Space."
   ],
   "submission_open_work": [
-    "Complete live developer key issuance after the owner enters the authenticator code; save the three connector values through the formal production configuration path.",
-    "Release and verify the Hub OAuth callback, account routing, revocation, and bounded external test Space configuration.",
+    "Complete native OAuth installation, multi-account retention and account-bearing event delivery on the released beta; synthetic signature checks alone are insufficient.",
     "Capture feature images at least 1600 pixels wide using sanitized released UI; do not show real customer data.",
     "Provision an isolated non-real reviewer account and deliver its credentials through the approved private submission mechanism.",
     "Finalize the category from the actual Stripe submission choices and submit the accurate listing after end-to-end verification."
