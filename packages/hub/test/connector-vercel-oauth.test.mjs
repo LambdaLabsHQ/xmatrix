@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { Hono } from "hono";
+import { HUB_ROUTES } from "@xmatrix/protocol";
+import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { gmailPollCallback } from "../src/connectors/gmail-poll-oauth.ts";
 import { test } from "node:test";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, verifyOAuthState } from "../src/connectors/oauth.ts";
@@ -129,18 +132,12 @@ test("redeploy uses the OAuth token and its trusted team for both requests", asy
 
 // Exercise the real callback handler with the authority/credential boundaries isolated.
 test("the callback writes credentials only after verified state, provider scope and completion URL", async () => {
-  const { readFileSync } = await import("node:fs");
-  const { createRequire } = await import("node:module");
-  const { runInNewContext } = await import("node:vm");
-  const ts = createRequire(import.meta.url)("typescript");
-  const source = readFileSync(new URL("../src/index-routes-connector-oauth.ts", import.meta.url), "utf8");
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const fields = { oauthToken: "fixture-token", oauthConfigurationId: "icfg_fixture", oauthTeamId: "team_fixture" };
   let validState = true;
   let signedIn = "admin";
   let checkPasses = true;
+  let stripeConnects = 0;
   const effects = [];
-  const exports = {};
   const dependencies = {
     "./github-connect-authorization": githubAuthorization,
     "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("only GitHub Connect links installations") },
@@ -168,24 +165,32 @@ test("the callback writes credentials only after verified state, provider scope 
     "./connectors/vercel-api": { vercelCompletionUrl },
     "./connectors/gmail-mailboxes": { addConnectedMailbox: async () => assert.fail("only a Gmail Connect adds a mailbox") },
     "./connectors/x-accounts": { connectXAccount: async () => assert.fail("only an X Connect adds an X account") },
+    "./connectors/stripe-accounts": { connectStripeAccount: async () => {
+      stripeConnects += 1;
+      assert.fail("Vercel Connect cannot add a Stripe account");
+    } },
     "./connectors/cloudflare-api": { connectCloudflareLogin: async () => assert.fail("only a Cloudflare Connect adds a login") },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
     "./index-shared": { connectorHubOrigin: () => "https://hub.test", requireAuth: async () => ({}),
       requireHumanAuth: () => ({ id: signedIn }), jsonErrors: async (_context, run) => run() },
-    "@xmatrix/protocol": { HUB_ROUTES: { connector_oauth_complete: "/api/connectors/oauth/complete" } },
+    "@xmatrix/protocol": { HUB_ROUTES },
     "@xmatrix/db": { ControlError: class ControlError extends Error {} },
     "./apps": { upsertAppConnection: async () => { effects.push("connection"); return {}; } },
     "./usage-cost-metering": metering,
   };
-  runInNewContext(code, { exports, require: name => { assert.ok(dependencies[name], name); return dependencies[name]; }, crypto, URL, console });
-  let complete;
-  exports.registerConnectorOAuthRoutes({ get() {}, post(path, handler) { if (path === "/api/connectors/oauth/complete") complete = handler; } });
+  // An unrelated provider import does not change Vercel's HTTP contract.
+  // Executing any unstubbed effect still fails rather than doing real I/O.
+  const routes = await loadCommonJsSourceModule(new URL("../src/index-routes-connector-oauth.ts", import.meta.url),
+    name => dependencies[name] ?? {});
+  const app = new Hono();
+  routes.registerConnectorOAuthRoutes(app);
   const invoke = async overrides => {
     effects.length = 0;
     const body = { state: "fixture-state", code: "code", configurationId: "icfg_fixture", teamId: "team_fixture", next: "https://vercel.com/integrations/done", ...overrides };
-    const result = await complete({ env: {}, req: { raw: new Request("https://hub.test/api/connectors/oauth/complete"), json: async () => body },
-      json: (payload, status) => ({ body: payload, status }) });
-    return { url: result.body?.redirect, status: result.status, effects: [...effects] };
+    const result = await app.request(HUB_ROUTES.connector_oauth_complete, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, {});
+    const payload = await result.json();
+    return { url: payload.redirect, status: result.status, effects: [...effects] };
   };
   validState = false;
   assert.deepEqual((await invoke({})).effects, []);
@@ -205,4 +210,5 @@ test("the callback writes credentials only after verified state, provider scope 
   signedIn = "admin";
   checkPasses = false;
   assert.match((await invoke({})).url, /oauth=failed/);
+  assert.equal(stripeConnects, 0, "no Vercel outcome may call Stripe Connect, even if the callback catches the error");
 });
