@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: A new Page keeps its first pasted image
+
+Pasting an image or video into an empty new Page captured its still-null id
+while the first write was creating it. The media ref then failed to bind.
+The editor now awaits that same creation before uploading against the permanent
+Page id. A browser regression reproduces the null owner id before the fix.
+Beta Web only, no schema or protocol change; recovery is a CI-validated beta
+Web reverting this change.
+
 ## Unreleased: Agents can upload Page images and videos
 
 Agents previously could only preserve images pasted by a person; new local

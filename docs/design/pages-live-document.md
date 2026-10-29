@@ -953,6 +953,8 @@ WebM, QuickTime) into the editor puts it in the text as a markdown image,
 - **The writer sees it at once.** The file is drawn from the writer's own
   copy while it uploads, with its progress; a file that does not upload
   leaves the text again and the editor says why.
+  Pasting into an empty new Page first waits for that same write to create
+  the Page, then binds the file to its permanent id.
 - **It is read as the page.** `GET /api/spaces/:spaceId/pages/:pageId/media/:file`
   serves the file to whoever may read the page, when the page's head text
   shows it or it was pasted into this page and not saved yet, and only when
