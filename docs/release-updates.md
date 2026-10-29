@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Launching the app reopens the last conversation
+
+Opening the bare `/app` now goes straight to the conversation this account
+last had open on this device (its address, ids only, kept per user in
+localStorage), as soon as the account is known, so its history read starts
+with the first reads. A notification's `/app?channel=` and `?view=` launches
+keep naming their own screen. When that conversation can no longer be read,
+the launch settles on its Space's list. Web only.
+
 ## Unreleased: Each app start reports how long it took for the person
 
 Once per page load the app sends when it first reached its shell, signed in,
