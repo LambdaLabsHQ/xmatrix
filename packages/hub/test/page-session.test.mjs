@@ -26,6 +26,25 @@ const human = (id) => ({ kind: "user", id, label: id });
 const agent = { kind: "agent", id: "agent-1", label: "claude:1", conversationId: "conv-1",
   runProof: { runId: "r", instanceId: "i", executionKey: "k" } };
 
+test("an unchanged Markdown write preserves the live word separator", () => {
+  const doc = new Y.Doc();
+  try {
+    const fragment = doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
+    setPageFragmentMarkdown(fragment, "Shipped", "agent");
+    const text = fragment.get(0).get(0);
+    text.insert(text.length, " and ");
+    const before = Y.encodeStateAsUpdate(doc);
+    const change = setPageFragmentMarkdown(fragment, pageFragmentMarkdown(fragment), "agent");
+    const after = Y.encodeStateAsUpdate(doc);
+    text.insert(text.length, "verified");
+    assert.equal(pageFragmentMarkdown(fragment).trim(), "Shipped and verified");
+    assert.deepEqual(after, before, "a no-op must not rewrite live text");
+    assert.equal(change.cursor, null);
+  } finally {
+    doc.destroy();
+  }
+});
+
 /**
  * A person's edits, written as markdown offsets for brevity: each becomes the
  * structural update the editor would make to the page's document.

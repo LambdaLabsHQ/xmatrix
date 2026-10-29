@@ -11,6 +11,11 @@ export function pageMarkdown(doc: Y.Doc): string {
 /** An edit made to a page document as markdown, as the session makes an Agent's. */
 export function editPageMarkdown(doc: Y.Doc, change: (markdown: string) => string, origin: string): void {
   const fragment = doc.getXmlFragment(PAGE_DOCUMENT_FRAGMENT);
-  const next = markdownToPageDoc(change(pageMarkdown(doc)));
+  const current = pageMarkdown(doc);
+  const changed = change(current);
+  // Markdown omits a live paragraph's trailing space. Re-parsing an unchanged
+  // projection would remove that separator while a reader types the next word.
+  if (fragment.length > 0 && changed === current) return;
+  const next = markdownToPageDoc(changed);
   doc.transact(() => updateYFragment(doc, fragment, next, { mapping: new Map(), isOMark: new Map() }), origin);
 }

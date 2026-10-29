@@ -211,7 +211,11 @@ export function setPageFragmentMarkdown(fragment: Y.XmlFragment, markdown: strin
   const after = markdownToPageDoc(markdown);
   const start = before.content.findDiffStart(after.content);
   const end = before.content.findDiffEnd(after.content);
-  if (start === null || !end) return { cursor: null, block: "" };
+  // The Markdown projection excludes a reader's unfinished trailing separator.
+  // An unchanged projection must leave those live editor bytes in place.
+  if (start === null || !end || (fragment.length > 0 && pageDocToMarkdown(before) === pageDocToMarkdown(after))) {
+    return { cursor: null, block: "" };
+  }
   const meta = { mapping: new Map(), isOMark: new Map() };
   doc.transact(() => updateYFragment(doc, fragment, after, meta), origin);
   // The cursor rests at the end of the last line the change touched.
