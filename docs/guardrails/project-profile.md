@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Agents upload local Page images and videos with `xmatrix page upload`, then
+insert the returned Markdown through ordinary Page writes. The Hub rechecks
+current Page edit access before binding media, including replays. Page text
+does not implicitly upload local files. See [Page media](../design/pages-live-document.md#66-images-and-videos).
+
 Google Calendar has a separate Space connection for calendar/event reads,
 availability and event writes. Every App now has one connection-wide
 read/ask/write permission; Calendar defaults to write, with no Channel rules. Conditional changes retain event ETags

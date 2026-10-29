@@ -938,7 +938,7 @@ place without copying it:
   page tree assumed one layout and was removed (parent §3); an embed is one
   file a page chose to show.
 
-### 6.6 Pasted images and videos
+### 6.6 Images and videos
 
 Pasting or dropping an image (PNG, JPEG, GIF, WebP, AVIF) or a video (MP4,
 WebM, QuickTime) into the editor puts it in the text as a markdown image,
@@ -973,7 +973,17 @@ WebM, QuickTime) into the editor puts it in the text as a markdown image,
   it. A video, or an image that could not be saved, keeps its reference.
   Nothing is pushed into the Agent's context: an image costs only when the
   Agent opens it.
-- **Writing maps it back and refuses local images.** Every way an Agent writes
+- **An Agent can upload a local image or video.** `xmatrix page upload <page>
+  <file>` uploads through the same private-content intent, verified bytes and
+  Page-owned ref as the editor, then prints Markdown for `page edit` or live
+  writing. It accepts the types above, from 1 byte through 25 MiB, and never
+  changes the Page's text itself. Create a Page before uploading into it.
+  The Hub checks the exact live Run, its owner's current Page edit access,
+  the Space and canonical Page/content-hash ref before binding, including on
+  replay. This check is separate from the content commit; a revocation after
+  authorization may allow that in-flight binding to finish. A published Page
+  exposes media only after its saved text references it.
+- **Writing maps cached paths back and asks for an explicit upload of new files.** Every way an Agent writes
   into a page — `page edit`, `page create`, `⟦write⟧` in a reply or a message,
   live co-writing — passes its text through the CLI's `page_media` mapping:
   a path ending in `attachment-cache/page-media/<sha-256>.<ext>`, read on any
@@ -981,7 +991,8 @@ WebM, QuickTime) into the editor puts it in the text as a markdown image,
   (a path, `~`, a drive, a share, `file:`) is not written. `page edit` and
   `page create` refuse the whole text, except for images the page already had
   at the edit's base revision; a stream holds each image until it is whole
-  and leaves a local one out, and the Agent is told. The editor does not take
+  and leaves a local one out, and the Agent is directed to `page upload`.
+  Text never triggers implicit local-file reads or uploads. The editor does not take
   `file:` or `blob:` images from pasted HTML either.
 
 ## 7. Around the page

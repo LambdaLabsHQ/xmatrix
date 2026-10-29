@@ -3301,8 +3301,10 @@ name = "xmatrix-cli-memory"
 version = "0.0.0"
 dependencies = [
  "colored",
+ "rustls",
  "serde",
  "serde_json",
+ "tokio",
  "urlencoding",
  "xmatrix-cli-args",
  "xmatrix-cli-core",

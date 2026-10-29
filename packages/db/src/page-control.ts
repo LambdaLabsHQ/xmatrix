@@ -633,13 +633,13 @@ export class PostgresPageRepository {
   }
 
   /** Whether a principal may read a page and edit it, and its head, without its text: what a live ticket needs. */
-  async access(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
+  async access(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal; write?: boolean }):
     Promise<{ canEdit: boolean; agentSuggestOnly: boolean; headRevision: number }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.access", spaceId, async (tx) => {
-      const actor = await pageActor(tx, spaceId, input.principal, false);
-      const row = await this.page(tx, spaceId, actor, pageId, "read");
+      const actor = await pageActor(tx, spaceId, input.principal, input.write ?? false);
+      const row = await this.page(tx, spaceId, actor, pageId, input.write ? "edit" : "read");
       return { canEdit: row.canEdit, agentSuggestOnly: row.agent_suggest_only, headRevision: Number(row.head_revision) };
     });
   }

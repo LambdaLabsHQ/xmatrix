@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { createSpace, json, MOCK_TOKEN, randomUUID, startMockUserHubWorker } from "./agent-launch-postgres.fixture.mjs";
+import { createSpace, inTestTransaction, json, MOCK_TOKEN, randomUUID, startMockUserHubWorker } from "./agent-launch-postgres.fixture.mjs";
+import { prepareAttachmentAgentRun } from "./support/message-attachment-upload.mjs";
 
 // A file pasted into a page is the Space's private content: a page shows it to
 // whoever can read the page, only when the page shows it (or it was pasted into
@@ -71,6 +72,77 @@ test("a page serves only media it shows and its Space holds, in part when asked"
     assert.equal(shown.status, 200, await shown.clone().text());
     assert.match(shown.headers.get("cache-control"), /public/u);
     await refused(await publicMedia(pasted.pageId), 404, "page_media_not_found");
+  } finally {
+    await worker.stop();
+  }
+});
+
+// The existing Human media case cannot prove live Run authority or revocation.
+// Exercise the real upload/ref/read boundary, including a replay after access changes.
+test("a live Agent uploads Page media only into a Page it and its owner may edit", async () => {
+  const userId = `page-media-agent-${randomUUID()}`;
+  const worker = await startMockUserHubWorker({ id: userId, email: "page-media-agent@example.com", name: "Media Agent" });
+  try {
+    const auth = { Authorization: `Bearer ${MOCK_TOKEN}`, "content-type": "application/json" };
+    const { prepared, channelId, agentHeaders } = await prepareAttachmentAgentRun(worker, `media-${randomUUID()}`, MOCK_TOKEN);
+    const catalog = await json(await worker.fetch("/api/channels", { headers: auth }));
+    const spaceId = catalog.channels.find(channel => channel.id === channelId).spaceId;
+    const pages = `/api/spaces/${spaceId}/pages`;
+    const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
+      body: JSON.stringify({ title: "Agent images", body: "Before\n", accessMode: "restricted" }) }))).page;
+    const bytes = Buffer.from(`Agent PNG ${randomUUID()}`);
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const reference = `![shot](xmatrix:page-media/${hash}.png)`;
+    const intent = await json(await worker.fetch("/api/relay-v2/private-r2/upload-intents", {
+      method: "POST", headers: agentHeaders, body: JSON.stringify({ requestId: randomUUID(), intentId: randomUUID(),
+        visibilityScopeId: `space:${spaceId}`, contentHash: hash, encodedSize: bytes.length,
+        expiresAt: new Date(Date.now() + 5 * 60_000).toISOString() }) }));
+    const uploaded = await worker.fetch(intent.upload.finalPath, { method: "PUT", headers: {
+      Authorization: `Bearer ${prepared.token}`, "content-type": "image/png", "content-length": String(bytes.length),
+      "x-xmatrix-content-sha256": hash }, body: bytes });
+    assert.equal(uploaded.status, 200, await uploaded.text());
+    const bind = (overrides = {}, headers = agentHeaders) => worker.fetch("/api/relay-v2/private-r2/blob-refs", {
+      method: "POST", headers, body: JSON.stringify({ requestId: randomUUID(), intentId: intent.intentId,
+        refId: `page-media:${page.pageId}:${hash}`, ownerKind: "page_media", ownerId: page.pageId,
+        visibilityScopeId: `space:${spaceId}`, ...overrides }) });
+    const mismatched = await bind({ refId: `page-media:${page.pageId}:${"a".repeat(64)}` });
+    assert.equal(mismatched.status, 400, await mismatched.text());
+    const bound = await bind();
+    assert.equal(bound.status, 200, await bound.text());
+    const replay = await bind();
+    assert.equal(replay.status, 200, await replay.text());
+    const edit = await worker.fetch(`${pages}/${page.pageId}`, { method: "PUT", headers: agentHeaders,
+      body: JSON.stringify({ baseRevision: page.headRevision, body: `Before\n\n${reference}\n`, conversationIds: [channelId] }) });
+    assert.equal(edit.status, 200, await edit.text());
+    const read = await worker.fetch(`${pages}/${page.pageId}/media/${hash}.png`, { headers: agentHeaders });
+    assert.equal(read.status, 200, await read.clone().text());
+    assert.deepEqual(Buffer.from(await read.arrayBuffer()), bytes);
+
+    const missing = await bind({ ownerId: "missing", refId: `page-media:missing:${hash}` });
+    assert.equal(missing.status, 404, await missing.text());
+    const foreignSpace = await createSpace(worker, `Foreign ${randomUUID()}`);
+    const foreign = (await json(await worker.fetch(`/api/spaces/${foreignSpace.id}/pages`, { method: "POST", headers: auth,
+      body: JSON.stringify({ title: "Foreign", body: "Private\n" }) }))).page;
+    const wrongSpace = await bind({ ownerId: foreign.pageId, visibilityScopeId: `space:${foreignSpace.id}`,
+      refId: `page-media:${foreign.pageId}:${hash}` });
+    assert.equal(wrongSpace.status, 403, await wrongSpace.text());
+
+    await inTestTransaction(async tx => {
+      await tx.query({ text: "UPDATE data.space_members SET role='member' WHERE space_id=$1 AND user_id=$2",
+        values: [spaceId, userId] });
+      await tx.query({ text: `INSERT INTO data.page_access (space_id,page_id,subject_kind,subject_id,access,created_at)
+        VALUES ($1,$2,'user',$3,'read',now()) ON CONFLICT (space_id,page_id,subject_kind,subject_id) DO UPDATE SET access='read'`,
+        values: [spaceId, page.pageId, userId] });
+    });
+    for (const headers of [agentHeaders, auth]) {
+      const readOnly = await bind({}, headers);
+      assert.equal(readOnly.status, 403, await readOnly.clone().text());
+      assert.equal((await readOnly.json()).code, "page_edit_forbidden", "existing refs cannot bypass current Page access");
+    }
+    await inTestTransaction(tx => tx.query({ text: "DELETE FROM data.page_access WHERE space_id=$1 AND page_id=$2",
+      values: [spaceId, page.pageId] }));
+    const revoked = await bind();
+    assert.equal(revoked.status, 404, await revoked.text());
   } finally {
     await worker.stop();
   }
