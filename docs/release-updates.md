@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: The app downloads a sixth less code before its first screen
+
+Tool views (Status, Agents, Machines, Schedules, Apps, Settings, Team, Profile,
+Platform admin), the Agent configuration page, the trace window and error
+reporting no longer load before the first screen of `/app`: initial JavaScript
+falls from 3.64 MB to 3.02 MB (1.17 MB to 0.98 MB gzip). Each view loads when first
+opened and shows its loading skeleton meanwhile; errors before error reporting
+starts are held and sent. Measured in [Channel startup](performance/channel-startup.md#cold-start-tool-views-and-error-reporting).
+Beta Web only, no API, schema or native change; recovery is a CI-validated beta
+Web release reverting the change.
+
 ## Unreleased: The Apps list groups by connection state and ticks what works in green
 
 The Apps list put category headings (Code & CI, Chat…) beside Connected, mixing

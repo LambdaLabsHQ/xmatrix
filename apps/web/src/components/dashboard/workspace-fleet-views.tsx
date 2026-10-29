@@ -1,9 +1,9 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentLaunchExecutable } from "@xmatrix/protocol";
-import Image from "next/image";
+import { agentLaunchExecutable } from "@xmatrix/protocol";
 import { openRepositoryToStar } from "./star-prompt";
+import { connectorIcon } from "./connector-icon";
 import { registrationStatus } from "./my-agents-registrations";
 import {
   EmptyToolState,
@@ -31,6 +31,7 @@ import {
 
 import {
   AppView,
+  replaceBrowserPath,
 } from "./workspace-shell-navigation";
 
 import {
@@ -40,7 +41,7 @@ import {
 } from "./workspace-shell-recovered";
 
 import { daemonPresenceLabel } from "./machine-daemon-presence";
-import { MachineLoadPanel } from "./machine-load-panel";
+import { MachineLoadPanel } from "./machine-load-details";
 import { MachineHarnessPanel } from "./machine-harness-panel";
 import { MachineWorktreesPanel } from "./machine-worktrees-panel";
 import {
@@ -65,7 +66,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   AlertTriangle,
-  Bug,
   Check,
   ChevronDown,
   Circle,
@@ -73,28 +73,22 @@ import {
   Download,
   Folder,
   FolderOpen,
-  GitPullRequest,
   HardDrive,
   Loader2,
-  ListTodo,
-  MessageSquare,
   MessageSquareText,
   Pencil,
   PlugZap,
   Plus,
   Radio,
   RefreshCw,
-  Rocket,
   Settings,
   Shield,
   Star,
-  Siren,
   Terminal,
   Bot,
   Trash2,
   PowerOff,
   Users,
-  Webhook,
   Wrench,
 } from "lucide-react";
 
@@ -144,12 +138,6 @@ import type {
 } from "@xmatrix/protocol";
 
 // Semantic module extracted from workspace-app-shell (AST-safe)
-
-export function connectorConnectionStatusLabel(status: SerializedAppConnectorConnection["status"]): string {
-  if (status === "configured") return "Connected";
-  if (status === "error") return "Needs attention";
-  return "Disconnected";
-}
 
 // Mobile overflow hub: groups workspace administration and personal settings
 // without presenting the mixed collection as a personal-profile destination.
@@ -1163,7 +1151,7 @@ export function AppsView({
         setSetupNotice({ tone: "warning", message: "Gmail notification authorization did not finish. Turn notifications on to try again." });
         url.searchParams.delete("gmailWatch");
       }
-      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+      replaceBrowserPath(`${url.pathname}${url.search}${url.hash}`);
       return;
     }
     if (!outcome || !providerId) return;
@@ -1179,7 +1167,9 @@ export function AppsView({
         ? "X authorization did not finish. Use Add X account to try again."
         : `${name} did not finish connecting. Try again, or paste a token under Credentials.` });
     url.searchParams.delete("oauth");
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    // Through the app's own address writer, so the router learns the new address: this
+    // view opens after the shell, whose router would otherwise put the old one back.
+    replaceBrowserPath(`${url.pathname}${url.search}${url.hash}`);
     // The connector remains the single selected detail while return flags are consumed.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, on return from the provider
   }, []);
@@ -1465,30 +1455,6 @@ export function githubConnectionInstallationIdsFromMetadata(
   }
   push(metadata?.installationId);
   return ids;
-}
-
-const CONNECTOR_KIND_ICONS: Partial<Record<AppConnectorManifest["kind"], React.ComponentType<{ className?: string }>>> = {
-  "code-host": GitPullRequest,
-  webhook: Webhook,
-  observability: Bug,
-  "issue-tracker": ListTodo,
-  incident: Siren,
-  chat: MessageSquare,
-  deploy: Rocket,
-  ci: Rocket,
-  gateway: PlugZap,
-};
-
-// The same checked-in vendor assets identify Apps and their message authors.
-// Stable component identities avoid remounting subscription controls on refresh.
-const CONNECTOR_VENDOR_ICONS = new Map(APP_CONNECTOR_PROVIDER_MANIFESTS.map(provider => [provider.id,
-  function ConnectorVendorIcon({ className }: { className?: string }) {
-    return <Image src={`/app-connectors/${provider.id}.svg`} alt="" width={24} height={24}
-      unoptimized className={cn("shrink-0 object-contain", className)} />;
-  }]));
-
-export function connectorIcon(connector: AppConnectorManifest): React.ComponentType<{ className?: string }> {
-  return CONNECTOR_VENDOR_ICONS.get(connector.id) ?? CONNECTOR_KIND_ICONS[connector.kind] ?? PlugZap;
 }
 
 export function ActivityView({ events }: { events: ObservabilityEvent[] }) {

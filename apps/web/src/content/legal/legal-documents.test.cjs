@@ -15,7 +15,7 @@ const cookiesPageSource = read("app/cookies/page.tsx");
 const subprocessorsPageSource = read("app/subprocessors/page.tsx");
 const footerSource = read("components/landing/footer.tsx");
 const loginSource = read("components/auth/auth-shell.tsx");
-const settingsSource = read("components/dashboard/workspace-admin-views.tsx");
+const settingsSource = read("components/dashboard/workspace-settings-team-views.tsx");
 
 test("legal pages render repository-owned policy sources", () => {
   const pages = [

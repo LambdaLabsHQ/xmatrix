@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
 import { ChannelDeletionDialog } from "./channel-deletion-dialog";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
@@ -47,8 +48,6 @@ import { ChannelApprovalsDock } from "./channel-approvals-dock";
 import { humanProfileFromSpaceMember } from "@/components/dashboard/human-profile-summary";
 
 import {
-  AgentConfigPage,
-  AgentInstanceDetailWindow,
   AgentWorkDetailsDock,
   ChannelDetails,
   ChannelHeader,
@@ -61,7 +60,6 @@ import {
   MobileChannelChatList,
   CreateFab,
   MobileTabDock,
-  ToolSurface,
   MobileChannelSummaryPlaque,
   TopWorkspaceBar,
   WorkspaceRail,
@@ -96,7 +94,7 @@ import {
 import { SpaceFirstTaskCard } from "./space-first-task-card";
 import { ListCreate, type CreateAction } from "./list-create";
 import { NewConversation } from "./new-conversation";
-import { SPACE_BILLING_SECTION } from "./settings-billing";
+import { SPACE_BILLING_SECTION } from "./space-billing";
 import { SpaceAllowanceNotice, useSpaceAllowance } from "./space-allowance-notice";
 import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
@@ -111,6 +109,23 @@ import { WorkspaceSearchDialog } from "./workspace-search";
 import type { SearchFilters } from "./workspace-search-model";
 import { OnboardingActionsContext, type OnboardingActions } from "./onboarding-actions";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
+import { ContentSkeleton } from "./content-skeleton";
+
+// Views the first screen does not draw load when first shown, so their code is
+// not downloaded and parsed before the app opens. A view panel shows the
+// skeleton while it loads; the trace window opens over the app once loaded.
+const ToolSurface = dynamic(() => import("./workspace-tool-surface").then((module) => module.ToolSurface), {
+  ssr: false,
+  loading: () => <ContentSkeleton label="Loading" lines={6} className="flex-1 p-6" />,
+});
+const AgentConfigPage = dynamic(() => import("./agent-config-page").then((module) => module.AgentConfigPage), {
+  ssr: false,
+  loading: () => <ContentSkeleton label="Loading" lines={6} className="flex-1 p-6" />,
+});
+const AgentInstanceDetailWindow = dynamic(() => import("./agent-trace-window").then((module) => module.AgentInstanceDetailWindow), {
+  ssr: false,
+  loading: () => null,
+});
 
 /**
  * The dock tab that owns a view. Pages, Channels and Status own themselves;

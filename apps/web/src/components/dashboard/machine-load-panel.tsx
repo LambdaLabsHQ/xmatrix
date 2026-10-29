@@ -5,9 +5,7 @@ import { machineResourceObservation } from "@xmatrix/protocol";
 import { statusInkClass } from "@/components/ui/status-tone";
 import { cn } from "@/lib/utils";
 
-import { MachineLoadHistoryChart } from "./machine-load-history-chart";
 import { machineGlanceReadings, machineLoadReadings, meterTone } from "./machine-load";
-import { MachineNetworkPanel } from "./machine-network-panel";
 import type { MachineSummary } from "./workspace-shell-helpers";
 
 /** One measured share, shown as a labelled value over a bar. */
@@ -21,27 +19,6 @@ export type MeterReading = {
   /** A person should look at this. */
   high: boolean;
 };
-
-/** Live load of an online Machine, and for its owner how that load changed;
- * an offline Machine has no current load but keeps its history. */
-export function MachineLoadPanel({ machine, now, token }: { machine: MachineSummary; now: number; token?: string | null }) {
-  const online = machine.status === "online" && machine.daemon;
-  const history = token && machine.machineId
-    ? <MachineLoadHistoryChart key={machine.machineId} machineId={machine.machineId} token={token} /> : null;
-  if (!online) return history;
-  const resources = machineResourceObservation(machine.daemon!.metadata?.machineResources, now);
-  const readings = machineLoadReadings(resources);
-  return (
-    <>
-      <div className="mt-4 border-t border-border/70 pt-3">
-        <MeterReadingList label="Machine load" readings={readings}
-          empty="No recent load sample from this daemon." />
-        <MachineNetworkPanel network={resources?.network} now={now} />
-      </div>
-      {history}
-    </>
-  );
-}
 
 /** A Machine's load at a glance in its list row: processor, memory and disk, each a toned bar. */
 export function MachineLoadGlance({ machine, now }: { machine: MachineSummary; now: number }) {

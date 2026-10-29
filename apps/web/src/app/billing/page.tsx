@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { spaceAppPath } from "@/components/dashboard/channel-links";
-import { SPACE_BILLING_SECTION } from "@/components/dashboard/settings-billing";
+import { SPACE_BILLING_SECTION } from "@/components/dashboard/space-billing";
 import type { SerializedSpace } from "@xmatrix/protocol";
 
 /*
