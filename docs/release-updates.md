@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Bounded schema collections reject oversized input early
+
+The Hub authentication and AI SDK dependency graph now resolves Zod 4 to
+4.6.6, fixing GHSA-mrhx-c7xc-m3w5 for constrained collections: size checks
+reject oversized arrays, maps and sets before validating their elements.
+Unbounded schemas still need transport limits; the authentication stream
+limit remains the protection for those inputs. Zod 3 in the build tooling
+is outside this change. Hub and beta Web, no schema or protocol migration.
+Recovery is a CI-validated beta reverting the dependency constraint and lock,
+which also restores the dependency risk; keep the transport limit in place.
+
 ## Unreleased: A failed App run is fixed where it shows
 
 Apps → Recent activity showed a failed private call as a user id and
