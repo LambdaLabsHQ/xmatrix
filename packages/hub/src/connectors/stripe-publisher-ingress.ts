@@ -57,7 +57,8 @@ export async function handleStripePublisherDelivery(input: { env: Env; request: 
     } catch (error) {
       // Only an authoritative refusal proves this grant cannot read the event.
       // Lease contention, storage/transport failures and rate limits must retry.
-      if (error instanceof ProviderRequestError && [401, 403, 404].includes(error.status)) return [];
+      const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+      if (typeof status === "number" && [401, 403, 404].includes(status)) return [];
       throw error;
     }
   });
