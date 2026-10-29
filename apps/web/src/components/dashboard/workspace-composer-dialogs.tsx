@@ -42,7 +42,7 @@ import {
   AppsView,
   LocalMacView,
   MachinesView,
-  THIS_MACHINE_ITEM,
+  THIS_MACHINE_SELECTION,
   MoreView,
 } from "./workspace-fleet-views";
 import { MyAgentsView } from "./my-agents-view";
@@ -2493,7 +2493,7 @@ export function ToolSurface({
   onOpenAgentCreate: () => void;
   onOpenLocalManagedAgentEdit: () => void;
   onDeleteAgent: (agent: LocalManagedAgent) => void;
-  onChangeView: (view: AppView, item?: string) => void;
+  onChangeView: (view: AppView, search?: string) => void;
   /** Opens the GitHub issue form for a report. */
   onReportIssue?: () => void;
 } & SpaceMemberActions & ScheduleActions) {
@@ -2597,11 +2597,11 @@ export function ToolSurface({
         events={currentSpaceEvents}
         automations={currentSpaceAutomations}
         executionEnabled={automationExecutionEnabled}
-        onOpenAgent={(registrationId) => onChangeView("agents", registrationId)}
+        onOpenAgent={(registrationId) => onChangeView("agents", `agent=${encodeURIComponent(registrationId)}`)}
         onOpenAgents={() => onChangeView("agents")}
-        onOpenMachine={(machineId) => onChangeView("machines", machineId)}
+        onOpenMachine={(machineId) => onChangeView("machines", `machine=${encodeURIComponent(machineId)}`)}
         onOpenMachines={() => onChangeView("machines")}
-        onOpenSchedule={(automationId) => onChangeView("automation", automationId)}
+        onOpenSchedule={(automationId) => onChangeView("automation", `schedule=${encodeURIComponent(automationId)}`)}
         onOpenSchedules={() => onChangeView("automation")}
       />
     );
@@ -2640,7 +2640,7 @@ export function ToolSurface({
         error={agentsError}
         token={token}
         spaceId={currentSpace?.id}
-        defaultItem={view === "local" ? THIS_MACHINE_ITEM : undefined}
+        defaultMachineId={view === "local" ? THIS_MACHINE_SELECTION : undefined}
         thisMachine={desktopAvailable && desktopContext
           && !["ios", "android"].includes(desktopContext.platform) ? {
           machineId: desktopContext?.machineId,

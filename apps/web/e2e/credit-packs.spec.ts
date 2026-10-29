@@ -17,7 +17,7 @@ test("a Pro owner starts a fixed-price pack checkout and sees a provider failure
   await fixtureJson(page, "pack-billing", /\/billing$/u, { billing });
   await fixtureJson(page, "pack-checkout", /\/billing\/credits\/checkout$/u,
     { error: "Credit pack checkout is temporarily unavailable" }, { status: 503 });
-  await page.goto("/app/personal-sspaceperso/settings?item=billing");
+  await page.goto("/app/personal-sspaceperso/settings?section=billing");
   await page.getByRole("button", { name: "Buy 5,000 credits · $10" }).click();
   await expect(page.getByTestId("space-billing").getByRole("alert")).toContainText("Credit pack checkout is temporarily unavailable");
   const requests = await fixtureRequestRecords(page, "pack-checkout");
@@ -31,7 +31,7 @@ test("returning from Checkout confirms through the server before showing the new
   await fixtureJson(page, "pack-billing", /\/billing$/u, { billing });
   await fixtureJson(page, "pack-reconcile", /\/billing\/credits\/reconcile$/u,
     { billing: { ...billing, credits: { ...billing.credits, packBalance: 5_000 } } });
-  await page.goto("/app/personal-sspaceperso/settings?item=billing&credit_pack_checkout=success&credit_pack_session_id=cs_test_verified");
+  await page.goto("/app/personal-sspaceperso/settings?section=billing&credit_pack_checkout=success&credit_pack_session_id=cs_test_verified");
   await expect(page.getByRole("status").filter({ hasText: "Credit pack payment confirmed" })).toBeVisible();
   await expect(page.getByText("5,000 pack credits left", { exact: false })).toBeVisible();
   const requests = await fixtureRequestRecords(page, "pack-reconcile");

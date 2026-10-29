@@ -143,8 +143,7 @@ import {
   SPLIT_TOOL_VIEWS,
   adminViewPath,
   agentsProfileEditPath,
-  toolItemPath,
-  toolItemSelection,
+  viewSelectionPath,
   pagesViewSelection,
   attentionSummaryFromEvent,
   browserDevicePresence,
@@ -2867,7 +2866,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       ? pagesViewPath(viewPath, selectedPageId, routeInfo.conversationKey)
       : view === "admin" || view === "settings" || view === "apps" ? adminViewPath(viewPath, currentBrowserLocation())
       : view === "agents" ? agentsProfileEditPath(viewPath, currentBrowserLocation())
-      : SPLIT_TOOL_VIEWS.includes(view) ? toolItemPath(viewPath, toolItemSelection(currentBrowserLocation())) : viewPath;
+      : SPLIT_TOOL_VIEWS.includes(view) ? viewSelectionPath(viewPath, currentBrowserLocation()) : viewPath;
     if (currentBrowserLocation() !== canonicalPath) {
       replaceBrowserPath(canonicalPath);
       setBrowserPath(canonicalPath);

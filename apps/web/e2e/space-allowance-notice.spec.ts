@@ -55,7 +55,7 @@ test("a used-up Free Space asks above the composer, clear of the conversation, a
     return row!.y + row!.height - card!.y;
   }).toBeLessThanOrEqual(1);
   await notice.getByRole("button", { name: "Upgrade to Pro" }).click();
-  await expect(page).toHaveURL(/\/settings\?item=billing/u);
+  await expect(page).toHaveURL(/\/settings\?section=billing/u);
   await expect(page.getByTestId("space-billing")).toBeVisible();
 });
 

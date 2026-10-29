@@ -44,7 +44,7 @@ test("a platform admin sees active people, growth, activation, retention, and pl
 
 test("the Spaces table searches and sorts, keeping its state in the address", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
-  await page.goto("/app/personal-sspaceperso/admin?item=spaces");
+  await page.goto("/app/personal-sspaceperso/admin?section=spaces");
 
   const spaces = page.getByRole("region", { name: "Spaces" });
   await expect(spaces.getByText("Lambda Labs")).toBeVisible();
@@ -82,7 +82,7 @@ test("opening a user shows their metadata-only detail, and Back returns to the l
       OVERVIEW.users[0],
     ] },
   });
-  await page.goto("/app/personal-sspaceperso/admin?item=users");
+  await page.goto("/app/personal-sspaceperso/admin?section=users");
 
   const users = page.getByRole("region", { name: "Registered users" });
   await expect(users.getByRole("columnheader", { name: "Last message" })).toHaveAttribute("aria-sort", "descending");
@@ -121,7 +121,7 @@ test("opening a user shows their metadata-only detail, and Back returns to the l
 
 test("the audit trail lists operator reads", async ({ page }) => {
   await openWorkspaceAs(page, true);
-  await page.goto("/app/personal-sspaceperso/admin?item=audit");
+  await page.goto("/app/personal-sspaceperso/admin?section=audit");
   const audit = page.getByRole("region", { name: "Audit trail" });
   await expect(audit.getByText("Opened a user")).toBeVisible();
   await expect(audit.getByText("user:user:1")).toBeVisible();
@@ -134,7 +134,7 @@ test("connector activity stays unknown with an older Hub", async ({ page }) => {
       ...connector, usage: undefined,
     })) },
   });
-  await page.goto("/app/personal-sspaceperso/admin?item=users&user=user%3A1");
+  await page.goto("/app/personal-sspaceperso/admin?section=users&user=user%3A1");
   const connectors = page.getByRole("region", { name: "Connectors added (1)" });
   await expect(connectors.getByText("GitHub")).toBeVisible();
   await expect(connectors.getByText("—", { exact: true })).toHaveCount(5);
@@ -169,13 +169,13 @@ test("changing the range keeps it in the address and reads nothing new", async (
   expect(await fixtureRequests(page, "admin-overview")).toHaveLength(reads.length);
 
   // Users and Spaces read the same overview: opening them waits on nothing.
-  await page.goto("/app/personal-sspaceperso/admin?item=users");
+  await page.goto("/app/personal-sspaceperso/admin?section=users");
   await expect(page.getByRole("region", { name: "Registered users" }).getByText("Active days, 30d")).toBeVisible();
 });
 
 test("a Space opens from the list with billing, members, and usage, and a member opens their user", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
-  await page.goto("/app/personal-sspaceperso/admin?item=spaces");
+  await page.goto("/app/personal-sspaceperso/admin?section=spaces");
   await page.getByRole("region", { name: "Spaces" }).getByText("Lambda Labs").click();
   await expect(page).toHaveURL(/space=space%3Alambda/);
 
@@ -193,14 +193,14 @@ test("a Space opens from the list with billing, members, and usage, and a member
   await page.screenshot({ path: testInfo.outputPath("desktop-space-detail.png"), fullPage: true });
 
   await page.getByRole("region", { name: "Members (2)" }).getByText("member@example.com").click();
-  await expect(page).toHaveURL(/item=users/);
+  await expect(page).toHaveURL(/section=users/);
   await expect(page).toHaveURL(/user=user%3A3/);
   await expect(page).not.toHaveURL(/space=/);
   await expect(page.getByRole("heading", { name: "Owner" })).toBeVisible();
 
   // The user's Spaces lead back to the Space detail.
   await page.getByRole("region", { name: "Spaces (1)" }).getByText("Lambda Labs").click();
-  await expect(page).toHaveURL(/item=spaces/);
+  await expect(page).toHaveURL(/section=spaces/);
   await expect(page.getByRole("heading", { name: "Lambda Labs" })).toBeVisible();
   await page.getByRole("button", { name: "Spaces", exact: true }).first().click();
   await expect(page).not.toHaveURL(/space=/);
@@ -209,7 +209,7 @@ test("a Space opens from the list with billing, members, and usage, and a member
 
 test("Operations shows Machines, runtimes, Runs, and Automations", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
-  await page.goto("/app/personal-sspaceperso/admin?item=operations");
+  await page.goto("/app/personal-sspaceperso/admin?section=operations");
   await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
   // data.outbox has no consumer, so there is no delivery backlog to report.
   await expect(page.getByText(/Event delivery/)).toHaveCount(0);
@@ -224,7 +224,7 @@ test("Operations shows Machines, runtimes, Runs, and Automations", async ({ page
 
 test("Billing lists subscriptions, webhooks, and platform paid calls", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
-  await page.goto("/app/personal-sspaceperso/admin?item=billing");
+  await page.goto("/app/personal-sspaceperso/admin?section=billing");
   await expect(page.getByRole("status").getByText("1 Space is in a payment grace period.")).toBeVisible();
   const subscriptions = page.getByRole("region", { name: "Subscriptions", exact: true }).getByRole("region", { name: "Subscriptions" });
   await expect(subscriptions.getByText("Lambda Labs")).toBeVisible();
@@ -232,6 +232,6 @@ test("Billing lists subscriptions, webhooks, and platform paid calls", async ({ 
   await expect(page.getByRole("region", { name: "Paid calls" }).getByText("ok 296 · uncertain 4")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("desktop-billing.png"), fullPage: true });
   await subscriptions.getByText("Lambda Labs").click();
-  await expect(page).toHaveURL(/item=spaces/);
+  await expect(page).toHaveURL(/section=spaces/);
   await expect(page.getByRole("heading", { name: "Lambda Labs" })).toBeVisible();
 });
