@@ -78,11 +78,12 @@ export const receiveBuildkiteDelivery = createSignedJsonReceiver({ name: "Buildk
   })] };
 });
 
-export const receiveStripeDelivery = createSignedJsonReceiver({ name: "Stripe", secretField: "signingSecret", proof: STRIPE_SIGNATURE }, (_, payload) => {
+/** Both Stripe's signed webhook and its authenticated event API use this representation. */
+export function stripeEvent(payload: Record<string, unknown>) {
   const type = text(payload.type);
   const object = record(record(payload.data).object);
   const account = /^acct_[A-Za-z0-9]{1,64}$/u.test(text(payload.account)) ? text(payload.account) : undefined;
-  return { ok: true, events: [connectorEvent({
+  return connectorEvent({
     eventId: `stripe:${text(payload.id)}`,
     sourceRef: `stripe:${sourceToken(type.split(".")[0]) || "*"}`,
     feature: "events",
@@ -91,8 +92,11 @@ export const receiveStripeDelivery = createSignedJsonReceiver({ name: "Stripe", 
     details: [account ? `Account: ${account}` : undefined,
       text(object.amount) ? `Amount: ${text(object.amount)} ${text(object.currency).toUpperCase()}` : undefined,
       text(object.status) ? `Status: ${text(object.status)}` : undefined],
-  })] };
-});
+  });
+}
+
+export const receiveStripeDelivery = createSignedJsonReceiver({ name: "Stripe", secretField: "signingSecret", proof: STRIPE_SIGNATURE },
+  (_, payload) => ({ ok: true, events: [stripeEvent(payload)] }));
 
 export const receiveGrafanaDelivery = createSignedJsonReceiver({ name: "Grafana", secretField: "webhookToken", proof: { header: "authorization", token: true, bearer: true } }, async (_, payload) => {
   const status = text(payload.status);

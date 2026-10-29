@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Stripe events from the App's own publishing account
+
+Stripe excludes an App's publishing account from Connect webhooks, even after
+OAuth installation. A separate operator-configured own-account endpoint now
+verifies its independent signature and reads the same event using each Space's
+current OAuth grant before posting. Reconnection or removal fences an in-flight
+delivery. It keeps all retained merchant grants, the five read-only permissions,
+and billing unchanged. The platform endpoint still ignores events without an
+account. Hub only, no schema or client change; the optional configuration pair
+disables this endpoint when absent. See [Stripe accounts](connectors/stripe.md#the-app-publishers-own-account).
+
 ## Unreleased: The open app says when it is offline or reconnecting
 
 A tinted-paper tile over the reading column, just under the top band, says

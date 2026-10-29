@@ -15,6 +15,7 @@ import { connectorPermissionRepository, connectorIngressUrl, connectorCredential
   mintConnectorSecret } from "./connectors/credentials";
 import { handleAppConnectorDelivery, handleConnectorDelivery } from "./connectors/event-ingress";
 import { handleStripeAppDelivery } from "./connectors/stripe-app-ingress";
+import { handleStripePublisherDelivery } from "./connectors/stripe-publisher-ingress";
 import { handleSentryInstallationDelivery } from "./connectors/sentry-app-lifecycle";
 import { handleVercelAppDelivery } from "./connectors/vercel-app-ingress";
 import { handleGoogleChatAppDelivery } from "./connectors/googlechat-ingress";
@@ -84,6 +85,13 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
   app.post("/api/connectors/dingtalk/events", c => handleDingTalkSyncHTTP(c.env, c.req.raw));
   app.on(["GET", "POST"], "/api/connectors/wecom/suite", c => handleWeComSuiteCallback(c.env, c.req.raw));
   app.on(["GET", "POST"], "/api/connectors/wecom/events", c => handleWeComAppDelivery(c.env, c.req.raw));
+  app.post("/api/connectors/stripe/publisher/events", async c => {
+    try {
+      return await handleStripePublisherDelivery({ env: c.env, request: c.req.raw });
+    } catch {
+      return Response.json({ error: "Connector ingress is unavailable" }, { status: 503 });
+    }
+  });
   app.post("/api/connectors/:providerId/events", async (c) => {
     try {
       if (c.req.param("providerId") === "discord") return await handleDiscordLifecycleDelivery(c.env, c.req.raw);

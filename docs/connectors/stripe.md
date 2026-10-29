@@ -55,6 +55,39 @@ live subscription authority again before append. Events without `account`
 route nowhere. Revocation compares the signed event's time to authorization
 time, conservatively retiring same-second ambiguity, never a later grant.
 
+## The App publisher's own account
+
+Stripe does not send Connect webhooks for an App installed in its publishing
+account ([Stripe's account model](https://docs.stripe.com/stripe-apps/how-stripe-apps-work#install-an-app-in-the-developers-account)).
+That account still connects through OAuth. The operator registers a separate
+**own-account** webhook at `POST /api/connectors/stripe/publisher/events`, using
+the same payment-failure, dispute and subscription event types. No billing or
+platform webhook setting changes.
+
+The release injects `CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID` from the confirmed
+publishing account and that endpoint's independent
+`CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET`. Neither a partial pair nor a secret
+shared with billing or the platform endpoint is accepted. These are operator
+settings, not fields the connecting user fills in. Register the endpoint only
+after the implementation and its release configuration are ready; save its
+new signing secret through stdin and deploy it through Production Release
+Intent. Without this configuration the endpoint is unavailable. A release that
+omits optional secrets preserves existing Worker settings; to retire an already
+configured endpoint, use a validated forward Hub change rather than deleting
+OAuth grants or assuming an omitted secret clears it.
+
+Signature and freshness are verified before any grant lookup. This endpoint
+accepts only Live own-account events; caller-supplied `account` is rejected.
+For each currently connected Space, its own retained OAuth token must retrieve
+the exact event id through `event_read`. Stripe must confirm the event's id,
+type, timestamp and mode. Delivery renders Stripe's retrieved content, labels
+it with the configured publisher account, and rechecks that same grant
+generation before Channel append and Automation dispatch. Unreadable events,
+removed grants and grants replaced during confirmation do not deliver.
+Upstream server errors retry without falling back to an operator token or a
+pasted parent credential. Confirmation has a bounded request budget. The
+platform endpoint still ignores all events without `account`.
+
 ## Release and recovery
 
 Ship Hub and beta Web through Production Release Intent. Verify two accounts,

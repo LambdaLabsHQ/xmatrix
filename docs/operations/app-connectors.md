@@ -531,6 +531,13 @@ Register each provider's OAuth app with the redirect URI
   disconnects bindings older than the event. The upload package, including the
   company icon and the Stripe CLI lockfile, lives in `docs/integrations/stripe-app/`
   and is not a workspace package.
+- Stripe's publishing account does not receive Connect webhooks. Its own
+  account uses the independent `/api/connectors/stripe/publisher/events`
+  endpoint and release pair `CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID` /
+  `CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET`; this never replaces a Space's
+  OAuth grants. The signature precedes lookup, and each Space's current grant
+  must read back the same event before delivery. The platform endpoint's
+  missing-account behavior stays zero delivery. See [Stripe accounts](../connectors/stripe.md#the-app-publishers-own-account).
 - A Slack workspace connects to one Space; Connect from another Space is
   refused, even after a disconnect or the Space's deletion, because the bot
   stays in the channels it joined. To move a workspace, a Slack workspace admin
