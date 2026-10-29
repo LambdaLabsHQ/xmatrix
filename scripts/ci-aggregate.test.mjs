@@ -179,3 +179,38 @@ test("an unselected partition failure is not hidden", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /web-unselected=failure/);
 });
+
+test("hosted turbo cache scopes are not prefixes of each other", () => {
+  const webJob = workflow.slice(workflow.indexOf("\n  web:\n"), workflow.indexOf("\n  hub:\n"));
+  const matrices = [...webJob.matchAll(/\[[^\]]*\{"name":[^\]]*\]/gu)].map((match) => JSON.parse(match[0]));
+  assert.equal(matrices.length, 3);
+  const scopes = new Set(["hub"]);
+  for (const entries of matrices) {
+    const writers = new Map();
+    for (const entry of entries) {
+      assert.equal(typeof entry.scope, "string", entry.name);
+      scopes.add(entry.scope);
+      const writes = entry.primary === true || String(entry.shard).startsWith("1/");
+      if (!writes) continue;
+      writers.set(entry.scope, (writers.get(entry.scope) ?? 0) + 1);
+    }
+    for (const [scope, count] of writers) {
+      assert.equal(count, 1, `two jobs would save turbo scope ${scope}`);
+    }
+  }
+  // Actions restore-keys are prefixes. `web-` matches historical and current
+  // `web-browser-` keys, so a product job restored the browser cache.
+  const reserved = new Set([...scopes, "web", "web-browser"]);
+  for (const scope of scopes) {
+    for (const other of reserved) {
+      if (scope === other) continue;
+      assert.equal(
+        `${other}-`.startsWith(`${scope}-`),
+        false,
+        `${scope} restore prefix matches ${other} keys`,
+      );
+    }
+  }
+  assert.match(webJob, /key: turbo-\$\{\{ runner\.os \}\}-\$\{\{ matrix\.scope \}\}-\$\{\{ github\.sha \}\}/u);
+  assert.doesNotMatch(webJob, /matrix\.primary && 'web'/u);
+});
