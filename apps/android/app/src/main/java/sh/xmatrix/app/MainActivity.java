@@ -184,6 +184,15 @@ public final class MainActivity extends ComponentActivity {
           loadPackagedFallback(request.getUrl());
         }
       }
+
+      // A server error page (a 5xx from the edge) is no app: open the copy the
+      // app carries, whose startup frame says it is still connecting.
+      @Override
+      public void onReceivedHttpError(WebView webView, WebResourceRequest request, WebResourceResponse response) {
+        if (response != null && response.getStatusCode() >= 500 && shouldFallbackToPackagedAssets(request)) {
+          loadPackagedFallback(request.getUrl());
+        }
+      }
     });
 
     WebSettings settings = view.getSettings();
