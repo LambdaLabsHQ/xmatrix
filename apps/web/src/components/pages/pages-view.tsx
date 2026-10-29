@@ -1260,7 +1260,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // The Instances live in this page's conversations, which an `@` calls by name rather than starting another.
   const instances = useMemo(() => pageInstances(liveOnPage, (id) => conversation(id)?.name ?? null), [conversation, liveOnPage]);
   const completion = useMemo<PageCompletion | undefined>(() => spaceId ? {
-    spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [], agents: writers.agents, instances,
+    spaceId, pages: tree.data ?? [], channels: referenceCatalog?.channels ?? [],
+    channelActivityMs: referenceCatalog?.channelActivityMs, agents: writers.agents, instances,
     readPage: (id) => queryClient.fetchQuery(pageDocumentQuery(userId ?? null, spaceId, id, token)),
     summonAgent: (harness, blockId, at) => {
       if (!page) return;
@@ -1276,7 +1277,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       addSummon(summon);
       void callInstanceRef.current?.(instance, blockId || null, summon);
     },
-  } : undefined, [addSummon, instances, page, queryClient, referenceCatalog?.channels, spaceId, token, tree.data, userId,
+  } : undefined, [addSummon, instances, page, queryClient, referenceCatalog?.channelActivityMs, referenceCatalog?.channels, spaceId, token, tree.data, userId,
     writers.agents]);
   useEffect(() => {
     if (!page || !canEdit || !coWriteRef.current) return;

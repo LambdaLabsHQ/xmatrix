@@ -4,6 +4,7 @@ import {
   type PageSummary,
   type ChannelSnapshot,
 } from "@xmatrix/protocol";
+import { rankSearchResults, searchActivityMs, searchMatchTier } from "./workspace-search-rank";
 
 /**
  * Typing a reference (pages-and-conversations.md §4.3): `#` picks a channel,
@@ -47,21 +48,15 @@ export function findActiveReference(draft: string, cursor: number): ActiveRefere
   return { kind: "channel", start, end: cursor, query };
 }
 
-function rank(label: string, query: string): number {
-  const text = label.toLowerCase();
-  const wanted = query.toLowerCase();
-  if (!wanted) return 1;
-  if (text === wanted) return 4;
-  if (text.startsWith(wanted)) return 3;
-  if (text.split(/[\s\-_/·]+/u).some((word) => word.startsWith(wanted))) return 2;
-  return text.includes(wanted) ? 1 : 0;
-}
-
-function byRank<T>(items: readonly T[], label: (item: T) => string, query: string, limit: number): T[] {
-  return items
-    .map((item, index) => ({ item, index, score: rank(label(item), query) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || a.index - b.index)
+/**
+ * Completion ranks as search does (`workspace-search-rank.ts`): how well the
+ * title matches, then how recently the thing was active. Only title matches
+ * complete; equal ranks keep their given order.
+ */
+function byRank<T>(items: readonly T[], label: (item: T) => string, activityMs: (item: T) => number,
+  query: string, limit: number): T[] {
+  return rankSearchResults(items.map((item) => ({ item, rank: { tier: searchMatchTier(query, label(item)), activityMs: activityMs(item) } }))
+    .filter((entry) => !query.trim() || entry.rank.tier < 3), (entry) => entry.rank)
     .slice(0, limit)
     .map((entry) => entry.item);
 }
@@ -71,12 +66,12 @@ export type ReferenceCandidate =
   | { kind: "page"; id: string; label: string; detail: string; pageId: string; blockId: string | null };
 
 export function channelReferenceCandidates(channels: readonly Pick<ChannelSnapshot, "id" | "spaceId" | "name" | "topic" | "summary">[], query: string,
-  spaceId: string | null, currentChannelId: string | null): ReferenceCandidate[] {
+  spaceId: string | null, currentChannelId: string | null,
+  activityMs: (channelId: string) => number = () => 0): ReferenceCandidate[] {
   const pool = channels.filter((channel) => (!spaceId || channel.spaceId === spaceId) && channel.name?.trim());
-  // The conversation being written in is the least likely one to point at.
-  const ordered = [...pool.filter((channel) => channel.id !== currentChannelId),
-    ...pool.filter((channel) => channel.id === currentChannelId)];
-  return byRank(ordered, (channel) => channelLabel(channel), query, 8).map((channel) => ({
+  // The conversation being written in is the least likely one to point at: last among equal matches.
+  return byRank(pool, (channel) => channelLabel(channel),
+    (channel) => channel.id === currentChannelId ? -Infinity : activityMs(channel.id), query, 8).map((channel) => ({
     kind: "channel", id: `channel:${channel.id}`, label: channelLabel(channel),
     detail: channel.topic?.trim() || channel.summary?.trim().split("\n")[0] || "", channelId: channel.id,
   }));
@@ -84,7 +79,7 @@ export function channelReferenceCandidates(channels: readonly Pick<ChannelSnapsh
 
 export function pageReferenceCandidates(pages: readonly PageSummary[], query: string): ReferenceCandidate[] {
   const titles = new Map(pages.map((page) => [page.pageId, page.title.trim() || "Untitled"]));
-  return byRank(pages, (page) => titles.get(page.pageId)!, query, 8).map((page) => ({
+  return byRank(pages, (page) => titles.get(page.pageId)!, (page) => searchActivityMs(page.updatedAt), query, 8).map((page) => ({
     kind: "page", id: `page:${page.pageId}`, label: titles.get(page.pageId)!,
     detail: page.parentPageId ? titles.get(page.parentPageId) ?? "" : "", pageId: page.pageId, blockId: null,
   }));
@@ -94,7 +89,7 @@ export function pageReferenceCandidates(pages: readonly PageSummary[], query: st
 export function sectionReferenceCandidates(page: { pageId: string; title: string },
   blocks: ReadonlyArray<{ id: string; title: string; depth: number }>, query: string): ReferenceCandidate[] {
   const title = page.title.trim() || "Untitled";
-  const sections = byRank(blocks.filter((block) => block.id), (block) => block.title, query, 12);
+  const sections = byRank(blocks.filter((block) => block.id), (block) => block.title, () => 0, query, 12);
   return [
     ...(query ? [] : [{ kind: "page" as const, id: `page:${page.pageId}`, label: title, detail: "Whole page",
       pageId: page.pageId, blockId: null }]),

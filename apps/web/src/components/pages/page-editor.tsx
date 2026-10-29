@@ -155,6 +155,8 @@ export interface PageCompletion {
   spaceId: string;
   pages: readonly PageSummary[];
   channels: readonly ChannelReference[];
+  /** When a channel was last active, so `#` ranks recent channels first. */
+  channelActivityMs?: (channelId: string) => number;
   agents: readonly WriteAgent[];
   /** The live Instances in this page's conversations, which an `@` calls by name instead of starting one. */
   instances: readonly PageInstance[];
@@ -202,7 +204,7 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
   }
   if (!completion) return [];
   if (trigger.kind === "channel") {
-    return channelReferenceCandidates(completion.channels, trigger.query, completion.spaceId, null)
+    return channelReferenceCandidates(completion.channels, trigger.query, completion.spaceId, null, completion.channelActivityMs)
       .map((candidate) => referenceItem(trigger, candidate));
   }
   if (trigger.kind === "page") {
