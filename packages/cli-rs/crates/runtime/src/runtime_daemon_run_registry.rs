@@ -825,15 +825,18 @@ async fn report_finished_daemon_children(
             .map(|exit| report_finished_daemon_child(registry, relay, exit)),
     )
     .await;
-    // A row whose exit report is still unacknowledged is not a live Run.
-    let live = registry
-        .lock()
-        .await
-        .values()
-        .any(|managed| crate::process_tree::process_alive(managed.pid));
-    if !live {
-        runtime_daemon_harness_action::on_daemon_idle(relay);
-    }
+}
+
+/// Whether a live Run may be using `preset_id`'s harness: one launched with
+/// it, or one whose row does not name its harness (written by an older daemon).
+pub(crate) async fn harness_has_live_run(registry: &DaemonRunRegistry, preset_id: &str) -> bool {
+    registry.lock().await.values().any(|managed| {
+        managed
+            .agent_preset_id
+            .as_deref()
+            .is_none_or(|id| id == preset_id)
+            && crate::process_tree::process_alive(managed.pid)
+    })
 }
 
 async fn report_finished_daemon_child(

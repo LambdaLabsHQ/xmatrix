@@ -63,7 +63,7 @@ integration("snapshot inventories persist per connection, never regress and need
   } finally { await fixture.close(); }
 });
 
-integration("release targets read the current schema and skip daemons that already saw the version", async () => {
+integration("release targets are daemons whose switch is on and whose installed version is not the latest", async () => {
   const fixture = await isolatedPostgres("harness_release", { shard: true });
   const { client, session } = fixture;
   try {
@@ -73,7 +73,12 @@ integration("release targets read the current schema and skip daemons that alrea
     await controls.command({ ...route, commandId: "connect", action: "connect", principal, payload: {},
       capabilities: ["machine_harness_inventory_v1", "machine_harness_release_v1"],
       metadata: { xmatrixDaemonVersion: "0.16.600", harnesses: { schemaVersion: 1, capturedAt: new Date().toISOString(),
-        items: [{ id: "claude", installed: true, version: "1.0.0", probeStatus: "ok", latestVersion: "1.0.0" }] } } });
+        items: [
+          // Seeing the latest version is not installing it: still a target.
+          { id: "claude", installed: true, version: "1.0.0", probeStatus: "ok", latestVersion: "2.0.0", autoUpdate: "enabled" },
+          { id: "cursor", installed: true, version: "2026.10.01", probeStatus: "ok", autoUpdate: "enabled" },
+          { id: "codex", installed: true, version: "0.1.0", probeStatus: "ok", autoUpdate: "disabled" },
+        ] } } });
     const { hostname } = (await client.query(
       "SELECT hostname FROM data.machine_daemons WHERE daemon_id=$1", [daemonId])).rows[0];
     const read = (...releases) => readHarnessReleaseTargets(session, { requestId: `release:${releases.length}`, releases });
@@ -82,9 +87,11 @@ integration("release targets read the current schema and skip daemons that alrea
 
     assert.deepEqual(await read({ presetId: "claude", version: "2.0.0" }), [target]);
     assert.deepEqual(await read({ presetId: "claude", version: "1.0.0" }), []);
-    // Every watched preset is read in one statement; a preset the daemon lacks names no target.
-    assert.deepEqual(await read({ presetId: "codex", version: "9.0.0" }, { presetId: "claude", version: "2.0.0" }),
-      [target]);
+    // A switch that is off is never a target, and a preset the daemon lacks names none.
+    assert.deepEqual(await read({ presetId: "codex", version: "9.0.0" }, { presetId: "claude", version: "2.0.0" },
+      { presetId: "gemini", version: "1.0.0" }), [target]);
+    // A preset without a registry has no version to compare.
+    assert.deepEqual(await read({ presetId: "cursor" }), [{ ...target, presetId: "cursor" }]);
     assert.deepEqual(await read(), []);
     // Every watched preset at once stays within the client's result bound.
     const many = Array.from({ length: 40 }, (_, index) => ({ presetId: `preset-${index}`, version: "1.0.0" }));

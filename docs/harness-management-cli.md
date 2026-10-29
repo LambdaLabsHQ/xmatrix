@@ -23,11 +23,13 @@ offer no Uninstall. Running instances of that harness may stop working. A
 daemon must report `machine_harness_uninstall_v1`; older daemons are never
 given an uninstall request.
 
-Automatic updating uses the harness's documented native control where supported,
-or the daemon's own update for supported harnesses without native updating, or
-whose updater never runs in an xMatrix launch (Claude Code). Hub watches the
-official registries and tells each daemon about a new release; except for
-Claude Code, the daemon waits until no Run is live on it before updating. Native environment and flag controls
+Automatic updating sets the harness's documented native control where supported,
+and while the switch shows on the daemon itself runs the official update recipe:
+xMatrix launches are headless, where most built-in updaters never run. Hub
+watches the official registries and tells each daemon whose installed version
+is not the latest, every 30 minutes until it is; a harness with no registry is
+told daily. Except for Claude Code, the daemon waits while a Run of that harness
+is live. Native environment and flag controls
 apply only to new xMatrix-launched instances; they do not change existing or
 externally launched processes. Unsupported controls remain
 disabled. Upstream defaults describe the harness, while the inventory's

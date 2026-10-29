@@ -130,6 +130,7 @@ fn test_empty_daemon_run_child() -> super::DaemonRunChild {
         repo_pool_binding: None,
         agent_id: None,
         agent_name: None,
+        agent_preset_id: None,
         auth_capability: None,
         request_capability: None,
         request_context: None,

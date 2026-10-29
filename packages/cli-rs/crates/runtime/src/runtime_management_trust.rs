@@ -139,6 +139,9 @@ struct DaemonRunChild {
     repo_pool_binding: Option<DaemonRepoPoolBinding>,
     agent_id: Option<String>,
     agent_name: Option<String>,
+    /// The harness this Run launched; an automatic update of that harness
+    /// waits while it is live. Rows from older daemons have none.
+    agent_preset_id: Option<String>,
     auth_capability: Option<String>,
     request_capability: Option<String>,
     request_context: Option<DaemonRequestAgentContext>,
@@ -252,6 +255,8 @@ struct PersistedDaemonRun {
     agent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     agent_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    agent_preset_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     auth_capability: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -512,6 +517,7 @@ struct SpawnedHeadlessAgent {
     repo_pool_binding: Option<DaemonRepoPoolBinding>,
     agent_id: Option<String>,
     agent_name: String,
+    agent_preset_id: Option<String>,
     spawned_at: String,
     pid: u32,
     status_file_path: Option<PathBuf>,
