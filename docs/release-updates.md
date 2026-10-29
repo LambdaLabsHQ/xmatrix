@@ -11,6 +11,7 @@ bearer and client identity and never a cookie, as page reads already do; a
 `401`, `426` or no answer across origins goes through the Web. Message
 attachments share the path. Hub and Web, no migration. Recovery is reverting
 #1196. See [Client resilience](architecture/client-resilience.md).
+
 ## Unreleased: The app starts one Hub round trip sooner and paints its last list
 
 Web sign-in now takes the bearer from the `set-auth-jwt` header the Hub's jwt
