@@ -12,6 +12,7 @@ import { isSentryInstallationGrant, refreshSentryInstallation } from "./sentry-i
 import { cloudflareGrantContext } from "./cloudflare-api";
 import { parseCloudflareLogins, serializeCloudflareLogins } from "./cloudflare-logins";
 import { composioConnectedAccount, composioConnectUrl, composioUserId } from "./composio";
+import { trimmedConnectorEnv } from "./connector-env";
 import { allowedStripeAuthorizeUrl, stripeAppSecretsReady, validateStripeGrant } from "./stripe-oauth";
 import { xOAuthFields } from "./x-oauth";
 
@@ -86,8 +87,7 @@ export interface OAuthClient {
 }
 
 function envValue(env: Env, name: string): string {
-  const value = (env as unknown as Record<string, unknown>)[name];
-  return typeof value === "string" ? value.trim() : "";
+  return trimmedConnectorEnv(env, name);
 }
 
 export function oauthClient(env: Env, providerId: string): OAuthClient | undefined {

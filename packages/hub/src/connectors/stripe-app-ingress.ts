@@ -1,9 +1,9 @@
-import { readBoundedRequestBody } from "../index-shared";
 import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { fireConnectorAutomationTriggers } from "../automation-triggers";
 import { connectorAppRepository, connectorCredentialRepository } from "./credentials";
-import { deliverEvent, type ConnectorIngressDependencies } from "./event-ingress";
+import { trimmedConnectorEnv } from "./connector-env";
+import { deliverEvent, readSignedProviderDelivery, type ConnectorIngressDependencies } from "./event-ingress";
 import { parseJsonObject } from "./event-format";
 import { oauthClient } from "./oauth";
 import { connectorProvider } from "./registry";
@@ -16,11 +16,6 @@ const DEPENDENCIES: ConnectorIngressDependencies = {
 const MAX_CONNECTIONS = 50;
 const NOT_FOUND = () => Response.json({ error: "Connector ingress not found" }, { status: 404 });
 
-function signingSecret(env: Env): string {
-  const value = (env as unknown as Record<string, unknown>).CONNECTOR_STRIPE_SIGNING_SECRET;
-  return typeof value === "string" ? value.trim() : "";
-}
-
 /**
  * The company Stripe App webhook. One endpoint receives every installed
  * account; the signed `account` field selects the Space. A per-Space ingress
@@ -31,15 +26,12 @@ export async function handleStripeAppDelivery(input: { env: Env; request: Reques
   const { env, request } = input;
   const client = oauthClient(env, "stripe");
   const provider = connectorProvider("stripe");
-  const secret = signingSecret(env);
+  const secret = trimmedConnectorEnv(env, "CONNECTOR_STRIPE_SIGNING_SECRET");
   if (!client || !provider?.events || !secret) return NOT_FOUND();
-  const bytes = await readBoundedRequestBody(request, 256 * 1024);
-  if (!bytes) return Response.json({ error: "Connector delivery is too large" }, { status: 413 });
-  const rawBody = new TextDecoder().decode(bytes);
-  const received = await provider.events.receive({ rawBody, headers: request.headers, url: new URL(request.url),
-    credentials: { signingSecret: secret } });
-  if (received.ok === "respond") return received.response;
-  if (!received.ok) return Response.json({ error: received.error }, { status: received.status });
+  const events = provider.events;
+  const signed = await readSignedProviderDelivery(request, (delivery) => events.receive(delivery), { signingSecret: secret });
+  if ("response" in signed) return signed.response;
+  const { rawBody, received } = signed;
   const payload = parseJsonObject(rawBody)!;
   const account = payload.account;
   if (account === undefined || account === null || account === "") {

@@ -37,6 +37,16 @@ function iso(value: string | Date): string {
   return new Date(value).toISOString();
 }
 
+function boundedRetirement(input: { requestId: string; appClientId: string; installationId: string; at: string; limit: number },
+  idPattern: RegExp, invalid: string) {
+  const appClientId = text(input.appClientId, "appClientId", 256);
+  const installationId = text(input.installationId, "installationId", 128);
+  const at = iso(input.at);
+  const withinLimit = Number.isSafeInteger(input.limit) && input.limit >= 1 && input.limit <= 100;
+  if (!idPattern.test(installationId) || !withinLimit) throw new AppControlError("invalid_app_request", 400, invalid);
+  return { requestId: text(input.requestId, "requestId", 200), appClientId, installationId, at };
+}
+
 function array(value: unknown, field: string, fallback: string[] = []): string[] {
   if (value === undefined) return fallback;
   if (!Array.isArray(value) || value.length > 200 || value.some((item) =>
@@ -658,15 +668,13 @@ export class PostgresAppRepository {
   /** Only a verified app removal/transfer delivery retires this exact current installation. */
   async retireVercelInstallation(input: { requestId: string; appClientId: string; installationId: string;
     eventScopeId: string; at: string; limit: number }): Promise<number> {
-    const appClientId = text(input.appClientId, "appClientId", 256);
-    const installationId = text(input.installationId, "installationId", 128);
+    const bound = boundedRetirement(input, /^icfg_[A-Za-z0-9]{1,80}$/u, "Invalid Vercel retirement");
     const scope = text(input.eventScopeId, "eventScopeId", 128);
-    const at = iso(input.at);
-    if (!/^icfg_[A-Za-z0-9]{1,80}$/u.test(installationId) || !/^(team|user)_[A-Za-z0-9_-]{1,80}$/u.test(scope) ||
-        !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+    if (!/^(team|user)_[A-Za-z0-9_-]{1,80}$/u.test(scope)) {
       throw new AppControlError("invalid_app_request", 400, "Invalid Vercel retirement");
     }
-    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+    const { requestId, appClientId, installationId, at } = bound;
+    return this.database.transaction({ requestId,
       operation: "app.vercel-installation-retire" }, async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "app_vercel_retirement_lock_v1", text: `SELECT i.connection_id
         FROM data.app_connector_oauth_installations i
@@ -702,13 +710,9 @@ export class PostgresAppRepository {
    */
   async retireSlackWorkspace(input: { requestId: string; appClientId: string; installationId: string; at: string;
     eventAt: string; limit: number; uninstalled: boolean }): Promise<number> {
-    const appClientId = text(input.appClientId, "appClientId", 256);
-    const installationId = text(input.installationId, "installationId", 128);
-    const at = iso(input.at);
     const eventAt = iso(input.eventAt);
-    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(installationId) || !Number.isSafeInteger(input.limit) || input.limit < 1 ||
-        input.limit > 100) throw new AppControlError("invalid_app_request", 400, "Invalid Slack retirement");
-    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+    const { requestId, appClientId, installationId, at } = boundedRetirement(input, /^[A-Za-z0-9_-]{1,128}$/u, "Invalid Slack retirement");
+    return this.database.transaction({ requestId,
       operation: "app.slack-workspace-retire" }, async tx => {
       await tx.query({ name: "slack_workspace_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
         values: [`slack:${appClientId}:${installationId}`], maxRows: 1 });
@@ -746,15 +750,9 @@ export class PostgresAppRepository {
    */
   async retireStripeAccount(input: { requestId: string; appClientId: string; installationId: string;
     at: string; eventAt: string; limit: number }): Promise<number> {
-    const appClientId = text(input.appClientId, "appClientId", 256);
-    const installationId = text(input.installationId, "installationId", 128);
-    const at = iso(input.at);
     const eventAt = iso(input.eventAt);
-    if (!/^acct_[A-Za-z0-9]{1,64}$/u.test(installationId) || !Number.isSafeInteger(input.limit) ||
-        input.limit < 1 || input.limit > 100) {
-      throw new AppControlError("invalid_app_request", 400, "Invalid Stripe retirement");
-    }
-    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+    const { requestId, appClientId, installationId, at } = boundedRetirement(input, /^acct_[A-Za-z0-9]{1,64}$/u, "Invalid Stripe retirement");
+    return this.database.transaction({ requestId,
       operation: "app.stripe-account-retire" }, async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "app_stripe_retirement_lock_v1", text: `SELECT i.connection_id
         FROM data.app_connector_oauth_installations i

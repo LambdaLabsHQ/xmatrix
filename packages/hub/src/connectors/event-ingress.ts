@@ -6,7 +6,8 @@ import { dispatchProductMessageAppend } from "../product-message-append";
 import type { Env } from "../types";
 import { connectorAppRepository, connectorCredentialRepository, INGRESS_KEY_FIELD } from "./credentials";
 import { timingSafeEqual } from "@xmatrix/protocol";
-import type { ConnectorEvent, ConnectorProvider } from "./provider";
+import type { ConnectorDeliveryResult, ConnectorEvent, ConnectorProvider } from "./provider";
+import { trimmedConnectorEnv } from "./connector-env";
 import { oauthClient } from "./oauth";
 import { parseJsonObject } from "./event-format";
 import { linearEventVisible } from "./linear-visibility";
@@ -47,24 +48,34 @@ const DEFAULT_DEPENDENCIES: ConnectorIngressDependencies = {
 
 /* An unknown provider, connection or key all look the same to the caller. */
 const NOT_FOUND = () => Response.json({ error: "Connector ingress not found" }, { status: 404 });
+const TOO_LARGE = () => Response.json({ error: "Connector delivery is too large" }, { status: 413 });
+
+/** Read one signed provider body, or the response the caller should return. */
+export async function readSignedProviderDelivery(request: Request,
+  receive: (delivery: { rawBody: string; headers: Headers; url: URL; credentials: Readonly<Record<string, string>> }) => Promise<ConnectorDeliveryResult>,
+  credentials: Readonly<Record<string, string>>): Promise<{ rawBody: string; received: Extract<ConnectorDeliveryResult, { ok: true }> } | { response: Response }> {
+  const bytes = await readBoundedRequestBody(request, MAX_DELIVERY_BYTES);
+  if (!bytes) return { response: TOO_LARGE() };
+  const rawBody = new TextDecoder().decode(bytes);
+  const received = await receive({ rawBody, headers: request.headers, url: new URL(request.url), credentials });
+  if (received.ok === "respond") return { response: received.response };
+  if (!received.ok) return { response: Response.json({ error: received.error }, { status: received.status }) };
+  return { rawBody, received };
+}
 
 /** The shared application callback. No caller-supplied Space id or per-Space secret. */
 export async function handleAppConnectorDelivery(input: { env: Env; request: Request;
   provider: ConnectorProvider | undefined }, dependencies: ConnectorIngressDependencies = DEFAULT_DEPENDENCIES): Promise<Response> {
   const { env, request, provider } = input;
   if (!provider?.events || !["slack", "linear"].includes(provider.id)) return NOT_FOUND();
+  const events = provider.events;
   const client = oauthClient(env, provider.id);
-  const envSecret = (env as unknown as Record<string, unknown>)[`CONNECTOR_${provider.id.toUpperCase()}_SIGNING_SECRET`];
-  const signingSecret = typeof envSecret === "string" ? envSecret.trim() : "";
+  const signingSecret = trimmedConnectorEnv(env, `CONNECTOR_${provider.id.toUpperCase()}_SIGNING_SECRET`);
   if (!client || !signingSecret) return NOT_FOUND();
-  const bytes = await readBoundedRequestBody(request, MAX_DELIVERY_BYTES);
-  if (!bytes) return Response.json({ error: "Connector delivery is too large" }, { status: 413 });
-  const rawBody = new TextDecoder().decode(bytes);
   // The provider verifies signature and freshness before any workspace is trusted.
-  const result = await provider.events.receive({ rawBody, headers: request.headers,
-    url: new URL(request.url), credentials: { signingSecret } });
-  if (result.ok === "respond") return result.response;
-  if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+  const signed = await readSignedProviderDelivery(request, (delivery) => events.receive(delivery), { signingSecret });
+  if ("response" in signed) return signed.response;
+  const { rawBody, received: result } = signed;
   const payload = parseJsonObject(rawBody)!;
   const installationId = provider.id === "slack" ? payload.team_id : payload.organizationId;
   const apps = dependencies.apps(env);

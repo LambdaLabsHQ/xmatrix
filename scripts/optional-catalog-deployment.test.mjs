@@ -13,6 +13,18 @@ const run = (extra = {}) => spawnSync(process.execPath, ['-e', script], {
   env: { ...base, ...extra }, encoding: 'utf8',
 });
 
+function assertNoPartialPayload(entries, failure) {
+  const complete = (1 << entries.length) - 1;
+  for (let mask = 1; mask < complete; mask += 1) {
+    const partial = Object.fromEntries(entries.filter((_, index) => mask & (1 << index)));
+    const result = run(partial);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, failure);
+    for (const value of Object.values(partial)) assert.ok(!result.stderr.includes(value));
+  }
+}
+
 test('missing catalog configuration blocks deployment without emitting secrets', () => {
   const { XMATRIX_SECRET_CATALOG_KEY: _, ...withoutCatalog } = base;
   const result = spawnSync(process.execPath, ['-e', script], {
@@ -56,15 +68,7 @@ test('Stripe rotation emits a complete live configuration or preserves existing 
 });
 
 test('every partial Stripe rotation fails before emitting any secret payload', () => {
-  const entries = Object.entries(billing);
-  for (let mask = 1; mask < 15; mask++) {
-    const partial = Object.fromEntries(entries.filter((_, index) => mask & (1 << index)));
-    const result = run(partial);
-    assert.notEqual(result.status, 0);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, /Missing production billing secret/);
-    for (const value of Object.values(partial)) assert.ok(!result.stderr.includes(value));
-  }
+  assertNoPartialPayload(Object.entries(billing), /Missing production billing secret/);
 });
 
 test('test-mode keys, invalid price references, and whitespace cannot reach production', () => {
@@ -208,15 +212,7 @@ test('Stripe App deployment emits the live trio, or an acceptance path, and neve
   for (const key of ['CONNECTOR_STRIPE_OAUTH_PUBLIC', 'CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH', 'CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID']) {
     assert.ok(workflow.includes(key + ': ${{ secrets.' + key + ' }}'), key);
   }
-  const entries = Object.entries(trio);
-  for (let mask = 1; mask < 7; mask++) {
-    const partial = Object.fromEntries(entries.filter((_, index) => mask & (1 << index)));
-    const result = run(partial);
-    assert.notEqual(result.status, 0);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, /Missing production connector secret/);
-    for (const value of Object.values(partial)) assert.ok(!result.stderr.includes(value));
-  }
+  assertNoPartialPayload(Object.entries(trio), /Missing production connector secret/);
   const testKey = run({ ...trio, CONNECTOR_STRIPE_CLIENT_SECRET: ['sk', 'test', 'fixtureNotARealKey'].join('_') });
   assert.notEqual(testKey.status, 0);
   assert.match(testKey.stderr, /Invalid production Stripe App configuration/);
