@@ -1605,3 +1605,33 @@ integration("durable X uploads claim explicit allow once and retain one scoped e
     await assert.rejects(start(stale), error => error.code === "action_request_scope_changed");
   });
 });
+
+integration("Stripe account bindings can be shared and a replay cannot retire a newer Connect", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await withDatabase(async ({ sql: otherSql, space: other }) => {
+      const account = "acct_fixtureA";
+      const useStripe = (query, id) => query(`UPDATE data.app_connector_connections SET connection_id=$1||':stripe',provider_id='stripe',
+        provider_name='Stripe',auth_mode='oauth' WHERE space_id=$1 AND provider_id='webhook'`, [id]);
+      await useStripe(sql, space);
+      await useStripe(otherSql, other);
+      const credentials = new PostgresAppCredentialRepository(database, material);
+      const apps = new PostgresAppRepository(database);
+      const input = (id) => ({ requestId: crypto.randomUUID(), spaceId: id, providerId: "stripe", actorUserId: "owner", at,
+        fields: { oauthToken: "fixture-token", oauthRefreshToken: "fixture-refresh", oauthExpiresAt: "1", stripeUserId: account },
+        policy: { allowed: ["oauthToken", "oauthRefreshToken", "oauthExpiresAt", "stripeUserId", "signingSecret", "ingressKey"], generated: ["ingressKey"] },
+        oauthInstallation: { appClientId: "ca_fixture", installationId: account }, initialize: { ingressKey: `key-${id}` } });
+      await assert.rejects(credentials.put({ ...input(space), oauthInstallation: { appClientId: "ca_fixture", installationId: account, eventScopeId: "nope" } }), /Invalid OAuth/);
+      await credentials.put(input(space));
+      await credentials.put(input(other));
+      const routed = () => apps.oauthEventConnections({ requestId: crypto.randomUUID(), providerId: "stripe",
+        appClientId: "ca_fixture", installationId: account, limit: 50 });
+      assert.deepEqual((await routed()).map(row => row.spaceId).sort(), [space, other].sort());
+      assert.equal(await apps.retireStripeAccount({ requestId: crypto.randomUUID(), appClientId: "ca_fixture",
+        installationId: account, at, eventAt: "2026-10-01T00:00:00.000Z", limit: 50 }), 0);
+      assert.equal((await routed()).length, 2);
+      assert.equal(await apps.retireStripeAccount({ requestId: crypto.randomUUID(), appClientId: "ca_fixture",
+        installationId: account, at, eventAt: "2026-10-03T00:00:00.000Z", limit: 50 }), 2);
+      assert.deepEqual(await routed(), []);
+    });
+  });
+});

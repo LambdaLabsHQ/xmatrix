@@ -1,0 +1,35 @@
+{
+  "$schema": "https://stripe.com/stripe-app.schema.json",
+  "id": "sh.xmatrix.connector",
+  "name": "xMatrix",
+  "version": "0.1.0",
+  "icon": "icon.png",
+  "extensions": null,
+  "permissions": [
+    {
+      "permission": "event_read",
+      "purpose": "Deliver the Stripe events you choose to your xMatrix channels."
+    },
+    {
+      "permission": "invoice_read",
+      "purpose": "Notify your team about failed invoice payments."
+    },
+    {
+      "permission": "payment_intent_read",
+      "purpose": "Notify your team about failed payments."
+    },
+    {
+      "permission": "dispute_read",
+      "purpose": "Notify your team about payment disputes."
+    },
+    {
+      "permission": "subscription_read",
+      "purpose": "Notify your team about subscription changes."
+    }
+  ],
+  "allowed_redirect_uris": [
+    "https://xmatrix-hub.xmatrix.sh/api/connectors/oauth/callback"
+  ],
+  "distribution_type": "public",
+  "stripe_api_access_type": "oauth"
+}

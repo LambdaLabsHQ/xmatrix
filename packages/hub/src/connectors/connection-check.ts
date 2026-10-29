@@ -31,8 +31,10 @@ export async function verifyConnectorConnection(env: Env, spaceId: string, provi
   if (providerId === "feishu" && await verifyFeishuNativeConnection(env, spaceId)) return;
   if (providerId === "googlechat" && await verifyGoogleChatNativeConnection(env, spaceId)) return;
   const credentials = await connectionCredentials(env, spaceId, providerId);
+  const stripeSignIn = providerId === "stripe" && Boolean(credentials.stripeUserId);
   const missing = (manifest.credentials ?? [])
-    .filter((field) => field.required && !field.generated && !field.managed && !credentials[field.id]);
+    .filter((field) => field.required && !field.generated && !field.managed && !credentials[field.id]
+      && !(stripeSignIn && field.id === "signingSecret"));
   if (missing.length > 0) {
     throw new Error(`Save ${missing.map((field) => field.label).join(", ")} under Credentials`);
   }

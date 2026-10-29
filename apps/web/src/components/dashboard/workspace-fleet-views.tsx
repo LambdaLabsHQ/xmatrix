@@ -1100,11 +1100,14 @@ export function AppsView({
   });
   /* Providers whose one-click OAuth this Hub has configured. */
   const oauthProvidersQuery = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "connector-oauth-providers", []),
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "connector-oauth-providers", [currentSpace?.id ?? ""]),
     queryFn: ({ signal }) => xmatrixApiRequest<{ providers?: string[]; nativeProviders?: string[] }>({
-      url: WEB_PROXY_ROUTES.connector_oauth_providers, token, signal,
+      url: currentSpace
+        ? `${WEB_PROXY_ROUTES.connector_oauth_providers}?spaceId=${encodeURIComponent(currentSpace.id)}`
+        : WEB_PROXY_ROUTES.connector_oauth_providers,
+      token, signal,
     }).then((payload) => ({ providers: payload.providers ?? [], nativeProviders: payload.nativeProviders ?? [] })),
-    enabled: Boolean(token && user?.id),
+    enabled: Boolean(token && user?.id && currentSpace),
   });
   const oauthProviders = oauthProvidersQuery.data?.providers ?? [];
   const nativeProviders = oauthProvidersQuery.data?.nativeProviders ?? [];

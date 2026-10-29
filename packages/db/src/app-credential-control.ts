@@ -219,7 +219,7 @@ export class PostgresAppCredentialRepository {
     }
     const installation = input.oauthInstallation;
     const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
-    if (installation && (input.asHub || !["slack", "linear", "vercel", "sentry", "discord"].includes(providerId) ||
+    if (installation && (input.asHub || !["slack", "linear", "vercel", "sentry", "discord", "stripe"].includes(providerId) ||
         !/^[A-Za-z0-9._-]{1,256}$/u.test(installation.appClientId) ||
         !/^[A-Za-z0-9_-]{1,128}$/u.test(installation.installationId) ||
         (providerId === "vercel" ? !/^icfg_[A-Za-z0-9]{1,80}$/u.test(installation.installationId) ||
@@ -228,7 +228,10 @@ export class PostgresAppCredentialRepository {
           providerId === "discord" ? !/^[1-9][0-9]{14,24}$/u.test(installation.appClientId) ||
             !/^[1-9][0-9]{14,24}$/u.test(installation.installationId) ||
             !/^[1-9][0-9]{14,24}$/u.test(installation.eventScopeId ?? "") ||
-            !Number.isFinite(Date.parse(installation.discordAuthorizedAt ?? "")) : installation.eventScopeId !== undefined))) {
+            !Number.isFinite(Date.parse(installation.discordAuthorizedAt ?? "")) :
+          providerId === "stripe" ? !/^acct_[A-Za-z0-9]{1,64}$/u.test(installation.installationId) ||
+            installation.eventScopeId !== undefined || input.fields.stripeUserId !== installation.installationId :
+          installation.eventScopeId !== undefined))) {
       throw new AppControlError("invalid_app_request", 400, "Invalid OAuth installation");
     }
     const expected = input.expectedInstallationSnapshot;

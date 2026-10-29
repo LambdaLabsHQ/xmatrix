@@ -1,4 +1,3 @@
-import { readBoundedRequestBody } from "../index-shared";
 import type { Env } from "../types";
 import { connectorProvider } from "./registry";
 import { oauthClient } from "./oauth";
@@ -6,7 +5,7 @@ import { parseJsonObject, record } from "./event-format";
 import { connectorAppRepository, connectorCredentialRepository } from "./credentials";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { fireConnectorAutomationTriggers } from "../automation-triggers";
-import { deliverEvent, type ConnectorIngressDependencies } from "./event-ingress";
+import { deliverEvent, readSignedProviderDelivery, type ConnectorIngressDependencies } from "./event-ingress";
 import { vercelEventScopeId, vercelProjectAuthorized } from "./vercel-api";
 
 const DEPENDENCIES: ConnectorIngressDependencies = { apps: connectorAppRepository,
@@ -23,13 +22,11 @@ export async function handleVercelAppDelivery(input: { env: Env; request: Reques
   const client = oauthClient(env, "vercel");
   const provider = connectorProvider("vercel");
   if (!client || !provider?.events) return Response.json({ error: "Connector ingress not found" }, { status: 404 });
-  const bytes = await readBoundedRequestBody(request, 256 * 1024);
-  if (!bytes) return Response.json({ error: "Connector delivery is too large" }, { status: 413 });
-  const rawBody = new TextDecoder().decode(bytes);
-  const received = await provider.events.receive({ rawBody, headers: request.headers, url: new URL(request.url),
-    credentials: { webhookSecret: client.clientSecret } });
-  if (received.ok === "respond") return received.response;
-  if (!received.ok) return Response.json({ error: received.error }, { status: received.status });
+  const events = provider.events;
+  const signed = await readSignedProviderDelivery(request, (delivery) => events.receive(delivery),
+    { webhookSecret: client.clientSecret });
+  if ("response" in signed) return signed.response;
+  const { rawBody, received } = signed;
   const payload = parseJsonObject(rawBody)!;
   const body = record(payload.payload);
   const type = payload.type;

@@ -14,6 +14,7 @@ import { getAppConnectorProvider } from "./app-connectors";
 import { connectorPermissionRepository, connectorIngressUrl, connectorCredentialRepository, INGRESS_KEY_FIELD,
   mintConnectorSecret } from "./connectors/credentials";
 import { handleAppConnectorDelivery, handleConnectorDelivery } from "./connectors/event-ingress";
+import { handleStripeAppDelivery } from "./connectors/stripe-app-ingress";
 import { handleSentryInstallationDelivery } from "./connectors/sentry-app-lifecycle";
 import { handleVercelAppDelivery } from "./connectors/vercel-app-ingress";
 import { handleGoogleChatAppDelivery } from "./connectors/googlechat-ingress";
@@ -92,6 +93,7 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
       if (c.req.param("providerId") === "googlechat") return await handleGoogleChatAppDelivery(c.env, c.req.raw);
       if (c.req.param("providerId") === "telegram") return await handleTelegramAppDelivery(c.env, c.req.raw);
       if (c.req.param("providerId") === "feishu") return await handleFeishuAppDelivery(c.env, c.req.raw);
+      if (c.req.param("providerId") === "stripe") return await handleStripeAppDelivery({ env: c.env, request: c.req.raw });
       return await handleAppConnectorDelivery({ env: c.env, request: c.req.raw,
         provider: connectorProvider(c.req.param("providerId")) });
     } catch {
