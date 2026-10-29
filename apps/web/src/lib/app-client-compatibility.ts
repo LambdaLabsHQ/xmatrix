@@ -24,7 +24,18 @@ function admissionKey(identity: ClientCompatibilityIdentity): string {
     identity.protocolVersion, identity.platform ?? null]);
 }
 
-/** The last build this device's Hub admitted; never user data. */
+/**
+ * What a remembered admission vouches for. A release changes only the version,
+ * and the build's own policy (`evaluateClientCompatibility`) still has to pass,
+ * so the first load after a release starts at once like every other load
+ * instead of waiting for the Hub.
+ */
+function rememberedAdmissionKey(identity: ClientCompatibilityIdentity): string {
+  return JSON.stringify([xmatrixHubOrigin(), identity.component,
+    identity.protocolVersion, identity.platform ?? null]);
+}
+
+/** The client this device's Hub last admitted; never user data. */
 const ADMITTED_STORAGE_KEY = "xmatrix.app-admitted";
 
 function readAdmitted(): string | null {
@@ -44,18 +55,18 @@ export async function admitAppCompatibility(identity: ClientCompatibilityIdentit
   return admissionCache.read(key, async () => {
     const result = await requestAppCompatibility(identity);
     if (!result.decision.compatible) admissionCache.clear();
-    writeAdmitted(result.decision.compatible ? key : null);
+    writeAdmitted(result.decision.compatible ? rememberedAdmissionKey(identity) : null);
     return result;
   });
 }
 
 /**
- * A build the Hub admitted before starts at once on the next load, while the
+ * A client the Hub admitted before starts at once on the next load, while the
  * Hub is asked again; a refusal still opens the upgrade wall. Asking first made
  * every load, a notification's included, wait behind the preparation bar.
  */
 export function admitRememberedAppCompatibility(identity: ClientCompatibilityIdentity): boolean {
-  if (readAdmitted() !== admissionKey(identity) || !evaluateClientCompatibility(identity).compatible) return false;
+  if (readAdmitted() !== rememberedAdmissionKey(identity) || !evaluateClientCompatibility(identity).compatible) return false;
   acceptedIdentity = identity;
   return true;
 }

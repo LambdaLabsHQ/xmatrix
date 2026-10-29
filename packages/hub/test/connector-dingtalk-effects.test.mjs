@@ -6,20 +6,30 @@ import { postgresProductMessage } from '../src/postgres-message-authority.ts';
 
 const integration=process.env.XMATRIX_TEST_POSTGRES_URL ? test : test.skip;
 
+// Follow the actual attempt's session so the injected lost COMMIT remains at
+// the same boundary as production append, including receipt reconciliation.
+function afterAppendCommit(database, after) {
+  return { cacheMode: "disabled", openSession: () => afterAppendCommit(database.openSession(), after),
+    close: () => database.close?.(), health: context => database.health(context),
+    async transaction(context, run) {
+      const result = await database.transaction(context, run);
+      if (context.operation === 'message.append' && context.placement) await after();
+      return result;
+    } };
+}
+
 integration('DingTalk closed primary adapter uses real Hub codec, readable append, true trigger owner and stable commit-unknown recovery',async()=>{
   // The isolated fixture uses full migrated tables and test-only native grants.
   // Use the same source module graph as the Hub for opaque WeakMap capabilities.
   const { effectFixture }=await import('../../db/test/dingtalk-effects.fixture.mjs');
   await effectFixture(async f=>{
     let unknown=true;
-    const database={ ...f.database,transaction:async(context,run)=>{
-      const result=await f.database.transaction(context,run);
-      if(context.operation==='message.append' && context.placement && unknown) {
+    const database=afterAppendCommit(f.database,async()=>{
+      if(unknown) {
         assert.equal((await f.sql('SELECT count(*)::int n FROM data.messages WHERE space_id=$1',[f.spaceId])).rows[0].n,1);
         unknown=false;throw new DatabaseCommitUnknownError('08006'); // COMMIT succeeded; the client lost its response.
       }
-      return result;
-    }};
+    });
     let nativeCalls=0;
     const effects=createDingTalkPrimaryInboundEffects({ env:{RELAY_POSTGRES_SHARD_ID:'shard-0'},app:f.app,repository:f.inbox,database,
       verifyNative:async()=>{nativeCalls++;} }); // Explicit fixture verifier; no provider/native acceptance claim.
@@ -46,16 +56,14 @@ integration('DingTalk commit-unknown recovery refuses retired source while prese
   const { effectFixture }=await import('../../db/test/dingtalk-effects.fixture.mjs');
   await effectFixture(async f=>{
     let lost=false;
-    const database={...f.database,transaction:async(context,run)=>{
-      const result=await f.database.transaction(context,run);
-      if(context.operation==='message.append' && context.placement && !lost) {
+    const database=afterAppendCommit(f.database,async()=>{
+      if(!lost) {
         lost=true;
         assert.equal((await f.sql('SELECT count(*)::int n FROM data.messages WHERE space_id=$1',[f.spaceId])).rows[0].n,1);
         await f.companies.retire(f.request({eventTime:await f.time(),corpId:f.selection.corpId,appId:f.selection.appId}));
         throw new DatabaseCommitUnknownError('08006');
       }
-      return result;
-    }};
+    });
     const effects=createDingTalkPrimaryInboundEffects({env:{RELAY_POSTGRES_SHARD_ID:'shard-0'},app:f.app,repository:f.inbox,database,verifyNative:async()=>{}});
     const current=await f.current(f.job),event={eventId:current.eventId,sourceRef:current.sourceRef,feature:'message.received',summary:'DingTalk text message',body:current.candidate.text};
     await assert.rejects(effects.append({job:f.job,event},{signal:new AbortController().signal,current:async()=>true}),e=>e.status===409);

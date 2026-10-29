@@ -24,8 +24,9 @@ export interface HarnessAutoUpdate {
   /** JSON settings files whose `env` object the harness applies to its own environment. */
   envFiles?: string[];
   /**
-   * The built-in updater runs only in interactive sessions, never in the
-   * headless mode xMatrix launches; the daemon runs `update` in its place.
+   * The built-in updater runs only in interactive sessions and its `update`
+   * installs beside running sessions, so the daemon's automatic update runs at
+   * once instead of waiting for this harness's live Runs to end.
    */
   interactiveOnly?: boolean;
   notes?: string;

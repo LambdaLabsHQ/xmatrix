@@ -20,10 +20,11 @@ const channels = [
   channel("f000", "connector", "2026-01-02T00:00:00.000Z"),
 ];
 
-test("a match tier reads the title: whole, start, anywhere, then elsewhere", () => {
+test("a match tier reads the title: whole, start of it or a word, anywhere, then elsewhere", () => {
   assert.equal(searchMatchTier("Connector", "#connector"), 0);
   assert.equal(searchMatchTier("connector", "Connector 消息唤醒"), 1);
-  assert.equal(searchMatchTier("connector", "app/connector"), 2);
+  assert.equal(searchMatchTier("connector", "app/connector"), 1);
+  assert.equal(searchMatchTier("connector", "各家connector接入"), 2);
   assert.equal(searchMatchTier("connector", "iOS审核拒因查询"), 3);
 });
 
@@ -47,7 +48,7 @@ test("everything found shares one ranking, whatever its kind", () => {
     pages: [{ pageId: "p1", title: "Connector 平台", updatedAt: "2026-10-18T17:46:00.000Z" }],
   });
   assert.deepEqual(results.slice(0, 5).map((result) => result.id),
-    ["channel:f000", "page:p1", "channel:da24", "channel:2dbd", "member:space:u1"]);
+    ["channel:f000", "page:p1", "channel:da24", "channel:2dbd", "channel:0aaa"]);
 });
 
 test("Jev's reading reorders below whole-title matches and never adds or drops a result", () => {

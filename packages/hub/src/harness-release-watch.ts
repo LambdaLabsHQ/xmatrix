@@ -1,5 +1,6 @@
 import { AGENT_PRESETS, readBoundedStream, type AgentPreset } from "@xmatrix/protocol";
-import { readHarnessReleaseTargets, type AuthorityDatabaseSession, type HarnessReleaseTarget } from "@xmatrix/db";
+import { readHarnessReleaseTargets, type AuthorityDatabaseSession, type HarnessRelease,
+  type HarnessReleaseTarget } from "@xmatrix/db";
 import { postgresAuthorityDatabase } from "./postgres-authority-http";
 import { machineDaemonCommand } from "./machines";
 import { relayRuntimeSingleCell } from "./relay-authority-locator";
@@ -54,16 +55,19 @@ export async function fetchLatestVersion(latest: Latest, fetcher: typeof fetch =
 export interface HarnessReleaseWatchDependencies {
   presets?: readonly AgentPreset[];
   latest?: (latest: Latest) => Promise<string | undefined>;
-  targets?: (releases: { presetId: string; version: string }[]) => Promise<HarnessReleaseTarget[]>;
+  targets?: (releases: HarnessRelease[]) => Promise<HarnessReleaseTarget[]>;
   /** Issues one daemon command; the Machine repository by default. */
   issue?: (command: Record<string, unknown>) => Promise<unknown>;
 }
 
 /**
- * Official registries publish no push feed, so the Hub reads each preset's
- * registry once a minute and tells only the daemons whose reported inventory
- * has not seen that version. A `release` command names the preset alone: the
- * daemon reads the registry itself and applies its own automatic-update policy.
+ * Automatic updates converge on state, not on an event. Official registries
+ * publish no push feed, so the Hub reads each preset's registry once a minute
+ * and tells every daemon whose inventory shows the switch on and an installed
+ * version other than the latest, again on later passes until it is installed.
+ * A preset with an update recipe but no registry is told daily, and its own
+ * update command decides. A `release` command names the preset alone: the
+ * daemon reads the registry itself and runs the update when it may.
  */
 export async function watchHarnessReleases(env: Env, dependencies: HarnessReleaseWatchDependencies = {}):
   Promise<{ issued: number }> {
@@ -75,14 +79,18 @@ export async function watchHarnessReleases(env: Env, dependencies: HarnessReleas
   const latestOf = dependencies.latest ?? (latest => fetchLatestVersion(latest));
   let issued = 0;
   try {
-    const watched = (dependencies.presets ?? AGENT_PRESETS)
-      .flatMap(preset => preset.management?.latest ? [{ preset, latest: preset.management.latest }] : []);
+    const presets = dependencies.presets ?? AGENT_PRESETS;
+    const watched = presets.flatMap(preset => preset.management?.latest ? [{ preset, latest: preset.management.latest }] : []);
     observeHarnessWatch(env, "runtime", "registry_read", started);
     const versions = await Promise.all(watched.map(({ latest }) => latestOf(latest)));
-    const releases = watched.flatMap(({ preset }, index) => {
-      const version = versions[index];
-      return version ? [{ presetId: preset.id, version }] : [];
-    });
+    const releases: HarnessRelease[] = [
+      ...watched.flatMap(({ preset }, index) => {
+        const version = versions[index];
+        return version ? [{ presetId: preset.id, version }] : [];
+      }),
+      ...presets.filter(preset => preset.management && !preset.management.latest &&
+        (preset.management.update.unix || preset.management.update.windows)).map(preset => ({ presetId: preset.id })),
+    ];
     if (releases.length === 0) return { issued };
     observeHarnessWatch(env, "runtime", "target_read", started);
     const found = await targets(releases);
@@ -175,7 +183,7 @@ export async function answerHarnessReleaseWatch(
     observeHarnessWatch(env, "runtime", "completed", started, result.issued);
     return response;
   } catch (error) {
-    const failure = transientFailure(error);
+    const failure = transientFailure(error, () => ({ operation: "HarnessReleaseWatch.runtime" }));
     observeHarnessWatch(env, "runtime", failure ? "deferred" : "failed", started);
     if (failure) return failureResponse(failure, { "cache-control": "no-store" });
     throw error;

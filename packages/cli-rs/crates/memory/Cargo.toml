@@ -11,3 +11,7 @@ serde_json = { workspace = true }
 urlencoding = { workspace = true }
 xmatrix-cli-args = { path = "../args" }
 xmatrix-cli-core = { path = "../core" }
+
+[dev-dependencies]
+rustls = { workspace = true, features = ["ring", "std"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

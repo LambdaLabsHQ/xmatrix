@@ -1004,6 +1004,7 @@ async fn finished_daemon_child_stays_registered_until_reported() {
             child: Some(child),
             run_id: Some("retry-exit".to_string()),
             agent_name: Some("codex".to_string()),
+            agent_preset_id: None,
             ..test_empty_daemon_run_child()
         },
     );
@@ -1080,6 +1081,7 @@ async fn finished_daemon_child_terminates_owned_job_before_reporting_exit() {
             process_tree: Some(process_tree),
             run_id: Some("owned-job-exit".to_string()),
             agent_name: Some("codex".to_string()),
+            agent_preset_id: None,
             ..test_empty_daemon_run_child()
         },
     );
@@ -1123,6 +1125,7 @@ async fn daemon_rehydrate_keeps_dead_wrapper_registered_until_tree_cleanup() {
         pid,
         run_id: Some("rehydrate-dead".to_string()),
         agent_name: Some("codex".to_string()),
+        agent_preset_id: None,
         updated_at: "1".to_string(),
         ..test_empty_persisted_daemon_run()
     };
@@ -1171,6 +1174,7 @@ async fn daemon_rehydrate_adopts_live_persisted_run_before_snapshot() {
         execution_key: Some("execution-pre-restart".to_string()),
         agent_id: Some("agent:pre-restart".to_string()),
         agent_name: Some("codex-test".to_string()),
+        agent_preset_id: None,
         auth_capability: Some(capability_key.clone()),
         request_context: Some(super::DaemonRequestAgentContext {
             agent_id: Some("agent:pre-restart".to_string()),
@@ -1263,6 +1267,7 @@ async fn daemon_registry_recovers_live_child_from_recent_sidecar() {
         execution_key: Some("execution-test-sidecar".to_string()),
         agent_id: Some("agent:test-sidecar".to_string()),
         agent_name: Some("codex-test".to_string()),
+        agent_preset_id: None,
         auth_capability: Some(auth_capability_key.clone()),
         request_capability: Some(request_capability_key.clone()),
         request_context: Some(super::DaemonRequestAgentContext {
@@ -1417,6 +1422,7 @@ async fn daemon_registry_rejects_sidecar_without_matching_process_heartbeat() {
         cwd: Some(temp_dir.clone()),
         run_id: Some("run:test-mismatch".to_string()),
         agent_name: Some("codex-test".to_string()),
+        agent_preset_id: None,
         status_file_path: Some(status_file_path),
         updated_at: "1".to_string(),
         ..test_empty_persisted_daemon_run()
@@ -1628,6 +1634,7 @@ async fn daemon_spawn_claim_blocks_duplicate_inflight_request() {
             instance_id: intent.instance_id.clone(),
             resume_session_key: intent.resume_session_key.clone(),
             agent_name: Some(intent.agent_name.clone()),
+            agent_preset_id: None,
             ..test_empty_daemon_run_child()
         },
     );
@@ -2854,6 +2861,7 @@ fn nested_process_cannot_mutate_sidecar_owned_status_file() {
         execution_key: Some("exec:owned".to_string()),
         agent_id: Some("agent:owned".to_string()),
         agent_name: Some("codex".to_string()),
+        agent_preset_id: None,
         status_file_path: Some(status_path.clone()),
         updated_at: "100".to_string(),
         ..test_empty_persisted_daemon_run()
@@ -2885,6 +2893,7 @@ fn registry_reconciliation_detects_missing_sidecar() {
         execution_key: Some("exec:reconcile".to_string()),
         agent_id: Some("agent:reconcile".to_string()),
         agent_name: Some("codex".to_string()),
+        agent_preset_id: None,
         status_file_path: Some(status_path),
         updated_at: "100".to_string(),
         ..test_empty_persisted_daemon_run()

@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { requireCredentialAdmin as requireSpaceAdmin } from "./app-credential-admin.js";
 import { resourcePages } from "./resource-pages.js";
 import { SENTRY_PUBLIC_INTEGRATION_SCOPES, utf8ByteLength } from "@xmatrix/protocol";
 
@@ -88,16 +89,6 @@ async function advanceCredentialConnection(tx: DatabaseTransaction, connectionId
       last_checked_at=CASE WHEN $3 THEN $2 ELSE last_checked_at END,
       error=CASE WHEN $3 THEN NULL ELSE error END WHERE connection_id=$1`,
   values: [connectionId, new Date(at).toISOString(), installed], maxRows: 0 });
-}
-
-async function requireSpaceAdmin(tx: DatabaseTransaction, spaceId: string, userId: string): Promise<void> {
-  const role = await tx.query<QueryResultRow>({ name: "app_credential_role_v2", text: `SELECT role
-    FROM data.space_members WHERE space_id=$1 AND user_id=$2
-      AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=$1)
-    LIMIT 1 FOR SHARE`, values: [spaceId, userId], maxRows: 1 });
-  if (role[0]?.role !== "owner" && role[0]?.role !== "admin") {
-    throw new AppControlError("space_not_found", 404, "Space not found");
-  }
 }
 
 async function decryptValues(material: string, row: QueryResultRow): Promise<Record<string, string>> {
@@ -228,7 +219,8 @@ export class PostgresAppCredentialRepository {
           providerId === "discord" ? !/^[1-9][0-9]{14,24}$/u.test(installation.appClientId) ||
             !/^[1-9][0-9]{14,24}$/u.test(installation.installationId) ||
             !/^[1-9][0-9]{14,24}$/u.test(installation.eventScopeId ?? "") ||
-            !Number.isFinite(Date.parse(installation.discordAuthorizedAt ?? "")) : installation.eventScopeId !== undefined))) {
+            !Number.isFinite(Date.parse(installation.discordAuthorizedAt ?? "")) :
+          installation.eventScopeId !== undefined))) {
       throw new AppControlError("invalid_app_request", 400, "Invalid OAuth installation");
     }
     const expected = input.expectedInstallationSnapshot;
@@ -301,6 +293,9 @@ export class PostgresAppCredentialRepository {
         WHERE connection_id=$1 AND credential_version=$2 FOR UPDATE`, values: [connectionId, Number(current.version)], maxRows: 1 }))[0] : undefined;
       // Regenerating a Hub-minted field leaves the grant, and so its binding, as it was.
       const generatedOnly = !!bound && entries.every(([name, value]) => value !== null && !!input.policy.generated?.includes(name));
+      if (providerId === "stripe" && !input.asHub && entries.some(([name]) => name !== "ingressKey")) {
+        await tx.query({ name: "stripe_manual_clear_accounts_v1", text: "DELETE FROM data.app_stripe_account_grants WHERE connection_id=$1", values: [connectionId], maxRows: 0 });
+      }
       // Native installation is an explicit replacement, never a fallback to old manual credentials.
       const values = current && !verified && !expected ? await decryptValues(this.material, current) : {};
       const previousGmailValues = providerId === "gmail" ? { ...values } : undefined;
@@ -380,7 +375,7 @@ export class PostgresAppCredentialRepository {
   }
 
   /** Read only original versions after live admin authorization; no grant enters the browser. */
-  async installationSnapshot(input: { requestId: string; spaceId: string; actorUserId: string; providerId?: "discord" | "x" }) {
+  async installationSnapshot(input: { requestId: string; spaceId: string; actorUserId: string; providerId?: "discord" | "x" | "stripe" }) {
     const spaceId = text(input.spaceId, "spaceId");
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.credentials.installation-snapshot" }, async tx => {

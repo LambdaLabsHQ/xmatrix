@@ -29,7 +29,8 @@ test("Gmail notification return survives Space hydration and completes once in t
     { action: "complete", state: "fixture-state", code: "fixture-code" },
   ]);
   const url = new URL(page.url());
-  expect(url.searchParams.get("item")).toBe("gmail");
+  expect(url.searchParams.get("connector")).toBe("gmail");
+  expect(url.searchParams.has("item")).toBe(false);
   expect(url.searchParams.has("gmailWatchState")).toBe(false);
   expect(url.searchParams.has("gmailWatchCode")).toBe(false);
   await releaseFixture(page, "gmail-complete");
@@ -44,6 +45,7 @@ test("declined notification consent returns to Gmail with a retry notice and no 
   await page.goto(`/app/${E2E_SPACE.id}/apps?connector=gmail&gmailWatch=failed`);
   await expect(page.getByText("Gmail notification authorization did not finish. Turn notifications on to try again.", { exact: true })).toBeVisible();
   await expect(page.getByText("New mail notifications", { exact: true })).toBeVisible();
-  expect(new URL(page.url()).searchParams.get("item")).toBe("gmail");
+  expect(new URL(page.url()).searchParams.get("connector")).toBe("gmail");
+  expect(new URL(page.url()).searchParams.has("item")).toBe(false);
   expect(await fixtureRequestBodies(page, "gmail-complete")).toHaveLength(0);
 });

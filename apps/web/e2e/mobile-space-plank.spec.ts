@@ -35,7 +35,7 @@ for (const tab of ["channels", "status", "pages"]) {
     expect(panelBox.x).toBeGreaterThan(0);
     expect(panelBox.x + panelBox.width).toBeLessThan(searchBox.x);
     await expect(panel).toHaveCSS("border-radius", "14px");
-    await page.locator(".xmatrix-app-shell").evaluate((shell) => {
+    await page.locator(".xmatrix-app-shell:not([aria-busy])").evaluate((shell) => {
       (shell as HTMLElement).style.setProperty("--mobile-topbar-safe-top", "59px");
     });
     expect((await panel.boundingBox())!.y).toBeGreaterThanOrEqual(59);

@@ -2161,6 +2161,7 @@ async fn spawn_headless_agent(
                 repo_pool_binding: Some(binding.clone()),
                 agent_id: identity_id.map(str::to_string),
                 agent_name: Some(agent_name.to_string()),
+                agent_preset_id: agent_preset_id.map(str::to_string),
                 // Only the one-way key goes to disk, as every later
                 // registry write does; the raw capability stays in the child.
                 auth_capability: auth_grant
@@ -2607,6 +2608,7 @@ async fn spawn_headless_agent(
         repo_pool_binding: repo_pool_binding.cloned(),
         agent_id: identity_id.map(str::to_string),
         agent_name: agent_name.to_string(),
+        agent_preset_id: agent_preset_id.map(str::to_string),
         spawned_at,
         pid,
         status_file_path: run_files

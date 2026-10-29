@@ -92,7 +92,7 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
 test("channel detail keeps the list bar's height, safe area and shadowless edge", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL, summary: "Review the mobile layout." }] });
 
-  await page.locator(".xmatrix-app-shell").evaluate((shell) => {
+  await page.locator(".xmatrix-app-shell:not([aria-busy])").evaluate((shell) => {
     (shell as HTMLElement).style.setProperty("--mobile-topbar-safe-top", "59px");
   });
   const bar = topbar(page);
@@ -137,7 +137,8 @@ test("other views keep their label, since the topbar is their only title", async
 test("create button clears native dock height and safe area, including older shells", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   // Exercise the native layout against both its fallback and live height updates.
-  await page.locator(".xmatrix-app-shell").evaluate((shell) => {
+  // The startup frame shares the shell's root class; style the shell itself.
+  await page.locator(".xmatrix-app-shell:not([aria-busy])").evaluate((shell) => {
     shell.classList.add("xmatrix-app-native-dock");
     (shell as HTMLElement).style.setProperty("--mobile-bottom-safe", "34px");
   });
@@ -156,7 +157,7 @@ test("create button clears native dock height and safe area, including older she
 
 test("the + keeps the 16px gutter and the content line its 30px, whatever side gap the native dock reports", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await page.locator(".xmatrix-app-shell").evaluate((shell) => {
+  await page.locator(".xmatrix-app-shell:not([aria-busy])").evaluate((shell) => {
     shell.classList.add("xmatrix-app-native-dock");
   });
   const fab = page.locator(".app-mobile-create-fab");

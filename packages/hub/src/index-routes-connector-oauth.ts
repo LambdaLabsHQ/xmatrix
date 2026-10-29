@@ -12,6 +12,7 @@ import { getAppConnectorProvider } from "./app-connectors";
 import { connectorCredentialRepository, INGRESS_KEY_FIELD, mintConnectorSecret } from "./connectors/credentials";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, oauthProviderIds, oauthRedirectUri,
   verifyOAuthState } from "./connectors/oauth";
+import { stripeAuthorizeEndpoint, stripeConnectOffered } from "./connectors/stripe-oauth";
 import { appOrigin } from "./deployment-origins";
 import { vercelCompletionUrl } from "./connectors/vercel-api";
 import { connectorHubOrigin, requireAuth, requireHumanAuth, jsonErrors } from "./index-shared";
@@ -19,6 +20,7 @@ import { ControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
 import { getAppConnection, upsertAppConnection } from "./apps";
 import type { Env } from "./types";
 import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
+import { connectStripeAccount } from "./connectors/stripe-accounts";
 import { connectXAccount } from "./connectors/x-accounts";
 import { connectCloudflareLogin } from "./connectors/cloudflare-api";
 import { upstreamMeter } from "./usage-cost-metering";
@@ -70,6 +72,12 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
       billingKey: `oauth:${await sha256Hex(state)}`, action: "connect" }).meter
       : upstreamMeter(env, { spaceId: verified.spaceId, connector: providerId, action: "connect" });
     const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state, meter);
+    if (providerId === "stripe") {
+      if (!verified.connectionSnapshot || verified.authorizationStartedAt === undefined) throw new Error("Restart Stripe Connect");
+      await connectStripeAccount(env, { spaceId: verified.spaceId, actorUserId: verified.userId, fields: grant.fields,
+        appClientId: verified.client.clientId, authorizedAt: verified.authorizationStartedAt, snapshot: verified.connectionSnapshot });
+      return appsRedirect(env, verified.spaceId, providerId, "connected");
+    }
     if (providerId === "x") {
       if (!verified.connectionSnapshot) throw new Error("Restart X Connect");
       await connectXAccount(env, { spaceId: verified.spaceId, actorUserId: verified.userId,
@@ -123,7 +131,9 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
 export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get("/api/connectors/oauth/providers", (c) => jsonErrors(c, async () => {
     requireHumanAuth(await requireAuth(c.req.raw, c.env));
-    return c.json({ providers: [...oauthProviderIds(c.env), ...(sentryInstallationClient(c.env) ? ["sentry"] : [])],
+    const spaceId = c.req.query("spaceId");
+    const providers = oauthProviderIds(c.env).filter((id) => id !== "stripe" || stripeConnectOffered(c.env, spaceId));
+    return c.json({ providers: [...providers, ...(sentryInstallationClient(c.env) ? ["sentry"] : [])],
       nativeProviders: [...(teamsNativeApp(c.env) ? ["teams"] : []), ...(googleChatNativeApp(c.env) ? ["googlechat"] : []), ...(await feishuNativeApp(c.env) ? ["feishu"] : []), ...(await telegramNativeApp(c.env) ? ["telegram"] : []), ...(await wecomNativeSuite(c.env) ? ["wecom"] : []), ...(await dingtalkNativeCompany(c.env) ? ["dingtalk"] : [])] }, 200, { "cache-control": "private, no-store" });
   }));
 
@@ -145,6 +155,10 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
     }
     const client = oauthClient(c.env, providerId);
     if (!client) return c.json({ error: "One-click connect is not configured for this app" }, 404);
+    const stripeAuthorizeUrl = providerId === "stripe" ? stripeAuthorizeEndpoint(c.env, spaceId) : undefined;
+    if (providerId === "stripe" && !stripeAuthorizeUrl) {
+      return c.json({ error: "One-click connect is not configured for this app" }, 404);
+    }
     let accountId: string | undefined;
     if (client.manifest.id === "x") {
       const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
@@ -158,8 +172,8 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
         creditsWaived: c.req.param("spaceId") === platformAdminSpaceId(c.env) });
     }
     let connectionSnapshot;
-    if (["discord", "x"].includes(client.manifest.id)) {
-      const providerId = client.manifest.id as "discord" | "x";
+    if (["discord", "x", "stripe"].includes(client.manifest.id)) {
+      const providerId = client.manifest.id as "discord" | "x" | "stripe";
       const existing = await getAppConnection(c.env, { connectionId: `${spaceId}:${providerId}`, actorUserId: user.id })
         .catch((error: unknown) => { if (error instanceof ControlError && error.status === 404) return null; throw error; });
       if (!existing) {
@@ -170,6 +184,7 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
         providerId, actorUserId: user.id });
     }
     return c.json({ url: await oauthAuthorizeUrl(client, { spaceId, userId: user.id, connectionSnapshot, accountId,
+      ...(stripeAuthorizeUrl ? { authorizeUrl: stripeAuthorizeUrl } : {}),
       redirectUri: oauthRedirectUri(connectorHubOrigin(c.env, c.req.raw)),
       meter: upstreamMeter(c.env, { spaceId, connector: client.manifest.id, action: "connect" }) }) },
     200, { "cache-control": "private, no-store" });

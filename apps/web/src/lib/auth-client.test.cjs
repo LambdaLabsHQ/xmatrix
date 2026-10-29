@@ -16,8 +16,8 @@ function signInService(t, { attempts, email, sessionStatus = 200 }) {
       return Response.json(status === 200 ? {} : { message: "Code refused", code: "INVALID_OTP" }, { status });
     }
     if (path.endsWith("/get-session")) return Response.json(email
-      ? { user: { id: "observed-user", email }, session: { token: "session" } } : null, { status: sessionStatus });
-    if (path.endsWith("/token")) return Response.json({ token: "jwt" });
+      ? { user: { id: "observed-user", email }, session: { token: "session" } } : null,
+      { status: sessionStatus, headers: email ? { "set-auth-jwt": "jwt" } : {} });
     assert.fail(`Unexpected account request: ${path}`);
   });
   return requests;

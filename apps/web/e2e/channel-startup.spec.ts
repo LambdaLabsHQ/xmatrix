@@ -101,23 +101,60 @@ test("a build the Hub admitted before opens on the next load while the Hub is as
   await expect(page.getByRole("progressbar", { name: "Preparing" })).toHaveCount(0);
 });
 
-test("resolving an anonymous session does not repeat compatibility admission", async ({ page }) => {
+/** A signed-in Hub session; the jwt plugin returns its bearer in `set-auth-jwt`. */
+const SIGNED_IN_SESSION = {
+  user: { id: "e2e-user", email: "e2e@xmatrix.test", name: "E2E Tester" },
+  session: { token: "test-session", expiresAt: "2099-01-01T00:00:00.000Z" },
+};
+const SESSION_JWT_HEADERS = { "set-auth-jwt": "test-jwt" };
+
+/** The workspace under real Better Auth reads rather than the mock session. */
+async function installRealAuthWorkspace(page: Page) {
   await page.addInitScript(() => {
     (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true;
   });
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+}
+
+test("resolving an anonymous session does not repeat compatibility admission, and takes its token from the session read", async ({ page }) => {
+  await installRealAuthWorkspace(page);
   await fixtureRule(page, { id: "startup-auth-session", pattern: "**/api/auth/get-session**",
-    responder: { kind: "deferred", json: {
-      user: { id: "e2e-user", email: "e2e@xmatrix.test", name: "E2E Tester" },
-      session: { token: "test-session", expiresAt: "2099-01-01T00:00:00.000Z" },
-    } } });
+    responder: { kind: "deferred", json: SIGNED_IN_SESSION, headers: SESSION_JWT_HEADERS } });
   await fixtureJson(page, "startup-auth-token", "**/api/auth/token**", { token: "test-jwt" });
   await page.goto("/app/personal-sspaceperso/channels/general--channel-general", { waitUntil: "domcontentloaded" });
   await expect.poll(async () => (await fixtureRequests(page, "client-compatibility")).length).toBe(1);
   await releaseFixture(page, "startup-auth-session");
-  await expect.poll(async () => (await fixtureRequests(page, "startup-auth-token")).length).toBeGreaterThan(0);
   await expect.poll(async () => (await fixtureRequests(page, "channel-catalog")).length).toBeGreaterThan(0);
+  // The session read carried the bearer; a second /token round trip would delay every read.
+  expect(await fixtureRequests(page, "startup-auth-token")).toHaveLength(0);
   expect(await fixtureRequests(page, "client-compatibility")).toHaveLength(1);
+});
+
+test("a returning account sees the list it last had while its session is confirmed", async ({ page }) => {
+  await installRealAuthWorkspace(page);
+  await fixtureJson(page, "signed-in-session", "**/api/auth/get-session**", SIGNED_IN_SESSION,
+    { headers: SESSION_JWT_HEADERS });
+  // As on a real network, the list answers after this account's disk store has opened.
+  await fixtureRule(page, { id: "held-catalog", pattern: /\/api\/xmatrix\/channels\/(?:page|resolve)(?:\?.*)?$/,
+    responder: { kind: "channelCatalog", channels: [E2E_CHANNEL], held: true } });
+  await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => page.evaluate(async () => (await indexedDB.databases())
+    .some(({ name }) => name?.startsWith("xmatrix-product-tail-cache")))).toBe(true);
+  await releaseFixture(page, "held-catalog");
+  const sidebar = page.locator(".app-sidebar");
+  await expect(sidebar.getByText("general", { exact: true })).toBeVisible();
+  // The list reached this device's disk once it had settled.
+  await expect.poll(() => page.evaluate(() =>
+    window.localStorage.getItem("xmatrix-product-tail-cache:last-catalog-user"))).toBe("e2e-user");
+
+  await fixtureRule(page, { id: "held-session", pattern: "**/api/auth/get-session**",
+    responder: { kind: "deferred", json: SIGNED_IN_SESSION, headers: SESSION_JWT_HEADERS } });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect.poll(async () => (await fixtureRequests(page, "held-session")).length).toBeGreaterThan(0);
+  await expect(sidebar.getByText("general", { exact: true })).toBeVisible();
+  await releaseFixture(page, "held-session");
+  await releaseFixture(page, "held-catalog");
+  await expect(page.getByRole("button", { name: "general", exact: true })).toBeVisible();
 });
 
 // A native session completes after admission, replacing the account QueryClient.
@@ -240,4 +277,39 @@ test("Electron reads history from the Hub", async ({ page }) => {
   });
   await page.goto("/app/personal-sspaceperso/channels/general--channel-general", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Electron browser history ready", { exact: true })).toBeVisible();
+});
+
+test("a conversation whose messages cannot be read says so instead of loading forever", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await fixtureJson(page, "refused-history", "**/channels/channel-general/history**",
+    { error: "History is unavailable", code: "invalid_request" }, { status: 400 });
+  await page.goto("/app/personal-sspaceperso/channels/general--channel-general", { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".app-empty-conversation-body").getByText(/Couldn't load messages/u)).toBeVisible();
+  await expect(page.locator(".app-message-timeline-skeleton")).toHaveCount(0);
+});
+
+test("the reading pane does not call the Space empty while its list is still arriving", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await fixtureRule(page, { id: "held-list", pattern: /\/api\/xmatrix\/channels\/(?:page|resolve)(?:\?.*)?$/,
+    responder: { kind: "channelCatalog", channels: [E2E_CHANNEL], held: true } });
+  await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+  await page.locator(".xmatrix-app-shell:not([aria-busy])").waitFor();
+  await expect.poll(async () => (await fixtureRequests(page, "held-list")).length).toBeGreaterThan(0);
+  await expect(page.locator(".app-message-timeline-skeleton")).toBeVisible();
+  await expect(page.getByText("No conversations yet")).toHaveCount(0);
+  await releaseFixture(page, "held-list");
+  await expect(page.locator(".app-message-timeline-skeleton")).toHaveCount(0);
+  await expect(page.getByText("No conversations yet")).toHaveCount(0);
+});
+
+test("the open app says it is offline while it is, and stops saying so when the network returns", async ({ page, context }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+  await page.locator(".xmatrix-app-shell:not([aria-busy])").waitFor();
+  const status = page.locator(".app-connection-status");
+  await expect(status).toHaveCount(0);
+  await context.setOffline(true);
+  await expect(status).toContainText("You’re offline");
+  await context.setOffline(false);
+  await expect(status).toHaveCount(0);
 });

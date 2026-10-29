@@ -143,8 +143,7 @@ import {
   SPLIT_TOOL_VIEWS,
   adminViewPath,
   agentsProfileEditPath,
-  toolItemPath,
-  toolItemSelection,
+  viewSelectionPath,
   pagesViewSelection,
   attentionSummaryFromEvent,
   browserDevicePresence,
@@ -2574,6 +2573,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }
     // Read the latest window from the Hub. Any failure keeps the presented
     // rows and the loading state; the periodic and foreground reads retry.
+    // Why the latest read last failed, until one succeeds.
+    let historyFailure: unknown = null;
     async function bridgeLatestHistoryOnline(forceRefresh = false): Promise<boolean> {
       const focusAnswered = (): boolean => {
         const focusRequest = lastHumanFocusRequestRef.current;
@@ -2660,8 +2661,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         productTailCacheHydratedStampsRef.current.delete(channelId);
         recordHistoryTailBase(channelId);
         if (renderAuthority) authorizeHistoryRender(renderAuthority);
+        historyFailure = null;
         return true;
-      } catch {
+      } catch (error) {
+        historyFailure = error;
         return false;
       }
     }
@@ -2671,8 +2674,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       try {
         const bridged = await bridgeLatestHistoryOnline();
         if (!readStillCurrent()) return;
-        setHistoryError(null);
-        setLoadingHistory(!bridged);
+        // A read that failed says so where the messages would be, instead of
+        // a skeleton that never ends; the periodic read keeps retrying.
+        const failure = bridged || historyRef.current.length > 0 ? null : historyFailure;
+        setHistoryError(failure ? userErrorMessage(failure, "Couldn't load messages") : null);
+        setLoadingHistory(!bridged && !failure);
       } finally {
         historyRefreshInFlightRef.current = false;
       }
@@ -2860,15 +2866,17 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     // The Pages view's URL also names the open page and the conversation open
     // beside it, so the pair can be shared.
     const viewPath = appViewPath(selectedChannel, view, currentSpaceId, spaces);
+    const preservesReturn = view === "admin" || view === "settings" || view === "apps";
+    const location = preservesReturn ? currentLoginReturnPath() : currentBrowserLocation();
     // Beside a page, the address is what names the conversation: opening and
     // closing one change it, and the selection follows it (also on Back).
     // A list destination's address names its open item the same way.
     const canonicalPath = view === "pages"
       ? pagesViewPath(viewPath, selectedPageId, routeInfo.conversationKey)
-      : view === "admin" || view === "settings" || view === "apps" ? adminViewPath(viewPath, currentBrowserLocation())
+      : preservesReturn ? adminViewPath(viewPath, location)
       : view === "agents" ? agentsProfileEditPath(viewPath, currentBrowserLocation())
-      : SPLIT_TOOL_VIEWS.includes(view) ? toolItemPath(viewPath, toolItemSelection(currentBrowserLocation())) : viewPath;
-    if (currentBrowserLocation() !== canonicalPath) {
+      : SPLIT_TOOL_VIEWS.includes(view) ? viewSelectionPath(viewPath, currentBrowserLocation()) : viewPath;
+    if (location !== canonicalPath) {
       replaceBrowserPath(canonicalPath);
       setBrowserPath(canonicalPath);
     }

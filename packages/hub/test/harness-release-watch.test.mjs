@@ -10,9 +10,11 @@ import {
   watchHarnessReleasesBesidePostgres,
 } from "../src/harness-release-watch.ts";
 
-const npm = { id: "claude", management: { latest: { kind: "npm", package: "@anthropic-ai/claude-code" } } };
-const pypi = { id: "vibe", management: { latest: { kind: "pypi", package: "mistral-vibe" } } };
-const unpublished = { id: "cursor", management: {} };
+const recipe = { unix: { command: "x", args: ["update"] }, windows: null };
+const npm = { id: "claude", management: { update: recipe, latest: { kind: "npm", package: "@anthropic-ai/claude-code" } } };
+const pypi = { id: "vibe", management: { update: recipe, latest: { kind: "pypi", package: "mistral-vibe" } } };
+const unpublished = { id: "cursor", management: { update: recipe } };
+const unupdatable = { id: "amp", management: { update: { unix: null, windows: null } } };
 /** A daemon the read names for a preset. */
 const target = (presetId, owner = "owner") => ({ presetId, ownerUserId: owner, ownerEmail: `${owner}@example.test`,
   machineId: "machine", hostId: "host", daemonId: `daemon-${owner}` });
@@ -22,7 +24,7 @@ async function watchAll(latest, found) {
   const asked = [];
   const commands = [];
   const result = await watchHarnessReleases({}, {
-    presets: [npm, pypi, unpublished],
+    presets: [npm, pypi, unpublished, unupdatable],
     latest,
     targets: async (releases) => { asked.push(releases); return found(releases); },
     issue: async (command) => { commands.push(command); return { command: { id: command.controlId } }; },
@@ -52,12 +54,13 @@ test("a large registry document is read, but one past the bound is refused", asy
   assert.equal(await fetchLatestVersion(npm.management.latest, async () => { throw new Error("offline"); }), undefined);
 });
 
-test("each daemon that has not seen the latest version is told the preset, never a version", async () => {
+test("each daemon without the latest version installed is told the preset, never a version", async () => {
   const { result, asked, commands } = await watchAll(
     async (latest) => latest.kind === "npm" ? "2.1.289" : undefined, () => [target("claude")]);
   assert.deepEqual(result, { issued: 1 });
-  assert.deepEqual(asked, [[{ presetId: "claude", version: "2.1.289" }]],
-    "an unreadable registry and an unpublished preset tell nobody");
+  assert.deepEqual(asked, [[{ presetId: "claude", version: "2.1.289" }, { presetId: "cursor" }]],
+    "an unreadable registry tells nobody; a preset without a registry is read without a version; " +
+    "one without an update recipe is never read");
   assert.equal(commands[0].commandType, "harness_action");
   assert.equal(commands[0].principal.id, "owner");
   assert.deepEqual(Object.keys(commands[0].payload).sort(), ["action", "presetId", "requestId", "type"]);
@@ -85,9 +88,10 @@ test("every preset with a published version is read in one pass, each target tol
   const { result, asked, commands } = await watchAll(
     async (latest) => latest.kind === "npm" ? "2.1.289" : "2.25.8",
     (releases) => releases.map(({ presetId }) => target(presetId)));
-  assert.deepEqual(result, { issued: 2 });
-  assert.deepEqual(asked, [[{ presetId: "claude", version: "2.1.289" }, { presetId: "vibe", version: "2.25.8" }]]);
-  assert.deepEqual(commands.map(command => command.payload.presetId), ["claude", "vibe"]);
+  assert.deepEqual(result, { issued: 3 });
+  assert.deepEqual(asked, [[{ presetId: "claude", version: "2.1.289" }, { presetId: "vibe", version: "2.25.8" },
+    { presetId: "cursor" }]]);
+  assert.deepEqual(commands.map(command => command.payload.presetId), ["claude", "vibe", "cursor"]);
 });
 
 test("a pass with no readable registry reads no targets", async () => {

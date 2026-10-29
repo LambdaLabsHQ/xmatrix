@@ -10,6 +10,193 @@ each connected row ends in a green tick. Unit and browser coverage check the sec
 the subheadings and the mark. Beta Web only, no API, schema or native change;
 recovery is a CI-validated beta Web release reverting the change.
 
+## Unreleased: The iOS app says when its page cannot load and retries
+
+A main-frame load that fails (not a cancelled navigation) now shows a
+tinted-paper tile over the app's paper, "can't be reached" or "offline", with
+Try again; it retries when the network returns (NWPathMonitor) and every 15 s,
+and a page whose web process iOS reclaimed reloads instead of staying blank.
+iOS only.
+## Unreleased: The open app says when it is offline or reconnecting
+
+A tinted-paper tile over the reading column, just under the top band, says
+"You're offline" while the browser is offline, and "Reconnecting to xMatrix…"
+when the live connection has dropped for more than 4 s after it had connected.
+It disappears when the connection returns; nothing on screen is blocked. Web
+only.
+
+## Unreleased: A desktop window always appears and says when the app cannot load
+
+A new window shows within 1.5 s even while the app's page is still on its way.
+A main-frame load that fails (not a cancelled navigation) shows a tinted-paper
+status in the window, "can't be reached" or "offline", with Try again; it
+retries when the network returns and every 15 s, and a crashed renderer
+reloads. Desktop only.
+
+## Unreleased: Android opens its own copy when the edge answers with a server error
+
+A main-frame 5xx from the Web origin (an edge error page) now opens the copy
+of the app the Android shell carries, as a network failure already did, so the
+person sees the app's startup frame and its connecting status instead of an
+error page. Android only.
+
+## Unreleased: Startup reads answer in time and failures show in place
+
+A sign-in session read (Web and native) now gives up after 15 s and counts as
+a transient failure the existing backoff retries, and each Channel list page
+attempt after 20 s, retried as a dropped connection, so a silent network no
+longer holds startup forever. A conversation whose latest messages cannot be
+read shows why where the messages would be, instead of a skeleton that never
+ends; the periodic read keeps retrying. While the Space's list has not
+answered, the reading pane shows its skeleton rather than "No conversations
+yet". Web only.
+
+## Unreleased: A Space keeps every Stripe account it connects
+
+Connecting another merchant previously replaced the Space's single Stripe
+grant. Each account now has an independently encrypted grant, refresh lease
+and event binding, shown under Stripe accounts with Add and Remove actions.
+Stripe's own picker still authorizes one merchant at a time. Uninstalling or
+removing one merchant leaves the others connected. Check reads events using
+the existing `event_read` permission, including an empty list, and fails on
+a refusal; it no longer requests account profiles with an ungranted permission.
+
+Hub and beta Web, with additive migration 0231 and no client protocol change.
+The new Hub adopts each old verified grant atomically under its parent lock;
+pending copies cannot route events. Retained grants use the new account store,
+so Hub recovery is a CI-validated forward fix that keeps that store. Do not
+roll the Hub back to the old single-grant reader after adoption. Web recovery
+can revert its UI independently. See [Stripe accounts](connectors/stripe.md).
+
+## Unreleased: The app opens on its own frame and says what it waits for
+
+The preparation progress bar and the signed-in shell's full-screen spinner are
+gone. Both waits render one `StartupShell`: the wood frame with the account's
+last list, or the list's skeleton, from the server's first frame onward. List
+skeletons no longer name a section before the list arrives. A tinted-paper
+status, timed by CSS so it works before scripts run, says "Connecting to
+xMatrix…" after 2 s, that it is still trying on a slow network after 6 s, and
+offers a reload after 15 s; an offline device says so at once. Web only.
+
+## Unreleased: Automatic harness updates keep trying until installed
+
+With the Machines switch on, harnesses still sat weeks behind. The Hub stopped
+telling a daemon once it had seen a new version, the daemon queued that update
+in memory only, and the update waited for every Run on the machine to end.
+Self-updating harnesses were assumed to update themselves, but they do not in
+xMatrix's headless launches. Now, while the switch is on, the daemon runs the
+official update. The Hub tells it every 30 minutes until the inventory shows
+the latest version installed, and daily for harnesses without a registry. Only
+live Runs of that same harness delay it. Hub and daemon, no schema change.
+Recovery is a CI-validated beta revert.
+## Unreleased: Shared links name the selected object
+
+An Apps link such as `?connector=stripe` previously stayed on the list because
+detail selection read `item`, while only OAuth returns interpreted `connector`.
+Apps now uses `connector` for opening, switching and closing details, including
+OAuth and Gmail returns. The old Apps `item` parameter is removed without an
+alias. The shared item hook and helpers are removed; Agents use `agent`,
+Machines use `machine`, Schedules use `schedule`, Settings/admin use `section`,
+and Team uses `space`. Existing item-only links return to their destination
+list; this is an intentional address change across Web consumers. Beta Web only, no protocol
+or schema change. Recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: A new Page keeps its first pasted image
+
+Pasting an image or video into an empty new Page captured its still-null id
+while the first write was creating it. The media ref then failed to bind.
+The editor now awaits that same creation before uploading against the permanent
+Page id. A browser regression reproduces the null owner id before the fix.
+Beta Web only, no schema or protocol change; recovery is a CI-validated beta
+Web reverting this change.
+
+## Unreleased: Unchanged Page edits preserve a word being typed
+
+A repeated Markdown write could parse an unchanged projection back into the
+live document and remove the trailing space a reader had just typed. The next
+word then joined the preceding one. The Hub's fragment writer and the parallel
+Web preview writer now leave an unchanged projection alone; empty documents
+still initialize and actual edits still apply. Real Yjs regressions reproduce
+`Shipped andverified` on both old paths. This independently establishes the
+bug; the original browser first attempt has no trace proving its timing. Hub
+and Web, no migration or native update; recovery is a CI-validated beta revert.
+
+## Unreleased: Agents can upload Page images and videos
+
+Agents previously could only preserve images pasted by a person; new local
+images were refused with an editor-only instruction. `xmatrix page upload
+<page> <file>` now uploads images and videos to the Page's private content and
+returns Markdown for ordinary edits or live writing. The Hub checks current
+Page write access and canonical Space/Page/hash refs on every binding, including
+replays. Text never causes an implicit local-file upload. Hub and CLI, no schema
+or wire migration; older CLIs continue to preserve existing media. Recovery is
+a CI-validated beta reverting the change. See [Page media](design/pages-live-document.md#66-images-and-videos).
+
+## Unreleased: Pasted page images upload to the Hub straight
+
+Pasting an image into a page sat at about 80% and then the image vanished.
+The Web's Worker (OpenNext) reads a whole request into memory before its route
+runs, so the upload body sent through it showed no progress while the Worker
+re-sent it, and the 30-second stall watchdog gave the upload up. The browser
+now sends the body straight to the Hub from the app's own origin, with its
+bearer and client identity and never a cookie, as page reads already do; a
+`401`, `426` or no answer across origins goes through the Web. Message
+attachments share the path. Hub and Web, no migration. Recovery is reverting
+#1196. See [Client resilience](architecture/client-resilience.md).
+
+## Unreleased: The app starts one Hub round trip sooner and paints its last list
+
+Web sign-in now takes the bearer from the `set-auth-jwt` header the Hub's jwt
+plugin already returns on a signed-in `get-session`, instead of a second
+`/api/auth/token` request, so every launch reaches its first reads one Hub
+round trip sooner. A remembered compatibility admission is keyed by Hub,
+component, protocol and platform rather than the exact version, so the first
+load after a release no longer waits behind the preparation bar; the Hub is
+still asked in the background and a refusal still opens the upgrade wall. The
+presentation-only Channel list snapshot is now written whenever the list
+settles, so a returning account sees its last list while its session is
+confirmed; it remains inert and user-partitioned. App routes preconnect to the
+Hub while scripts download. Web only. See
+[Channel startup performance](performance/channel-startup.md).
+
+## Unreleased: Message append recovers a lost pre-COMMIT response
+
+HUB-B6 lost its final live-routing read after publication writes, before COMMIT.
+The database-only append now closes that session and retries once on a fresh
+connection, checking authority and rebuilding reply/attention recipients for
+each attempt. Real PostgreSQL coverage verifies one committed message, mutation
+and outbox entry, fresh reply targets, bounded repeated loss and the unchanged
+unknown-COMMIT boundary. Delivery remains outside the transaction; unknown
+commits use existing receipt reconciliation. This repairs recovery without
+attributing the underlying disconnect. Hub only, no migration or client change;
+recovery is a CI-validated beta Hub reverting this change. See
+[PostgreSQL recovery](operations/postgres-hyperdrive-origin.md).
+
+## Unreleased: Stackless Durable Object outages retain their HTTP caller
+
+HUB-B5 reached the common HTTP outage handler without an originating stack;
+its console report discarded the route, leaving only the common capture stack.
+The original exception now reaches Sentry once with its registered method and
+route template, or the fixed PageSession/Harness watch boundary, and boolean
+platform flags. The issue reader exposes only that bounded diagnostic, never
+path values, request data or identities. Different routes retain independent
+fingerprints. Existing 503 responses and replay boundaries are unchanged.
+HUB-88/9C share this diagnostic gap; their underlying invalidation remains
+unproven. Hub only, no migration or client update. Recovery is a CI-validated
+beta Hub reverting this diagnostic change. See
+[Runtime delivery errors](operations/runtime-delivery-errors.md).
+
+## Unreleased: Bounded schema collections reject oversized input early
+
+The Hub authentication and AI SDK dependency graph now resolves Zod 4 to
+4.6.6, fixing GHSA-mrhx-c7xc-m3w5 for constrained collections: size checks
+reject oversized arrays, maps and sets before validating their elements.
+Unbounded schemas still need transport limits; the authentication stream
+limit remains the protection for those inputs. Zod 3 in the build tooling
+is outside this change. Hub and beta Web, no schema or protocol migration.
+Recovery is a CI-validated beta reverting the dependency constraint and lock,
+which also restores the dependency risk; keep the transport limit in place.
+
 ## Unreleased: A failed App run is fixed where it shows
 
 Apps → Recent activity showed a failed private call as a user id and

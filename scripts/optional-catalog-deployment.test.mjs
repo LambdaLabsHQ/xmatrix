@@ -13,6 +13,18 @@ const run = (extra = {}) => spawnSync(process.execPath, ['-e', script], {
   env: { ...base, ...extra }, encoding: 'utf8',
 });
 
+function assertNoPartialPayload(entries, failure) {
+  const complete = (1 << entries.length) - 1;
+  for (let mask = 1; mask < complete; mask += 1) {
+    const partial = Object.fromEntries(entries.filter((_, index) => mask & (1 << index)));
+    const result = run(partial);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, failure);
+    for (const value of Object.values(partial)) assert.ok(!result.stderr.includes(value));
+  }
+}
+
 test('missing catalog configuration blocks deployment without emitting secrets', () => {
   const { XMATRIX_SECRET_CATALOG_KEY: _, ...withoutCatalog } = base;
   const result = spawnSync(process.execPath, ['-e', script], {
@@ -56,15 +68,7 @@ test('Stripe rotation emits a complete live configuration or preserves existing 
 });
 
 test('every partial Stripe rotation fails before emitting any secret payload', () => {
-  const entries = Object.entries(billing);
-  for (let mask = 1; mask < 15; mask++) {
-    const partial = Object.fromEntries(entries.filter((_, index) => mask & (1 << index)));
-    const result = run(partial);
-    assert.notEqual(result.status, 0);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, /Missing production billing secret/);
-    for (const value of Object.values(partial)) assert.ok(!result.stderr.includes(value));
-  }
+  assertNoPartialPayload(Object.entries(billing), /Missing production billing secret/);
 });
 
 test('test-mode keys, invalid price references, and whitespace cannot reach production', () => {
@@ -193,6 +197,39 @@ test('Google Chat deployment rejects a changed system identity, URL, invalid JSO
   }
 });
 
+
+test('Stripe App deployment emits the live trio, or an acceptance path, and never a partial set', () => {
+  const stripeKey = ['sk', 'live', 'fixtureNotARealKey'].join('_');
+  const trio = { CONNECTOR_STRIPE_CLIENT_ID: 'ca_fixtureClient', CONNECTOR_STRIPE_CLIENT_SECRET: stripeKey,
+    CONNECTOR_STRIPE_SIGNING_SECRET: 'whsec_fixtureNotARealSecret' };
+  const absent = run();
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.equal(JSON.parse(absent.stdout).CONNECTOR_STRIPE_CLIENT_ID, undefined);
+  const configured = run(trio);
+  assert.equal(configured.status, 0, configured.stderr);
+  assert.deepEqual(Object.fromEntries(Object.keys(trio).map((key) => [key, JSON.parse(configured.stdout)[key]])), trio);
+  for (const key of Object.keys(trio)) assert.ok(workflow.includes(key + ': ${{ secrets.' + key + ' }}'), key);
+  for (const key of ['CONNECTOR_STRIPE_OAUTH_PUBLIC', 'CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH', 'CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID']) {
+    assert.ok(workflow.includes(key + ': ${{ secrets.' + key + ' }}'), key);
+  }
+  assertNoPartialPayload(Object.entries(trio), /Missing production connector secret/);
+  const testKey = run({ ...trio, CONNECTOR_STRIPE_CLIENT_SECRET: ['sk', 'test', 'fixtureNotARealKey'].join('_') });
+  assert.notEqual(testKey.status, 0);
+  assert.match(testKey.stderr, /Invalid production Stripe App configuration/);
+  assert.ok(!testKey.stderr.includes('fixtureNotARealKey'));
+  const path = '/oauth/v2/chnlink_fixturePath/authorize';
+  const acceptance = run({ ...trio, CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH: path, CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID: 'acceptance-space' });
+  assert.equal(acceptance.status, 0, acceptance.stderr);
+  assert.equal(JSON.parse(acceptance.stdout).CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH, path);
+  const half = run({ ...trio, CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH: path });
+  assert.notEqual(half.status, 0);
+  assert.ok(!half.stderr.includes('chnlink_fixturePath'));
+  const reviewed = run({ ...trio, CONNECTOR_STRIPE_OAUTH_PUBLIC: 'marketplace', CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH: path });
+  assert.equal(reviewed.status, 0, reviewed.stderr);
+  const published = JSON.parse(reviewed.stdout);
+  assert.equal(published.CONNECTOR_STRIPE_OAUTH_PUBLIC, 'marketplace');
+  assert.equal(published.CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH, undefined);
+});
 
 test('Discord company application deploys only a complete bounded client and bot triple', () => {
   const values = { CONNECTOR_DISCORD_CLIENT_ID: '123456789012345678', CONNECTOR_DISCORD_CLIENT_SECRET: 'fixture-client',

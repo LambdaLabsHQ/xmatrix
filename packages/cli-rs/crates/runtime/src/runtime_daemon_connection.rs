@@ -508,6 +508,7 @@ async fn hold_owner_action_lease(
 async fn execute_leased_harness_action(
     hub_url: &str,
     relay: &SharedMachineDaemonConnection,
+    run_registry: &DaemonRunRegistry,
     command: MachineDaemonCommand,
 ) -> Option<MachineDaemonReport> {
     let MachineDaemonCommand::MachineHarnessAction {
@@ -533,11 +534,10 @@ async fn execute_leased_harness_action(
         // A sign-in installs nothing; a redelivery at worst restarts it, and
         // the code it carries is only ever handed to the sign-in it names.
         crate::runtime_daemon_harness_login::execute(&preset_id, action, code.as_deref()).await
-    } else if matches!(
-        action,
-        machine_daemon_connection::HarnessAction::Refresh
-            | machine_daemon_connection::HarnessAction::Release
-    ) {
+    } else if action == machine_daemon_connection::HarnessAction::Release {
+        let busy = harness_has_live_run(run_registry, &preset_id).await;
+        runtime_daemon_harness_action::release(&preset_id, busy).await
+    } else if action == machine_daemon_connection::HarnessAction::Refresh {
         runtime_daemon_harness_action::execute(&preset_id, action).await
     } else {
         match runtime_daemon_harness_action::begin_request_once(&request_id) {
@@ -2854,9 +2854,10 @@ async fn run_daemon_connection(
                     }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineHarnessAction { .. }) => {
                         let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let run_registry = run_registry.clone();
                         spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
                             let DeferredDaemonCommandContext { hub_url, relay, effect_journal, effect_id } = context;
-                            let Some(report) = execute_leased_harness_action(&hub_url, &relay, command).await else {
+                            let Some(report) = execute_leased_harness_action(&hub_url, &relay, &run_registry, command).await else {
                                 return;
                             };
                             if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {

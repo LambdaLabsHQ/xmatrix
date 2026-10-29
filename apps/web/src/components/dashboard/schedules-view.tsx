@@ -1,5 +1,7 @@
 "use client";
 
+import { useUrlParameter } from "./url-query-state";
+
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
@@ -34,7 +36,6 @@ import { spaceMemberCanCreate } from "./space-member-permissions";
 import { formatRelativeAge } from "./time-display";
 import {
   ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolSplit,
-  useToolItem,
 } from "./tool-split";
 import { AutomationExpressionGuidance, automationExpressionFromText } from "./workspace-admin-views";
 import { evaluationBindingLabel, formatDateTime } from "./workspace-shell-recovered";
@@ -97,7 +98,7 @@ export function SchedulesView({
   onOpenPages: () => void;
 } & ScheduleActions) {
   const { user } = useAuth();
-  const [selectedId, select] = useToolItem();
+  const [selectedId, select] = useUrlParameter("schedule");
   const [editingId, setEditingId] = useState<string | null>(null);
   // Relative times ("next in 8 min") stay true while the view is open.
   const [now, setNow] = useState(() => Date.now());

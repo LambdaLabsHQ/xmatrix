@@ -7,6 +7,7 @@ import { messageSearchFailureMetadata } from "../../postgres-request-failure";
 import { safeServerDiagnosticId } from "../../server-error-diagnostic";
 import { runtimeDatabaseFailureMetadata } from "../../runtime-transport/runtime-database-failure";
 import { machineRegistryCausalityMetadata } from "../../runtime-transport/machine-registry-causality";
+import { durableObjectFailureMetadata } from "../../durable-object-request-failure";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
@@ -49,6 +50,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
     lines.push(...runtimeDatabaseFailureMetadata((extra as Record<string, unknown>).runtime_database_reason));
     lines.push(...machineDaemonCredentialFailureMetadata((extra as Record<string, unknown>).machine_credential_reason));
     lines.push(...machineRegistryCausalityMetadata(extra as Record<string, unknown>));
+    lines.push(...durableObjectFailureMetadata((extra as Record<string, unknown>).durable_object_failure));
     const diagnosticId = safeServerDiagnosticId((extra as Record<string, unknown>).diagnosticId);
     if (diagnosticId) lines.push(`Diagnostic reference: ${diagnosticId}`);
   }

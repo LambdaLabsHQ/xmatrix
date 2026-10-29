@@ -344,7 +344,7 @@ export class RelayPageSession extends DurableObject<Env> {
       return Response.json({ error: "Not found" }, { status: 404 });
     } catch (error) {
       if (error instanceof ControlError) return postgresControlErrorResponse(error);
-      const transient = transientFailure(error);
+      const transient = transientFailure(error, () => ({ operation: "PageSession.fetch" }));
       if (transient) return failureResponse(transient);
       console.error("page session request failed", error);
       // The Hub's console logs are not always kept, so the editor sees what failed.

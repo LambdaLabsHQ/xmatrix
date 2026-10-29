@@ -12,7 +12,7 @@ async function openApps(page: Page, { providers = [], connections = [], app, per
   providers?: string[]; connections?: unknown[]; app?: string; permission?: unknown;
 }) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await fixtureJson(page, "providers", "**/api/xmatrix/connectors/oauth/providers", { providers, nativeProviders: [] });
+  await fixtureJson(page, "providers", `**/api/xmatrix/connectors/oauth/providers?spaceId=${E2E_SPACE.id}`, { providers, nativeProviders: [] });
   await fixtureJson(page, "connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections });
   await fixtureJson(page, "executions", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });
   await fixtureJson(page, "policies", /\/app-connections\/[^/]+\/policies$/, permission);

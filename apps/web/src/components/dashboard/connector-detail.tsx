@@ -15,6 +15,7 @@ import { noticeClass } from "@/components/ui/status-tone";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { StripeAccounts } from "./stripe-accounts";
 import { CloudflareLogins } from "./cloudflare-logins";
 import { ConnectorActivity } from "./connector-activity";
 import {
@@ -178,6 +179,10 @@ export function ConnectorDetailPage({
             onInstall={() => onConnect({ mode: "account" })}
             onChanged={refreshConnections} />
         ) : null}
+        {connector.id === "stripe" && oauth ? (
+          <StripeAccounts key={spaceId} spaceId={spaceId} token={token} userId={userId}
+            adding={connecting} canAdd={oauth} hideWhenEmpty={!configured} onAdd={() => onConnect()} onChanged={refreshConnections} />
+        ) : null}
         {connector.id === "gmail" && configured ? (
           <GmailMailboxes key={spaceId} spaceId={spaceId} token={token} userId={userId} members={members}
             adding={connecting} onAdd={() => onConnect()} />
@@ -240,6 +245,7 @@ export function ConnectorDetailPage({
           )
         ) : null}
         {kind !== "chat" && kind !== "company" && configured && connectorGeneratesCredentials(manualConnector)
+          && !(connector.id === "stripe" && kind === "oauth" && !hasTypedCredentials)
           ? <ConnectorEventDelivery {...credentials} connector={manualConnector} /> : null}
 
         <ConnectorCommands connector={connector} />

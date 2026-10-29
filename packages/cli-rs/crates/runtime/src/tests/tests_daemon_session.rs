@@ -163,6 +163,7 @@ fn daemon_registry_reconciliation_ignores_timestamps_but_detects_missing_runs() 
         execution_key: Some("exec:test".to_string()),
         agent_id: Some("agent:test".to_string()),
         agent_name: Some("codex".to_string()),
+        agent_preset_id: None,
         auth_capability: Some("auth-cap".to_string()),
         request_capability: Some("request-cap".to_string()),
         updated_at: "100".to_string(),
@@ -2385,4 +2386,33 @@ fn spawn_bootstrap_templates_replace_inherited_overrides_and_fail_closed() {
     );
     prompts.schema_version = 42;
     assert!(super::apply_spawn_bootstrap_prompts(applied, Some(&prompts)).is_err());
+}
+
+#[tokio::test]
+async fn an_automatic_update_waits_only_for_live_runs_of_its_own_harness() {
+    let live = |preset: Option<&str>| {
+        let mut child = test_empty_daemon_run_child();
+        child.pid = std::process::id();
+        child.agent_preset_id = preset.map(str::to_string);
+        child
+    };
+    let registry: DaemonRunRegistry = Arc::new(tokio::sync::Mutex::new(HashMap::from([(
+        "run:cursor".to_string(),
+        live(Some("cursor")),
+    )])));
+    assert!(super::harness_has_live_run(&registry, "cursor").await);
+    assert!(!super::harness_has_live_run(&registry, "codex").await);
+
+    // The harness survives the sidecar, so a restarted daemon still knows it.
+    let persisted = super::persisted_daemon_run_from_child(&live(Some("cursor")));
+    let reread: super::PersistedDaemonRun =
+        serde_json::from_value(serde_json::to_value(&persisted).unwrap()).unwrap();
+    assert_eq!(reread.agent_preset_id.as_deref(), Some("cursor"));
+
+    // A row an older daemon wrote does not name its harness: it may be any.
+    registry
+        .lock()
+        .await
+        .insert("run:old".to_string(), live(None));
+    assert!(super::harness_has_live_run(&registry, "codex").await);
 }

@@ -18,6 +18,8 @@ overrides:
   ip-address: "^10.3.1"
   postcss: "^8.5.18"
   kysely: "0.29.2"
+  # Reject oversized constrained collections before validating their elements.
+  "zod@>=4.0.0 <4.6.6": "4.6.6"
   # Build-time tooling (OpenNext, shadcn, wrangler/miniflare) pulls these in;
   # keep them past current advisories within their majors.
   "brace-expansion@>=2.0.0 <3": "^2.1.6"

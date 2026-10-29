@@ -11,6 +11,8 @@ const js = ts.transpileModule(source, {
 }).outputText;
 
 let fetchImpl;
+/** Where the page asks the Hub straight; null asks through the Web. */
+let direct = null;
 let id = 0;
 let requests = [];
 
@@ -32,7 +34,9 @@ class FakeXMLHttpRequest {
     this.method = method;
     this.url = url;
   }
-  setRequestHeader() {}
+  setRequestHeader(name, value) {
+    (this.headers ??= {})[name] = value;
+  }
   send() {
     this.sent = true;
     this.readyState = 2;
@@ -113,6 +117,7 @@ vm.runInNewContext(js, {
       };
     }
     if (specifier === "../query/api-client") return transport;
+    if (specifier === "../query/hub-read") return { directHubRequest: () => direct };
     return require(specifier);
   },
 });
@@ -390,4 +395,76 @@ test("a refused commit is not replayed", async () => {
     token: "human-token", messageId: "message-1", visibilityScopeId: "channel:closed-1", attachments: [attachment],
   }), { status: 403, code: "not_authorized" });
   assert.equal(calls, 1);
+});
+
+/** Waits for the next upload request to be sent. */
+async function sentRequest(index) {
+  for (let turn = 0; turn < 50 && !requests[index]?.sent; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(requests[index]?.sent, `upload request ${index} was not sent`);
+  return requests[index];
+}
+
+test("the body goes to the Hub straight, not through the Web's Worker that would hold all of it first", async () => {
+  fetchImpl = admittedUploadResponse;
+  requests = [];
+  direct = { origin: "https://hub.example", headers: { "x-xmatrix-client-component": "web" } };
+  try {
+    const pending = prepareMessageAttachmentUpload(uploadInput());
+    const request = await sentRequest(0);
+    assert.match(request.url, /^https:\/\/hub\.example\/api\/relay-v2\/private-r2\/uploads\/id-\d+\/scope\/space%3Aspace-1$/u);
+    assert.equal(request.headers.Authorization, "Bearer human-token");
+    assert.equal(request.headers["x-xmatrix-client-component"], "web");
+    assert.equal(request.headers["x-xmatrix-content-sha256"].length, 64);
+    request.status = 200;
+    request.responseText = "{}";
+    request.onload();
+    await pending;
+    assert.equal(requests.length, 1, "an upload the Hub took is sent once");
+  } finally {
+    direct = null;
+  }
+});
+
+for (const [refusal, answer] of [
+  ["a token the Hub does not take from here", (request) => {
+    request.status = 401;
+    request.responseText = JSON.stringify({ error: "Unauthorized" });
+    request.onload();
+  }],
+  ["no answer across origins", (request) => request.onerror()],
+]) {
+  test(`an upload goes through the Web on ${refusal}`, async () => {
+    fetchImpl = admittedUploadResponse;
+    requests = [];
+    direct = { origin: "https://hub.example", headers: {} };
+    try {
+      const pending = prepareMessageAttachmentUpload(uploadInput());
+      answer(await sentRequest(0));
+      const viaWeb = await sentRequest(1);
+      assert.match(viaWeb.url, /^\/api\/xmatrix\/relay-v2\/private-r2\/uploads\/id-\d+\/scope\/space%3Aspace-1$/u);
+      viaWeb.status = 200;
+      viaWeb.responseText = "{}";
+      viaWeb.onload();
+      await pending;
+    } finally {
+      direct = null;
+    }
+  });
+}
+
+test("an upload the Hub refuses for itself is not sent again through the Web", async () => {
+  fetchImpl = admittedUploadResponse;
+  requests = [];
+  direct = { origin: "https://hub.example", headers: {} };
+  try {
+    const pending = prepareMessageAttachmentUpload(uploadInput());
+    const request = await sentRequest(0);
+    request.status = 403;
+    request.responseText = JSON.stringify({ error: "checksum does not match intent", code: "not_authorized" });
+    request.onload();
+    await assert.rejects(pending, /checksum does not match intent/u);
+    assert.equal(requests.length, 1);
+  } finally {
+    direct = null;
+  }
 });

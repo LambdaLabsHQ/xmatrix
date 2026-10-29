@@ -76,15 +76,15 @@ export function openAdminLocation(params: Record<string, string>) {
   pushBrowserPath(`${url.pathname}${url.search}${url.hash}`);
   window.dispatchEvent(new Event(PARAM_EVENT));
   // The section list follows its own address event.
-  window.dispatchEvent(new Event("xmatrix:tool-item"));
+  window.dispatchEvent(new Event("xmatrix:url-query"));
 }
 
 export function openAdminUser(userId: string) {
-  openAdminLocation({ item: "users", user: userId, space: "" });
+  openAdminLocation({ section: "users", user: userId, space: "" });
 }
 
 export function openAdminSpace(spaceId: string) {
-  openAdminLocation({ item: "spaces", space: spaceId, user: "" });
+  openAdminLocation({ section: "spaces", space: spaceId, user: "" });
 }
 
 export function isForbidden(error: unknown): boolean {

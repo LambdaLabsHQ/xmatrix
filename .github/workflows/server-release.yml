@@ -224,6 +224,12 @@ jobs:
           CONNECTOR_FEISHU_ENCRYPT_KEY: ${{ secrets.CONNECTOR_FEISHU_ENCRYPT_KEY }}
           CONNECTOR_SLACK_SIGNING_SECRET: ${{ secrets.CONNECTOR_SLACK_SIGNING_SECRET }}
           CONNECTOR_LINEAR_SIGNING_SECRET: ${{ secrets.CONNECTOR_LINEAR_SIGNING_SECRET }}
+          CONNECTOR_STRIPE_CLIENT_ID: ${{ secrets.CONNECTOR_STRIPE_CLIENT_ID }}
+          CONNECTOR_STRIPE_CLIENT_SECRET: ${{ secrets.CONNECTOR_STRIPE_CLIENT_SECRET }}
+          CONNECTOR_STRIPE_SIGNING_SECRET: ${{ secrets.CONNECTOR_STRIPE_SIGNING_SECRET }}
+          CONNECTOR_STRIPE_OAUTH_PUBLIC: ${{ secrets.CONNECTOR_STRIPE_OAUTH_PUBLIC }}
+          CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH: ${{ secrets.CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH }}
+          CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID: ${{ secrets.CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN_HUB }}
         run: |
           set -euo pipefail
@@ -320,6 +326,31 @@ jobs:
           for (const provider of ["SLACK", "LINEAR"]) {
             const key = `CONNECTOR_${provider}_SIGNING_SECRET`;
             if (process.env[key]) payload[key] = validConnectorSecret(key);
+          }
+          const stripeApp = ["CONNECTOR_STRIPE_CLIENT_ID", "CONNECTOR_STRIPE_CLIENT_SECRET", "CONNECTOR_STRIPE_SIGNING_SECRET"];
+          if (stripeApp.some((key) => process.env[key])) {
+            for (const key of stripeApp) payload[key] = validConnectorSecret(key);
+            if (!/^ca_[A-Za-z0-9]+$/.test(payload.CONNECTOR_STRIPE_CLIENT_ID) ||
+                !/^sk_live_[A-Za-z0-9]+$/.test(payload.CONNECTOR_STRIPE_CLIENT_SECRET) ||
+                !/^whsec_[A-Za-z0-9]+$/.test(payload.CONNECTOR_STRIPE_SIGNING_SECRET)) {
+              throw new Error("Invalid production Stripe App configuration");
+            }
+          }
+          if (process.env.CONNECTOR_STRIPE_OAUTH_PUBLIC) {
+            const mode = validConnectorSecret("CONNECTOR_STRIPE_OAUTH_PUBLIC");
+            if (mode !== "marketplace" || !payload.CONNECTOR_STRIPE_CLIENT_ID) {
+              throw new Error("Invalid production Stripe App configuration");
+            }
+            payload.CONNECTOR_STRIPE_OAUTH_PUBLIC = mode;
+          }
+          const stripeExternal = ["CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH", "CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID"];
+          if (payload.CONNECTOR_STRIPE_OAUTH_PUBLIC !== "marketplace" && stripeExternal.some((key) => process.env[key])) {
+            for (const key of stripeExternal) payload[key] = validConnectorSecret(key);
+            if (!payload.CONNECTOR_STRIPE_CLIENT_ID ||
+                !/^\/oauth\/v2\/chnlink_[A-Za-z0-9]+\/authorize$/.test(payload.CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH) ||
+                payload.CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID.length > 180) {
+              throw new Error("Invalid production Stripe App configuration");
+            }
           }
           const sentryApp = ["CONNECTOR_SENTRY_APP_UUID", "CONNECTOR_SENTRY_APP_SLUG"];
           if (sentryApp.some((key) => process.env[key])) {

@@ -16,7 +16,7 @@ use xmatrix_cli_core::machine_daemon_connection::{
 };
 
 use crate::runtime_daemon_harness_inventory::{
-    harness_command, inventory, probe, read_latest_version, report_inventory, resolve_launcher,
+    harness_command, inventory, probe, read_latest_version, resolve_launcher,
     resolve_recipe_program,
 };
 use crate::runtime_daemon_harness_policy::{
@@ -585,10 +585,8 @@ pub(crate) async fn execute(preset_id: &str, action: HarnessAction) -> HarnessAc
     }
     let preset = registry_preset(preset_id);
     if action == HarnessAction::Release {
-        return match preset {
-            Some(preset) => release(preset).await,
-            None => result(preset_id, action, HarnessActionStatus::Unsupported),
-        };
+        // Only the daemon knows which Runs are live; a local call assumes one may be.
+        return release(preset_id, true).await;
     }
     if action == HarnessAction::Refresh {
         for preset in agent_presets() {
@@ -660,32 +658,43 @@ pub async fn apply_local(preset_id: &str, action: &str) -> Result<serde_json::Va
     Ok(serde_json::to_value(execute(preset_id, action).await)?)
 }
 
-/// Presets with a newer published version whose update waits for this daemon
-/// to have no live Run.
-static WAITING_FOR_IDLE: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
-/// `(preset, version)` updates this daemon has already started or queued, so
-/// a version the update recipe does not actually install is never retried in a
-/// loop.
-static ATTEMPTED: Mutex<BTreeSet<(String, String)>> = Mutex::new(BTreeSet::new());
-
-/// Hub saw the preset's registry publish a version this daemon has not seen.
-/// The daemon reads the registry itself (Hub never names a version) and, if it
-/// owns this harness's updates and the installed version differs, updates: a
-/// harness whose own updater would run beside live sessions at once, any other
-/// once the daemon has no live Run, because a Run's registry row is not tagged
-/// with its harness. The re-probed item carries the new latest version.
-async fn release(preset: &'static AgentPreset) -> HarnessActionResult {
+/// Hub saw the preset's registry publish a version, or, for a preset with no
+/// registry, a day passed. The daemon owns the harness's updates whenever its
+/// automatic-update switch shows on, and converges the installed version: it
+/// reads the registry itself (Hub never names a version) and runs the update
+/// recipe when the installed version differs, or always for a preset without a
+/// registry, whose own update command decides. A harness whose updater replaces
+/// itself beside live sessions updates at once; any other waits while a Run of
+/// it is live (`harness_busy`). Nothing is remembered: Hub tells the daemon
+/// again until the inventory reports the latest version installed, so a
+/// restart, a failure or a busy harness is retried on a later notice.
+pub(crate) async fn release(preset_id: &str, harness_busy: bool) -> HarnessActionResult {
     let action = HarnessAction::Release;
-    let Some(management) = preset.management.as_ref().filter(|m| m.latest.is_some()) else {
+    let Some(preset) = registry_preset(preset_id) else {
+        return result(preset_id, action, HarnessActionStatus::Unsupported);
+    };
+    let Some(management) = preset
+        .management
+        .as_ref()
+        .filter(|management| management.update.current().is_some())
+    else {
         return result(&preset.id, action, HarnessActionStatus::Unsupported);
     };
-    let mut outcome = match read_latest_version(preset).await {
-        None => with_tail(
-            result(&preset.id, action, HarnessActionStatus::Failed),
-            "the registry did not answer",
-        ),
-        Some(latest) => apply_release(preset, management, latest).await,
+    let latest = match &management.latest {
+        None => None,
+        Some(_) => match read_latest_version(preset).await {
+            None => {
+                let mut failed = with_tail(
+                    result(&preset.id, action, HarnessActionStatus::Failed),
+                    "the registry did not answer",
+                );
+                failed.item = probed_item(preset).await;
+                return failed;
+            }
+            latest => latest,
+        },
     };
+    let mut outcome = apply_release(preset, management, latest.as_deref(), harness_busy).await;
     outcome.item = probed_item(preset).await;
     outcome
 }
@@ -693,35 +702,26 @@ async fn release(preset: &'static AgentPreset) -> HarnessActionResult {
 async fn apply_release(
     preset: &'static AgentPreset,
     management: &HarnessManagement,
-    latest: String,
+    latest: Option<&str>,
+    harness_busy: bool,
 ) -> HarnessActionResult {
     let action = HarnessAction::Release;
     let policy = HarnessPolicy::load();
     let installed = probe(preset, &policy).await.version;
     let owned = daemon_runs_updates(preset, &policy) && resolve_launcher(preset).is_some();
-    if !owned || installed.is_none() || installed.as_deref() == Some(latest.as_str()) {
+    if !owned
+        || installed.is_none()
+        || latest.is_some_and(|latest| installed.as_deref() == Some(latest))
+    {
         return result(&preset.id, action, HarnessActionStatus::Succeeded);
     }
     let Some(recipe) = management.update.current() else {
         return result(&preset.id, action, HarnessActionStatus::Succeeded);
     };
-    let key = (preset.id.clone(), latest);
-    // A poisoned set refuses rather than risk an update loop.
-    let seen = ATTEMPTED
-        .lock()
-        .map(|attempted| attempted.contains(&key))
-        .unwrap_or(true);
-    if seen {
-        return result(&preset.id, action, HarnessActionStatus::Succeeded);
-    }
-    if !management.auto_update.interactive_only {
-        if let (Ok(mut waiting), Ok(mut attempted)) = (WAITING_FOR_IDLE.lock(), ATTEMPTED.lock()) {
-            waiting.insert(preset.id.clone());
-            attempted.insert(key);
-        }
+    if harness_busy && !management.auto_update.interactive_only {
         return with_tail(
             result(&preset.id, action, HarnessActionStatus::Succeeded),
-            "update waits until no Run is live on this daemon",
+            "update waits until no Run of this harness is live",
         );
     }
     let Some(_lock) = try_lock_preset(&preset.id) else {
@@ -730,52 +730,12 @@ async fn apply_release(
             BUSY_MESSAGE,
         );
     };
-    if let Ok(mut attempted) = ATTEMPTED.lock() {
-        attempted.insert(key);
-    }
     let update = run_recipe(&preset.id, HarnessAction::Update, recipe, ACTION_TIMEOUT).await;
-    HarnessActionResult { action, ..update }
-}
-
-/// The daemon's last live Run exited: run the updates that were waiting for it.
-pub(crate) fn on_daemon_idle(
-    relay: &Arc<xmatrix_cli_core::machine_daemon_connection::MachineDaemonConnectionClient>,
-) {
-    let waiting = WAITING_FOR_IDLE
-        .lock()
-        .map(|mut waiting| std::mem::take(&mut *waiting))
-        .unwrap_or_default();
-    if waiting.is_empty() {
-        return;
-    }
-    let relay = relay.clone();
-    tokio::spawn(async move {
-        for preset in waiting.iter().filter_map(|id| registry_preset(id)) {
-            // The owner may have turned it off since the release that queued it.
-            if daemon_runs_updates(preset, &HarnessPolicy::load()) {
-                update_and_report(preset, &relay).await;
-            }
-        }
-    });
-}
-
-async fn update_and_report(
-    preset: &'static AgentPreset,
-    relay: &xmatrix_cli_core::machine_daemon_connection::MachineDaemonConnectionClient,
-) {
-    let Some(recipe) = preset.management.as_ref().and_then(|m| m.update.current()) else {
-        return;
-    };
-    // An owner action already running on this harness covers it.
-    let Some(_lock) = try_lock_preset(&preset.id) else {
-        return;
-    };
-    let outcome = run_recipe(&preset.id, HarnessAction::Update, recipe, ACTION_TIMEOUT).await;
     eprintln!(
         "Automatic {} update {:?} (exit {:?})",
-        preset.id, outcome.status, outcome.exit_code
+        preset.id, update.status, update.exit_code
     );
-    report_inventory(relay).await;
+    HarnessActionResult { action, ..update }
 }
 
 #[cfg(test)]
@@ -837,8 +797,8 @@ mod tests {
             ("custom", HarnessAction::Update),
             ("zcode", HarnessAction::AutoUpdateOff),
             ("grok", HarnessAction::Uninstall),
-            // No official registry publishes Cursor: nothing to hear about.
-            ("cursor", HarnessAction::Release),
+            // No update recipe: nothing a release could run.
+            ("zcode", HarnessAction::Release),
             ("no-such-harness", HarnessAction::Release),
         ] {
             let result = execute(preset, action).await;

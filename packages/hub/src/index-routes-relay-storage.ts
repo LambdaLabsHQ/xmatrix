@@ -1,6 +1,7 @@
 import type { Context, Hono } from "hono";
 import { relayResponse } from "./private-response";
 import type { Env } from "./types";
+import { authorizePageMediaCommit } from "./index-routes-pages";
 import { postgresMessageAttachmentAuthorityRequest } from "./postgres-message-attachment-authority";
 import { agentRunDelegationDenied } from "./agent-run-channel-delegation";
 import {
@@ -163,9 +164,11 @@ export function registerRelayStorageRoutes(app: Hono<{ Bindings: Env }>): void {
     })));
   app.post(RELAY_R2_BLOB_REF_PATH, relayR2Route(async (c) => {
     const visibilityScopeId = await relayVisibilityScopeIdFromRequest(c.req.raw);
+    const authUser = await requireAuth(c.req.raw, c.env);
+    await authorizePageMediaCommit(c.env, authUser, await c.req.raw.clone().json<Record<string, unknown>>());
     return handleRelayR2BlobRefCommit({
       request: c.req.raw,
-      ...await uploadAuthorization(c, visibilityScopeId),
+      ...await privateUploadAuthorization(c.env, authUser, visibilityScopeId),
       now: Date.now(),
       bucket: payloadBucket(c.env),
       content: scopedContent(c.env, visibilityScopeId),

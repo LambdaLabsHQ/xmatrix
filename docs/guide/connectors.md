@@ -81,7 +81,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Google Cloud | `gcp` | Monitoring incident fired, resolved | Projects, Cloud Run, logs, metrics, costs, APIs |
 | CircleCI | `circleci` | Failed, succeeded | |
 | Buildkite | `buildkite` | Failed, passed | |
-| Stripe | `stripe` | Every event of an object | |
+| Stripe | `stripe` | Failed payments, disputes, and subscription changes. Connect with Stripe, or every event of an object from a webhook you create | |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, sitemaps, properties, verification |
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event` (writes ask by default; [guide](../connectors/google-calendar.md)) |

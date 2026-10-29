@@ -12,6 +12,7 @@ import { verifyDiscordNativeConnection } from "./discord-native";
 import { verifyFeishuNativeConnection } from "./feishu-native";
 import { verifyGoogleChatNativeConnection } from "./googlechat-native";
 import { verifyXConnection } from "./x-api";
+import { verifyStripeAccounts } from "./stripe-accounts";
 
 /* What a connection's credentials are and whether they work. A connection is
    Connected only after this passes: the fields its manifest requires are
@@ -23,6 +24,7 @@ export async function verifyConnectorConnection(env: Env, spaceId: string, provi
   const manifest = getAppConnectorProvider(providerId);
   if (!manifest) throw new Error("Unknown app");
   if (providerId === "x") return verifyXConnection(env, spaceId, commandId);
+  if (providerId === "stripe" && await verifyStripeAccounts(env, spaceId)) return;
   if (providerId === "teams" && await verifyTeamsNativeConnection(env, spaceId)) return;
   if (providerId === "dingtalk" && await verifyDingTalkNativeConnection(env, spaceId)) return;
   if (providerId === "wecom" && await verifyWeComNativeConnection(env, spaceId)) return;
@@ -31,8 +33,10 @@ export async function verifyConnectorConnection(env: Env, spaceId: string, provi
   if (providerId === "feishu" && await verifyFeishuNativeConnection(env, spaceId)) return;
   if (providerId === "googlechat" && await verifyGoogleChatNativeConnection(env, spaceId)) return;
   const credentials = await connectionCredentials(env, spaceId, providerId);
+  const stripeSignIn = providerId === "stripe" && Boolean(credentials.stripeUserId);
   const missing = (manifest.credentials ?? [])
-    .filter((field) => field.required && !field.generated && !field.managed && !credentials[field.id]);
+    .filter((field) => field.required && !field.generated && !field.managed && !credentials[field.id]
+      && !(stripeSignIn && field.id === "signingSecret"));
   if (missing.length > 0) {
     throw new Error(`Save ${missing.map((field) => field.label).join(", ")} under Credentials`);
   }

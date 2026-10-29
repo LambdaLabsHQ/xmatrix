@@ -9,6 +9,7 @@ import {
   PostgresAppActionRequestRepository,
   PostgresAppCredentialRepository,
   PostgresAppRepository,
+  PostgresStripeAccountRepository,
   PostgresSpaceControlRepository,
 } from "../dist/index.js";
 
@@ -1603,5 +1604,55 @@ integration("durable X uploads claim explicit allow once and retain one scoped e
     const stale = await stage("reconnected-before-start");
     await writeGrant({ ...account, generation: crypto.randomUUID() });
     await assert.rejects(start(stale), error => error.code === "action_request_scope_changed");
+  });
+});
+
+integration("Stripe account bindings can be shared and a replay cannot retire a newer Connect", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await withDatabase(async ({ sql: otherSql, space: other }) => {
+      const account = "acct_fixtureA";
+      const useStripe = (query, id) => query(`UPDATE data.app_connector_connections SET connection_id=$1||':stripe',provider_id='stripe',
+        provider_name='Stripe',auth_mode='oauth' WHERE space_id=$1 AND provider_id='webhook'`, [id]);
+      await useStripe(sql, space);
+      await useStripe(otherSql, other);
+      const accounts = new PostgresStripeAccountRepository(database, material);
+      const connect = async (id, accountId = account) => {
+        const parent = (await sql("SELECT version,search_rank_sequence FROM data.app_connector_connections WHERE connection_id=$1", [`${id}:stripe`])).rows[0];
+        await accounts.connect({ spaceId: id, actorUserId: "owner", snapshot: {
+          connectionVersion: Number(parent.version), connectionGeneration: parent.search_rank_sequence },
+          grant: { accountId, appClientId: "ca_fixture", generation: crypto.randomUUID(), name: accountId,
+            authorizedAt: at, accessToken: "fixture-token", refreshToken: "fixture-refresh", expiresAt: Date.now()+3600000 } });
+      };
+      await connect(space);await connect(other);
+      await connect(space, "acct_otherMerchant");
+      const routed = () => accounts.eventConnections({ appClientId: "ca_fixture", accountId: account, limit: 50 });
+      assert.deepEqual((await routed()).map(row => row.spaceId).sort(), [space, other].sort());
+      const apps = new PostgresAppRepository(database);
+      await sql(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,created_at,updated_at)
+        VALUES($1||':stripe-events',$1,'Stripe events','stripe-events','open','stripe-events',1,$2,$2)`, [space, at]);
+      await sql(`INSERT INTO data.app_source_relations(relation_id,connection_id,space_id,channel_id,source_kind,source_ref,
+        features_json,version,created_by,created_at,updated_at) VALUES($1||':stripe-route',$1||':stripe',$1,
+        $1||':stripe-events','repository','stripe:invoice','["events"]',1,'owner',$2,$2)`, [space, at]);
+      const first = (await routed()).find(row => row.spaceId === space);
+      const second = (await accounts.eventConnections({ appClientId: "ca_fixture", accountId: "acct_otherMerchant", limit: 50 }))[0];
+      const channels = (id, generation) => apps.connectorEventRoutes({ requestId: crypto.randomUUID(),
+        connectionId: `${space}:stripe`, sourceRef: "stripe:invoice", limit: 50,
+        oauthBinding: { providerId: "stripe", appClientId: "ca_fixture", installationId: id, grantGeneration: generation } });
+      assert.equal((await channels(account, first.grantGeneration)).length, 1);
+      assert.deepEqual(await channels(account, crypto.randomUUID()), []);
+      assert.deepEqual(await channels("acct_unknown", first.grantGeneration), []);
+      assert.equal(await accounts.retireAccount({ appClientId: "ca_fixture", accountId: account,
+        eventAt: "2026-10-01T00:00:00.000Z", limit: 50 }), 0);
+      assert.equal((await routed()).length, 2);
+      assert.equal(await accounts.retireAccount({ appClientId: "ca_fixture", accountId: account,
+        eventAt: "2026-10-03T00:00:00.000Z", limit: 50 }), 2);
+      assert.deepEqual(await routed(), []);
+      assert.deepEqual(await channels(account, first.grantGeneration), []);
+      assert.equal((await channels("acct_otherMerchant", second.grantGeneration)).length, 1);
+      await apps.upsert({ commandId: crypto.randomUUID(), spaceId: space, actorUserId: "owner", at: new Date().toISOString(),
+        provider: { id: "stripe", name: "Stripe", authMode: "oauth", scopes: [], secretRefs: [], capabilities: [], metadataFields: [] },
+        body: { status: "disconnected" } });
+      assert.deepEqual((await accounts.list({ spaceId: space, actorUserId: "owner" })).accounts, []);
+    });
   });
 });

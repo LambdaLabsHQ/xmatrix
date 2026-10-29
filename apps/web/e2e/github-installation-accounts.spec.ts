@@ -18,7 +18,7 @@ async function openGitHub(page: Page, { status = "configured", grant }: { status
     await page.addInitScript((value) => window.sessionStorage.setItem("xmatrix:github-grant", value), grant);
   }
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  await fixtureJson(page, "github-providers", "**/api/xmatrix/connectors/oauth/providers", { providers: ["github"] });
+  await fixtureJson(page, "github-providers", `**/api/xmatrix/connectors/oauth/providers?spaceId=${E2E_SPACE.id}`, { providers: ["github"] });
   await fixtureJson(page, "github-connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, {
     connections: [{ ...connection, status }],
   });
@@ -77,4 +77,6 @@ test("returning from GitHub lands on Apps with the outcome and the grant, past t
   await expect.poll(async () => (await fixtureRequests(page, "github-installations"))
     .some((url) => url.endsWith("?grant=grant-2"))).toBe(true);
   expect(page.url()).not.toContain("grant");
+  expect(new URL(page.url()).searchParams.get("connector")).toBe("github");
+  expect(new URL(page.url()).searchParams.has("item")).toBe(false);
 });

@@ -44,12 +44,10 @@ test("a complete login code signs in once without a click, and a resend waits ou
 
 /** A Hub with no session until `state.signedIn` is set. */
 async function hubSessionOnceSignedIn(page: import("@playwright/test").Page, state: { signedIn: boolean }) {
-  await page.route("**/api/auth/get-session", route => route.fulfill({ json: state.signedIn
-    ? { user: { id: "user-1", email: "reviewer@example.test" }, session: { token: "s", expiresAt: "2099-01-01T00:00:00.000Z" } }
-    : null }));
-  await page.route("**/api/auth/token", route => state.signedIn
-    ? route.fulfill({ json: { token: "fixture-jwt" } })
-    : route.fulfill({ status: 401, json: {} }));
+  await page.route("**/api/auth/get-session", route => route.fulfill(state.signedIn
+    ? { json: { user: { id: "user-1", email: "reviewer@example.test" }, session: { token: "s", expiresAt: "2099-01-01T00:00:00.000Z" } },
+      headers: { "set-auth-jwt": "fixture-jwt", "access-control-expose-headers": "set-auth-jwt" } }
+    : { json: null }));
 }
 
 /** A Hub whose session appears once `signedIn` is set, and whose code check answers per call. */

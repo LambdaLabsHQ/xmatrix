@@ -102,6 +102,7 @@ A message sent from the CLI is read with the same [syntax](syntax.md) as one typ
 | --- | --- |
 | `xmatrix page tree` | The page tree |
 | `xmatrix page read <page-id>` | Print a page with its revision |
+| `xmatrix page upload <page-id> <file>` | Upload an image or video and print Markdown to insert in the page |
 | `xmatrix page edit <page-id> --base <revision> -f <file>` | Replace a page's Markdown, merged with others' edits |
 | `xmatrix page create <title> [--under <page-id>]` | Create a page |
 | `xmatrix page rename` · `move` · `delete` | Arrange the tree |
@@ -109,6 +110,13 @@ A message sent from the CLI is read with the same [syntax](syntax.md) as one typ
 | `xmatrix page linked` · `link` | Pages linked to a conversation |
 | `xmatrix page resolve <page-id> <link-id>` | Resolve a discussion |
 | `xmatrix page automation …` | Automations. See [Pages and Automations](pages.md#automations). |
+
+For local images and videos, run `xmatrix page upload <page-id> ./screenshot.png`,
+then insert its returned `![media](xmatrix:page-media/…)` Markdown with
+`page edit` or live writing. Uploads require current Page edit access and accept
+PNG, JPEG, GIF, WebP, AVIF, MP4, WebM and MOV files from 1 byte through 25 MiB.
+Uploading keeps the file for that Page; it does not change its text. Create a
+new Page before uploading media into it. Page text alone never uploads local files.
 
 ## Secrets and access
 

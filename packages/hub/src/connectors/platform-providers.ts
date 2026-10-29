@@ -53,6 +53,7 @@ import { receiveSentryDelivery } from "./sentry-events";
 import { receiveSlackDelivery } from "./slack-events";
 import { receiveVercelDelivery } from "./vercel-events";
 import { verifyVercel } from "./vercel-api";
+import { verifyStripe } from "./stripe-oauth";
 import {
   receiveBitbucketDelivery, receiveBuildkiteDelivery, receiveCircleCiDelivery, receiveGrafanaDelivery,
   receiveNetlifyDelivery, receiveOpsgenieDelivery, receiveStripeDelivery, receiveTelegramDelivery,
@@ -100,7 +101,7 @@ const PROVIDERS: Record<string, {
   bitbucket: { receive: receiveBitbucketDelivery, actions: BITBUCKET_ACTIONS, verify: verifyBitbucket },
   circleci: { receive: receiveCircleCiDelivery },
   buildkite: { receive: receiveBuildkiteDelivery },
-  stripe: { receive: (delivery) => receiveStripeDelivery(delivery) },
+  stripe: { receive: (delivery) => receiveStripeDelivery(delivery), verify: verifyStripe },
   grafana: { receive: receiveGrafanaDelivery },
   opsgenie: { receive: receiveOpsgenieDelivery },
   netlify: { receive: receiveNetlifyDelivery, verify: verifyNetlify },

@@ -56,8 +56,8 @@ test("Hub commands answer a person and a Run through the Hub's own routes", asyn
     assert.equal(invocation.from.kind, "agent");
     const receipt = history.messages.find(message => message.replyToMessageId === invocation.messageId);
     assert.ok(receipt, "a denied private call still has a threaded result receipt");
-    assert.match(receipt.body, /Gmail read: blocked; Result: \[hidden — private call\]/);
-    assert.doesNotMatch(receipt.body, /connect Gmail/);
+    // The Hub's own next step carries no provider data, so even a private call shows it.
+    assert.match(receipt.body, /Gmail read: blocked; connect Gmail to this Space first/);
     // The real authority and R2 reader protect originals from other members and Agent Runs.
     const ownerAuth = { Authorization: `Bearer ${MOCK_TOKEN}`, "content-type": "application/json" };
     const privateUrl = `/api/channels/${channelId}/messages/${encodeURIComponent(receipt.messageId)}/connector-result`;
@@ -75,7 +75,8 @@ test("Hub commands answer a person and a Run through the Hub's own routes", asyn
     await acceptSpaceInvite(worker, await inviteToSpace(worker, spaceId, MOCK_TOKEN, "admin"), otherToken);
     const otherHistory = await channelHistory(worker, otherToken, channelId);
     assert.ok(otherHistory.messages.some(row => row.messageId === receipt.messageId));
-    assert.doesNotMatch(otherHistory.messages.find(row => row.messageId === receipt.messageId).body, /connect Gmail/);
+    // Shared guidance, not a result: every member reads the same next step.
+    assert.match(otherHistory.messages.find(row => row.messageId === receipt.messageId).body, /connect Gmail/);
     const otherRead = await worker.fetch(privateUrl, { headers: { Authorization: `Bearer ${otherToken}` } });
     assert.equal(otherRead.status, 404);
     assert.doesNotMatch(await otherRead.text(), /connect Gmail/);

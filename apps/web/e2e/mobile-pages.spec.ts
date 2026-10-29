@@ -18,6 +18,39 @@ const summary = (pageId: string, parentPageId: string | null, title: string) => 
   publishedAt: null });
 const PAGE_TREE_PATTERN = /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u;
 
+// A first paste makes the Page asynchronously. Media must use that permanent
+// identity rather than capture the empty Page's null id before creation ends.
+test("a first image paste waits for its new Page before binding media", async ({ page }) => {
+  await installMobilePages(page, [summary("p-lambda", null, "Lambda Labs")]);
+  const created = summary("p-image", null, "Untitled");
+  await fixtureRule(page, { id: "image-page-create", pattern: PAGE_TREE_PATTERN, method: "POST",
+    responder: { kind: "deferred", json: { page: created, seeded: true } } });
+  await fixtureJson(page, "image-page-tree", PAGE_TREE_PATTERN,
+    { pages: [summary("p-lambda", null, "Lambda Labs"), created] }, { method: "GET" });
+  await fixtureRule(page, { id: "page-media-intent", pattern: "**/relay-v2/private-r2/upload-intents", method: "POST",
+    responder: { kind: "relayV2UploadIntent" } });
+  await fixtureJson(page, "page-media-bytes", "**/relay-v2/private-r2/uploads/**", { verified: true }, { method: "PUT" });
+  await fixtureJson(page, "page-media-ref", "**/relay-v2/private-r2/blob-refs", { version: 1 }, { method: "POST" });
+  await openMobilePages(page);
+  await page.locator(".app-mobile-create-fab").tap();
+  const editor = page.getByTestId("page-editor").locator(".page-document");
+  await expect(editor).toBeFocused();
+  await editor.evaluate(element => {
+    const data = new DataTransfer();
+    data.items.add(new File([Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=="),
+      ch => ch.charCodeAt(0))], "first.png", { type: "image/png" }));
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await expect.poll(async () => (await fixtureRequestBodies(page, "image-page-create")).length).toBe(1);
+  await releaseFixture(page, "image-page-create");
+  await expect.poll(async () => (await fixtureRequestBodies(page, "page-media-ref")).length).toBe(1);
+  const [bound] = await fixtureRequestBodies(page, "page-media-ref");
+  expect(bound).toMatchObject({ ownerKind: "page_media", ownerId: "p-image", visibilityScopeId: `space:${E2E_SPACE.id}` });
+  expect(bound!.refId).toMatch(/^page-media:p-image:[0-9a-f]{64}$/u);
+  await expect(page.getByTestId("page-media")).toHaveCount(1);
+  await expect(page.getByTestId("page-media-failure")).toHaveCount(0);
+});
+
 /** The Pages stubs every phone case here shares: a workspace with a page tree. */
 async function installMobilePages(page: Page, pages: Array<ReturnType<typeof summary>>, space = E2E_SPACE) {
   await installWorkspaceStubs(page, { spaces: [space], channels: [E2E_CHANNEL] });

@@ -1,6 +1,5 @@
 "use client";
 
-import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
 import { ChannelDeletionDialog } from "./channel-deletion-dialog";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
@@ -13,6 +12,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties,
 } from "react";
 import { useStableCallback } from "./workspace-shell-helpers";
+import { channelRecentActivityMs } from "./workspace-shell-helpers-extra";
 import { CrossSpaceReadCard, useChannelPendingCrossSpaceReads } from "./cross-space-read-card";
 import { useQueries } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -29,8 +29,9 @@ import { ManageSecretsProvider } from "./secret-request-card";
 import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
-import { closeToolItem } from "./tool-split";
-import { Loader2, Maximize2, X } from "lucide-react";
+import { closeViewSelection } from "./url-query-state";
+import { ConnectionStatus } from "./connection-status";
+import { Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
 import {
@@ -73,7 +74,7 @@ import {
   usePendingChannelNavigation,
   CONVERSATION_QUERY,
   useChannelCatalogPaging,
-  ColdStartChannelCatalog,
+  StartupShell,
 } from "./workspace-shell-modules";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { usePlatformAdminCapability } from "./use-platform-admin-capability";
@@ -81,7 +82,7 @@ import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
-import { AGENT_PRESETS, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { AGENT_PRESETS, WEB_PROXY_ROUTES, type ChannelSnapshot } from "@xmatrix/protocol";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { useOnboardingLocale } from "@/lib/onboarding-locale";
 import { harnessSpaceKey } from "./harness-space-switch";
@@ -393,6 +394,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const onboardingCatalog = currentSpaceCatalog.page(CONVERSATION_QUERY);
   const channelsLoaded = Boolean(token && currentSpaceId) && !loadingWorkspace &&
     onboardingCatalog.loaded && !onboardingCatalog.loading && !onboardingCatalog.error;
+  const catalogPending = !channelsLoaded && !onboardingCatalog.error;
   const registrationCatalog = useAgentRegistrationCatalog(currentSpaceId ?? "", token ?? "",
     Boolean(token && currentSpaceId));
   const spaceAgents = useMemo(
@@ -645,9 +647,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     () => (channelReferencesRef.current = channelReferences(channelReferencesRef.current, channels)),
     [channels],
   );
+  const channelsByIdRef = useRef(new Map<string, ChannelSnapshot>());
+  channelsByIdRef.current = useMemo(() => new Map(channels.map((channel) => [channel.id, channel])), [channels]);
   const messageReferenceCatalog = useMemo<MessageReferenceCatalog>(() => ({
     channels: referenceChannels,
     pages: pageTree.data,
+    channelActivityMs: (channelId) => {
+      const channel = channelsByIdRef.current.get(channelId);
+      return channel ? channelRecentActivityMs(channel) : 0;
+    },
     onOpenChannel: (channelId) => navigateToChannelRef.current(channelId),
   }), [referenceChannels, pageTree.data]);
   const changeAppViewRef = useRef(changeAppView);
@@ -664,13 +672,13 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   }, [channels, currentSpaceId, machines, user?.id]);
   const machineLinks = useMemo<MachineLinks>(() => ({
     machines: machineTargets,
-    onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
+    onOpenMachine: (machineId) => changeAppViewRef.current("machines", `machine=${encodeURIComponent(machineId)}`),
   }), [machineTargets]);
-  const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
+  const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "section=secrets"), []);
   const spaceAllowance = useSpaceAllowance(user?.id, currentSpaceId);
   const composerAllowance = useMemo(() => user ? {
     userId: user.id,
-    onOpenBilling: () => changeAppViewRef.current("settings", SPACE_BILLING_SECTION),
+    onOpenBilling: () => changeAppViewRef.current("settings", `section=${SPACE_BILLING_SECTION}`),
   } : undefined, [user]);
   // The route owns whether a page is open; its tree entry may arrive later.
   // Keep the back bar and its content spacing while the title is loading.
@@ -850,7 +858,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     else if (phonePageConversation) closePageConversation();
     else if (phonePageOpen) closePage();
     else if (view === "messages" && selectedChannel) backToChannelList();
-    else if (SPLIT_TOOL_VIEWS.includes(view) && closeToolItem()) return true;
+    else if (SPLIT_TOOL_VIEWS.includes(view) && closeViewSelection()) return true;
     else if (view !== "messages" && view !== "more" && MORE_TAB_VIEWS.includes(view)) backToMore();
     else return false;
     return true;
@@ -983,26 +991,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   ) : undefined, [desktopBridge, desktopUpdateStatus, installUpdateFromRail]);
 
   if (loading || !user) {
-    if (cachedCatalogChannels.length > 0) {
-      return (
-        <ColdStartChannelCatalog
-          channels={cachedCatalogChannels}
-          desktopFrameClass={desktopFrameClass}
-          showMobileTabDock={!isIOSNativeShell}
-        />
-      );
-    }
     return (
-      <div
-        className={cn(
-          "xmatrix-app xmatrix-app-shell flex h-dvh w-screen max-w-[100dvw] items-center justify-center overflow-hidden bg-background text-foreground",
-          desktopFrameClass
-        )}
-      >
-        <LiquidGlassFilter />
-        <div className="app-ambient pointer-events-none fixed inset-0" />
-        <AnimatedIcon icon={Loader2} className="size-6 animate-spin" />
-      </div>
+      <StartupShell
+        channels={cachedCatalogChannels}
+        desktopFrameClass={desktopFrameClass}
+        showMobileTabDock={!isIOSNativeShell}
+      />
     );
   }
 
@@ -1175,8 +1169,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         token={token ?? null}
         localContext={localMentionContext}
         isJoined={canUseSelectedChannel}
-        loading={loadingWorkspace || Boolean(
+        // Until the list has answered, "no conversations" would be a guess:
+        // the empty pane waits on the skeleton instead.
+        loading={loadingWorkspace || (!selectedChannel && channels.length === 0 && catalogPending) || Boolean(
           selectedChannel &&
+          // A failed read is an answer: its error shows in place of the skeleton.
+          !historyError &&
           (loadingHistory || !historyRenderAuthorized) &&
           // Keep the last painted page while a refresh runs; only the
           // empty window may show a skeleton.
@@ -1185,7 +1183,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         highlightMessageId={highlightedMessageId ?? undefined}
         timeline={timeline}
         hasWorkDock={channelHasAgentMembers(selectedChannel) || channelHasPendingApprovals || Boolean(spaceAllowance.notice)}
-        hasChannels={channels.length > 0}
+        hasChannels={channels.length > 0 || !channelsLoaded}
         hasOlderMessages={historyRenderAuthorized && hasOlderMessages}
         olderLoading={olderLoading}
         error={historyError}
@@ -1579,6 +1577,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <main
           className="app-main relative flex min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-card/80"
         >
+          <ConnectionStatus />
           <TopWorkspaceBar
             page={openedPage}
             onClosePage={closePage}

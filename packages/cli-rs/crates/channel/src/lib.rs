@@ -1009,14 +1009,6 @@ fn attachment_visibility_scope_id(
     }
 }
 
-fn attachment_upload_final_path(intent_id: &str, visibility_scope_id: &str) -> String {
-    format!(
-        "/api/relay-v2/private-r2/uploads/{}/scope/{}",
-        urlencoding::encode(intent_id),
-        urlencoding::encode(visibility_scope_id),
-    )
-}
-
 async fn upload_channel_file_attachments(
     hub_url: &str,
     token: &str,
@@ -1024,17 +1016,6 @@ async fn upload_channel_file_attachments(
     message_id: &str,
     attachments: Vec<PendingFileAttachment>,
 ) -> error::Result<Vec<UploadedMessageAttachment>> {
-    #[derive(Deserialize)]
-    struct UploadIntentResponse {
-        upload: UploadIntentPaths,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct UploadIntentPaths {
-        final_path: String,
-    }
-
     #[derive(Deserialize)]
     struct ChannelsResponse {
         channels: Vec<protocol::SerializedChannel>,
@@ -1067,65 +1048,30 @@ async fn upload_channel_file_attachments(
             .as_ref()
             .and_then(|channel| channel.space_id.as_deref()),
     )?;
-    let expires_at = (time::OffsetDateTime::now_utc() + time::Duration::hours(1))
-        .format(&time::format_description::well_known::Rfc3339)
-        .map_err(|error| CliError::Launch(format!("Cannot format upload expiry: {error}")))?;
     let mut uploaded = Vec::with_capacity(attachments.len());
     for attachment in attachments {
         let encoded_bytes = attachment.bytes.len() as u64;
-        let intent_id = uuid::Uuid::new_v4().to_string();
-        let admitted: UploadIntentResponse = http::request_json(
-            &with_route(hub_url, "/api/relay-v2/private-r2/upload-intents"),
-            "POST",
-            Some(token),
-            Some(serde_json::json!({
-                "requestId": uuid::Uuid::new_v4().to_string(),
-                "intentId": intent_id,
-                "visibilityScopeId": visibility_scope_id,
-                "contentHash": attachment.content_hash,
-                "encodedSize": encoded_bytes,
-                "expiresAt": expires_at,
-            })),
-        )
-        .await?;
-        let expected_upload_path = attachment_upload_final_path(&intent_id, &visibility_scope_id);
-        if admitted.upload.final_path != expected_upload_path {
-            return Err(CliError::Launch(
-                "Hub returned a noncanonical attachment upload path".into(),
-            ));
-        }
-        http::put_bytes::<serde_json::Value>(
-            &with_route(hub_url, &admitted.upload.final_path),
-            token,
-            &attachment.mime_type,
-            &attachment.content_hash,
-            attachment.bytes,
-        )
-        .await?;
         let requested_id = uuid::Uuid::new_v4().to_string();
-        let committed = http::request_json::<serde_json::Value>(
-            &with_route(hub_url, "/api/relay-v2/private-r2/blob-refs"),
-            "POST",
-            Some(token),
-            Some(serde_json::json!({
-                "requestId": uuid::Uuid::new_v4().to_string(),
-                "intentId": intent_id,
-                "refId": requested_id,
-                "ownerKind": "message_attachment",
-                "ownerId": message_id,
-                "visibilityScopeId": visibility_scope_id,
-            })),
+        let attachment_id = xmatrix_cli_core::private_upload::upload(
+            hub_url,
+            token,
+            xmatrix_cli_core::private_upload::PrivateFile {
+                scope: &visibility_scope_id,
+                owner_kind: "message_attachment",
+                owner_id: message_id,
+                ref_id: &requested_id,
+                content_hash: &attachment.content_hash,
+                mime_type: &attachment.mime_type,
+                bytes: attachment.bytes,
+            },
         )
         .await?;
         // The owner already holds these bytes under one ref. A second file of
         // the same bytes reuses that id; sending it twice would conflict.
-        let attachment_id = committed
-            .get("refId")
-            .and_then(|value| value.as_str())
-            .filter(|value| !value.is_empty() && value.len() <= 300)
-            .unwrap_or(requested_id.as_str())
-            .to_string();
-        if uploaded.iter().any(|item: &UploadedMessageAttachment| item.attachment_id == attachment_id) {
+        if uploaded
+            .iter()
+            .any(|item: &UploadedMessageAttachment| item.attachment_id == attachment_id)
+        {
             continue;
         }
         uploaded.push(UploadedMessageAttachment {
@@ -3039,11 +2985,10 @@ mod tests {
     }
 
     use super::{
-        OpenedChannelThread, agent_sender_env_value, attachment_upload_final_path,
-        attachment_visibility_scope_id, channel_create_body, channel_entity_token,
-        channel_image_mime_type, cmd_channel_create, decode_send_newline_escapes,
-        format_history_message_at, is_agent_execution_context, is_intake,
-        process_descends_from_tracked_pid, resolve_channel_selector,
+        OpenedChannelThread, agent_sender_env_value, attachment_visibility_scope_id,
+        channel_create_body, channel_entity_token, channel_image_mime_type, cmd_channel_create,
+        decode_send_newline_escapes, format_history_message_at, is_agent_execution_context,
+        is_intake, process_descends_from_tracked_pid, resolve_channel_selector,
         should_refuse_user_attributed_send_without_agent_identity, tracked_ancestor_pid,
     };
     use std::collections::{HashMap, HashSet};
@@ -3116,14 +3061,6 @@ mod tests {
     #[test]
     fn attachment_scope_rejects_open_channel_without_space() {
         assert!(attachment_visibility_scope_id("channel-1", Some("open"), None).is_err());
-    }
-
-    #[test]
-    fn attachment_upload_uses_scope_bound_blob_authority_path() {
-        assert_eq!(
-            attachment_upload_final_path("intent-1", "space:space-1"),
-            "/api/relay-v2/private-r2/uploads/intent-1/scope/space%3Aspace-1"
-        );
     }
 
     #[test]

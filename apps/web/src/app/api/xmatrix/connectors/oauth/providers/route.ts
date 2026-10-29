@@ -1,4 +1,7 @@
 import { HUB_ROUTES } from "@xmatrix/protocol";
-import { hubRouteHandler } from "@/lib/xmatrix-proxy";
+import { hubRouteHandlerFrom } from "@/lib/xmatrix-proxy";
 
-export const GET = hubRouteHandler("GET", HUB_ROUTES.connector_oauth_providers);
+export const GET = hubRouteHandlerFrom("GET", (_params, url) => {
+  const spaceId = url.searchParams.get("spaceId");
+  return spaceId ? `${HUB_ROUTES.connector_oauth_providers}?spaceId=${encodeURIComponent(spaceId)}` : HUB_ROUTES.connector_oauth_providers;
+});

@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { STRIPE_NATIVE_GRANT_SQL } from "./stripe-account-routing.js";
 import { RESOURCE_PAGE_SIZE, resourcePages } from "./resource-pages.js";
 import { commandDigest as digest } from "./command-digest.js";
 import { ControlError } from "./control-error.js";
@@ -35,6 +36,16 @@ const reusedCommand = () => new AppControlError("idempotency_mismatch", 409, "co
 
 function iso(value: string | Date): string {
   return new Date(value).toISOString();
+}
+
+function boundedRetirement(input: { requestId: string; appClientId: string; installationId: string; at: string; limit: number },
+  idPattern: RegExp, invalid: string) {
+  const appClientId = text(input.appClientId, "appClientId", 256);
+  const installationId = text(input.installationId, "installationId", 128);
+  const at = iso(input.at);
+  const withinLimit = Number.isSafeInteger(input.limit) && input.limit >= 1 && input.limit <= 100;
+  if (!idPattern.test(installationId) || !withinLimit) throw new AppControlError("invalid_app_request", 400, invalid);
+  return { requestId: text(input.requestId, "requestId", 200), appClientId, installationId, at };
 }
 
 function array(value: unknown, field: string, fallback: string[] = []): string[] {
@@ -177,6 +188,9 @@ async function connectionViews(tx: DatabaseTransaction, rows: QueryResultRow[], 
   const ids = rows.map((row) => String(row.connection_id));
   const subscriptions = channelId ? await relationsByConnection(tx, ids, channelId) : new Map<string, Subscription[]>();
   const credentials = await credentialFieldsByConnection(tx, ids);
+  const nativeStripe = await tx.query<QueryResultRow>({ name: "stripe_connection_fields_v1", text: `SELECT DISTINCT connection_id
+    FROM data.app_stripe_account_grants WHERE connection_id=ANY($1::text[])`, values: [ids], maxRows: ids.length });
+  for (const row of nativeStripe) credentials.set(String(row.connection_id), ["stripeAccounts"]);
   const githubLinks = await githubLinksByConnection(tx,
     rows.filter((row) => row.provider_id === "github").map((row) => String(row.connection_id)));
   return rows.map((row) => {
@@ -658,15 +672,13 @@ export class PostgresAppRepository {
   /** Only a verified app removal/transfer delivery retires this exact current installation. */
   async retireVercelInstallation(input: { requestId: string; appClientId: string; installationId: string;
     eventScopeId: string; at: string; limit: number }): Promise<number> {
-    const appClientId = text(input.appClientId, "appClientId", 256);
-    const installationId = text(input.installationId, "installationId", 128);
+    const bound = boundedRetirement(input, /^icfg_[A-Za-z0-9]{1,80}$/u, "Invalid Vercel retirement");
     const scope = text(input.eventScopeId, "eventScopeId", 128);
-    const at = iso(input.at);
-    if (!/^icfg_[A-Za-z0-9]{1,80}$/u.test(installationId) || !/^(team|user)_[A-Za-z0-9_-]{1,80}$/u.test(scope) ||
-        !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+    if (!/^(team|user)_[A-Za-z0-9_-]{1,80}$/u.test(scope)) {
       throw new AppControlError("invalid_app_request", 400, "Invalid Vercel retirement");
     }
-    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+    const { requestId, appClientId, installationId, at } = bound;
+    return this.database.transaction({ requestId,
       operation: "app.vercel-installation-retire" }, async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "app_vercel_retirement_lock_v1", text: `SELECT i.connection_id
         FROM data.app_connector_oauth_installations i
@@ -702,13 +714,9 @@ export class PostgresAppRepository {
    */
   async retireSlackWorkspace(input: { requestId: string; appClientId: string; installationId: string; at: string;
     eventAt: string; limit: number; uninstalled: boolean }): Promise<number> {
-    const appClientId = text(input.appClientId, "appClientId", 256);
-    const installationId = text(input.installationId, "installationId", 128);
-    const at = iso(input.at);
     const eventAt = iso(input.eventAt);
-    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(installationId) || !Number.isSafeInteger(input.limit) || input.limit < 1 ||
-        input.limit > 100) throw new AppControlError("invalid_app_request", 400, "Invalid Slack retirement");
-    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+    const { requestId, appClientId, installationId, at } = boundedRetirement(input, /^[A-Za-z0-9_-]{1,128}$/u, "Invalid Slack retirement");
+    return this.database.transaction({ requestId,
       operation: "app.slack-workspace-retire" }, async tx => {
       await tx.query({ name: "slack_workspace_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
         values: [`slack:${appClientId}:${installationId}`], maxRows: 1 });
@@ -763,7 +771,10 @@ export class PostgresAppRepository {
         !/^[a-f0-9]{64}$/u.test(wecom.companyDigest) || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(wecom.grantGeneration))) {
       throw new AppControlError("invalid_app_request", 400, "Invalid WeCom company route grant");
     }
-    const bounded = binding?.providerId === "sentry" || !!chat || !!wecom;
+    const bounded = binding?.providerId === "sentry" || binding?.providerId === "stripe" || !!chat || !!wecom;
+    if (binding?.providerId === "stripe" && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(binding.grantGeneration ?? "")) {
+      throw new AppControlError("invalid_app_request", 400, "Stripe route requires its grant generation");
+    }
     if (binding?.providerId === "vercel" && (!Number.isSafeInteger(binding.credentialVersion) || binding.credentialVersion! < 1)) {
       throw new AppControlError("invalid_app_request", 400, "Vercel route requires its credential version");
     }
@@ -773,21 +784,23 @@ export class PostgresAppRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.connector-event-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v11", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v12", text: `SELECT
         r.space_id,r.channel_id,r.created_by,r.features_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
         JOIN data.channels channel ON channel.channel_id=r.channel_id AND channel.space_id=r.space_id
         WHERE r.connection_id=$1 AND ${LIVE_SOURCE_RELATION_SQL} AND r.source_kind='repository'
           AND lower(r.source_ref)=$2
-          AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM data.app_connector_oauth_installations i
+          AND ($4::text IS NULL OR ($4='stripe' AND EXISTS (SELECT 1 FROM data.app_stripe_account_grants a
+            WHERE ${STRIPE_NATIVE_GRANT_SQL} AND a.app_client_id=$5 AND a.account_id=$6 AND a.grant_generation=$8::uuid))
+            OR ($4<>'stripe' AND EXISTS (SELECT 1 FROM data.app_connector_oauth_installations i
             JOIN data.app_connector_credentials k ON k.connection_id=i.connection_id AND k.space_id=i.space_id
               AND k.version=i.credential_version
             WHERE i.connection_id=c.connection_id AND i.space_id=c.space_id AND i.provider_id=c.provider_id
               AND i.provider_id=$4 AND i.app_client_id=$5 AND i.installation_id=$6
               AND ($7::bigint IS NULL OR i.credential_version=$7)
               AND ($8::uuid IS NULL OR i.grant_generation=$8::uuid)
-              AND (i.provider_id<>'slack' OR ${SLACK_WORKSPACE_OWNED_SQL("i", "$16::timestamptz")})))
+              AND (i.provider_id<>'slack' OR ${SLACK_WORKSPACE_OWNED_SQL("i", "$16::timestamptz")}))))
           AND ($9::text IS NULL OR ($12='googlechat' AND EXISTS (SELECT 1 FROM data.app_googlechat_room_bindings g
             WHERE g.connection_id=c.connection_id AND g.space_id=c.space_id AND c.provider_id='googlechat'
               AND g.active AND g.app_identity=$9 AND g.chat_space=$10 AND g.grant_generation=$11::uuid
@@ -891,6 +904,9 @@ export class PostgresAppRepository {
         if (body.agentId !== undefined && body.agentId !== null) throw new AppControlError(
           "invalid_app_request", 400, "Connector connections are not bound to an Agent");
         const version = Number(current?.version ?? 0) + 1;
+        if (providerId === "stripe" && status === "disconnected") {
+          await tx.query({ name: "stripe_disconnect_accounts_v1", text: "DELETE FROM data.app_stripe_account_grants WHERE connection_id=$1", values: [id], maxRows: 0 });
+        }
         if (providerId === "wecom" && status === "disconnected") {
           await tx.query({ name: "wecom_disconnect_installation_v1", text: "DELETE FROM data.app_wecom_installations WHERE connection_id=$1", values: [id], maxRows: 0 });
           await tx.query({ name: "wecom_disconnect_attempt_v1", text: "DELETE FROM data.app_wecom_install_attempts WHERE connection_id=$1", values: [id], maxRows: 0 });

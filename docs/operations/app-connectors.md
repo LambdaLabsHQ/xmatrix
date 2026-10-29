@@ -2,6 +2,16 @@
 
 App connectors route app context into xMatrix channels through typed provider manifests, space-level connection records, and Hub-side executors. Connection records may store provider ids, status, scopes, enabled channel ids, configured agent ids, secret reference names, and bounded metadata only. They must not store provider tokens, webhook secrets, installation access tokens, or OAuth refresh tokens.
 
+Apps opens a provider with `/app/<space>/apps?connector=<provider>`, for example
+`?connector=stripe`. The same parameter owns selection from a shared link,
+the list and OAuth returns; Back to the list removes it. Apps no longer reads
+or writes `item`, and removes it when normalizing an old address. Other tool
+destinations likewise name their domain object (`agent`, `machine`, `schedule`,
+`section` or `space`); the anonymous selection contract is retired.
+
+Stripe's multi-account consent, storage, revocation, migration and recovery
+contract is documented in [Stripe accounts](../connectors/stripe.md).
+
 ## Current Providers
 
 - Linear provides task search/editing, assignments, states, labels, projects,
@@ -65,7 +75,7 @@ provider's webhook at the ingress URL. Then subscribe a channel with
 | Bitbucket Cloud | webhook secret (generated) | `X-Hub-Signature: sha256=` HMAC | `workspace/repo` |
 | CircleCI | signing secret (generated) | `circleci-signature` `v1=` HMAC-SHA256 | project slug `gh/org/repo` |
 | Buildkite | token (generated) | `X-Buildkite-Token` equality | pipeline slug |
-| Stripe | endpoint signing secret | `Stripe-Signature` `t=`/`v1=` HMAC over `t.body` + 5 min tolerance | event object (`invoice`) |
+| Stripe | endpoint signing secret, or Connect with Stripe | `Stripe-Signature` `t=`/`v1=` HMAC over `t.body` + 5 min tolerance | event object (`invoice`) |
 | Grafana | bearer token (generated) | `Authorization: Bearer` equality | contact point name |
 | Opsgenie | header token (generated) | `X-Xmatrix-Token` equality | integration name |
 | Netlify | JWS secret (generated) | `X-Webhook-Signature` HS256 JWS with `iss=netlify` and the body's SHA-256 | site name |
@@ -492,6 +502,7 @@ Register each provider's OAuth app with the redirect URI
 | Vercel | Integration console → External integration (`xmatrix` slug) | Integration Configuration read, Deployments read/write, Projects/Teams/Current User read |
 | PagerDuty | Company developer account → Scoped OAuth confidential app | `abilities.read incidents.read incidents.write` |
 | Bitbucket Cloud | Company workspace Settings → OAuth consumers (non-private consumer) | `account pullrequest` |
+| Stripe | Stripe Apps manifest in `docs/integrations/stripe-app/` (`stripe_api_access_type: oauth`) | `event_read`, `invoice_read`, `payment_intent_read`, `dispute_read`, `subscription_read` |
 
 **How the flow works.**
 - The signed state binds the provider, the Space and the admin who started
@@ -504,6 +515,22 @@ Register each provider's OAuth app with the redirect URI
   workspace bindings and application signing secrets; Vercel uses the Integration
   binding and Client Secret described above. Other inbound setups use their
   per-connection ingress URL and the provider's signing secret.
+- Stripe Connect appears only when a release injects `CONNECTOR_STRIPE_CLIENT_ID`
+  (`ca_`), `CONNECTOR_STRIPE_CLIENT_SECRET` (the app developer's `sk_live_`,
+  HTTP Basic username with an empty password) and `CONNECTOR_STRIPE_SIGNING_SECRET`
+  (the platform endpoint's `whsec_`) together. Those are not the billing
+  `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`. Until App review, also set
+  `CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH` (the provider path
+  `/oauth/v2/chnlink_…/authorize`, with no client id) and
+  `CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID`: only that Space is offered Connect,
+  on that path. Other Spaces keep the pasted signing secret. After review, set
+  `CONNECTOR_STRIPE_OAUTH_PUBLIC` to `marketplace` and every Space uses
+  `https://marketplace.stripe.com/oauth/v2/authorize`. The platform webhook is
+  `POST /api/connectors/stripe/events` and routes by the event's `account`.
+  Several Spaces may bind the same account. `account.application.deauthorized`
+  disconnects bindings older than the event. The upload package, including the
+  company icon and the Stripe CLI lockfile, lives in `docs/integrations/stripe-app/`
+  and is not a workspace package.
 - A Slack workspace connects to one Space; Connect from another Space is
   refused, even after a disconnect or the Space's deletion, because the bot
   stays in the channels it joined. To move a workspace, a Slack workspace admin

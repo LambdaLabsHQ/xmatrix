@@ -19,7 +19,7 @@ async function openNotifications(page: Page, config: Record<string, unknown>) {
   });
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
   await fixtureJson(page, "push-config", "**/api/xmatrix/push/config", config);
-  await page.goto("/app/personal-sspaceperso/settings?item=notifications");
+  await page.goto("/app/personal-sspaceperso/settings?section=notifications");
   await expect(page.getByText("Push notifications", { exact: true })).toBeVisible();
 }
 

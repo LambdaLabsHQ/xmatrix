@@ -30,6 +30,13 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Agents upload local Page images and videos with `xmatrix page upload`, then
+insert the returned Markdown through ordinary Page writes. The Hub rechecks
+current Page edit access before binding media, including replays. Page text
+does not implicitly upload local files. See [Page media](../design/pages-live-document.md#66-images-and-videos).
+An editor's first media paste into a new Page waits for its creation before
+binding the file to the Page's permanent id.
+
 Google Calendar has a separate Space connection for calendar/event reads,
 availability and event writes. Every App now has one connection-wide
 read/ask/write permission; Calendar defaults to write, with no Channel rules. Conditional changes retain event ETags
@@ -192,8 +199,8 @@ Instances and resume sleeping/interrupted ones through the bounded wake
 boundary. Stopped Instances remain stopped. See
 [Connector delivery](../design/connector-platform.md).
 
-Connector reads have normal (`xmatrix call --public`) and private (`--private`)
-result modes. Both retain their invocation and parameters in the Channel;
+Connector reads are normal by default (`xmatrix call`) and private only with an
+explicit `--private`. Both retain their invocation and parameters in the Channel;
 private receipts and execution history receive a fixed mask before any result
 write. The original value or provider error returns to the caller and is retained in restricted content for its Human owner’s Web view for 30 days; other members and Agent Runs cannot read that view.
 Run, mailbox and app-permission checks remain unchanged. See

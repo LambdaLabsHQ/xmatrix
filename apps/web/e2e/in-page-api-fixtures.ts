@@ -23,7 +23,7 @@ import { expect, type Page } from "@playwright/test";
  */
 
 export type FixtureResponder =
-  | { kind: "static"; status?: number; json: unknown; delayMs?: number; echoRequestId?: boolean }
+  | { kind: "static"; status?: number; json: unknown; delayMs?: number; echoRequestId?: boolean; headers?: Record<string, string> }
   /**
    * Keyset history: `beforeSequence` is exclusive, newest page first.
    *
@@ -87,7 +87,7 @@ export type FixtureResponder =
    * exist while a request is still outstanding. Release it with
    * `releaseFixture(page, id)`.
    */
-  | { kind: "deferred"; status?: number; json: unknown };
+  | { kind: "deferred"; status?: number; json: unknown; headers?: Record<string, string> };
 
 export type FixtureRule = {
   /** Stable id so a spec can read back the requests this rule served. */
@@ -217,10 +217,10 @@ function installInterceptor({
         }
       }
 
-      function jsonResponse(body: unknown, status: number) {
+      function jsonResponse(body: unknown, status: number, headers?: Record<string, string>) {
         return new Response(JSON.stringify(body ?? null), {
           status,
-          headers: { "content-type": "application/json" },
+          headers: { ...headers, "content-type": "application/json" },
         });
       }
 
@@ -492,7 +492,8 @@ function installInterceptor({
             if (!gate.released) await gate.promise;
             return jsonResponse(
               rule.responder.json,
-              (rule.responder.status as number | undefined) ?? 200
+              (rule.responder.status as number | undefined) ?? 200,
+              rule.responder.headers as Record<string, string> | undefined
             );
           }
           if (rule.responder.kind === "channelViewPreference") {
@@ -518,7 +519,8 @@ function installInterceptor({
           }
           return jsonResponse(
             rule.responder.json,
-            (rule.responder.status as number | undefined) ?? 200
+            (rule.responder.status as number | undefined) ?? 200,
+            rule.responder.headers as Record<string, string> | undefined
           );
         }
 
@@ -654,13 +656,13 @@ export async function fixtureJson(
   id: string,
   pattern: string | RegExp,
   json: unknown,
-  options: { status?: number; method?: string; delayMs?: number; echoRequestId?: boolean } = {}
+  options: { status?: number; method?: string; delayMs?: number; echoRequestId?: boolean; headers?: Record<string, string> } = {}
 ): Promise<void> {
   await fixtureRule(page, {
     id,
     pattern,
     method: options.method,
-    responder: { kind: "static", status: options.status, json, delayMs: options.delayMs, echoRequestId: options.echoRequestId },
+    responder: { kind: "static", status: options.status, json, delayMs: options.delayMs, echoRequestId: options.echoRequestId, headers: options.headers },
   });
 }
 

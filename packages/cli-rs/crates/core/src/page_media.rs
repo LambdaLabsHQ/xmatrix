@@ -7,7 +7,8 @@
 //! Agent's own file tool opens it where it stands in the text. Writing maps
 //! such a path back to the page's reference — by its name alone, so a path
 //! read on another machine maps too — and leaves out an image of any other
-//! local file: an image reaches a page by being pasted into it.
+//! local file. Upload new files with `xmatrix page upload <page> <file>` and
+//! insert the returned Markdown through any page writing path.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -340,7 +341,7 @@ pub fn to_page(text: &str, existing: HashSet<String>) -> (String, Vec<String>) {
 /// What the Agent is told about images of local files it tried to write into a page.
 pub fn refused_images_note(refused: &[String]) -> String {
     format!(
-        "images of local files do not go into pages (an image reaches a page by being pasted into it in the editor): {}",
+        "local images must be uploaded first with `xmatrix page upload <page> <file>`; insert the returned Markdown: {}",
         refused.join(", ")
     )
 }

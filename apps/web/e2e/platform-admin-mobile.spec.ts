@@ -48,7 +48,7 @@ test("a phone enters Platform from More, opens a section, and returns to its sec
 
 test("a phone shares a filtered user list, opens a user, and Back restores the filter", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
-  await page.goto(`${ADMIN}?item=users&uq=owner&usort=user`);
+  await page.goto(`${ADMIN}?section=users&uq=owner&usort=user`);
   const users = page.getByRole("region", { name: "Registered users" });
   await expect(users.getByRole("textbox")).toHaveValue("owner");
   await expect(users.getByRole("textbox")).toHaveCSS("box-shadow", "none");
@@ -82,7 +82,7 @@ test("a phone shares a filtered user list, opens a user, and Back restores the f
 
 test("phone sorting, search, and CSV export work without table headers", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
-  await page.goto(`${ADMIN}?item=spaces&sq=solo`);
+  await page.goto(`${ADMIN}?section=spaces&sq=solo`);
   const spaces = page.getByRole("region", { name: "Spaces", exact: true });
   const search = spaces.getByRole("textbox");
   await expect(search).toHaveValue("solo");
@@ -111,7 +111,7 @@ test("phone pagination and search reset remain in the shared address", async ({ 
       ...OVERVIEW.users[0], userId: `user:${index}`, name: `Person ${index}`,
     })) },
   });
-  await page.goto(`${ADMIN}?item=users&upage=2`);
+  await page.goto(`${ADMIN}?section=users&upage=2`);
   const users = page.getByRole("region", { name: "Registered users" });
   await expect(users.getByText("Page 2 of 2")).toBeVisible();
   await expect(users.locator("li")).toHaveCount(1);
@@ -124,7 +124,7 @@ test("phone pagination and search reset remain in the shared address", async ({ 
 test("320px paper fits storage, long identities, user sublists, and the audit trail", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await openWorkspaceAs(page, true);
-  await page.goto(`${ADMIN}?item=overview`);
+  await page.goto(`${ADMIN}?section=overview`);
   await page.getByRole("region", { name: "Storage by category" }).scrollIntoViewIfNeeded();
   await expectPaperFits(page);
   const longId = "machine:" + "a".repeat(80);
@@ -133,12 +133,12 @@ test("320px paper fits storage, long identities, user sublists, and the audit tr
       machines: [{ ...USER_DETAIL.machines[0], machineId: longId }],
       agents: [{ ...USER_DETAIL.agents[0], displayName: "d".repeat(80) }] },
   });
-  await page.goto(`${ADMIN}?item=users&user=user%3A1`);
+  await page.goto(`${ADMIN}?section=users&user=user%3A1`);
   await expect(page.getByRole("heading", { name: "b".repeat(80) })).toBeVisible();
   await expectPaperFits(page);
   await page.getByRole("region", { name: "Sessions (1)" }).scrollIntoViewIfNeeded();
   await expectPaperFits(page);
-  await page.goto(`${ADMIN}?item=audit`);
+  await page.goto(`${ADMIN}?section=audit`);
   await expect(page.getByRole("region", { name: "Audit trail" }).getByText("Opened a user")).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-audit.png") });
@@ -147,19 +147,19 @@ test("320px paper fits storage, long identities, user sublists, and the audit tr
 test("320px paper fits a Space detail, Operations, and Billing", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await openWorkspaceAs(page, true);
-  await page.goto(`${ADMIN}?item=spaces&space=space%3Alambda`);
+  await page.goto(`${ADMIN}?section=spaces&space=space%3Alambda`);
   await expect(page.getByRole("heading", { name: "Lambda Labs" })).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-space-detail.png"), fullPage: true });
   await page.getByRole("region", { name: "Members (2)" }).getByRole("button", { name: /member@example.com/ }).click();
   await expect(page).toHaveURL(/user=user%3A3/);
 
-  await page.goto(`${ADMIN}?item=operations`);
+  await page.goto(`${ADMIN}?section=operations`);
   await expect(page.getByRole("region", { name: "Machines", exact: true }).getByText("machine:1")).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-operations.png"), fullPage: true });
 
-  await page.goto(`${ADMIN}?item=billing`);
+  await page.goto(`${ADMIN}?section=billing`);
   await expect(page.getByText("1 Space is in a payment grace period.")).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-billing.png"), fullPage: true });

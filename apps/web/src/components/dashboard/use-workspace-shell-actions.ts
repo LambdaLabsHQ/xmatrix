@@ -33,8 +33,7 @@ import {
 import { createMobileChannelHistoryNavigation } from "./mobile-channel-history-navigation";
 import { sendHumanChannelFocus } from "./send-human-channel-focus";
 import { pointerActivationAlreadyHandled } from "./pointer-activation-guard";
-import { agentHarnessItemId } from "./agent-list-groups";
-import { toolItemPath } from "./workspace-shell-navigation";
+import { agentHarnessSelectionId } from "./agent-list-groups";
 
 import {
   useCallback,
@@ -1279,8 +1278,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void refreshAgentPresetDiscoveries();
   }
 
-  /** `item` opens one item of a destination's list, as its address names it (`?item=`). */
-  function changeAppView(nextView: AppView, item?: string) {
+  /** Open a destination with its own query fields, when requested. */
+  function changeAppView(nextView: AppView, search?: string) {
     setView(nextView);
     if (nextView !== "messages") {
       setSelectedChannelId(null);
@@ -1288,22 +1287,14 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setReplyTarget(null);
     }
     const viewPath = appViewPath(nextView === "messages" ? s.selectedChannel : null, nextView, s.currentSpaceId, s.spaces);
-    const nextPath = toolItemPath(viewPath, item ?? null);
+    const nextPath = search ? `${viewPath}?${search}` : viewPath;
     pushBrowserPath(nextPath);
     setBrowserPath(nextPath);
   }
 
-  /**
-   * Opens what the Space says this harness is for. `edit=profile` asks that
-   * editor to take the caret; the item address is the harness itself.
-   */
+  /** Opens this harness's profile and asks its editor to take the caret. */
   function openHarnessProfile(harness: string) {
-    const item = agentHarnessItemId(harness);
-    changeAppView("agents", item);
-    const viewPath = appViewPath(null, "agents", s.currentSpaceId, s.spaces);
-    const nextPath = `${toolItemPath(viewPath, item)}&edit=profile`;
-    replaceBrowserPath(nextPath);
-    setBrowserPath(nextPath);
+    changeAppView("agents", `agent=${encodeURIComponent(agentHarnessSelectionId(harness))}&edit=profile`);
   }
 
   /** `userId` omitted means the viewer's own profile — the rail avatar's case. */
@@ -1329,7 +1320,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   /** Schedules, opened at one Automation with its editor. */
   function openSchedule(automationId: string) {
     setScheduleFocusId(automationId);
-    changeAppView("automation", automationId);
+    changeAppView("automation", `schedule=${encodeURIComponent(automationId)}`);
   }
 
   const clearScheduleFocus = useCallback(() => setScheduleFocusId(null), [setScheduleFocusId]);
