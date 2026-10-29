@@ -211,8 +211,13 @@ through the Web. The Web answers the read when the Hub does not: before
 admission, at any other origin (an app shell's), on no answer across origins,
 on `401` (the Web renews the token from the session) and on `426`. The ticket
 a page's live session opens with is asked for the same way (`POST …/live`), as
-the session's socket already goes to the Hub. Other writes keep going through
-the Web. Direct requests use the browser's default cache mode: a mode that
+the session's socket already goes to the Hub. The body of an upload (a pasted
+page image, a message attachment) goes the same way (`PUT
+…/private-r2/uploads/<intent>/scope/<scope>`): the Web's Worker (OpenNext)
+reads a whole request into memory before its route runs, so a file sent
+through it shows no progress while the Worker re-sends it, and the upload's
+stall watchdog gave it up; the Hub streams it into storage as it arrives.
+Other writes keep going through the Web. Direct requests use the browser's default cache mode: a mode that
 skips the HTTP cache makes Chrome skip its preflight cache too, and ask again
 before every request. The Hub marks every direct answer `no-store`, so no answer
 is kept, while the preflight's is, for two hours. A build with `NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS=0` sends everything
