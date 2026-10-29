@@ -10,6 +10,21 @@ each connected row ends in a green tick. Unit and browser coverage check the sec
 the subheadings and the mark. Beta Web only, no API, schema or native change;
 recovery is a CI-validated beta Web release reverting the change.
 
+## Unreleased: Stripe payment notifications include the App's publishing account
+
+Stripe Channel notifications cover paid invoices, successful payments and
+subscription creation as well as failures, disputes and later subscription
+changes. Subscription creation keeps its real status and does not imply a
+successful payment. Amounts are labeled as Stripe minor units.
+
+Stripe excludes an App's publishing account from Connect webhooks, even after
+OAuth installation. A separate operator-configured own-account endpoint now
+verifies its independent signature and reads the same event using each Space's
+current OAuth grant before posting. Reconnection or removal fences an in-flight
+delivery. It keeps all retained merchant grants, the five read-only permissions,
+and billing unchanged. The platform endpoint still ignores events without an
+account. Hub only, no schema or client change; the endpoint stays unavailable until its optional configuration pair is deployed. See [Stripe accounts](connectors/stripe.md#the-app-publishers-own-account).
+
 ## Unreleased: The iOS app says when its page cannot load and retries
 
 A main-frame load that fails (not a cancelled navigation) now shows a

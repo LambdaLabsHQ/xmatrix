@@ -18,6 +18,21 @@ usable, while an account whose credential was refused asks for reconnection.
 One Check has a time budget; a timeout asks for another Check rather than
 scanning an arbitrarily large account list in one request.
 
+Company webhooks select `invoice.paid` for paid subscription invoices,
+`payment_intent.succeeded` for successful payments, `invoice.payment_failed`,
+`payment_intent.payment_failed`, `charge.dispute.created`,
+`charge.dispute.updated`, `charge.dispute.closed`,
+`charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`,
+`customer.subscription.created`, `customer.subscription.updated`,
+`customer.subscription.deleted`, `customer.subscription.paused`,
+`customer.subscription.resumed`, and `account.application.deauthorized`.
+Use `@stripe:subscribe:* events` in a Channel to receive these from every
+retained account. Invoice and payment events are separate Stripe events, so
+one purchase can produce both. Subscription creation preserves its actual
+status (including `incomplete`) and does not claim payment. Amounts are
+explicitly labeled as Stripe minor units. See [subscription events](https://docs.stripe.com/billing/subscriptions/webhooks)
+and [payment status](https://docs.stripe.com/payments/payment-intents/verifying-status).
+
 All retained accounts share the Space connection's subscriptions, such as
 `@stripe:subscribe:invoice events`. Messages and Automation summaries identify
 the account. **Remove** forgets only the inspected account generation in this
@@ -54,6 +69,39 @@ the current app client, account, grant generation, configured connection and
 live subscription authority again before append. Events without `account`
 route nowhere. Revocation compares the signed event's time to authorization
 time, conservatively retiring same-second ambiguity, never a later grant.
+
+## The App publisher's own account
+
+Stripe does not send Connect webhooks for an App installed in its publishing
+account ([Stripe's account model](https://docs.stripe.com/stripe-apps/how-stripe-apps-work#install-an-app-in-the-developers-account)).
+That account still connects through OAuth. The operator registers a separate
+**own-account** webhook at `POST /api/connectors/stripe/publisher/events`, using
+the same payment-failure, dispute and subscription event types. No billing or
+platform webhook setting changes.
+
+The release injects `CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID` from the confirmed
+publishing account and that endpoint's independent
+`CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET`. Neither a partial pair nor a secret
+shared with billing or the platform endpoint is accepted. These are operator
+settings, not fields the connecting user fills in. Register the endpoint only
+after the implementation and its release configuration are ready; save its
+new signing secret through stdin and deploy it through Production Release
+Intent. Without this configuration the endpoint is unavailable. A release that
+omits optional secrets preserves existing Worker settings; to retire an already
+configured endpoint, use a validated forward Hub change rather than deleting
+OAuth grants or assuming an omitted secret clears it.
+
+Signature and freshness are verified before any grant lookup. This endpoint
+accepts only Live own-account events; caller-supplied `account` is rejected.
+For each currently connected Space, its own retained OAuth token must retrieve
+the exact event id through `event_read`. Stripe must confirm the event's id,
+type, timestamp and mode. Delivery renders Stripe's retrieved content, labels
+it with the configured publisher account, and rechecks that same grant
+generation before Channel append and Automation dispatch. Unreadable events,
+removed grants and grants replaced during confirmation do not deliver.
+Upstream server errors retry without falling back to an operator token or a
+pasted parent credential. Confirmation has a bounded request budget. The
+platform endpoint still ignores all events without `account`.
 
 ## Release and recovery
 

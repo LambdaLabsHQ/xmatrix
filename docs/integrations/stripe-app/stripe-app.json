@@ -2,7 +2,7 @@
   "$schema": "https://stripe.com/stripe-app.schema.json",
   "id": "sh.xmatrix.connector",
   "name": "xMatrix",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "icon": "icon.png",
   "extensions": null,
   "permissions": [
@@ -12,11 +12,11 @@
     },
     {
       "permission": "invoice_read",
-      "purpose": "Notify your team about failed invoice payments."
+      "purpose": "Notify your team when invoices are paid or invoice payments fail."
     },
     {
       "permission": "payment_intent_read",
-      "purpose": "Notify your team about failed payments."
+      "purpose": "Notify your team when payments succeed or fail."
     },
     {
       "permission": "dispute_read",

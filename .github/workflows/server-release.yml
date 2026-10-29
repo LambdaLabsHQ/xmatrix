@@ -230,6 +230,8 @@ jobs:
           CONNECTOR_STRIPE_OAUTH_PUBLIC: ${{ secrets.CONNECTOR_STRIPE_OAUTH_PUBLIC }}
           CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH: ${{ secrets.CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH }}
           CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID: ${{ secrets.CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID }}
+          CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID: ${{ secrets.CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID }}
+          CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET: ${{ secrets.CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN_HUB }}
         run: |
           set -euo pipefail
@@ -342,6 +344,16 @@ jobs:
               throw new Error("Invalid production Stripe App configuration");
             }
             payload.CONNECTOR_STRIPE_OAUTH_PUBLIC = mode;
+          }
+          const stripePublisher = ["CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID", "CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET"];
+          if (stripePublisher.some(key => process.env[key])) {
+            for (const key of stripePublisher) payload[key] = validConnectorSecret(key);
+            if (!payload.CONNECTOR_STRIPE_CLIENT_ID ||
+                !/^acct_[A-Za-z0-9]{1,64}$/.test(payload.CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID) ||
+                !/^whsec_[A-Za-z0-9]+$/.test(payload.CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET) ||
+                [payload.CONNECTOR_STRIPE_SIGNING_SECRET, process.env.STRIPE_WEBHOOK_SECRET].includes(payload.CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET)) {
+              throw new Error("Invalid production Stripe publisher webhook configuration");
+            }
           }
           const stripeExternal = ["CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH", "CONNECTOR_STRIPE_ACCEPTANCE_SPACE_ID"];
           if (payload.CONNECTOR_STRIPE_OAUTH_PUBLIC !== "marketplace" && stripeExternal.some((key) => process.env[key])) {

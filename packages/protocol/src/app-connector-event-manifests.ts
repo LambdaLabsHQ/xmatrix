@@ -815,7 +815,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     id: "stripe",
     name: "Stripe",
     kind: "billing",
-    description: "Route Stripe events, such as failed payments, disputes, and subscription changes, into channels.",
+    description: "Get notified about successful payments, paid invoices, subscription changes, payment failures, and disputes.",
     oauth: { authorizeUrl: "https://marketplace.stripe.com/oauth/v2/authorize", tokenUrl: "https://api.stripe.com/v1/oauth/token",
       scopes: [], tokenField: "oauthToken", flow: "stripe-app" },
     credentials: [{ id: "signingSecret", label: "Signing secret", required: true,
@@ -824,7 +824,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       { id: "stripeUserId", label: "Stripe account", managed: true, description: "Set by Connect with Stripe." },
       { id: "stripeAccounts", label: "Stripe accounts", managed: true, description: "Each Connect adds one merchant account." }],
     source: { label: "Object", placeholder: "invoice", pattern: "^[a-z_]{1,40}$",
-      description: "The event type's object, such as invoice for invoice.payment_failed." },
+      description: "The event type's object, such as invoice for invoice.paid." },
     features: [{ id: "events", label: "Events", description: "Every event for the object." }],
   }),
   eventConnector({
