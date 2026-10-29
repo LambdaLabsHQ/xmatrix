@@ -1,3 +1,4 @@
+import Network
 import Photos
 import SwiftUI
 import UIKit
@@ -236,7 +237,67 @@ struct WebContainerView: UIViewRepresentable {
                     webView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
                 ])
             }
+            lastRequestedURL = url
             webView.load(URLRequest(url: url))
+        }
+
+        // MARK: Load failure
+
+        /// The address the page was last asked to open, retried after a failure.
+        private var lastRequestedURL: URL?
+        private var loadFailureView: LoadFailureView?
+        private var loadRetryTimer: Timer?
+        private var networkMonitor: NWPathMonitor?
+
+        /// The app's page did not arrive: say why over the paper, offer a retry,
+        /// and try again by itself when the network returns and every 15 s.
+        fileprivate func showLoadFailure(_ error: Error, failingURL: URL?) {
+            guard let containerView else { return }
+            if let failingURL, failingURL.scheme?.hasPrefix("http") == true { lastRequestedURL = failingURL }
+            let offline = (error as NSError).code == NSURLErrorNotConnectedToInternet
+            let failureView = loadFailureView ?? {
+                let view = LoadFailureView { [weak self] in self?.retryLoad() }
+                view.translatesAutoresizingMaskIntoConstraints = false
+                containerView.addSubview(view)
+                NSLayoutConstraint.activate([
+                    view.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+                    view.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+                    view.topAnchor.constraint(equalTo: containerView.topAnchor),
+                    view.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+                ])
+                loadFailureView = view
+                return view
+            }()
+            failureView.setOffline(offline)
+            containerView.bringSubviewToFront(failureView)
+            if loadRetryTimer == nil {
+                loadRetryTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+                    self?.retryLoad()
+                }
+            }
+            if networkMonitor == nil {
+                let monitor = NWPathMonitor()
+                monitor.pathUpdateHandler = { [weak self] path in
+                    guard path.status == .satisfied else { return }
+                    DispatchQueue.main.async { self?.retryLoad() }
+                }
+                monitor.start(queue: .global(qos: .utility))
+                networkMonitor = monitor
+            }
+        }
+
+        fileprivate func hideLoadFailure() {
+            loadRetryTimer?.invalidate()
+            loadRetryTimer = nil
+            networkMonitor?.cancel()
+            networkMonitor = nil
+            loadFailureView?.removeFromSuperview()
+            loadFailureView = nil
+        }
+
+        private func retryLoad() {
+            guard loadFailureView != nil else { return }
+            webView?.load(URLRequest(url: lastRequestedURL ?? AppConfiguration.mobileTabURL(.pages)))
         }
 
         /// A tab tap switches the page's own dock pane; nothing loads.
@@ -363,7 +424,28 @@ struct WebContainerView: UIViewRepresentable {
         // bar height was written to. Layout will not necessarily run again, so
         // replay it rather than wait for the next bar measurement.
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            owner?.hideLoadFailure()
             owner?.navigationFinished()
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            reportLoadFailure(error)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            reportLoadFailure(error)
+        }
+
+        /// iOS reclaimed the page's process: open it again rather than leave blank paper.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            webView.reload()
+        }
+
+        private func reportLoadFailure(_ error: Error) {
+            let nsError = error as NSError
+            // A navigation the app replaced, or a link handed to another app, is not a failure.
+            guard nsError.domain == NSURLErrorDomain, nsError.code != NSURLErrorCancelled else { return }
+            owner?.showLoadFailure(error, failingURL: nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
         }
 
         func webView(
@@ -538,5 +620,62 @@ struct WebContainerView: UIViewRepresentable {
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {
             nil
         }
+    }
+}
+
+/// What the window shows when the app's page could not load: one tile of the
+/// app's tinted paper saying why, with a retry in place. No shadow, no glass.
+final class LoadFailureView: UIView {
+    private let message = UILabel()
+    private let onRetry: () -> Void
+
+    init(onRetry: @escaping () -> Void) {
+        self.onRetry = onRetry
+        super.init(frame: .zero)
+        backgroundColor = WebContainerView.shellBackground
+        let ink = UIColor(red: 40 / 255, green: 32 / 255, blue: 24 / 255, alpha: 1)
+
+        let tile = UIStackView()
+        tile.axis = .vertical
+        tile.alignment = .center
+        tile.spacing = 10
+        tile.isLayoutMarginsRelativeArrangement = true
+        tile.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 14, leading: 18, bottom: 14, trailing: 18)
+        tile.backgroundColor = ink.withAlphaComponent(0.05)
+        tile.layer.cornerRadius = 10
+        tile.translatesAutoresizingMaskIntoConstraints = false
+
+        message.font = .systemFont(ofSize: 15, weight: .semibold)
+        message.textColor = ink.withAlphaComponent(0.72)
+        message.numberOfLines = 0
+        message.textAlignment = .center
+
+        var retry = UIButton.Configuration.plain()
+        retry.title = "Try again"
+        retry.baseForegroundColor = ink.withAlphaComponent(0.95)
+        retry.background.backgroundColor = ink.withAlphaComponent(0.06)
+        retry.background.cornerRadius = 8
+        retry.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14)
+        let button = UIButton(configuration: retry, primaryAction: UIAction { [weak self] _ in self?.onRetry() })
+
+        tile.addArrangedSubview(message)
+        tile.addArrangedSubview(button)
+        addSubview(tile)
+        NSLayoutConstraint.activate([
+            tile.centerXAnchor.constraint(equalTo: centerXAnchor),
+            tile.centerYAnchor.constraint(equalTo: centerYAnchor),
+            tile.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
+            tile.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+        ])
+        setOffline(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func setOffline(_ offline: Bool) {
+        message.text = offline
+            ? "You’re offline. xMatrix will open when the network is back."
+            : "xMatrix can’t be reached right now. Still trying to connect…"
     }
 }

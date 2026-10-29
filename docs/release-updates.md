@@ -8,9 +8,15 @@ verifies its independent signature and reads the same event using each Space's
 current OAuth grant before posting. Reconnection or removal fences an in-flight
 delivery. It keeps all retained merchant grants, the five read-only permissions,
 and billing unchanged. The platform endpoint still ignores events without an
-account. Hub only, no schema or client change; the optional configuration pair
-disables this endpoint when absent. See [Stripe accounts](connectors/stripe.md#the-app-publishers-own-account).
+account. Hub only, no schema or client change; the endpoint stays unavailable until its optional configuration pair is deployed. See [Stripe accounts](connectors/stripe.md#the-app-publishers-own-account).
 
+## Unreleased: The iOS app says when its page cannot load and retries
+
+A main-frame load that fails (not a cancelled navigation) now shows a
+tinted-paper tile over the app's paper, "can't be reached" or "offline", with
+Try again; it retries when the network returns (NWPathMonitor) and every 15 s,
+and a page whose web process iOS reclaimed reloads instead of staying blank.
+iOS only.
 ## Unreleased: The open app says when it is offline or reconnecting
 
 A tinted-paper tile over the reading column, just under the top band, says
