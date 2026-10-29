@@ -2573,6 +2573,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }
     // Read the latest window from the Hub. Any failure keeps the presented
     // rows and the loading state; the periodic and foreground reads retry.
+    // Why the latest read last failed, until one succeeds.
+    let historyFailure: unknown = null;
     async function bridgeLatestHistoryOnline(forceRefresh = false): Promise<boolean> {
       const focusAnswered = (): boolean => {
         const focusRequest = lastHumanFocusRequestRef.current;
@@ -2659,8 +2661,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         productTailCacheHydratedStampsRef.current.delete(channelId);
         recordHistoryTailBase(channelId);
         if (renderAuthority) authorizeHistoryRender(renderAuthority);
+        historyFailure = null;
         return true;
-      } catch {
+      } catch (error) {
+        historyFailure = error;
         return false;
       }
     }
@@ -2670,8 +2674,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       try {
         const bridged = await bridgeLatestHistoryOnline();
         if (!readStillCurrent()) return;
-        setHistoryError(null);
-        setLoadingHistory(!bridged);
+        // A read that failed says so where the messages would be, instead of
+        // a skeleton that never ends; the periodic read keeps retrying.
+        const failure = bridged || historyRef.current.length > 0 ? null : historyFailure;
+        setHistoryError(failure ? userErrorMessage(failure, "Couldn't load messages") : null);
+        setLoadingHistory(!bridged && !failure);
       } finally {
         historyRefreshInFlightRef.current = false;
       }

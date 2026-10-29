@@ -393,6 +393,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const onboardingCatalog = currentSpaceCatalog.page(CONVERSATION_QUERY);
   const channelsLoaded = Boolean(token && currentSpaceId) && !loadingWorkspace &&
     onboardingCatalog.loaded && !onboardingCatalog.loading && !onboardingCatalog.error;
+  const catalogPending = !channelsLoaded && !onboardingCatalog.error;
   const registrationCatalog = useAgentRegistrationCatalog(currentSpaceId ?? "", token ?? "",
     Boolean(token && currentSpaceId));
   const spaceAgents = useMemo(
@@ -1167,8 +1168,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         token={token ?? null}
         localContext={localMentionContext}
         isJoined={canUseSelectedChannel}
-        loading={loadingWorkspace || Boolean(
+        // Until the list has answered, "no conversations" would be a guess:
+        // the empty pane waits on the skeleton instead.
+        loading={loadingWorkspace || (!selectedChannel && channels.length === 0 && catalogPending) || Boolean(
           selectedChannel &&
+          // A failed read is an answer: its error shows in place of the skeleton.
+          !historyError &&
           (loadingHistory || !historyRenderAuthorized) &&
           // Keep the last painted page while a refresh runs; only the
           // empty window may show a skeleton.
@@ -1177,7 +1182,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         highlightMessageId={highlightedMessageId ?? undefined}
         timeline={timeline}
         hasWorkDock={channelHasAgentMembers(selectedChannel) || channelHasPendingApprovals || Boolean(spaceAllowance.notice)}
-        hasChannels={channels.length > 0}
+        hasChannels={channels.length > 0 || !channelsLoaded}
         hasOlderMessages={historyRenderAuthorized && hasOlderMessages}
         olderLoading={olderLoading}
         error={historyError}

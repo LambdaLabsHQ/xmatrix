@@ -13,6 +13,7 @@ import {
   signInWithAppleIdToken,
   signInWithBetterAuthPasskey,
   signInWithBetterAuthSocial,
+  SESSION_READ_TIMEOUT_MS,
   signOutBetterAuth,
   verifyBetterAuthOtpWithRetry,
   verifyBetterAuthPassword,
@@ -461,6 +462,7 @@ async function loadNativeSessionState(): Promise<Omit<AuthState, "loading">> {
 
   const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     cache: "no-store",
+    signal: AbortSignal.timeout(SESSION_READ_TIMEOUT_MS),
   }).catch((error) => {
     if (isTransientNetworkSessionError(error)) {
       throw new Error("Native app session is temporarily unavailable");

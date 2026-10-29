@@ -68,6 +68,9 @@ every performance case. The Node checks and the duplicate scan run as two jobs
 beside each other. Together with Desktop, Android, both Rust jobs, the selector
 and aggregate, the full matrix has 19 jobs. The primary job also saves its
 Next.js and Turbo build caches without waiting for browser sampling to finish.
+Product jobs and browser shards use separate Turbo scopes, and those scope
+names are not prefixes of each other: Actions restore-keys match by prefix,
+so a `web` prefix also selects `web-browser` caches.
 
 Hub shards share the checked-in `packages/hub/test/timing-history.json` snapshot.
 Refresh it from complete passing hosted suites when new files accumulate:
