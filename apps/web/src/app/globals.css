@@ -8265,6 +8265,12 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   color: var(--m-ink-attention, var(--accent));
 }
 
+/* A connected App's tick is the same green as a free person's or Agent's
+   presence dot. */
+.xmatrix-app .app-tool-state-icon[data-state="connected"] {
+  color: oklch(0.696 0.17 162.48);
+}
+
 .xmatrix-app .app-tool-detail-section-title {
   border-bottom: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 }

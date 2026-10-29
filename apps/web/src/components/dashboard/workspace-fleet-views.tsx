@@ -1377,30 +1377,44 @@ export function AppsView({
     await patchConnectorConnection(connector.id, { providerId: connector.id, metadata });
   }
 
+  function connectorRow(connector: AppConnectorManifest) {
+    const Icon = connectorIcon(connector);
+    const connection = connectionsByProvider.get(connector.id);
+    const needsAttention = connection?.status === "error";
+    const connected = connection?.status === "configured";
+    // The group says the state; a row ends in the state's mark: a green tick
+    // when it works, a warning when it stopped (with what stopped under it).
+    const StateIcon = needsAttention ? AlertTriangle : connected ? Check : null;
+    const stateLabel = needsAttention ? "Needs attention" : "Connected";
+    return (
+      <ToolListRow key={connector.id} testId="connector-row"
+        selected={Boolean(connectorId) && connector.id === selectedConnector?.id}
+        shownBeside={!connectorId && connector.id === selectedConnector?.id}
+        onSelect={() => selectConnector(connector.id)}
+        leading={<Icon className="size-7" />}
+        title={connector.name}
+        trailing={StateIcon ? <span role="img" aria-label={stateLabel} title={stateLabel}
+          className="app-tool-state-icon flex shrink-0" data-state={needsAttention ? "attention" : "connected"}>
+          <StateIcon className="size-4" strokeWidth={2.5} /></span> : null}
+        state={needsAttention ? "attention" : connected ? "running" : "paused"}
+        subtitle={needsAttention ? connection?.error || "The connection needs to be authorized again" : undefined} />
+    );
+  }
+
   const list = (
     <ToolList title="Apps">
       <div className="app-connectors-list">
         {groupConnectorsForList(connectors, connections).map((group) => (
           <ToolListGroup key={group.title} title={group.title}>
-            {group.connectors.map((connector) => {
-              const Icon = connectorIcon(connector);
-              const connection = connectionsByProvider.get(connector.id);
-              // The group says the state; a row adds only what needs the reader: what stopped.
-              const needsAttention = connection?.status === "error";
-              return (
-                <ToolListRow key={connector.id} testId="connector-row"
-                  selected={Boolean(connectorId) && connector.id === selectedConnector?.id}
-                  shownBeside={!connectorId && connector.id === selectedConnector?.id}
-                  onSelect={() => selectConnector(connector.id)}
-                  leading={<Icon className="size-7" />}
-                  title={connector.name}
-                  trailing={needsAttention ? <span role="img" aria-label="Needs attention" title="Needs attention"
-                    className="app-tool-state-icon flex shrink-0" data-state="attention">
-                    <AlertTriangle className="size-4" /></span> : null}
-                  state={needsAttention ? "attention" : connection?.status === "configured" ? "running" : "paused"}
-                  subtitle={needsAttention ? connection?.error || "The connection needs to be authorized again" : undefined} />
-              );
-            })}
+            {group.categories
+              ? group.categories.flatMap((category) => [
+                  <li key={`category:${category.title}`} role="presentation"
+                    className="app-tool-list-subheading pt-2 pb-0.5 pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] text-xs font-medium text-muted-foreground">
+                    {category.title}
+                  </li>,
+                  ...category.connectors.map(connectorRow),
+                ])
+              : group.connectors.map(connectorRow)}
           </ToolListGroup>
         ))}
       </div>

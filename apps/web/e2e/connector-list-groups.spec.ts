@@ -23,16 +23,22 @@ async function openApps(page: Page, { providers = [], connections = [], app, per
 
 const page_ = (page: Page) => page.locator(".app-tool-detail-scroll:visible");
 
-test("Apps lists what needs a hand first, then what works, then the rest by category", async ({ page }) => {
+test("Apps groups by connection state: needs a hand, connected (green tick), then not connected by category", async ({ page }) => {
   await openApps(page, { connections: [connection("sentry", "Sentry", "error"), connection("linear", "Linear", "configured")] });
 
   const groups = page.locator(".app-connectors-list .app-tool-list-group");
-  await expect(groups.first()).toHaveAttribute("aria-label", "Needs attention");
+  await expect(groups).toHaveCount(3);
+  await expect(groups.nth(0)).toHaveAttribute("aria-label", "Needs attention");
   await expect(groups.nth(1)).toHaveAttribute("aria-label", "Connected");
-  await expect(page.getByRole("region", { name: "Connected" })).toContainText("Linear");
-  // An app nobody connected sits under its category, with no line repeating an invitation.
-  const gitlab = page.getByRole("region", { name: "Code & CI" }).getByTestId("connector-row").filter({ hasText: "GitLab" });
+  await expect(groups.nth(2)).toHaveAttribute("aria-label", "Not connected");
+  const linear = page.getByRole("region", { name: "Connected" }).getByTestId("connector-row").filter({ hasText: "Linear" });
+  await expect(linear.getByRole("img", { name: "Connected" })).toBeVisible();
+  // Categories are subheadings inside Not connected, never sections beside Connected.
+  const notConnected = page.getByRole("region", { name: "Not connected" });
+  await expect(notConnected.locator(".app-tool-list-subheading").first()).toHaveText("Code & CI");
+  const gitlab = notConnected.getByTestId("connector-row").filter({ hasText: "GitLab" });
   await expect(gitlab).toHaveText("GitLab");
+  await expect(gitlab.locator(".app-tool-state-icon")).toHaveCount(0);
 });
 
 test("a credentials-only app leads with its form; the command reference stays folded", async ({ page }) => {

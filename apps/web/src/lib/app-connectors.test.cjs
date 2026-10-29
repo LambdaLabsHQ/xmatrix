@@ -31,7 +31,7 @@ test("names compare without regard to case", () => {
   assert.deepEqual(ordered.map((item) => item.id), ["a", "b", "c"]);
 });
 
-test("the list groups apps by state, then lists unconnected apps once under their category", () => {
+test("the list groups apps by state, and splits the unconnected ones by category inside Not connected", () => {
   const app = (id, name, kind, status = "available") => ({ id, name, kind, status });
   const groups = groupConnectorsForList([
     app("github", "GitHub", "code-host"),
@@ -51,9 +51,13 @@ test("the list groups apps by state, then lists unconnected apps once under thei
     ["Needs attention", ["sentry"]],
     ["Connected", ["github"]],
     ["Disconnected", ["linear"]],
+    ["Not connected", ["circleci", "gitlab", "slack", "stripe"]],
+    ["Coming soon", ["acme"]],
+  ]);
+  const notConnected = groups.find((group) => group.title === "Not connected");
+  assert.deepEqual(notConnected.categories.map((category) => [category.title, category.connectors.map((item) => item.id)]), [
     ["Code & CI", ["circleci", "gitlab"]],
     ["Chat", ["slack"]],
     ["More", ["stripe"]],
-    ["Coming soon", ["acme"]],
   ]);
 });
