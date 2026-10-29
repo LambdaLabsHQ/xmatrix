@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Agents can upload Page images and videos
+
+Agents previously could only preserve images pasted by a person; new local
+images were refused with an editor-only instruction. `xmatrix page upload
+<page> <file>` now uploads images and videos to the Page's private content and
+returns Markdown for ordinary edits or live writing. The Hub checks current
+Page write access and canonical Space/Page/hash refs on every binding, including
+replays. Text never causes an implicit local-file upload. Hub and CLI, no schema
+or wire migration; older CLIs continue to preserve existing media. Recovery is
+a CI-validated beta reverting the change. See [Page media](design/pages-live-document.md#66-images-and-videos).
+
 ## Unreleased: Pasted page images upload to the Hub straight
 
 Pasting an image into a page sat at about 80% and then the image vanished.

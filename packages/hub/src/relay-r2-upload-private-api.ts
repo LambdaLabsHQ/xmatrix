@@ -1,4 +1,4 @@
-import { immutableContentObjectKey, lowercaseHex , utf8ByteLength } from "@xmatrix/protocol";
+import { immutableContentObjectKey, lowercaseHex, PAGE_MEDIA_OWNER_KIND, pageMediaRefId, utf8ByteLength } from "@xmatrix/protocol";
 // Production composition for authenticated private immutable uploads.
 // PostgreSQL content stores intent/ref metadata; this module owns only bounded
 // request parsing and R2 I/O.
@@ -357,6 +357,9 @@ export async function handleRelayR2BlobRefCommit(input: {
     id(value.intentId, "intentId"),
     input.expectedScopeId,
   );
+  if (ownerKind === PAGE_MEDIA_OWNER_KIND && refId !== pageMediaRefId(ownerId, intent.contentHash)) {
+    fail("invalid_request", 400, "Page media reference must name the uploaded content hash");
+  }
   // The upload made the object exist; this ref sets who sees it. A Space-scope
   // upload may go into a Channel's scope — the authority holds it to the
   // intent's own Space — and any other upload only into its own scope.

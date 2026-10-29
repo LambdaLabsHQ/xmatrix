@@ -1911,6 +1911,16 @@ pub enum AccessCommand {
 
 #[derive(Subcommand)]
 pub enum PageCommand {
+    /// Upload an image or video and print Markdown to insert with page edit or live writing
+    Upload {
+        /// Page that will hold the file
+        page: String,
+        /// Local PNG, JPEG, GIF, WebP, AVIF, MP4, WebM or MOV file (up to 25 MiB)
+        file: PathBuf,
+        /// Space ID (defaults to this Run's conversation's Space)
+        #[arg(long)]
+        space: Option<String>,
+    },
     /// Read the pages linked to this conversation, on demand
     Linked {
         /// Conversation ID (defaults to this Run's conversation)
