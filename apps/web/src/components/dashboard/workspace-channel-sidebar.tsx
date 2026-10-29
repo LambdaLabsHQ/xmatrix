@@ -914,6 +914,9 @@ export function channelActivityAt(channel: ChannelSnapshot): string | undefined 
    the list's own skeleton. It is the first frame the server sends, so the
    app never opens on an empty page, and it says what it is waiting for once
    the wait is long enough to notice (StartupStatus). */
+/** Startup knows a Space is coming before it knows which: the header waits. */
+const STARTUP_PENDING_SPACE = "startup-pending";
+
 export function StartupShell({
   channels = [],
   desktopFrameClass,
@@ -962,7 +965,14 @@ export function StartupShell({
           className="app-sidebar hidden w-[var(--app-desktop-sidebar-width)] flex-col bg-sidebar text-sidebar-foreground md:flex"
           style={{ "--app-desktop-sidebar-width": `${desktopSidebarWidth}px` } as CSSProperties}
         >
-          <div className="app-material-scroll-viewport min-h-0 flex-1 overflow-y-auto">
+          {/* The signed-in sidebar's own header and + row, waiting and inert,
+              so the list below sits where it will stay. */}
+          <div className="pointer-events-none" aria-hidden>
+            <SidebarSpaceHeader spaces={[]} currentSpaceId={STARTUP_PENDING_SPACE} renamingSpaceId={null}
+              error={null} currentUserId="" onSelectSpace={inert} onRenameSpace={inert} onManageSpaces={inert} />
+            <ListCreate action={{ label: "New conversation", onCreate: inert, disabled: true }} />
+          </div>
+          <div className="app-material-scroll-viewport app-sidebar-pane-body min-h-0 flex-1 overflow-y-auto">
             <div className="app-material-scroll-content pointer-events-none min-h-full py-2 text-[15px] md:pt-0">
               {rows((channel) => (
                 <ChannelNavItem

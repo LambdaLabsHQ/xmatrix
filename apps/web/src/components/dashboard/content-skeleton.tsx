@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { ListSectionHeading, RECENT_SECTION } from "./list-section-heading";
 import {
   CHANNEL_CHAT_ROW_CLASS_NAME,
   CHANNEL_ROW_HASH_CLASS_NAME,
@@ -120,8 +121,9 @@ export function useEmptySurfaceSkeleton(
 
 /** The conversation list while its catalog is still arriving: placeholder
  *  rows inside a conversation row's own boxes (row-frames). Only the name,
- *  the time and the preview are bars. No section heading: which sections the
- *  list has is part of what has not arrived yet. */
+ *  the time and the preview are bars. The section heading keeps its place but
+ *  is not shown: which sections the list has is part of what has not arrived
+ *  yet, and the rows must not move when it does. */
 export function ChannelListSkeleton({
   label = "Loading channels",
   rows = LIST_SKELETON_ROWS.length,
@@ -132,6 +134,9 @@ export function ChannelListSkeleton({
   return (
     <div className="app-list-skeleton" role="status" aria-label={label}>
       <div aria-hidden="true">
+        <div className="invisible">
+          <ListSectionHeading {...RECENT_SECTION} />
+        </div>
         {LIST_SKELETON_ROWS.slice(0, rows).map(([title, preview], index) => (
           <div key={index} className={cn(CHANNEL_CHAT_ROW_CLASS_NAME, "flex w-full")}>
             <span className={CHANNEL_ROW_TITLE_LINE_CLASS_NAME}>
