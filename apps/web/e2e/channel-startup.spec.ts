@@ -101,16 +101,25 @@ test("a build the Hub admitted before opens on the next load while the Hub is as
   await expect(page.getByRole("progressbar", { name: "Preparing" })).toHaveCount(0);
 });
 
-test("resolving an anonymous session does not repeat compatibility admission, and takes its token from the session read", async ({ page }) => {
+/** A signed-in Hub session; the jwt plugin returns its bearer in `set-auth-jwt`. */
+const SIGNED_IN_SESSION = {
+  user: { id: "e2e-user", email: "e2e@xmatrix.test", name: "E2E Tester" },
+  session: { token: "test-session", expiresAt: "2099-01-01T00:00:00.000Z" },
+};
+const SESSION_JWT_HEADERS = { "set-auth-jwt": "test-jwt" };
+
+/** The workspace under real Better Auth reads rather than the mock session. */
+async function installRealAuthWorkspace(page: Page) {
   await page.addInitScript(() => {
     (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true;
   });
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+}
+
+test("resolving an anonymous session does not repeat compatibility admission, and takes its token from the session read", async ({ page }) => {
+  await installRealAuthWorkspace(page);
   await fixtureRule(page, { id: "startup-auth-session", pattern: "**/api/auth/get-session**",
-    responder: { kind: "deferred", json: {
-      user: { id: "e2e-user", email: "e2e@xmatrix.test", name: "E2E Tester" },
-      session: { token: "test-session", expiresAt: "2099-01-01T00:00:00.000Z" },
-    }, headers: { "set-auth-jwt": "test-jwt" } } });
+    responder: { kind: "deferred", json: SIGNED_IN_SESSION, headers: SESSION_JWT_HEADERS } });
   await fixtureJson(page, "startup-auth-token", "**/api/auth/token**", { token: "test-jwt" });
   await page.goto("/app/personal-sspaceperso/channels/general--channel-general", { waitUntil: "domcontentloaded" });
   await expect.poll(async () => (await fixtureRequests(page, "client-compatibility")).length).toBe(1);
@@ -122,16 +131,9 @@ test("resolving an anonymous session does not repeat compatibility admission, an
 });
 
 test("a returning account sees the list it last had while its session is confirmed", async ({ page }) => {
-  await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true;
-  });
-  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  const session = {
-    user: { id: "e2e-user", email: "e2e@xmatrix.test", name: "E2E Tester" },
-    session: { token: "test-session", expiresAt: "2099-01-01T00:00:00.000Z" },
-  };
-  await fixtureJson(page, "signed-in-session", "**/api/auth/get-session**", session,
-    { headers: { "set-auth-jwt": "test-jwt" } });
+  await installRealAuthWorkspace(page);
+  await fixtureJson(page, "signed-in-session", "**/api/auth/get-session**", SIGNED_IN_SESSION,
+    { headers: SESSION_JWT_HEADERS });
   // As on a real network, the list answers after this account's disk store has opened.
   await fixtureRule(page, { id: "held-catalog", pattern: /\/api\/xmatrix\/channels\/(?:page|resolve)(?:\?.*)?$/,
     responder: { kind: "channelCatalog", channels: [E2E_CHANNEL], held: true } });
@@ -146,7 +148,7 @@ test("a returning account sees the list it last had while its session is confirm
     window.localStorage.getItem("xmatrix-product-tail-cache:last-catalog-user"))).toBe("e2e-user");
 
   await fixtureRule(page, { id: "held-session", pattern: "**/api/auth/get-session**",
-    responder: { kind: "deferred", json: session, headers: { "set-auth-jwt": "test-jwt" } } });
+    responder: { kind: "deferred", json: SIGNED_IN_SESSION, headers: SESSION_JWT_HEADERS } });
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect.poll(async () => (await fixtureRequests(page, "held-session")).length).toBeGreaterThan(0);
   await expect(sidebar.getByText("general", { exact: true })).toBeVisible();
