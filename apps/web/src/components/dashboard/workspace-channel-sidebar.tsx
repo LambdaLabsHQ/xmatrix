@@ -1021,20 +1021,18 @@ export function StartupShell({
 }
 
 /* What the startup frame is waiting for, said only once the wait is long
-   enough to notice: one glass capsule on the slab, never a bare link. CSS
-   alone times it, so it works in the server's first frame before any script
-   has run; the slow capsule is a plain link to this page, so it reloads
-   without one. */
+   enough to notice: one tile of tinted paper on the slab, no shadow, never a
+   bare link. CSS alone times it, so it works in the server's first frame
+   before any script has run; the slow tile is a plain link to this page, so
+   it reloads without one. */
 function StartupStatus() {
   return (
     <div className="app-startup-status" role="status">
-      <LiquidGlassPill as="span" onSlab className="app-startup-status-connecting">
-        Connecting to xMatrix…
-      </LiquidGlassPill>
-      <LiquidGlassPill as="a" href="" onSlab className="app-startup-status-slow">
+      <span className="app-paper-tile app-startup-status-connecting">Connecting to xMatrix…</span>
+      <a href="" className="app-paper-tile app-startup-status-slow">
         <RotateCw className="size-3.5" aria-hidden="true" />
         Slow network · Reload
-      </LiquidGlassPill>
+      </a>
     </div>
   );
 }

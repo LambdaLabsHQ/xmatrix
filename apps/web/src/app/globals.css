@@ -4647,6 +4647,10 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   animation: app-startup-status-in 300ms ease-out 10.2s both;
 }
 
+.xmatrix-app a.app-startup-status-slow:hover {
+  background: color-mix(in oklch, var(--foreground) 7%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-startup-status-connecting { animation-duration: 1ms, 1ms; }
   .app-startup-status-slow { animation-duration: 1ms; }
