@@ -231,6 +231,26 @@ test('Stripe App deployment emits the live trio, or an acceptance path, and neve
   assert.equal(published.CONNECTOR_STRIPE_EXTERNAL_AUTHORIZE_PATH, undefined);
 });
 
+test('Stripe publisher webhook deployment requires an independent complete pair and the native application', () => {
+  const pair = { CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID: 'acct_fixturePublisher',
+    CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET: 'whsec_fixturePublisher' };
+  const trio = { CONNECTOR_STRIPE_CLIENT_ID: 'ca_fixtureClient', CONNECTOR_STRIPE_CLIENT_SECRET: LIVE_FIXTURE_KEY,
+    CONNECTOR_STRIPE_SIGNING_SECRET: 'whsec_fixturePlatform' };
+  const accepted = run({ ...trio, ...pair });
+  assert.equal(accepted.status, 0, accepted.stderr);
+  assert.deepEqual(JSON.parse(accepted.stdout), { ...base, ...trio, ...pair });
+  for (const key of Object.keys(pair)) assert.ok(workflow.includes(key + ': ${{ secrets.' + key + ' }}'));
+  for (const extra of [pair, { ...trio, CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID: pair.CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID },
+    { ...trio, CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET: pair.CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET },
+    { ...trio, ...pair, CONNECTOR_STRIPE_PUBLISHER_ACCOUNT_ID: 'https://other.invalid' },
+    { ...trio, ...pair, CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET: trio.CONNECTOR_STRIPE_SIGNING_SECRET },
+    { ...trio, ...pair, STRIPE_WEBHOOK_SECRET: pair.CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET }]) {
+    const result = run(extra);
+    assert.notEqual(result.status, 0); assert.equal(result.stdout, '');
+    assert.ok(!result.stderr.includes(pair.CONNECTOR_STRIPE_PUBLISHER_SIGNING_SECRET));
+  }
+});
+
 test('Discord company application deploys only a complete bounded client and bot triple', () => {
   const values = { CONNECTOR_DISCORD_CLIENT_ID: '123456789012345678', CONNECTOR_DISCORD_CLIENT_SECRET: 'fixture-client',
     CONNECTOR_DISCORD_BOT_TOKEN: 'fixture-bot' };

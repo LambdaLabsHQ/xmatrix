@@ -2,8 +2,8 @@
   "name": "xMatrix",
   "built_by": "MadeByRobot, LLC",
   "category_preference": "Workflow automation",
-  "subtitle": "Bring payment failures, disputes, and subscription updates to your team.",
-  "about": "xMatrix brings people and their coding agents together in shared workspaces. Connect your Stripe account to route selected payment failure, dispute, and subscription events into the channels where your team works, with shared context and living pages.",
+  "subtitle": "Bring payments, subscriptions, and disputes into your team conversations.",
+  "about": "xMatrix brings people and their coding agents together in shared workspaces. Connect your Stripe accounts to route selected payment, invoice, dispute, and subscription events into the channels where your team works, with shared context and living pages.",
   "company_website": "https://xmatrix.sh",
   "privacy_policy": "https://xmatrix.sh/privacy",
   "terms_of_service": "https://xmatrix.sh/terms",
@@ -18,8 +18,8 @@
   ],
   "features": [
     {
-      "title": "Bring payment failures into the conversation",
-      "description": "Route failed invoice and PaymentIntent events to selected xMatrix channels so your team can see the event context and coordinate follow-up.",
+      "title": "Know when payments succeed or need attention",
+      "description": "Receive paid-invoice and successful-payment notifications alongside failures in selected xMatrix channels. See the account, event, amount in Stripe minor units, and actual status so your team can coordinate follow-up.",
       "image": null
     },
     {
@@ -37,12 +37,12 @@
     "Sign in to the dedicated xMatrix reviewer test account supplied separately. Use its isolated test Space with administrator rights.",
     "Open the Space Apps page and choose Connect with Stripe. For app review, use the normal public OAuth installation path; the external test path is for implementation testing only.",
     "Select the reviewer-owned Stripe account, inspect the five read-only permissions, authorize, and return to xMatrix. No client ID, account ID, signing secret, or API key is entered by the connecting user.",
-    "In the isolated test channel, subscribe to invoice, payment_intent, dispute, and subscription event sources as described by the released connector guide.",
-    "Use Stripe test events for the reviewer test account. Verify events reach its selected channel and do not reach a separate unconnected Space.",
+    "In the isolated test channel, send @stripe:subscribe:* events to receive the selected event types from every retained account.",
+    "Use Stripe test events for the reviewer test account. Verify paid-invoice, successful-payment and subscription notifications reach its selected channel and do not reach a separate unconnected Space. Subscription creation alone must not claim payment.",
     "Disconnect or uninstall the integration and verify subsequent events no longer reach the Space."
   ],
   "submission_open_work": [
-    "Complete native OAuth installation, multi-account retention and account-bearing event delivery on the released beta; synthetic signature checks alone are insufficient.",
+    "Verify account-bearing and publisher own-account event delivery on the released beta, including paid invoices and successful payments. Four live OAuth installations and retention have passed; signature checks alone are insufficient.",
     "Capture feature images at least 1600 pixels wide using sanitized released UI; do not show real customer data.",
     "Provision an isolated non-real reviewer account and deliver its credentials through the approved private submission mechanism.",
     "Finalize the category from the actual Stripe submission choices and submit the accurate listing after end-to-end verification."
@@ -53,5 +53,5 @@
     "https://xmatrix.sh/pricing.md",
     "https://xmatrix.sh/about.md"
   ],
-  "prepared_at_utc": "2026-10-28"
+  "prepared_at_utc": "2026-10-29"
 }
