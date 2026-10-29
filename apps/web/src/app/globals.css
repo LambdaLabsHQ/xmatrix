@@ -4617,16 +4617,24 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 
 .app-startup-status {
   display: grid;
+  justify-items: center;
   margin: 0;
   padding: 1.25rem 1.5rem;
-  text-align: center;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  color: color-mix(in oklch, var(--foreground) 62%, transparent);
 }
 
-.app-startup-status > span {
+.app-startup-status > * {
   grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 2rem;
+  padding: 0 0.9rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  color: color-mix(in oklch, var(--foreground) 72%, transparent);
+  text-decoration: none;
+  white-space: nowrap;
   opacity: 0;
 }
 
@@ -4635,14 +4643,8 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 }
 
 .app-startup-status-slow {
-  animation: app-startup-status-in 300ms ease-out 10.2s both;
-}
-
-.app-startup-status-reload {
   color: var(--foreground);
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  animation: app-startup-status-in 300ms ease-out 10.2s both;
 }
 
 @media (prefers-reduced-motion: reduce) {

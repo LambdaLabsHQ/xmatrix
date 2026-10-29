@@ -124,6 +124,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  RotateCw,
   Settings2,
   } from "lucide-react";
 
@@ -1020,17 +1021,21 @@ export function StartupShell({
 }
 
 /* What the startup frame is waiting for, said only once the wait is long
-   enough to notice. CSS alone times it, so it works in the server's first
-   frame before any script has run; the reload is a plain link to this page. */
+   enough to notice: one glass capsule on the slab, never a bare link. CSS
+   alone times it, so it works in the server's first frame before any script
+   has run; the slow capsule is a plain link to this page, so it reloads
+   without one. */
 function StartupStatus() {
   return (
-    <p className="app-startup-status" role="status">
-      <span className="app-startup-status-connecting">Connecting to xMatrix…</span>
-      <span className="app-startup-status-slow">
-        Still connecting. The network may be slow.{" "}
-        <a href="" className="app-startup-status-reload">Reload</a>
-      </span>
-    </p>
+    <div className="app-startup-status" role="status">
+      <LiquidGlassPill as="span" onSlab className="app-startup-status-connecting">
+        Connecting to xMatrix…
+      </LiquidGlassPill>
+      <LiquidGlassPill as="a" href="" onSlab className="app-startup-status-slow">
+        <RotateCw className="size-3.5" aria-hidden="true" />
+        Slow network · Reload
+      </LiquidGlassPill>
+    </div>
   );
 }
 
