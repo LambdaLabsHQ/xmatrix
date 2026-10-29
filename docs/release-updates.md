@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Pasted page images upload to the Hub straight
+
+Pasting an image into a page sat at about 80% and then the image vanished.
+The Web's Worker (OpenNext) reads a whole request into memory before its route
+runs, so the upload body sent through it showed no progress while the Worker
+re-sent it, and the 30-second stall watchdog gave the upload up. The browser
+now sends the body straight to the Hub from the app's own origin, with its
+bearer and client identity and never a cookie, as page reads already do; a
+`401`, `426` or no answer across origins goes through the Web. Message
+attachments share the path. Hub and Web, no migration. Recovery is reverting
+#1196. See [Client resilience](architecture/client-resilience.md).
+
 ## Unreleased: Message append recovers a lost pre-COMMIT response
 
 HUB-B6 lost its final live-routing read after publication writes, before COMMIT.
