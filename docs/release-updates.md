@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: A new Page keeps its first pasted image
+
+Pasting an image or video into an empty new Page captured its still-null id
+while the first write was creating it. The media ref then failed to bind.
+The editor now awaits that same creation before uploading against the permanent
+Page id. A browser regression reproduces the null owner id before the fix.
+Beta Web only, no schema or protocol change; recovery is a CI-validated beta
+Web reverting this change.
+
 ## Unreleased: Unchanged Page edits preserve a word being typed
 
 A repeated Markdown write could parse an unchanged projection back into the

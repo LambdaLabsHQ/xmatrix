@@ -34,6 +34,8 @@ Agents upload local Page images and videos with `xmatrix page upload`, then
 insert the returned Markdown through ordinary Page writes. The Hub rechecks
 current Page edit access before binding media, including replays. Page text
 does not implicitly upload local files. See [Page media](../design/pages-live-document.md#66-images-and-videos).
+An editor's first media paste into a new Page waits for its creation before
+binding the file to the Page's permanent id.
 
 Google Calendar has a separate Space connection for calendar/event reads,
 availability and event writes. Every App now has one connection-wide
