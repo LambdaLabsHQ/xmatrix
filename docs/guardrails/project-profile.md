@@ -199,8 +199,8 @@ Instances and resume sleeping/interrupted ones through the bounded wake
 boundary. Stopped Instances remain stopped. See
 [Connector delivery](../design/connector-platform.md).
 
-Connector reads have normal (`xmatrix call --public`) and private (`--private`)
-result modes. Both retain their invocation and parameters in the Channel;
+Connector reads are normal by default (`xmatrix call`) and private only with an
+explicit `--private`. Both retain their invocation and parameters in the Channel;
 private receipts and execution history receive a fixed mask before any result
 write. The original value or provider error returns to the caller and is retained in restricted content for its Human owner’s Web view for 30 days; other members and Agent Runs cannot read that view.
 Run, mailbox and app-permission checks remain unchanged. See

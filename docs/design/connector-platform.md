@@ -542,12 +542,11 @@ are bounded to 32 KiB and original results to 256 KiB, with `private, no-store`
 HTTP responses in both modes.
 Aggregate metering contains only the existing IDs and enums.
 
-Visibility selection is explicit in the CLI: a bare call, or both flags, fails
-before I/O rather than silently publishing an old private script's parameters.
-The original 1.9.1-beta.1 API request without a visibility is now rejected with
-HTTP 400 before publication. Its callers must choose a mode explicitly; there
-is no fallback that silently makes previously private invocation parameters
-public. Malformed modes are rejected without coercion.
+The CLI defaults to a normal (public) result; only an explicit `--private`
+masks it, and passing both flags fails before I/O. The CLI always sends the
+chosen mode. The original 1.9.1-beta.1 API request without a visibility is
+still rejected with HTTP 400 before publication, so the API itself has no
+implicit fallback. Malformed modes are rejected without coercion.
 
 The Hub does not extract codes or automatically create Secrets. An authorized
 caller can consume a private result locally or save it under a fresh alias using
