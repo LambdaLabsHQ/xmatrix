@@ -100,6 +100,9 @@ function getAuthBaseUrl(): string {
   );
 }
 
+/** How long one session read may take before it counts as unanswered. */
+export const SESSION_READ_TIMEOUT_MS = 15_000;
+
 export async function loadBetterAuthSession(): Promise<{
   session: WebAuthSession | null;
   user: AuthUser | null;
@@ -110,6 +113,9 @@ export async function loadBetterAuthSession(): Promise<{
   let sessionJwt: string | null = null;
   const sessionResponse = await authClient.getSession({
     fetchOptions: {
+      // An unanswered sign-in check is a transient failure the caller retries,
+      // not a startup that waits forever.
+      signal: AbortSignal.timeout(SESSION_READ_TIMEOUT_MS),
       onSuccess: (context) => {
         sessionJwt = context.response.headers.get("set-auth-jwt")?.trim() || null;
       },
