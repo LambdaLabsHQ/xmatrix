@@ -34,10 +34,13 @@ integration("Message events use entity versions for non-first messages and recov
       requestDigest: "1".repeat(64), senderKind: "user", senderId: id,
       messageKind: "xmatrix.message.text", sentAt: new Date().toISOString(),
       prepared, senderSnapshot: { userId: id } };
+    const reservation = await repository.reserveAppendSequence({ ...input, observedPostgresHead: sequence - 1 });
+    assert.equal(reservation.sequence, sequence);
     const result = await repository.append(input);
     assert.equal(result.sequence, sequence);
     assert.equal(result.entityVersion, 1);
-    assert.deepEqual(await repository.append(input), result, "append replay retains timeline sequence");
+    const { liveRouting: _routing, ...receipt } = result;
+    assert.deepEqual(await repository.append(input), receipt, "append replay retains timeline sequence");
     return input.messageId;
   };
   const recall = (messageId, expectedEntityVersion = 1, overrides = {}) => repository.tombstone({
@@ -132,6 +135,7 @@ integration("Message events use entity versions for non-first messages and recov
       [id, fifth])).rows[0].entity_version), 1);
   } finally {
     await deleteSpaceRows(client, id, ["idempotency_keys", "outbox", "message_mutations", "messages",
+      "message_sequence_reservations", "channel_message_sequences",
       "channel_content_counters", "space_billing_usage",
       "space_storage_usage", "space_members", "channels", "spaces"], { shard: true });
     await client.query(`DROP OWNED BY ${role}`);

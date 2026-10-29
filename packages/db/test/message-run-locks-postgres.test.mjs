@@ -27,8 +27,9 @@ integration("Run and message operations order behind Channel stops and recheck c
     }, senderSnapshot: { kind: "agent", id: "a:1" } };
   let afterProof;
   const database = postgresDatabase(reader);
-  const repository = new PostgresMessageRepository({ ...database,
-    transaction: (context, callback) => database.transaction(context, tx => callback({
+  const observed = target => ({ ...target,
+    openSession: () => observed(target.openSession()),
+    transaction: (context, callback) => target.transaction(context, tx => callback({
       async query(query) {
         const result = await tx.query(query);
         if (query.name === "message_append_run_proof_v3") await afterProof?.();
@@ -36,6 +37,7 @@ integration("Run and message operations order behind Channel stops and recheck c
       },
     })),
   });
+  const repository = new PostgresMessageRepository(observed(database));
   try {
     await seedTestSpacePlacement(fixture.client, "space", new Date().toISOString());
     await sql(`INSERT INTO data.spaces(space_id,owner_user_id,name,search_rank_sequence,version,created_at,updated_at)
