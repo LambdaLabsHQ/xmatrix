@@ -117,6 +117,8 @@ function openChannelRow(channelId) {
 function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = sequenceChannelId, rows }) {
   return {
     cacheMode: "disabled",
+    openSession() { return this; },
+    async close() {},
     async transaction(_context, callback) {
       return callback({
         async query(query) {
