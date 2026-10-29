@@ -7,6 +7,7 @@ import { connectorProvider } from "../src/connectors/registry.ts";
 import { sentryInstallationClient } from "../src/connectors/sentry-installation.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 import * as githubAuthorization from "../src/github-connect-authorization.ts";
+import * as stripeOAuth from "../src/connectors/stripe-oauth.ts";
 
 const exchangeOAuthCode = async (...args) => (await exchangeOAuthGrant(...args)).fields;
 
@@ -144,6 +145,7 @@ test("the callback writes credentials only after verified state, provider scope 
     "./github-connect-authorization": githubAuthorization,
     "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("only GitHub Connect links installations") },
     "./connectors/sentry-installation": { sentryInstallationClient },
+    "./connectors/stripe-oauth": stripeOAuth,
     "./connectors/gmail-poll-oauth": { gmailPollCallback },
     "./connectors/teams-native": { teamsNativeApp: () => undefined },
     "./connectors/googlechat-native": { googleChatNativeApp: () => undefined },
