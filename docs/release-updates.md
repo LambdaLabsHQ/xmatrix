@@ -15,6 +15,7 @@ grammar clearly claims it, so a table or a log stays plain. A quote in a
 message is the same tinted paper instead of a rule beside grey text. Beta Web,
 no API or schema change; recovery is a CI-validated release reverting the
 change.
+
 ## Unreleased: Apple sign-in names why native authorization stopped
 
 An Apple authorization error 1000 with no underlying error could be a missing
