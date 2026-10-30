@@ -9,6 +9,7 @@ import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { withProviderResponses } from "./support/fetch-responses.mjs";
 import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts";
 import * as metering from "../src/usage-cost-metering.ts";
+import { AppControlError } from "../../db/src/app-control.ts";
 
 const mailbox = { address: "mailbox@example.test", account: "ca_mailbox", owner: "user:owner" };
 const id = "18f2a9c0d1e2b3a4";
@@ -34,6 +35,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
   });
   const dependencies = {
     "@xmatrix/protocol": protocol,
+    "@xmatrix/db": { AppControlError },
     "../app-connectors": { getAppConnectorProvider: provider => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === provider) },
     "./command-support": support,
     "./action-parse": { parseActionCommand },
