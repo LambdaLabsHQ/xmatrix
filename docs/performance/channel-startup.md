@@ -187,12 +187,13 @@ Same method as above, on the browser fixture build (`node e2e/build.mjs`), for
 
 | Metric | Before | After |
 | --- | ---: | ---: |
-| Initial JS bytes | 3,641,739 | 3,023,013 |
-| Gzip bytes | 1,173,302 | 977,129 |
-| Brotli bytes | 975,388 | 828,579 |
+| Initial JS bytes | 3,644,298 | 3,025,569 |
+| Gzip bytes | 1,174,284 | 978,108 |
+| Brotli bytes | 976,090 | 829,342 |
 | Initial JS files | 39 | 40 |
 
-This removes 618,726 uncompressed bytes (17.0%) and 196,173 gzip bytes (16.7%).
+This removes 618,729 uncompressed bytes (17.0%), 196,176 gzip bytes (16.7%) and
+146,748 Brotli bytes (15.0%); Brotli uses Node's `brotliCompressSync` defaults.
 A tool view opened first after launch now waits for its chunk; a view that
 consumes a return parameter (an Apps OAuth outcome) writes the address through
 `replaceBrowserPath`, so the router does not put the consumed parameter back.

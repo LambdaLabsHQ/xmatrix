@@ -37,7 +37,8 @@ test("⌘F inside a conversation searches only it, and Backspace widens it to th
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, RELEASE] });
   await stubMessageSearch(page);
   await page.goto(`/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, { waitUntil: "domcontentloaded" });
-  await expect(page.locator(".app-rail")).toBeVisible();
+  // The startup frame draws the rail before the shell that answers ⌘F; the open conversation's composer is the shell's.
+  await expect(page.locator(".app-composer").first()).toBeVisible();
 
   await page.keyboard.press("Control+f");
   const dialog = page.getByRole("dialog", { name: "Search workspace" });
