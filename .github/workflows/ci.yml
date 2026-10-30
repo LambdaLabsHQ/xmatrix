@@ -283,7 +283,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"web-unit","partitions":"web-unit","shard":"","primary":false,"scope":"product"},{"name":"web-build","partitions":"web-build","shard":"","primary":true,"scope":"product"},{"name":"web-check","partitions":"web-check","shard":"","primary":false,"scope":"product"}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true,"scope":"product"},{"name":"web (performance)","partitions":"web-browser","shard":"performance","primary":false,"scope":"web-browser"},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false,"scope":"web-browser"},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false,"scope":"web-browser"},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false,"scope":"web-browser"},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false,"scope":"web-browser"}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true,"scope":"product"}]') }}
+        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"web-unit","partitions":"web-unit","shard":"","primary":false,"scope":"product","next":false},{"name":"web-build","partitions":"web-build","shard":"","primary":true,"scope":"product","next":true},{"name":"web-check","partitions":"web-check","shard":"","primary":false,"scope":"product","next":false}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":"","primary":true,"scope":"product","next":true},{"name":"web (performance)","partitions":"web-browser","shard":"performance","primary":false,"scope":"web-browser","next":true},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false,"scope":"web-browser","next":true},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false,"scope":"web-browser","next":true},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false,"scope":"web-browser","next":true},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false,"scope":"web-browser","next":true}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true,"scope":"product","next":true}]') }}
     # Long tests must not occupy production upload/deploy runners.
     runs-on: &linux_runner ${{ fromJSON(inputs.linux_runner || '"ubuntu-24.04"') }}
     env:
@@ -298,13 +298,16 @@ jobs:
       - id: ledger
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup web
+      # Unit tests and the lint/typecheck job do not run `next build`. Restoring
+      # the build cache there only spends egress, and enough concurrent
+      # restores make the job that does compile miss it.
       - name: Point the Next.js build cache at the Actions cache
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted'
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.next
         shell: bash
         run: echo "XMATRIX_NEXT_CACHE_DIR=$HOME/.cache/xmatrix/next-cache/hosted" >> "$GITHUB_ENV"
       - name: Restore the Next.js build cache
         id: next-cache
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted'
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.next
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/xmatrix/next-cache/hosted
@@ -341,7 +344,7 @@ jobs:
         run: node scripts/ci.mjs ${{ matrix.partitions }}
       # One writer per run; main refreshes it, and a branch seeds a cold cache.
       - name: Save the Next.js build cache
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.primary && success() && (github.ref == 'refs/heads/main' || steps.next-cache.outputs.cache-matched-key == '')
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.next && matrix.primary && success() && (github.ref == 'refs/heads/main' || steps.next-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/xmatrix/next-cache/hosted

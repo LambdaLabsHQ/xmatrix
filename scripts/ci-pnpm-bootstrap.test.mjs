@@ -50,6 +50,12 @@ printf '%s\\n' "$1" >> "$RUNNER_TEMP/delays"
 
 const posix = { skip: process.platform === "win32" };
 
+test("hosted installs do not restore the PNPM store from the Actions cache", () => {
+  const action = readRepoFile(".github/actions/setup-pnpm-node/action.yml");
+  assert.doesNotMatch(action, /pnpm-store-/u);
+  assert.match(action, /lockfile-verified-/u);
+});
+
 test("a bootstrap ECONNRESET retries the pinned install and publishes PNPM only after success", posix, (t) => {
   const { result, calls, delays, published, directory } = bootstrap(t, ["ECONNRESET", ""]);
   assert.equal(result.status, 0, result.stderr + result.stdout);
