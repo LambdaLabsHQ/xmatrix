@@ -2,7 +2,7 @@ import type { ClientConfig, QueryResult } from "pg";
 
 const STATES = ["active", "idle in transaction", "idle in transaction (aborted)", "idle", "unknown"];
 const WAITS = ["Lock", "Client", "IO", "IPC", "LWLock", "Timeout", "Activity", "BufferPin", "none", "other"];
-const OWNERS = ["execution-report", "runtime", "message", "launch", "other"];
+const OWNERS = ["execution-report", "runtime", "message", "launch", "catalog", "other"];
 interface Backend {
   state: string;
   wait: string;
@@ -48,7 +48,8 @@ const projection = (alias: string) => `json_build_object(
     THEN ${alias}.wait_event_type ELSE 'other' END,
   'owner',CASE ${alias}.application_name WHEN 'xmatrix-execution-report' THEN 'execution-report'
     WHEN 'xmatrix-hub-runtime' THEN 'runtime' WHEN 'xmatrix-hub-message-authority' THEN 'message'
-    WHEN 'xmatrix-agent-launch-coordinator' THEN 'launch' ELSE 'other' END,
+    WHEN 'xmatrix-agent-launch-coordinator' THEN 'launch'
+    WHEN 'xmatrix-hub-channel-catalog' THEN 'catalog' ELSE 'other' END,
   'ageMs',LEAST(120000,GREATEST(0,COALESCE(EXTRACT(epoch FROM (clock_timestamp()-${alias}.xact_start))*1000,0)))::int)`;
 
 /** Sample while the row lock is still waiting: after 55P03 the wait edge has already disappeared. */
@@ -87,7 +88,8 @@ export function watchPostgresLockWait(queryName: string, backendPid: number | un
   options: { connectionString: string; lockTimeoutMs: number; clientFactory: (config: ClientConfig) => DiagnosticClient },
 ): (() => Promise<PostgresLockWait | undefined>) | undefined {
   if (!["runtime_execution_report_owner_v4", "channel_lifecycle_lock_runtime_new_work_v1",
-    "message_append_preflight_v4"].includes(queryName) ||
+    "message_append_preflight_v4", "channel_mutation_root_lock_v2",
+    "channel_mutation_head_advance_v1"].includes(queryName) ||
       !backendPid) return;
   return watch(backendPid, Math.min(500, Math.max(1, Math.floor(options.lockTimeoutMs / 2))), options);
 }

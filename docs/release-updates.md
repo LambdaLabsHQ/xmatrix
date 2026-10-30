@@ -10,6 +10,18 @@ field is now named once in protocol, and the shell, provider returns and the
 Hub's Apps redirects build addresses from it. Beta Web and Hub, no API or
 schema change; recovery is a CI-validated release reverting the change.
 
+## Unreleased: Text-task answer failures retain the failing database path
+
+HUB-BC completed a text task but timed out applying its Channel About. Its
+best-effort handler discarded the original stack and database evidence. It now
+reports that exception once, retaining the named query and transaction phase;
+slow Channel metadata root/control-head locks also capture the bounded live
+wait graph, with a fixed catalog writer category. Diagnostic connections share
+the existing one-per-isolate budget. This fills missing evidence, not a proven
+repair of the underlying contention. Completed commands are still acknowledged;
+replay, authorization and unknown-COMMIT rules are unchanged. Hub only, no
+migration; recovery is a CI-validated beta Hub release reverting the change.
+
 ## Unreleased: Returning to the iOS app no longer says "Reconnecting"
 
 The iOS app replaces its live connection every time it comes back to the
