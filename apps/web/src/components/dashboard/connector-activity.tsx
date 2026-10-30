@@ -74,7 +74,7 @@ export function ConnectorActivity({ executions, members, loading, error, credent
           <AnimatedIcon icon={RefreshCw} className={cn("size-3.5", loading && "animate-spin")} /> Refresh
         </ConnectorAction>
       )}>
-      <ConnectorRows>
+      <ConnectorRows className={executions.length ? "app-connector-audit -mx-3" : undefined}>
         {executions.map((execution) => (
           <ExecutionRow key={execution.id} execution={execution} members={members} credentials={credentials}
             onRefresh={onRefresh} onReconnect={onReconnect} />
@@ -108,7 +108,7 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
   const who = requesterName(execution, members);
   const when = relativeTime(execution.createdAt);
   return (
-    <li className="py-1.5" data-testid="connector-execution">
+    <li className="px-3 py-2" data-testid="connector-execution">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 text-[13px] sm:grid-cols-[minmax(0,1fr)_minmax(0,9rem)_5.5rem_5rem]">
         <span className="truncate text-sm font-semibold">{execution.actionLabel || execution.actionId || "Default action"}</span>
         <span className="truncate text-muted-foreground max-sm:hidden">{who}</span>

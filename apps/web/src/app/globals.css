@@ -8506,6 +8506,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
   background: color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 
+/* Recent activity is an audit list: every other run lies on a band of the
+   same tint, square, so a line reads across its columns without rules. */
+.xmatrix-app .app-connector-audit > li:nth-child(odd) {
+  background: color-mix(in oklch, var(--foreground) 4%, transparent);
+}
+
 .xmatrix-app .app-ask-card[data-ask-card="open"],
 .xmatrix-app .app-channel-approvals {
   --app-ask-ink: var(--m-ink-attention, var(--accent));
