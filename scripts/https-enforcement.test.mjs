@@ -25,13 +25,22 @@ test("Hub rejects insecure processing before auth, including spoofed forwarding 
   }
 });
 
+/** The Web's worker.mjs, with the modules it imports, over a stub OpenNext handler in a temporary directory. */
+async function webWorkerFixture(prefix, openNextSource) {
+  const dir = await mkdtemp(`${tmpdir()}/${prefix}`);
+  await mkdir(`${dir}/.open-next`);
+  await writeFile(`${dir}/.open-next/worker.js`, openNextSource);
+  await writeFile(`${dir}/package.json`, '{"type":"module"}');
+  for (const file of ["worker.mjs", "site-host.mjs"]) {
+    await writeFile(`${dir}/${file}`, await readFile(new URL(`../apps/web/${file}`, import.meta.url)));
+  }
+  return dir;
+}
+
 test("Web redirects before assets or OpenNext and preserves secure routing", async () => {
-  const dir = await mkdtemp(`${tmpdir()}/xmatrix-https-`);
+  const dir = await webWorkerFixture("xmatrix-https-",
+    'export const sentinel = 1; export default { fetch: () => new Response("app") };');
   try {
-    await mkdir(`${dir}/.open-next`);
-    await writeFile(`${dir}/.open-next/worker.js`, 'export const sentinel = 1; export default { fetch: () => new Response("app") };');
-    await writeFile(`${dir}/package.json`, '{"type":"module"}');
-    await writeFile(`${dir}/worker.mjs`, await readFile(new URL("../apps/web/worker.mjs", import.meta.url)));
     const { default: worker, sentinel } = await import(pathToFileURL(`${dir}/worker.mjs`));
     assert.equal(sentinel, 1);
     for (const path of ["/", "/favicon.ico", "/_next/static/a.js", "/api/auth?q=a%2Fb"]) {
@@ -76,18 +85,33 @@ test("Web redirects before assets or OpenNext and preserves secure routing", asy
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test("Web makes every cache revalidate prerendered pages", async () => {
-  const dir = await mkdtemp(`${tmpdir()}/xmatrix-prerendered-`);
+test("Web sends anything but the site at the site origin to the app origin, after the TLS guard and before assets", async () => {
+  const dir = await webWorkerFixture("xmatrix-site-", 'export default { fetch: () => new Response("app") };');
   try {
-    await mkdir(`${dir}/.open-next`);
-    await writeFile(`${dir}/.open-next/worker.js`, `export default { fetch: (request) => {
+    const { default: worker } = await import(pathToFileURL(`${dir}/worker.mjs`));
+    const assets = { fetch: async () => new Response("asset") };
+    const env = { ASSETS: assets, XMATRIX_SITE_ORIGIN: "https://xmatrix.page", XMATRIX_APP_ORIGIN: "https://xmatrix.sh" };
+    const insecure = await worker.fetch(new Request("http://xmatrix.page/app"), env, {});
+    assert.equal(insecure.status, 308);
+    assert.equal(insecure.headers.get("location"), "https://xmatrix.page/app");
+    const app = await worker.fetch(new Request("https://xmatrix.page/app/space?x=1"), env, {});
+    assert.equal(app.status, 302);
+    assert.equal(app.headers.get("location"), "https://xmatrix.sh/app/space?x=1");
+    assert.equal(await (await worker.fetch(new Request("https://xmatrix.page/docs/setup"), env, {})).text(), "asset");
+    assert.equal(await (await worker.fetch(new Request("https://xmatrix.sh/app"), env, {})).text(), "asset");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Web makes every cache revalidate prerendered pages", async () => {
+  const dir = await webWorkerFixture("xmatrix-prerendered-", `export default { fetch: (request) => {
       const path = new URL(request.url).pathname;
       const cacheControl = path === "/app" ? "s-maxage=31536000, stale-while-revalidate=2592000"
         : path === "/" ? "s-maxage=31536000" : "private, no-cache, no-store, max-age=0, must-revalidate";
       return new Response("page:" + path, { headers: { "cache-control": cacheControl, etag: "page-hash", "x-opennext-cache": "HIT" } });
     } };`);
-    await writeFile(`${dir}/package.json`, '{"type":"module"}');
-    await writeFile(`${dir}/worker.mjs`, await readFile(new URL("../apps/web/worker.mjs", import.meta.url)));
+  try {
     const { default: worker } = await import(pathToFileURL(`${dir}/worker.mjs`));
     for (const [path, cacheControl] of [
       ["/app", "public, max-age=0, must-revalidate"],

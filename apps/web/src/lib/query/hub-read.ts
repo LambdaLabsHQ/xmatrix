@@ -2,7 +2,7 @@
 
 import { clientCompatibilityHeaders } from "@xmatrix/protocol";
 import { requireAcceptedAppCompatibilityIdentity } from "@/lib/app-client-compatibility";
-import { siteUrl } from "@/lib/site-url";
+import { appUrl } from "@/lib/site-url";
 import { requireJson, xmatrixHubOrigin, xmatrixRawResponse } from "./api-client";
 
 /**
@@ -12,7 +12,7 @@ import { requireJson, xmatrixHubOrigin, xmatrixRawResponse } from "./api-client"
  */
 function readsFromHub(): boolean {
   if (process.env.NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS === "0" || typeof window === "undefined") return false;
-  return window.location.origin === siteUrl.origin;
+  return window.location.origin === appUrl.origin;
 }
 
 function admittedIdentity() {

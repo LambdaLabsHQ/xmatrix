@@ -1,4 +1,5 @@
 import handler from "./.open-next/worker.js";
+import { siteOriginRedirect } from "./site-host.mjs";
 export * from "./.open-next/worker.js";
 
 export default {
@@ -11,6 +12,8 @@ export default {
       url.protocol = "https:";
       return Response.redirect(url.href, 308);
     }
+    const toApp = siteOriginRedirect(url, env);
+    if (toApp) return toApp;
     if (request.method === "GET" || request.method === "HEAD") {
       const asset = await env.ASSETS.fetch(request);
       if (asset.status !== 404) {
