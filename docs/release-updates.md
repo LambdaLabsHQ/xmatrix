@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: A page's code blocks take syntax colours
+
+A page's code blocks were plain text. They now take the same low-chroma inks
+as a code block in a conversation (#1238): in the live editor as decorations
+over the text, in the read-only preview and public pages once drawn. A fence's
+language picks the grammar; a fence without one is coloured only when a
+grammar clearly claims it. Beta Web, no API or schema change; recovery is a
+CI-validated release reverting the change.
+
 ## Unreleased: Code blocks in a conversation are the same paper as a page's
 
 A fenced code block without a language drew its code as an inline chip, so in

@@ -3,6 +3,7 @@ import { DOMSerializer, type Node as DocNode } from "prosemirror-model";
 import { pageMediaElement, type PageMediaUrl } from "./page-media";
 import { drawPageReferences, type PageReferenceTargets } from "./page-reference-chips";
 import { markShortCells } from "./page-table-cells";
+import { highlightDrawnCode } from "./page-code-highlight";
 
 /**
  * Markdown drawn as the live editor draws a page (pages-live-document.md §4):
@@ -43,6 +44,7 @@ export function renderPageDocument(markdown: string, target: HTMLElement, refere
     if (media) image.replaceWith(media);
   }
   markShortCells(target);
+  highlightDrawnCode(target);
   if (references) drawPageReferences(target, references);
   return headings;
 }
