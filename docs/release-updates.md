@@ -44,8 +44,13 @@ then its own compositor layer moved by transform or opacity alone, the rest of
 the way after release runs on the compositor as keyframes sampled from the same
 spring, and the iOS app reports a touch at the left edge so the page sets the
 change up before the swipe is recognized: the swipe begins in 2 ms, a move
-costs 3.5 ms with no repaint, and a swipe that catches the spring-back carries
-on from where it is (#1255). Beta Web and iOS, no API or schema change; recovery is
+costs 3.5 ms and repaints only the sign, and a swipe that catches the
+spring-back carries on from where it is (#1255). The moving parts' own CSS
+transitions are off for the length of the change, so none trails the finger
+(the leaving name had stood 48 px behind it), and a drag seeks paused
+animations laid once for the whole way instead of writing inline styles: a
+drag frame takes 3.6 ms of main thread instead of 6.2 (#1260). Beta Web and
+iOS, no API or schema change; recovery is
 a CI-validated release reverting the change (an iOS build without it falls back
 to the snapshot slide, since the page answers only the new bridge call).
 
