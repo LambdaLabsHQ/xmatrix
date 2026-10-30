@@ -1438,14 +1438,15 @@
 
     /* The thread summary is a fixed 32px chip, so the author-avatar sizing
        above must not inflate its participant stack past the chip and let
-       `overflow: hidden` clip the round faces. */
-    .xmatrix-app .app-message-timeline .app-thread-summary .identity-avatar-face {
+       `overflow: hidden` clip the round faces. The pill back to a person's
+       message is the same height. */
+    .xmatrix-app .app-message-timeline :is(.app-thread-summary, .app-timeline-human-above) .identity-avatar-face {
       width: 1.25rem;
       height: 1.25rem;
       font-size: 0.625rem;
     }
 
-    .xmatrix-app .app-message-timeline .app-thread-summary .identity-avatar-face > svg {
+    .xmatrix-app .app-message-timeline :is(.app-thread-summary, .app-timeline-human-above) .identity-avatar-face > svg {
       width: 0.75rem;
       height: 0.75rem;
     }

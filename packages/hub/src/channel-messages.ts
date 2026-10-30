@@ -271,6 +271,7 @@ export async function channelMessageHistory(
     beforeSequence?: number;
     afterSequence?: number;
     limit?: number;
+    senderKind?: "user" | "agent" | "app";
     principal: AuthorityPrincipal;
   },
 ): Promise<Record<string, unknown>> {
