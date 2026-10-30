@@ -42,12 +42,15 @@ export function MobileListTransitionLayer({ store, bar, listCreate, webDock, sta
   if (!stage) return null;
   return (
     <>
+      {/* The conversation bar's paper, which clears as the list arrives under it. */}
+      <div className="app-list-transition-band" aria-hidden="true" />
       <TopWorkspaceBar ghost="app-list-transition-target" channel={null} view="messages" {...bar} />
       <div className="app-list-transition-controls contents" inert aria-hidden="true">
         <CreateFab action={listCreate} />
         {webDock && <MobileTabDock activeView="messages" statusLive={statusLive} onChangeView={onChangeView} />}
       </div>
-      <div className="app-list-transition-shield" aria-hidden="true" />
+      {/* Set up for a swipe that may not come, the page still takes taps. */}
+      {stage !== "prepared" && <div className="app-list-transition-shield" aria-hidden="true" />}
     </>
   );
 }
