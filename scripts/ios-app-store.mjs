@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const EDITABLE = new Set(["PREPARE_FOR_SUBMISSION", "REJECTED", "METADATA_REJECTED", "DEVELOPER_REJECTED", "READY_FOR_REVIEW"]);
 const SUBMITTED = new Set(["WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE", "PENDING_APPLE_RELEASE", "PROCESSING_FOR_APP_STORE", "READY_FOR_SALE", "READY_FOR_DISTRIBUTION"]);
+const ON_SALE = new Set(["READY_FOR_SALE", "READY_FOR_DISTRIBUTION", "REPLACED_WITH_NEW_VERSION", "REMOVED_FROM_SALE", "DEVELOPER_REMOVED_FROM_SALE"]);
 const relation = (type, id) => ({ data: { type, id } });
 const state = (row) => row.attributes.appVersionState ?? row.attributes.appStoreState;
 const query = (values) => new URLSearchParams(values).toString();
@@ -93,6 +94,23 @@ export async function releaseToApple(api, { release, appId, buildNumber, metadat
   return submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes, waitFor, attempts });
 }
 
+/**
+ * Cancels the one review submission still waiting for Apple and waits, at
+ * most `attempts` times 5 seconds apart, until Apple has closed it.
+ */
+async function withdrawQueuedReview(api, appId, waitFor, attempts = 24) {
+  const open = (await api.list(`/v1/reviewSubmissions?${query({ "filter[app]": appId, "filter[platform]": "IOS", limit: "200" })}`))
+    .filter((row) => row.attributes.state !== "COMPLETE");
+  if (open.length !== 1 || open[0].attributes.state !== "WAITING_FOR_REVIEW") throw new Error("The queued App Review submission is ambiguous; reconcile it at Apple.");
+  const path = `/v1/reviewSubmissions/${open[0].id}`;
+  await api.request(path, "PATCH", { type: "reviewSubmissions", id: open[0].id, attributes: { canceled: true } });
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if ((await api.request(path)).data.attributes.state === "COMPLETE") return;
+    if (attempt + 1 < attempts) await waitFor(5000);
+  }
+  throw new Error("Apple has not finished withdrawing the queued review; rerun this release to continue.");
+}
+
 export async function submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes = "", waitFor = wait, attempts = 60 }) {
   validateMetadata(metadata);
   if (releaseNotes !== undefined && (typeof releaseNotes !== "string" || !releaseNotes.trim() || [...releaseNotes].length > 4_000)) {
@@ -100,11 +118,23 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   }
   const build = await waitForValidBuild(api, { appId, version, buildNumber, waitFor, attempts });
 
-  const versions = await api.list(`/v1/apps/${appId}/appStoreVersions?${query({ "filter[platform]": "IOS", include: "build", limit: "200" })}`);
+  const listVersions = () => api.list(`/v1/apps/${appId}/appStoreVersions?${query({ "filter[platform]": "IOS", include: "build", limit: "200" })}`);
+  let versions = await listVersions();
   let target = versions.find((row) => row.attributes.versionString === version);
   if (target && SUBMITTED.has(state(target))) {
     if (target.relationships?.build?.data?.id !== build.id) throw new Error("Submitted version has a different build; refusing replacement.");
     return { outcome: "already-submitted", version, buildNumber, state: state(target) };
+  }
+  // An older version still queued for App Review would reach the App Store
+  // first and hold this release back, so this release takes its place. One
+  // Apple has started reviewing or approved is left alone.
+  const queued = versions.filter((row) => row.id !== target?.id && state(row) === "WAITING_FOR_REVIEW");
+  let replaced;
+  if (queued.length === 1 && compareVersions(queued[0].attributes.versionString, version) < 0) {
+    replaced = queued[0].attributes.versionString;
+    await withdrawQueuedReview(api, appId, waitFor);
+    versions = await listVersions();
+    target = versions.find((row) => row.attributes.versionString === version);
   }
   if (versions.some((row) => row.id !== target?.id && ["WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE", "PENDING_APPLE_RELEASE", "PROCESSING_FOR_APP_STORE"].includes(state(row)))) {
     return { outcome: "deferred-existing-review", version, buildNumber };
@@ -156,11 +186,13 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
       relationships: { build: relation("builds", build.id) },
     });
   }
+  const released = versions.some((row) => row.id !== target.id && ON_SALE.has(state(row)));
   const localizations = await api.list(`/v1/appStoreVersions/${target.id}/appStoreVersionLocalizations?limit=200`);
   for (const entry of metadata.localizations) {
     const existing = localizations.find((row) => row.attributes.locale === entry.locale);
     const attributes = { ...entry };
-    if (releaseNotes && entry.locale === "en-US") attributes.whatsNew = releaseNotes;
+    // Apple accepts What's New only once an earlier version has been on sale.
+    if (releaseNotes && entry.locale === "en-US" && released) attributes.whatsNew = releaseNotes;
     if (existing) {
       delete attributes.locale;
       await api.request(`/v1/appStoreVersionLocalizations/${existing.id}`, "PATCH", { type: "appStoreVersionLocalizations", id: existing.id, attributes });
@@ -199,7 +231,9 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   await api.request(`/v1/reviewSubmissions/${submission.id}`, "PATCH", { type: "reviewSubmissions", id: submission.id, attributes: { submitted: true } });
   for (let attempt = 0; attempt < 6; attempt++) {
     const current = (await api.request(`/v1/reviewSubmissions/${submission.id}`)).data;
-    if (["WAITING_FOR_REVIEW", "IN_REVIEW", "COMPLETE"].includes(current.attributes.state)) return { outcome: "submitted", version, buildNumber, state: current.attributes.state };
+    if (["WAITING_FOR_REVIEW", "IN_REVIEW", "COMPLETE"].includes(current.attributes.state)) {
+      return { outcome: "submitted", version, buildNumber, state: current.attributes.state, ...(replaced ? { replaced } : {}) };
+    }
     if (attempt < 5) await waitFor(5000);
   }
   throw new Error("Apple submission receipt is not yet confirmed; rerun to reconcile.");
@@ -234,5 +268,6 @@ await runCliMain(import.meta.url, async () => {
   });
   // Only these allowlisted, non-secret fields are persisted publicly.
   console.log(JSON.stringify(result));
+  if (result.outcome.startsWith("deferred")) console.log(`::warning title=App Review::${version} (${env.IOS_BUILD_NUMBER}) was not submitted: ${result.outcome}.`);
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `\nApp Store: **${result.outcome}** — ${version} (${env.IOS_BUILD_NUMBER})${result.state ? `, ${result.state}` : ""}.\n`);
 });
