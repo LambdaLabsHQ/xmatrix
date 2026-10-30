@@ -15,13 +15,17 @@ import { systemBackLayerOpen } from "./use-system-back";
  *
  * It has to keep up with a finger at 120 Hz, so:
  * - Everything that moves is its own compositor layer for the length of the
- *   change and moves by transform or opacity alone: a frame repaints nothing,
- *   lays out only the sign's length, and touches only those elements' own
- *   inline styles. Nothing the whole page inherits changes, and the shell does
- *   not render: the root's `data-list-transition` is set here, and only
- *   MobileListTransitionLayer draws the list's bar and controls.
+ *   change and moves by transform or opacity alone; only the sign's length is
+ *   laid out and repainted. Nothing the whole page inherits changes, and the
+ *   shell does not render: the root's `data-list-transition` is set here, and
+ *   only MobileListTransitionLayer draws the list's bar and controls.
+ * - A drag seeks paused animations that hold the whole way: a frame resolves
+ *   only the animated values, where inline styles would match every part's
+ *   style rules again. The parts' own transitions are off meanwhile: one would
+ *   trail the finger, started and cancelled by every move.
  * - Once let go, the rest of the way is handed to the compositor as keyframes
- *   sampled from the spring, so it lands smoothly whatever the main thread does.
+ *   sampled from the spring, so the layers land smoothly whatever the main
+ *   thread does. The sign's length, which is laid out, follows on the main thread.
  * - The iOS app announces a touch at the left edge (`prepare`) before its swipe
  *   is recognized; the change is set up then, invisibly, and the swipe starts
  *   on a page that is ready. A swipe that catches the screen springing back
@@ -57,6 +61,13 @@ const SETTLE_RATE = 22;
 const SETTLE_SAMPLES = 60;
 /** A prepared change no swipe took up is put away. */
 const PREPARED_FOR_MS = 700;
+/** How fast the bar's glyphs and the controls at the bottom trade places: the
+    leaving ones are gone 1/rate of the way along, and the arriving ones start
+    as far from the end. */
+const BAR_FADE = 1.7;
+const BOTTOM_FADE = 1.8;
+/** Where along the way (0 to 1) a fade starts or ends. Every pose is linear in between. */
+const POSE_STOPS = [0, 1 - 1 / BAR_FADE, 1 - 1 / BOTTOM_FADE, 1 / BOTTOM_FADE, 1 / BAR_FADE, 1].sort((a, b) => a - b);
 
 function reducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -129,6 +140,8 @@ function poses(parts: Parts, x: number): Array<[HTMLElement, Pose]> {
   const p = Math.min(1, Math.max(0, x / parts.width));
   const out: Array<[HTMLElement, Pose]> = [];
   const shift = (dx: number, dy = 0) => `translate3d(${dx}px, ${dy}px, 0)`;
+  const fadeOut = (rate: number) => String(Math.max(0, 1 - rate * p));
+  const fadeIn = (rate: number) => String(Math.max(0, 1 - rate * (1 - p)));
   if (parts.list) out.push([parts.list, { transform: shift(x - parts.width) }]);
   for (const element of parts.conversation) out.push([element, { transform: shift(x) }]);
   if (parts.band) out.push([parts.band, { opacity: String(1 - p) }]);
@@ -138,30 +151,38 @@ function poses(parts: Parts, x: number): Array<[HTMLElement, Pose]> {
     for (const name of leaving) out.push([name, { transform: shift((from + 6) * p) }]);
     for (const name of arriving) out.push([name, { transform: shift((to + 6) * (p - 1)) }]);
   }
-  for (const glyph of parts.leavingGlyphs) {
-    out.push([glyph, { opacity: String(Math.max(0, 1 - 1.7 * p)), transform: shift(14 * p) }]);
-  }
-  for (const glyph of parts.arrivingGlyphs) {
-    out.push([glyph, { opacity: String(Math.max(0, 1.7 * p - 0.7)), transform: shift(-14 * (1 - p)) }]);
-  }
+  for (const glyph of parts.leavingGlyphs) out.push([glyph, { opacity: fadeOut(BAR_FADE), transform: shift(14 * p) }]);
+  for (const glyph of parts.arrivingGlyphs) out.push([glyph, { opacity: fadeIn(BAR_FADE), transform: shift(-14 * (1 - p)) }]);
   if (parts.composer) out.push([parts.composer, { transform: shift(0, 8 * p) }]);
   // A glass fades on itself: faded through an ancestor it has nothing behind it to show.
-  for (const part of parts.composerParts) out.push([part, { opacity: String(Math.max(0, 1 - 1.8 * p)) }]);
+  for (const part of parts.composerParts) out.push([part, { opacity: fadeOut(BOTTOM_FADE) }]);
   for (const control of parts.listControls) {
-    out.push([control, { opacity: String(Math.max(0, 1.8 * p - 0.8)), transform: shift(0, 8 * (1 - p)) }]);
+    out.push([control, { opacity: fadeIn(BOTTOM_FADE), transform: shift(0, 8 * (1 - p)) }]);
   }
   return out;
 }
 
-function paint(parts: Parts, x: number) {
-  for (const [element, pose] of poses(parts, x)) {
-    for (const [property, value] of Object.entries(pose)) element.style.setProperty(property, value);
-  }
+/** The whole way as paused animations, one for each moving part, for a drag to seek: their time is `x`. */
+function layTrack(parts: Parts): Animation[] {
+  const frames = POSE_STOPS.map((stop) => poses(parts, stop * parts.width));
+  return frames[0].map(([element], part) => {
+    const animation = element.animate(
+      frames.map((pose, stop) => ({ ...pose[part][1], offset: POSE_STOPS[stop] })),
+      { duration: parts.width, fill: "both" },
+    );
+    animation.pause();
+    return animation;
+  });
 }
 
-/** What holds for the whole change, set once: the moving parts' own layers, and the conversation's paper. */
+function seek(animations: Animation[], x: number) {
+  for (const animation of animations) animation.currentTime = x;
+}
+
+/** What holds for the whole change, set once: the moving parts' own layers and no transitions of theirs, and the conversation's paper. */
 function setUp(parts: Parts) {
   for (const [element, pose] of poses(parts, 0)) {
+    element.style.setProperty("transition", "none", "important");
     const layered = Object.keys(pose).filter((property) => property !== "width");
     if (layered.length) element.style.setProperty("will-change", layered.join(", "));
   }
@@ -176,8 +197,7 @@ function setUp(parts: Parts) {
 function tearDown(parts: Parts) {
   const elements = new Set([...poses(parts, 0).map(([element]) => element), ...parts.conversationPaper]);
   for (const element of elements) {
-    for (const animation of element.getAnimations()) animation.cancel();
-    for (const property of ["transform", "opacity", "width", "will-change", "background", "flex-shrink", "min-width"]) {
+    for (const property of ["transition", "will-change", "background", "flex-shrink", "min-width"]) {
       element.style.removeProperty(property);
     }
   }
@@ -225,6 +245,8 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       dragging: false,
       dragFrom: 0,
       committing: false,
+      /** What a drag seeks, from the change's setup until it is let go. */
+      track: [] as Animation[],
       landing: null as null | { toList: boolean; position: () => number; animations: Animation[] },
       putAway: 0,
     };
@@ -247,14 +269,18 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       m.parts.band?.style.setProperty("background", barPaper);
       setUp(m.parts);
       m.x = stage === "forward" ? m.parts.width : 0;
-      paint(m.parts, m.x);
+      m.track = layTrack(m.parts);
+      seek(m.track, m.x);
       return true;
     };
 
     const close = (update?: () => void) => {
       window.clearTimeout(m.putAway);
+      // The screen holds its last pose until the new one is in.
+      const holding = [...m.track, ...(m.landing?.animations ?? [])];
       m.stage = null;
       m.dragging = false;
+      m.track = [];
       m.landing = null;
       m.committing = Boolean(update);
       try {
@@ -266,6 +292,7 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       } finally {
         m.committing = false;
       }
+      for (const animation of holding) animation.cancel();
       if (m.parts) tearDown(m.parts);
       m.parts = null;
       if (rootRef.current) delete rootRef.current.dataset.listTransition;
@@ -274,6 +301,8 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
     const land = (target: number, speed: number, then: () => void) => {
       const parts = m.parts;
       if (!parts) return;
+      for (const animation of m.track) animation.cancel();
+      m.track = [];
       const landing = settleOnCompositor(parts, m.x, target, speed);
       m.landing = { toList: target > 0, ...landing };
       void Promise.all(landing.animations.map((animation) => animation.finished)).then(() => {
@@ -329,7 +358,8 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
           m.dragging = true;
           m.dragFrom = caughtAt;
           m.x = caughtAt;
-          if (m.parts) paint(m.parts, caughtAt);
+          if (m.parts) m.track = layTrack(m.parts);
+          seek(m.track, caughtAt);
           return true;
         }
         if (m.stage === "prepared") {
@@ -345,7 +375,7 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       move(distance) {
         if (!m.dragging || !m.parts) return;
         m.x = Math.max(0, m.dragFrom + distance);
-        paint(m.parts, m.x);
+        seek(m.track, m.x);
       },
       end(back, speed) {
         if (!m.dragging || !m.parts) return;
