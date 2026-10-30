@@ -49,7 +49,7 @@ integration("one opening message begins the transaction with every setting intac
 
 // HUB-AY: a lock timeout erases pg_blocking_pids' wait edge. Existing driver
 // recovery tests cannot prove the diagnostic was taken while the SQL was waiting.
-integration("execution-owner lock failures retain the live blocker without identities or SQL", async () => {
+integration("writer lock failures retain the live blocker without identities or SQL", async () => {
   const isolated = await isolatedPostgres("execution_lock", { migrate: false, runtimeRole: false });
   const connectionString = isolated.url.toString();
   const placement = { spaceId: "space", shardId: "lock-diagnostic", placementEpoch: 1 };
@@ -63,10 +63,16 @@ integration("execution-owner lock failures retain the live blocker without ident
     await holder.query(`INSERT INTO ${table} VALUES (1,'private-report')`);
     await holder.query("BEGIN; SET LOCAL application_name='xmatrix-execution-report'");
     await holder.query(`SELECT * FROM ${table} FOR UPDATE`);
-    for (const mode of ["available", "unavailable", "disconnect"]) {
+    const writers = [
+      ["runtime_execution_report_owner_v4", "xmatrix-execution-report", "execution-report"],
+      ["channel_mutation_root_lock_v2", "xmatrix-hub-channel-catalog", "catalog"],
+      ["channel_mutation_head_advance_v1", "xmatrix-hub-channel-catalog", "catalog"],
+    ];
+    for (const [queryName, applicationName, owner, mode] of writers.flatMap(writer =>
+      ["available", "unavailable", "disconnect"].map(mode => [...writer, mode]))) {
       let diagnosticConnections = 0;
       const database = createAuthorityDatabase({ connectionString, shardId: "lock-diagnostic",
-        lockTimeoutMs: 1500, clientFactory: config => {
+        applicationName, lockTimeoutMs: 1500, clientFactory: config => {
           // A real driver owns the command. Only the independent diagnostic
           // connection is unavailable in the negative case.
           if (config.application_name === "xmatrix-lock-diagnostic") {
@@ -81,13 +87,13 @@ integration("execution-owner lock failures retain the live blocker without ident
           return new Client(config);
         } });
       await assert.rejects(database.transaction({ requestId: "private-request",
-        operation: "runtime.execution-report", placement }, tx => tx.query({ name: "runtime_execution_report_owner_v4",
+        operation: "runtime.execution-report", placement }, tx => tx.query({ name: queryName,
         text: `SELECT private_value FROM ${table} WHERE id=$1 FOR UPDATE`, values: [1], maxRows: 1 })), error => {
         assert.equal(error.code, "55P03", "the original failure remains authoritative");
         const [evidence] = databaseFailureEvidence(error);
         assert.equal(evidence.lockWait?.status, mode === "available" ? "sampled" : "unavailable");
         if (mode === "available") {
-          assert.equal(evidence.lockWait.waiter.owner, "execution-report");
+          assert.equal(evidence.lockWait.waiter.owner, owner);
           assert.equal(evidence.lockWait.waiter.wait, "Lock");
           assert.equal(evidence.lockWait.blockers.length, 1);
           assert.equal(evidence.lockWait.blockers[0].owner, "execution-report");
