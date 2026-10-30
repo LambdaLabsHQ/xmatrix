@@ -249,14 +249,14 @@ pub enum Commands {
         #[command(subcommand)]
         command: SetupCommand,
     },
-    /// List connected agents
+    /// List live Agent Instances; each Machine's harnesses are in `xmatrix agent list`
     #[command(alias = "ls")]
     List {
         /// Emit machine-readable JSON with narrow fields including provider quota
         #[arg(long)]
         json: bool,
     },
-    /// Manage agents
+    /// List each Machine's Agents (harness, online, quota) and manage them in a Space
     Agent {
         #[command(subcommand)]
         command: AgentCommand,
@@ -277,7 +277,7 @@ pub enum Commands {
         #[command(subcommand)]
         command: SpaceCommand,
     },
-    /// Inspect or rename this Machine
+    /// Inspect or rename this Machine; every Machine's Agents are in `xmatrix agent list`
     Machine {
         #[command(subcommand)]
         command: MachineCommand,
@@ -1757,7 +1757,8 @@ pub enum AttachmentCommand {
 
 #[derive(Subcommand)]
 pub enum SpaceCommand {
-    /// Read the repositories and registered directories an Agent can be launched with in a Space
+    /// Read the repositories and registered directories an Agent can be launched with in a Space.
+    /// Machines and the harnesses each runs are in `xmatrix agent list`
     LaunchTargets {
         /// Space ID. Defaults to the Space of this Run's conversation.
         space_id: Option<String>,

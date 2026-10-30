@@ -403,6 +403,11 @@ pub async fn cmd_list(hub_url: &str, token: &str, json_output: bool) -> error::R
             a.id.dimmed()
         );
     }
+    // Who is live is not where work can start: that is per Machine.
+    println!(
+        "{}",
+        "Which harnesses each Machine runs, online and quota: xmatrix agent list".dimmed()
+    );
 
     Ok(())
 }

@@ -2,13 +2,16 @@ Channel command text (sent visibly, then interpreted by the Hub):
   @auto <task>                              Route a task to an available Agent
   @<agent> repo:<owner/repo> <task>           Start work in an authorized repository
   @<agent> pwd:"<registered-path>" <task>     Start work in a registered directory
+  @<agent> machine:<name> <task>             Start work on a named machine
   @<agent>:<instance>:stop [reason]          Stop that Instance's active Run
   @<agent>:<instance>:reborn                 Resume that Instance's continuity
   @<agent>:<instance>:handoff:@<successor>    Transfer work to a successor
   /stop all [reason]                        Stop every live Instance in this Channel
 
 Lifecycle actions use current Channel/Run permissions. The Hub decides access
-and routing; message text cannot grant either. For launch targets, use
+and routing; message text cannot grant either. Before naming a machine or
+harness, read `xmatrix agent list`: each machine's harnesses, whether it is
+online and its quota. Repositories and directories are in
 `xmatrix space launch-targets`. For connected app commands, run
 `xmatrix connector list`, then send the returned command as a Channel message.
 
