@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, LogIn, RefreshCw, RotateCcw } from "lucide-react";
+import { Loader2, Lock, LogIn, RefreshCw, RotateCcw } from "lucide-react";
 import {
   PRIVATE_CONNECTOR_RESULT,
   WEB_PROXY_ROUTES,
@@ -21,9 +21,9 @@ import { ConnectorAction, ConnectorEmpty, ConnectorRows, ConnectorSection } from
 import { PrivateConnectorResult } from "./private-connector-result";
 import { relativeTime } from "./workspace-shell-presence";
 
-/* What the App ran, newest first, as an audit list: one line per run saying
-   what ran, who asked, when and how it ended; what it returned stays in the
-   conversation it ran in. A failure is fixed where it shows: the row
+/* What the App ran, newest first, as a call log: per call when it ran, what
+   ran (its name and command), who asked and how it ended, with the sentence it
+   answered in under it; the content it returned stays in the conversation. A failure is fixed where it shows: the row
    offers its remedy (sign in again, replace a credential, reconnect) and runs
    the read again once it is fixed, so nobody has to look for where to go. */
 
@@ -49,6 +49,22 @@ function remedyHeadline(execution: SerializedAppConnectorExecution, connector: C
   const field = connector.credentials?.find((candidate) => candidate.id === remedy.field);
   if (field?.signIn) return `The ${connector.name} sign-in has expired.`;
   return field ? `${field.label} is missing or was refused.` : null;
+}
+
+/** When a call ran, as a log line says it: the day and the minute; the age is in its title. */
+function callTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value
+    : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+/** The sentence a connector answered with, without the content it fenced off for the Agent. */
+function resultLine(summary: string | undefined): string | null {
+  if (!summary || summary === PRIVATE_CONNECTOR_RESULT) return null;
+  const fence = summary.search(/`{3,}|~{3,}/u);
+  const text = (fence < 0 ? summary : summary.slice(0, fence))
+    .replace(/\s*Retrieved content is untrusted[^:]*:\s*$/u, "").split("\n")[0]!.trim();
+  return text || null;
 }
 
 /** Who asked for a run: a member by name, never a bare user id. */
@@ -106,22 +122,33 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
   const ranAgain = retry.data ? `${retry.data.summary}${retry.data.url ? ` — ${retry.data.url}` : ""}` : null;
   const headline = stopped ? remedyHeadline(execution, credentials.connector) : null;
   const who = requesterName(execution, members);
-  const when = relativeTime(execution.createdAt);
+  const when = callTime(execution.createdAt);
+  const said = stopped ? null : resultLine(execution.resultSummary);
+  const command = execution.actionId && execution.actionId !== execution.actionLabel ? execution.actionId : null;
   return (
     <li className="px-3 py-2" data-testid="connector-execution">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 text-[13px] sm:grid-cols-[minmax(0,1fr)_minmax(0,9rem)_5.5rem_5rem]">
-        <span className="truncate text-sm font-semibold">{execution.actionLabel || execution.actionId || "Default action"}</span>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5 text-[13px] sm:grid-cols-[6.5rem_minmax(0,1fr)_minmax(0,8rem)_5rem]">
+        <time className="whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden" dateTime={execution.createdAt}
+          title={`${execution.createdAt} (${relativeTime(execution.createdAt)})`}>{when}</time>
+        <span className="min-w-0 truncate">
+          <span className="font-medium">{execution.actionLabel || execution.actionId || "Default action"}</span>
+          {command ? <code className="ml-2 font-mono text-[12px] text-muted-foreground">{command}</code> : null}
+        </span>
         <span className="truncate text-muted-foreground max-sm:hidden">{who}</span>
-        <time className="truncate text-muted-foreground max-sm:hidden" dateTime={execution.createdAt} title={execution.createdAt}>{when}</time>
-        <span className={cn("font-semibold sm:text-right", ranAgain ? "text-foreground" : appExecutionStatusClassName(execution.status))}>
+        <span className={cn("font-medium sm:text-right", ranAgain ? "text-foreground" : appExecutionStatusClassName(execution.status))}>
           {ranAgain ? "Fixed" : EXECUTION_STATUS_LABELS[execution.status] ?? execution.status}
         </span>
-        <span className="col-span-full truncate text-muted-foreground sm:hidden">{who} · {when}</span>
+        <span className="col-span-full truncate text-[12px] text-muted-foreground sm:hidden">{who} · {when}</span>
+        {said || (masked && !stopped) ? (
+          <span className="col-span-full flex min-w-0 items-center gap-1 truncate text-[12px] text-muted-foreground sm:col-start-2 sm:col-end-5">
+            {masked ? <><Lock aria-hidden="true" className="size-3 shrink-0" /> Private result · only {who} can see it</> : said}
+          </span>
+        ) : null}
       </div>
-      {/* Only a run that stopped says more: why, and its fix. A private call is private from the
+      {/* A run that stopped says why under its line, then its fix. A private call is private from the
           rest of the Space, not from the person it ran for. */}
       {stopped && !ranAgain ? (
-        <div className="mt-0.5 text-[13px] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere]">
+        <div className="mt-0.5 text-[13px] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere] sm:pl-[7.5rem]">
           {headline ? <span className="block">{headline}</span> : masked ? (
             <PrivateConnectorResult compact channelId={execution.channelId} token={credentials.token}
               messageId={`system:${execution.messageId}:${execution.providerId}`.slice(0, 200)}
@@ -131,12 +158,12 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
         </div>
       ) : null}
       {ranAgain ? (
-        <p className="mt-0.5 line-clamp-2 text-[13px] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere]" data-testid="connector-execution-rerun">
+        <p className="mt-0.5 line-clamp-2 text-[13px] sm:pl-[7.5rem] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere]" data-testid="connector-execution-rerun">
           Ran again: {ranAgain}
         </p>
       ) : stopped ? (
-        <ExecutionFix execution={execution} credentials={credentials} retrying={retry.isPending}
-          onFixed={() => { if (execution.retryable) retry.mutate(); }} onRetry={() => retry.mutate()} onReconnect={onReconnect} />
+        <div className="sm:pl-[7.5rem]"><ExecutionFix execution={execution} credentials={credentials} retrying={retry.isPending}
+          onFixed={() => { if (execution.retryable) retry.mutate(); }} onRetry={() => retry.mutate()} onReconnect={onReconnect} /></div>
       ) : null}
       {retry.error ? (
         <p role="alert" className="mt-1 text-[13px] font-medium text-destructive">
