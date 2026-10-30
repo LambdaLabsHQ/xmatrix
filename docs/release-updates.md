@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Unreadable Channel catalogs answer not found
+
+Opening a Channel list for a Space the account cannot access returned an
+internal error even though authorization correctly withheld the rows. Catalog
+pages, counts and resolution now return the same non-retryable 404 for an
+unreadable or nonexistent Space. Membership and Channel access checks stay in
+PostgreSQL; this changes the rejection response, not access. Hub only, no
+schema or client change; recovery is a CI-validated Hub release reverting the
+error classification.
+
 ## Unreleased: The app downloads a sixth less code before its first screen
 
 Tool views (Status, Agents, Machines, Schedules, Apps, Settings, Team, Profile,

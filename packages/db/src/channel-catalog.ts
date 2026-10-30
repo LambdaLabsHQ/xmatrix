@@ -12,6 +12,7 @@ import {
   type ChannelCatalogPageFilter,
   type ChannelCatalogPageView, utf8ByteLength } from "@xmatrix/protocol";
 import { DatabaseContractError } from "./errors.js";
+import { ControlError } from "./control-error.js";
 import { messagePreviewColumnsSql, readMessagePreview, type MessagePreview } from "./message-preview.js";
 import { declaredWaitStandsSql } from "./message-attention-wait.js";
 import { PostgresSpacePlacementDirectory } from "./placement.js";
@@ -510,7 +511,8 @@ export class PostgresChannelCatalogRepository {
     spaceId: string,
     callback: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> {
-    const placement = await this.placements.resolve({ requestId, operation: `${operation}.placement` }, spaceId);
+    const placement = await this.placements.find({ requestId, operation: `${operation}.placement` }, spaceId);
+    if (!placement) throw new ControlError("space_not_found", 404, "Space not found");
     if (placement.state !== "active" || placement.targetShardId !== null) {
       throw new DatabaseContractError("Space placement is unavailable");
     }
@@ -631,7 +633,7 @@ export class PostgresChannelCatalogRepository {
       });
       const envelope = envelopes[0];
       if (envelope && !envelope.principal_authorized) {
-        throw new DatabaseContractError("Catalog principal is unavailable in this Space");
+        throw new ControlError("space_not_found", 404, "Space not found");
       }
       const statsRows = input.countsOnly || input.includeCounts !== false
         ? await transaction.query<StatsRow>({
@@ -668,7 +670,7 @@ export class PostgresChannelCatalogRepository {
       }) : [];
       const stats = statsRows[0];
       if (stats && !stats.principal_authorized) {
-        throw new DatabaseContractError("Catalog principal is unavailable in this Space");
+        throw new ControlError("space_not_found", 404, "Space not found");
       }
       if (!envelope && !stats) throw new DatabaseContractError("Catalog page is unavailable");
       const rows = envelope?.page_rows ?? [];
@@ -813,8 +815,9 @@ export class PostgresChannelCatalogRepository {
           input.includeParticipants !== false], maxRows: 1,
       });
       const envelope = envelopes[0];
-      if (!envelope?.principal_authorized) {
-        throw new DatabaseContractError("Catalog principal is unavailable in this Space");
+      if (!envelope) throw new DatabaseContractError("Catalog resolve is unavailable");
+      if (!envelope.principal_authorized) {
+        throw new ControlError("space_not_found", 404, "Space not found");
       }
       const rows = envelope.resolved_rows ?? [];
       const byId = new Map<string, CatalogRow>();

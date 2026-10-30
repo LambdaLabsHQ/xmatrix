@@ -16,6 +16,11 @@ binds its opaque continuation cursor to the authenticated query tuple:
 
 The cursor is a continuation hint only. Hub authenticates the Human again and
 PostgreSQL re-evaluates current Space membership and Channel ACLs on every page.
+An unreadable or nonexistent Space returns the same non-retryable
+`404 space_not_found` for pages, counts and resolution. The repository raises a
+typed authorization rejection, rather than reporting a normal denial as a
+database contract failure. Unexpected database defects retain their server
+error classification.
 Changing any query component invalidates the cursor. The supported views are:
 
 - `tree`: direct children of `scopeChannelId`, or Space roots when omitted;
