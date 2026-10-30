@@ -2,11 +2,25 @@
 
 import { useEffect, useState } from "react";
 import { Lock } from "lucide-react";
+import type { Components } from "react-markdown";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { parseGmailMessage } from "@/lib/gmail-message";
 import { GmailMessageCard } from "./gmail-message-card";
+import { splitConnectorResult } from "@/lib/connector-result";
+import { ConnectorResultLinkAction } from "./connector-result-link";
+import { messageMarkdownComponents, RichMessageContent } from "./workspace-shell-rich-message";
+import { isSafeRichTextHref } from "./workspace-shell-formatters";
+
+/** Its Markdown is drawn like a message's, but nothing in it loads media from a host the result names. */
+const PRIVATE_RESULT_COMPONENTS: Components = {
+  ...messageMarkdownComponents,
+  img: () => null,
+  a: ({ href, children }) => typeof href === "string" && isSafeRichTextHref(href)
+    ? <a href={href} target="_blank" rel="noreferrer" className="font-medium text-primary underline underline-offset-2">{children}</a>
+    : <>{children}</>,
+};
 
 /** Private values never enter the shared message model, quote/selection actions or Markdown media. */
 export function PrivateConnectorResult({ channelId, messageId, ownerUserId, ownerName, token, compact = false }: {
@@ -40,6 +54,7 @@ export function PrivateConnectorResult({ channelId, messageId, ownerUserId, owne
   }, [channelId, messageId, fetcher, key, owns, token]);
   const detail = owns && value?.key === key ? value.detail : undefined;
   const email = detail === undefined ? undefined : parseGmailMessage(detail);
+  const result = detail === undefined || email ? undefined : splitConnectorResult(detail);
   if (compact) return <>
     {detail !== undefined ? <span className="block whitespace-pre-wrap" data-testid="private-connector-result">
       {email ? `${email.subject || "(no subject)"} — ${email.fromName || email.fromAddress}` : detail}</span>
@@ -53,9 +68,11 @@ export function PrivateConnectorResult({ channelId, messageId, ownerUserId, owne
       {owns ? unavailable ? "Private result is unavailable" : detail !== undefined ? email ? "Only you can see this email" : "Private result · visible to you" : "Loading private result…"
         : `Private result · visible to ${ownerName ?? "its owner"} and the Agent that ran it`}
     </p>
-    {detail !== undefined && !email && <pre data-testid="private-connector-result"
-      className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-sans text-sm [overflow-wrap:anywhere]">
-      {detail}
-    </pre>}
+    {result && <div className="app-connector-receipt-detail">
+      <div data-testid="private-connector-result" className="max-h-80 overflow-auto [overflow-wrap:anywhere]">
+        <RichMessageContent body={result.body} components={PRIVATE_RESULT_COMPONENTS} />
+      </div>
+      {result.link && <ConnectorResultLinkAction link={result.link} />}
+    </div>}
   </div>;
 }

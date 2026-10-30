@@ -57,6 +57,33 @@ test("a long connector result folds under Show more", async ({ page }) => {
   await expect(card).toContainText("Request data omitted");
 });
 
+// A fenced result followed by its dashboard link stays a fenced block; the link becomes the result's own action.
+test("a fenced result reads as a block and its link as an action, for the caller and for its private owner", async ({ page }) => {
+  const url = "https://dash.cloudflare.com/62f1/workers/d1/databases/24bf";
+  const detail = "stockpulse-db: 1 row (195 rows read)\n```\nCOUNT(*)  MAX(created_at)\n5         2026-10-30T20:45:49.989Z\n```" + ` — ${url}`;
+  const channel = { ...E2E_CHANNEL, messageCount: 2, lastMessageSequence: 2, historyHeadSequence: 2, updatedAt: E2E_NOW };
+  const messages = [
+    { ...receipt(1, `Google Search Console inspect_url: completed; ${detail}`), replyToMessageId: undefined },
+    { ...receipt(2, "Google Search Console inspect_url: completed; Result: [hidden — private call]."), replyToMessageId: undefined,
+      metadata: { xmatrixProvenance: "system_fact", xmatrixPrivateConnectorResultOwner: "e2e-user" } },
+  ];
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [channel] });
+  await fixtureJson(page, "fenced-result-history", "**/api/xmatrix/channels/channel-general/history**", { messages, hasMore: false });
+  await fixtureJson(page, "fenced-private-original", /\/api\/xmatrix\/channels\/[^/]+\/messages\/[^/]+\/connector-result$/u, { detail });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await conversationOpened(page);
+  const cards = page.getByTestId("connector-receipt");
+  await expect(cards).toHaveCount(2, { timeout: 20_000 });
+  for (const card of [cards.nth(0), cards.nth(1)]) {
+    await expect(card.locator("pre")).toContainText("2026-10-30T20:45:49.989Z", { timeout: 20_000 });
+    await expect(card.locator("pre")).not.toContainText("```");
+    await expect(card.locator("pre")).not.toContainText(url);
+    await expect(card.getByRole("link", { name: "Open in dash.cloudflare.com" })).toHaveAttribute("href", url);
+    await expect(card).not.toContainText("—");
+  }
+  await page.screenshot({ path: test.info().outputPath("connector-receipt-fenced.png") });
+});
+
 // The Human sees a protected value automatically; another owner never triggers its read.
 // Text never loads external media or enters a passage-to-shared-conversation action.
 test("private originals are fetched only for their owner and stay outside shared message actions", async ({ page }) => {
