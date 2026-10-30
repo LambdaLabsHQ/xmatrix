@@ -75,3 +75,22 @@ export function useHighlightedCode(text: string, language: string): string | nul
   }, [hljs]);
   return useMemo(() => (hljs ? highlightCode(hljs, text, language) : null), [hljs, text, language]);
 }
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  bash: "Bash", sh: "Shell", shell: "Shell", zsh: "Zsh", console: "Terminal", shellsession: "Terminal",
+  js: "JavaScript", javascript: "JavaScript", jsx: "JSX", ts: "TypeScript", typescript: "TypeScript", tsx: "TSX",
+  json: "JSON", jsonc: "JSON", yaml: "YAML", yml: "YAML", toml: "TOML", ini: "INI",
+  py: "Python", python: "Python", rb: "Ruby", ruby: "Ruby", go: "Go", golang: "Go", rs: "Rust", rust: "Rust",
+  swift: "Swift", kotlin: "Kotlin", kt: "Kotlin", java: "Java", c: "C", cpp: "C++", php: "PHP",
+  sql: "SQL", diff: "Diff", patch: "Diff", css: "CSS", html: "HTML", xml: "XML", svg: "SVG",
+  md: "Markdown", markdown: "Markdown", dockerfile: "Dockerfile", docker: "Dockerfile", text: "Text", txt: "Text",
+};
+const TERMINAL_LANGUAGES = new Set(["bash", "sh", "shell", "zsh", "console", "shellsession", "powershell", "ps1", "fish"]);
+const DATA_LANGUAGES = new Set(["json", "jsonc", "yaml", "yml", "toml", "ini"]);
+
+/** How a fence's language reads above its code: a proper name, and whether it is a terminal, data or source. */
+export function codeLanguageLabel(language: string): { name: string; kind: "terminal" | "data" | "source" } {
+  const key = language.toLowerCase();
+  const kind = TERMINAL_LANGUAGES.has(key) ? "terminal" : DATA_LANGUAGES.has(key) ? "data" : "source";
+  return { name: LANGUAGE_NAMES[key] ?? language, kind };
+}

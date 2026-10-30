@@ -2734,15 +2734,20 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 }
 
 .xmatrix-app .rich-message .message-code-language {
-  padding: 8px 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 48px 0 14px;
   color: var(--muted-foreground);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px;
+  font-family: var(--font-sans-family);
+  font-size: 12px;
+  font-weight: 600;
   line-height: 16px;
 }
 
 .xmatrix-app .rich-message .message-code-language + .message-code-copy + pre {
-  padding-top: 4px;
+  padding-top: 8px;
 }
 
 /* Opaque in the block's own tint, so over a long first line it covers the code rather than mixing with it. */

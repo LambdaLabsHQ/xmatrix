@@ -3,7 +3,7 @@ import { usageWithoutQuota, accountQuotaUsageFromCandidates, mergeUsageAttribute
 export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "@xmatrix/protocol";
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { attachmentMediaType, directMediaLink } from "./attachment-media-type";
-import { useHighlightedCode } from "./code-highlight";
+import { codeLanguageLabel, useHighlightedCode } from "./code-highlight";
 import { MediaLink } from "./media-player";
 import { MessageMarkdownImage } from "./message-markdown-image";
 import { formatInstant, formatZonedDateTime } from "./time-display";
@@ -42,8 +42,11 @@ import {
 import { type Components } from "react-markdown";
 
 import {
+  Braces,
   Check,
   Copy,
+  FileCode2,
+  Terminal,
 } from "lucide-react";
 
 import { NonOperationalMentions, renderMentionChildren } from "@/components/dashboard/mention-read-chip";
@@ -236,6 +239,21 @@ export function busiestAgentInstance(
   );
 }
 
+const CODE_LANGUAGE_ICONS = { terminal: Terminal, data: Braces, source: FileCode2 };
+
+// The language is interface text over the code, an icon and a name in the UI face, never a line that reads as
+// the code's own first line.
+function MarkdownCodeLanguage({ language }: { language: string }) {
+  const label = codeLanguageLabel(language);
+  const Icon = CODE_LANGUAGE_ICONS[label.kind];
+  return (
+    <div className="message-code-language">
+      <Icon aria-hidden className="size-3.5 shrink-0" />
+      <span className="truncate">{label.name}</span>
+    </div>
+  );
+}
+
 export function MarkdownPre({ children }: { children?: React.ReactNode }) {
   const [codeCopied, setCodeCopied] = useState(false);
 
@@ -257,7 +275,7 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
   // inline span's chip and gets a rim on every line.
   return (
     <div className="message-code-block group/code relative mt-4 w-full min-w-0 max-w-full overflow-hidden first:mt-0" data-language={language || undefined}>
-      {language ? <div className="message-code-language">{language}</div> : null}
+      {language ? <MarkdownCodeLanguage language={language} /> : null}
       <button
         type="button"
         title={codeCopied ? "Copied" : "Copy code"}
