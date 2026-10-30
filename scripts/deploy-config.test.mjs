@@ -124,6 +124,37 @@ test("a beta release deploys its own Worker at the beta origin and builds for it
   assert.throws(() => profileEnvironment(resolveProfile(profile(), env), "web-beta"), /needs web.beta/u);
 });
 
+test("a site origin is the stable Web's second domain, outside the cookie domain, and names canonical URLs", () => {
+  const beta = { workerName: "acme-web-beta", origin: "https://beta.acme.example" };
+  const resolved = resolveProfile(profile({ web: { siteOrigin: "https://acme-site.example", beta } }), env);
+  const base = { name: "xmatrix-web", main: "worker.mjs" };
+  const stable = renderWebConfig(base, resolved);
+  assert.deepEqual(stable.routes, [
+    { pattern: "acme.example", custom_domain: true },
+    { pattern: "acme-site.example", custom_domain: true },
+  ]);
+  assert.deepEqual(stable.vars, {
+    XMATRIX_APP_ORIGIN: "https://acme.example",
+    XMATRIX_SITE_ORIGIN: "https://acme-site.example",
+  });
+  const betaWeb = renderWebConfig(base, resolved, "web-beta");
+  assert.deepEqual(betaWeb.routes, [{ pattern: "beta.acme.example", custom_domain: true }], "the beta Web is never the site");
+  assert.equal("vars" in betaWeb, false);
+  assert.equal("vars" in renderWebConfig(base, resolveProfile(profile(), env)), false);
+
+  assert.equal(profileEnvironment(resolved).NEXT_PUBLIC_SITE_URL, "https://acme-site.example");
+  assert.equal(profileEnvironment(resolved).NEXT_PUBLIC_APP_URL, "https://acme.example", "sign-in stays at the app");
+  assert.equal(profileEnvironment(resolved, "web-beta").NEXT_PUBLIC_SITE_URL, "https://beta.acme.example");
+  assert.equal(profileEnvironment(resolveProfile(profile(), env)).NEXT_PUBLIC_SITE_URL, "https://acme.example");
+  assert.equal(renderHubConfig(hubBase, resolved).vars.APP_URL, "https://acme.example", "the Hub trusts only the app");
+
+  for (const origin of ["https://acme.example", "https://hub.acme.example", "https://beta.acme.example"]) {
+    assert.throws(() => resolveProfile(profile({ web: { siteOrigin: origin, beta } }), env), /must be its own origin/u);
+  }
+  assert.throws(() => resolveProfile(profile({ web: { siteOrigin: "https://acme-site.example/docs" } }), env),
+    /bare https origin/u);
+});
+
 test("a deployment meters nothing unless its profile names a billing policy", () => {
   const unmetered = resolveProfile(profile(), env);
   assert.equal(unmetered.billing, null);
