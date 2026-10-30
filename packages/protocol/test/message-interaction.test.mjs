@@ -112,6 +112,20 @@ test("a connector invocation spans its whole first-line statement", () => {
   assert.equal(parseConnectorInvocation("> @github:comment:x hi"), undefined);
 });
 
+test("connector JSON with a bare URL remains an executable statement, not quoted speech", () => {
+  const json = JSON.stringify({ currencyCode: "IDR", mutateOperations: [
+    { adGroupAdOperation: { create: { ad: { finalUrls: ["https://example.test/"] } } } },
+  ] });
+  const body = `@googleads:validate_mutations:1234567890 ${json}`;
+  assert.equal(parseConnectorInvocation(body)?.action, "validate_mutations");
+  assert.deepEqual(parseConnectorActionCommand("googleads", body), {
+    actionId: "validate_mutations", statement: { target: "1234567890", text: json },
+  });
+  for (const quoted of [`\`${body}\``, `> ${body}`, `    ${body}`, `[${body}](https://other.test)`]) {
+    assert.equal(parseConnectorInvocation(quoted), undefined, quoted);
+  }
+});
+
 test("a zero-width escape after the @ is the command the Hub runs, so it is highlighted too", () => {
   const body = "@\u200Bcloudflare:query_database:acct/nomadcafe-d1 SELECT 1\nLIMIT 3";
   assert.deepEqual(parseConnectorActionCommand("cloudflare", body), {

@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Connector JSON commands keep working with web addresses
+
+A connector command containing a URL in a JSON string could be treated as
+ordinary speech and never run. Markdown's generated autolink lacked source
+positions, so context filtering excluded the entire message. Plain autolinks
+now recover their offsets when their ancestor reconstructs its source exactly,
+preserving the command outside them; links, code and quotations still cannot
+invoke anything, and unmappable literals still fail closed. Hub and beta Web, no schema or permission
+change; recovery is a CI-validated release reverting this parser correction.
+
 ## Unreleased: On a phone only the lists move between a conversation and its list
 
 Opening a conversation and going back slid the whole page, bar included, and
