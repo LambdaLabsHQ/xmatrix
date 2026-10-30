@@ -2,6 +2,8 @@
 
 import { useLayoutEffect, useRef, type MutableRefObject } from "react";
 
+import { useScreenChangeStore, type ScreenChangeStore } from "./screen-change-store";
+
 /*
  * Switching dock tabs on a phone moves the whole page: the track carries the
  * tabs' screens (globals.css, .app-mobile-dock-track) and the bar with its wood
@@ -14,11 +16,7 @@ import { useLayoutEffect, useRef, type MutableRefObject } from "react";
  */
 export type DockTabSlide = { key: number; direction: 1 | -1 };
 
-export type DockTabSlideStore = {
-  subscribe: (listener: () => void) => () => void;
-  get: () => DockTabSlide | null;
-  set: (slide: DockTabSlide | null) => void;
-};
+export type DockTabSlideStore = ScreenChangeStore<DockTabSlide>;
 
 export function useDockTabSlide({ slot, tabRootShowing, tabTapped }: {
   /** The dock tab whose screen the track shows. */
@@ -29,23 +27,7 @@ export function useDockTabSlide({ slot, tabRootShowing, tabTapped }: {
       moves the bar; the app settling on the tab its address names does not. */
   tabTapped: MutableRefObject<boolean>;
 }): DockTabSlideStore {
-  const storeRef = useRef<DockTabSlideStore | null>(null);
-  if (!storeRef.current) {
-    let slide: DockTabSlide | null = null;
-    const listeners = new Set<() => void>();
-    storeRef.current = {
-      subscribe: (listener) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-      get: () => slide,
-      set: (next) => {
-        slide = next;
-        for (const listener of listeners) listener();
-      },
-    };
-  }
-  const store = storeRef.current;
+  const store = useScreenChangeStore<DockTabSlide>();
   const previousSlot = useRef(slot);
 
   useLayoutEffect(() => {

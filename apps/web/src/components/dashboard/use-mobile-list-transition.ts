@@ -3,6 +3,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { flushSync } from "react-dom";
 
+import { useScreenChangeStore, type ScreenChangeStore } from "./screen-change-store";
 import { systemBackLayerOpen } from "./use-system-back";
 
 /*
@@ -24,10 +25,7 @@ import { systemBackLayerOpen } from "./use-system-back";
 export type MobileListTransitionStage = "back" | "forward";
 
 /** Which change is running, for the layer that draws the list's bar and controls during it. */
-export type MobileListTransitionStore = {
-  subscribe: (listener: () => void) => () => void;
-  get: () => MobileListTransitionStage | null;
-};
+export type MobileListTransitionStore = ScreenChangeStore<MobileListTransitionStage>;
 
 /** runMobileScreenTransition hands a screen change here first; true when it was drawn here. */
 export type MobileListTransitionDriver = {
@@ -161,27 +159,10 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
 }): MobileListTransitionStore {
   const state = useRef({ conversationOverList, listShowing, onBack });
   state.current = { conversationOverList, listShowing, onBack };
-  const storeRef = useRef<{ store: MobileListTransitionStore; set: (stage: MobileListTransitionStage | null) => void } | null>(null);
-  if (!storeRef.current) {
-    let stage: MobileListTransitionStage | null = null;
-    const listeners = new Set<() => void>();
-    storeRef.current = {
-      store: {
-        subscribe: (listener) => {
-          listeners.add(listener);
-          return () => listeners.delete(listener);
-        },
-        get: () => stage,
-      },
-      set: (next) => {
-        stage = next;
-        for (const listener of listeners) listener();
-      },
-    };
-  }
+  const store = useScreenChangeStore<MobileListTransitionStage>();
 
   useEffect(() => {
-    const setStage = storeRef.current!.set;
+    const setStage = store.set;
     const m = { stage: null as MobileListTransitionStage | null, parts: null as Parts | null, x: 0, frame: 0,
       dragging: false, committing: false };
 
@@ -290,7 +271,7 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       if (window.__xmatrixBackGesture === gesture) delete window.__xmatrixBackGesture;
       driverRef.current = null;
     };
-  }, [driverRef, rootRef]);
+  }, [driverRef, rootRef, store]);
 
-  return storeRef.current.store;
+  return store;
 }
