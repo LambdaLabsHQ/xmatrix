@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Stripe Checkout returns open Billing again
+
+Since #1203, Stripe Checkout and portal returns to `/billing`, and the
+allowance notice's link outside the shell, opened Settings › Account, so a
+returning payer had to find Billing before their payment was confirmed. They
+open Billing again, and confirmation runs there (#1227). Each view's address
+field is now named once in protocol, and the shell, provider returns and the
+Hub's Apps redirects build addresses from it. Beta Web and Hub, no API or
+schema change; recovery is a CI-validated release reverting the change.
+
 ## Unreleased: Returning to the iOS app no longer says "Reconnecting"
 
 The iOS app replaces its live connection every time it comes back to the
