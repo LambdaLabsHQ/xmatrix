@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { ControlError, PostgresAppCredentialRepository } from "../../db/dist/index.js";
 import { connectorDatabase, integration } from "../../db/test/postgres-database.fixture.mjs";
-import { HUB_ROUTES } from "@xmatrix/protocol";
+import { HUB_ROUTES, appViewAddress } from "@xmatrix/protocol";
 import * as oauth from "../src/connectors/oauth.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 import { signGitHubAppState } from "../src/index-shared.ts";
@@ -29,7 +29,7 @@ async function withSpaces(run) {
     "./github-connect-authorization": githubAuthorization,
     "./index-routes-auth-space-management": { linkGitHubInstallation: () => assert.fail("a refused GitHub Connect cannot link an installation"),
       confirmGitHubInstallations: async (...args) => { confirmations.push(args.slice(1)); } },
-    "./connectors/oauth": oauth, "./usage-cost-metering": metering, "@xmatrix/protocol": { HUB_ROUTES },
+    "./connectors/oauth": oauth, "./usage-cost-metering": metering, "@xmatrix/protocol": { HUB_ROUTES, appViewAddress },
     "@xmatrix/db": { ControlError },
     "./connectors/credentials": { connectorCredentialRepository: () => repository },
     "./index-shared": { requireAuth: async () => principal, requireHumanAuth: user => user,

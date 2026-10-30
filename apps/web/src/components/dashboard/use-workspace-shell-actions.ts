@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { presenceInstanceId } from "@xmatrix/protocol";
+import { appViewSelectionQuery, isAppSelectionView, presenceInstanceId } from "@xmatrix/protocol";
 
 import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
@@ -1278,8 +1278,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void refreshAgentPresetDiscoveries();
   }
 
-  /** Open a destination with its own query fields, when requested. */
-  function changeAppView(nextView: AppView, search?: string) {
+  /** Open a destination, on one of its own selections when one is named. */
+  function changeAppView(nextView: AppView, selection?: string, extra?: Readonly<Record<string, string>>) {
     setView(nextView);
     if (nextView !== "messages") {
       setSelectedChannelId(null);
@@ -1287,14 +1287,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setReplyTarget(null);
     }
     const viewPath = appViewPath(nextView === "messages" ? s.selectedChannel : null, nextView, s.currentSpaceId, s.spaces);
-    const nextPath = search ? `${viewPath}?${search}` : viewPath;
+    const nextPath = selection && isAppSelectionView(nextView)
+      ? `${viewPath}?${appViewSelectionQuery(nextView, selection, extra)}` : viewPath;
     pushBrowserPath(nextPath);
     setBrowserPath(nextPath);
   }
 
   /** Opens this harness's profile and asks its editor to take the caret. */
   function openHarnessProfile(harness: string) {
-    changeAppView("agents", `agent=${encodeURIComponent(agentHarnessSelectionId(harness))}&edit=profile`);
+    changeAppView("agents", agentHarnessSelectionId(harness), { edit: "profile" });
   }
 
   /** `userId` omitted means the viewer's own profile — the rail avatar's case. */
@@ -1320,7 +1321,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   /** Schedules, opened at one Automation with its editor. */
   function openSchedule(automationId: string) {
     setScheduleFocusId(automationId);
-    changeAppView("automation", `schedule=${encodeURIComponent(automationId)}`);
+    changeAppView("automation", automationId);
   }
 
   const clearScheduleFocus = useCallback(() => setScheduleFocusId(null), [setScheduleFocusId]);

@@ -1,4 +1,4 @@
-import { lowercaseHex, sha256Hex } from "@xmatrix/protocol";
+import { appViewAddress, lowercaseHex, sha256Hex } from "@xmatrix/protocol";
 import type { GmailRoutingJob } from "@xmatrix/db";
 import type { Env } from "../types";
 import { connectorHubOrigin, signGitHubAppState, verifyGitHubAppState } from "../index-shared";
@@ -27,10 +27,8 @@ export async function gmailPollCallback(env: Env, request: Request): Promise<Res
   const claims=await gmailPollState(env,state);
   if(!claims)return undefined;
   const code=query.get("code") ?? "";
-  const url=new URL(`/app/${encodeURIComponent(claims.spaceId)}/apps`,appOrigin(env));
-  url.searchParams.set("connector","gmail");
-  if(!code || code.length>2048)url.searchParams.set("gmailWatch","failed");
-  else {url.searchParams.set("gmailWatchState",state);url.searchParams.set("gmailWatchCode",code);}
+  const returned: Record<string,string>=!code || code.length>2048 ? {gmailWatch:"failed"} : {gmailWatchState:state,gmailWatchCode:code};
+  const url=new URL(appViewAddress(claims.spaceId,"apps","gmail",returned),appOrigin(env));
   return new Response(null,{status:302,headers:{location:url.toString(),"cache-control":"no-store","referrer-policy":"no-referrer"}});
 }
 export async function startGmailPolling(env: Env, request: Request, input: {spaceId:string;userId:string;

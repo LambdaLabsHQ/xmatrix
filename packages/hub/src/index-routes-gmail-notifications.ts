@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { HUB_ROUTES, sha256Hex, lowercaseHex } from "@xmatrix/protocol";
+import { HUB_ROUTES, appViewAddress, sha256Hex, lowercaseHex } from "@xmatrix/protocol";
 import { connectorHubOrigin, readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorStatus,
   signGitHubAppState, verifyGitHubAppState } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
@@ -41,10 +41,8 @@ export function registerGmailNotificationRoutes(app:Hono<{Bindings:Env}>) {
       const state=c.req.query("state") ?? "";
       const claims=await stateClaims(c.env,state);
       const code=c.req.query("code") ?? "";
-      const url=new URL(`/app/${encodeURIComponent(claims.spaceId)}/apps`,appOrigin(c.env));
-      url.searchParams.set("connector","gmail");
-      if(!code || code.length>2048)url.searchParams.set("gmailWatch","failed");
-      else {url.searchParams.set("gmailWatchState",state);url.searchParams.set("gmailWatchCode",code);}
+      const returned: Record<string,string>=!code || code.length>2048 ? {gmailWatch:"failed"} : {gmailWatchState:state,gmailWatchCode:code};
+      const url=new URL(appViewAddress(claims.spaceId,"apps","gmail",returned),appOrigin(c.env));
       return c.redirect(url.toString(),302);
     }catch{return c.json({error:"Restart notification authorization"},400);}
   });

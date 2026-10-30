@@ -91,6 +91,7 @@ import type {
   ChannelSnapshot,
   SerializedSpace,
 } from "@xmatrix/protocol";
+import { APP_VIEW_SELECTION_FIELDS, appViewSelectionQuery, isAppSelectionView } from "@xmatrix/protocol";
 
 // Semantic module extracted from workspace-app-shell (AST-safe)
 
@@ -336,32 +337,20 @@ export function pagesViewPath(spacePath: string, pageId: string | null, conversa
   return search ? `${spacePath}?${search}` : spacePath;
 }
 
-/** Each destination names the selected domain object, never an anonymous item. */
-export function viewSelectionParameter(view: AppView): string | null {
-  switch (view) {
-    case "apps": return "connector";
-    case "agents": return "agent";
-    case "machines": case "local": return "machine";
-    case "automation": return "schedule";
-    case "settings": case "admin": return "section";
-    case "team": return "space";
-    default: return null;
-  }
-}
-
 /** A destination keeps only the domain selection it owns during Space URL normalization. */
 export function viewSelectionPath(viewPath: string, location: string): string {
-  const parameter = viewSelectionParameter(appRouteInfo(viewPath).view);
-  const url = parseAppLocation(location);
-  const selected = parameter ? url.searchParams.get(parameter)?.trim() : null;
-  return selected ? `${viewPath}?${parameter}=${encodeURIComponent(selected)}` : viewPath;
+  const view = appRouteInfo(viewPath).view;
+  if (!isAppSelectionView(view)) return viewPath;
+  const selected = parseAppLocation(location).searchParams.get(APP_VIEW_SELECTION_FIELDS[view])?.trim();
+  return selected ? `${viewPath}?${appViewSelectionQuery(view, selected)}` : viewPath;
 }
 
 /** Preserve the explicit request to focus this harness's profile as the Space URL hydrates. */
 export function agentsProfileEditPath(viewPath: string, location: string): string {
-  const url = parseAppLocation(location);
-  const path = viewSelectionPath(viewPath, location);
-  return url.searchParams.get("agent") && url.searchParams.get("edit") === "profile" ? `${path}&edit=profile` : path;
+  const query = parseAppLocation(location).searchParams;
+  const agent = query.get(APP_VIEW_SELECTION_FIELDS.agents)?.trim();
+  return agent && query.get("edit") === "profile"
+    ? `${viewPath}?${appViewSelectionQuery("agents", agent, { edit: "profile" })}` : viewSelectionPath(viewPath, location);
 }
 
 /**

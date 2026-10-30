@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, appViewAddress } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -66,7 +66,7 @@ export function WeComInstallationConfirmation() {
         url: WEB_PROXY_ROUTES.space_app_connection_wecom_install(selection.spaceId), token: session.access_token,
         method: "PUT", body: { state, members, confirmed: true }, signal: AbortSignal.timeout(60_000) });
       if (result.ok !== true) throw new Error("installation was not confirmed");
-      window.location.assign(`/app/${encodeURIComponent(selection.spaceId)}/apps?connector=wecom&oauth=connected`);
+      window.location.assign(appViewAddress(selection.spaceId, "apps", "wecom", { oauth: "connected" }));
     } catch {
       setSelection(null); setMembers([]); setConfirmed(false); setPending(false);
       setError("The installation could not be confirmed. Return to Apps → WeCom and start a fresh installation.");
@@ -98,6 +98,6 @@ export function WeComInstallationConfirmation() {
         I confirm this company, Space and member range. This replaces the Space’s existing WeCom connection.
       </InstallationConsent>
     </>}
-    <InstallationOutcome error={error} href={selection ? `/app/${encodeURIComponent(selection.spaceId)}/apps?connector=wecom` : "/app"} />
+    <InstallationOutcome error={error} href={selection ? appViewAddress(selection.spaceId, "apps", "wecom") : "/app"} />
   </main>;
 }

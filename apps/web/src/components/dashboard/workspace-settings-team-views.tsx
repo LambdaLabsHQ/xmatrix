@@ -712,7 +712,7 @@ export function SettingsView({
         </div>
       ) },
   ];
-  return <SectionedToolView title="Settings" sections={sections} />;
+  return <SectionedToolView title="Settings" view="settings" sections={sections} />;
 }
 
 export interface SpaceMemberActions {
@@ -1247,7 +1247,7 @@ export function TeamView({
     </div>
   );
   return (
-    <SectionedToolView title="Team" selectionParameter="space" defaultKey={currentSpace?.id} sections={[
+    <SectionedToolView title="Team" view="team" defaultKey={currentSpace?.id} sections={[
       ...spaces.map((space): ToolSection => {
         const current = space.id === currentSpace?.id;
         return {

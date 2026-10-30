@@ -511,6 +511,10 @@ export {
 } from "./pages.js";
 export { pagePositionBetween, PagePositionError } from "./page-position.js";
 
+export {
+  APP_VIEW_SELECTION_FIELDS, appViewAddress, appViewSelectionField, appViewSelectionQuery, isAppSelectionView,
+} from "./app-view-address.js";
+export type { AppSelectionView } from "./app-view-address.js";
 export { externalAppSource, messageExternalAppSource } from "./external-app-source.js";
 export type { ExternalAppSource } from "./external-app-source.js";
 export type {

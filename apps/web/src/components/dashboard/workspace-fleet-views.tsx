@@ -114,7 +114,7 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { groupConnectorsForList, orderConnectorsForList, type AppConnectorManifest } from "@/lib/app-connectors";
-import { useUrlParameter } from "./url-query-state";
+import { useViewSelection } from "./url-query-state";
 import { ConnectorDetailPage } from "./connector-detail";
 import { connectorGeneratesCredentials } from "./connector-credentials";
 
@@ -127,7 +127,7 @@ import { cn } from "@/lib/utils";
 
 import { statusChipClass } from "@/components/ui/status-tone";
 
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { APP_VIEW_SELECTION_FIELDS, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import type {
   ObservabilityEvent,
@@ -773,7 +773,7 @@ export function MachinesView({
   const [assigned, setAssigned] = useState<Record<string, boolean>>({});
   const [assignBusy, setAssignBusy] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
-  const [selectedMachineId, select] = useUrlParameter("machine");
+  const [selectedMachineId, select] = useViewSelection("machines");
   // Load samples expire after 90 seconds; re-judge freshness between refreshes.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1055,7 +1055,7 @@ export function AppsView({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   // The address is the only source of the selected connector.
-  const [connectorId, selectConnector] = useUrlParameter("connector");
+  const [connectorId, selectConnector] = useViewSelection("apps");
   const setSelectedConnectorId = (id: string) => selectConnector(id, { replace: true });
   const [connectionActionError, setConnectionsError] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<{ tone: "success" | "warning"; message: string } | null>(null);
@@ -1143,7 +1143,7 @@ export function AppsView({
     const url = new URL(window.location.href);
     url.searchParams.delete("item");
     const outcome = url.searchParams.get("oauth");
-    const providerId = url.searchParams.get("connector");
+    const providerId = url.searchParams.get(APP_VIEW_SELECTION_FIELDS.apps);
     if (providerId === "gmail" && (url.searchParams.has("gmailWatchState") || url.searchParams.has("gmailWatch"))) {
       // The mailbox view consumes its single-use code after connection data loads.
       // The connector in the address already opens Gmail; do not claim the grant completed.

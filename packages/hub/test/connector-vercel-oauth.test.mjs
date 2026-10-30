@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Hono } from "hono";
-import { HUB_ROUTES } from "@xmatrix/protocol";
+import { HUB_ROUTES, appViewAddress } from "@xmatrix/protocol";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { gmailPollCallback } from "../src/connectors/gmail-poll-oauth.ts";
 import { test } from "node:test";
@@ -173,7 +173,7 @@ test("the callback writes credentials only after verified state, provider scope 
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
     "./index-shared": { connectorHubOrigin: () => "https://hub.test", requireAuth: async () => ({}),
       requireHumanAuth: () => ({ id: signedIn }), jsonErrors: async (_context, run) => run() },
-    "@xmatrix/protocol": { HUB_ROUTES },
+    "@xmatrix/protocol": { HUB_ROUTES, appViewAddress },
     "@xmatrix/db": { ControlError: class ControlError extends Error {} },
     "./apps": { upsertAppConnection: async () => { effects.push("connection"); return {}; } },
     "./usage-cost-metering": metering,

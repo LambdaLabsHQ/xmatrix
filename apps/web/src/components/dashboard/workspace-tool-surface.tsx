@@ -197,7 +197,7 @@ export function ToolSurface({
   onOpenAgentCreate: () => void;
   onOpenLocalManagedAgentEdit: () => void;
   onDeleteAgent: (agent: LocalManagedAgent) => void;
-  onChangeView: (view: AppView, search?: string) => void;
+  onChangeView: (view: AppView, selection?: string) => void;
   /** Opens the GitHub issue form for a report. */
   onReportIssue?: () => void;
 } & SpaceMemberActions & ScheduleActions) {
@@ -301,11 +301,11 @@ export function ToolSurface({
         events={currentSpaceEvents}
         automations={currentSpaceAutomations}
         executionEnabled={automationExecutionEnabled}
-        onOpenAgent={(registrationId) => onChangeView("agents", `agent=${encodeURIComponent(registrationId)}`)}
+        onOpenAgent={(registrationId) => onChangeView("agents", registrationId)}
         onOpenAgents={() => onChangeView("agents")}
-        onOpenMachine={(machineId) => onChangeView("machines", `machine=${encodeURIComponent(machineId)}`)}
+        onOpenMachine={(machineId) => onChangeView("machines", machineId)}
         onOpenMachines={() => onChangeView("machines")}
-        onOpenSchedule={(automationId) => onChangeView("automation", `schedule=${encodeURIComponent(automationId)}`)}
+        onOpenSchedule={(automationId) => onChangeView("automation", automationId)}
         onOpenSchedules={() => onChangeView("automation")}
       />
     );

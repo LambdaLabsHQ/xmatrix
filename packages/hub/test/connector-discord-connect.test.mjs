@@ -8,6 +8,7 @@ import * as oauth from '../src/connectors/oauth.ts';
 import * as metering from '../src/usage-cost-metering.ts';
 import * as githubAuthorization from '../src/github-connect-authorization.ts';
 import { HUB_ROUTES } from '../../protocol/src/authority-foundation.ts';
+import { appViewAddress } from '../../protocol/src/app-view-address.ts';
 import { stubFetchResponses } from './support/fetch-responses.mjs';
 import { gmailPollCallback } from '../src/connectors/gmail-poll-oauth.ts';
 
@@ -33,7 +34,7 @@ function fixture() {
     './deployment-origins': { appOrigin: () => 'https://xmatrix.test' },
     './connectors/vercel-api': { vercelCompletionUrl: () => undefined },
     './connectors/credentials': { connectorCredentialRepository: () => repository, mintConnectorSecret: () => 'unneeded', INGRESS_KEY_FIELD: 'ingressKey' },
-    '@xmatrix/protocol': { HUB_ROUTES },
+    '@xmatrix/protocol': { HUB_ROUTES, appViewAddress },
     './index-shared': { requireAuth: async () => ({ agentRun: state.agent }), requireHumanAuth: () => ({ id: state.signedIn ?? 'human-admin' }),
       connectorHubOrigin: () => 'https://hub.test',
       jsonErrors: async (context, run) => { try { return await run(); } catch (error) { return context.json({ error: error.message }, error.status ?? 500); } } },

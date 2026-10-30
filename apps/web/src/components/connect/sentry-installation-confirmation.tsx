@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { WEB_PROXY_ROUTES, type SerializedSpace } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, appViewAddress, type SerializedSpace } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { buttonVariants } from "@/components/ui/button";
@@ -73,7 +73,7 @@ export function SentryInstallationConfirmation() {
         url: WEB_PROXY_ROUTES.space_app_connection_sentry_install(selected), token: session.access_token,
         method: "POST", body: { ...input, confirmed: true }, signal: AbortSignal.timeout(60_000) });
       if (response.ok !== true) throw new Error("installation was not confirmed");
-      window.location.assign(`/app/${encodeURIComponent(selected)}/apps?connector=sentry&oauth=connected`);
+      window.location.assign(appViewAddress(selected, "apps", "sentry", { oauth: "connected" }));
     } catch {
       // Do not replay a possibly consumed code, or display provider/private error payloads.
       setError("The installation could not be confirmed. Return to Apps → Sentry and start a fresh installation.");
@@ -100,6 +100,6 @@ export function SentryInstallationConfirmation() {
         I confirm this organization and Space. This replaces any existing Sentry connection in the selected Space.
       </InstallationConsent>
     </>}
-    <InstallationOutcome error={error} href={selected ? `/app/${encodeURIComponent(selected)}/apps?connector=sentry` : "/app"} />
+    <InstallationOutcome error={error} href={selected ? appViewAddress(selected, "apps", "sentry") : "/app"} />
   </main>;
 }
