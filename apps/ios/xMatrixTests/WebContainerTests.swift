@@ -236,6 +236,70 @@ final class WebContainerTests: XCTestCase {
         XCTAssertLessThanOrEqual(bounded.count, 300)
     }
 
+    func testAppleAuthorizationFailureRecordsAttemptFactsWithoutPrivateDetails() throws {
+        let secret = "private-account@example.test"
+        let underlying = NSError(domain: "AKAuthenticationError", code: -7026, userInfo: [
+            NSUnderlyingErrorKey: NSError(domain: secret, code: 42, userInfo: [NSLocalizedDescriptionKey: "secret-token"]),
+            "account-id": secret,
+        ])
+        let error = NSError(domain: ASAuthorizationError.errorDomain, code: 1000, userInfo: [
+            NSUnderlyingErrorKey: underlying,
+            NSLocalizedDescriptionKey: secret,
+        ])
+        let facts = AppleAuthorizationFacts(anchor: "view", presented: false, phase: "active", nonce: "ok", extra: false)
+        let message = try XCTUnwrap(AppSignIn.authorizationFailureMessage(error, facts: facts))
+        XCTAssertTrue(message.hasPrefix("Apple authorization failed: authorization:1000 > authentication:-7026 > other:42;"), message)
+        XCTAssertTrue(message.contains("anchor=view; presented=0; phase=active; nonce=ok; extra=1"), message)
+        XCTAssertFalse(message.contains(secret), message)
+        XCTAssertFalse(message.contains("secret-token"), message)
+        XCTAssertFalse(message.contains("account-id"), message)
+        XCTAssertLessThanOrEqual(message.count, AppSignIn.diagnosticCharacterLimit)
+
+        let opaque = NSError(domain: ASAuthorizationError.errorDomain, code: 1000, userInfo: [
+            NSUnderlyingErrorKey: secret,
+        ])
+        let bare = try XCTUnwrap(AppSignIn.authorizationFailureMessage(opaque, facts: facts))
+        XCTAssertTrue(bare.contains("authorization:1000 > underlying:other"), bare)
+        XCTAssertFalse(bare.contains(secret), bare)
+        XCTAssertLessThanOrEqual(bare.count, AppSignIn.diagnosticCharacterLimit)
+
+        let long = Array(repeating: "authentication_server:-2147483648", count: 12)
+        let crowded = AppleAuthorizationFacts(anchor: "view", presented: true, phase: "background", nonce: "bad", extra: true)
+        let kept = AppSignIn.diagnosticMessage(chain: long, facts: crowded)
+        XCTAssertLessThanOrEqual(kept.count, AppSignIn.diagnosticCharacterLimit)
+        XCTAssertTrue(kept.contains("anchor=view; presented=1; phase=background; nonce=bad; extra=1"), kept)
+        XCTAssertTrue(kept.hasPrefix("Apple authorization failed:"), kept)
+    }
+
+    func testEmptyAppleNonceIsNamedBeforeAppleIsAsked() async {
+        let flow = AppSignIn()
+        let secret = "user@example.com"
+        XCTAssertEqual(AppSignIn.nonceKind(secret), "bad")
+        XCTAssertEqual(AppSignIn.nonceKind(String(repeating: "ab", count: 32)), "ok")
+        XCTAssertEqual(AppSignIn.preflightChains(hasWindow: true, nonce: String(repeating: "ab", count: 32)), [])
+        XCTAssertEqual(AppSignIn.preflightChains(hasWindow: false, nonce: secret), ["presentation:no_window"])
+        XCTAssertEqual(AppSignIn.preflightChains(hasWindow: false, nonce: ""), ["presentation:no_window", "nonce:empty"])
+
+        do {
+            _ = try await flow.signInWithApple(nonce: "")
+            XCTFail("an empty nonce must not ask Apple")
+        } catch {
+            let message = (error as NSError).localizedDescription
+            XCTAssertTrue(message.contains("nonce:empty"), message)
+            XCTAssertTrue(message.contains("nonce=empty"), message)
+            XCTAssertFalse(message.contains("authorization:1000"), message)
+            XCTAssertEqual(NativeBridge.failurePayload(error) as? String, message)
+            XCTAssertLessThanOrEqual(message.count, AppSignIn.diagnosticCharacterLimit)
+        }
+
+        let diagnosed = AppSignIn.diagnosticMessage(
+            chain: ["authorization:1000"],
+            facts: AppleAuthorizationFacts(anchor: "view", presented: false, phase: "active", nonce: AppSignIn.nonceKind(secret), extra: false))
+        XCTAssertTrue(diagnosed.contains("nonce=bad"), diagnosed)
+        XCTAssertFalse(diagnosed.contains(secret), diagnosed)
+        XCTAssertFalse(diagnosed.contains("@"), diagnosed)
+    }
+
     func testAppleAuthorizationCancellationStaysSilent() {
         let error = NSError(domain: ASAuthorizationError.errorDomain, code: ASAuthorizationError.Code.canceled.rawValue)
         XCTAssertEqual((NativeBridge.failurePayload(error) as? [String: String])?["name"], "AbortError")

@@ -15,6 +15,20 @@ grammar clearly claims it, so a table or a log stays plain. A quote in a
 message is the same tinted paper instead of a rule beside grey text. Beta Web,
 no API or schema change; recovery is a CI-validated release reverting the
 change.
+## Unreleased: Apple sign-in names why native authorization stopped
+
+An Apple authorization error 1000 with no underlying error could be a missing
+window, an empty nonce, a failure before Apple showed its sheet, or an unknown
+system failure, and those were the same report. The attempt now keeps whether
+the page's window, another on-screen window, the window captured at the start,
+or no window was available, whether Apple asked for a presentation anchor, the
+application phase, the nonce shape (empty, 64-character hex, or other), and
+whether the error carried userInfo keys outside a fixed allowlist. Descriptions,
+key names, values, and the nonce are not included. A missing window or an empty
+nonce is reported as that fact and Apple is not asked. A replaced attempt cannot
+complete the new one. Authorization is not replayed. The native string stays
+inside the browser defect limit. iOS only; recovery is a CI-validated beta iOS
+release reverting this change.
 
 ## Unreleased: The Mac app opens with its traffic lights centred on the rail
 
