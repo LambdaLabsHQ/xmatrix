@@ -22,7 +22,7 @@ import { PrivateConnectorResult } from "./private-connector-result";
 import { relativeTime } from "./workspace-shell-presence";
 
 /* What the App ran, newest first, as a call log: per call when it ran, what
-   ran (its name and command), who asked and how it ended, with the sentence it
+   ran (its name and command), who made it (an Agent, for its person) and how it ended, with the sentence it
    answered in under it; the content it returned stays in the conversation. A failure is fixed where it shows: the row
    offers its remedy (sign in again, replace a credential, reconnect) and runs
    the read again once it is fixed, so nobody has to look for where to go. */
@@ -122,23 +122,26 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
   const ranAgain = retry.data ? `${retry.data.summary}${retry.data.url ? ` — ${retry.data.url}` : ""}` : null;
   const headline = stopped ? remedyHeadline(execution, credentials.connector) : null;
   const who = requesterName(execution, members);
+  // Who made the call: the Agent, for the person it ran for, or the person themselves.
+  const caller = execution.requestedByAgent
+    ? <><span className="text-foreground">{execution.requestedByAgent}</span> for {who}</> : who;
   const when = callTime(execution.createdAt);
   const said = stopped ? null : resultLine(execution.resultSummary);
   const command = execution.actionId && execution.actionId !== execution.actionLabel ? execution.actionId : null;
   return (
     <li className="px-3 py-2" data-testid="connector-execution">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5 text-[13px] sm:grid-cols-[6.5rem_minmax(0,1fr)_minmax(0,8rem)_5rem]">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5 text-[13px] sm:grid-cols-[6.5rem_minmax(0,1fr)_minmax(0,11rem)_5rem]">
         <time className="whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden" dateTime={execution.createdAt}
           title={`${execution.createdAt} (${relativeTime(execution.createdAt)})`}>{when}</time>
         <span className="min-w-0 truncate">
           <span className="font-medium">{execution.actionLabel || execution.actionId || "Default action"}</span>
           {command ? <code className="ml-2 font-mono text-[12px] text-muted-foreground">{command}</code> : null}
         </span>
-        <span className="truncate text-muted-foreground max-sm:hidden">{who}</span>
+        <span className="truncate text-muted-foreground max-sm:hidden">{caller}</span>
         <span className={cn("font-medium sm:text-right", ranAgain ? "text-foreground" : appExecutionStatusClassName(execution.status))}>
           {ranAgain ? "Fixed" : EXECUTION_STATUS_LABELS[execution.status] ?? execution.status}
         </span>
-        <span className="col-span-full truncate text-[12px] text-muted-foreground sm:hidden">{who} · {when}</span>
+        <span className="col-span-full truncate text-[12px] text-muted-foreground sm:hidden">{caller} · {when}</span>
         {said || (masked && !stopped) ? (
           <span className="col-span-full flex min-w-0 items-center gap-1 truncate text-[12px] text-muted-foreground sm:col-start-2 sm:col-end-5">
             {masked ? <><Lock aria-hidden="true" className="size-3 shrink-0" /> Private result · only {who} can see it</> : said}

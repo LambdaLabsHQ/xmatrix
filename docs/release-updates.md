@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: An App's Recent activity is a call log that names the calling Agent
+
+Recent activity printed each run's whole answer on the page, so a calendar list
+ran as raw JSON across the background. It is now a call log on one rounded
+tinted sheet: per call the day and minute, the action and its command, who made
+it and how it ended, and under it the sentence it answered with; the returned
+content stays in the conversation. A call an Agent made now names that Agent
+("claude for Daniel"): the Hub records the Agent's name when the call runs, in
+a new nullable `requested_by_agent` column (migration 0232); earlier calls
+show only their person. The copy line on App pages shares the sheet's tint,
+radius and width (#1234). Beta Web and Hub; additive schema change; recovery is
+a CI-validated release reverting the change (the column may stay).
+
 ## Unreleased: The Mac app opens with its traffic lights centred on the rail
 
 The Mac app's first frame, drawn before the app's script runs, laid out the

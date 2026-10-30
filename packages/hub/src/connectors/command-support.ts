@@ -4,6 +4,7 @@ import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
 import { getChannel } from "../spaces";
 import type { ConnectorCommandInput } from "./provider";
+import { agentNameOf } from "./agent-caller";
 
 /* What every connector command needs around its own work: the Channel's
    Space connection, an execution record, and one receipt per message. */
@@ -88,11 +89,14 @@ export async function withExecution(
 ): Promise<string> {
   const retryCommand = action.retry && input.body.trim() && utf8ByteLength(input.body.trim()) <= 4_000 ? input.body.trim() : undefined;
   const executionId = `app-execution:${input.messageId}${action.key}:${manifest.id}:${action.id}`.slice(0, 240);
+  const agent = input.senderKind === "agent" && input.senderId
+    ? await agentNameOf(input.env, { ownerUserId: input.actorUserId, instanceId: input.senderId }) : undefined;
   await appCommand(input.env, "record-execution", {
     commandId: `product:${manifest.id}-record:${input.messageId}${action.key}`.slice(0, 200),
     executionId, connectionId: scope.connectionId, channelId: input.channelId, messageId: input.messageId,
     actionId: action.id, actionLabel: action.label.slice(0, 120), requestedByLabel: input.actorUserId,
     ...(retryCommand ? { retryCommand, resultVisibility: action.retry } : {}),
+    ...(agent ? { requestedByAgent: agent } : {}),
     principal: scope.principal,
   });
   const outcome = await run();

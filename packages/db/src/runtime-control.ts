@@ -433,6 +433,7 @@ function serializedInstance(row: QueryResultRow) {
     status: String(row.status), version: Number(row.version),
     ...(row.run_status ? { runStatus: String(row.run_status) } : {}),
     ...(row.run_metadata_json === undefined ? {} : { runMetadata: metadata(row, "run_metadata_json") }),
+    ...(typeof row.agent_name === "string" && row.agent_name ? { agentName: row.agent_name } : {}),
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
 }
 
@@ -1738,9 +1739,14 @@ export class PostgresRuntimeRepository {
       placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch } } : { requestId, operation: "runtime.get-instance-legacy" },
     async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "runtime_get_instance_v2", text: `SELECT i.*,
+      const rows = await tx.query<QueryResultRow>({ name: "runtime_get_instance_v3", text: `SELECT i.*,
         r.workspace_machine_id,r.workspace_canonical_cwd,r.status AS run_status,
-        r.metadata_json AS run_metadata_json FROM data.instances i JOIN data.runs r ON r.run_id=i.run_id
+        r.metadata_json AS run_metadata_json,
+        COALESCE(s.display_name,r.metadata_json->>'agentName') AS agent_name
+        FROM data.instances i JOIN data.runs r ON r.run_id=i.run_id
+        LEFT JOIN data.run_agent_registrations b ON b.run_id=r.run_id
+        LEFT JOIN data.space_agent_registrations s ON s.space_id=b.space_id AND s.owner_user_id=b.owner_user_id
+          AND s.machine_id=b.machine_id AND s.harness=b.harness
         WHERE i.instance_id=$1 AND r.owner_user_id=$2 LIMIT 1`, values: [instanceId,
       text(input.actorUserId, "actorUserId", 300)], maxRows: 1 });
       if (!rows[0]) throw new RuntimeControlError("not_found", 404, "Instance not found");

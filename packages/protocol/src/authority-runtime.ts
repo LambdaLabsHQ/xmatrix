@@ -308,6 +308,8 @@ export interface SerializedAppConnectorExecution {
   resultSummary?: string;
   requestedBy: string;
   requestedByLabel?: string;
+  /** The Agent that made the call, by its name when it ran; absent when the person made it. */
+  requestedByAgent?: string;
   /** Set on a failure the person can fix from where it shows. */
   remedy?: AppConnectorRemedy;
   /** A read whose command can run again. */

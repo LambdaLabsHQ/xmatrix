@@ -22,3 +22,14 @@ export async function agentRegistrationOf(env: Env, input: { ownerUserId: string
     return undefined;
   }
 }
+
+/** The name of the Agent a live Instance runs as, for naming who made a call; none when it cannot be read. */
+export async function agentNameOf(env: Env, input: { ownerUserId: string; instanceId: string }): Promise<string | undefined> {
+  try {
+    const { instance } = await runtimeRepository(env).getInstance({ requestId: crypto.randomUUID(),
+      instanceId: input.instanceId, actorUserId: input.ownerUserId });
+    return instance.agentName?.slice(0, 120) || undefined;
+  } catch {
+    return undefined;
+  }
+}

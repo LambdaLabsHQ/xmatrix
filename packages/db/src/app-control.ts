@@ -243,6 +243,7 @@ export function appExecutionView(row: Record<string, unknown>,
     ...(row.result_summary ? { resultSummary: String(row.result_summary) } : {}),
     requestedBy: String(row.requested_by),
     ...(row.requested_by_label ? { requestedByLabel: String(row.requested_by_label) } : {}),
+    ...(row.requested_by_agent ? { requestedByAgent: String(row.requested_by_agent) } : {}),
     ...(row.remedy ? { remedy: appExecutionRemedy(String(row.remedy)) } : {}),
     ...(row.retry_command ? { retryable: true } : {}),
     ...(row.result_visibility ? { resultVisibility: String(row.result_visibility) } : {}),
@@ -1072,11 +1073,11 @@ export class PostgresAppRepository {
     const exists = await tx.query({ name: "app_execution_exists_v1", text: `SELECT execution_id
       FROM data.app_connector_executions WHERE execution_id=$1 LIMIT 1`, values: [executionId], maxRows: 1 });
     if (exists[0]) throw new AppControlError("execution_exists", 409, "App execution already exists");
-    await tx.query({ name: "app_execution_record_v2", text: `INSERT INTO data.app_connector_executions
+    await tx.query({ name: "app_execution_record_v3", text: `INSERT INTO data.app_connector_executions
       (execution_id,space_id,channel_id,message_id,provider_id,provider_name,action_id,action_label,
        status,dispatch_state,reason,connection_id,result_channel_id,result_summary,requested_by,
-       requested_by_label,retry_command,result_visibility,version,created_at,updated_at) VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,'queued','pending',NULL,$9,NULL,NULL,$10,$11,$13,$14,1,$12,$12)`, values: [
+       requested_by_label,retry_command,result_visibility,requested_by_agent,version,created_at,updated_at) VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,'queued','pending',NULL,$9,NULL,NULL,$10,$11,$13,$14,$15,1,$12,$12)`, values: [
       executionId, rows[0].space_id, channelId, text(input.messageId, "messageId", 300),
       rows[0].provider_id, rows[0].provider_name,
       input.actionId === undefined ? null : text(input.actionId, "actionId", 100),
@@ -1084,7 +1085,8 @@ export class PostgresAppRepository {
       connectionId, actor.id,
       input.requestedByLabel === undefined ? null : text(input.requestedByLabel, "requestedByLabel", 120), at,
       input.retryCommand === undefined ? null : text(input.retryCommand, "retryCommand", 4000),
-      input.resultVisibility === undefined ? null : visibility(input.resultVisibility)],
+      input.resultVisibility === undefined ? null : visibility(input.resultVisibility),
+      input.requestedByAgent === undefined ? null : text(input.requestedByAgent, "requestedByAgent", 120)],
     maxRows: 0 });
     const created = await tx.query<QueryResultRow>({ name: "app_execution_recorded_v1",
       text: "SELECT * FROM data.app_connector_executions WHERE execution_id=$1 LIMIT 1",

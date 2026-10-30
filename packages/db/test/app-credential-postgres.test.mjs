@@ -226,6 +226,12 @@ integration("a failed read records its remedy and runs again only from its own r
     assert.equal(listed.retryable, true);
     assert.equal(listed.resultVisibility, "private");
     assert.equal(listed.retryCommand, undefined, "the Space-wide list never carries a command");
+    assert.equal(listed.requestedByAgent, undefined, "a call the person made names no Agent");
+    await command("record-execution", { executionId: `${executionId}-agent`, messageId: "message-2", actionId: "web_session",
+      requestedByAgent: "claude" });
+    assert.equal((await apps.listExecutions({ requestId: crypto.randomUUID(), spaceId: space, actorUserId: "owner",
+      limit: 10 })).executions.find((row) => row.id === `${executionId}-agent`).requestedByAgent, "claude",
+    "a call an Agent made names that Agent");
     assert.deepEqual(await apps.executionRetry({ requestId: crypto.randomUUID(), spaceId: space, executionId,
       actorUserId: "member" }), { channelId, requestedBy: "member", command: "@webhook:web_session:*", visibility: "private" });
     await assert.rejects(apps.executionRetry({ requestId: crypto.randomUUID(), spaceId: space, executionId,
