@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: The Mac app opens with its traffic lights centred on the rail
+
+The Mac app's first frame, drawn before the app's script runs, laid out the
+browser's 64px rail, so the traffic lights spilled off the wood onto the paper
+until the script added the macOS frame and everything jumped to the 80px rail.
+The window frame (macOS and Windows) now reads the platform from
+`<html data-desktop-platform>`, which the root layout's inline script sets
+before the first paint, so the window opens in its final layout. Beta Web, no
+desktop, API or schema change; recovery is a CI-validated release reverting
+the change.
+
 ## Unreleased: Stripe Checkout returns open Billing again
 
 Since #1203, Stripe Checkout and portal returns to `/billing`, and the
