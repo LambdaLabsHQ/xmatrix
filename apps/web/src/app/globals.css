@@ -9346,6 +9346,9 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
   color: var(--muted-foreground);
 }
 .xmatrix-app .app-connector-receipt-private svg { width: 12px; height: 12px; flex: none; }
+.xmatrix-app .app-connector-receipt-lock { display: inline-flex; color: var(--muted-foreground); opacity: .55; cursor: help; }
+.xmatrix-app .app-connector-receipt-lock:hover { opacity: 1; }
+.xmatrix-app .app-connector-receipt-head .app-connector-receipt-lock svg { width: 12px; height: 12px; opacity: 1; }
 .xmatrix-app .app-connector-receipt-link {
   display: inline-flex;
   align-items: center;

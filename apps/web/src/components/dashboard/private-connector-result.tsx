@@ -64,10 +64,11 @@ export function PrivateConnectorResult({ channelId, messageId, ownerUserId, owne
   </>;
   return <div>
     {email && <div data-testid="private-connector-result"><GmailMessageCard message={email} /></div>}
-    <p className="app-connector-receipt-private" title={owns ? "Originals are available for 30 days while you can read this Channel." : undefined}><Lock aria-hidden="true" />
-      {owns ? unavailable ? "Private result is unavailable" : detail !== undefined ? email ? "Only you can see this email" : "Private result · visible to you" : "Loading private result…"
+    {/* Once the original is shown, the header's lock says who can see it; only a missing original needs words. */}
+    {detail === undefined && <p className="app-connector-receipt-private"><Lock aria-hidden="true" />
+      {owns ? unavailable ? "Private result is unavailable" : "Loading private result…"
         : `Private result · visible to ${ownerName ?? "its owner"} and the Agent that ran it`}
-    </p>
+    </p>}
     {result && <div className="app-connector-receipt-detail">
       <div data-testid="private-connector-result" className="max-h-80 overflow-auto [overflow-wrap:anywhere]">
         <RichMessageContent body={result.body} components={PRIVATE_RESULT_COMPONENTS} />

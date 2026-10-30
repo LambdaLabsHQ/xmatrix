@@ -105,7 +105,10 @@ test("private originals are fetched only for their owner and stay outside shared
   // The original scrolls in its own box; a rounded corner there would clip its first glyph.
   await expect(original).toHaveCSS("border-top-left-radius", "0px");
   await original.screenshot({ path: test.info().outputPath("private-connector-result.png") });
-  await expect(page.getByTestId("connector-receipt").nth(0)).toContainText("visible to you");
+  // Beside a shown original, who can see it is a quiet lock in the header, spelled out on hover.
+  await expect(page.getByTestId("connector-receipt").nth(0)).not.toContainText("visible to you");
+  await expect(page.getByTestId("connector-receipt").nth(0).getByRole("img", { name: /Private result/u })).toBeVisible();
+  await expect(page.getByTestId("connector-receipt").nth(1)).toContainText("visible to its owner and the Agent that ran it");
   await expect(page.getByTestId("connector-receipt").nth(1)).not.toContainText(value);
   const reads = (await fixtureRequests(page, "private-original")).map(url => new URL(url).pathname);
   expect(reads.length).toBeGreaterThan(0);
