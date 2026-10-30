@@ -87,7 +87,8 @@ integration("writer lock failures retain the live blocker without identities or 
           return new Client(config);
         } });
       await assert.rejects(database.transaction({ requestId: "private-request",
-        operation: "runtime.execution-report", placement }, tx => tx.query({ name: queryName,
+        operation: owner === "catalog" ? "channel.channel_configure" : "runtime.execution-report", placement },
+      tx => tx.query({ name: queryName,
         text: `SELECT private_value FROM ${table} WHERE id=$1 FOR UPDATE`, values: [1], maxRows: 1 })), error => {
         assert.equal(error.code, "55P03", "the original failure remains authoritative");
         const [evidence] = databaseFailureEvidence(error);
