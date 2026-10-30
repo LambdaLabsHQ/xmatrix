@@ -55,6 +55,7 @@ import { machineRunLifecycleReport } from "../machine-run-lifecycle-report";
 import { updateAgentLaunch } from "../runtime";
 import { supersededMachineDaemonConnection } from "./runtime-operation-failure";
 import { assertMachineRegistryCausality } from "./machine-registry-causality";
+import { captureServerErrorDiagnostic } from "../server-error-diagnostic";
 
 type ExecutableMessage = Exclude<
   MachineDaemonClientMessage,
@@ -309,8 +310,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       // The command is complete either way; what the answer is for must not fail the Machine's report.
       await this.dependencies.textTaskAnswered?.({ requestId: message.requestId, result: message.result,
         ownerUserId: session.principal.ownerUserId })
-        .catch((error: unknown) => console.error("Text task answer was not applied", {
-          requestId: message.requestId, error: error instanceof Error ? error.message : String(error) }));
+        .catch((error: unknown) => captureServerErrorDiagnostic("machine.text-task.apply", error, {
+          taskKind: channelAboutRequest(message.requestId) ? "channel-about" : "page-summary",
+        }));
     }
     if (message.type === "machine_spawn_result" && message.launchId && message.channelId) {
       const spawnStarted = performance.now();
