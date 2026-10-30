@@ -98,3 +98,55 @@ integration("release targets are daemons whose switch is on and whose installed 
     assert.deepEqual(await read(...many, { presetId: "claude", version: "2.0.0" }), [target]);
   } finally { await fixture.close(); }
 });
+
+integration("release targets probe the release notices, not a Machine's command history", async () => {
+  const fixture = await isolatedPostgres("harness_release_index", { shard: true });
+  const { client, session } = fixture;
+  try {
+    const controls = new PostgresMachineControlRepository(session);
+    const { route, principal } = await enrolledDaemon(controls, "e");
+    const { ownerUserId, machineId } = route;
+    await controls.command({ ...route, commandId: "connect", action: "connect", principal, payload: {},
+      capabilities: ["machine_harness_inventory_v1", "machine_harness_release_v1"],
+      metadata: { xmatrixDaemonVersion: "0.16.600", harnesses: { schemaVersion: 1, capturedAt: new Date().toISOString(),
+        items: [{ id: "claude", installed: true, version: "1.0.0", probeStatus: "ok", autoUpdate: "enabled" }] } } });
+    // Closed history dominates the table: a busy Machine has thousands of
+    // older release notices, none of them inside the repeat interval.
+    await client.query(`INSERT INTO data.machine_daemon_commands
+        (command_id,owner_user_id,machine_id,command_type,payload_json,status,attempts,version,created_at,updated_at)
+      SELECT 'history-'||n,$1,$2,'harness_action',
+        jsonb_build_object('presetId','claude','action','release'),'completed',1,1,
+        now()-interval '30 days',now()-interval '30 days'
+      FROM generate_series(1,40000) n`, [ownerUserId, machineId]);
+    await client.query("ANALYZE data.machine_daemon_commands");
+    const query = `SELECT
+        release.preset_id,target.owner_user_id,target.owner_email,target.machine_id,target.hostname,target.daemon_id
+        FROM unnest($2::text[],$3::text[]) WITH ORDINALITY AS release(preset_id,version,position)
+        CROSS JOIN LATERAL (SELECT
+          daemon.owner_user_id,daemon.owner_email,daemon.machine_id,daemon.hostname,daemon.daemon_id
+          FROM data.machine_daemons daemon
+          WHERE daemon.status='online' AND daemon.capabilities_json ? $1
+            AND EXISTS (SELECT 1 FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(daemon.metadata_json->'harnesses'->'items')='array'
+                  THEN daemon.metadata_json->'harnesses'->'items' ELSE '[]'::jsonb END) item
+              WHERE item->>'id'=release.preset_id AND item->'installed'='true'::jsonb
+                AND item->>'autoUpdate'='enabled'
+                AND (release.version='' OR item->>'version' IS DISTINCT FROM release.version))
+            AND NOT EXISTS (SELECT 1 FROM data.machine_daemon_commands command
+              WHERE command.owner_user_id=daemon.owner_user_id AND command.machine_id=daemon.machine_id
+                AND command.command_type='harness_action' AND command.payload_json->>'presetId'=release.preset_id
+                AND command.payload_json->>'action'='release'
+                AND command.created_at>clock_timestamp()-
+                  (CASE WHEN release.version='' THEN $6 ELSE $4 END)::interval)
+          ORDER BY daemon.daemon_id LIMIT $5) target
+        ORDER BY release.position,target.daemon_id`;
+    const plan = (await client.query(`EXPLAIN (FORMAT JSON) ${query}`,
+      ["machine_harness_release_v1", ["claude", "cursor"], ["2.0.0", ""], "30 minutes", 500, "24 hours"]))
+      .rows[0]["QUERY PLAN"][0].Plan;
+    const nodes = function* (node) { yield node; for (const child of node.Plans ?? []) yield* nodes(child); };
+    const commands = [...nodes(plan)].filter(node => node["Relation Name"] === "machine_daemon_commands");
+    assert.deepEqual([...new Set(commands.map(node => node["Index Name"] ?? node["Node Type"]))],
+      ["machine_daemon_commands_harness_release_idx"],
+      "reading release targets must not scan a Machine's command history");
+  } finally { await fixture.close(); }
+});

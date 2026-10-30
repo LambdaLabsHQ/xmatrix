@@ -165,7 +165,10 @@ const RELEASE_TARGET_ROWS = 5_000;
  * latest version installed it is no longer a target. A release without a
  * version (a preset without a registry) targets every such daemon daily. Every
  * preset is read in one statement, so a pass costs one transaction however
- * many presets are watched.
+ * many presets are watched. That statement is a single read, which the client
+ * only retries and never bounds with a server statement timeout, so its
+ * anti-join must stay a bounded index probe: 0233 adds the partial index over
+ * release notices that keeps it from scanning a Machine's command history.
  */
 export async function readHarnessReleaseTargets(database: AuthorityDatabase, input: {
   requestId: string; releases: readonly HarnessRelease[]; limit?: number;
