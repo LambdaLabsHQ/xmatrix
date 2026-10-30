@@ -5,10 +5,12 @@ import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts";
 import { commandResult } from "../src/connectors/command-support.ts";
 import * as metering from "../src/usage-cost-metering.ts";
+import { AppControlError } from "../../db/src/app-control.ts";
 
 async function dispatcher({ providerId, spaceId, mode, repository, publish = async () => {}, imports = {} }) {
   const dependencies = {
     "@xmatrix/protocol": protocol,
+    "@xmatrix/db": { AppControlError },
     "../app-connectors": { getAppConnectorProvider: () => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
     "./command-support": { commandResult, commandScope: async () => ({ spaceId, connectionId: `${spaceId}:${providerId}` }),
       withExecution: async (manifest, _input, _scope, action, run) => commandResult(manifest.name, action.id, await run()),
@@ -20,6 +22,36 @@ async function dispatcher({ providerId, spaceId, mode, repository, publish = asy
   };
   return loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url), name => dependencies[name] ?? {});
 }
+
+// A consumed approval can become stale during the execution's token refresh.
+// The dispatch boundary must explain the local refusal without blaming Google,
+// leaking arbitrary exceptions, or reaching a provider write.
+test("approved actions report stale authority before provider I/O and mask unknown errors", async () => {
+  for (const during of ["credentials", "authorization", "preflight", "unknown"]) {
+    let checks = 0, writes = 0;
+    const failure = new AppControlError(during === "credentials" ? "credential_changed"
+      : during === "unknown" ? "unknown" : "action_request_scope_changed", 409, "private diagnostic");
+    const commands = await dispatcher({ providerId: "googleads", spaceId: "s", mode: async () => "ask",
+      repository: { authorize: async () => {
+        checks++;
+        if (during !== "preflight" || checks === 2) throw failure;
+      } }, imports: {
+        "./connection-credentials": { connectionCredentials: async () => {
+          if (during === "credentials") throw failure;
+          return { oauthToken: "token", customerId: "1234567890" };
+        } },
+      } });
+    const action = { effect: "write", requires: [], parse: () => { throw new Error("must use frozen input"); },
+      execute: async context => { await context.authorizeWrite(); writes++; return { summary: "written" }; } };
+    const result = await commands.runConnectorAction("googleads", {
+      env: {}, channelId: "c", messageId: "m:approved", actorUserId: "owner", senderKind: "user",
+    }, "mutate", action, { target: "1234567890", text: "" }, { requestId: "approved", prepared: {} });
+    assert.equal(writes, 0);
+    assert.doesNotMatch(result, /private diagnostic/);
+    assert.match(result, during === "unknown" ? /failed; the provider call failed/
+      : /blocked; .*changed.*new approval/i);
+  }
+});
 
 // The execution boundary must stage ask without calling the provider, and recheck policy
 // at dispatch. PostgreSQL's consume-once test cannot detect a dispatcher bypass.
