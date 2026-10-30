@@ -13,6 +13,7 @@ import {
   fixtureRequests,
   fixtureRule,
   releaseFixture,
+  screenChangeLanded,
 } from "./workspace-fixtures";
 
 const SLOW_HISTORY_RULE = "slow-channel-general-history";
@@ -269,6 +270,92 @@ test("the iOS app's edge swipe goes Back in the page, and a notification opens w
   // A dock tab's own screen has nothing to go Back to; the app keeps it.
   expect(await nativeBackForTest(page)).toBe(false);
   expect(await historyLength(page)).toBe(entries);
+});
+
+/** The iOS app's left-edge swipe as the page receives it. */
+function backGesture(page: Page) {
+  return {
+    begin: () => page.evaluate(() => window.__xmatrixBackGesture?.begin() ?? null),
+    move: (distance: number) => page.evaluate((d) => window.__xmatrixBackGesture?.move(d), distance),
+    end: (back: boolean, speed: number) =>
+      page.evaluate(([b, v]) => window.__xmatrixBackGesture?.end(b, v), [back, speed] as const),
+  };
+}
+
+/** Where the conversation's sign, its timeline, the channel list and its composer stand on screen. */
+function screenLayout(page: Page) {
+  return page.evaluate(() => {
+    const left = (selector: string) => {
+      const element = document.querySelector(selector);
+      return element instanceof HTMLElement && element.checkVisibility() ? Math.round(element.getBoundingClientRect().left) : null;
+    };
+    return {
+      sign: left(".app-mobile-channel-detail-bar .app-mobile-back-sign"),
+      timeline: left(".app-message-timeline"),
+      list: left(".app-mobile-channel-list-pane"),
+      composer: left(".app-composer-box"),
+    };
+  });
+}
+
+/** The iOS app with a conversation open over its channel list, and a left-edge swipe begun on it. */
+async function swipeFromConversation(page: Page) {
+  await installNativeBridge(page, "ios");
+  await openGeneralChannel(page);
+  await screenChangeLanded(page);
+  const before = await screenLayout(page);
+  const gesture = backGesture(page);
+  expect(await gesture.begin()).toBe(true);
+  return { before, gesture };
+}
+
+test("the iOS app's edge swipe moves only the lists under a still bar, and lands on the channel list", async ({ page }) => {
+  const { before, gesture } = await swipeFromConversation(page);
+  await gesture.move(150);
+  // The sign and the composer stay; the conversation goes with the finger and
+  // the channel list lies right beside it.
+  expect(await screenLayout(page)).toEqual({ ...before, timeline: 150, list: 150 - page.viewportSize()!.width });
+
+  await gesture.end(true, 900);
+  await expectChannelListVisible(page);
+  await expect(page).toHaveURL("/app/personal-sspaceperso/channels");
+  await screenChangeLanded(page);
+});
+
+test("an edge swipe let go short of Back leaves the conversation as it was", async ({ page }) => {
+  const { before, gesture } = await swipeFromConversation(page);
+  await gesture.move(60);
+  await gesture.end(false, 0);
+  await screenChangeLanded(page);
+  await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+  expect(await screenLayout(page)).toEqual(before);
+});
+
+test("the page leaves an edge swipe to the app while a layer is open over the conversation", async ({ page }) => {
+  await installNativeBridge(page, "ios");
+  await openGeneralChannel(page);
+  const { details } = await openChannelDetailsFrom(page, "More");
+  expect(await backGesture(page).begin()).toBe(false);
+  await expect(details).toBeVisible();
+});
+
+test("switching dock tabs moves the bar with the page", async ({ page }) => {
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  const moving = await page.evaluate(async () => {
+    const track = document.querySelector<HTMLElement>(".app-mobile-dock-track");
+    const slot = () => track?.style.getPropertyValue("--app-mobile-dock-slot");
+    const channels = slot();
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Primary"] button[aria-label="Status"]')?.click();
+    // The bar starts with the track, on the frame that moves it to the Status screen.
+    for (let frame = 0; frame < 60 && slot() === channels; frame++) await new Promise(requestAnimationFrame);
+    const bar = document.querySelector(".app-mobile-tab-root-bar:not(.app-dock-tab-slide-outgoing)");
+    const leaving = document.querySelector(".app-dock-tab-slide-outgoing");
+    return { bar: bar?.getAnimations().length ?? 0, leaving: leaving?.getAnimations().length ?? 0 };
+  });
+  expect(moving.bar).toBeGreaterThan(0);
+  expect(moving.leaving).toBeGreaterThan(0);
+  await expect(page.locator(".app-dock-tab-slide-outgoing")).toHaveCount(0);
 });
 
 test("a conversation opened from a notification goes back to the channel list, not the conversation before it", async ({ page }) => {
@@ -679,19 +766,7 @@ test("long pressing a mobile channel opens its actions side by side under the ro
   await page.keyboard.press("Escape");
 });
 
-test("opening a mobile channel uses a compact app bar, directional transition, and stable loading skeleton", async ({ page }, testInfo) => {
-  await page.addInitScript(() => {
-    const original = document.startViewTransition?.bind(document);
-    (window as typeof window & { __mobileTransitionDirections?: string[] }).__mobileTransitionDirections = [];
-    if (!original) return;
-    document.startViewTransition = ((callback: () => void) => {
-      (window as typeof window & { __mobileTransitionDirections?: string[] }).__mobileTransitionDirections?.push(
-        document.documentElement.dataset.xmatrixMobileNavigation || "missing"
-      );
-      return original(callback);
-    }) as typeof document.startViewTransition;
-  });
-
+test("opening a mobile channel uses a compact app bar and a stable loading skeleton", async ({ page }, testInfo) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   /* Held open on purpose: the skeleton only exists while history is still in
      flight. `releaseFixture` below lets it land. */
@@ -751,10 +826,6 @@ test("opening a mobile channel uses a compact app bar, directional transition, a
   }
   await expect(detailBar.getByRole("button", { name: /Archive #/ })).toHaveCount(0);
   await expect(detailBar.getByRole("button", { name: "Search workspace" })).toHaveCount(0);
-  expect(await page.evaluate(() => typeof document.startViewTransition)).toBe("function");
-  expect(await page.evaluate(() => (
-    (window as typeof window & { __mobileTransitionDirections?: string[] }).__mobileTransitionDirections
-  ))).toContain("forward");
   await page.waitForTimeout(350);
   const loadingScreenshot = testInfo.outputPath("mobile-channel-detail-loading.png");
   await page.screenshot({ path: loadingScreenshot, fullPage: false });
@@ -770,9 +841,6 @@ test("opening a mobile channel uses a compact app bar, directional transition, a
 
   await page.getByRole("button", { name: "Back to channels" }).tap();
   await expect(page.locator(".app-mobile-channel-list-pane")).toBeVisible();
-  expect(await page.evaluate(() => (
-    (window as typeof window & { __mobileTransitionDirections?: string[] }).__mobileTransitionDirections
-  ))).toContain("back");
 });
 
 test("More tab hosts overflow views and returns from Settings without a history loop", async ({ page }) => {

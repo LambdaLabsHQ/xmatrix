@@ -30,6 +30,8 @@ import { ManageSecretsProvider } from "./secret-request-card";
 import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
+import { useMobileListTransition } from "./use-mobile-list-transition";
+import { useDockTabSlide } from "./use-dock-tab-slide";
 import { closeViewSelection } from "./url-query-state";
 import { ConnectionStatus } from "./connection-status";
 import { markStartup, reportStartupTiming, STARTUP_REPORT_SETTLE_MS } from "@/lib/startup-timing";
@@ -245,6 +247,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     workspaceSearchHere,
     setWorkspaceSearchOpen,
     isMobileViewport,
+    mobileListTransitionRef,
     renamingSpaceId,
     creatingSpace,
     desktopSidebarWidth,
@@ -604,6 +607,31 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const isMobileDockView = view === "messages" || view === "more";
   // A conversation and a new one are pushed screens over the dock track.
   const mobileDockCovered = view === "messages" && (Boolean(selectedChannel) || composingConversation);
+  // Between a conversation and its channel list only the lists move; the bar,
+  // its sign and the controls at the bottom stay (use-mobile-list-transition).
+  const shellRootRef = useRef<HTMLDivElement | null>(null);
+  const listTransitionFree = isMobileViewport && mobileDockPager && view === "messages" && !composingConversation &&
+    !mobileChannelDetailsOpen && !agentConfigDialog && !workspaceSearchOpen;
+  const listTransitionStage = useMobileListTransition({
+    conversationOverList: listTransitionFree && Boolean(selectedChannel),
+    listShowing: listTransitionFree && !selectedChannel,
+    rootRef: shellRootRef,
+    driverRef: mobileListTransitionRef,
+    onBack: backToChannelList,
+  });
+  // Switching dock tabs moves the whole page, its bar and sign with it.
+  const dockTabTapped = useRef(false);
+  const changeDockTab = useStableCallback((next: AppView) => {
+    dockTabTapped.current = DOCK_TAB_VIEWS.indexOf(dockTabOf(next)) !== mobileDockSlot;
+    changeAppView(next);
+  });
+  const dockTabSlide = useDockTabSlide({
+    tabTapped: dockTabTapped,
+    slot: mobileDockSlot,
+    tabRootShowing: isMobileViewport && mobileDockPager && !mobileDockCovered && !(view === "pages" && selectedPageId) &&
+      !agentConfigDialog && DOCK_TAB_VIEWS.includes(view),
+    rootRef: shellRootRef,
+  });
   // What the shell holds live about a conversation linked to a page (pages-live-document.md §4.4).
   // A message on its way is its last one already, so a page's card for it shows the comment as it is sent.
   const pageConversation = useCallback((conversationId: string) => {
@@ -863,9 +891,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       // Follow-ups tab shipped inert on iOS, and how an Agents tab that
       // posted the retired `agents` segment did nothing.
       const resolved = viewForRouteSegment(nextView);
-      if (resolved) changeAppView(resolved);
+      if (!resolved) return;
+      dockTabTapped.current = DOCK_TAB_VIEWS.indexOf(dockTabOf(resolved)) !== mobileDockSlot;
+      changeAppView(resolved);
     });
-  }, [changeAppView, currentSpaceId, desktopBridge, isIOSNativeShell, selectSpace]);
+  }, [changeAppView, currentSpaceId, desktopBridge, isIOSNativeShell, mobileDockSlot, selectSpace]);
 
   // A phone screen's parent, the same one its bar's chevron goes to. A layer
   // over the screen (a sheet, the new-conversation form) consumes Back first.
@@ -1518,6 +1548,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onCancel={cancelSearch}
       />
       <div
+        ref={shellRootRef}
+        data-list-transition={listTransitionStage ?? undefined}
         className={cn(
           "xmatrix-app xmatrix-app-shell relative isolate m-0 flex w-screen max-w-[100dvw] justify-start bg-background text-foreground",
           desktopFrameClass,
@@ -1558,15 +1590,19 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           searching={workspaceSearchOpen}
           onOpenSearch={openWorkspaceSearch}
         />}
-        <CreateFab action={mobileCreate} />
-        {!isIOSNativeShell && (
-          <MobileTabDock
-            activeView={view}
-            hidden={!nativeMobileTabVisible}
-            statusLive={statusLive}
-            onChangeView={changeRailView}
-          />
-        )}
+        {/* While the lists trade places the list's own controls fade in where
+            they stand, out of reach until the list is the screen. */}
+        <div className="contents" inert={Boolean(listTransitionStage)} aria-hidden={listTransitionStage ? true : undefined}>
+          <CreateFab action={mobileCreate ?? (listTransitionStage ? listCreate : null)} />
+          {!isIOSNativeShell && (
+            <MobileTabDock
+              activeView={view}
+              hidden={!nativeMobileTabVisible && !listTransitionStage}
+              statusLive={statusLive}
+              onChangeView={changeDockTab}
+            />
+          )}
+        </div>
 
       {/* One workspace panel beside the rail: the conversation list, the
           conversation and its details share its paper and its single shadow.
@@ -1638,6 +1674,33 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             onOpenChannelDetails={openMobileChannelDetails}
             onSelectSpace={selectSpace}
           />
+          {dockTabSlide && (
+            <TopWorkspaceBar
+              key={dockTabSlide.key}
+              ghost="app-dock-tab-slide-outgoing"
+              channel={null}
+              spaces={spaces}
+              currentSpaceId={currentSpaceId}
+              view={view}
+              onBack={backToChannelList}
+              onOpenMore={backToMore}
+              onOpenSearch={openWorkspaceSearch}
+              onSelectSpace={selectSpace}
+            />
+          )}
+          {listTransitionStage && (
+            <TopWorkspaceBar
+              ghost="app-list-transition-target"
+              channel={null}
+              spaces={spaces}
+              currentSpaceId={currentSpaceId}
+              view="messages"
+              onBack={backToChannelList}
+              onOpenMore={backToMore}
+              onOpenSearch={openWorkspaceSearch}
+              onSelectSpace={selectSpace}
+            />
+          )}
 
           {agentConfigDialog ? (
             <AgentConfigPage

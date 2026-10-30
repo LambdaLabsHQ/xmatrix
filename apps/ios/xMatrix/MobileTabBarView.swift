@@ -23,6 +23,10 @@ extension Notification.Name {
     /// or unmeasured (an app opened straight into a channel) while the
     /// composer still needs it.
     static let xmatrixDisplayCornerRadiusChanged = Notification.Name("xmatrixDisplayCornerRadiusChanged")
+    /// A left-edge swipe the page draws, back from a conversation to its
+    /// channel list: `progress` (0...1) while the finger moves, then `settle`
+    /// (true when it goes Back). The dock belongs to the list and follows it.
+    static let xmatrixBackSwipeFollow = Notification.Name("xmatrixBackSwipeFollow")
 }
 
 /// The display corner radius as last measured, for observers that start
@@ -159,8 +163,47 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
         view = passthroughView
     }
 
+    /// The dock is fading in or out with a swipe back to the list, so the
+    /// hidden state the page last reported does not apply yet.
+    private var followingBackSwipe = false
+
+    /// While a conversation is swiped back to its channel list the dock comes
+    /// in over the last part of the way, as the list's web controls do, and
+    /// stays once the page lands there and reports it. A swipe let go short of
+    /// Back takes it away again.
+    @objc private func followBackSwipe(_ notification: Notification) {
+        guard isViewLoaded, !mobileTabState.visible else { return }
+        if let progress = notification.userInfo?["progress"] as? CGFloat {
+            followingBackSwipe = true
+            view.isHidden = false
+            view.alpha = min(1, max(0, 1.8 * progress - 0.8))
+        } else if let back = notification.userInfo?["settle"] as? Bool {
+            followingBackSwipe = true
+            view.isHidden = false
+            UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+                self.view.alpha = back ? 1 : 0
+            } completion: { _ in
+                // Going Back, the page reports the dock shown once the list
+                // lands; if it never does, the reported state wins.
+                let wait: TimeInterval = back ? 1.5 : 0
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+                    guard let self, self.followingBackSwipe, !self.mobileTabState.visible else { return }
+                    self.followingBackSwipe = false
+                    self.view.isHidden = true
+                    self.view.alpha = 1
+                }
+            }
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(followBackSwipe(_:)),
+            name: .xmatrixBackSwipeFollow,
+            object: nil
+        )
 
         // This controller is layered over the web view only to host the
         // system tab bar. It deliberately has no child content controller:
@@ -327,7 +370,13 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
         mobileTabState = state
         guard isViewLoaded else { return }
 
-        view.isHidden = !state.visible
+        if state.visible {
+            followingBackSwipe = false
+            view.alpha = 1
+            view.isHidden = false
+        } else if !followingBackSwipe {
+            view.isHidden = true
+        }
         let tab = MobileTabView.tab(for: state.activeView)
         guard let index = mobileTabViews.firstIndex(of: tab), let items = tabBar.items else { return }
         tabBar.selectedItem = items[index]

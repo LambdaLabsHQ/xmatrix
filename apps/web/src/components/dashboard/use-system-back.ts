@@ -61,6 +61,11 @@ function dispatchSystemBack(): boolean {
   return false;
 }
 
+/** A layer (a sheet, a dialog) is open over the screen and would take Back first. */
+export function systemBackLayerOpen(): boolean {
+  return systemBackEntries.some((entry) => !entry.screen);
+}
+
 function ensureSystemBackDispatcher(): void {
   if (unsubscribeSystemBack) return;
   const bridge = getDesktopBridge();
