@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { humanPushConnected } from "./workspace-resource-push";
+import { humanPushConnected, humanPushRetrying } from "./workspace-resource-push";
 
 /** A dropped connection that recovers within this is not worth a word. */
 const RECONNECT_NOTICE_DELAY_MS = 4_000;
@@ -17,35 +17,43 @@ export function subscribeToNetwork(onChange: () => void) {
 }
 
 /**
- * Whether the live connection is down, from the Human socket's own signal
- * (`setHumanPushConnected`). Until it has connected once, startup owns the
- * wait (StartupShell), so this stays quiet.
+ * Whether the live connection is down and failing to come back, from the
+ * Human socket's own signals (`setHumanPushConnected`, `markHumanPushRetrying`).
+ * Until it has connected once, startup owns the wait (StartupShell), so this
+ * stays quiet. A socket replaced on purpose (the iOS app returning to the
+ * foreground replaces it every time) is not failing until a redial does.
  */
-function useLiveConnectionDown(): boolean {
+function useLiveConnectionFailing(): boolean {
   const [state, setState] = useState(() => {
     const connected = humanPushConnected();
-    return { everConnected: connected, connected };
+    return { everConnected: connected, connected, retrying: humanPushRetrying() };
   });
   useEffect(() => {
     const onPush = (event: Event) => {
-      const connected = (event as CustomEvent<{ connected: boolean }>).detail?.connected === true;
-      setState((current) => ({ everConnected: current.everConnected || connected, connected }));
+      const detail = (event as CustomEvent<{ connected: boolean; retrying: boolean }>).detail;
+      const connected = detail?.connected === true;
+      setState((current) => ({
+        everConnected: current.everConnected || connected,
+        connected,
+        retrying: detail?.retrying === true,
+      }));
     };
     window.addEventListener("xmatrix:human-push", onPush);
     return () => window.removeEventListener("xmatrix:human-push", onPush);
   }, []);
-  return state.everConnected && !state.connected;
+  return state.everConnected && !state.connected && state.retrying;
 }
 
 /**
  * What the app is waiting for once it is open: one tile of tinted paper under
- * the top band, only while it is true. Offline says so at once; a dropped live
- * connection says it is reconnecting once the drop outlasts a blip. Everything
+ * the top band, only while it is true. Offline says so at once; a live
+ * connection whose redial failed says it is reconnecting once the drop
+ * outlasts a blip. Everything
  * on screen stays usable; new messages catch up when the connection returns.
  */
 export function ConnectionStatus() {
   const online = useSyncExternalStore(subscribeToNetwork, () => navigator.onLine, () => true);
-  const down = useLiveConnectionDown();
+  const down = useLiveConnectionFailing();
   const [noticeDue, setNoticeDue] = useState(false);
   useEffect(() => {
     if (!down) {

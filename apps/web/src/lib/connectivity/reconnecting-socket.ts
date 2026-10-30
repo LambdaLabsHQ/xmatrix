@@ -48,6 +48,12 @@ export interface ReconnectingSocketOptions<S extends SocketTransport = WebSocket
   onDown?: () => void;
   /** Its close event, after `onDown`. A promise defers the redial until it settles. */
   onClose?: (event: CloseEvent) => CloseDecision | Promise<CloseDecision>;
+  /**
+   * A redial now waits out backoff: an attempt failed or the socket closed.
+   * A socket replaced on purpose (resume, silent socket) dials at once and
+   * does not call this.
+   */
+  onRetry?: () => void;
   heartbeat?: {
     intervalMs: number;
     timeoutMs: number;
@@ -228,6 +234,7 @@ export class ReconnectingSocket<S extends SocketTransport = WebSocket> {
     this.clearRetry();
     const delay = reconnectDelayMs(this.attempts.current, this.options.backoff, this.options.random);
     this.attempts.current += 1;
+    this.options.onRetry?.();
     this.retry = setTimeout(() => {
       this.retry = undefined;
       void this.dial();

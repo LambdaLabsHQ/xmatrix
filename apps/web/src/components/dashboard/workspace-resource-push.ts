@@ -8,16 +8,34 @@ export interface WorkspaceResourceChange {
 }
 
 let connected = false;
+let retrying = false;
 
 /**
  * Records the socket. Unchanged values do nothing, so effect cleanup does not
- * refetch when the flag was already false.
+ * refetch when the flag was already false. Connecting ends any retry.
  */
 export function setHumanPushConnected(next: boolean): void {
   if (connected === next) return;
   connected = next;
+  if (next) retrying = false;
+  publishHumanPush();
+}
+
+/** A redial of the Human socket failed and now waits out backoff. */
+export function markHumanPushRetrying(): void {
+  if (retrying || connected) return;
+  retrying = true;
+  publishHumanPush();
+}
+
+function publishHumanPush(): void {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent("xmatrix:human-push", { detail: { connected: next } }));
+  window.dispatchEvent(new CustomEvent("xmatrix:human-push", { detail: { connected, retrying } }));
+}
+
+/** Whether a redial of the Human socket has failed since it was last connected. */
+export function humanPushRetrying(): boolean {
+  return retrying;
 }
 
 /** Whether the Human socket is connected right now. */
