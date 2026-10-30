@@ -20,6 +20,8 @@ const OUTCOMES: Record<ConnectorReceiptStatus, { label: string; tone: StatusTone
   ignored: { label: "Ignored", tone: "secondary", Icon: CircleMinus },
 };
 
+const PRIVATE_NOTICE = "Private result: only its owner and the Agent that ran it can see it. The owner can open it for 30 days.";
+
 /**
  * What an App answered a connector command with, drawn as a tool call's result rather than as prose: per
  * statement, what ran and how it ended, then what it returned. Private results have a separate owner view;
@@ -45,6 +47,8 @@ export function ConnectorReceiptCard({ entries, collapsed = false, components, p
                 {outcome && <outcome.Icon aria-hidden="true" className={statusInkClass(outcome.tone)} />}
                 {entry.subject && <span className="app-connector-receipt-subject">{entry.subject}</span>}
                 {outcome && <span className={statusInkClass(outcome.tone, "app-connector-receipt-status")}>{outcome.label}</span>}
+                {entry.private && <span className="app-connector-receipt-lock" role="img" aria-label={PRIVATE_NOTICE} title={PRIVATE_NOTICE}>
+                  <Lock aria-hidden="true" /></span>}
               </p>
             )}
             {entry.private && privateResult ? <PrivateConnectorResult {...privateResult} /> : entry.private ? (
