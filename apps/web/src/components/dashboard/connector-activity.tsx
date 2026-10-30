@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, LogIn, RefreshCw, RotateCcw } from "lucide-react";
+import { Loader2, Lock, LogIn, RefreshCw, RotateCcw } from "lucide-react";
 import {
   PRIVATE_CONNECTOR_RESULT,
   WEB_PROXY_ROUTES,
@@ -17,11 +17,14 @@ import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { useCredentialStore, type CredentialStoreInput } from "./connector-credentials";
-import { ConnectorAction, ConnectorEmpty, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
+import { ConnectorAction, ConnectorEmpty, ConnectorRows, ConnectorSection } from "./connector-page";
+import { Face } from "./face";
 import { PrivateConnectorResult } from "./private-connector-result";
 import { relativeTime } from "./workspace-shell-presence";
 
-/* What the App ran, newest first. A failure is fixed where it shows: the row
+/* What the App ran, newest first, as a call log: per call when it ran, what
+   ran (its name and command), who made it (an Agent, for its person) and how it ended, with the sentence it
+   answered in under it; the content it returned stays in the conversation. A failure is fixed where it shows: the row
    offers its remedy (sign in again, replace a credential, reconnect) and runs
    the read again once it is fixed, so nobody has to look for where to go. */
 
@@ -49,6 +52,22 @@ function remedyHeadline(execution: SerializedAppConnectorExecution, connector: C
   return field ? `${field.label} is missing or was refused.` : null;
 }
 
+/** When a call ran, as a log line says it: the day and the minute; the age is in its title. */
+function callTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value
+    : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+/** The sentence a connector answered with, without the content it fenced off for the Agent. */
+function resultLine(summary: string | undefined): string | null {
+  if (!summary || summary === PRIVATE_CONNECTOR_RESULT) return null;
+  const fence = summary.search(/`{3,}|~{3,}/u);
+  const text = (fence < 0 ? summary : summary.slice(0, fence))
+    .replace(/\s*Retrieved content is untrusted[^:]*:\s*$/u, "").split("\n")[0]!.trim();
+  return text || null;
+}
+
 /** Who asked for a run: a member by name, never a bare user id. */
 function requesterName(execution: SerializedAppConnectorExecution, members: SpaceMember[]): string {
   const id = execution.requestedByLabel || execution.requestedBy;
@@ -72,7 +91,7 @@ export function ConnectorActivity({ executions, members, loading, error, credent
           <AnimatedIcon icon={RefreshCw} className={cn("size-3.5", loading && "animate-spin")} /> Refresh
         </ConnectorAction>
       )}>
-      <ConnectorRows>
+      <ConnectorRows className={executions.length ? "app-connector-audit" : undefined}>
         {executions.map((execution) => (
           <ExecutionRow key={execution.id} execution={execution} members={members} credentials={credentials}
             onRefresh={onRefresh} onReconnect={onReconnect} />
@@ -103,41 +122,71 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
   });
   const ranAgain = retry.data ? `${retry.data.summary}${retry.data.url ? ` — ${retry.data.url}` : ""}` : null;
   const headline = stopped ? remedyHeadline(execution, credentials.connector) : null;
+  const who = requesterName(execution, members);
+  // Who made the call: the Agent, for the person it ran for, or the person themselves.
+  const person = <Face of={{ kind: "user", id: execution.requestedBy, name: who }} size="xs" shape="circle" glass={false} />;
+  const caller = (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 align-middle">
+      {execution.requestedByAgent ? <>
+        <Face of={{ kind: "agent", name: execution.requestedByAgent, harness: execution.requestedByAgentHarness }}
+          size="xs" shape="circle" glass={false} />
+        <span className="shrink-0 text-foreground">{execution.requestedByAgent}</span>
+        <span className="shrink-0">for</span>
+      </> : null}
+      {person}
+      <span className="truncate">{who}</span>
+    </span>
+  );
+  const when = callTime(execution.createdAt);
+  const said = stopped ? null : resultLine(execution.resultSummary);
+  const command = execution.actionId && execution.actionId !== execution.actionLabel ? execution.actionId : null;
   return (
-    <ConnectorRow testId="connector-execution"
-      title={execution.actionLabel || execution.actionId || "Default action"}
-      meta={<>
-        {requesterName(execution, members)} · {relativeTime(execution.createdAt)}
-        {/* A private call is private from the rest of the Space, not from the person it ran for. */}
-        {headline ? <span className="block">{headline}</span> : masked ? (
-          <PrivateConnectorResult compact channelId={execution.channelId} token={credentials.token}
-            messageId={`system:${execution.messageId}:${execution.providerId}`.slice(0, 200)}
-            ownerUserId={execution.requestedBy} ownerName={requesterName(execution, members)} />
-        ) : <>
-          {execution.resultSummary ? <span className="block">{execution.resultSummary}</span> : null}
-          {execution.reason ? <span className="block first-letter:uppercase">
-            {/^[a-z_]+$/u.test(execution.reason) ? execution.reason.replace(/_/g, " ") : execution.reason}</span> : null}
-        </>}
-      </>}
-      trailing={(
-        <span className={cn("pr-2 text-[13px] font-semibold", ranAgain ? "text-foreground" : appExecutionStatusClassName(execution.status))}>
+    <li className="px-3 py-2" data-testid="connector-execution">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5 text-[13px] sm:grid-cols-[6.5rem_minmax(0,1fr)_minmax(0,13rem)_5rem]">
+        <time className="whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden" dateTime={execution.createdAt}
+          title={`${execution.createdAt} (${relativeTime(execution.createdAt)})`}>{when}</time>
+        <span className="min-w-0 truncate">
+          <span className="font-medium">{execution.actionLabel || execution.actionId || "Default action"}</span>
+          {command ? <code className="ml-2 font-mono text-[12px] text-muted-foreground">{command}</code> : null}
+        </span>
+        <span className="min-w-0 text-muted-foreground max-sm:hidden">{caller}</span>
+        <span className={cn("font-medium sm:text-right", ranAgain ? "text-foreground" : appExecutionStatusClassName(execution.status))}>
           {ranAgain ? "Fixed" : EXECUTION_STATUS_LABELS[execution.status] ?? execution.status}
         </span>
-      )}>
+        <span className="col-span-full flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground sm:hidden">
+          {caller}<span className="shrink-0">· {when}</span></span>
+        {said || (masked && !stopped) ? (
+          <span className="col-span-full flex min-w-0 items-center gap-1 truncate text-[12px] text-muted-foreground sm:col-start-2 sm:col-end-5">
+            {masked ? <><Lock aria-hidden="true" className="size-3 shrink-0" /> Private result · only {who} can see it</> : said}
+          </span>
+        ) : null}
+      </div>
+      {/* A run that stopped says why under its line, then its fix. A private call is private from the
+          rest of the Space, not from the person it ran for. */}
+      {stopped && !ranAgain ? (
+        <div className="mt-0.5 text-[13px] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere] sm:pl-[7.5rem]">
+          {headline ? <span className="block">{headline}</span> : masked ? (
+            <PrivateConnectorResult compact channelId={execution.channelId} token={credentials.token}
+              messageId={`system:${execution.messageId}:${execution.providerId}`.slice(0, 200)}
+              ownerUserId={execution.requestedBy} ownerName={who} />
+          ) : execution.reason ? <span className="block first-letter:uppercase">
+            {/^[a-z_]+$/u.test(execution.reason) ? execution.reason.replace(/_/g, " ") : execution.reason}</span> : null}
+        </div>
+      ) : null}
       {ranAgain ? (
-        <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-[1.45] text-foreground" data-testid="connector-execution-rerun">
+        <p className="mt-0.5 line-clamp-2 text-[13px] sm:pl-[7.5rem] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere]" data-testid="connector-execution-rerun">
           Ran again: {ranAgain}
         </p>
       ) : stopped ? (
-        <ExecutionFix execution={execution} credentials={credentials} retrying={retry.isPending}
-          onFixed={() => { if (execution.retryable) retry.mutate(); }} onRetry={() => retry.mutate()} onReconnect={onReconnect} />
+        <div className="sm:pl-[7.5rem]"><ExecutionFix execution={execution} credentials={credentials} retrying={retry.isPending}
+          onFixed={() => { if (execution.retryable) retry.mutate(); }} onRetry={() => retry.mutate()} onReconnect={onReconnect} /></div>
       ) : null}
       {retry.error ? (
         <p role="alert" className="mt-1 text-[13px] font-medium text-destructive">
           {userErrorMessage(retry.error, "Couldn't run it again")}
         </p>
       ) : null}
-    </ConnectorRow>
+    </li>
   );
 }
 

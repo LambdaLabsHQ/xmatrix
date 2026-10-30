@@ -22,6 +22,7 @@ async function execute(outcome) {
     };
     if (["../product-message-append", "../private-response",
       "../spaces"].includes(name)) return {};
+    if (name === "./agent-caller") return { callingAgentOf: async () => undefined };
     assert.fail(`unexpected import: ${name}`);
   });
   let attempts = 0;

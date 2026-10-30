@@ -29,6 +29,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
     if (name === "../product-message-append") return {
       dispatchProductMessageAppend: async (_env, _channel, input) => { receipts.push(input); return new Response(null, { status: 200 }); },
     };
+    if (name === "./agent-caller") return { callingAgentOf: async () => ({ name: "claude", harness: "claude" }) };
     assert.fail(`unexpected support import ${name}`);
   });
   const dependencies = {

@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: An App's Recent activity is a call log that names the calling Agent
+
+Recent activity printed each run's whole answer on the page, so a calendar list
+ran as raw JSON across the background. It is now a call log on one rounded
+tinted sheet: per call the day and minute, the action and its command, who made
+it and how it ended, and under it the sentence it answered with; the returned
+content stays in the conversation. A call an Agent made now names that Agent
+with both faces ("claude for Daniel"): the Hub records the Agent's name and
+harness when the call runs, in new nullable `requested_by_agent` and
+`requested_by_harness` columns (migration 0232); earlier calls show only
+their person. The copy line on App pages shares the sheet's tint,
+radius and width (#1234). Beta Web and Hub; additive schema change; recovery is
+a CI-validated release reverting the change (the columns may stay).
+
 ## Unreleased: A page's code blocks take syntax colours
 
 A page's code blocks were plain text. They now take the same low-chroma inks
