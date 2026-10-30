@@ -81,11 +81,19 @@ have unknown peaks because the source logs contain only elapsed time.
 The snapshot affects scheduling, never test
 discovery or authorization; all shards of one revision must use the same input.
 
-Each hosted job carries PNPM's lockfile supply-chain verification record
+Hosted jobs do not restore a PNPM store from the Actions cache. That archive
+is about 488 MiB and every install job would download it; overlapping pull
+requests push the cache account over its egress limit, the transfer sits at
+0 bytes, and the smaller Next.js cache then misses as well. A registry
+install is within a few seconds of a successful store restore. Each hosted
+job still carries PNPM's lockfile supply-chain verification record
 (`lockfile-verified.jsonl`) in the Actions cache, keyed by the lockfile, the
 workspace policy files and the PNPM version. PNPM itself skips its per-entry
 registry check only for a lockfile with the same content hash verified under a
 policy at least as strict; any other lockfile or policy is checked in full.
+Only a job that runs `next build` restores the Next.js build cache. The unit
+tests and the lint/typecheck job do not, so they do not compete with the
+compile for that egress.
 Reusable callers can set `linux_runner`, `offload_runner`, and `windows_runner`
 to a JSON runner label or array, for example `'"ubuntu-24.04"'`. These inputs
 select compute only; they do not change the tests or release authorization.

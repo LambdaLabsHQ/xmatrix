@@ -189,6 +189,8 @@ test("hosted turbo cache scopes are not prefixes of each other", () => {
     const writers = new Map();
     for (const entry of entries) {
       assert.equal(typeof entry.scope, "string", entry.name);
+      const builds = entry.partitions !== "web-unit" && entry.partitions !== "web-check";
+      assert.equal(entry.next, builds, entry.name);
       scopes.add(entry.scope);
       const writes = entry.primary === true || String(entry.shard).startsWith("1/");
       if (!writes) continue;
@@ -212,5 +214,6 @@ test("hosted turbo cache scopes are not prefixes of each other", () => {
     }
   }
   assert.match(webJob, /key: turbo-\$\{\{ runner\.os \}\}-\$\{\{ matrix\.scope \}\}-\$\{\{ github\.sha \}\}/u);
+  assert.match(webJob, /runner\.environment == 'github-hosted' && matrix\.next/u);
   assert.doesNotMatch(webJob, /matrix\.primary && 'web'/u);
 });

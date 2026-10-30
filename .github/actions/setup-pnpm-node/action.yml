@@ -71,22 +71,15 @@ runs:
         "$pnpm_prefix/bin/pnpm" --version
         echo "$pnpm_prefix/bin" >> "$GITHUB_PATH"
 
-    # An ephemeral GitHub-hosted runner starts with an empty store, so it
-    # restores one from the Actions cache, keyed by the lockfile. Persistent
-    # runners never take this path (see below).
-    - name: Locate the PNPM store on a GitHub-hosted runner
-      id: hosted-store
-      if: inputs.install-deps == 'true' && runner.environment == 'github-hosted'
-      shell: bash
-      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-    - name: Restore the PNPM store on a GitHub-hosted runner
-      if: inputs.install-deps == 'true' && runner.environment == 'github-hosted'
-      uses: actions/cache@v6
-      with:
-        path: ${{ steps.hosted-store.outputs.path }}
-        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-        restore-keys: pnpm-store-${{ runner.os }}-
+    # Do not put the PNPM store in the Actions cache. The lockfile's store is
+    # about 488 MiB, and every hosted install job restores it. Overlapping
+    # pull requests drive the cache account over its egress limit: the
+    # download then sits at 0 bytes for about 35 seconds and reports
+    # "Egress is over the account limit", after which the smaller Next.js
+    # cache misses too and the production build compiles cold. A registry
+    # install is within a few seconds of a successful store restore, so the
+    # archive does not pay for itself. Persistent runners keep the machine
+    # store described below and never used this path.
 
     # PNPM re-checks every lockfile entry against its supply-chain policy
     # (minimumReleaseAge) before installing: a registry metadata request per
@@ -120,13 +113,9 @@ runs:
     # Supported product jobs use persistent self-hosted runners. PNPM's
     # content-addressed store lives outside each checkout, so clean worktrees
     # reuse the machine-local packages and download only missing lockfile
-    # entries. Do not wrap this shared action in a GitHub Actions cache: every
-    # job would download and extract the same large remote archive even when
-    # its runner-local store is already warm. A future ephemeral workflow may
-    # own a separate cache policy without taxing persistent runners.
-    # A persistent runner shares its host with other jobs, so its install is
-    # throttled; a hosted VM has the machine to itself and installs at full
-    # concurrency from the restored store.
+    # entries. A persistent runner shares its host with other jobs, so its
+    # install is throttled; a hosted VM has the machine to itself and installs
+    # at full concurrency from the registry.
     - name: Install dependencies
       if: inputs.install-deps == 'true'
       shell: bash
