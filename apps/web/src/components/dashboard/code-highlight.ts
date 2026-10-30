@@ -39,7 +39,12 @@ const GRAMMARS = {
 const DETECTED = ["bash", "json", "typescript", "python", "yaml", "sql", "diff", "swift", "rust", "go", "css", "xml"];
 const DETECTION_RELEVANCE = 4;
 
-function loadHighlighter(): Promise<HLJSApi> {
+/** highlight.js once it has loaded, else null. */
+export function loadedHighlighter(): HLJSApi | null {
+  return highlighter;
+}
+
+export function loadHighlighter(): Promise<HLJSApi> {
   loading ??= (async () => {
     const [{ default: hljs }, grammars] = await Promise.all([
       import("highlight.js/lib/core"),
@@ -58,6 +63,31 @@ export function highlightCode(hljs: HLJSApi, text: string, language: string): st
   }
   const detected = hljs.highlightAuto(text, DETECTED);
   return detected.relevance >= DETECTION_RELEVANCE ? detected.value : null;
+}
+
+export type CodeInkRun = { from: number; to: number; className: string };
+
+/** The coloured runs of a highlighted text as offsets into it, for an editor that draws them as decorations. */
+export function highlightRuns(hljs: HLJSApi, text: string, language: string): CodeInkRun[] | null {
+  const html = highlightCode(hljs, text, language);
+  if (html === null) return null;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const runs: CodeInkRun[] = [];
+  let offset = 0;
+  const walk = (node: Node, className: string) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const length = child.textContent?.length ?? 0;
+        if (className && length) runs.push({ from: offset, to: offset + length, className });
+        offset += length;
+      } else if (child instanceof Element) {
+        walk(child, [className, child.className].filter(Boolean).join(" "));
+      }
+    }
+  };
+  walk(template.content, "");
+  return runs;
 }
 
 /** The block's highlighted markup (escaped by highlight.js), or null while loading or when nothing claims it. */

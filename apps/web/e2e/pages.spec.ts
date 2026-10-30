@@ -2550,3 +2550,18 @@ test("a discussion with many conversations above it opens level with its passage
   await expect(text).toBeInViewport();
   await expect(open.getByRole("button", { name: "Close the conversation" })).toBeInViewport();
 });
+
+test("a page's code blocks take syntax inks by their fence's language, and a table in a fence stays plain", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const server = pageDocument("# Relay\n\n```ts\nconst ready = true;\n```\n\n```\ngroup  product id\nPro    sh.xmatrix.app.pro.annual\n```\n");
+  new awarenessProtocol.Awareness(server).setLocalState(null);
+  await servePageSession(browser, server);
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await browser.getByTestId("page-tree").getByRole("button", { name: "Relay" }).click();
+  const blocks = browser.locator(".ProseMirror.page-document[contenteditable] pre");
+  await expect(blocks.first().locator(".hljs-keyword")).toHaveText("const");
+  await expect(blocks.nth(1)).toContainText("sh.xmatrix.app.pro.annual");
+  await expect(blocks.nth(1).locator("[class*='hljs-']")).toHaveCount(0);
+});

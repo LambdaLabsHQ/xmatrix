@@ -27,6 +27,7 @@ import { referenceChips, type PageReferenceTargets } from "./page-reference-chip
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { imageView, pageMediaPaste, type LocalMedia, type PageMediaSource, type UploadPageMedia } from "./page-media";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
+import { codeHighlight } from "./page-code-highlight";
 import { pageTriggers } from "./page-triggers";
 import { tableCells } from "./page-table-cells-plugin";
 import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
@@ -1305,6 +1306,7 @@ export function editorPlugins(input: {
     pageTriggers(),
     markdownShortcuts(),
     syntaxPlugin(),
+    codeHighlight(),
     taskShortcut,
     pageMediaPaste({ upload: input.uploadMedia, local: input.localMedia, onFailure: input.onMediaFailure }),
     pasteLink,

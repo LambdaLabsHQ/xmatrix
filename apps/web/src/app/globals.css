@@ -2764,29 +2764,6 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   padding: 0.6em 0.9em;
 }
 
-/* Syntax colours are inks on the paper, not a theme on top of it: low chroma, about one weight darker than
-   a printed listing, with comments receding to the margin's grey. */
-.xmatrix-app .rich-message .message-code-block {
-  --code-ink-keyword: oklch(0.44 0.13 28);
-  --code-ink-string: oklch(0.45 0.1 145);
-  --code-ink-number: oklch(0.5 0.11 65);
-  --code-ink-title: oklch(0.42 0.11 255);
-  --code-ink-attr: oklch(0.43 0.08 200);
-  --code-ink-type: oklch(0.44 0.1 320);
-  --code-ink-comment: oklch(0.56 0.015 80);
-}
-
-.xmatrix-app .rich-message .message-code-block :is(.hljs-keyword, .hljs-selector-tag, .hljs-meta .hljs-keyword, .hljs-doctag) { color: var(--code-ink-keyword); }
-.xmatrix-app .rich-message .message-code-block :is(.hljs-string, .hljs-regexp, .hljs-meta .hljs-string, .hljs-char) { color: var(--code-ink-string); }
-.xmatrix-app .rich-message .message-code-block :is(.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet, .hljs-link) { color: var(--code-ink-number); }
-.xmatrix-app .rich-message .message-code-block :is(.hljs-title, .hljs-section, .hljs-selector-id, .hljs-selector-class) { color: var(--code-ink-title); }
-.xmatrix-app .rich-message .message-code-block :is(.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-template-variable, .hljs-params, .hljs-name) { color: var(--code-ink-attr); }
-.xmatrix-app .rich-message .message-code-block :is(.hljs-built_in, .hljs-type, .hljs-class .hljs-title, .hljs-meta) { color: var(--code-ink-type); }
-.xmatrix-app .rich-message .message-code-block :is(.hljs-comment, .hljs-quote) { color: var(--code-ink-comment); font-style: italic; }
-.xmatrix-app .rich-message .message-code-block .hljs-addition { color: var(--code-ink-string); background: color-mix(in oklch, var(--code-ink-string) 10%, transparent); }
-.xmatrix-app .rich-message .message-code-block .hljs-deletion { color: var(--code-ink-keyword); background: color-mix(in oklch, var(--code-ink-keyword) 10%, transparent); }
-.xmatrix-app .rich-message .message-code-block .hljs-emphasis { font-style: italic; }
-.xmatrix-app .rich-message .message-code-block .hljs-strong { font-weight: 700; }
 
 /*
  * Desktop: float the composer over the chat timeline, matching the mobile float
