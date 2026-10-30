@@ -326,6 +326,11 @@ ownership.
 It freezes the actual Gmail reply recipient before approval and never fetches
 new headers to redirect the approved email. Expired or changed requests must
 be recreated. Consumed or uncertain writes are not automatically retried.
+Token refresh can change the credential version during approved dispatch and
+invalidate that approval. Known authority refusals report a blocked action and
+the required connection review or new approval, rather than a provider failure;
+unknown exceptions remain masked. This does not relax the version checks or
+reuse the consumed approval.
 The approval payload is cleared after settlement; ordinary receipts carry the
 request reference rather than the email body. See connector-platform.md §3.5
 for persistence, additive rollout and API contracts.

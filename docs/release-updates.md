@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Approved connector actions explain stale approval failures
+
+An action approved after its OAuth token approached expiry could refresh the
+credentials and then fail the approval's credential-version check. The receipt
+called that internal refusal a provider failure. Known approval and credential
+authority errors now report a blocked action with the required connection review
+or new approval. Unknown exception details stay hidden; approval checks, single
+use and write retry rules remain unchanged. Hub only, no schema change; recovery
+is a CI-validated release reverting the receipt mapping.
+
 ## Unreleased: Connector JSON commands keep working with web addresses
 
 A connector command containing a URL in a JSON string could be treated as

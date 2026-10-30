@@ -254,7 +254,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       await announceActionRequests(input.env, scope.spaceId, input.channelId);
       return approvalReceipt(manifest.name, actionId, request);
     } catch (error) {
-      const shared = sharedWorkspace(error);
+      const shared = actionAuthorityFailure(error);
       if (shared) return result("blocked", shared);
       if (error instanceof ConnectorRemedy && error.status === 403) return result("blocked", error.message);
       return result("failed", error instanceof ProviderRequestError ? error.message : "could not create an approval request");
@@ -273,6 +273,8 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
         const summary = result.url ? `${result.summary} — ${result.url}` : result.summary;
         return { status: "completed", summary: `${summary}${context.x?.billingSummary?.() ? `\n${context.x.billingSummary()}` : ""}` };
       } catch (error) {
+        const authority = actionAuthorityFailure(error);
+        if (authority) return { status: "blocked", summary: authority };
         const reason = error instanceof ProviderRequestError ? error.message
           : error instanceof DOMException && error.name === "TimeoutError"
             ? "the provider did not answer in time" : "the provider call failed";
@@ -280,7 +282,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
           (context.x?.billingSummary?.() ? `\n${context.x.billingSummary()}` : "") };
       }
     } catch (error) {
-      const shared = sharedWorkspace(error);
+      const shared = actionAuthorityFailure(error);
       if (shared) return { status: "blocked", summary: shared };
       if (error instanceof ProviderRequestError) return { status: error instanceof ConnectorRemedy && error.status === 403 ? "blocked" : "failed",
         summary: error.message, remedy: remedyOf(error) };
@@ -290,9 +292,20 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   });
 }
 
-/** A Slack workspace still shared by two Spaces' older bindings: its refusal says what to do. */
-function sharedWorkspace(error: unknown): string | undefined {
-  return error instanceof AppControlError && error.code === SLACK_WORKSPACE_TAKEN ? error.message : undefined;
+/** Local authority refusals use fixed recovery copy, never arbitrary exception text. */
+function actionAuthorityFailure(error: unknown): string | undefined {
+  if (!(error instanceof AppControlError)) return undefined;
+  if (error.code === SLACK_WORKSPACE_TAKEN) return error.message;
+  if (["action_request_scope_changed", "credential_changed"].includes(error.code)) {
+    return "The connected account or credentials changed; review the current connection and request a new approval.";
+  }
+  if (["action_request_not_executing", "action_request_expired"].includes(error.code)) {
+    return "This approval is no longer executable; review the current connection and request a new approval.";
+  }
+  if (error.code === "action_request_forbidden") {
+    return "Current access no longer permits this approval; a Space admin must review it.";
+  }
+  return undefined;
 }
 
 /** A Channel's pending requests changed: its admins' open Channels read the list again instead of polling it. */
