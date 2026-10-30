@@ -13,6 +13,7 @@ import type { ComposerInvocationDraft } from "./composer-invocation-bindings";
 import { ChannelHistoryPreload } from "./channel-history-preload";
 import { useStartupBackgroundReady } from "./use-startup-background-ready";
 import { nativeBackOwnsAnimation } from "./use-system-back";
+import type { MobileListTransitionDriver } from "./use-mobile-list-transition";
 
 import type {
   DesktopAgentPresetDiscovery,
@@ -499,16 +500,23 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
      list, so we must NOT auto-pick channels[0]. Desktop keeps the sidebar +
      auto-selection. Read via ref inside selection resolvers (no re-render). */
   const isMobileViewportRef = useRef(false);
+  /** A conversation and its channel list trade places in the shell's own motion (use-mobile-list-transition). */
+  const mobileListTransitionRef = useRef<MobileListTransitionDriver | null>(null);
 
   const runMobileScreenTransition = useCallback((
     direction: "forward" | "back",
     update: () => void
   ) => {
+    if (nativeBackOwnsAnimation()) {
+      update();
+      return;
+    }
+    if (mobileListTransitionRef.current?.run(direction, update)) return;
     const transitionDocument = document as Document & {
       startViewTransition?: (callback: () => void) => { ready: Promise<void>; finished: Promise<void> };
     };
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (nativeBackOwnsAnimation() || !isMobileViewportRef.current || reduceMotion || !transitionDocument.startViewTransition) {
+    if (!isMobileViewportRef.current || reduceMotion || !transitionDocument.startViewTransition) {
       update();
       return;
     }
@@ -3091,6 +3099,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     toggleChannelPinned,
     markChannelResponded,
     runMobileScreenTransition,
+    mobileListTransitionRef,
     setWorkingSpaceId,
     history,
     historyCacheRevision,

@@ -28,6 +28,11 @@ for (const scenario of ["superseded", "update failure", "invalid animation"] as 
     }, scenario);
     await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
     await page.goto("/app/personal-sspaceperso/channels");
+    // A conversation opened from its list draws its own change
+    // (use-mobile-list-transition); one opened from search goes through the
+    // browser's view transition.
+    await page.getByRole("button", { name: "Search workspace" }).tap();
+    await page.keyboard.type("general");
     if (scenario === "invalid animation") {
       await page.evaluate(() => {
         for (let i = 0; i < 2; i++) {
@@ -38,7 +43,7 @@ for (const scenario of ["superseded", "update failure", "invalid animation"] as 
         }
       });
     }
-    await page.locator('[data-mobile-channel-row-id="channel-general"]').tap();
+    await page.getByRole("dialog", { name: "Search workspace" }).getByRole("button", { name: /#general/u }).tap();
     await expect(page.locator(".app-mobile-channel-detail-bar")).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.xmatrixMobileNavigation))
       .toBeUndefined();

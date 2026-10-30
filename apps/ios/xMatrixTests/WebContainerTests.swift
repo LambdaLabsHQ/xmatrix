@@ -142,28 +142,53 @@ final class WebContainerTests: XCTestCase {
 
     func testEdgeSwipeGoesBackInThePageNotThroughHistory() {
         var asked: [String] = []
+        var pageDraws = false
         var pageWentBack = true
         let (coordinator, container) = makeCoordinator(askScript: { _, script, answer in
             asked.append(script)
-            answer(pageWentBack)
+            answer(script.contains("__xmatrixBackGesture") ? pageDraws : pageWentBack)
         })
         defer { withExtendedLifetime(container) {} }
         coordinator.load(AppConfiguration.mobileTabURL(.messages))
         XCTAssertFalse(page(coordinator).allowsBackForwardNavigationGestures)
+        coordinator.edgeSwipeBegan()
         coordinator.edgeSwipeEnded(distance: 20, speed: 100)
-        XCTAssertEqual(asked, [])
+        XCTAssertEqual(asked, ["window.__xmatrixBackGesture?.begin() === true"])
+        coordinator.edgeSwipeBegan()
         coordinator.edgeSwipeEnded(distance: 120, speed: 0)
-        XCTAssertEqual(asked, ["window.__xmatrixNativeBack?.() === true"])
+        XCTAssertEqual(asked.last, "window.__xmatrixNativeBack?.() === true")
         pageWentBack = false
+        coordinator.edgeSwipeBegan()
         coordinator.edgeSwipeEnded(distance: 0, speed: 900)
-        XCTAssertEqual(asked.count, 2)
+        XCTAssertEqual(asked.suffix(2), ["window.__xmatrixBackGesture?.begin() === true",
+                                         "window.__xmatrixNativeBack?.() === true"])
     }
 
-    func testSwipedScreenStaysUnderTheFinger() {
-        for (distance, progress) in [(CGFloat(0), CGFloat(0)), (120, 0.3), (420, 1.08)] {
-            let pose = WebContainerView.Coordinator.plankTransform(distance: distance, progress: progress)
-            XCTAssertEqual(pose.m41, distance, accuracy: 0.001)
-        }
+    /// A conversation over its channel list: the page draws the whole swipe
+    /// from the distances it is sent and goes Back itself when it is let go.
+    func testEdgeSwipeThePageDrawsIsHandedToIt() {
+        var ran: [String] = []
+        var asked: [String] = []
+        let (coordinator, container) = makeCoordinator(
+            runScript: { _, script in ran.append(script) },
+            askScript: { _, script, answer in
+                asked.append(script)
+                answer(true)
+            }
+        )
+        defer { withExtendedLifetime(container) {} }
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        coordinator.edgeSwipeBegan()
+        coordinator.edgeSwipeMoved(distance: 60)
+        coordinator.edgeSwipeEnded(distance: 60, speed: 900)
+        XCTAssertEqual(asked, ["window.__xmatrixBackGesture?.begin() === true"])
+        XCTAssertEqual(ran.filter { $0.contains("__xmatrixBackGesture") }, [
+            "window.__xmatrixBackGesture?.move(60.0)",
+            "window.__xmatrixBackGesture?.end(true, 900.0)",
+        ])
+        coordinator.edgeSwipeBegan()
+        coordinator.edgeSwipeEnded(distance: 40, speed: 0)
+        XCTAssertEqual(ran.last, "window.__xmatrixBackGesture?.end(false, 0.0)")
     }
 
     func testEdgeSwipeRunsAlongsideThePageTouches() {
