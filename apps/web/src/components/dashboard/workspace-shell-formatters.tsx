@@ -3,6 +3,7 @@ import { usageWithoutQuota, accountQuotaUsageFromCandidates, mergeUsageAttribute
 export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "@xmatrix/protocol";
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { attachmentMediaType, directMediaLink } from "./attachment-media-type";
+import { useHighlightedCode } from "./code-highlight";
 import { MediaLink } from "./media-player";
 import { MessageMarkdownImage } from "./message-markdown-image";
 import { formatInstant, formatZonedDateTime } from "./time-display";
@@ -251,6 +252,7 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
   }
 
   const language = markdownCodeLanguage(children);
+  const highlighted = useHighlightedCode(text, language);
   // The block draws its own code element from the text, so a fence without a language never falls through to the
   // inline span's chip and gets a rim on every line.
   return (
@@ -266,7 +268,11 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
         {codeCopied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
       </button>
       <pre className="message-code-scroll max-w-full overflow-x-auto text-xs leading-5">
-        <code className="block min-w-max font-mono">{text}</code>
+        {highlighted === null ? (
+          <code className="block min-w-max font-mono">{text}</code>
+        ) : (
+          <code className="block min-w-max font-mono" dangerouslySetInnerHTML={{ __html: highlighted }} />
+        )}
       </pre>
     </div>
   );

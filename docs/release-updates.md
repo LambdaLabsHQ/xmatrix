@@ -7,7 +7,10 @@ the light theme every line wore its own rim and long lines were cut off; every
 block also carried a bold uppercase CODE title band and a border. A code block
 in a message is now one piece of tinted paper, the same as a page's code block
 and quote: plain monospace ink that scrolls sideways, the language as a quiet
-label only when the fence names one, and copy at the corner. A quote in a
+label only when the fence names one, and copy at the corner. Code takes
+syntax colours in low-chroma inks (highlight.js, loaded only once a code block
+appears): by the fence's language, or, for a fence without one, only when a
+grammar clearly claims it, so a table or a log stays plain. A quote in a
 message is the same tinted paper instead of a rule beside grey text. Beta Web,
 no API or schema change; recovery is a CI-validated release reverting the
 change.
