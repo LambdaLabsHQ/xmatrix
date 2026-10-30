@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: The site also answers at xmatrix.page
+
+xmatrix.sh is a country-code domain Google does not treat as generic, so the
+site was indexed as a Saint Helena site. The stable Web now also serves the
+marketing site at xmatrix.page: the home pages, docs, download, release notes
+and legal pages answer there, and canonical URLs, the sitemap and robots name
+xmatrix.page on both origins, so search engines index it there. Every page
+still answers at xmatrix.sh and nothing redirects away from it; at xmatrix.page
+any other path, the app and sign-in among them, goes to xmatrix.sh with a
+temporary redirect. The Hub, its OAuth callbacks, webhooks, MCP endpoint, token
+issuer and the session cookie are unchanged. Stable Web only, no API or schema
+change; recovery is a CI-validated stable Web release without `web.siteOrigin`.
+
 ## Unreleased: Approved connector actions explain stale approval failures
 
 An action approved after its OAuth token approached expiry could refresh the

@@ -37,6 +37,7 @@
   "web": {
     "workerName": "xmatrix-web",
     "origin": "https://xmatrix.sh",
+    "siteOrigin": "https://xmatrix.page",
     "workersDev": true,
     "previewUrls": true,
     "beta": {
