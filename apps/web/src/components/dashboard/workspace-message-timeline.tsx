@@ -141,6 +141,7 @@ import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
 import { TimelineVirtuosoScroller } from "./timeline-virtuoso-scroller";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, beginTimelineSendRise, isJustSentRow, playSentRowEntrance } from "./timeline-send-rise";
 import { FoldedActivityRow } from "./conversation-activity-row";
+import { HumanAboveViewJump, TIMELINE_ROW_ID_ATTRIBUTE } from "./timeline-human-above";
 import {
   buildConversationRows,
   sinceDigest,
@@ -1111,6 +1112,7 @@ export const MessageTimeline = memo(function MessageTimeline({
               <div
                 key={message.id}
                 id={messageAnchorId(message)}
+                {...{ [TIMELINE_ROW_ID_ATTRIBUTE]: message.id }}
                 ref={handleTimelineRowMount}
                 data-timeline-rise-row={
                   Date.now() - (arrivedAt.get(message.id) ?? 0) < TIMELINE_ARRIVAL_FRESH_MS ? "sent" : ""
@@ -1230,6 +1232,8 @@ export const MessageTimeline = memo(function MessageTimeline({
         settling && "[&_[data-testid=virtuoso-item-list]]:invisible",
       )}
     >
+      <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id} token={token}
+        hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling} onJump={stableOnJumpToMessage} />
       {/* A refresh must not hide already-rendered rows.
           Skeleton only when there is nothing to show yet. */}
       {loading && !hasTimelineContent && (

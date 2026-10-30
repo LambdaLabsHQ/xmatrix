@@ -899,6 +899,8 @@ export interface MessageHistoryInput {
   beforeSequence?: number;
   afterSequence?: number;
   limit?: number;
+  /** Only messages this kind of sender wrote: the last thing a person said, above a run of Agent replies. */
+  authorKind?: "user" | "agent" | "app";
   /** The Space placement the caller resolved together with the Channel's
    *  route. It only selects the shard; the read still takes the fence. */
   resolvedPlacement?: SpacePlacement;
@@ -3028,6 +3030,9 @@ export class PostgresMessageRepository {
     if (!Number.isSafeInteger(limit) || limit < 1 || selectedBounds > 1) {
       throw new MessageAuthorityError("invalid_request", 400, "History bounds are invalid");
     }
+    if (input.authorKind !== undefined && !["user", "agent", "app"].includes(input.authorKind)) {
+      throw new MessageAuthorityError("invalid_request", 400, "History author is invalid");
+    }
     const beforeTime = input.before === undefined ? null : new Date(input.before);
     if (beforeTime && !Number.isFinite(beforeTime.getTime())) {
       throw new MessageAuthorityError("invalid_request", 400, "History before timestamp is invalid");
@@ -3046,7 +3051,7 @@ export class PostgresMessageRepository {
       }, callback);
     const direction = after === null ? "DESC" : "ASC";
     const rows = await read((transaction) => transaction.query<HistoryPageRow>({
-      name: "message_history_page_v4",
+      name: "message_history_page_v5",
       text: `WITH history_input AS (
           SELECT $1::text AS space_id,$2::text AS channel_id,
             $7::text AS principal_kind,$8::text AS principal_id
@@ -3064,6 +3069,7 @@ export class PostgresMessageRepository {
             AND ($3::bigint IS NULL OR timeline_sequence < $3)
             AND ($4::bigint IS NULL OR timeline_sequence > $4)
             AND ($5::timestamptz IS NULL OR sent_at < $5)
+            AND ($11::text IS NULL OR author_kind = $11)
           ORDER BY timeline_sequence ${direction} LIMIT $6
         ), thread_candidates AS MATERIALIZED (
           SELECT DISTINCT ON (c.metadata_json->>'threadRootMessageId')
@@ -3124,7 +3130,7 @@ export class PostgresMessageRepository {
         LEFT JOIN thread_summaries thread ON thread.root_message_id=page.message_id
         ORDER BY page.timeline_sequence ${direction}`,
       values: [spaceId, channelId, before, after, beforeTime?.toISOString() ?? null, limit + 1,
-        principal.kind, principal.id, limit, `${principal.kind}:${principal.id}`],
+        principal.kind, principal.id, limit, `${principal.kind}:${principal.id}`, input.authorKind ?? null],
       maxRows: limit + 1,
     }));
     const head = rows[0];

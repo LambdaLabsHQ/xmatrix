@@ -132,7 +132,7 @@ integration("one fenced statement reads the authorized page, its Thread summarie
   assert.equal(newest.messages[0].threadSummary, undefined, "a closed Thread stays hidden");
   assert.equal(newest.messages[1].attachments[0].version, 3, "a legacy attachment edge recovers its version");
   assert.equal(newest.messages[2].tombstoneSender.label, "Ada Author", "a recalled row names its author");
-  assert.deepEqual(counted.names, ["message_history_page_v4",
+  assert.deepEqual(counted.names, ["message_history_page_v5",
     "message_history_attachment_versions_v1", "message_history_tombstone_senders_v2"]);
 
   counted.names.length = 0;
@@ -143,7 +143,7 @@ integration("one fenced statement reads the authorized page, its Thread summarie
   assert.equal(summary.channelId, seeded.thread);
   assert.equal(summary.replyCount, 3, "the root copy is not a reply");
   assert.deepEqual(summary.replies.map((reply) => reply.messageId), [`${seeded.thread}-3`, `${seeded.thread}-4`]);
-  assert.deepEqual(counted.names, ["message_history_page_v4"],
+  assert.deepEqual(counted.names, ["message_history_page_v5"],
     "a page without legacy attachments or tombstones is one statement");
 
   const before = await repository.history({ ...scope, beforeSequence: 2 });
@@ -151,6 +151,12 @@ integration("one fenced statement reads the authorized page, its Thread summarie
   assert.equal(before.hasMore, false);
   const timed = await repository.history({ ...scope, before: "2026-09-01T00:02:30Z" });
   assert.deepEqual(timed.messages.map((message) => message.sequence), [1, 2]);
+  // The last thing a person said above an Agent's reply, however many replies lie between.
+  await sql("UPDATE data.messages SET author_kind='agent' WHERE space_id=$1 AND channel_id=$2 AND timeline_sequence=3",
+    [space, seeded.channel]);
+  const said = await repository.history({ ...scope, beforeSequence: 4, authorKind: "user", limit: 1 });
+  assert.deepEqual(said.messages.map((message) => message.messageId), [`${seeded.channel}-2`]);
+  await assert.rejects(repository.history({ ...scope, authorKind: "robot" }), (error) => error.code === "invalid_request");
 
   for (const principal of [{ kind: "user", id: `stranger-${id}` }, { kind: "agent", id: `instance-${id}` }]) {
     await assert.rejects(repository.history({ ...scope, principal }),

@@ -400,6 +400,13 @@ export async function openGeneralChannelWithHistory(
   });
 }
 
+/* A phone's screen change has landed: a conversation and its channel list have
+   finished trading places, and a dock tab's bar has finished sliding in with
+   its page. Layout read during either is a frame of the motion. */
+export async function screenChangeLanded(page: Page): Promise<void> {
+  await expect(page.locator("[data-list-transition], .app-dock-tab-slide-outgoing")).toHaveCount(0);
+}
+
 /* A conversation opens on a plain tail of its rows and the virtual list takes
    over a moment later. A spec that sends, or counts renders, from the first
    quarter second waits for that, as a reader's hands do. Call it once the

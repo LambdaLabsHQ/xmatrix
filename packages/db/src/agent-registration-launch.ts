@@ -43,6 +43,7 @@ import {
   validateHarnessParameterValues,
   type AutoLaunchTags,
   type HarnessTooOld,
+  type MachineAgents,
   type HarnessSignedOut,
   type OfflineMachine,
   type LaunchMachineBlock,
@@ -399,6 +400,33 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       agentName: String(row.display_name), reused };
   }
 
+  /** The harnesses the one Machine a tag names runs in this Space; undefined
+   * when no Machine or more than one goes by it. Only read to word a refusal. */
+  private async machineAgents(tag: string): Promise<MachineAgents | undefined> {
+    const registrations = await this.database.transaction({ requestId: "registration-machine-agents",
+      operation: "registration.launch.machine-agents", placement: this.placement }, tx => tx.query({
+      name: "registration_launch_machine_agents_v1", text: `SELECT r.owner_user_id,r.machine_id,r.harness
+        FROM data.space_agent_registrations r
+        JOIN data.space_agent_registration_access a ON a.space_id=r.space_id AND a.owner_user_id=r.owner_user_id
+          AND a.machine_id=r.machine_id AND a.harness=r.harness
+        WHERE r.space_id=$1 AND a.grant_state='active' AND a.policy_state='enabled'
+        ORDER BY r.harness LIMIT 501`, values: [this.placement.spaceId], maxRows: 501 }));
+    const machines = [...new Map(registrations.map(row => [`${row.owner_user_id}\n${row.machine_id}`,
+      { ownerUserId: String(row.owner_user_id), machineId: String(row.machine_id) }])).values()];
+    if (!machines.length || machines.length > 100) return undefined;
+    const names = await this.directory.transaction({ requestId: "registration-machine-agents",
+      operation: "registration.launch.machine-agents-names" }, tx => tx.query({
+      name: "registration_launch_machine_agents_names_v1", text: `SELECT owner_user_id,machine_id,name FROM data.machines
+        WHERE (owner_user_id,machine_id) IN (SELECT * FROM unnest($1::text[],$2::text[])) AND retired_at IS NULL`,
+      values: [machines.map(machine => machine.ownerUserId), machines.map(machine => machine.machineId)], maxRows: 100 }));
+    const named = names.filter(row => machineTagSelects(tag, String(row.machine_id), String(row.name ?? "")));
+    if (named.length !== 1 || !named[0]!.name) return undefined;
+    const [{ owner_user_id: owner, machine_id: machineId, name }] = named as [QueryResultRow];
+    const harnesses = [...new Set(registrations.filter(row => row.owner_user_id === owner && row.machine_id === machineId)
+      .map(row => String(row.harness)))];
+    return { machineName: String(name), harnesses };
+  }
+
   /** A machine tag may name the Machine instead of spelling its id; never its hostname. */
   private async machineKnownAs(ownerUserId: string, machineId: string, tag: string): Promise<boolean> {
     if (tag === machineId) return true;
@@ -711,18 +739,25 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
     const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld;
-      signedOut?: HarnessSignedOut; offline?: OfflineMachine[]; quotaTargets?: SpaceAgentRegistrationKey[] }> = [];
+      signedOut?: HarnessSignedOut; offline?: OfflineMachine[]; machineAgents?: MachineAgents;
+      quotaTargets?: SpaceAgentRegistrationKey[] }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
     const summonText = (selection: { start: number; end: number; text: string }) =>
       input.body.slice(selection.start, selectionLaunchConditions(input.body, selection).end);
-    // A refusal keeps what its error says is too old, signed out or offline, so the reply can name it.
-    const refused = (selectionIndex: number, selection: { start: number; end: number; text: string }, code: string, error: unknown) => {
+    // A refusal keeps what its error says is too old, signed out or offline, so the reply can name it,
+    // and for a named machine that does not run the Agent, what that machine does run.
+    const refused = async (selectionIndex: number, selection: { start: number; end: number; text: string }, code: string,
+      error: unknown) => {
       const tooOld = error instanceof RegistrationAccessError ? error.tooOld : undefined;
       const signedOut = error instanceof RegistrationAccessError ? error.signedOut : undefined;
       const offline = error instanceof RegistrationAccessError ? error.offline : undefined;
+      const machine = code === "registration_machine_unavailable"
+        ? selectionLaunchConditions(input.body, selection).tags.machine : undefined;
+      // Only wording: a failed read leaves the refusal as it was.
+      const machineAgents = machine ? await this.machineAgents(machine).catch(() => undefined) : undefined;
       rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}),
-        ...(signedOut ? { signedOut } : {}), ...(offline?.length ? { offline } : {}),
+        ...(signedOut ? { signedOut } : {}), ...(offline?.length ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}),
         ...(error instanceof RegistrationAccessError && error.quotaTargets ? { quotaTargets: error.quotaTargets } : {}) });
     };
     for (const [selectionIndex, selection] of source.selections.entries()) {
@@ -780,7 +815,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           const code = error instanceof RegistrationAccessError &&
             REGISTRATION_PREPARATION_REJECTION_CODES.includes(error.code)
             ? error.code : "registration_selection_failed";
-          refused(selectionIndex, selection, code, error);
+          await refused(selectionIndex, selection, code, error);
           continue;
         }
         const candidate = candidates.find(item => sameAgentRegistration(item.key, selected.key) && item.key.spaceId === selected.key.spaceId);
@@ -798,7 +833,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...selectedParameters(selected, candidate.key.harness) }));
       } catch (error) {
         if ((error instanceof RegistrationAccessError || error instanceof MessageAuthorityError) && error.status < 500) {
-          refused(selectionIndex, selection, error.code, error);
+          await refused(selectionIndex, selection, error.code, error);
           continue;
         }
         throw error;

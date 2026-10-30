@@ -1,14 +1,28 @@
 use super::*;
 use xmatrix_cli_core::protocol;
 
-/// The owner of the Run this CLI runs inside, from its registration.
-fn run_owner_user_id() -> Option<String> {
+/// A field of the registration of the Run this CLI runs inside.
+fn run_registration_field(field: &str) -> Option<String> {
     let registration: Value =
         serde_json::from_str(&std::env::var("XMATRIX_AGENT_REGISTRATION").ok()?).ok()?;
-    registration["ownerUserId"]
+    registration[field]
         .as_str()
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+/// The owner of the Run this CLI runs inside, from its registration.
+fn run_owner_user_id() -> Option<String> {
+    run_registration_field("ownerUserId")
+}
+
+/// The named Space, or the Space of the Run this CLI runs inside.
+fn space_or_run(space: Option<String>) -> error::Result<String> {
+    space
+        .or_else(|| run_registration_field("spaceId"))
+        .ok_or_else(|| {
+            CliError::Launch("Name the Space with --space <id> (see `xmatrix spaces`)".into())
+        })
 }
 
 /// A Space's Agents are its registrations: one harness on one owner's machine.
@@ -31,7 +45,20 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
         None
     };
     match command {
-        AgentCommand::List { space } => list(hub_url, token, &space).await,
+        AgentCommand::List {
+            space,
+            machine,
+            json,
+        } => {
+            list(
+                hub_url,
+                token,
+                &space_or_run(space)?,
+                machine.as_deref(),
+                json,
+            )
+            .await
+        }
         AgentCommand::Add {
             harness,
             space,
@@ -154,7 +181,7 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
             } else {
                 text
             };
-            describe(hub_url, token, &space, &harness, text).await
+            describe(hub_url, token, &space_or_run(space)?, &harness, text).await
         }
         AgentCommand::Remove {
             harness,
@@ -190,7 +217,13 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
     }
 }
 
-async fn list(hub_url: &str, token: &str, space: &str) -> error::Result<()> {
+async fn list(
+    hub_url: &str,
+    token: &str,
+    space: &str,
+    machine: Option<&str>,
+    json: bool,
+) -> error::Result<()> {
     let value: Value = http::request_json(
         &with_route(hub_url, &protocol::space_agent_registrations_route(space)),
         "GET",
@@ -198,36 +231,98 @@ async fn list(hub_url: &str, token: &str, space: &str) -> error::Result<()> {
         None,
     )
     .await?;
-    let registrations = value["registrations"]
+    let mut registrations = value["registrations"]
         .as_array()
         .cloned()
         .unwrap_or_default();
-    if registrations.is_empty() {
-        println!(
-            "No Agents in Space {space}. Add one with `xmatrix agent add <harness> --space {space}`."
-        );
+    if let Some(machine) = machine {
+        registrations.retain(|registration| on_machine(registration, machine));
+    }
+    // One Machine's Agents together, so what it can run reads off one block.
+    registrations.sort_by_key(|registration| {
+        (
+            registration["machineName"]
+                .as_str()
+                .unwrap_or_default()
+                .to_lowercase(),
+            registration["key"]["machineId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            registration["key"]["harness"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        )
+    });
+    if json {
+        println!("{}", serde_json::json!({ "registrations": registrations }));
         return Ok(());
     }
+    if registrations.is_empty() {
+        match machine {
+            Some(machine) => println!("No Agents on Machine {machine} in Space {space}."),
+            None => println!(
+                "No Agents in Space {space}. Add one with `xmatrix agent add <harness> --space {space}`."
+            ),
+        }
+        return Ok(());
+    }
+    let text = |value: &Value| value.as_str().unwrap_or("-").to_string();
+    let width = registrations
+        .iter()
+        .map(|registration| text(&registration["machineName"]).chars().count())
+        .chain([7])
+        .max()
+        .unwrap_or(7);
     println!(
-        "{:<24} {:<10} {:<20} {:<20} {}",
-        "NAME".bold(),
-        "HARNESS".bold(),
-        "OWNER".bold(),
+        "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {}",
         "MACHINE".bold(),
-        "STATE".bold()
+        "ONLINE".bold(),
+        "HARNESS".bold(),
+        "NAME".bold(),
+        "STATE".bold(),
+        "QUOTA".bold(),
+        "OWNER".bold()
     );
     for registration in &registrations {
-        let text = |value: &Value| value.as_str().unwrap_or("-").to_string();
         println!(
-            "{:<24} {:<10} {:<20} {:<20} {}",
-            text(&registration["displayName"]),
-            text(&registration["key"]["harness"]),
-            text(&registration["ownerName"]),
+            "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {}",
             text(&registration["machineName"]),
-            state_label(registration)
+            online_label(registration),
+            text(&registration["key"]["harness"]),
+            text(&registration["displayName"]),
+            state_label(registration),
+            quota_label(registration),
+            text(&registration["ownerName"])
         );
     }
     Ok(())
+}
+
+/// A Machine named by its name (any case) or its id.
+fn on_machine(registration: &Value, machine: &str) -> bool {
+    registration["key"]["machineId"].as_str() == Some(machine)
+        || registration["machineName"]
+            .as_str()
+            .is_some_and(|name| name.eq_ignore_ascii_case(machine))
+}
+
+/// Whether the owner's daemon on its Machine is connected; `-` from a Hub that does not say.
+fn online_label(registration: &Value) -> &'static str {
+    match registration["live"]["machine"]["online"].as_bool() {
+        Some(true) => "online",
+        Some(false) => "offline",
+        None => "-",
+    }
+}
+
+/// The provider quota left in its tightest window, while the reading is current.
+fn quota_label(registration: &Value) -> String {
+    registration["live"]["quota"]["remainingPercent"]
+        .as_f64()
+        .map(|percent| format!("{}%", percent.round()))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 /// Prints what the Space says a harness is for, or rewrites it with `text`.
@@ -298,11 +393,17 @@ fn harness_profile<'a>(catalog: &'a Value, harness: &str) -> Option<&'a Value> {
 }
 
 /// Disabled in the Space, or (before disabling was per Space) on its machine.
+/// Its Space state; an enabled Agent that cannot take work yet says why.
 fn state_label(registration: &Value) -> String {
-    if registration["routingBlocker"].as_str() == Some("owner_environment_disabled") {
+    let blocker = registration["routingBlocker"].as_str();
+    if blocker == Some("owner_environment_disabled") {
         return "disabled".to_string();
     }
-    registration["state"].as_str().unwrap_or("-").to_string()
+    let state = registration["state"].as_str().unwrap_or("-");
+    match blocker {
+        Some(blocker) if state == "enabled" => blocker.replace('_', " "),
+        _ => state.to_string(),
+    }
 }
 
 /// The Agent's owner or a Space owner/admin disables or enables it in a Space.
@@ -584,6 +685,23 @@ mod tests {
         assert_eq!(
             state_label(&serde_json::json!({"state":"revoked"})),
             "revoked"
+        );
+    }
+
+    #[test]
+    fn a_listed_agent_says_whether_its_machine_can_take_work() {
+        let row = serde_json::json!({"state":"enabled","routingBlocker":"model_unavailable",
+            "machineName":"Laptop","key":{"machineId":"machine:abc","harness":"codex"},
+            "live":{"machine":{"online":false},"quota":{"remainingPercent":12.4}}});
+        assert_eq!(state_label(&row), "model unavailable");
+        assert_eq!(online_label(&row), "offline");
+        assert_eq!(quota_label(&row), "12%");
+        assert!(on_machine(&row, "laptop") && on_machine(&row, "machine:abc"));
+        assert!(!on_machine(&row, "Workstation"));
+        let unreported = serde_json::json!({"state":"enabled"});
+        assert_eq!(
+            (online_label(&unreported), quota_label(&unreported).as_str()),
+            ("-", "-")
         );
     }
 

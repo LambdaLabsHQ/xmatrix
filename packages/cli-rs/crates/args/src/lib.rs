@@ -249,14 +249,14 @@ pub enum Commands {
         #[command(subcommand)]
         command: SetupCommand,
     },
-    /// List connected agents
+    /// List live Agent Instances; each Machine's harnesses are in `xmatrix agent list`
     #[command(alias = "ls")]
     List {
         /// Emit machine-readable JSON with narrow fields including provider quota
         #[arg(long)]
         json: bool,
     },
-    /// Manage agents
+    /// List each Machine's Agents (harness, online, quota) and manage them in a Space
     Agent {
         #[command(subcommand)]
         command: AgentCommand,
@@ -277,7 +277,7 @@ pub enum Commands {
         #[command(subcommand)]
         command: SpaceCommand,
     },
-    /// Inspect or rename this Machine
+    /// Inspect or rename this Machine; every Machine's Agents are in `xmatrix agent list`
     Machine {
         #[command(subcommand)]
         command: MachineCommand,
@@ -1470,11 +1470,20 @@ pub enum GoalCliCommand {
 
 #[derive(Subcommand)]
 pub enum AgentCommand {
-    /// List the Agents in a Space
+    /// List the Agents in a Space by Machine: which harnesses each Machine
+    /// runs, whether it is online, ready and has provider quota left. Read it
+    /// before naming `machine:<name>` or a harness in a summon
     #[command(alias = "ls")]
     List {
+        /// Defaults to this Agent Run's Space
         #[arg(long)]
-        space: String,
+        space: Option<String>,
+        /// Only this Machine, by name or id
+        #[arg(long)]
+        machine: Option<String>,
+        /// Emit the Hub's registration records as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Add an Agent that runs a harness on this machine to a Space
     Add {
@@ -1521,8 +1530,9 @@ pub enum AgentCommand {
         harness: String,
         /// The description: free text, up to 1000 characters. Empty clears it.
         text: Option<String>,
+        /// Defaults to this Agent Run's Space
         #[arg(long)]
-        space: String,
+        space: Option<String>,
         /// Read the description from stdin
         #[arg(long, conflicts_with = "text")]
         stdin: bool,
@@ -1747,7 +1757,8 @@ pub enum AttachmentCommand {
 
 #[derive(Subcommand)]
 pub enum SpaceCommand {
-    /// Read the repositories and registered directories an Agent can be launched with in a Space
+    /// Read the repositories and registered directories an Agent can be launched with in a Space.
+    /// Machines and the harnesses each runs are in `xmatrix agent list`
     LaunchTargets {
         /// Space ID. Defaults to the Space of this Run's conversation.
         space_id: Option<String>,

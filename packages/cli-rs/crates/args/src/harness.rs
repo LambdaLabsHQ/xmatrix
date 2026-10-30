@@ -36,7 +36,8 @@ impl HarnessApplyAction {
 
 #[derive(Subcommand)]
 pub enum HarnessCommand {
-    /// List reported harnesses; Agent Runs default to a fresh local probe
+    /// List reported harnesses; Agent Runs default to a fresh local probe and
+    /// read other Machines' Agents with `xmatrix agent list`
     List {
         #[arg(long, conflicts_with = "machine")]
         local: bool,

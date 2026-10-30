@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { E2E_CHANNEL, E2E_SPACE, installWorkspaceStubs, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { E2E_CHANNEL, E2E_SPACE, installWorkspaceStubs, openWorkspaceWithStubs, screenChangeLanded } from "./workspace-fixtures";
 import { fixtureJson } from "./in-page-api-fixtures";
 import { paintedMainTop } from "./painted-timeline-frames";
 
@@ -34,6 +34,7 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
   for (const [tab, create] of [["Channels", "New conversation"], ["Pages", "New page"], ["Status", null],
     ["More", null]] as const) {
     await dock.getByRole("button", { name: tab }).tap();
+    await screenChangeLanded(page);
     await expect(bar).toContainText(E2E_SPACE.name);
     await expect(bar).not.toContainText(tab);
     await expect(bar.getByRole("button", { name: /^New / })).toHaveCount(0);
@@ -101,6 +102,7 @@ test("channel detail keeps the list bar's height, safe area and shadowless edge"
   await expect(bar).toHaveCSS("box-shadow", "none");
 
   await page.locator(".app-mobile-channel-list-pane").getByText("general", { exact: true }).first().tap();
+  await screenChangeLanded(page);
 
   await expect(bar).toContainText("general");
   /* The title alone names the conversation: no Space or member count under it. */

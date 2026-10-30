@@ -12,7 +12,47 @@ harness when the call runs, in new nullable `requested_by_agent` and
 `requested_by_harness` columns (migration 0232); earlier calls show only
 their person. The copy line on App pages shares the sheet's tint,
 radius and width (#1234). Beta Web and Hub; additive schema change; recovery is
-a CI-validated release reverting the change (the column may stay).
+a CI-validated release reverting the change (the columns may stay).
+
+## Unreleased: A page's code blocks take syntax colours
+
+A page's code blocks were plain text. They now take the same low-chroma inks
+as a code block in a conversation (#1238): in the live editor as decorations
+over the text, in the read-only preview and public pages once drawn. A fence's
+language picks the grammar; a fence without one is coloured only when a
+grammar clearly claims it. Beta Web, no API or schema change; recovery is a
+CI-validated release reverting the change.
+
+## Unreleased: Code blocks in a conversation are the same paper as a page's
+
+A fenced code block without a language drew its code as an inline chip, so in
+the light theme every line wore its own rim and long lines were cut off; every
+block also carried a bold uppercase CODE title band and a border. A code block
+in a message is now one piece of tinted paper, the same as a page's code block
+and quote: plain monospace ink that scrolls sideways, the language as a quiet
+label (an icon and the language's name in the interface face, so it never reads as
+the first line of code) only when the fence names one, and copy at the corner. Code takes
+syntax colours in low-chroma inks (highlight.js, loaded only once a code block
+appears): by the fence's language, or, for a fence without one, only when a
+grammar clearly claims it, so a table or a log stays plain. A quote in a
+message is the same tinted paper instead of a rule beside grey text. Beta Web,
+no API or schema change; recovery is a CI-validated release reverting the
+change.
+
+## Unreleased: Apple sign-in names why native authorization stopped
+
+An Apple authorization error 1000 with no underlying error could be a missing
+window, an empty nonce, a failure before Apple showed its sheet, or an unknown
+system failure, and those were the same report. The attempt now keeps whether
+the page's window, another on-screen window, the window captured at the start,
+or no window was available, whether Apple asked for a presentation anchor, the
+application phase, the nonce shape (empty, 64-character hex, or other), and
+whether the error carried userInfo keys outside a fixed allowlist. Descriptions,
+key names, values, and the nonce are not included. A missing window or an empty
+nonce is reported as that fact and Apple is not asked. A replaced attempt cannot
+complete the new one. Authorization is not replayed. The native string stays
+inside the browser defect limit. iOS only; recovery is a CI-validated beta iOS
+release reverting this change.
 
 ## Unreleased: The Mac app opens with its traffic lights centred on the rail
 

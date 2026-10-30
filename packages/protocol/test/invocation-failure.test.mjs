@@ -3,7 +3,7 @@ import test from "node:test";
 import { isLaunchHintRejection, launchRefusal, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
   preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut,
   harnessSignedOutNoticeOf, HARNESS_SIGNED_OUT_NOTICE_KIND, daemonOfflineRefusal, machineOfflineNoticeOf,
-  MACHINE_OFFLINE_NOTICE_KIND, parseOfflineMachines, REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
+  MACHINE_OFFLINE_NOTICE_KIND, parseOfflineMachines, parseMachineAgents, REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
 
 test("every registered summon rejection has a public, bounded explanation", () => {
   for (const code of REGISTRATION_PREPARATION_REJECTION_CODES) {
@@ -63,6 +63,21 @@ test("an offline refusal names its machines and how to bring one back", () => {
     sourceMention: "@zcode", sourceMessageId: "m1" }), { offline: [{ machineId: "a" }], summon: { sourceMention: "@zcode", sourceMessageId: "m1" } });
   assert.equal(machineOfflineNoticeOf({ kind: MACHINE_OFFLINE_NOTICE_KIND, offline: [] }), null);
   assert.equal(machineOfflineNoticeOf({ kind: HARNESS_SIGNED_OUT_NOTICE_KIND, offline: [{ machineId: "a" }] }), null);
+});
+
+test("a named machine that does not run the Agent says what it does run", () => {
+  assert.equal(preparationRejectionMessage("registration_machine_unavailable",
+    { machineName: "Laptop", harnesses: ["codex", "cursor", "grok"] }),
+    "Laptop does not run this Agent. It runs codex, cursor and grok; mention one of those, or see every machine's Agents " +
+    "on the Agents page or with xmatrix agent list. No launch was allocated.");
+  assert.match(preparationRejectionMessage("registration_machine_unavailable", { machineName: "Laptop", harnesses: [] }),
+    /^Laptop does not run this Agent\. It runs no Agent in this Space, /);
+  // Without a stored detail the code alone still points at the list.
+  assert.match(preparationRejectionMessage("registration_machine_unavailable"), /xmatrix agent list/);
+  // A stored detail is read back only whole and bounded.
+  assert.equal(parseMachineAgents({ machineName: "Laptop", harnesses: ["Codex"] }), undefined);
+  assert.equal(parseMachineAgents({ machineName: "", harnesses: [] }), undefined);
+  assert.equal(parseMachineAgents({ machineName: "Laptop", harnesses: Array.from({ length: 65 }, () => "codex") }), undefined);
 });
 
 test("a launch only a too-old harness could take names the program, its version and the update", () => {

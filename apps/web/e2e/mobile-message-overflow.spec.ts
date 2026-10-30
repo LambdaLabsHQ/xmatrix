@@ -6,7 +6,8 @@ const LONG_TOKEN = `mobile-${"horizontal-overflow-".repeat(16)}`;
 const MESSAGE_BODY = [
   "Long message content stays inside the mobile timeline.",
   "",
-  "```text",
+  // A fence without a language: its code once fell through to the inline chip, a rim on every line.
+  "```",
   LONG_TOKEN,
   "```",
   "",
@@ -60,6 +61,10 @@ test("mobile chat timeline stays fixed while wide content scrolls independently"
   const code = timeline.locator(".message-code-scroll");
   const tableScroller = timeline.locator(".message-table-scroll");
   await expect(code).toBeVisible();
+  await expect.poll(() => code.locator("code").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { display: style.display, borderWidth: style.borderTopWidth, background: style.backgroundColor };
+  })).toEqual({ display: "block", borderWidth: "0px", background: "rgba(0, 0, 0, 0)" });
   await expect(tableScroller).toBeVisible();
 
   await expect.poll(() => timeline.evaluate((element) => {

@@ -56,7 +56,16 @@ struct WebContainerView: UIViewRepresentable {
         private let runScript: (WKWebView, String) -> Void
         /// Runs a script that answers true or false.
         private let askScript: (WKWebView, String, @escaping (Bool) -> Void) -> Void
-        /// While the left edge is dragged: the screen being swiped away, and
+        /// Who draws the left-edge swipe under way, nil when none is.
+        private var edgeSwipeDrawer: EdgeSwipeDrawer?
+        /// A swipe let go before the page said whether it draws it.
+        private var edgeSwipeRelease: (back: Bool, speed: CGFloat)?
+        /// How far the finger has come, for a snapshot that starts late.
+        private var edgeSwipeDistance: CGFloat = 0
+        /// Whether letting go now would go Back; crossing it ticks once.
+        private var edgeSwipeArmed = false
+        private let edgeSwipeHaptic = UIImpactFeedbackGenerator(style: .soft)
+        /// A swipe the page does not draw: the screen being swiped away, and
         /// the paper it uncovers until the page has gone Back under it.
         private var swipeCover: UIView?
         private var swipeBackdrop: UIView?
@@ -335,9 +344,9 @@ struct WebContainerView: UIViewRepresentable {
             }
         }
 
-        /// The left-edge swipe moves the screen with the finger. Let go far or
-        /// fast enough, it is the page's Back: to the parent screen, or closing
-        /// the top layer. Short of that, the screen settles back in place.
+        /// The left-edge swipe follows the finger. Let go far or fast enough,
+        /// it is the page's Back: to the parent screen, or closing the top
+        /// layer. Short of that, everything settles back in place.
         @objc func handleEdgeSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
             guard let view = gesture.view else { return }
             let distance = gesture.translation(in: view).x
@@ -345,7 +354,7 @@ struct WebContainerView: UIViewRepresentable {
             case .began: edgeSwipeBegan()
             case .changed: edgeSwipeMoved(distance: distance)
             case .ended: edgeSwipeEnded(distance: distance, speed: gesture.velocity(in: view).x)
-            case .cancelled, .failed: settleEdgeSwipe(wentBack: false)
+            case .cancelled, .failed: edgeSwipeEnded(distance: 0, speed: 0)
             default: break
             }
         }
@@ -357,15 +366,92 @@ struct WebContainerView: UIViewRepresentable {
             true
         }
 
+        /// Distance or speed past which letting go goes Back.
+        static let edgeSwipeBackDistance: CGFloat = 80
+        static let edgeSwipeBackSpeed: CGFloat = 600
+
+        /// A conversation going back to its channel list is drawn by the page:
+        /// only the lists move, while the bar, its sign and the tab bar stay
+        /// where they are. Any other Back slides a snapshot of the screen away.
+        /// The page is asked first; the drag goes to it while it answers, and
+        /// it drops the drag if it declines.
+        enum EdgeSwipeDrawer { case asking, page, snapshot }
+
         func edgeSwipeBegan() {
+            guard let webView, edgeSwipeDrawer == nil else { return }
+            edgeSwipeDrawer = .asking
+            edgeSwipeRelease = nil
+            edgeSwipeDistance = 0
+            edgeSwipeArmed = false
+            edgeSwipeHaptic.prepare()
+            askScript(webView, "window.__xmatrixBackGesture?.begin() === true") { [weak self] pageDraws in
+                self?.edgeSwipeAnswered(pageDraws: pageDraws)
+            }
+        }
+
+        func edgeSwipeMoved(distance: CGFloat) {
+            guard let drawer = edgeSwipeDrawer, let webView else { return }
+            let distance = max(0, distance)
+            edgeSwipeDistance = distance
+            let armed = distance > Self.edgeSwipeBackDistance
+            if armed && !edgeSwipeArmed {
+                edgeSwipeHaptic.impactOccurred(intensity: 0.7)
+                edgeSwipeHaptic.prepare()
+            }
+            edgeSwipeArmed = armed
+            switch drawer {
+            case .asking, .page:
+                runScript(webView, "window.__xmatrixBackGesture?.move(\(Double(distance)))")
+                if drawer == .page { postBackSwipe(["progress": distance / max(webView.bounds.width, 1)]) }
+            case .snapshot:
+                swipeCover?.transform = CGAffineTransform(translationX: distance, y: 0)
+            }
+        }
+
+        func edgeSwipeEnded(distance: CGFloat, speed: CGFloat) {
+            guard let drawer = edgeSwipeDrawer else { return }
+            let back = distance > Self.edgeSwipeBackDistance || speed > Self.edgeSwipeBackSpeed
+            switch drawer {
+            case .asking: edgeSwipeRelease = (back, speed)
+            case .page: releasePageSwipe(back: back, speed: speed)
+            case .snapshot: releaseSnapshotSwipe(back: back)
+            }
+        }
+
+        private func edgeSwipeAnswered(pageDraws: Bool) {
+            guard edgeSwipeDrawer == .asking else { return }
+            edgeSwipeDrawer = pageDraws ? .page : .snapshot
+            if !pageDraws {
+                coverWithSnapshot()
+                swipeCover?.transform = CGAffineTransform(translationX: edgeSwipeDistance, y: 0)
+            }
+            guard let release = edgeSwipeRelease else { return }
+            edgeSwipeRelease = nil
+            if pageDraws {
+                releasePageSwipe(back: release.back, speed: release.speed)
+            } else {
+                releaseSnapshotSwipe(back: release.back)
+            }
+        }
+
+        /// The page settles the lists from the finger's speed and goes Back
+        /// itself once they land; the tab bar comes in, or leaves, alongside.
+        private func releasePageSwipe(back: Bool, speed: CGFloat) {
+            edgeSwipeDrawer = nil
+            guard let webView else { return }
+            runScript(webView, "window.__xmatrixBackGesture?.end(\(back), \(Double(speed)))")
+            postBackSwipe(["settle": back])
+        }
+
+        /// The tab bar is the page's dock: it fades in with the list it belongs to.
+        private func postBackSwipe(_ info: [String: Any]) {
+            NotificationCenter.default.post(name: .xmatrixBackSwipeFollow, object: nil, userInfo: info)
+        }
+
+        private func coverWithSnapshot() {
             guard swipeCover == nil, let webView, let containerView,
                   let cover = webView.snapshotView(afterScreenUpdates: false) else { return }
             cover.frame = webView.frame
-            cover.layer.shadowColor = UIColor.black.cgColor
-            cover.layer.shadowOpacity = 0.12
-            cover.layer.shadowRadius = 12
-            cover.layer.shadowOffset = CGSize(width: -4, height: 0)
-            cover.layer.shadowPath = UIBezierPath(rect: cover.bounds).cgPath
             let backdrop = UIView(frame: webView.frame)
             backdrop.backgroundColor = WebContainerView.shellBackground
             containerView.insertSubview(backdrop, aboveSubview: webView)
@@ -374,23 +460,20 @@ struct WebContainerView: UIViewRepresentable {
             swipeCover = cover
         }
 
-        func edgeSwipeMoved(distance: CGFloat) {
-            swipeCover?.transform = CGAffineTransform(translationX: max(0, distance), y: 0)
-        }
-
-        func edgeSwipeEnded(distance: CGFloat, speed: CGFloat) {
-            guard let webView, distance > 80 || speed > 600 else {
-                settleEdgeSwipe(wentBack: false)
+        private func releaseSnapshotSwipe(back: Bool) {
+            edgeSwipeDrawer = nil
+            guard back, let webView else {
+                settleSnapshot(wentBack: false)
                 return
             }
             askScript(webView, "window.__xmatrixNativeBack?.() === true") { [weak self] wentBack in
-                self?.settleEdgeSwipe(wentBack: wentBack)
+                self?.settleSnapshot(wentBack: wentBack)
             }
         }
 
         /// The page has gone Back under the swiped screen, which slides off to
         /// show it; with nothing to go Back to, the screen returns.
-        private func settleEdgeSwipe(wentBack: Bool) {
+        private func settleSnapshot(wentBack: Bool) {
             guard let cover = swipeCover else { return }
             let backdrop = swipeBackdrop
             swipeCover = nil

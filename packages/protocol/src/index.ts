@@ -209,7 +209,7 @@ export type {
 export {
   DECISION_ANSWER_ISSUES, daemonOfflineRefusal, launchRefusal, parameterFailureCodeFromDecisionRecord, parseDecisionAnswerFailure, parseHarnessTooOld,
   HARNESS_SIGNED_OUT_NOTICE_KIND, harnessSignedOutNoticeOf, harnessSignedOutSentence, parseHarnessSignedOut,
-  MACHINE_OFFLINE_NOTICE_KIND, machineOfflineNoticeOf, parseOfflineMachines,
+  MACHINE_OFFLINE_NOTICE_KIND, machineOfflineNoticeOf, parseOfflineMachines, parseMachineAgents, type MachineAgents,
   PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage, rejectionCause,
   REGISTRATION_PREPARATION_REJECTION_CODES, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS,
   isLaunchHintRejection, LAUNCH_HINT_REJECTION_CODES,

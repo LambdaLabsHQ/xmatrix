@@ -230,8 +230,9 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
       const code = known ? item.code : "registration_launch_rejected";
       const signedOut = code === "registration_harness_signed_out" ? item.signedOut : undefined;
       const offline = code === "registration_daemon_offline" && item.offline?.length ? item.offline : undefined;
-      // What is too old, signed out or offline is named; any other code is its own sentence.
-      const reason = known ? preparationRejectionMessage(code, signedOut ?? offline ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
+      const machineAgents = code === "registration_machine_unavailable" ? item.machineAgents : undefined;
+      // What is too old, signed out or offline, or what a named machine runs, is named; any other code is its own sentence.
+      const reason = known ? preparationRejectionMessage(code, signedOut ?? offline ?? machineAgents ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
         : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
       const body = `Agent launch failed: ${reason} (${code})`;
       const noticeBody = item.quotaRetryId ? `${body}\n\n${item.sourceMention}\nRequest ${(item.selectionIndex ?? 0) + 1}` : body;

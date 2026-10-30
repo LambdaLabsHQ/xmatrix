@@ -919,16 +919,6 @@
     box-decoration-break: clone;
   }
 
-  .xmatrix-app .message-code-block {
-    border-radius: 0.75rem;
-  }
-
-  .xmatrix-app .message-code-block :is(pre, code) {
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
   .xmatrix-app .message-code-scroll {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
@@ -1448,14 +1438,15 @@
 
     /* The thread summary is a fixed 32px chip, so the author-avatar sizing
        above must not inflate its participant stack past the chip and let
-       `overflow: hidden` clip the round faces. */
-    .xmatrix-app .app-message-timeline .app-thread-summary .identity-avatar-face {
+       `overflow: hidden` clip the round faces. The pill back to a person's
+       message is the same height. */
+    .xmatrix-app .app-message-timeline :is(.app-thread-summary, .app-timeline-human-above) .identity-avatar-face {
       width: 1.25rem;
       height: 1.25rem;
       font-size: 0.625rem;
     }
 
-    .xmatrix-app .app-message-timeline .app-thread-summary .identity-avatar-face > svg {
+    .xmatrix-app .app-message-timeline :is(.app-thread-summary, .app-timeline-human-above) .identity-avatar-face > svg {
       width: 0.75rem;
       height: 0.75rem;
     }
@@ -2720,9 +2711,60 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   border-radius: var(--app-field-shell-radius) !important;
 }
 
-.xmatrix-app .message-code-block.message-code-block {
-  border-radius: 0.75rem !important;
+/* A code block and a quote in a message are pieces of the same tinted paper as a page's (page-document.css):
+   no rim, no shadow, no title band. The code inside is plain ink on that paper, never a chip per line; a
+   language, when the fence names one, is a quiet label above it, and copy waits at the corner. */
+.xmatrix-app .rich-message :is(.message-code-block, .message-quote) {
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: color-mix(in oklch, var(--foreground) 4.5%, transparent) !important;
+  box-shadow: none !important;
 }
+
+.xmatrix-app .rich-message .message-code-block pre,
+.xmatrix-app .rich-message .message-code-block code {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0;
+}
+
+.xmatrix-app .rich-message .message-code-block pre {
+  padding: 10px 14px 11px;
+}
+
+.xmatrix-app .rich-message .message-code-language {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 48px 0 14px;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans-family);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.xmatrix-app .rich-message .message-code-language + .message-code-copy + pre {
+  padding-top: 8px;
+}
+
+/* Opaque in the block's own tint, so over a long first line it covers the code rather than mixing with it. */
+.xmatrix-app .rich-message .message-code-copy {
+  border-radius: 6px !important;
+  background: color-mix(in oklch, var(--foreground) 4.5%, var(--app-panel-paper, var(--background)));
+}
+
+.xmatrix-app .rich-message .message-code-copy:hover {
+  background: color-mix(in oklch, var(--foreground) 9%, var(--app-panel-paper, var(--background)));
+}
+
+.xmatrix-app .rich-message .message-quote {
+  padding: 0.6em 0.9em;
+}
+
 
 /*
  * Desktop: float the composer over the chat timeline, matching the mobile float
@@ -3816,21 +3858,6 @@ html[data-app-theme="wood"] .xmatrix-app [class*="bg-orange-"] {
   color: oklch(0.769 0.188 70.08) !important;
 }
 
-/* 2) light code wells: recessed, neutral, no drop shadow */
-html[data-app-theme="wood"] .xmatrix-app .message-code-block {
-  box-shadow:
-    inset 0 1px 2px oklch(0 0 0 / 0.12),
-    inset 0 -1px 0 oklch(1 0 0 / 0.5) !important;
-
-  /* code blocks: warm parchment, not syntax-theme blue-gray */
-  background: oklch(0.951 0.006 84) !important;
-  border-color: oklch(0.88 0.02 80) !important;
-}
-
-.xmatrix-app .message-code-block :is(.border-b, .border-t) {
-  border-color: transparent !important;
-}
-
 /* 3) Primary actions (`bg-foreground` / `bg-primary` on a tool page).
 
    Every action on the board is the same raised glass; a primary one is only
@@ -4022,11 +4049,6 @@ html[data-app-theme] .xmatrix-app .app-mobile-channel-details-surface .app-mater
   filter: none !important;
 }
 
-html[data-app-theme="wood"] .xmatrix-app .message-code-block pre,
-html[data-app-theme="wood"] .xmatrix-app .message-code-block code {
-  background: transparent !important;
-}
-
 /* date separators: little wood plaques */
 
 /* right-rail ask composer: rounded rect (user) */
@@ -4098,7 +4120,6 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block code {
 
 /* chips: code labels, role badges */
 .xmatrix-app.xmatrix-app :is(.app-tool-surface, .app-details) code,
-.xmatrix-app.xmatrix-app .message-code-block,
 .xmatrix-app.xmatrix-app .flex.min-w-0.items-baseline > span.rounded.bg-muted {
   border-radius: 4px !important;
 }
@@ -9510,3 +9531,112 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 .xmatrix-app .app-page-back:hover { background: color-mix(in oklab, var(--foreground) 9%, transparent); }
 .xmatrix-app .app-page-back svg { width: 16px; height: 16px; flex: none; }
 .xmatrix-app .app-page-back span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A phone's conversation and its Space's channel list trade places
+   (use-mobile-list-transition.ts). Only the two lists move, side by side as
+   one flat strip with nothing drawn between them: the channel list lies just
+   left of the conversation. The bar, its wood sign and the controls at the
+   bottom stay where they stand, and the names slide through the sign the same
+   way. Switching dock tabs moves the whole page, sign included; that the sign
+   stays put is what tells going a level up or down apart from it. Everything
+   is drawn from the custom properties the shell root carries while the
+   change runs. */
+@media (max-width: 767px) {
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-mobile-dock-pager {
+    visibility: visible !important;
+    translate: calc(var(--app-list-dx, 0px) - 100%) 0;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-message-surface {
+    background: transparent !important;
+  }
+
+  /* The conversation's paper moves, and the work under way in it with it; its
+     composer stays. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-message-surface > :not(.app-composer) {
+    translate: var(--app-list-dx, 0px) 0;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-message-surface > :not(.app-composer, .app-agent-work-dock) {
+    background: var(--background) !important;
+  }
+
+  /* The conversation's band clears as the list arrives under it. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-topbar.app-mobile-channel-detail-bar {
+    background: color-mix(in oklch, var(--background) calc(100% - 100% * var(--app-list-p, 0)), transparent) !important;
+  }
+
+  /* The list's bar lies over the conversation's for the length of the change:
+     clear, so the sign and glyphs under it show, and out of reach. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-topbar.app-list-transition-target {
+    border-color: transparent !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    pointer-events: none !important;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-topbar.app-topbar.app-topbar.app-list-transition-target :is(.app-mobile-title, .app-mobile-space-trigger) {
+    background: none !important;
+    box-shadow: none !important;
+  }
+
+  /* The glyphs at the bar's end trade places in the names' direction. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-mobile-channel-detail-bar :is(.app-mobile-share-button, .app-mobile-channel-more-button) {
+    opacity: calc(1 - 1.7 * var(--app-list-p, 0));
+    translate: calc(14px * var(--app-list-p, 0)) 0;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-list-transition-target .app-mobile-search-icon {
+    opacity: calc(1.7 * var(--app-list-p, 0) - 0.7);
+    translate: calc(-14px * (1 - var(--app-list-p, 0))) 0;
+  }
+
+  /* One board: it keeps its place and goes from the conversation's length to
+     the list's, while the names slide through it, the conversation's out to the
+     right and the Space's in from the left. Sized once both are measured. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] {
+    --app-list-sign-width: calc(var(--app-list-sign-from) + (var(--app-list-sign-to) - var(--app-list-sign-from)) * var(--app-list-p, 0));
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] .app-topbar.app-mobile-channel-detail-bar .app-mobile-back-sign,
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] .app-topbar.app-topbar.app-topbar.app-list-transition-target :is(.app-mobile-title, .app-mobile-space-trigger) {
+    width: var(--app-list-sign-width) !important;
+    max-width: none !important;
+    overflow: hidden !important;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] .app-topbar.app-mobile-channel-detail-bar .app-mobile-back-sign > * {
+    flex-shrink: 0 !important;
+    min-width: max-content !important;
+    translate: calc((var(--app-list-sign-from) + 6px) * var(--app-list-p, 0)) 0;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] .app-topbar.app-topbar.app-topbar.app-list-transition-target :is(.app-mobile-title, .app-mobile-space-trigger) > * {
+    flex-shrink: 0 !important;
+    min-width: max-content !important;
+    translate: calc((var(--app-list-sign-to) + 6px) * (var(--app-list-p, 0) - 1)) 0;
+  }
+
+  /* The controls at the bottom stay where they stand: the conversation's sink
+     away, the list's rise in. A glass fades on itself: faded through an
+     ancestor it would have nothing behind it to show. Nothing on either
+     screen takes a tap until one of them is the screen again. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-composer {
+    translate: 0 calc(8px * var(--app-list-p, 0));
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-composer-shell > * {
+    opacity: calc(1 - 1.8 * var(--app-list-p, 0)) !important;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] :is(.app-main, .app-composer, .app-agent-work-dock) {
+    pointer-events: none !important;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] :is(.app-mobile-create-fab.app-mobile-create-fab, .app-mobile-tab-dock.app-mobile-tab-dock) {
+    opacity: calc(1.8 * var(--app-list-p, 0) - 0.8) !important;
+    translate: 0 calc(8px * (1 - var(--app-list-p, 0)));
+  }
+}

@@ -562,7 +562,11 @@ export function TopWorkspaceBar({
   onOpenChannelDetails,
   onSelectSpace,
   onClosePageConversation,
+  ghost,
 }: {
+  /** A copy of a bar drawn only while screens change: the channel list's over a conversation's
+      (use-mobile-list-transition), or the tab being left (use-dock-tab-slide). Inert and unread. */
+  ghost?: "app-list-transition-target" | "app-dock-tab-slide-outgoing";
   /** A page open on a phone: the bar is its back bar, like a conversation's. */
   page?: { title: string } | null;
   onClosePage?: () => void;
@@ -630,8 +634,11 @@ export function TopWorkspaceBar({
       className={cn(
         "app-topbar flex h-12 shrink-0 items-center gap-2 bg-background px-3 text-foreground sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,36rem)_minmax(0,1fr)]",
         showBack && "app-mobile-channel-detail-bar",
-        tabRoot && "app-mobile-tab-root-bar"
+        tabRoot && "app-mobile-tab-root-bar",
+        ghost
       )}
+      aria-hidden={ghost ? true : undefined}
+      inert={Boolean(ghost)}
     >
       <div className="relative min-w-0 flex-1 md:hidden">
         <SignWithBack back={backButton}>

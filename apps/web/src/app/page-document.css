@@ -31,8 +31,9 @@
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.88em;
   line-height: 1.55;
-  border-radius: 8px;
-  background: var(--muted);
+  /* The same tinted paper as a quote, and as a code block in a conversation. */
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--foreground) 4.5%, transparent);
   padding: 0.75em 1em;
   overflow-x: auto;
   white-space: pre;
@@ -40,6 +41,82 @@
 }
 .page-document pre code { background: none; padding: 0; font-size: inherit; }
 .page-document pre[data-markdown] { color: var(--muted-foreground); }
+
+/* Syntax colours are inks on the paper, the same for a page's code block and one in a conversation
+   (code-highlight.ts): low chroma, about one weight darker than a printed listing, comments receding to the
+   margin's grey. */
+.xmatrix-app .rich-message .message-code-block,
+.page-document pre {
+  --code-ink-keyword: oklch(0.44 0.13 28);
+  --code-ink-string: oklch(0.45 0.1 145);
+  --code-ink-number: oklch(0.5 0.11 65);
+  --code-ink-title: oklch(0.42 0.11 255);
+  --code-ink-attr: oklch(0.43 0.08 200);
+  --code-ink-type: oklch(0.44 0.1 320);
+  --code-ink-comment: oklch(0.56 0.015 80);
+}
+.xmatrix-app .rich-message .message-code-block .hljs-keyword,
+.xmatrix-app .rich-message .message-code-block .hljs-selector-tag,
+.xmatrix-app .rich-message .message-code-block .hljs-doctag,
+.page-document pre .hljs-keyword,
+.page-document pre .hljs-selector-tag,
+.page-document pre .hljs-doctag { color: var(--code-ink-keyword); }
+.xmatrix-app .rich-message .message-code-block .hljs-string,
+.xmatrix-app .rich-message .message-code-block .hljs-regexp,
+.xmatrix-app .rich-message .message-code-block .hljs-char,
+.page-document pre .hljs-string,
+.page-document pre .hljs-regexp,
+.page-document pre .hljs-char { color: var(--code-ink-string); }
+.xmatrix-app .rich-message .message-code-block .hljs-number,
+.xmatrix-app .rich-message .message-code-block .hljs-literal,
+.xmatrix-app .rich-message .message-code-block .hljs-symbol,
+.xmatrix-app .rich-message .message-code-block .hljs-bullet,
+.xmatrix-app .rich-message .message-code-block .hljs-link,
+.page-document pre .hljs-number,
+.page-document pre .hljs-literal,
+.page-document pre .hljs-symbol,
+.page-document pre .hljs-bullet,
+.page-document pre .hljs-link { color: var(--code-ink-number); }
+.xmatrix-app .rich-message .message-code-block .hljs-title,
+.xmatrix-app .rich-message .message-code-block .hljs-section,
+.xmatrix-app .rich-message .message-code-block .hljs-selector-id,
+.xmatrix-app .rich-message .message-code-block .hljs-selector-class,
+.page-document pre .hljs-title,
+.page-document pre .hljs-section,
+.page-document pre .hljs-selector-id,
+.page-document pre .hljs-selector-class { color: var(--code-ink-title); }
+.xmatrix-app .rich-message .message-code-block .hljs-attr,
+.xmatrix-app .rich-message .message-code-block .hljs-attribute,
+.xmatrix-app .rich-message .message-code-block .hljs-property,
+.xmatrix-app .rich-message .message-code-block .hljs-variable,
+.xmatrix-app .rich-message .message-code-block .hljs-template-variable,
+.xmatrix-app .rich-message .message-code-block .hljs-params,
+.xmatrix-app .rich-message .message-code-block .hljs-name,
+.page-document pre .hljs-attr,
+.page-document pre .hljs-attribute,
+.page-document pre .hljs-property,
+.page-document pre .hljs-variable,
+.page-document pre .hljs-template-variable,
+.page-document pre .hljs-params,
+.page-document pre .hljs-name { color: var(--code-ink-attr); }
+.xmatrix-app .rich-message .message-code-block .hljs-built_in,
+.xmatrix-app .rich-message .message-code-block .hljs-type,
+.xmatrix-app .rich-message .message-code-block .hljs-meta,
+.page-document pre .hljs-built_in,
+.page-document pre .hljs-type,
+.page-document pre .hljs-meta { color: var(--code-ink-type); }
+.xmatrix-app .rich-message .message-code-block .hljs-comment,
+.xmatrix-app .rich-message .message-code-block .hljs-quote,
+.page-document pre .hljs-comment,
+.page-document pre .hljs-quote { color: var(--code-ink-comment); font-style: italic; }
+.xmatrix-app .rich-message .message-code-block .hljs-addition,
+.page-document pre .hljs-addition { color: var(--code-ink-string); background: color-mix(in oklch, var(--code-ink-string) 10%, transparent); }
+.xmatrix-app .rich-message .message-code-block .hljs-deletion,
+.page-document pre .hljs-deletion { color: var(--code-ink-keyword); background: color-mix(in oklch, var(--code-ink-keyword) 10%, transparent); }
+.xmatrix-app .rich-message .message-code-block .hljs-emphasis,
+.page-document pre .hljs-emphasis { font-style: italic; }
+.xmatrix-app .rich-message .message-code-block .hljs-strong,
+.page-document pre .hljs-strong { font-weight: 700; }
 /* A quote is a piece of tinted paper, as an ask is in a conversation: no rule beside it, its words in full ink,
    the place a page keeps a summary such as where it stands. */
 .page-document blockquote {
