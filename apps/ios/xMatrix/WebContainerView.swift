@@ -60,6 +60,12 @@ struct WebContainerView: UIViewRepresentable {
         /// the paper it uncovers until the page has gone Back under it.
         private var swipeCover: UIView?
         private var swipeBackdrop: UIView?
+        /// The warm shade over whatever lies under the swiped screen.
+        private var swipeShade: UIView?
+        /// Whether letting go now would go Back; crossing it ticks once.
+        private var swipeArmed = false
+        private var swipeHaptic: UIImpactFeedbackGenerator?
+        private var swipeAnimator: UIViewPropertyAnimator?
 
         func attach(to containerView: UIView) {
             self.containerView = containerView
@@ -357,52 +363,148 @@ struct WebContainerView: UIViewRepresentable {
             true
         }
 
+        /// Distance or speed past which letting go goes Back.
+        static let edgeSwipeBackDistance: CGFloat = 80
+        static let edgeSwipeBackSpeed: CGFloat = 600
+
+        /// The swiped screen lifts off the paper like a plank: it takes the
+        /// device's corners, settles back a little in depth and turns on its
+        /// far edge, with a shadow that lengthens as it travels. Under it, a
+        /// warm shade lifts as more of the paper shows.
         func edgeSwipeBegan() {
+            // A new drag lands the last swipe where it was heading first.
+            if let animator = swipeAnimator, animator.state == .active {
+                animator.stopAnimation(false)
+                animator.finishAnimation(at: .end)
+            }
             guard swipeCover == nil, let webView, let containerView,
-                  let cover = webView.snapshotView(afterScreenUpdates: false) else { return }
-            cover.frame = webView.frame
-            cover.layer.shadowColor = UIColor.black.cgColor
-            cover.layer.shadowOpacity = 0.12
-            cover.layer.shadowRadius = 12
-            cover.layer.shadowOffset = CGSize(width: -4, height: 0)
-            cover.layer.shadowPath = UIBezierPath(rect: cover.bounds).cgPath
+                  let snapshot = webView.snapshotView(afterScreenUpdates: false) else { return }
+            let radius = DisplayCorner.radius > 0 ? DisplayCorner.radius : 44
+            let cover = UIView(frame: webView.frame)
+            cover.layer.shadowColor = UIColor(red: 40 / 255, green: 32 / 255, blue: 24 / 255, alpha: 1).cgColor
+            cover.layer.shadowOpacity = 0
+            cover.layer.shadowRadius = 24
+            cover.layer.shadowOffset = CGSize(width: -6, height: 0)
+            cover.layer.shadowPath = UIBezierPath(roundedRect: cover.bounds, cornerRadius: radius).cgPath
+            snapshot.frame = cover.bounds
+            snapshot.layer.cornerRadius = radius
+            snapshot.layer.cornerCurve = .continuous
+            snapshot.layer.masksToBounds = true
+            snapshot.layer.borderWidth = 0.5
+            snapshot.layer.borderColor = UIColor(red: 120 / 255, green: 88 / 255, blue: 56 / 255, alpha: 0.18).cgColor
+            cover.addSubview(snapshot)
             let backdrop = UIView(frame: webView.frame)
             backdrop.backgroundColor = WebContainerView.shellBackground
+            let shade = UIView(frame: webView.frame)
+            shade.backgroundColor = UIColor(red: 40 / 255, green: 32 / 255, blue: 24 / 255, alpha: 1)
+            shade.isUserInteractionEnabled = false
             containerView.insertSubview(backdrop, aboveSubview: webView)
-            containerView.insertSubview(cover, aboveSubview: backdrop)
+            containerView.insertSubview(shade, aboveSubview: backdrop)
+            containerView.insertSubview(cover, aboveSubview: shade)
             swipeBackdrop = backdrop
+            swipeShade = shade
             swipeCover = cover
+            swipeArmed = false
+            swipeHaptic = UIImpactFeedbackGenerator(style: .soft)
+            swipeHaptic?.prepare()
+            layOutEdgeSwipe(distance: 0)
         }
 
         func edgeSwipeMoved(distance: CGFloat) {
-            swipeCover?.transform = CGAffineTransform(translationX: max(0, distance), y: 0)
+            layOutEdgeSwipe(distance: distance)
+            let armed = distance > Self.edgeSwipeBackDistance
+            if armed && !swipeArmed {
+                swipeHaptic?.impactOccurred(intensity: 0.7)
+                swipeHaptic?.prepare()
+            }
+            swipeArmed = armed
+        }
+
+        /// One pose of the swipe: the cover `distance` points along, the shade
+        /// matching. Past the screen's width the plank keeps turning away.
+        private func layOutEdgeSwipe(distance: CGFloat) {
+            guard let cover = swipeCover else { return }
+            let width = max(cover.bounds.width, 1)
+            let progress = min(max(distance / width, 0), 1.2)
+            cover.transform3D = Self.plankTransform(distance: max(0, distance), progress: progress)
+            cover.layer.shadowOpacity = Float(min(progress * 3, 1) * 0.28)
+            swipeShade?.alpha = 0.16 * (1 - min(progress, 1))
+        }
+
+        /// The swiped screen's pose: along the finger, a little smaller, and
+        /// turned on its vertical axis so the far edge recedes. Reduce Motion
+        /// keeps only the slide.
+        static func plankTransform(distance: CGFloat, progress: CGFloat) -> CATransform3D {
+            var transform = CATransform3DIdentity
+            transform.m34 = -1 / 1400
+            transform = CATransform3DTranslate(transform, distance, 0, 0)
+            guard !UIAccessibility.isReduceMotionEnabled else { return transform }
+            let scale = 1 - 0.07 * min(progress * 1.6, 1)
+            transform = CATransform3DScale(transform, scale, scale, 1)
+            return CATransform3DRotate(transform, 0.14 * progress, 0, 1, 0)
         }
 
         func edgeSwipeEnded(distance: CGFloat, speed: CGFloat) {
-            guard let webView, distance > 80 || speed > 600 else {
-                settleEdgeSwipe(wentBack: false)
+            guard let webView, distance > Self.edgeSwipeBackDistance || speed > Self.edgeSwipeBackSpeed else {
+                settleEdgeSwipe(wentBack: false, speed: speed)
                 return
             }
             askScript(webView, "window.__xmatrixNativeBack?.() === true") { [weak self] wentBack in
-                self?.settleEdgeSwipe(wentBack: wentBack)
+                self?.settleEdgeSwipe(wentBack: wentBack, speed: speed)
             }
         }
 
-        /// The page has gone Back under the swiped screen, which slides off to
-        /// show it; with nothing to go Back to, the screen returns.
-        private func settleEdgeSwipe(wentBack: Bool) {
+        /// The page has gone Back under the swiped screen, which flies off on
+        /// a spring carrying the finger's speed while the parent slides in
+        /// from behind it and comes out of the shade. With nothing to go Back
+        /// to, the screen springs back into place.
+        private func settleEdgeSwipe(wentBack: Bool, speed: CGFloat = 0) {
             guard let cover = swipeCover else { return }
             let backdrop = swipeBackdrop
+            let shade = swipeShade
             swipeCover = nil
             swipeBackdrop = nil
-            if wentBack { backdrop?.removeFromSuperview() }
-            let width = cover.bounds.width
-            UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
-                cover.transform = wentBack ? CGAffineTransform(translationX: width, y: 0) : .identity
-            } completion: { _ in
-                cover.removeFromSuperview()
+            swipeShade = nil
+            swipeHaptic = nil
+            swipeArmed = false
+            let width = max(cover.bounds.width, 1)
+            let from = cover.layer.presentation()?.transform.m41 ?? cover.transform3D.m41
+            let to: CGFloat = wentBack ? width * 1.08 : 0
+            let remaining = to - from
+            let velocity = abs(remaining) > 1 ? max(min(speed / remaining, 30), -30) : 0
+            let spring = UISpringTimingParameters(
+                dampingRatio: wentBack ? 1 : 0.82,
+                initialVelocity: CGVector(dx: velocity, dy: 0)
+            )
+            let animator = UIViewPropertyAnimator(duration: wentBack ? 0.42 : 0.5, timingParameters: spring)
+            let reveal = wentBack && !UIAccessibility.isReduceMotionEnabled ? webView : nil
+            if wentBack {
                 backdrop?.removeFromSuperview()
+                // The parent waits a third of a screen behind, as UIKit's own
+                // pop does, and catches up as the plank leaves.
+                let lag = (width - from) * 0.3
+                reveal?.transform = CGAffineTransform(translationX: -lag, y: 0)
             }
+            animator.addAnimations {
+                cover.transform3D = Self.plankTransform(distance: to, progress: to / width)
+                shade?.alpha = wentBack ? 0 : 0.16
+                reveal?.transform = .identity
+            }
+            let shadow = CABasicAnimation(keyPath: "shadowOpacity")
+            shadow.fromValue = cover.layer.presentation()?.shadowOpacity ?? cover.layer.shadowOpacity
+            shadow.toValue = 0
+            shadow.duration = wentBack ? 0.42 : 0.35
+            cover.layer.shadowOpacity = 0
+            cover.layer.add(shadow, forKey: "shadowOpacity")
+            animator.addCompletion { [weak self] _ in
+                reveal?.transform = .identity
+                cover.removeFromSuperview()
+                shade?.removeFromSuperview()
+                backdrop?.removeFromSuperview()
+                if self?.swipeAnimator === animator { self?.swipeAnimator = nil }
+            }
+            swipeAnimator = animator
+            animator.startAnimation()
         }
 
         fileprivate func navigationFinished() {

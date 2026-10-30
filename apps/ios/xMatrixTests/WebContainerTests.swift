@@ -159,6 +159,13 @@ final class WebContainerTests: XCTestCase {
         XCTAssertEqual(asked.count, 2)
     }
 
+    func testSwipedScreenStaysUnderTheFinger() {
+        for (distance, progress) in [(CGFloat(0), CGFloat(0)), (120, 0.3), (420, 1.08)] {
+            let pose = WebContainerView.Coordinator.plankTransform(distance: distance, progress: progress)
+            XCTAssertEqual(pose.m41, distance, accuracy: 0.001)
+        }
+    }
+
     func testEdgeSwipeRunsAlongsideThePageTouches() {
         let (coordinator, container) = makeCoordinator()
         defer { withExtendedLifetime(container) {} }
