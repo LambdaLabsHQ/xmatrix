@@ -299,6 +299,19 @@ function screenLayout(page: Page) {
   });
 }
 
+/** Where each part a swipe moves besides the lists stands, and how much of it shows. */
+function swipedParts(page: Page) {
+  return page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>([
+    ".app-mobile-channel-detail-bar :is(.app-mobile-back-sign > *, .app-mobile-share-button, .app-mobile-channel-more-button)",
+    ".app-list-transition-target :is(.app-mobile-title > *, .app-mobile-search-icon)",
+    ".app-composer-box",
+    ".app-list-transition-controls :is(.app-mobile-create-fab, .app-mobile-tab-dock)",
+  ].join(", "))).map((element) => {
+    const { left, top } = element.getBoundingClientRect();
+    return { part: element.className, left: Math.round(left), top: Math.round(top), opacity: getComputedStyle(element).opacity };
+  }));
+}
+
 /** The iOS app with a conversation open over its channel list, where it stands, and its left-edge swipe. */
 async function conversationToSwipe(page: Page) {
   await installNativeBridge(page, "ios");
@@ -324,6 +337,18 @@ test("the iOS app's edge swipe moves only the lists under a still bar, and lands
   await gesture.end(true, 900);
   await expectChannelListVisible(page);
   await expect(page).toHaveURL("/app/personal-sspaceperso/channels");
+  await screenChangeLanded(page);
+});
+
+test("every part an edge swipe moves stays where the finger puts it", async ({ page }) => {
+  const { gesture } = await swipeFromConversation(page);
+  await gesture.move(150);
+  const held = await swipedParts(page);
+  expect(held.length).toBeGreaterThanOrEqual(6);
+  // The finger rests: nothing catches up with it afterwards.
+  await page.waitForTimeout(400);
+  expect(await swipedParts(page)).toEqual(held);
+  await gesture.end(false, 0);
   await screenChangeLanded(page);
 });
 
