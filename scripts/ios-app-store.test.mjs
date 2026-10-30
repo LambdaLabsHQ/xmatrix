@@ -116,7 +116,8 @@ test("an older version still queued for App Review is withdrawn and this release
   const renamed = writes.find((row) => row.path === "/v1/appStoreVersions/version");
   assert.equal(renamed.data.attributes.versionString, "1.0.200");
   const added = writes.filter((row) => row.path === "/v1/reviewSubmissionItems").map((row) => row.data.relationships);
-  assert.deepEqual(added.map(({ reviewSubmission, ...item }) => item), [
+  for (const item of added) assert.equal(item.reviewSubmission.data.id, "submission");
+  assert.deepEqual(added.map((item) => Object.fromEntries(Object.entries(item).filter(([key]) => key !== "reviewSubmission"))), [
     { appStoreVersion: { data: { type: "appStoreVersions", id: "version" } } },
     { subscriptionGroupVersion: { data: { type: "subscriptionGroupVersions", id: "group-version" } } },
     { subscriptionVersion: { data: { type: "subscriptionVersions", id: "monthly-version" } } },
