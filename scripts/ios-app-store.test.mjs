@@ -106,13 +106,23 @@ test("an app's first version omits What's New, which Apple refuses before anythi
 
 test("an older version still queued for App Review is withdrawn and this release takes its place", async () => {
   const { api, writes } = fixture({ version: { appVersionState: "WAITING_FOR_REVIEW" },
-    submission: { id: "submission", attributes: { state: "WAITING_FOR_REVIEW" } } });
+    submission: { id: "submission", attributes: { state: "WAITING_FOR_REVIEW" } },
+    items: [{ relationships: { appStoreVersion: { data: { id: "version" } } } },
+      { relationships: { subscriptionGroupVersion: { data: { id: "group-version" } } } },
+      { relationships: { subscriptionVersion: { data: { id: "monthly-version" } } } }] });
   assert.deepEqual(await submitRelease(api, args),
     { outcome: "submitted", version: "1.0.200", buildNumber: "12345", state: "WAITING_FOR_REVIEW", replaced: "1.0.199" });
   assert.deepEqual(writes[0].data.attributes, { canceled: true });
   const renamed = writes.find((row) => row.path === "/v1/appStoreVersions/version");
   assert.equal(renamed.data.attributes.versionString, "1.0.200");
-  assert.ok(writes.some((row) => row.data?.attributes?.submitted));
+  const added = writes.filter((row) => row.path === "/v1/reviewSubmissionItems").map((row) => row.data.relationships);
+  assert.deepEqual(added.map(({ reviewSubmission, ...item }) => item), [
+    { appStoreVersion: { data: { type: "appStoreVersions", id: "version" } } },
+    { subscriptionGroupVersion: { data: { type: "subscriptionGroupVersions", id: "group-version" } } },
+    { subscriptionVersion: { data: { type: "subscriptionVersions", id: "monthly-version" } } },
+  ]);
+  const submitted = writes.findIndex((row) => row.data?.attributes?.submitted);
+  assert.ok(submitted > writes.findLastIndex((row) => row.path === "/v1/reviewSubmissionItems"));
 
   const slow = fixture({ version: { appVersionState: "WAITING_FOR_REVIEW" },
     submission: { id: "submission", attributes: { state: "WAITING_FOR_REVIEW" } }, cancelState: "CANCELING" });
