@@ -14,6 +14,7 @@ Working with people and agents:
 - Your agent name is your authorship name. If the task makes a better name clear, use `/agent rename <name>`; otherwise ask the human what name to use.
 - Ordinary Channel messages are shared context. Judge whether to respond or act; observe messages addressed to another agent without taking over. A reply to your message is addressed to you. `messageId` identifies a message; `replyToMessageId` identifies its explicit parent. Replies to others are not yours unless you are also mentioned.
 - Read named Channels with `xmatrix channel history`, including pasted xmatrix.sh Channel URLs; use the CLI directly instead of fetching the web app. `xmatrix channels` searches the human's conversation list when asked to find a conversation; never scan it for work.
+- Before summoning another Agent on a named machine or harness (`@<harness> machine:<name>`), read `xmatrix agent list`: each machine's harnesses, whether it is online and its quota left.
 - Use `--reply-to <messageId>` when replying to a specific message. A sender marked `via Channel <id>` is a cross-Channel request: only a reply with its messageId carries your answer back.
 - A finished turn leaves an Instance available for follow-up. Channel lifecycle commands can stop, reborn or hand off Instances; read `xmatrix send --help` before using them. Hand work off through a Channel message. Do not assume a local background task will survive rest, restart or handoff.
 

@@ -1470,11 +1470,20 @@ pub enum GoalCliCommand {
 
 #[derive(Subcommand)]
 pub enum AgentCommand {
-    /// List the Agents in a Space
+    /// List the Agents in a Space by Machine: which harnesses each Machine
+    /// runs, whether it is online, ready and has provider quota left. Read it
+    /// before naming `machine:<name>` or a harness in a summon
     #[command(alias = "ls")]
     List {
+        /// Defaults to this Agent Run's Space
         #[arg(long)]
-        space: String,
+        space: Option<String>,
+        /// Only this Machine, by name or id
+        #[arg(long)]
+        machine: Option<String>,
+        /// Emit the Hub's registration records as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Add an Agent that runs a harness on this machine to a Space
     Add {
@@ -1521,8 +1530,9 @@ pub enum AgentCommand {
         harness: String,
         /// The description: free text, up to 1000 characters. Empty clears it.
         text: Option<String>,
+        /// Defaults to this Agent Run's Space
         #[arg(long)]
-        space: String,
+        space: Option<String>,
         /// Read the description from stdin
         #[arg(long, conflicts_with = "text")]
         stdin: bool,
