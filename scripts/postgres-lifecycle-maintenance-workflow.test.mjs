@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse } from "yaml";
+
+// A file URL keeps the dynamic import valid on every runner path style.
+const workspace = pathToFileURL(fileURLToPath(new URL("..", import.meta.url))).href.replace(/\/$/u, "");
 
 const workflow = await readFile(new URL(
   "../.github/workflows/production-postgres-lifecycle-maintenance.yml",
@@ -52,7 +56,7 @@ async function broker(runs) {
     },
   };
   await script(github, { eventName: "schedule", runId: 7, repo: {} }, { info: () => {}, notice: () => {} },
-    { env: { REQUEST_DRY_RUN: "", REQUEST_MAX_ROWS: "" } });
+    { env: { GITHUB_WORKSPACE: workspace, REQUEST_DRY_RUN: "", REQUEST_MAX_ROWS: "" } });
   return dispatched;
 }
 
@@ -74,6 +78,7 @@ test("the broker dispatches the release the executor accepts, whatever order Git
     assert.deepEqual(await broker(runs), [{ workflow_id: "production-postgres-lifecycle-maintenance.yml", ref: "xmatrix-v0.16.349-beta.2" }]);
   }
   // Both sides ask for an uncached run list and the broker logs what it saw.
-  for (const text of [request, workflow]) assert.match(text, /uncached: String\(context\.runId\), headers: \{ "cache-control": "no-cache" \}/u);
-  assert.match(request, /core\.info\(`Saw \$\{runs\.length\} successful releases/u);
+  assert.match(request, /uncached: `\$\{context\.runId\}-\$\{Date\.now\(\)\}`, headers: \{ "cache-control": "no-cache" \}/u);
+  assert.match(workflow, /uncached: String\(context\.runId\), headers: \{ "cache-control": "no-cache" \}/u);
+  assert.match(request, /core\.info\(`Saw \$\{history\.length\} successful releases and \$\{recent\.length\} since \$\{day\}/u);
 });

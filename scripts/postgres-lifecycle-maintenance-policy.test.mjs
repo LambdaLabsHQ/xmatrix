@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -6,6 +7,7 @@ import {
   lifecycleExecutionTitle,
   lifecycleRequestTitle,
   requireLifecycleExecutionAuthority,
+  resolveMaintenanceRelease,
 } from "./postgres-lifecycle-maintenance-policy.mjs";
 
 const tag = "xmatrix-v0.16.238";
@@ -69,6 +71,34 @@ test("lifecycle execution rejects authority, parameter, and replay drift", () =>
       { id: 43, display_title: lifecycleExecutionTitle(41, "true", "10000") },
     ] }),
   ]) assert.throws(() => requireLifecycleExecutionAuthority(input));
+});
+
+test("a release that succeeds while the history list is in flight replaces that stale tag", () => {
+  const run = (id, head_branch) =>
+    ({ id, conclusion: "success", event: "workflow_dispatch", head_branch, head_sha: String(id) });
+  const history = [run(12, "xmatrix-v2.2.1-beta.12")];
+  const recent = [...history, run(13, "xmatrix-v2.2.1-beta.13")];
+  assert.deepEqual(resolveMaintenanceRelease({ history, recent, openRuns: [] }), {
+    release: recent[1], wait: false,
+  });
+  const stable = { id: 14, status: "in_progress", event: "workflow_dispatch", head_branch: "xmatrix-v2.2.1" };
+  assert.equal(resolveMaintenanceRelease({ history, recent, openRuns: [stable] }).wait, false);
+  const newer = { id: 15, status: "in_progress", event: "workflow_dispatch", head_branch: "xmatrix-v2.2.1-beta.14" };
+  const waiting = resolveMaintenanceRelease({ history, recent, openRuns: [newer] });
+  assert.equal(waiting.wait, true);
+  assert.equal(waiting.release.id, 13);
+  assert.equal(resolveMaintenanceRelease({
+    history, recent, openRuns: [{ ...newer, status: "completed", conclusion: "failure" }],
+  }).wait, false);
+});
+
+test("the daily broker re-reads recent successes before it dispatches", () => {
+  const source = readFileSync(new URL(
+    "../.github/workflows/production-postgres-lifecycle-maintenance-request.yml",
+    import.meta.url,
+  ), "utf8");
+  assert.match(source, /resolveMaintenanceRelease/u);
+  assert.match(source, /created: `>=\$\{day\}`/u);
 });
 
 test("maintenance runs from the newest beta, never from a stable that rebuilt an older source", () => {
