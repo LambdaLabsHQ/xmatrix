@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Returning to the iOS app no longer says "Reconnecting"
+
+The iOS app replaces its live connection every time it comes back to the
+foreground, and on cellular the new connection often took longer than the
+4 s grace, so the open app said "Reconnecting to xMatrix…" when nothing had
+failed. The tile now waits until a redial has actually failed (#1225).
+Offline still shows at once. Beta Web only, no API, schema or native change;
+recovery is a CI-validated beta Web release reverting the change.
+
 ## Unreleased: Unreadable Channel catalogs answer not found
 
 Opening a Channel list for a Space the account cannot access returned an
