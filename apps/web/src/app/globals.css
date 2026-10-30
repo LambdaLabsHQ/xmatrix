@@ -9546,36 +9546,20 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 
 /* A phone's conversation and its Space's channel list trade places
    (use-mobile-list-transition.ts). Only the two lists move, side by side as
-   one flat strip with nothing drawn between them: the channel list lies just
-   left of the conversation. The bar, its wood sign and the controls at the
-   bottom stay where they stand, and the names slide through the sign the same
-   way. Switching dock tabs moves the whole page, sign included; that the sign
-   stays put is what tells going a level up or down apart from it. Everything
-   is drawn from the custom properties the shell root carries while the
-   change runs. */
+   one flat strip with nothing drawn between them; the bar, its wood sign and
+   the controls at the bottom stay where they stand, and the names slide
+   through the sign. Switching dock tabs moves the whole page, sign included;
+   that the sign stays put is what tells going a level up or down apart from
+   it. What moves is painted frame by frame on the moving elements themselves;
+   these rules hold for the whole change. */
 @media (max-width: 767px) {
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-mobile-dock-pager {
     visibility: visible !important;
-    translate: calc(var(--app-list-dx, 0px) - 100%) 0;
   }
 
+  /* The conversation's paper moves with its rows (painted on them); under it lies the list. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-message-surface {
     background: transparent !important;
-  }
-
-  /* The conversation's paper moves, and the work under way in it with it; its
-     composer stays. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-message-surface > :not(.app-composer) {
-    translate: var(--app-list-dx, 0px) 0;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-message-surface > :not(.app-composer, .app-agent-work-dock) {
-    background: var(--background) !important;
-  }
-
-  /* The conversation's band clears as the list arrives under it. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-topbar.app-mobile-channel-detail-bar {
-    background: color-mix(in oklch, var(--background) calc(100% - 100% * var(--app-list-p, 0)), transparent) !important;
   }
 
   /* The list's bar lies over the conversation's for the length of the change:
@@ -9589,66 +9573,26 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
     pointer-events: none !important;
   }
 
+  /* One board: the conversation's sign keeps its wood and the list's lends
+     only its window, so the names pass through a single board. Every rule here
+     names the elements it styles: toggling the root attribute restyles only
+     them, where a rule ending in `*` would restyle the whole page. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-topbar.app-topbar.app-topbar.app-list-transition-target :is(.app-mobile-title, .app-mobile-space-trigger) {
     background: none !important;
     box-shadow: none !important;
   }
 
-  /* The glyphs at the bar's end trade places in the names' direction. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-mobile-channel-detail-bar :is(.app-mobile-share-button, .app-mobile-channel-more-button) {
-    opacity: calc(1 - 1.7 * var(--app-list-p, 0));
-    translate: calc(14px * var(--app-list-p, 0)) 0;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-list-transition-target .app-mobile-search-icon {
-    opacity: calc(1.7 * var(--app-list-p, 0) - 0.7);
-    translate: calc(-14px * (1 - var(--app-list-p, 0))) 0;
-  }
-
-  /* One board: it keeps its place and goes from the conversation's length to
-     the list's, while the names slide through it, the conversation's out to the
-     right and the Space's in from the left. Sized once both are measured. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] {
-    --app-list-sign-width: calc(var(--app-list-sign-from) + (var(--app-list-sign-to) - var(--app-list-sign-from)) * var(--app-list-p, 0));
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] .app-topbar.app-mobile-channel-detail-bar .app-mobile-back-sign,
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] .app-topbar.app-topbar.app-topbar.app-list-transition-target :is(.app-mobile-title, .app-mobile-space-trigger) {
-    width: var(--app-list-sign-width) !important;
-    max-width: none !important;
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-topbar.app-topbar.app-topbar :is(.app-mobile-back-sign, .app-list-transition-target :is(.app-mobile-title, .app-mobile-space-trigger)) {
     overflow: hidden !important;
   }
 
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] .app-topbar.app-mobile-channel-detail-bar .app-mobile-back-sign > * {
-    flex-shrink: 0 !important;
-    min-width: max-content !important;
-    translate: calc((var(--app-list-sign-from) + 6px) * var(--app-list-p, 0)) 0;
-  }
+}
 
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition-sized] .app-topbar.app-topbar.app-topbar.app-list-transition-target :is(.app-mobile-title, .app-mobile-space-trigger) > * {
-    flex-shrink: 0 !important;
-    min-width: max-content !important;
-    translate: calc((var(--app-list-sign-to) + 6px) * (var(--app-list-p, 0) - 1)) 0;
-  }
-
-  /* The controls at the bottom stay where they stand: the conversation's sink
-     away, the list's rise in. A glass fades on itself: faded through an
-     ancestor it would have nothing behind it to show. Nothing on either
-     screen takes a tap until one of them is the screen again. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-composer {
-    translate: 0 calc(8px * var(--app-list-p, 0));
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-composer-shell > * {
-    opacity: calc(1 - 1.8 * var(--app-list-p, 0)) !important;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] :is(.app-main, .app-composer, .app-agent-work-dock) {
-    pointer-events: none !important;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] :is(.app-mobile-create-fab.app-mobile-create-fab, .app-mobile-tab-dock.app-mobile-tab-dock) {
-    opacity: calc(1.8 * var(--app-list-p, 0) - 0.8) !important;
-    translate: 0 calc(8px * (1 - var(--app-list-p, 0)));
-  }
+/* Nothing on either screen takes a tap until one of them is the screen again.
+   A shield over the page, not `pointer-events` on it: that one inherits, and
+   setting it would restyle every node the page has. */
+.xmatrix-app .app-list-transition-shield {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-toast);
 }

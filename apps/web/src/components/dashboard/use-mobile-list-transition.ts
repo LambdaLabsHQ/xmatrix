@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { flushSync } from "react-dom";
 
 import { systemBackLayerOpen } from "./use-system-back";
@@ -12,15 +12,22 @@ import { systemBackLayerOpen } from "./use-system-back";
  * keeps its place too; the names slide through it. (Switching dock tabs moves
  * the whole page, sign included: use-dock-tab-slide.ts.)
  *
- * The shell root carries the motion as custom properties, written directly so
- * a finger's drag never re-renders React:
- *   --app-list-dx           how far the conversation has moved right (px)
- *   --app-list-p            the same as a fraction of the width, 0..1
- *   --app-list-sign-from/to the sign's width as the conversation and as the list
- * globals.css draws every layer from them.
+ * A drag moves at the finger's rate, so a frame may touch only the few
+ * elements that move, through their own inline styles. Anything the whole page
+ * inherits (a custom property on the shell) would restyle every node on every
+ * frame. For the same reason the shell does not re-render to start or end the
+ * change: the root carries `data-list-transition` set here, globals.css draws
+ * what holds for the whole change from it, and only MobileListTransitionLayer
+ * renders the list's own bar and controls for it.
  */
 
 export type MobileListTransitionStage = "back" | "forward";
+
+/** Which change is running, for the layer that draws the list's bar and controls during it. */
+export type MobileListTransitionStore = {
+  subscribe: (listener: () => void) => () => void;
+  get: () => MobileListTransitionStage | null;
+};
 
 /** runMobileScreenTransition hands a screen change here first; true when it was drawn here. */
 export type MobileListTransitionDriver = {
@@ -45,6 +52,103 @@ function reducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+/** The elements that move during the change, found once when it starts. */
+type Parts = {
+  width: number;
+  list: HTMLElement | null;
+  conversation: HTMLElement[];
+  /** The conversation's rows and summary, which carry its paper while it moves. */
+  conversationPaper: HTMLElement[];
+  band: HTMLElement | null;
+  sign: { from: number; to: number; boards: HTMLElement[]; leaving: HTMLElement[]; arriving: HTMLElement[] } | null;
+  leavingGlyphs: HTMLElement[];
+  arrivingGlyphs: HTMLElement[];
+  composer: HTMLElement | null;
+  composerParts: HTMLElement[];
+  listControls: HTMLElement[];
+};
+
+const all = (root: ParentNode, selector: string) => Array.from(root.querySelectorAll<HTMLElement>(selector));
+
+function findParts(root: HTMLElement): Parts {
+  const target = root.querySelector<HTMLElement>(".app-list-transition-target");
+  const fromBoard = root.querySelector<HTMLElement>(".app-topbar:not(.app-list-transition-target) .app-mobile-back-sign");
+  const toBoard = target?.querySelector<HTMLElement>(":is(.app-mobile-title, .app-mobile-space-trigger)") ?? null;
+  // Both boards are on the page at their natural lengths now.
+  const sign = fromBoard && toBoard ? {
+    from: fromBoard.getBoundingClientRect().width,
+    to: toBoard.getBoundingClientRect().width,
+    boards: [fromBoard, toBoard],
+    leaving: Array.from(fromBoard.children) as HTMLElement[],
+    arriving: Array.from(toBoard.children) as HTMLElement[],
+  } : null;
+  return {
+    width: root.clientWidth || window.innerWidth,
+    list: root.querySelector<HTMLElement>(".app-mobile-dock-pager"),
+    conversation: all(root, ".app-message-surface > :not(.app-composer)"),
+    conversationPaper: all(root, ".app-message-surface > :not(.app-composer, .app-agent-work-dock)"),
+    band: root.querySelector<HTMLElement>(".app-topbar.app-mobile-channel-detail-bar"),
+    sign,
+    leavingGlyphs: all(root, ".app-mobile-channel-detail-bar :is(.app-mobile-share-button, .app-mobile-channel-more-button)"),
+    arrivingGlyphs: target ? all(target, ".app-mobile-search-icon") : [],
+    composer: root.querySelector<HTMLElement>(".app-composer"),
+    composerParts: all(root, ".app-composer-shell > *"),
+    listControls: all(root, ".app-list-transition-controls :is(.app-mobile-create-fab, .app-mobile-tab-dock)"),
+  };
+}
+
+const PAINTED = ["translate", "opacity", "width", "background", "flex-shrink", "min-width"] as const;
+
+/** What holds for the whole change, set once on the elements it concerns. */
+function prepare(parts: Parts) {
+  for (const element of parts.conversationPaper) element.style.setProperty("background", "var(--background)", "important");
+  // Neither name shrinks to the board's changing length; the board covers what does not fit.
+  for (const name of parts.sign ? [...parts.sign.leaving, ...parts.sign.arriving] : []) {
+    name.style.setProperty("flex-shrink", "0", "important");
+    name.style.setProperty("min-width", "max-content", "important");
+  }
+}
+
+/** One frame of the change, `x` px along (0 = the conversation, width = the list). */
+function paint(parts: Parts, x: number) {
+  const p = Math.min(1, Math.max(0, x / parts.width));
+  const set = (element: HTMLElement | null, property: (typeof PAINTED)[number], value: string) =>
+    element?.style.setProperty(property, value, "important");
+  set(parts.list, "translate", `${x - parts.width}px 0`);
+  for (const element of parts.conversation) set(element, "translate", `${x}px 0`);
+  set(parts.band, "background", `color-mix(in oklch, var(--background) ${(1 - p) * 100}%, transparent)`);
+  if (parts.sign) {
+    const { from, to, boards, leaving, arriving } = parts.sign;
+    for (const board of boards) set(board, "width", `${from + (to - from) * p}px`);
+    for (const name of leaving) set(name, "translate", `${(from + 6) * p}px 0`);
+    for (const name of arriving) set(name, "translate", `${(to + 6) * (p - 1)}px 0`);
+  }
+  for (const glyph of parts.leavingGlyphs) {
+    set(glyph, "opacity", String(1 - 1.7 * p));
+    set(glyph, "translate", `${14 * p}px 0`);
+  }
+  for (const glyph of parts.arrivingGlyphs) {
+    set(glyph, "opacity", String(1.7 * p - 0.7));
+    set(glyph, "translate", `${-14 * (1 - p)}px 0`);
+  }
+  set(parts.composer, "translate", `0 ${8 * p}px`);
+  // A glass fades on itself: faded through an ancestor it has nothing behind it to show.
+  for (const part of parts.composerParts) set(part, "opacity", String(1 - 1.8 * p));
+  for (const control of parts.listControls) {
+    set(control, "opacity", String(1.8 * p - 0.8));
+    set(control, "translate", `0 ${8 * (1 - p)}px`);
+  }
+}
+
+function unpaint(parts: Parts) {
+  const elements = [parts.list, parts.band, parts.composer, ...parts.conversation, ...parts.conversationPaper, ...parts.leavingGlyphs,
+    ...parts.arrivingGlyphs, ...parts.composerParts, ...parts.listControls,
+    ...(parts.sign ? [...parts.sign.boards, ...parts.sign.leaving, ...parts.sign.arriving] : [])];
+  for (const element of elements) {
+    for (const property of PAINTED) element?.style.removeProperty(property);
+  }
+}
+
 export function useMobileListTransition({ conversationOverList, listShowing, rootRef, driverRef, onBack }: {
   /** A conversation lies over its Space's channel list on a phone, with nothing open over it. */
   conversationOverList: boolean;
@@ -54,38 +158,48 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
   driverRef: MutableRefObject<MobileListTransitionDriver | null>;
   /** The conversation's Back to the channel list. */
   onBack: () => void;
-}): MobileListTransitionStage | null {
-  const [stage, setStage] = useState<MobileListTransitionStage | null>(null);
+}): MobileListTransitionStore {
   const state = useRef({ conversationOverList, listShowing, onBack });
   state.current = { conversationOverList, listShowing, onBack };
-  const motion = useRef({ stage: null as MobileListTransitionStage | null, x: 0, width: 0, frame: 0, dragging: false,
-    committing: false });
+  const storeRef = useRef<{ store: MobileListTransitionStore; set: (stage: MobileListTransitionStage | null) => void } | null>(null);
+  if (!storeRef.current) {
+    let stage: MobileListTransitionStage | null = null;
+    const listeners = new Set<() => void>();
+    storeRef.current = {
+      store: {
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        get: () => stage,
+      },
+      set: (next) => {
+        stage = next;
+        for (const listener of listeners) listener();
+      },
+    };
+  }
 
   useEffect(() => {
-    const m = motion.current;
+    const setStage = storeRef.current!.set;
+    const m = { stage: null as MobileListTransitionStage | null, parts: null as Parts | null, x: 0, frame: 0,
+      dragging: false, committing: false };
 
-    const paint = (x: number) => {
-      const root = rootRef.current;
-      if (!root) return;
+    const move = (x: number) => {
       m.x = x;
-      root.style.setProperty("--app-list-dx", `${x}px`);
-      root.style.setProperty("--app-list-p", String(Math.min(1, Math.max(0, x / m.width))));
+      if (m.parts) paint(m.parts, x);
     };
 
     const open = (direction: MobileListTransitionStage): boolean => {
       const root = rootRef.current;
       if (!root) return false;
       m.stage = direction;
-      m.width = root.clientWidth || window.innerWidth;
+      root.dataset.listTransition = direction;
+      // Only the layer renders: the list's bar and its controls, over the conversation's.
       flushSync(() => setStage(direction));
-      // Both signs are on the page now at their natural widths; the board
-      // takes the conversation's and the list's in turn.
-      const from = root.querySelector(".app-topbar:not(.app-list-transition-target) .app-mobile-back-sign");
-      const to = root.querySelector(".app-list-transition-target :is(.app-mobile-title, .app-mobile-space-trigger)");
-      root.style.setProperty("--app-list-sign-from", `${from?.getBoundingClientRect().width ?? 0}px`);
-      root.style.setProperty("--app-list-sign-to", `${to?.getBoundingClientRect().width ?? 0}px`);
-      root.dataset.listTransitionSized = "";
-      paint(direction === "forward" ? m.width : 0);
+      m.parts = findParts(root);
+      prepare(m.parts);
+      move(direction === "forward" ? m.parts.width : 0);
       return true;
     };
 
@@ -95,6 +209,7 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       m.dragging = false;
       m.committing = Boolean(update);
       try {
+        // The change lands in one render: the new screen, and the layer gone.
         flushSync(() => {
           update?.();
           setStage(null);
@@ -102,12 +217,9 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       } finally {
         m.committing = false;
       }
-      const root = rootRef.current;
-      if (!root) return;
-      for (const name of ["--app-list-dx", "--app-list-p", "--app-list-sign-from", "--app-list-sign-to"]) {
-        root.style.removeProperty(name);
-      }
-      delete root.dataset.listTransitionSized;
+      if (m.parts) unpaint(m.parts);
+      m.parts = null;
+      if (rootRef.current) delete rootRef.current.dataset.listTransition;
     };
 
     /* From where it is to `target`, carrying `speed` (px/s). A release keeps
@@ -125,11 +237,11 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
         const t = (now - start) / 1000;
         const left = (offset + (speed + SETTLE_RATE * offset) * t) * Math.exp(-SETTLE_RATE * t);
         if (Math.abs(left) < 0.5 && t > 0.05) {
-          paint(target);
+          move(target);
           done();
           return;
         }
-        paint(target + left);
+        move(target + left);
         m.frame = requestAnimationFrame(step);
       };
       m.frame = requestAnimationFrame(step);
@@ -145,7 +257,7 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
         if (m.stage || reducedMotion()) return false;
         if (direction === "back") {
           if (!state.current.conversationOverList || !open("back")) return false;
-          settle(m.width, 0, false, () => close(update));
+          settle(m.parts!.width, 0, false, () => close(update));
           return true;
         }
         if (!state.current.listShowing) return false;
@@ -163,12 +275,12 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
         return true;
       },
       move(distance) {
-        if (m.dragging) paint(Math.max(0, distance));
+        if (m.dragging) move(Math.max(0, distance));
       },
       end(back, speed) {
-        if (!m.dragging) return;
+        if (!m.dragging || !m.parts) return;
         m.dragging = false;
-        settle(back ? m.width : 0, speed, true, () => back ? close(() => state.current.onBack()) : close());
+        settle(back ? m.parts.width : 0, speed, true, () => back ? close(() => state.current.onBack()) : close());
       },
     };
     window.__xmatrixBackGesture = gesture;
@@ -180,5 +292,5 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
     };
   }, [driverRef, rootRef]);
 
-  return stage;
+  return storeRef.current.store;
 }
