@@ -410,8 +410,8 @@ test("D1 queries run one read-only statement and show bounded rows", async () =>
   assert.deepEqual(query.body, { sql: "SELECT source, views FROM PageViews" });
   assert.equal(query.authorization, "Bearer token-b");
   assert.match(value.summary, /stockpulse-db: 60 rows, first 50 shown \(60 rows read\)/u);
-  assert.match(value.summary, /source\tviews\npod cast\t0/u, "tabs in values cannot shift columns");
-  assert.doesNotMatch(value.summary, /\t50\n|\t59/u);
+  assert.match(value.summary, /source    views\npod cast  0\ndirect    1\n/u, "columns line up and tabs in values cannot shift them");
+  assert.doesNotMatch(value.summary, / 50\n| 59/u);
 
   const listed = await actWith(twoLogins, `@cloudflare:list_databases:${OTHER}`, { ...perToken,
     [`GET accounts/${OTHER}/d1/database`]: [{ name: "stockpulse-db", uuid: db, num_tables: 0, file_size: 3 * 1_048_576 }] });

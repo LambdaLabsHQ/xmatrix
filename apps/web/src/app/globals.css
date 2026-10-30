@@ -9346,6 +9346,18 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
   color: var(--muted-foreground);
 }
 .xmatrix-app .app-connector-receipt-private svg { width: 12px; height: 12px; flex: none; }
+.xmatrix-app .app-connector-receipt-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+}
+.xmatrix-app .app-connector-receipt-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.xmatrix-app .app-connector-receipt-link svg { width: 13px; height: 13px; flex: none; }
 
 /*
  * A Gmail read (gmail-message-card.tsx) drawn as the letter itself: a raised sheet on the receipt's tinted paper,

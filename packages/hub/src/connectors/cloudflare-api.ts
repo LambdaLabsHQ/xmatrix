@@ -376,6 +376,13 @@ function cell(value: unknown): string {
   return oneLine(typeof value === "object" ? JSON.stringify(value) : String(value), QUERY_CELL).replace(/\t/gu, " ");
 }
 
+/* Columns padded with spaces line up in any monospaced reading; tabs only did while every value was short. */
+function alignedTable(lines: string[][]): string {
+  const widths = lines[0]!.map((_, index) => Math.max(...lines.map((line) => line[index]!.length)));
+  return lines.map((line) => line.map((value, index) => index === line.length - 1 ? value : value.padEnd(widths[index]!))
+    .join("  ").trimEnd()).join("\n");
+}
+
 export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
   list_accounts: {
     effect: "read",
@@ -482,10 +489,10 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
       const rows = (Array.isArray(first.results) ? first.results : []).map(record);
       const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
       const shown = rows.slice(0, QUERY_ROWS);
-      const table = [columns.map((column) => cell(column)).join("\t"),
-        ...shown.map((row) => columns.map((column) => cell(row[column])).join("\t"))].join("\n");
+      const table = alignedTable([columns.map((column) => cell(column)),
+        ...shown.map((row) => columns.map((column) => cell(row[column])))]);
       const read = Number(record(first.meta).rows_read);
-      return { summary: `${database.name}: ${rows.length} rows${rows.length > shown.length ? `, first ${shown.length} shown` : ""}` +
+      return { summary: `${database.name}: ${rows.length} ${rows.length === 1 ? "row" : "rows"}${rows.length > shown.length ? `, first ${shown.length} shown` : ""}` +
         `${Number.isFinite(read) ? ` (${read} rows read)` : ""}` +
         (columns.length ? `\n${quoteRetrievedText(table, QUERY_OUTPUT)}` : ""),
         url: `https://dash.cloudflare.com/${target.account}/workers/d1/databases/${database.id}` };

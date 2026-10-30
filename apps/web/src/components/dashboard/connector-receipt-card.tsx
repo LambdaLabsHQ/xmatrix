@@ -8,6 +8,8 @@ import { RichMessageContent } from "./workspace-shell-rich-message";
 import { PrivateConnectorResult } from "./private-connector-result";
 import { parseGmailMessage } from "@/lib/gmail-message";
 import { GmailMessageCard } from "./gmail-message-card";
+import { splitConnectorResult } from "@/lib/connector-result";
+import { ConnectorResultLinkAction } from "./connector-result-link";
 
 const OUTCOMES: Record<ConnectorReceiptStatus, { label: string; tone: StatusTone; Icon: typeof CircleCheck }> = {
   completed: { label: "Completed", tone: "settled", Icon: CircleCheck },
@@ -35,6 +37,7 @@ export function ConnectorReceiptCard({ entries, collapsed = false, components, p
       {entries.map((entry, index) => {
         const outcome = entry.status ? OUTCOMES[entry.status] : undefined;
         const email = entry.private || !entry.detail ? undefined : parseGmailMessage(entry.detail);
+        const result = entry.private || email || !entry.detail ? undefined : splitConnectorResult(entry.detail);
         return (
           <div key={index} className="app-connector-receipt-entry" data-status={entry.status ?? "unknown"}>
             {(entry.subject || outcome) && (
@@ -51,9 +54,10 @@ export function ConnectorReceiptCard({ entries, collapsed = false, components, p
               </p>
             ) : email ? (
               <div className="app-connector-receipt-detail"><GmailMessageCard message={email} /></div>
-            ) : entry.detail ? (
+            ) : result ? (
               <div className="app-connector-receipt-detail">
-                <RichMessageContent body={entry.detail} collapsed={collapsed} components={components} />
+                <RichMessageContent body={result.body} collapsed={collapsed} components={components} />
+                {result.link && <ConnectorResultLinkAction link={result.link} />}
               </div>
             ) : null}
           </div>
