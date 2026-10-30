@@ -4,6 +4,7 @@ import test from "node:test";
 import { Client } from "pg";
 
 import {
+  ControlError,
   createAuthorityDatabase,
   PostgresChannelCatalogRepository,
   PostgresSpaceControlRepository,
@@ -299,6 +300,30 @@ integration("a family list reads one Channel and the readable threads opened on 
   t.diagnostic(`family list ${familyBytes} bytes vs full catalog ${fullBytes} bytes (${full.channels.length} rows)`);
   assert.ok(full.channels.length > family.channels.length);
   assert.ok(familyBytes < fullBytes);
+});
+
+integration("unreadable Spaces return the same not-found rejection across catalog reads", async (t) => {
+  await seed();
+  const database = createAuthorityDatabase({ connectionString, shardId: "shard-0" });
+  const repository = new PostgresChannelCatalogRepository(database);
+  const selections = [
+    ["page", (input) => repository.page({ ...input, view: "flat", filter: "all" })],
+    ["page without counts", (input) => repository.page({ ...input, view: "flat", filter: "all", includeCounts: false })],
+    ["counts", (input) => repository.page({ ...input, view: "flat", filter: "all", countsOnly: true })],
+    ["resolve", (input) => repository.resolve({ ...input, channelIds: ["root-40"] })],
+    ["metadata resolve", (input) => repository.resolve({ ...input, channelIds: ["root-40"], includeParticipants: false })],
+  ];
+  for (const principal of [{ kind: "user", id: "outsider" }, { kind: "agent", id: "unregistered" }]) {
+    for (const spaceId of ["space-catalog", "missing-space"]) {
+      for (const [name, read] of selections) {
+        await t.test(`${principal.kind}: ${spaceId}: ${name}`, async () => {
+          await assert.rejects(read({ requestId: "catalog-denied", spaceId, principal }), (error) =>
+            error instanceof ControlError && error.status === 404 && error.code === "space_not_found" &&
+            error.message === "Space not found" && error.retryable === false);
+        });
+      }
+    }
+  }
 });
 
 integration("channel catalog pages and resolves against PostgreSQL", async () => {
