@@ -71,8 +71,10 @@ sale; Apple refuses it on an app's first version, so that version omits it.
 An older version still waiting for App Review (Apple has not started it) would
 otherwise reach the App Store first and hold the stable back. The job cancels
 that submission, waits up to two minutes for Apple to close it, then reuses the
-withdrawn version for this release; `submitted` then names the version it
-`replaced`. A version Apple is reviewing or has approved is never withdrawn.
+withdrawn version for this release, carrying the withdrawn submission's
+subscription and subscription group items into the new one (Apple reviews a
+first subscription only with an app version); `submitted` then names the
+version it `replaced`. A version Apple is reviewing or has approved is never withdrawn.
 
 Outcomes in the Actions job summary:
 

@@ -94,18 +94,27 @@ export async function releaseToApple(api, { release, appId, buildNumber, metadat
   return submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes, waitFor, attempts });
 }
 
+const CARRIED = { subscriptionVersion: "subscriptionVersions", subscriptionGroupVersion: "subscriptionGroupVersions" };
+
 /**
  * Cancels the one review submission still waiting for Apple and waits, at
- * most `attempts` times 5 seconds apart, until Apple has closed it.
+ * most `attempts` times 5 seconds apart, until Apple has closed it. Answers
+ * the subscription items it carried, which the replacement must carry too:
+ * Apple reviews a first subscription only together with an app version.
  */
 async function withdrawQueuedReview(api, appId, waitFor, attempts = 24) {
   const open = (await api.list(`/v1/reviewSubmissions?${query({ "filter[app]": appId, "filter[platform]": "IOS", limit: "200" })}`))
     .filter((row) => row.attributes.state !== "COMPLETE");
   if (open.length !== 1 || open[0].attributes.state !== "WAITING_FOR_REVIEW") throw new Error("The queued App Review submission is ambiguous; reconcile it at Apple.");
   const path = `/v1/reviewSubmissions/${open[0].id}`;
+  const items = await api.list(`${path}/items?${query({ "fields[reviewSubmissionItems]": "appStoreVersion,subscriptionVersion,subscriptionGroupVersion", limit: "200" })}`);
+  const carried = items.flatMap((item) => Object.keys(CARRIED).flatMap((key) => {
+    const id = item.relationships?.[key]?.data?.id;
+    return id ? [{ key, id }] : [];
+  }));
   await api.request(path, "PATCH", { type: "reviewSubmissions", id: open[0].id, attributes: { canceled: true } });
   for (let attempt = 0; attempt < attempts; attempt++) {
-    if ((await api.request(path)).data.attributes.state === "COMPLETE") return;
+    if ((await api.request(path)).data.attributes.state === "COMPLETE") return carried;
     if (attempt + 1 < attempts) await waitFor(5000);
   }
   throw new Error("Apple has not finished withdrawing the queued review; rerun this release to continue.");
@@ -129,10 +138,10 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   // first and hold this release back, so this release takes its place. One
   // Apple has started reviewing or approved is left alone.
   const queued = versions.filter((row) => row.id !== target?.id && state(row) === "WAITING_FOR_REVIEW");
-  let replaced;
+  let replaced, carried = [];
   if (queued.length === 1 && compareVersions(queued[0].attributes.versionString, version) < 0) {
     replaced = queued[0].attributes.versionString;
-    await withdrawQueuedReview(api, appId, waitFor);
+    carried = await withdrawQueuedReview(api, appId, waitFor);
     versions = await listVersions();
     target = versions.find((row) => row.attributes.versionString === version);
   }
@@ -226,6 +235,11 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   if (!items.length) {
     await api.request("/v1/reviewSubmissionItems", "POST", { type: "reviewSubmissionItems", relationships: {
       reviewSubmission: relation("reviewSubmissions", submission.id), appStoreVersion: relation("appStoreVersions", target.id),
+    } });
+  }
+  for (const { key, id } of carried) {
+    await api.request("/v1/reviewSubmissionItems", "POST", { type: "reviewSubmissionItems", relationships: {
+      reviewSubmission: relation("reviewSubmissions", submission.id), [key]: relation(CARRIED[key], id),
     } });
   }
   await api.request(`/v1/reviewSubmissions/${submission.id}`, "PATCH", { type: "reviewSubmissions", id: submission.id, attributes: { submitted: true } });
