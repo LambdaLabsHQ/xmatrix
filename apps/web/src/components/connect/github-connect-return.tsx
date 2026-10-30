@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { appViewAddress } from "@xmatrix/protocol";
 import { GITHUB_CONNECT_OUTCOMES, keepGitHubConnectReturn, takeGitHubReturnPath } from "@/lib/github-connect-return";
 
 /** Where every GitHub connect lands: it keeps the result for this tab, then opens the Space's Apps view,
@@ -14,7 +15,7 @@ export function GitHubConnectReturn() {
     const outcome = GITHUB_CONNECT_OUTCOMES.find((known) => known === reported) ?? "failed";
     keepGitHubConnectReturn(outcome, query.get("grant"));
     const space = query.get("space");
-    window.location.replace(takeGitHubReturnPath(outcome) ?? (space ? `/app/${encodeURIComponent(space)}/apps?connector=github` : "/app"));
+    window.location.replace(takeGitHubReturnPath(outcome) ?? (space ? appViewAddress(space, "apps", "github") : "/app"));
   }, []);
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-5 px-6 py-12">

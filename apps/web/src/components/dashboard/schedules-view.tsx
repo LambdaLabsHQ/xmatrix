@@ -1,6 +1,6 @@
 "use client";
 
-import { useUrlParameter } from "./url-query-state";
+import { useViewSelection } from "./url-query-state";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -98,7 +98,7 @@ export function SchedulesView({
   onOpenPages: () => void;
 } & ScheduleActions) {
   const { user } = useAuth();
-  const [selectedId, select] = useUrlParameter("schedule");
+  const [selectedId, select] = useViewSelection("automation");
   const [editingId, setEditingId] = useState<string | null>(null);
   // Relative times ("next in 8 min") stay true while the view is open.
   const [now, setNow] = useState(() => Date.now());

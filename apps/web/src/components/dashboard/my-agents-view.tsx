@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { AgentHarnessDetail } from "./agent-harness-detail";
-import { useUrlParameter } from "./url-query-state";
+import { useViewSelection } from "./url-query-state";
 import { AgentListGroups, agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
 import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
@@ -115,7 +115,7 @@ export function MyAgentsView({
   /* A switch shows its new position at once and holds it until the agent list
      confirms it; waiting for the list's reload made a flip look ignored. */
   const [switching, setSwitching] = useState<{ id: string; on: boolean } | null>(null);
-  const [selectedAgentId, select] = useUrlParameter("agent");
+  const [selectedAgentId, select] = useViewSelection("agents");
 
   const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
   const copy = useOnboardingCopy(spaceId, token, currentUserId);

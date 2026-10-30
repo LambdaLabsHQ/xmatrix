@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
-import { appRouteInfo, pushBrowserPath, replaceBrowserPath, viewSelectionParameter } from "./workspace-shell-navigation";
+import { APP_VIEW_SELECTION_FIELDS, appViewSelectionField, type AppSelectionView } from "@xmatrix/protocol";
+import { appRouteInfo, pushBrowserPath, replaceBrowserPath } from "./workspace-shell-navigation";
 
 const QUERY_EVENT = "xmatrix:url-query";
 
@@ -29,8 +30,9 @@ function writeParameter(parameter: string, next: string | null, options: { repla
   window.dispatchEvent(new Event(QUERY_EVENT));
 }
 
-/** Read and write one explicitly named URL field without a second local state. */
-export function useUrlParameter(parameter: string): [string | null, (next: string | null, options?: { replace?: boolean }) => void] {
+/** Read and write the selection `view` keeps in the address, without a second local state. */
+export function useViewSelection(view: AppSelectionView): [string | null, (next: string | null, options?: { replace?: boolean }) => void] {
+  const parameter = APP_VIEW_SELECTION_FIELDS[view];
   const read = useCallback(() => new URL(window.location.href).searchParams.get(parameter)?.trim() || null, [parameter]);
   const write = useCallback((next: string | null, options?: { replace?: boolean }) => writeParameter(parameter, next, options), [parameter]);
   return [useSyncExternalStore(subscribe, read, () => null), write];
@@ -38,7 +40,7 @@ export function useUrlParameter(parameter: string): [string | null, (next: strin
 
 /** The phone's shell Back closes the domain selection owned by this destination. */
 export function closeViewSelection(): boolean {
-  const parameter = viewSelectionParameter(appRouteInfo(window.location.href).view);
+  const parameter = appViewSelectionField(appRouteInfo(window.location.href).view);
   if (!parameter || !new URL(window.location.href).searchParams.get(parameter)) return false;
   writeParameter(parameter, null);
   return true;

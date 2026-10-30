@@ -14,7 +14,7 @@ import {
   LIST_ROW_TITLE_CLASS_NAME,
   LIST_ROW_TITLE_LINE_CLASS_NAME,
 } from "./row-frames";
-import { useUrlParameter } from "./url-query-state";
+import { useViewSelection } from "./url-query-state";
 
 /*
  * Every rail destination reads the way conversations and pages do: the rail,
@@ -364,15 +364,15 @@ export type ToolSection = {
  * admin: the list names the sections and the paper shows one. On a desktop
  * the first is shown until another is chosen; on a phone the list comes first.
  */
-export function SectionedToolView({ title, sections, label = title, defaultKey, selectionParameter = "section" }: {
+export function SectionedToolView({ title, sections, label = title, defaultKey, view }: {
   title: string;
   sections: ToolSection[];
-  selectionParameter?: "section" | "space";
+  view: "settings" | "admin" | "team";
   label?: string;
   /** The section shown on a desktop while the address names none. */
   defaultKey?: string;
 }) {
-  const [sectionKey, select] = useUrlParameter(selectionParameter);
+  const [sectionKey, select] = useViewSelection(view);
   const chosen = sections.find((section) => section.key === sectionKey);
   const shown = chosen ?? sections.find((section) => section.key === defaultKey) ?? sections[0];
   const createSection = sections.find((section) => section.create);

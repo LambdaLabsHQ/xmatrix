@@ -3,7 +3,7 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { HARNESS_PROFILE_DESCRIPTION_LIMIT, WEB_PROXY_ROUTES, type AgentRegistrationSummary } from "@xmatrix/protocol";
+import { APP_VIEW_SELECTION_FIELDS, HARNESS_PROFILE_DESCRIPTION_LIMIT, WEB_PROXY_ROUTES, type AgentRegistrationSummary } from "@xmatrix/protocol";
 
 import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -45,7 +45,7 @@ export function HarnessProfileSection({ registration, token, onSaved }: {
     if (!editable) return;
     const url = parseAppLocation(window.location.href);
     if (url.searchParams.get("edit") !== "profile") return;
-    if (url.searchParams.get("agent") !== agentHarnessSelectionId(harness)) return;
+    if (url.searchParams.get(APP_VIEW_SELECTION_FIELDS.agents) !== agentHarnessSelectionId(harness)) return;
     fieldRef.current?.focus();
   }, [editable, harness]);
   // A Hub that does not report profiles has nothing to show or edit.

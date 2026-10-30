@@ -688,13 +688,13 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   }, [channels, currentSpaceId, machines, user?.id]);
   const machineLinks = useMemo<MachineLinks>(() => ({
     machines: machineTargets,
-    onOpenMachine: (machineId) => changeAppViewRef.current("machines", `machine=${encodeURIComponent(machineId)}`),
+    onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
   }), [machineTargets]);
-  const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "section=secrets"), []);
+  const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
   const spaceAllowance = useSpaceAllowance(user?.id, currentSpaceId);
   const composerAllowance = useMemo(() => user ? {
     userId: user.id,
-    onOpenBilling: () => changeAppViewRef.current("settings", `section=${SPACE_BILLING_SECTION}`),
+    onOpenBilling: () => changeAppViewRef.current("settings", SPACE_BILLING_SECTION),
   } : undefined, [user]);
   // The route owns whether a page is open; its tree entry may arrive later.
   // Keep the back bar and its content spacing while the title is loading.

@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
-import {WEB_PROXY_ROUTES} from '@xmatrix/protocol';
+import {WEB_PROXY_ROUTES, appViewAddress} from '@xmatrix/protocol';
 import {useAuth} from '@/lib/auth-context';
 import {xmatrixApiRequest} from '@/lib/query/api-client';
 import {Button,buttonVariants} from '@/components/ui/button';
@@ -47,7 +47,7 @@ export function DingTalkInstallationConfirmation() {
         token:captured.token,method:'PUT',body:{state:input.state,confirmed:true},signal:AbortSignal.any([controller.current.signal,AbortSignal.timeout(60_000)])});
       if(owner.current!==captured)return;
       if(result.ok!==true)throw new Error('confirmation failed');
-      window.location.assign(`/app/${encodeURIComponent(selection.spaceId)}/apps?connector=dingtalk&oauth=connected`);
+      window.location.assign(appViewAddress(selection.spaceId, "apps", "dingtalk", { oauth: "connected" }));
     } catch {if(owner.current===captured){setSelection(null);setConfirmed(false);setPending(false);setError('The company connection could not be confirmed. Start a fresh authorization from Apps → DingTalk.');}}
   }
   return <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-5 px-6 py-12">
@@ -65,6 +65,6 @@ export function DingTalkInstallationConfirmation() {
         I confirm this company, original Space and selected members. This replaces the Space’s existing DingTalk connection and saved robot credentials.
       </InstallationConsent>
     </>}
-    <InstallationOutcome error={error} href={selection?`/app/${encodeURIComponent(selection.spaceId)}/apps?connector=dingtalk`:'/app'}/>
+    <InstallationOutcome error={error} href={selection?appViewAddress(selection.spaceId,'apps','dingtalk'):'/app'}/>
   </main>;
 }

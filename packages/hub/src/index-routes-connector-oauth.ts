@@ -6,7 +6,7 @@ import { sentryInstallationClient } from "./connectors/sentry-installation";
 import { feishuNativeApp } from "./connectors/feishu-native";
 import { googleChatNativeApp } from "./connectors/googlechat-native";
 import type { Hono } from "hono";
-import { HUB_ROUTES, sha256Hex } from "@xmatrix/protocol";
+import { HUB_ROUTES, appViewAddress, sha256Hex } from "@xmatrix/protocol";
 import { checkAppConnection } from "./app-connection-check";
 import { getAppConnectorProvider } from "./app-connectors";
 import { connectorCredentialRepository, INGRESS_KEY_FIELD, mintConnectorSecret } from "./connectors/credentials";
@@ -39,10 +39,7 @@ import { confirmGitHubInstallations, linkGitHubInstallation } from "./index-rout
  */
 
 function appsRedirect(env: Env, spaceId: string, providerId: string, outcome: "connected" | "failed" | "elsewhere"): string {
-  const url = new URL(`/app/${encodeURIComponent(spaceId)}/apps`, appOrigin(env));
-  url.searchParams.set("connector", providerId);
-  url.searchParams.set("oauth", outcome);
-  return url.toString();
+  return new URL(appViewAddress(spaceId, "apps", providerId, { oauth: outcome }), appOrigin(env)).toString();
 }
 
 /** The provider's callback parameters the app passes back to finish a connect. */

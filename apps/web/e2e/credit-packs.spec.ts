@@ -39,3 +39,17 @@ test("returning from Checkout confirms through the server before showing the new
   expect(JSON.parse(requests[0].body!)).toEqual({ sessionId: "cs_test_verified" });
   await expect(page).not.toHaveURL(/credit_pack_session_id/);
 });
+
+// Stripe returns to `/billing`, which must open this Space's Billing with the
+// return intact (#1203 retired the field `/billing` still wrote).
+test("Checkout's return address opens Billing and confirms there", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
+  await fixtureJson(page, "pack-billing", /\/billing$/u, { billing });
+  await fixtureJson(page, "pack-reconcile", /\/billing\/credits\/reconcile$/u,
+    { billing: { ...billing, credits: { ...billing.credits, packBalance: 5_000 } } });
+  await page.goto(`/billing?space=${E2E_SPACE.id}&credit_pack_checkout=success&credit_pack_session_id=cs_test_verified`);
+  await expect(page).toHaveURL(/\/settings\?section=billing/u);
+  await expect(page.getByTestId("space-billing")).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Credit pack payment confirmed" })).toBeVisible();
+  expect(await fixtureRequestRecords(page, "pack-reconcile")).toHaveLength(1);
+});
