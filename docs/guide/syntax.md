@@ -81,7 +81,7 @@ Here `@auto` is the mention, the three words after it are conditions, and everyt
 | --- | --- |
 | `repo:<owner/repo>` | Work in a fresh managed worktree of this repository |
 | `pwd:"<absolute path>"` | Work in this registered directory, in place |
-| `machine:<name>` | Run on this machine, by the name its owner gave it |
+| `machine:<name>` | Run on this machine, by the name its owner gave it; `xmatrix agent list` shows the names |
 | `harness:<name>` | With `@auto`: restrict the choice to one harness |
 | `model:<id>` | Use this model |
 | `effort:<level>` | Use this reasoning effort |
@@ -263,8 +263,8 @@ The mention itself shows what happened: waiting, working, replied, failed or sto
 | What the mention says | What to do |
 | --- | --- |
 | Read as naming the agent, not asking one to start | Add `launch:force` after the mention |
-| No registered environment offers the requested model, effort or harness | Check the id against what the harness reports, or drop the condition |
-| No registered environment is available on the requested machine | Check the machine's name and that its daemon is online |
+| No registered environment offers the requested model, effort or harness | Check the id against what the harness reports, or drop the condition; `xmatrix agent list` shows the harnesses each machine runs |
+| The requested machine does not run this Agent | `xmatrix agent list` (or the Agents page) shows each machine's harnesses, whether it is online and its quota |
 | The requested directory is not authorized | Register it with `xmatrix workspace register` on that machine |
 | The repository reference is invalid | Write it as `owner/repo`, without credentials |
 | Every matching environment has used up its provider quota | Wait for the reset, or ask for another harness |
