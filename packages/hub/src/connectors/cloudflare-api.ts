@@ -19,11 +19,17 @@ import { addCloudflareLogin, parseCloudflareLogins, type CloudflareAccountRef } 
  * destination pointing at this connection's ingress and one policy named
  * `xMatrix · <alert type> · <Space id>` sending to it, and the Space's last
  * unsubscribe removes the policy. Names carry the Space, so two Spaces that
- * connect one account never touch each other's configuration. Agents read Workers logs, deployments and D1 databases,
- * and may roll a Worker back where the Channel allows it.
+ * connect one account never touch each other's configuration. Agents read and
+ * write the account's zones, DNS and registrar domains, list Workers and attach
+ * a hostname to one, read Workers logs, deployments and D1, and may roll a
+ * Worker back where the Channel allows it. D1 stays read-only.
  */
 
 const SCRIPT = /^[a-z0-9][a-z0-9_-]{0,62}$/u;
+const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/u;
+const DNS_TYPE = /^(?:A|AAAA|CNAME|TXT|MX|NS|CAA)$/u;
+const DNS_LABEL = /^(?:@|\*|[a-z0-9_](?:[a-z0-9_-]{0,62}[a-z0-9_])?(?:\.[a-z0-9_](?:[a-z0-9_-]{0,62}[a-z0-9_])?)*)$/u;
+const DNS_CONTENT = 2_048;
 const DATABASE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const DATABASE_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 const VERSION = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
@@ -51,7 +57,7 @@ function logins(credentials: Credentials): Login[] {
   return list;
 }
 
-async function cloudflarePayload(token: string, path: string, init: RequestInit & { json?: unknown } = {}):
+async function cloudflarePayload(token: string, path: string, init: RequestInit & { json?: unknown; timeoutMs?: number } = {}):
   Promise<Record<string, unknown>> {
   const payload = await providerJson(providerUrl("https://api.cloudflare.com/client/v4/", path),
     { ...init, headers: { authorization: `Bearer ${token}` } });
@@ -62,7 +68,7 @@ async function cloudflarePayload(token: string, path: string, init: RequestInit 
   return payload;
 }
 
-async function cloudflare(token: string, path: string, init: RequestInit & { json?: unknown } = {}): Promise<unknown> {
+async function cloudflare(token: string, path: string, init: RequestInit & { json?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
   return (await cloudflarePayload(token, path, init)).result;
 }
 
@@ -363,12 +369,91 @@ async function databaseId(target: CloudflareTarget, database: string): Promise<{
   return { id: text(found.uuid), name: database };
 }
 
-/* A grant from before D1 was offered lacks d1.read; Cloudflare answers with an authorization error. */
-function d1Refusal(error: unknown): never {
+/* A grant from before a scope was offered answers with an authorization error. */
+function grantRefusal(error: unknown, grant: string): never {
   if (error instanceof ProviderRequestError && /authenticat|authoriz|permission|10000/iu.test(error.message)) {
-    throw new ProviderRequestError(403, `${error.message}. Reconnect Cloudflare in Apps to grant D1 read access`);
+    throw new ProviderRequestError(403, `${error.message}. Reconnect Cloudflare in Apps to grant ${grant}`);
   }
   throw error;
+}
+
+const d1Refusal = (error: unknown): never => grantRefusal(error, "D1 read access");
+const accessRefusal = (error: unknown): never => grantRefusal(error, "zone, DNS and registrar access");
+
+function namedAccount(statement: { target: string; text: string }, usage: string): Record<string, string> | string {
+  if (statement.text.trim()) return usage;
+  const value = statement.target.trim().toLowerCase();
+  if (value === "*") return {};
+  return CLOUDFLARE_ACCOUNT_ID.test(value) ? { account: value } : usage;
+}
+
+function namedDomain(statement: { target: string; text: string }, usage: string): Record<string, string> | string {
+  if (statement.text.trim()) return usage;
+  const { account, rest } = splitAccount(statement.target.trim().toLowerCase());
+  return DOMAIN.test(rest) ? { domain: rest, ...(account ? { account } : {}) } : usage;
+}
+
+async function zonesNamed(target: CloudflareTarget, name: string): Promise<Record<string, unknown>[]> {
+  return cloudflareList(target.token, `zones?account.id=${target.account}&name=${encodeURIComponent(name)}`, 20).catch(accessRefusal);
+}
+
+/* The zone is the hostname or the longest suffix of it that this account holds. */
+async function zoneForHost(target: CloudflareTarget, hostname: string): Promise<{ id: string; name: string }> {
+  const labels = hostname.split(".");
+  for (let start = 0; start <= labels.length - 2; start++) {
+    const name = labels.slice(start).join(".");
+    const found = (await zonesNamed(target, name)).find((zone) => text(zone.name).toLowerCase() === name);
+    const id = text(found?.id);
+    if (found && CLOUDFLARE_ACCOUNT_ID.test(id)) return { id, name };
+  }
+  throw new ProviderRequestError(404, `No Cloudflare zone contains ${hostname}`);
+}
+
+async function hostedZone(credentials: Credentials, account: string | undefined, hostname: string):
+  Promise<{ target: CloudflareTarget; zone: { id: string; name: string } }> {
+  const target = await cloudflareTarget(credentials, account);
+  return { target, zone: await zoneForHost(target, hostname) };
+}
+
+function recordName(zone: string, name: string): string {
+  if (name === "@" || name === zone) return zone;
+  return name.endsWith(`.${zone}`) ? name : `${name}.${zone}`;
+}
+
+/* Registrar lists use a cursor, not the page numbers the rest of the API uses. */
+async function registrarDomains(target: CloudflareTarget): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = [];
+  let cursor = "";
+  for (let page = 0; page < 20; page++) {
+    const query = cursor ? `?per_page=50&cursor=${encodeURIComponent(cursor)}` : "?per_page=50";
+    const payload = await cloudflarePayload(target.token, `accounts/${target.account}/registrar/registrations${query}`).catch(accessRefusal);
+    const result = Array.isArray(payload.result) ? payload.result.map(record) : [];
+    items.push(...result);
+    const info = record(payload.result_info);
+    const next = text(info.cursor) || text(record(info.cursors).after);
+    if (!next || next === cursor) return items;
+    cursor = next;
+  }
+  return items;
+}
+
+async function domainCheck(target: CloudflareTarget, domain: string): Promise<Record<string, unknown>> {
+  const checked = record(await cloudflare(target.token, `accounts/${target.account}/registrar/domain-check`,
+    { method: "POST", json: { domains: [domain] }, timeoutMs: 20_000 }).catch(accessRefusal));
+  return record((Array.isArray(checked.domains) ? checked.domains : [])[0]);
+}
+
+function domainPrice(row: Record<string, unknown>): { cost: string; renewal: string; currency: string } {
+  const pricing = record(row.pricing);
+  return { cost: text(pricing.registration_cost), renewal: text(pricing.renewal_cost), currency: text(pricing.currency) || "USD" };
+}
+
+/* MX content is `<priority> <host>`; every other type is stored as written. */
+function dnsContent(type: string, raw: string): { content: string; priority?: number } {
+  if (type !== "MX") return { content: raw };
+  const match = raw.match(/^(\d{1,5})\s+(\S+)$/u);
+  if (!match) throw new ProviderRequestError(400, "an MX record is <priority> <host>");
+  return { content: match[2]!, priority: Number(match[1]) };
 }
 
 function cell(value: unknown): string {
@@ -496,6 +581,169 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
         `${Number.isFinite(read) ? ` (${read} rows read)` : ""}` +
         (columns.length ? `\n${quoteRetrievedText(table, QUERY_OUTPUT)}` : ""),
         url: `https://dash.cloudflare.com/${target.account}/workers/d1/databases/${database.id}` };
+    },
+  },
+  list_zones: {
+    effect: "read",
+    requires: ["logins|oauthToken|apiToken"],
+    parse: (statement) => namedAccount(statement, "name an account: @cloudflare:list_zones:<account id>|*"),
+    async execute({ credentials }, input) {
+      const target = await cloudflareTarget(credentials, input.account);
+      const zones = await cloudflareList(target.token, `zones?account.id=${target.account}`, 100).catch(accessRefusal);
+      const lines = zones.slice(0, 50).map((zone) => `${text(zone.name)}  ${text(zone.id)}  ${text(zone.status)}`);
+      return { summary: `${oneLine(target.name, 80)}: ${zones.length} zones` +
+        (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
+        url: `https://dash.cloudflare.com/${target.account}` };
+    },
+  },
+  create_zone: {
+    effect: "write",
+    requires: ["logins|oauthToken|apiToken"],
+    parse: (statement) => namedDomain(statement, "name a zone: @cloudflare:create_zone:[<account id>/]<domain>"),
+    async execute({ credentials }, input) {
+      const target = await cloudflareTarget(credentials, input.account);
+      const existing = (await zonesNamed(target, input.domain!)).find((zone) => text(zone.name).toLowerCase() === input.domain);
+      if (existing) return { summary: `${input.domain} already has zone ${text(existing.id)}`,
+        url: `https://dash.cloudflare.com/${target.account}/${text(existing.id)}` };
+      const created = record(await cloudflare(target.token, "zones", { method: "POST", json: {
+        name: input.domain, account: { id: target.account }, type: "full" } }).catch(accessRefusal));
+      return { summary: `Created zone ${text(created.name) || input.domain} ${text(created.id)}`,
+        url: `https://dash.cloudflare.com/${target.account}/${text(created.id)}` };
+    },
+  },
+  list_dns: {
+    effect: "read",
+    requires: ["logins|oauthToken|apiToken"],
+    parse: (statement) => namedDomain(statement, "name a zone: @cloudflare:list_dns:[<account id>/]<zone>"),
+    async execute({ credentials }, input) {
+      const { target, zone } = await hostedZone(credentials, input.account, input.domain!);
+      const records = await cloudflareList(target.token, `zones/${zone.id}/dns_records`, 100).catch(accessRefusal);
+      const lines = records.slice(0, 50).map((item) => `${text(item.type)}  ${text(item.name)}  ${oneLine(text(item.content), 180)}`);
+      return { summary: `${zone.name}: ${records.length} DNS records` +
+        (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
+        url: `https://dash.cloudflare.com/${target.account}/${zone.id}/dns/records` };
+    },
+  },
+  put_dns: {
+    effect: "write",
+    requires: ["logins|oauthToken|apiToken"],
+    parse(statement) {
+      const usage = "name a record: @cloudflare:put_dns:[<account id>/]<zone> <TYPE> <name> <content>";
+      const { account, rest } = splitAccount(statement.target.trim().toLowerCase());
+      const parts = statement.text.trim().match(/^([A-Za-z]+)\s+(\S+)\s+(\S[\s\S]*)$/u);
+      if (!DOMAIN.test(rest) || !parts) return usage;
+      const type = parts[1]!.toUpperCase();
+      const name = parts[2]!.toLowerCase();
+      const content = parts[3]!.trim();
+      if (!DNS_TYPE.test(type) || !DNS_LABEL.test(name) || content.length > DNS_CONTENT || /[\r\n]/u.test(content)) return usage;
+      return { domain: rest, type, name, content, ...(account ? { account } : {}) };
+    },
+    async execute({ credentials }, input) {
+      const { target, zone } = await hostedZone(credentials, input.account, input.domain!);
+      const fqdn = recordName(zone.name, input.name!);
+      const written = dnsContent(input.type!, input.content!);
+      const listed = await cloudflareList(target.token,
+        `zones/${zone.id}/dns_records?type=${input.type}&name=${encodeURIComponent(fqdn)}`, 100).catch(accessRefusal);
+      if (listed.some((item) => text(item.content) === written.content && (written.priority === undefined || Number(item.priority) === written.priority))) {
+        return { summary: `${input.type} ${fqdn} already has that content`,
+          url: `https://dash.cloudflare.com/${target.account}/${zone.id}/dns/records` };
+      }
+      await cloudflare(target.token, `zones/${zone.id}/dns_records`, { method: "POST", json: {
+        type: input.type, name: fqdn, content: written.content, ttl: 1,
+        ...(written.priority === undefined ? {} : { priority: written.priority }),
+        ...(input.type === "A" || input.type === "AAAA" || input.type === "CNAME" ? { proxied: false } : {}) } }).catch(accessRefusal);
+      return { summary: `Added ${input.type} ${fqdn}`,
+        url: `https://dash.cloudflare.com/${target.account}/${zone.id}/dns/records` };
+    },
+  },
+  list_domains: {
+    effect: "read",
+    requires: ["logins|oauthToken|apiToken"],
+    parse: (statement) => namedAccount(statement, "name an account: @cloudflare:list_domains:<account id>|*"),
+    async execute({ credentials }, input) {
+      const target = await cloudflareTarget(credentials, input.account);
+      const domains = await registrarDomains(target);
+      const lines = domains.slice(0, 50).map((domain) => `${text(domain.domain_name) || text(domain.name)}  ${text(domain.status)}` +
+        `${text(domain.expires_at) ? `  expires ${text(domain.expires_at)}` : ""}` +
+        `${domain.auto_renew === true ? "  auto-renew" : domain.auto_renew === false ? "  no auto-renew" : ""}`);
+      return { summary: `${oneLine(target.name, 80)}: ${domains.length} registered domains` +
+        (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
+        url: `https://dash.cloudflare.com/${target.account}/domains/registrations` };
+    },
+  },
+  check_domain: {
+    effect: "read",
+    requires: ["logins|oauthToken|apiToken"],
+    parse: (statement) => namedDomain(statement, "name a domain: @cloudflare:check_domain:[<account id>/]<domain>"),
+    async execute({ credentials }, input) {
+      const target = await cloudflareTarget(credentials, input.account);
+      const row = await domainCheck(target, input.domain!);
+      const { cost, renewal, currency } = domainPrice(row);
+      return { summary: `${input.domain}: ${row.registrable === true ? "registrable" : "not registrable"}` +
+        `${text(row.tier) ? ` ${text(row.tier)}` : ""}` +
+        `${text(row.reason) ? ` (${text(row.reason)})` : ""}` +
+        `${cost ? `, ${currency} ${cost} to register` : ""}` +
+        `${renewal ? `, ${currency} ${renewal} to renew` : ""}`,
+        url: `https://dash.cloudflare.com/${target.account}/domains/registrations` };
+    },
+  },
+  register_domain: {
+    effect: "write",
+    requires: ["logins|oauthToken|apiToken"],
+    parse: (statement) => namedDomain(statement, "name a domain: @cloudflare:register_domain:[<account id>/]<domain>"),
+    async execute({ credentials }, input) {
+      const target = await cloudflareTarget(credentials, input.account);
+      const row = await domainCheck(target, input.domain!);
+      if (row.registrable !== true) {
+        throw new ProviderRequestError(409, `${input.domain} is not registrable${text(row.reason) ? `: ${text(row.reason)}` : ""}`);
+      }
+      if (text(row.tier) === "premium") throw new ProviderRequestError(409, `${input.domain} is premium; this command registers standard domains only`);
+      const { cost, renewal, currency } = domainPrice(row);
+      const created = record(await cloudflare(target.token, `accounts/${target.account}/registrar/registrations`,
+        { method: "POST", json: { domain_name: input.domain, auto_renew: true }, timeoutMs: 25_000 }).catch(accessRefusal));
+      const failure = record(created.error);
+      const state = text(created.state) || "submitted";
+      if (state === "failed" || state === "action_required" || state === "blocked") {
+        throw new ProviderRequestError(502, `${input.domain}: registration ${state}${text(failure.message) ? `: ${text(failure.message)}` : ""}`);
+      }
+      return { summary: `${input.domain}: registration ${state}` +
+        `${cost ? `, ${currency} ${cost} now` : ""}` +
+        `${renewal ? `, renews at ${currency} ${renewal}` : ""}, auto-renew on`,
+        url: `https://dash.cloudflare.com/${target.account}/domains/registrations` };
+    },
+  },
+  list_workers: {
+    effect: "read",
+    requires: ["logins|oauthToken|apiToken"],
+    parse: (statement) => namedAccount(statement, "name an account: @cloudflare:list_workers:<account id>|*"),
+    async execute({ credentials }, input) {
+      const target = await cloudflareTarget(credentials, input.account);
+      const scripts = await cloudflareList(target.token, `accounts/${target.account}/workers/scripts`, 100).catch(accessRefusal);
+      const lines = scripts.slice(0, 50).map((script) => text(script.id));
+      return { summary: `${oneLine(target.name, 80)}: ${scripts.length} Workers` +
+        (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
+        url: `https://dash.cloudflare.com/${target.account}/workers/overview` };
+    },
+  },
+  attach_domain: {
+    effect: "write",
+    requires: ["logins|oauthToken|apiToken"],
+    parse(statement) {
+      const usage = "name a hostname and Worker: @cloudflare:attach_domain:[<account id>/]<hostname> <worker>";
+      const { account, rest } = splitAccount(statement.target.trim().toLowerCase());
+      const worker = statement.text.trim().toLowerCase();
+      if (!DOMAIN.test(rest) || !SCRIPT.test(worker)) return usage;
+      const parsed: Record<string, string> = { domain: rest, worker };
+      if (account) parsed.account = account;
+      return parsed;
+    },
+    async execute({ credentials }, input) {
+      const { target, zone } = await hostedZone(credentials, input.account, input.domain!);
+      const attached = record(await cloudflare(target.token, `accounts/${target.account}/workers/domains`,
+        { method: "PUT", json: { hostname: input.domain, service: input.worker, environment: "production", enabled: true, zone_id: zone.id, zone_name: zone.name } })
+        .catch(accessRefusal));
+      return { summary: `Attached ${text(attached.hostname) || input.domain} to ${text(attached.service) || input.worker}`,
+        url: `https://dash.cloudflare.com/${target.account}/workers/services/view/${input.worker}/production/domains` };
     },
   },
 };
