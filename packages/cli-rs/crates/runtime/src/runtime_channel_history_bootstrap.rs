@@ -310,7 +310,7 @@ pub(crate) fn render_channel_context_block(
         .collect();
     Some(format!(
         "Also in channel {channel_id} since your last turn — {} message(s). `xmatrix list` \
-         shows who is live now.\n\
+         shows who is live now; `xmatrix agent list` shows which harnesses each machine runs.\n\
          \n\
          {entries}\
          End of channel context.",

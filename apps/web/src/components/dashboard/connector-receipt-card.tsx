@@ -6,6 +6,8 @@ import type { ConnectorReceiptEntry, ConnectorReceiptStatus } from "@xmatrix/pro
 import { statusInkClass, type StatusTone } from "@/components/ui/status-tone";
 import { RichMessageContent } from "./workspace-shell-rich-message";
 import { PrivateConnectorResult } from "./private-connector-result";
+import { parseGmailMessage } from "@/lib/gmail-message";
+import { GmailMessageCard } from "./gmail-message-card";
 
 const OUTCOMES: Record<ConnectorReceiptStatus, { label: string; tone: StatusTone; Icon: typeof CircleCheck }> = {
   completed: { label: "Completed", tone: "settled", Icon: CircleCheck },
@@ -32,6 +34,7 @@ export function ConnectorReceiptCard({ entries, collapsed = false, components, p
     <div className="app-connector-receipt" data-testid="connector-receipt">
       {entries.map((entry, index) => {
         const outcome = entry.status ? OUTCOMES[entry.status] : undefined;
+        const email = entry.private || !entry.detail ? undefined : parseGmailMessage(entry.detail);
         return (
           <div key={index} className="app-connector-receipt-entry" data-status={entry.status ?? "unknown"}>
             {(entry.subject || outcome) && (
@@ -46,6 +49,8 @@ export function ConnectorReceiptCard({ entries, collapsed = false, components, p
                 <Lock aria-hidden="true" />
                 Private result: only the caller received it
               </p>
+            ) : email ? (
+              <div className="app-connector-receipt-detail"><GmailMessageCard message={email} /></div>
             ) : entry.detail ? (
               <div className="app-connector-receipt-detail">
                 <RichMessageContent body={entry.detail} collapsed={collapsed} components={components} />

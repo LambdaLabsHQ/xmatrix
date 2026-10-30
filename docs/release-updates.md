@@ -1,5 +1,38 @@
 # Release Updates
 
+## Unreleased: The Mac app opens with its traffic lights centred on the rail
+
+The Mac app's first frame, drawn before the app's script runs, laid out the
+browser's 64px rail, so the traffic lights spilled off the wood onto the paper
+until the script added the macOS frame and everything jumped to the 80px rail.
+The window frame (macOS and Windows) now reads the platform from
+`<html data-desktop-platform>`, which the root layout's inline script sets
+before the first paint, so the window opens in its final layout. Beta Web, no
+desktop, API or schema change; recovery is a CI-validated release reverting
+the change.
+
+## Unreleased: Stripe Checkout returns open Billing again
+
+Since #1203, Stripe Checkout and portal returns to `/billing`, and the
+allowance notice's link outside the shell, opened Settings › Account, so a
+returning payer had to find Billing before their payment was confirmed. They
+open Billing again, and confirmation runs there (#1227). Each view's address
+field is now named once in protocol, and the shell, provider returns and the
+Hub's Apps redirects build addresses from it. Beta Web and Hub, no API or
+schema change; recovery is a CI-validated release reverting the change.
+
+## Unreleased: Text-task answer failures retain the failing database path
+
+HUB-BC completed a text task but timed out applying its Channel About. Its
+best-effort handler discarded the original stack and database evidence. It now
+reports that exception once, retaining the named query and transaction phase;
+slow Channel metadata root/control-head locks also capture the bounded live
+wait graph, with a fixed catalog writer category. Diagnostic connections share
+the existing one-per-isolate budget. This fills missing evidence, not a proven
+repair of the underlying contention. Completed commands are still acknowledged;
+replay, authorization and unknown-COMMIT rules are unchanged. Hub only, no
+migration; recovery is a CI-validated beta Hub release reverting the change.
+
 ## Unreleased: Returning to the iOS app no longer says "Reconnecting"
 
 The iOS app replaces its live connection every time it comes back to the

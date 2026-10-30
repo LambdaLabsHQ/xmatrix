@@ -153,6 +153,21 @@ test("on macOS the traffic lights sit centred on the rail and cover nothing", as
   await expect(help).toBeHidden();
 });
 
+test("on macOS the first frame, before the app's script runs, already centres the lights on the rail", async ({ page }) => {
+  await page.setViewportSize(VIEWPORT);
+  await page.addInitScript(() => {
+    (window as unknown as Record<string, unknown>).xmatrixDesktop = { client: "desktop", platform: "darwin" };
+  });
+  /* Only the server's frame and the root layout's inline script: the frame
+     the window shows while the app's script is still loading. */
+  await page.route("**/_next/static/**/*.js", (route) => route.abort());
+  await page.goto("/app", { waitUntil: "domcontentloaded" });
+
+  await expect(page.locator(".xmatrix-app .app-rail").first()).toBeVisible();
+  await expectFlushToWindow(page);
+  expect((await box(page, ".app-rail")).width).toBe(LIGHTS.x * 2 + LIGHTS.width);
+});
+
 test("macOS full screen drops the lights' band when the shell reports it", async ({ page }) => {
   await openAsMacDesktop(page);
   const app = page.locator(".xmatrix-app.xmatrix-desktop-macos").first();

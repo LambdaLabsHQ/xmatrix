@@ -65,14 +65,25 @@ version or creates a new one; an existing higher editable version is never downg
 New versions use manual release after approval. Existing release settings are kept.
 The exact build relationship is read back before submission. Apple must return a
 waiting/in-review/completed submission receipt before `submitted` is reported.
+What's New carries the authored stable notes once an earlier version has been on
+sale; Apple refuses it on an app's first version, so that version omits it.
+
+An older version still waiting for App Review (Apple has not started it) would
+otherwise reach the App Store first and hold the stable back. The job cancels
+that submission, waits up to two minutes for Apple to close it, then reuses the
+withdrawn version for this release, carrying the withdrawn submission's
+subscription and subscription group items into the new one (Apple reviews a
+first subscription only with an app version); `submitted` then names the
+version it `replaced`. A version Apple is reviewing or has approved is never withdrawn.
 
 Outcomes in the Actions job summary:
 
 - `submitted`: Apple accepted the review submission. This is **not** approval or live
   App Store distribution.
 - `already-submitted`: that exact version and build were already submitted or approved.
-- `deferred-existing-review`: another review/release is in progress. The current build
-  is available in TestFlight; no existing review is canceled or replaced.
+- `deferred-existing-review`: Apple is reviewing, or has approved, another version.
+  The current build is available in TestFlight and is **not** submitted; the job
+  logs a warning annotation. Submit it once that version has been released.
 - `deferred-review-response-required`: Apple has unresolved rejection issues. The build
   remains in TestFlight, and the editable draft receives the current public metadata
   and exact build (including its icon). Complete the requested evidence and response
@@ -100,7 +111,7 @@ or localization writes are reconciled by their identifiers and locale on retry. 
 published release's deferred result is addressed by a new regular iOS release after
 the review blocker is resolved, not by bypassing version-order checks. If the API
 contract changes, fix the script in a normal PR and release forward. Never cancel
-someone else's review, clear audit evidence, change tags, or dump raw API bodies to
+a review other than the queued older version a stable replaces, clear audit evidence, change tags, or dump raw API bodies to
 public logs while diagnosing.
 
 Validation: `node --test scripts/ios-app-store.test.mjs` and

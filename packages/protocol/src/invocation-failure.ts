@@ -131,9 +131,9 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_selection_invalid: "xMatrix's selection no longer matches authorized launch resources. No launch was allocated.",
   registration_not_found: "No registered environment offers an authorized model and workspace for this invocation. No launch was allocated.",
   registration_candidates_limit: "Too many registered environments matched this invocation. No launch was allocated.",
-  registration_machine_unavailable: "No registered environment is available on the requested machine. No launch was allocated.",
+  registration_machine_unavailable: "The requested machine does not run this Agent. See which Agents each machine runs on the Agents page or with xmatrix agent list. No launch was allocated.",
   registration_machine_ambiguous: "More than one person's machine has the requested name; ask for the machine through its owner's Agent. No launch was allocated.",
-  registration_harness_unavailable: "No registered environment offers the requested harness with the other launch parameters. No launch was allocated.",
+  registration_harness_unavailable: "No registered environment offers the requested harness with the other launch parameters. See which Agents each machine runs on the Agents page or with xmatrix agent list. No launch was allocated.",
   registration_model_unavailable: "No registered environment offers the requested model with the other launch parameters. No launch was allocated.",
   registration_effort_unavailable: "No registered environment offers the requested reasoning effort with the other launch parameters. No launch was allocated.",
   registration_directory_unavailable: "The requested directory is not authorized for any environment matching the other launch parameters. No launch was allocated.",
@@ -342,6 +342,29 @@ export function parseOfflineMachines(value: unknown): OfflineMachine[] | undefin
   return machines;
 }
 
+/** The harnesses a named machine runs in the Space, for a summon that named
+ * it for a harness it does not run. */
+export interface MachineAgents { machineName: string; harnesses: string[] }
+
+const MACHINE_AGENTS_MAX = 64;
+
+/** A stored named-machine refusal's harnesses read back; anything else carries no detail. */
+export function parseMachineAgents(value: unknown): MachineAgents | undefined {
+  const stored = storedDetail(value);
+  const machineName = stored?.field("machineName", 200);
+  const harnesses = stored?.detail.harnesses;
+  if (!machineName || !Array.isArray(harnesses) || harnesses.length > MACHINE_AGENTS_MAX ||
+    !harnesses.every(harness => typeof harness === "string" && /^[a-z0-9][a-z0-9._-]{0,63}$/u.test(harness))) return undefined;
+  return { machineName, harnesses: [...harnesses] as string[] };
+}
+
+/** What the named machine does run, so the next summon can name one of them. */
+function machineAgentsMessage({ machineName, harnesses }: MachineAgents): string {
+  const which = harnesses.length > 1 ? `${harnesses.slice(0, -1).join(", ")} and ${harnesses.at(-1)}` : harnesses[0];
+  return `${machineName} does not run this Agent. ${which ? `It runs ${which}; mention one of those` : "It runs no Agent in this Space"}` +
+    ", or see every machine's Agents on the Agents page or with xmatrix agent list. No launch was allocated.";
+}
+
 /** The kind of a Channel notice for a summon refused because its machine is
  * offline. The Web draws it as how to bring the machine back, then sends the
  * summon again. */
@@ -399,14 +422,17 @@ function harnessTooOldMessage(tooOld: HarnessTooOld): string {
 }
 
 /** `detail` is what the rejection stored for its code: an invalid answer's
- * failure, what is too old, what is signed out, or which machines are offline. */
+ * failure, what is too old, what is signed out, which machines are offline,
+ * or what a named machine runs. */
 export function preparationRejectionMessage(code: string, detail?: unknown): string | undefined {
   const answer = code === "routing_parameter_invalid_answer" ? parseDecisionAnswerFailure(detail) : undefined;
   const tooOld = code === "registration_harness_outdated" ? parseHarnessTooOld(detail) : undefined;
   const signedOut = code === "registration_harness_signed_out" ? parseHarnessSignedOut(detail) : undefined;
   const offline = code === "registration_daemon_offline" ? parseOfflineMachines(detail) : undefined;
+  const machineAgents = code === "registration_machine_unavailable" ? parseMachineAgents(detail) : undefined;
   return answer ? parameterAnswerMessage(answer) : tooOld ? harnessTooOldMessage(tooOld)
     : signedOut ? harnessSignedOutMessage(signedOut) : offline ? daemonOfflineMessage(offline)
+    : machineAgents ? machineAgentsMessage(machineAgents)
     : Object.hasOwn(PREPARATION_REJECTION_MESSAGES, code) ? PREPARATION_REJECTION_MESSAGES[code] : undefined;
 }
 

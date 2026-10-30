@@ -4245,7 +4245,13 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
      avatar rises into the band. The desktop shell reports full screen as an
      event (`xmatrix-desktop-fullscreen`).
    - Windows: the caption buttons overlay the top-right of the band (see the
-     Windows block below). */
+     Windows block below).
+
+   The platform frame is read from <html data-desktop-platform>, which the
+   root layout's inline script sets before the first paint: the server-drawn
+   startup frame cannot know the shell, and a frame that waited for the app's
+   script would open with the lights off the rail and jump once it ran. The
+   class form serves the site's window preview, which is not in a shell. */
 @media (min-width: 768px) {
   .xmatrix-app {
     --app-edge-top: var(--app-safe-area-top);
@@ -4260,14 +4266,14 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 
   /* Where the desktop shell places the lights (MAC_TRAFFIC_LIGHT_POSITION
      in apps/desktop); their centre is the band's. */
-  .xmatrix-app.xmatrix-desktop-macos {
+  .xmatrix-app:is(.xmatrix-desktop-macos, :where(html[data-desktop-platform="darwin"]) *) {
     --xmatrix-mac-traffic-light-x: 12px;
     --xmatrix-mac-traffic-light-y: 19px;
     --xmatrix-mac-traffic-light-size: 14px;
     --xmatrix-mac-traffic-light-spacing: 7px;
   }
 
-  .xmatrix-app.xmatrix-desktop-macos:not(.xmatrix-desktop-fullscreen) {
+  .xmatrix-app:is(.xmatrix-desktop-macos, :where(html[data-desktop-platform="darwin"]) *):not(.xmatrix-desktop-fullscreen) {
     --app-rail-width: calc(
       var(--xmatrix-mac-traffic-light-x) * 2 +
       var(--xmatrix-mac-traffic-light-size) * 3 +
@@ -4341,11 +4347,11 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     padding-top: var(--app-band) !important;
   }
 
-  .xmatrix-app.xmatrix-desktop-macos :is(.app-rail, .app-sidebar, .app-topbar, .app-panel-header) {
+  .xmatrix-app:is(.xmatrix-desktop-macos, :where(html[data-desktop-platform="darwin"]) *) :is(.app-rail, .app-sidebar, .app-topbar, .app-panel-header) {
     -webkit-app-region: drag;
   }
 
-  .xmatrix-app.xmatrix-desktop-macos :is(
+  .xmatrix-app:is(.xmatrix-desktop-macos, :where(html[data-desktop-platform="darwin"]) *) :is(
     button,
     a,
     input,
@@ -4358,8 +4364,8 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     .app-details,
     .app-agent-work-dock
   ),
-  .xmatrix-app.xmatrix-desktop-macos .app-sidebar > :not(.app-sidebar-space-header),
-  .xmatrix-app.xmatrix-desktop-macos :is(.app-topbar, .app-panel-header) > * {
+  .xmatrix-app:is(.xmatrix-desktop-macos, :where(html[data-desktop-platform="darwin"]) *) .app-sidebar > :not(.app-sidebar-space-header),
+  .xmatrix-app:is(.xmatrix-desktop-macos, :where(html[data-desktop-platform="darwin"]) *) :is(.app-topbar, .app-panel-header) > * {
     -webkit-app-region: no-drag;
   }
 }
@@ -4404,7 +4410,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 
   /* Windows draws its caption buttons in that corner: the icon stands just
      left of them, as search does in Windows apps. */
-  .xmatrix-app.xmatrix-desktop-windows {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) {
     --app-global-search-inset: var(--xmatrix-windows-caption-clearance);
   }
 }
@@ -4417,28 +4423,28 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
    would lie under them steps aside: the details planks start below the band,
    and a header that reaches the right edge keeps the buttons' width free. */
 @media (min-width: 768px) {
-  .xmatrix-app.xmatrix-desktop-windows {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) {
     --xmatrix-windows-caption-height: env(titlebar-area-height, 0px);
     --xmatrix-windows-caption-width: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
     /* The panel's right edge is the window's. */
     --xmatrix-windows-caption-clearance: max(1rem, calc(var(--xmatrix-windows-caption-width) + 0.5rem));
   }
 
-  .xmatrix-app.xmatrix-desktop-windows .app-panel-header {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) .app-panel-header {
     padding-right: var(--xmatrix-windows-caption-clearance);
   }
 
-  .xmatrix-app.xmatrix-desktop-windows .app-page-band {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) .app-page-band {
     padding-top: max(1.5rem, var(--xmatrix-windows-caption-height));
   }
 
-  .xmatrix-app.xmatrix-desktop-windows .app-main > .app-tool-surface.app-material-wood-panel {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) .app-main > .app-tool-surface.app-material-wood-panel {
     margin-top: max(10px, calc(var(--xmatrix-windows-caption-height) + 6px)) !important;
   }
 
   /* First in the root, so every no-drag control after it is cut back out of
      the grip. */
-  .xmatrix-app.xmatrix-desktop-windows > .app-windows-caption-band {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) > .app-windows-caption-band {
     position: fixed !important;
     inset: 0 0 auto 0;
     z-index: 0 !important;
@@ -4447,11 +4453,11 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     -webkit-app-region: drag;
   }
 
-  .xmatrix-app.xmatrix-desktop-windows .app-rail {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) .app-rail {
     -webkit-app-region: drag;
   }
 
-  .xmatrix-app.xmatrix-desktop-windows :is(
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) :is(
     button,
     a,
     input,
@@ -4476,13 +4482,13 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 /* With the details column open, it is the right edge and the conversation
    header is not under the buttons. */
 @media (min-width: 80rem) {
-  .xmatrix-app.xmatrix-desktop-windows :has(> .app-details.xl\:flex) .app-panel-header {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) :has(> .app-details.xl\:flex) .app-panel-header {
     padding-right: 1rem;
   }
 }
 
 @media (min-width: 96rem) {
-  .xmatrix-app.xmatrix-desktop-windows :has(> .app-details) .app-panel-header {
+  .xmatrix-app:is(.xmatrix-desktop-windows, :where(html[data-desktop-platform="win32"]) *) :has(> .app-details) .app-panel-header {
     padding-right: 1rem;
   }
 }
@@ -9314,6 +9320,88 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
   color: var(--muted-foreground);
 }
 .xmatrix-app .app-connector-receipt-private svg { width: 12px; height: 12px; flex: none; }
+
+/*
+ * A Gmail read (gmail-message-card.tsx) drawn as the letter itself: a raised sheet on the receipt's tinted paper,
+ * the sender's initial as a monogram, the subject in display weight, Gmail's verdict on the sender in status ink,
+ * then the text and its links as quiet chips that name their host first.
+ */
+.xmatrix-app .app-gmail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  background: var(--background);
+  border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent),
+    0 6px 18px -10px color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+.xmatrix-app .app-gmail-card-head { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.xmatrix-app .app-gmail-card-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--background);
+  background: var(--foreground);
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 3px color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+.xmatrix-app .app-gmail-card-who { min-width: 0; flex: 1; }
+.xmatrix-app .app-gmail-card-from { display: flex; align-items: baseline; gap: 10px; font-size: 14px; line-height: 1.35; }
+.xmatrix-app .app-gmail-card-name { font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xmatrix-app .app-gmail-card-date { margin-left: auto; flex: none; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.xmatrix-app .app-gmail-card-meta { display: flex; flex-wrap: wrap; column-gap: 8px; font-size: 12px; line-height: 1.4; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.xmatrix-app .app-gmail-card-meta > span + span::before { content: "·"; margin-right: 8px; }
+.xmatrix-app .app-gmail-card-subject { margin-top: 4px; font-size: 16px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.xmatrix-app .app-gmail-card-sender { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; font-size: 12px; font-weight: 550; }
+.xmatrix-app .app-gmail-card-sender svg { width: 13px; height: 13px; flex: none; }
+.xmatrix-app .app-gmail-card-body {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.xmatrix-app .app-gmail-card-body-folded {
+  max-height: 9.5rem;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.xmatrix-app .app-gmail-card-toggle { align-self: flex-start; font-size: 12.5px; font-weight: 600; color: var(--muted-foreground); }
+.xmatrix-app .app-gmail-card-toggle:hover { color: var(--foreground); }
+.xmatrix-app .app-gmail-card-note { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-foreground); }
+.xmatrix-app .app-gmail-card-note svg { width: 12px; height: 12px; }
+.xmatrix-app .app-gmail-card-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+.xmatrix-app .app-gmail-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 3px 8px 3px 10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+  transition: background-color 150ms ease;
+}
+.xmatrix-app .app-gmail-card-link:hover { background: color-mix(in oklab, var(--foreground) 9%, transparent); }
+.xmatrix-app .app-gmail-card-link-label { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.xmatrix-app .app-gmail-card-link-host { flex: none; color: var(--muted-foreground); }
+.xmatrix-app .app-gmail-card-link svg { width: 12px; height: 12px; flex: none; color: var(--muted-foreground); }
 
 /*
  * What an Agent message changed on pages (page-edit-cards.tsx): a slip of tinted paper under the message, as a

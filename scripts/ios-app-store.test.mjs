@@ -45,7 +45,9 @@ function fixture(options = {}) {
       if (path === "/v1/reviewSubmissions" && method === "POST") {
         submission = { id: "submission", attributes: { state: "READY_FOR_REVIEW" } }; return { data: submission };
       }
-      if (path === "/v1/reviewSubmissions/submission" && method === "PATCH") {
+      if (path === "/v1/reviewSubmissions/submission" && method === "PATCH" && data.attributes.canceled) {
+        submission.attributes.state = options.cancelState ?? "COMPLETE"; version.attributes.appVersionState = "DEVELOPER_REJECTED";
+      } else if (path === "/v1/reviewSubmissions/submission" && method === "PATCH") {
         assert.deepEqual(data.attributes, { submitted: true }); submission.attributes.state = options.receiptState ?? "WAITING_FOR_REVIEW";
       }
       if (path === "/v1/reviewSubmissions/submission" && method === "GET") return { data: submission };
@@ -76,7 +78,8 @@ test("submits exact build, preserves private review fields and unrelated localiz
 });
 
 test("stable What's New uses the authored public notes and preserves private review details", async () => {
-  const { api, writes } = fixture();
+  const draft = { id: "version", attributes: { versionString: "1.0.199", appVersionState: "PREPARE_FOR_SUBMISSION" } };
+  const { api, writes } = fixture({ versions: [draft, { id: "on-sale", attributes: { versionString: "1.0.198", appVersionState: "READY_FOR_SALE" } }] });
   const notes = "Read what changed.\n\nFull release notes: https://xmatrix.sh/releases/1.0.200";
   await releaseToApple(api, { ...args, release: "1.0.200", releaseNotes: notes, privateNotes: "SENSITIVE_TEST_SENTINEL" });
   const localization = writes.find((row) => row.path.startsWith("/v1/appStoreVersionLocalizations/") && row.method === "PATCH");
@@ -94,8 +97,42 @@ test("rerun verifies same submitted version's build and does no writes", async (
   assert.deepEqual(wrong.writes, []);
 });
 
-test("existing review stays untouched; a rejected draft is refreshed without resolving issues", async () => {
-  for (const versionState of ["WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE"]) {
+test("an app's first version omits What's New, which Apple refuses before anything is on sale", async () => {
+  const { api, writes } = fixture();
+  await releaseToApple(api, { ...args, release: "1.0.200", releaseNotes: "Read what changed." });
+  const localization = writes.find((row) => row.path.startsWith("/v1/appStoreVersionLocalizations/") && row.method === "PATCH");
+  assert.equal("whatsNew" in localization.data.attributes, false);
+});
+
+test("an older version still queued for App Review is withdrawn and this release takes its place", async () => {
+  const { api, writes } = fixture({ version: { appVersionState: "WAITING_FOR_REVIEW" },
+    submission: { id: "submission", attributes: { state: "WAITING_FOR_REVIEW" } },
+    items: [{ relationships: { appStoreVersion: { data: { id: "version" } } } },
+      { relationships: { subscriptionGroupVersion: { data: { id: "group-version" } } } },
+      { relationships: { subscriptionVersion: { data: { id: "monthly-version" } } } }] });
+  assert.deepEqual(await submitRelease(api, args),
+    { outcome: "submitted", version: "1.0.200", buildNumber: "12345", state: "WAITING_FOR_REVIEW", replaced: "1.0.199" });
+  assert.deepEqual(writes[0].data.attributes, { canceled: true });
+  const renamed = writes.find((row) => row.path === "/v1/appStoreVersions/version");
+  assert.equal(renamed.data.attributes.versionString, "1.0.200");
+  const added = writes.filter((row) => row.path === "/v1/reviewSubmissionItems").map((row) => row.data.relationships);
+  for (const item of added) assert.equal(item.reviewSubmission.data.id, "submission");
+  assert.deepEqual(added.map((item) => Object.fromEntries(Object.entries(item).filter(([key]) => key !== "reviewSubmission"))), [
+    { appStoreVersion: { data: { type: "appStoreVersions", id: "version" } } },
+    { subscriptionGroupVersion: { data: { type: "subscriptionGroupVersions", id: "group-version" } } },
+    { subscriptionVersion: { data: { type: "subscriptionVersions", id: "monthly-version" } } },
+  ]);
+  const submitted = writes.findIndex((row) => row.data?.attributes?.submitted);
+  assert.ok(submitted > writes.findLastIndex((row) => row.path === "/v1/reviewSubmissionItems"));
+
+  const slow = fixture({ version: { appVersionState: "WAITING_FOR_REVIEW" },
+    submission: { id: "submission", attributes: { state: "WAITING_FOR_REVIEW" } }, cancelState: "CANCELING" });
+  await assert.rejects(submitRelease(slow.api, args), /not finished withdrawing/u);
+  assert.equal(slow.writes.some((row) => row.data?.attributes?.submitted), false);
+});
+
+test("a version Apple is reviewing or approved stays untouched; a rejected draft is refreshed without resolving issues", async () => {
+  for (const versionState of ["IN_REVIEW", "PENDING_DEVELOPER_RELEASE"]) {
     const { api, writes } = fixture({ version: { appVersionState: versionState } });
     assert.equal((await submitRelease(api, args)).outcome, "deferred-existing-review");
     assert.deepEqual(writes, []);

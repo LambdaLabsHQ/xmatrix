@@ -16,7 +16,7 @@ async fn cmd_harness_cli(
                 return print_harness_inventory(&inventory, json);
             }
             if agent {
-                return Err(CliError::Auth("Agent Runs can inspect this machine with harness list --local; remote inventories require the machine owner's login".into()));
+                return Err(CliError::Auth("An Agent Run reads which harnesses each Machine runs, whether it is online and its quota with `xmatrix agent list`; `harness list --local` probes this machine".into()));
             }
             let token = resolve_auth_token(token_override, hub_url).await?;
             let daemons = owned_harness_daemons(hub_url, &token).await?;
