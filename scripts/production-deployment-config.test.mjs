@@ -46,9 +46,13 @@ test("production refuses over-limit requests and bounds Jev spend, each limiter 
   assert.equal(new Set(namespaces).size, namespaces.length, "limiters sharing a namespace share counters");
 });
 
-test("production Web serves its custom domain", () => {
+test("production Web serves its custom domain, and the site at xmatrix.page too", () => {
   assert.equal(web.name, "xmatrix-web");
-  assert.deepEqual(web.routes, [{ pattern: "xmatrix.sh", custom_domain: true }]);
+  assert.deepEqual(web.routes, [
+    { pattern: "xmatrix.sh", custom_domain: true },
+    { pattern: "xmatrix.page", custom_domain: true },
+  ]);
+  assert.deepEqual(web.vars, { XMATRIX_APP_ORIGIN: "https://xmatrix.sh", XMATRIX_SITE_ORIGIN: "https://xmatrix.page" });
 });
 
 test("the production beta Web is its own Worker on beta.xmatrix.sh, with no other public host", async () => {
