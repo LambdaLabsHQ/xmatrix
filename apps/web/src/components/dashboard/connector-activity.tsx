@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { useCredentialStore, type CredentialStoreInput } from "./connector-credentials";
 import { ConnectorAction, ConnectorEmpty, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
+import { ConnectorResult } from "./connector-result";
 import { PrivateConnectorResult } from "./private-connector-result";
 import { relativeTime } from "./workspace-shell-presence";
 
@@ -104,7 +105,7 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
   const ranAgain = retry.data ? `${retry.data.summary}${retry.data.url ? ` — ${retry.data.url}` : ""}` : null;
   const headline = stopped ? remedyHeadline(execution, credentials.connector) : null;
   return (
-    <ConnectorRow testId="connector-execution"
+    <ConnectorRow testId="connector-execution" trailingAtTitle
       title={execution.actionLabel || execution.actionId || "Default action"}
       meta={<>
         {requesterName(execution, members)} · {relativeTime(execution.createdAt)}
@@ -114,7 +115,7 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
             messageId={`system:${execution.messageId}:${execution.providerId}`.slice(0, 200)}
             ownerUserId={execution.requestedBy} ownerName={requesterName(execution, members)} />
         ) : <>
-          {execution.resultSummary ? <span className="block">{execution.resultSummary}</span> : null}
+          {execution.resultSummary ? <ConnectorResult text={execution.resultSummary} /> : null}
           {execution.reason ? <span className="block first-letter:uppercase">
             {/^[a-z_]+$/u.test(execution.reason) ? execution.reason.replace(/_/g, " ") : execution.reason}</span> : null}
         </>}

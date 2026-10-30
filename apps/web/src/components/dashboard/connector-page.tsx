@@ -68,11 +68,13 @@ export function ConnectorRows({ children, testId, className }: { children: React
  * its mark, its name, one line about it, and what can be done to it. On a
  * phone the actions go under the name instead of squeezing it.
  */
-export function ConnectorRow({ leading, title, meta, trailing, children, testId }: {
+export function ConnectorRow({ leading, title, meta, trailing, trailingAtTitle = false, children, testId }: {
   leading?: ReactNode;
   title: ReactNode;
   meta?: ReactNode;
   trailing?: ReactNode;
+  /** Keep what trails on the title's line when what is under it can open tall (a run's result). */
+  trailingAtTitle?: boolean;
   /** More about the row, under its line: a field, a command. */
   children?: ReactNode;
   testId?: string;
@@ -85,7 +87,7 @@ export function ConnectorRow({ leading, title, meta, trailing, children, testId 
         {meta ? <div className="mt-0.5 text-[13px] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere]">{meta}</div> : null}
         {children}
       </div>
-      {trailing ? <div className={cn("-mr-2 flex shrink-0 items-center gap-0.5", leading && "max-sm:pl-11")}>{trailing}</div> : null}
+      {trailing ? <div className={cn("-mr-2 flex shrink-0 items-center gap-0.5", trailingAtTitle && "self-start", leading && "max-sm:pl-11")}>{trailing}</div> : null}
     </li>
   );
 }
