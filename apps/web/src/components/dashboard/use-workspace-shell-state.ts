@@ -94,7 +94,7 @@ import { removeRetiredBrowserReplica } from "@/lib/retired-browser-replica";
 import { maybePushRecipientScopedNativeMessageNotification } from "./recipient-scoped-native-message-notification";
 import { noteAgentAnswered } from "@/lib/star-prompt";
 import { useHumanFocusHistoryHttpFallback } from "./use-human-focus-history-http-fallback";
-import { invalidateWorkspaceResources, markHumanPushRetrying, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
+import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
@@ -2205,9 +2205,16 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   }, [token]);
 
   // Catch up when the socket connects, and restart the fallback polls when it drops.
-  // TanStack reads refetchInterval only after a fetch.
+  // TanStack reads refetchInterval only after a fetch. A failed redial says only
+  // that the socket is still down: nothing to catch up on, and the polls run.
   useEffect(() => {
-    const onPush = () => invalidateWorkspaceResources(queryClient);
+    let connected = humanPushConnected();
+    const onPush = (event: Event) => {
+      const next = (event as CustomEvent<{ connected: boolean }>).detail.connected;
+      if (next === connected) return;
+      connected = next;
+      void invalidateWorkspaceResources(queryClient);
+    };
     const onResource = (event: Event) => {
       const detail = (event as CustomEvent<WorkspaceResourceChange>).detail;
       invalidateWorkspaceResources(queryClient, detail);
