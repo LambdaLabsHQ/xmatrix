@@ -275,6 +275,7 @@ test("the iOS app's edge swipe goes Back in the page, and a notification opens w
 /** The iOS app's left-edge swipe as the page receives it. */
 function backGesture(page: Page) {
   return {
+    prepare: () => page.evaluate(() => window.__xmatrixBackGesture?.prepare()),
     begin: () => page.evaluate(() => window.__xmatrixBackGesture?.begin() ?? null),
     move: (distance: number) => page.evaluate((d) => window.__xmatrixBackGesture?.move(d), distance),
     end: (back: boolean, speed: number) =>
@@ -328,6 +329,43 @@ test("an edge swipe let go short of Back leaves the conversation as it was", asy
   await gesture.end(false, 0);
   await screenChangeLanded(page);
   await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+  expect(await screenLayout(page)).toEqual(before);
+});
+
+test("a touch at the edge sets the swipe up unseen, and the swipe starts from it", async ({ page }) => {
+  await installNativeBridge(page, "ios");
+  await openGeneralChannel(page);
+  await screenChangeLanded(page);
+  const before = await screenLayout(page);
+  const gesture = backGesture(page);
+  await gesture.prepare();
+  // Set up for a swipe that may not come: what is on screen has not moved, the
+  // list waits wholly off it, and nothing is held from taps.
+  const prepared = await screenLayout(page);
+  expect(prepared).toMatchObject({ sign: before.sign, timeline: before.timeline, composer: before.composer });
+  expect(prepared.list).toBe(-page.viewportSize()!.width);
+  await expect(page.locator(".app-list-transition-shield")).toHaveCount(0);
+  expect(await gesture.begin()).toBe(true);
+  await gesture.move(120);
+  expect(await screenLayout(page)).toMatchObject({ sign: before.sign, timeline: 120 });
+  await gesture.end(false, 0);
+  await screenChangeLanded(page);
+  expect(await screenLayout(page)).toEqual(before);
+});
+
+test("a swipe that catches the conversation springing back carries on from where it is", async ({ page }) => {
+  const { before, gesture } = await swipeFromConversation(page);
+  await gesture.move(200);
+  await gesture.end(false, 0);
+  expect(await gesture.begin()).toBe(true);
+  await gesture.move(0);
+  const caught = (await screenLayout(page)).timeline!;
+  expect(caught).toBeGreaterThan(0);
+  expect(caught).toBeLessThanOrEqual(200);
+  await gesture.move(40);
+  expect((await screenLayout(page)).timeline).toBe(caught + 40);
+  await gesture.end(false, 0);
+  await screenChangeLanded(page);
   expect(await screenLayout(page)).toEqual(before);
 });
 
