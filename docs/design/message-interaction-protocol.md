@@ -30,6 +30,14 @@ all-lines-or-none rule and eight-statement limit. Handoff consumes its successor
 address as part of one invocation. Code, quotations, links and escaped addresses
 do not become operational commands.
 
+GFM can turn a URL inside JSON into an autolink without source positions.
+Context filtering recovers offsets only when the nearest positioned ancestor's
+text and known plain autolinks reconstruct its source exactly. Link offsets then
+follow the children's cumulative UTF-16 lengths, rather than searching for another
+copy of the URL. Overlapping exclusions are merged. Entities, escapes, unsupported
+structure or other unmappable unpositioned literals still reject the whole
+message, and addresses inside recovered links remain ineligible.
+
 The Hub's post-commit entry point selects lifecycle and runtime executors from
 this plan. HTTP, WebSocket and scheduled messages continue through the same
 post-commit path. Domain adapters use their existing source-message binding,

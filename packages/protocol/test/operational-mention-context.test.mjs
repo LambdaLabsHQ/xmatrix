@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { createInstanceMentionScanner } from "../dist/agent-mention.js";
+import { createInstanceMentionScanner, existingInstanceMentionScanner } from "../dist/agent-mention.js";
 import { mentionAddressTokens, scanMentionAddresses } from "../dist/mention-address.js";
 import { filterOperationalMentions, hasOperationalAgentInvocation, literalMentionSourceOffsets,
   nonOperationalMentionRanges, isOperationalMentionStart } from "../dist/operational-mention-context.js";
@@ -50,4 +50,43 @@ test("rendered escapes and entities do not acquire another occurrence's invocati
   assert.equal(positions.size, 1);
   assert.deepEqual([...positions.values()], [raw.lastIndexOf("@")]);
   assert.equal(literalMentionSourceOffsets("different", address), undefined);
+});
+
+test("autolinks inside JSON exclude only their source while preserving real mentions", () => {
+  const url = "https://example.test/a(@Beta:2)";
+  const body = `😀\r\n@Alpha:1 inspect {"urls":["${url}","${url}"]}\r\n@Gamma:3`;
+  const candidates = [...body.matchAll(existingInstanceMentionScanner())].map(match => ({
+    start: match.index + match[0].length - match[1].length - 1,
+    end: match.index + match[0].length,
+  }));
+  assert.deepEqual(filterOperationalMentions(body, candidates).map(({ start, end }) => body.slice(start, end)),
+    ["@Alpha:1", "@Gamma:3"]);
+  assert.equal(candidates.length, 4, "both URL occurrences also look like addresses before context filtering");
+});
+
+test("an ancestor with unsupported link structure stays fail closed", () => {
+  const url = "https://example.test/a(@Alpha:1)";
+  const body = `{"urls":["${url}"]} [${url} @Beta:2](https://other.test) @Gamma:3`;
+  const ranges = nonOperationalMentionRanges(body);
+  assert.equal(isOperationalMentionStart(body.indexOf("@Beta:2"), ranges), false);
+  assert.equal(isOperationalMentionStart(body.indexOf("@Gamma:3"), ranges), false);
+});
+
+test("literal email and www autolinks can be mapped, while decoded source remains fail closed", () => {
+  for (const text of ["agent@example.test", "www.example.test/path"]) {
+    const body = `@Alpha:1 inspect {"values":["${text}"]}`;
+    assert.equal(isOperationalMentionStart(0, nonOperationalMentionRanges(body)), true, text);
+  }
+  const body = '@Alpha:1 inspect {"urls":["https://example.test/?x=&amp;y"]}';
+  assert.equal(isOperationalMentionStart(0, nonOperationalMentionRanges(body)), false,
+    "a decoded autolink without an exact source match cannot authorize a call");
+});
+
+test("a decoded autolink cannot borrow an identical literal URL's source", () => {
+  const invocation = "@Alpha:new:/tmp/project";
+  const decoded = `https://example.test/a/(${invocation})`;
+  for (const copy of [`\`${decoded}\``, decoded]) {
+    const body = `[https://example.test/&#x61;/(${invocation}) ${copy}]`;
+    assert.equal(hasOperationalAgentInvocation(body), false, body);
+  }
 });
