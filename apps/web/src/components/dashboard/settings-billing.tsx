@@ -5,7 +5,7 @@ import Link from "next/link";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { AppleSpaceBillingSection } from "./settings-apple-billing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
@@ -14,48 +14,14 @@ import { LiquidGlassCard, WoodPanel } from "@/components/ui/material-surfaces";
 import { PRO_PLAN_FEATURES, PRO_SEAT_PRICE_USD } from "@/lib/space-plans";
 import { billingCheckoutReturn } from "@/lib/billing-checkout-return";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
-import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
-import { spacePlanMark, spacePlansAbsent, type SpacePlanBilling } from "./space-plan-mark";
+import { spacePlanMark } from "./space-plan-mark";
 import { replaceBrowserPath } from "./workspace-shell-navigation";
-
-export const SPACE_BILLING_SECTION = "billing";
+import { spaceBillingKey, useSpaceBilling, type SpaceBilling, type SpaceCredits } from "./space-billing";
 
 /** The return parameters `/billing` forwards; removed once they have been acted on. */
 const CHECKOUT_RETURN_PARAMS = ["checkout", "checkout_session_id", "ai_checkout", "ai_checkout_session_id", "credit_pack_checkout", "credit_pack_session_id"] as const;
 type BillingCommand = "checkout" | "portal" | "reconcile" | "apple-reconcile" | "credits/checkout" | "credits/reconcile";
-
-export type SpaceBilling = SpacePlanBilling & {
-  plan: "free" | "pro";
-  canManage: boolean;
-  seats: { used: number; limit: number };
-  freeUsage: { acceptedMessages: number; limit: number; remaining: number };
-  subscription: {
-    billingProvider?: "stripe" | "apple";
-    status: string;
-    seatQuantity: number;
-    currentPeriodEnd?: string | null;
-    cancelAtPeriodEnd: boolean;
-    graceUntil?: string;
-    access?: "full" | "read_only";
-  } | null;
-  seatAdjustmentRequired?: boolean;
-  /** A Pro Space's Agent credits this month (docs/design/agent-credits.md). */
-  credits?: SpaceCredits;
-};
-
-export type SpaceCredits = {
-  periodStart: string;
-  resetsOn: string;
-  included: number;
-  includedUsed: number;
-  packBalance: number;
-  packUsed: number;
-  grace: number;
-  graceUsed: number;
-  paused: boolean;
-  packCredits: number;
-};
 
 function capitalized(value: string): string {
   return value ? value[0].toUpperCase() + value.slice(1).replace(/_/g, " ") : value;
@@ -73,28 +39,6 @@ function useCheckoutReturn() {
     replaceBrowserPath(`${url.pathname}${url.search}${url.hash}`);
   }, []);
   return useMemo(() => ({ ...returned, clear }), [returned, clear]);
-}
-
-function spaceBillingKey(userId: string, spaceId: string) {
-  return xmatrixQueryKeys.domain({ userId }, "billing", [spaceId]);
-}
-
-export function useSpaceBilling(userId: string, spaceId: string | null, options?: {
-  /** How soon to read again, from what was last read. */
-  refetchInterval?: (billing: SpaceBilling | undefined) => number | false;
-}) {
-  const refetchInterval = options?.refetchInterval;
-  return useQuery({
-    queryKey: spaceBillingKey(userId, spaceId ?? ""),
-    queryFn: ({ signal }) => xmatrixApiRequest<{ billing: SpaceBilling }>({
-      url: `/api/xmatrix/spaces/${encodeURIComponent(spaceId!)}/billing`, signal,
-    }).then((payload) => payload.billing),
-    enabled: Boolean(spaceId),
-    retry: (failures, error) => !spacePlansAbsent(error) && failures < 3,
-    refetchInterval: refetchInterval
-      ? (query) => spacePlansAbsent(query.state.error) ? false : refetchInterval(query.state.data)
-      : undefined,
-  });
 }
 
 /** The list row's summary: the plan, and what is wrong with it if anything is. */

@@ -158,6 +158,48 @@ device parsing time, or iOS/macOS process-restart latency. The browser regressio
 checks that the Channel list does not request editor assets; the Pages suite
 checks live co-editing and document presentation after lazy loading.
 
+## Cold-start tool views and error reporting
+
+The first screen is a conversation or the conversation list, yet every tool view
+behind the rail and the More tab was in the initial graph: Status, Agents,
+Machines (harness, worktree, load history and network panels), Schedules, Apps
+(connector detail, credentials, activity), Settings and Team (billing,
+passkeys, sessions), Profile and Platform admin with its charts. The shell now
+loads them on first use through client-only dynamic imports, each panel showing
+`ContentSkeleton` while it arrives:
+
+- `ToolSurface` lives in `workspace-tool-surface.tsx`, out of the composer
+  module; Settings and Team moved out of `workspace-admin-views.tsx`, whose data
+  helpers the first screen still uses. The shell barrel no longer re-exports the
+  fleet views or the trace window.
+- The Agent configuration page and the Agent trace window load when opened.
+- Pieces the first screen needs were split from the views that carried them:
+  connector icons (`connector-icon.tsx`), the Space billing query
+  (`space-billing.ts`) and a Machine's load glance (`machine-load-panel.tsx`,
+  with the detail in `machine-load-details.tsx`).
+- Sentry starts after the page's `load` event, when the browser is idle.
+  Uncaught errors and rejections before then are held and sent once it starts,
+  through the same `beforeSend` filters; only breadcrumbs from before the start
+  are not recorded.
+
+Same method as above, on the browser fixture build (`node e2e/build.mjs`), for
+`/layout`, `/app/layout` and `/app/page` (`/workspace` measures the same):
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Initial JS bytes | 3,644,298 | 3,025,569 |
+| Gzip bytes | 1,174,284 | 978,108 |
+| Brotli bytes | 976,090 | 829,342 |
+| Initial JS files | 39 | 40 |
+
+This removes 618,729 uncompressed bytes (17.0%), 196,176 gzip bytes (16.7%) and
+146,748 Brotli bytes (15.0%); Brotli uses Node's `brotliCompressSync` defaults.
+A tool view opened first after launch now waits for its chunk; a view that
+consumes a return parameter (an Apps OAuth outcome) writes the address through
+`replaceBrowserPath`, so the router does not put the consumed parameter back.
+The page live session (Yjs, about 100 KB uncompressed) is still in the initial
+graph through `pages-view.tsx` and is the next candidate.
+
 ## Foreground recovery
 
 Visible, online pages refresh the loaded Channel catalogs and the selected

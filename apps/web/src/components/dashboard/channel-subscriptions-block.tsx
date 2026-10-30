@@ -43,7 +43,7 @@ import { APP_CONNECTORS } from "@/lib/app-connectors";
 import { cn } from "@/lib/utils";
 
 import { DetailBlock } from "./workspace-admin-views";
-import { connectorConnectionStatusLabel, connectorIcon } from "./workspace-fleet-views";
+import { connectorConnectionStatusLabel, connectorIcon } from "./connector-icon";
 import { COUNT_CHIP_MATERIAL_CLASS } from "./workspace-shell-constants";
 
 /* A posted command is only confirmed when the connector's own completion line

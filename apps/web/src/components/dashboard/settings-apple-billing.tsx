@@ -8,7 +8,7 @@ import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { actionClass } from "@/components/ui/action-tone";
-import { useSpaceBilling } from "./settings-billing";
+import { useSpaceBilling } from "./space-billing";
 
 type Product = { id: string; interval: "month" | "year"; displayName: string; displayPrice: string };
 

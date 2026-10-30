@@ -38,6 +38,8 @@ const REQUIRED_SHELL_MODULES = Object.freeze([
   "centered-dialog-shell.tsx",
   "workspace-fleet-views.tsx",
   "workspace-admin-views.tsx",
+  "workspace-settings-team-views.tsx",
+  "workspace-tool-surface.tsx",
   "tool-split.tsx",
   "schedules-model.ts",
   "schedules-view.tsx",

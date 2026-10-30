@@ -9,7 +9,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { statusChipClass } from "@/components/ui/status-tone";
 import { AskCard } from "./ask-card";
 import { spaceAllowanceNotice } from "./space-plan-mark";
-import { useSpaceBilling } from "./settings-billing";
+import { useSpaceBilling } from "./space-billing";
 
 /* Codes a write is refused with once its Space's plan cannot pay for it. */
 const PLAN_REFUSALS = new Set(["payment_required", "credits_exhausted", "billing_grace_read_only"]);

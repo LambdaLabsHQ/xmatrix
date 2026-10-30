@@ -7,6 +7,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { ConnectorAction, ConnectorEmpty, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
+import { replaceBrowserPath } from "./workspace-shell-navigation";
 
 interface Notification { id:string;address:string;enabled:boolean;lastSignalAt?:string;lastVerifiedAt?:string;expiresAt?:string;error?:string }
 export function GmailNotifications({spaceId,token,userId,mailboxes}:{
@@ -28,7 +29,7 @@ export function GmailNotifications({spaceId,token,userId,mailboxes}:{
     completionStarted.current=true;setCompleting(true);
     // Consume once. OAuth parameters leave the address bar before any other interaction.
     current.searchParams.delete("gmailWatchState");current.searchParams.delete("gmailWatchCode");
-    window.history.replaceState(window.history.state,"",current.toString());
+    replaceBrowserPath(`${current.pathname}${current.search}${current.hash}`);
     update.mutate({action:"complete",state:oauthState,code},{onSettled:()=>setCompleting(false)});
   },[update]);
   const latest=new Map<string,Notification>();
