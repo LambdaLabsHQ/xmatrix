@@ -31,6 +31,7 @@ import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content"
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
 import { useMobileListTransition } from "./use-mobile-list-transition";
+import { DockTabSlideLayer, MobileListTransitionLayer } from "./mobile-transition-layers";
 import { useDockTabSlide } from "./use-dock-tab-slide";
 import { closeViewSelection } from "./url-query-state";
 import { ConnectionStatus } from "./connection-status";
@@ -612,7 +613,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const shellRootRef = useRef<HTMLDivElement | null>(null);
   const listTransitionFree = isMobileViewport && mobileDockPager && view === "messages" && !composingConversation &&
     !mobileChannelDetailsOpen && !agentConfigDialog && !workspaceSearchOpen;
-  const listTransitionStage = useMobileListTransition({
+  const listTransition = useMobileListTransition({
     conversationOverList: listTransitionFree && Boolean(selectedChannel),
     listShowing: listTransitionFree && !selectedChannel,
     rootRef: shellRootRef,
@@ -630,7 +631,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     slot: mobileDockSlot,
     tabRootShowing: isMobileViewport && mobileDockPager && !mobileDockCovered && !(view === "pages" && selectedPageId) &&
       !agentConfigDialog && DOCK_TAB_VIEWS.includes(view),
-    rootRef: shellRootRef,
   });
   // What the shell holds live about a conversation linked to a page (pages-live-document.md §4.4).
   // A message on its way is its last one already, so a page's card for it shows the comment as it is sent.
@@ -846,6 +846,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   [canCreateChannel, composingConversation, createNewPage, currentSpaceId, manageMachines,
     startNewConversation, user, view]);
   const mobileCreate = !nativeMobileTabVisible || agentConfigDialog ? null : listCreate;
+  // The bar a dock tab's own screen shows, for the copies drawn while screens change.
+  const tabRootBar = { spaces, currentSpaceId, onOpenSearch: openWorkspaceSearch, onSelectSpace: selectSpace,
+    onBack: backToChannelList, onOpenMore: backToMore };
   const desktopCreate = isMobileViewport || agentConfigDialog ? null : listCreate;
   // Elsewhere Ctrl/⌘+N starts a new conversation (browsers that reserve it for a new window keep it).
   const shortcutCreate = desktopCreate && !desktopCreate.disabled ? desktopCreate.onCreate
@@ -1549,7 +1552,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       />
       <div
         ref={shellRootRef}
-        data-list-transition={listTransitionStage ?? undefined}
         className={cn(
           "xmatrix-app xmatrix-app-shell relative isolate m-0 flex w-screen max-w-[100dvw] justify-start bg-background text-foreground",
           desktopFrameClass,
@@ -1590,19 +1592,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           searching={workspaceSearchOpen}
           onOpenSearch={openWorkspaceSearch}
         />}
-        {/* While the lists trade places the list's own controls fade in where
-            they stand, out of reach until the list is the screen. */}
-        <div className="contents" inert={Boolean(listTransitionStage)} aria-hidden={listTransitionStage ? true : undefined}>
-          <CreateFab action={mobileCreate ?? (listTransitionStage ? listCreate : null)} />
-          {!isIOSNativeShell && (
-            <MobileTabDock
-              activeView={view}
-              hidden={!nativeMobileTabVisible && !listTransitionStage}
-              statusLive={statusLive}
-              onChangeView={changeDockTab}
-            />
-          )}
-        </div>
+        <CreateFab action={mobileCreate} />
+        {!isIOSNativeShell && (
+          <MobileTabDock
+            activeView={view}
+            hidden={!nativeMobileTabVisible}
+            statusLive={statusLive}
+            onChangeView={changeDockTab}
+          />
+        )}
 
       {/* One workspace panel beside the rail: the conversation list, the
           conversation and its details share its paper and its single shadow.
@@ -1674,33 +1672,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             onOpenChannelDetails={openMobileChannelDetails}
             onSelectSpace={selectSpace}
           />
-          {dockTabSlide && (
-            <TopWorkspaceBar
-              key={dockTabSlide.key}
-              ghost="app-dock-tab-slide-outgoing"
-              channel={null}
-              spaces={spaces}
-              currentSpaceId={currentSpaceId}
-              view={view}
-              onBack={backToChannelList}
-              onOpenMore={backToMore}
-              onOpenSearch={openWorkspaceSearch}
-              onSelectSpace={selectSpace}
-            />
-          )}
-          {listTransitionStage && (
-            <TopWorkspaceBar
-              ghost="app-list-transition-target"
-              channel={null}
-              spaces={spaces}
-              currentSpaceId={currentSpaceId}
-              view="messages"
-              onBack={backToChannelList}
-              onOpenMore={backToMore}
-              onOpenSearch={openWorkspaceSearch}
-              onSelectSpace={selectSpace}
-            />
-          )}
+          <DockTabSlideLayer store={dockTabSlide} rootRef={shellRootRef} view={view} bar={tabRootBar} />
+          <MobileListTransitionLayer
+            store={listTransition}
+            bar={tabRootBar}
+            listCreate={listCreate}
+            webDock={!isIOSNativeShell}
+            statusLive={statusLive}
+            onChangeView={changeDockTab}
+          />
 
           {agentConfigDialog ? (
             <AgentConfigPage
