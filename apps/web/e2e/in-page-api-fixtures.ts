@@ -225,7 +225,9 @@ function installInterceptor({
       }
 
       function pagedHistory(rule: Rule, url: URL) {
-        const messages = (rule.responder.messages || []) as Array<{ sequence: number }>;
+        const senderKind = url.searchParams.get("senderKind");
+        const messages = ((rule.responder.messages || []) as Array<{ sequence: number; from?: { kind?: string } }>)
+          .filter((message) => !senderKind || message.from?.kind === senderKind);
         const limit = Number(url.searchParams.get("limit") || 10);
         const beforeValue = url.searchParams.get("beforeSequence");
         const beforeSequence = beforeValue === null ? null : Number(beforeValue);

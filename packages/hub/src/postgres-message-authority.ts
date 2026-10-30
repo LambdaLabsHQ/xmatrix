@@ -664,6 +664,7 @@ type PostgresMessageHistoryInput = {
   beforeSequence?: number;
   afterSequence?: number;
   limit?: number;
+  senderKind?: "user" | "agent" | "app";
   principal: AuthorityPrincipal;
 };
 
@@ -690,6 +691,7 @@ export async function postgresMessageHistory(
     beforeSequence: input.beforeSequence,
     afterSequence: input.afterSequence,
     limit: input.limit,
+    authorKind: input.senderKind,
   });
   const candidates = result.messages.map(postgresProductMessage);
   const forward = input.afterSequence !== undefined;

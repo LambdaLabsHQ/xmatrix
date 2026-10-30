@@ -485,12 +485,16 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     if (queryBeforeSequence) input.beforeSequence = Number(queryBeforeSequence);
     const queryAfterSequence = c.req.query("afterSequence");
     if (queryAfterSequence) input.afterSequence = Number(queryAfterSequence);
+    // Only what one kind of sender wrote, e.g. the last thing a person said above a run of Agent replies.
+    const querySenderKind = c.req.query("senderKind");
+    if (querySenderKind) input.senderKind = querySenderKind;
     type HistoryInput = {
       channelId: string;
       before?: string;
       beforeSequence?: number;
       afterSequence?: number;
       limit?: number;
+      senderKind?: "user" | "agent" | "app";
       principal: { kind: "user" | "agent"; id: string };
     };
     let familyHistory = await channelMessageResponse(() => channelMessageHistory(c.env, input as HistoryInput));

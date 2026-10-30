@@ -546,10 +546,13 @@ export async function fetchChannelHistory(
     before?: string;
     beforeSequence?: number;
     afterSequence?: number;
+    /** Only what this kind of sender wrote. */
+    senderKind?: "user" | "agent" | "app";
     signal?: AbortSignal;
   }
 ): Promise<ChannelHistoryPage> {
   const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.senderKind) params.set("senderKind", options.senderKind);
   if (options.beforeSequence !== undefined) {
     params.set("beforeSequence", String(options.beforeSequence));
   }
