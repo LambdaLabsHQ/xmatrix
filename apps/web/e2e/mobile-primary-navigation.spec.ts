@@ -13,6 +13,7 @@ import {
   fixtureRequests,
   fixtureRule,
   releaseFixture,
+  screenChangeLanded,
 } from "./workspace-fixtures";
 
 const SLOW_HISTORY_RULE = "slow-channel-general-history";
@@ -297,37 +298,35 @@ function screenLayout(page: Page) {
   });
 }
 
-test("the iOS app's edge swipe moves only the lists under a still bar, and lands on the channel list", async ({ page }) => {
+/** The iOS app with a conversation open over its channel list, and a left-edge swipe begun on it. */
+async function swipeFromConversation(page: Page) {
   await installNativeBridge(page, "ios");
   await openGeneralChannel(page);
-  await expect(page.locator("[data-list-transition]")).toHaveCount(0);
+  await screenChangeLanded(page);
   const before = await screenLayout(page);
-  const width = page.viewportSize()!.width;
-
   const gesture = backGesture(page);
   expect(await gesture.begin()).toBe(true);
+  return { before, gesture };
+}
+
+test("the iOS app's edge swipe moves only the lists under a still bar, and lands on the channel list", async ({ page }) => {
+  const { before, gesture } = await swipeFromConversation(page);
   await gesture.move(150);
   // The sign and the composer stay; the conversation goes with the finger and
   // the channel list lies right beside it.
-  expect(await screenLayout(page)).toEqual({ ...before, timeline: 150, list: 150 - width });
+  expect(await screenLayout(page)).toEqual({ ...before, timeline: 150, list: 150 - page.viewportSize()!.width });
 
   await gesture.end(true, 900);
   await expectChannelListVisible(page);
   await expect(page).toHaveURL("/app/personal-sspaceperso/channels");
-  await expect(page.locator("[data-list-transition], .app-list-transition-target")).toHaveCount(0);
+  await screenChangeLanded(page);
 });
 
 test("an edge swipe let go short of Back leaves the conversation as it was", async ({ page }) => {
-  await installNativeBridge(page, "ios");
-  await openGeneralChannel(page);
-  await expect(page.locator("[data-list-transition]")).toHaveCount(0);
-  const before = await screenLayout(page);
-
-  const gesture = backGesture(page);
-  expect(await gesture.begin()).toBe(true);
+  const { before, gesture } = await swipeFromConversation(page);
   await gesture.move(60);
   await gesture.end(false, 0);
-  await expect(page.locator("[data-list-transition], .app-list-transition-target")).toHaveCount(0);
+  await screenChangeLanded(page);
   await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
   expect(await screenLayout(page)).toEqual(before);
 });
