@@ -36,7 +36,10 @@ conversation from the list play the same motion. Switching dock tabs moves the
 whole page, sign included, so the two read apart. A Back the page does not draw
 (an open page, channel details) keeps the snapshot slide, without its shadow
 (#1229), and a list no longer scrolls under the same finger while the page
-draws the swipe (#1244). Beta Web and iOS, no API or schema change; recovery is
+draws the swipe (#1244). Each frame touches only the dozen elements that move,
+through their own inline styles, and starting or ending the change renders only
+the layer that draws the list's bar and controls, not the shell: a move costs
+12 ms instead of 144 ms at 4x CPU throttle (#1250). Beta Web and iOS, no API or schema change; recovery is
 a CI-validated release reverting the change (an iOS build without it falls back
 to the snapshot slide, since the page answers only the new bridge call).
 
