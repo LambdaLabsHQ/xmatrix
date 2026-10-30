@@ -421,7 +421,9 @@ struct WebContainerView: UIViewRepresentable {
         private func edgeSwipeAnswered(pageDraws: Bool) {
             guard edgeSwipeDrawer == .asking else { return }
             edgeSwipeDrawer = pageDraws ? .page : .snapshot
-            if !pageDraws {
+            if pageDraws, let webView {
+                stopScrolling(in: webView)
+            } else {
                 coverWithSnapshot()
                 swipeCover?.transform = CGAffineTransform(translationX: edgeSwipeDistance, y: 0)
             }
@@ -431,6 +433,19 @@ struct WebContainerView: UIViewRepresentable {
                 releasePageSwipe(back: release.back, speed: release.speed)
             } else {
                 releaseSnapshotSwipe(back: release.back)
+            }
+        }
+
+        /// The swipe runs alongside the page's scrolling, which a snapshot used
+        /// to hide. With the page drawing it, a list that set off scrolling
+        /// under the same finger stops, so it does not ride up while it slides.
+        private func stopScrolling(in view: UIView) {
+            for subview in view.subviews {
+                if let scrollView = subview as? UIScrollView, scrollView.panGestureRecognizer.isEnabled {
+                    scrollView.panGestureRecognizer.isEnabled = false
+                    scrollView.panGestureRecognizer.isEnabled = true
+                }
+                stopScrolling(in: subview)
             }
         }
 
