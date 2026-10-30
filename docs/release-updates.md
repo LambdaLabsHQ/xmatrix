@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Code blocks in a conversation are the same paper as a page's
+
+A fenced code block without a language drew its code as an inline chip, so in
+the light theme every line wore its own rim and long lines were cut off; every
+block also carried a bold uppercase CODE title band and a border. A code block
+in a message is now one piece of tinted paper, the same as a page's code block
+and quote: plain monospace ink that scrolls sideways, the language as a quiet
+label only when the fence names one, and copy at the corner. A quote in a
+message is the same tinted paper instead of a rule beside grey text. Beta Web,
+no API or schema change; recovery is a CI-validated release reverting the
+change.
+
 ## Unreleased: The Mac app opens with its traffic lights centred on the rail
 
 The Mac app's first frame, drawn before the app's script runs, laid out the

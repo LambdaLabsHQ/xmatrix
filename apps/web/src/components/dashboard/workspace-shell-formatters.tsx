@@ -60,8 +60,6 @@ import {
   type DesktopUpdateStatus,
 } from "@/lib/desktop/bridge";
 
-import { cn } from "@/lib/utils";
-
 import { RICH_MESSAGE_PARAGRAPH_CLASS_NAME } from "./row-frames";
 import { AGENT_PRESETS } from "@xmatrix/protocol";
 
@@ -106,7 +104,7 @@ export function createMessageMarkdownComponents(
     <p className={RICH_MESSAGE_PARAGRAPH_CLASS_NAME}>{renderMentionChildren(children, node)}</p>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="mt-4 border-l-2 border-primary/60 pl-3 text-muted-foreground first:mt-0">
+    <blockquote className="message-quote mt-4 first:mt-0">
       <NonOperationalMentions>{children}</NonOperationalMentions>
     </blockquote>
   ),
@@ -145,15 +143,8 @@ export function createMessageMarkdownComponents(
     if (typeof src !== "string" || !isSafeMessageImageSrc(src)) return null;
     return <MessageMarkdownImage src={src} alt={typeof alt === "string" ? alt : ""} />;
   },
-  code: ({ className, children }) => {
-    const language = /language-([A-Za-z0-9_-]+)/.exec(className || "")?.[1];
-    if (language) {
-      return (
-        <code className={cn("block min-w-max font-mono", className)}>
-          {children}
-        </code>
-      );
-    }
+  // A fenced block's own code element is drawn by MarkdownPre; this is only the inline span.
+  code: ({ children }) => {
     // Agents often wrap `page:<id>` or `channel:<id>` in backticks; promote a lone reference to the same live chip.
     const span = loneMessageReference(markdownTextContent(children));
     if (span) return <MessageReferenceChip span={span} />;
@@ -253,29 +244,30 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
     return () => window.clearTimeout(timeout);
   }, [codeCopied]);
 
+  const text = markdownTextContent(children).replace(/\n$/, "");
   async function copyCodeBlock() {
-    await copyTextToClipboard(markdownTextContent(children).replace(/\n$/, ""));
+    await copyTextToClipboard(text);
     setCodeCopied(true);
   }
 
   const language = markdownCodeLanguage(children);
+  // The block draws its own code element from the text, so a fence without a language never falls through to the
+  // inline span's chip and gets a rim on every line.
   return (
-    <div className="message-code-block group/code relative mt-4 w-full min-w-0 max-w-full overflow-hidden rounded-md border border-border bg-muted/70 first:mt-0">
-      <div className="pointer-events-none sticky top-0 right-0 left-0 z-10 flex min-h-8 items-center justify-between gap-2 bg-muted px-3 py-1.5">
-        <span className="min-w-0 truncate text-[11px] font-bold uppercase text-muted-foreground">
-          {language || "code"}
-        </span>
-        <button
-          type="button"
-          title={codeCopied ? "Copied" : "Copy code"}
-          aria-label={codeCopied ? "Copied" : "Copy code"}
-          onClick={() => void copyCodeBlock()}
-          className="pointer-events-auto inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 transition hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover/code:opacity-100"
-        >
-          {codeCopied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
-        </button>
-      </div>
-      <pre className="message-code-scroll max-w-full overflow-x-auto p-3 pt-2 text-xs leading-5">{children}</pre>
+    <div className="message-code-block group/code relative mt-4 w-full min-w-0 max-w-full overflow-hidden first:mt-0" data-language={language || undefined}>
+      {language ? <div className="message-code-language">{language}</div> : null}
+      <button
+        type="button"
+        title={codeCopied ? "Copied" : "Copy code"}
+        aria-label={codeCopied ? "Copied" : "Copy code"}
+        onClick={() => void copyCodeBlock()}
+        className="message-code-copy absolute top-1.5 right-1.5 z-10 inline-flex size-7 items-center justify-center text-muted-foreground opacity-100 transition hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover/code:opacity-100"
+      >
+        {codeCopied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
+      </button>
+      <pre className="message-code-scroll max-w-full overflow-x-auto text-xs leading-5">
+        <code className="block min-w-max font-mono">{text}</code>
+      </pre>
     </div>
   );
 }

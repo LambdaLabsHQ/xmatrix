@@ -919,16 +919,6 @@
     box-decoration-break: clone;
   }
 
-  .xmatrix-app .message-code-block {
-    border-radius: 0.75rem;
-  }
-
-  .xmatrix-app .message-code-block :is(pre, code) {
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
   .xmatrix-app .message-code-scroll {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
@@ -2720,8 +2710,53 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   border-radius: var(--app-field-shell-radius) !important;
 }
 
-.xmatrix-app .message-code-block.message-code-block {
-  border-radius: 0.75rem !important;
+/* A code block and a quote in a message are pieces of the same tinted paper as a page's (page-document.css):
+   no rim, no shadow, no title band. The code inside is plain ink on that paper, never a chip per line; a
+   language, when the fence names one, is a quiet label above it, and copy waits at the corner. */
+.xmatrix-app .rich-message :is(.message-code-block, .message-quote) {
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: color-mix(in oklch, var(--foreground) 4.5%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.xmatrix-app .rich-message .message-code-block pre,
+.xmatrix-app .rich-message .message-code-block code {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0;
+}
+
+.xmatrix-app .rich-message .message-code-block pre {
+  padding: 10px 14px 11px;
+}
+
+.xmatrix-app .rich-message .message-code-language {
+  padding: 8px 14px 0;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.xmatrix-app .rich-message .message-code-language + .message-code-copy + pre {
+  padding-top: 4px;
+}
+
+/* Opaque in the block's own tint, so over a long first line it covers the code rather than mixing with it. */
+.xmatrix-app .rich-message .message-code-copy {
+  border-radius: 6px !important;
+  background: color-mix(in oklch, var(--foreground) 4.5%, var(--app-panel-paper, var(--background)));
+}
+
+.xmatrix-app .rich-message .message-code-copy:hover {
+  background: color-mix(in oklch, var(--foreground) 9%, var(--app-panel-paper, var(--background)));
+}
+
+.xmatrix-app .rich-message .message-quote {
+  padding: 0.6em 0.9em;
 }
 
 /*
@@ -3816,21 +3851,6 @@ html[data-app-theme="wood"] .xmatrix-app [class*="bg-orange-"] {
   color: oklch(0.769 0.188 70.08) !important;
 }
 
-/* 2) light code wells: recessed, neutral, no drop shadow */
-html[data-app-theme="wood"] .xmatrix-app .message-code-block {
-  box-shadow:
-    inset 0 1px 2px oklch(0 0 0 / 0.12),
-    inset 0 -1px 0 oklch(1 0 0 / 0.5) !important;
-
-  /* code blocks: warm parchment, not syntax-theme blue-gray */
-  background: oklch(0.951 0.006 84) !important;
-  border-color: oklch(0.88 0.02 80) !important;
-}
-
-.xmatrix-app .message-code-block :is(.border-b, .border-t) {
-  border-color: transparent !important;
-}
-
 /* 3) Primary actions (`bg-foreground` / `bg-primary` on a tool page).
 
    Every action on the board is the same raised glass; a primary one is only
@@ -4022,11 +4042,6 @@ html[data-app-theme] .xmatrix-app .app-mobile-channel-details-surface .app-mater
   filter: none !important;
 }
 
-html[data-app-theme="wood"] .xmatrix-app .message-code-block pre,
-html[data-app-theme="wood"] .xmatrix-app .message-code-block code {
-  background: transparent !important;
-}
-
 /* date separators: little wood plaques */
 
 /* right-rail ask composer: rounded rect (user) */
@@ -4098,7 +4113,6 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block code {
 
 /* chips: code labels, role badges */
 .xmatrix-app.xmatrix-app :is(.app-tool-surface, .app-details) code,
-.xmatrix-app.xmatrix-app .message-code-block,
 .xmatrix-app.xmatrix-app .flex.min-w-0.items-baseline > span.rounded.bg-muted {
   border-radius: 4px !important;
 }
