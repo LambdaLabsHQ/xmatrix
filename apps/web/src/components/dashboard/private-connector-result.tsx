@@ -5,6 +5,8 @@ import { Lock } from "lucide-react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
+import { parseGmailMessage } from "@/lib/gmail-message";
+import { GmailMessageCard } from "./gmail-message-card";
 
 /** Private values never enter the shared message model, quote/selection actions or Markdown media. */
 export function PrivateConnectorResult({ channelId, messageId, ownerUserId, ownerName, token, compact = false }: {
@@ -36,20 +38,24 @@ export function PrivateConnectorResult({ channelId, messageId, ownerUserId, owne
       .finally(() => clearTimeout(timer));
     return () => { controller.abort(); clearTimeout(timer); };
   }, [channelId, messageId, fetcher, key, owns, token]);
+  const detail = owns && value?.key === key ? value.detail : undefined;
+  const email = detail === undefined ? undefined : parseGmailMessage(detail);
   if (compact) return <>
-    {owns && value?.key === key ? <span className="block whitespace-pre-wrap" data-testid="private-connector-result">{value.detail}</span>
+    {detail !== undefined ? <span className="block whitespace-pre-wrap" data-testid="private-connector-result">
+      {email ? `${email.subject || "(no subject)"} — ${email.fromName || email.fromAddress}` : detail}</span>
       : owns ? <span className="block">{unavailable ? "Private result is unavailable" : "Loading private result…"}</span> : null}
     <span className="flex items-center gap-1 text-[12px]"><Lock aria-hidden="true" className="size-3" />
       {owns ? "Only you can see this result" : `Only ${ownerName ?? "its owner"} can see this result`}</span>
   </>;
   return <div>
+    {email && <div data-testid="private-connector-result"><GmailMessageCard message={email} /></div>}
     <p className="app-connector-receipt-private" title={owns ? "Originals are available for 30 days while you can read this Channel." : undefined}><Lock aria-hidden="true" />
-      {owns ? unavailable ? "Private result is unavailable" : value?.key === key ? "Private result · visible to you" : "Loading private result…"
+      {owns ? unavailable ? "Private result is unavailable" : detail !== undefined ? email ? "Only you can see this email" : "Private result · visible to you" : "Loading private result…"
         : `Private result · visible to ${ownerName ?? "its owner"} and the Agent that ran it`}
     </p>
-    {owns && value?.key === key && <pre data-testid="private-connector-result"
+    {detail !== undefined && !email && <pre data-testid="private-connector-result"
       className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-sans text-sm [overflow-wrap:anywhere]">
-      {value.detail}
+      {detail}
     </pre>}
   </div>;
 }
