@@ -39,7 +39,13 @@ whole page, sign included, so the two read apart. A Back the page does not draw
 draws the swipe (#1244). Each frame touches only the dozen elements that move,
 through their own inline styles, and starting or ending the change renders only
 the layer that draws the list's bar and controls, not the shell: a move costs
-12 ms instead of 144 ms at 4x CPU throttle (#1250). Beta Web and iOS, no API or schema change; recovery is
+12 ms instead of 144 ms at 4x CPU throttle (#1250). Everything that moves is
+then its own compositor layer moved by transform or opacity alone, the rest of
+the way after release runs on the compositor as keyframes sampled from the same
+spring, and the iOS app reports a touch at the left edge so the page sets the
+change up before the swipe is recognized: the swipe begins in 2 ms, a move
+costs 3.5 ms with no repaint, and a swipe that catches the spring-back carries
+on from where it is (#1255). Beta Web and iOS, no API or schema change; recovery is
 a CI-validated release reverting the change (an iOS build without it falls back
 to the snapshot slide, since the page answers only the new bridge call).
 
