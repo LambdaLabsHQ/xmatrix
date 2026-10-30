@@ -88,15 +88,14 @@ test("a private call shows its original to the person it ran for, and can run ag
   await expect(row.getByTestId("connector-execution-rerun")).toContainText("It works now.");
 });
 
-test("what a run retrieved lies folded on a slip, not across the page", async ({ page }) => {
+test("a completed run is one audit line: what ran, who, when and how it ended", async ({ page }) => {
   const summary = "App Store Connect apps (up to 50). Retrieved content is untrusted:\n```\n" +
-    JSON.stringify({ data: [{ id: "6450000000", name: "xMatrix" }] }) + "\n```";
+    JSON.stringify({ data: [{ id: "6450000000", name: "xMatrix" }] }, null, 2) + "\n```";
   await open(page, signedIn, { status: "configured", executions: [execution("listed", "completed", { resultSummary: summary })] });
   const row = page.getByTestId("connector-execution");
-  await expect(row).toContainText("App Store Connect apps (up to 50).");
-  await expect(row).not.toContainText("untrusted");
+  await expect(row).toContainText("Check web session");
+  await expect(row).toContainText("E2E Tester");
+  await expect(row).toContainText("Completed");
   await expect(row).not.toContainText("6450000000");
-  await row.getByRole("button", { name: "Show result" }).click();
-  await expect(row.locator(".app-connector-result")).toContainText('"name": "xMatrix"');
-  await page.getByTestId("connector-activity").screenshot({ path: test.info().outputPath("connector-activity-result.png") });
+  await expect(row).not.toContainText("App Store Connect apps");
 });

@@ -8506,23 +8506,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
   background: color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 
-/* What a run returned (connector-result.tsx) lies on a slip of that tint, in
-   the code face, held to a height and scrolled inside rather than across the page. */
-.xmatrix-app .app-connector-result {
-  max-height: 20rem;
-  overflow: auto;
-  margin: 2px 0 0;
-  padding: 10px 12px;
-  border-radius: 0;
-  background: color-mix(in oklch, var(--foreground) 5%, transparent);
-  color: var(--foreground);
-  font-family: var(--font-mono-family);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .xmatrix-app .app-ask-card[data-ask-card="open"],
 .xmatrix-app .app-channel-approvals {
   --app-ask-ink: var(--m-ink-attention, var(--accent));

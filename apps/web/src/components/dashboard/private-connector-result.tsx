@@ -5,14 +5,13 @@ import { Lock } from "lucide-react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
-import { ConnectorResult } from "./connector-result";
 
 /** Private values never enter the shared message model, quote/selection actions or Markdown media. */
 export function PrivateConnectorResult({ channelId, messageId, ownerUserId, ownerName, token, compact = false }: {
   channelId: string; messageId: string; ownerUserId: string; token: string | null;
   /** Who else may read it, when the reader knows them by name. */
   ownerName?: string;
-  /** One line of a list: the original as Recent activity shows a result, then who can see it. */
+  /** One line of a list: the original as plain text, then who can see it. */
   compact?: boolean;
 }) {
   const { user } = useAuth();
@@ -38,7 +37,7 @@ export function PrivateConnectorResult({ channelId, messageId, ownerUserId, owne
     return () => { controller.abort(); clearTimeout(timer); };
   }, [channelId, messageId, fetcher, key, owns, token]);
   if (compact) return <>
-    {owns && value?.key === key ? <ConnectorResult text={value.detail} testId="private-connector-result" />
+    {owns && value?.key === key ? <span className="block whitespace-pre-wrap" data-testid="private-connector-result">{value.detail}</span>
       : owns ? <span className="block">{unavailable ? "Private result is unavailable" : "Loading private result…"}</span> : null}
     <span className="flex items-center gap-1 text-[12px]"><Lock aria-hidden="true" className="size-3" />
       {owns ? "Only you can see this result" : `Only ${ownerName ?? "its owner"} can see this result`}</span>

@@ -17,12 +17,13 @@ import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { useCredentialStore, type CredentialStoreInput } from "./connector-credentials";
-import { ConnectorAction, ConnectorEmpty, ConnectorRow, ConnectorRows, ConnectorSection } from "./connector-page";
-import { ConnectorResult } from "./connector-result";
+import { ConnectorAction, ConnectorEmpty, ConnectorRows, ConnectorSection } from "./connector-page";
 import { PrivateConnectorResult } from "./private-connector-result";
 import { relativeTime } from "./workspace-shell-presence";
 
-/* What the App ran, newest first. A failure is fixed where it shows: the row
+/* What the App ran, newest first, as an audit list: one line per run saying
+   what ran, who asked, when and how it ended; what it returned stays in the
+   conversation it ran in. A failure is fixed where it shows: the row
    offers its remedy (sign in again, replace a credential, reconnect) and runs
    the read again once it is fixed, so nobody has to look for where to go. */
 
@@ -104,29 +105,33 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
   });
   const ranAgain = retry.data ? `${retry.data.summary}${retry.data.url ? ` — ${retry.data.url}` : ""}` : null;
   const headline = stopped ? remedyHeadline(execution, credentials.connector) : null;
+  const who = requesterName(execution, members);
+  const when = relativeTime(execution.createdAt);
   return (
-    <ConnectorRow testId="connector-execution" trailingAtTitle
-      title={execution.actionLabel || execution.actionId || "Default action"}
-      meta={<>
-        {requesterName(execution, members)} · {relativeTime(execution.createdAt)}
-        {/* A private call is private from the rest of the Space, not from the person it ran for. */}
-        {headline ? <span className="block">{headline}</span> : masked ? (
-          <PrivateConnectorResult compact channelId={execution.channelId} token={credentials.token}
-            messageId={`system:${execution.messageId}:${execution.providerId}`.slice(0, 200)}
-            ownerUserId={execution.requestedBy} ownerName={requesterName(execution, members)} />
-        ) : <>
-          {execution.resultSummary ? <ConnectorResult text={execution.resultSummary} /> : null}
-          {execution.reason ? <span className="block first-letter:uppercase">
-            {/^[a-z_]+$/u.test(execution.reason) ? execution.reason.replace(/_/g, " ") : execution.reason}</span> : null}
-        </>}
-      </>}
-      trailing={(
-        <span className={cn("pr-2 text-[13px] font-semibold", ranAgain ? "text-foreground" : appExecutionStatusClassName(execution.status))}>
+    <li className="py-1.5" data-testid="connector-execution">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 text-[13px] sm:grid-cols-[minmax(0,1fr)_minmax(0,9rem)_5.5rem_5rem]">
+        <span className="truncate text-sm font-semibold">{execution.actionLabel || execution.actionId || "Default action"}</span>
+        <span className="truncate text-muted-foreground max-sm:hidden">{who}</span>
+        <time className="truncate text-muted-foreground max-sm:hidden" dateTime={execution.createdAt} title={execution.createdAt}>{when}</time>
+        <span className={cn("font-semibold sm:text-right", ranAgain ? "text-foreground" : appExecutionStatusClassName(execution.status))}>
           {ranAgain ? "Fixed" : EXECUTION_STATUS_LABELS[execution.status] ?? execution.status}
         </span>
-      )}>
+        <span className="col-span-full truncate text-muted-foreground sm:hidden">{who} · {when}</span>
+      </div>
+      {/* Only a run that stopped says more: why, and its fix. A private call is private from the
+          rest of the Space, not from the person it ran for. */}
+      {stopped && !ranAgain ? (
+        <div className="mt-0.5 text-[13px] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere]">
+          {headline ? <span className="block">{headline}</span> : masked ? (
+            <PrivateConnectorResult compact channelId={execution.channelId} token={credentials.token}
+              messageId={`system:${execution.messageId}:${execution.providerId}`.slice(0, 200)}
+              ownerUserId={execution.requestedBy} ownerName={who} />
+          ) : execution.reason ? <span className="block first-letter:uppercase">
+            {/^[a-z_]+$/u.test(execution.reason) ? execution.reason.replace(/_/g, " ") : execution.reason}</span> : null}
+        </div>
+      ) : null}
       {ranAgain ? (
-        <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-[1.45] text-foreground" data-testid="connector-execution-rerun">
+        <p className="mt-0.5 line-clamp-2 text-[13px] leading-[1.45] text-muted-foreground [overflow-wrap:anywhere]" data-testid="connector-execution-rerun">
           Ran again: {ranAgain}
         </p>
       ) : stopped ? (
@@ -138,7 +143,7 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
           {userErrorMessage(retry.error, "Couldn't run it again")}
         </p>
       ) : null}
-    </ConnectorRow>
+    </li>
   );
 }
 
