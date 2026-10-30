@@ -129,8 +129,8 @@ export function ConnectorAction({ className, children, ...props }: ButtonHTMLAtt
 export function ConnectorCopyLine({ value, label, display }: { value: string; label: string; display?: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="app-connector-copy-line flex min-w-0 items-center gap-1">
-      <code className="min-w-0 flex-1 truncate rounded-none px-2.5 py-1.5 font-mono text-[13px]">{display ?? value}</code>
+    <div className="app-connector-copy-line flex min-w-0 items-center gap-1 pr-1">
+      <code className="min-w-0 flex-1 truncate bg-transparent px-3 py-1.5 font-mono text-[13px]">{display ?? value}</code>
       <ConnectorAction aria-label={`Copy ${label}`} title={`Copy ${label}`}
         onClick={() => void navigator.clipboard?.writeText(value).then(() => {
           setCopied(true);

@@ -8500,18 +8500,16 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
   box-shadow: inset 3px 0 0 var(--m-ink-alert, var(--destructive));
 }
 
-/* A value to paste elsewhere is a slip of the same tint, square. */
-.xmatrix-app .app-connector-copy-line code {
-  border-radius: 0;
+/* A value to paste elsewhere and Recent activity's audit list are slips of one
+   tint with rounded corners, each the full width of the part it is in so their
+   edges line up: the copy line carries its Copy inside, and the list's lines
+   are set apart by space rather than rules. */
+.xmatrix-app .app-connector-copy-line,
+.xmatrix-app .app-connector-audit {
+  border-radius: 10px;
   background: color-mix(in oklch, var(--foreground) 5%, transparent);
 }
-
-/* Recent activity is an audit list: the whole list lies on one sheet of the
-   same tint, square, its lines set apart by space rather than rules. */
-.xmatrix-app .app-connector-audit {
-  padding-block: 4px;
-  background: color-mix(in oklch, var(--foreground) 4%, transparent);
-}
+.xmatrix-app .app-connector-audit { padding-block: 4px; }
 
 .xmatrix-app .app-ask-card[data-ask-card="open"],
 .xmatrix-app .app-channel-approvals {

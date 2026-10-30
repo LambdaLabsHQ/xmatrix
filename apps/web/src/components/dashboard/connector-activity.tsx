@@ -74,7 +74,7 @@ export function ConnectorActivity({ executions, members, loading, error, credent
           <AnimatedIcon icon={RefreshCw} className={cn("size-3.5", loading && "animate-spin")} /> Refresh
         </ConnectorAction>
       )}>
-      <ConnectorRows className={executions.length ? "app-connector-audit -mx-3" : undefined}>
+      <ConnectorRows className={executions.length ? "app-connector-audit" : undefined}>
         {executions.map((execution) => (
           <ExecutionRow key={execution.id} execution={execution} members={members} credentials={credentials}
             onRefresh={onRefresh} onReconnect={onReconnect} />
