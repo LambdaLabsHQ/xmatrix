@@ -342,6 +342,29 @@ export function parseOfflineMachines(value: unknown): OfflineMachine[] | undefin
   return machines;
 }
 
+/** The harnesses a named machine runs in the Space, for a summon that named
+ * it for a harness it does not run. */
+export interface MachineAgents { machineName: string; harnesses: string[] }
+
+const MACHINE_AGENTS_MAX = 64;
+
+/** A stored named-machine refusal's harnesses read back; anything else carries no detail. */
+export function parseMachineAgents(value: unknown): MachineAgents | undefined {
+  const stored = storedDetail(value);
+  const machineName = stored?.field("machineName", 200);
+  const harnesses = stored?.detail.harnesses;
+  if (!machineName || !Array.isArray(harnesses) || harnesses.length > MACHINE_AGENTS_MAX ||
+    !harnesses.every(harness => typeof harness === "string" && /^[a-z0-9][a-z0-9._-]{0,63}$/u.test(harness))) return undefined;
+  return { machineName, harnesses: [...harnesses] as string[] };
+}
+
+/** What the named machine does run, so the next summon can name one of them. */
+function machineAgentsMessage({ machineName, harnesses }: MachineAgents): string {
+  const which = harnesses.length > 1 ? `${harnesses.slice(0, -1).join(", ")} and ${harnesses.at(-1)}` : harnesses[0];
+  return `${machineName} does not run this Agent. ${which ? `It runs ${which}; mention one of those` : "It runs no Agent in this Space"}` +
+    ", or see every machine's Agents on the Agents page or with xmatrix agent list. No launch was allocated.";
+}
+
 /** The kind of a Channel notice for a summon refused because its machine is
  * offline. The Web draws it as how to bring the machine back, then sends the
  * summon again. */
@@ -399,14 +422,17 @@ function harnessTooOldMessage(tooOld: HarnessTooOld): string {
 }
 
 /** `detail` is what the rejection stored for its code: an invalid answer's
- * failure, what is too old, what is signed out, or which machines are offline. */
+ * failure, what is too old, what is signed out, which machines are offline,
+ * or what a named machine runs. */
 export function preparationRejectionMessage(code: string, detail?: unknown): string | undefined {
   const answer = code === "routing_parameter_invalid_answer" ? parseDecisionAnswerFailure(detail) : undefined;
   const tooOld = code === "registration_harness_outdated" ? parseHarnessTooOld(detail) : undefined;
   const signedOut = code === "registration_harness_signed_out" ? parseHarnessSignedOut(detail) : undefined;
   const offline = code === "registration_daemon_offline" ? parseOfflineMachines(detail) : undefined;
+  const machineAgents = code === "registration_machine_unavailable" ? parseMachineAgents(detail) : undefined;
   return answer ? parameterAnswerMessage(answer) : tooOld ? harnessTooOldMessage(tooOld)
     : signedOut ? harnessSignedOutMessage(signedOut) : offline ? daemonOfflineMessage(offline)
+    : machineAgents ? machineAgentsMessage(machineAgents)
     : Object.hasOwn(PREPARATION_REJECTION_MESSAGES, code) ? PREPARATION_REJECTION_MESSAGES[code] : undefined;
 }
 
