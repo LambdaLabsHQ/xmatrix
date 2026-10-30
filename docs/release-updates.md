@@ -1,5 +1,35 @@
 # Release Updates
 
+## Unreleased: On a phone only the lists move between a conversation and its list
+
+Opening a conversation and going back slid the whole page, bar included, and
+the iOS left-edge swipe slid a snapshot of the screen with a shadow. Now the
+bar, its wood sign and the controls at the bottom stay where they stand: only
+the conversation and its Space's channel list move, side by side as one flat
+strip with nothing drawn between them, and the names slide through the still
+sign. The bar's glyphs (share and more, search) and the bottom controls
+(composer, dock and +) trade places where they stand. The iOS swipe follows the
+finger and lands on a critically damped spring from the finger's speed; the
+page draws it from the distances the app sends (`window.__xmatrixBackGesture`),
+and the native tab bar fades in with the list. The bar's chevron and opening a
+conversation from the list play the same motion. Switching dock tabs moves the
+whole page, sign included, so the two read apart. A Back the page does not draw
+(an open page, channel details) keeps the snapshot slide, without its shadow
+(#1229), and a list no longer scrolls under the same finger while the page
+draws the swipe (#1244). Beta Web and iOS, no API or schema change; recovery is
+a CI-validated release reverting the change (an iOS build without it falls back
+to the snapshot slide, since the page answers only the new bridge call).
+
+## Unreleased: A failed redial no longer re-reads every workspace list
+
+Since #1225 the Human socket also announced a redial that failed and waits out
+backoff, and the shell re-read every workspace resource (launch targets,
+Automations, transfers, cross-Space reads, connector approvals) on each such
+announcement. While the Hub was unreachable each failed redial fetched all of
+them again, although nothing had changed. They are now re-read only when the
+socket connects or drops (#1243). Beta Web, no API or schema change; recovery is
+a CI-validated release reverting the change.
+
 ## Unreleased: An App's Recent activity is a call log that names the calling Agent
 
 Recent activity printed each run's whole answer on the page, so a calendar list
