@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { useCredentialStore, type CredentialStoreInput } from "./connector-credentials";
 import { ConnectorAction, ConnectorEmpty, ConnectorRows, ConnectorSection } from "./connector-page";
+import { Face } from "./face";
 import { PrivateConnectorResult } from "./private-connector-result";
 import { relativeTime } from "./workspace-shell-presence";
 
@@ -123,25 +124,37 @@ function ExecutionRow({ execution, members, credentials, onRefresh, onReconnect 
   const headline = stopped ? remedyHeadline(execution, credentials.connector) : null;
   const who = requesterName(execution, members);
   // Who made the call: the Agent, for the person it ran for, or the person themselves.
-  const caller = execution.requestedByAgent
-    ? <><span className="text-foreground">{execution.requestedByAgent}</span> for {who}</> : who;
+  const person = <Face of={{ kind: "user", id: execution.requestedBy, name: who }} size="xs" shape="circle" glass={false} />;
+  const caller = (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 align-middle">
+      {execution.requestedByAgent ? <>
+        <Face of={{ kind: "agent", name: execution.requestedByAgent, harness: execution.requestedByAgentHarness }}
+          size="xs" shape="circle" glass={false} />
+        <span className="shrink-0 text-foreground">{execution.requestedByAgent}</span>
+        <span className="shrink-0">for</span>
+      </> : null}
+      {person}
+      <span className="truncate">{who}</span>
+    </span>
+  );
   const when = callTime(execution.createdAt);
   const said = stopped ? null : resultLine(execution.resultSummary);
   const command = execution.actionId && execution.actionId !== execution.actionLabel ? execution.actionId : null;
   return (
     <li className="px-3 py-2" data-testid="connector-execution">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5 text-[13px] sm:grid-cols-[6.5rem_minmax(0,1fr)_minmax(0,11rem)_5rem]">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5 text-[13px] sm:grid-cols-[6.5rem_minmax(0,1fr)_minmax(0,13rem)_5rem]">
         <time className="whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden" dateTime={execution.createdAt}
           title={`${execution.createdAt} (${relativeTime(execution.createdAt)})`}>{when}</time>
         <span className="min-w-0 truncate">
           <span className="font-medium">{execution.actionLabel || execution.actionId || "Default action"}</span>
           {command ? <code className="ml-2 font-mono text-[12px] text-muted-foreground">{command}</code> : null}
         </span>
-        <span className="truncate text-muted-foreground max-sm:hidden">{caller}</span>
+        <span className="min-w-0 text-muted-foreground max-sm:hidden">{caller}</span>
         <span className={cn("font-medium sm:text-right", ranAgain ? "text-foreground" : appExecutionStatusClassName(execution.status))}>
           {ranAgain ? "Fixed" : EXECUTION_STATUS_LABELS[execution.status] ?? execution.status}
         </span>
-        <span className="col-span-full truncate text-[12px] text-muted-foreground sm:hidden">{caller} · {when}</span>
+        <span className="col-span-full flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground sm:hidden">
+          {caller}<span className="shrink-0">· {when}</span></span>
         {said || (masked && !stopped) ? (
           <span className="col-span-full flex min-w-0 items-center gap-1 truncate text-[12px] text-muted-foreground sm:col-start-2 sm:col-end-5">
             {masked ? <><Lock aria-hidden="true" className="size-3 shrink-0" /> Private result · only {who} can see it</> : said}

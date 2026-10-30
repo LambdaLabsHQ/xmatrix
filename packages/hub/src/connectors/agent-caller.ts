@@ -23,12 +23,14 @@ export async function agentRegistrationOf(env: Env, input: { ownerUserId: string
   }
 }
 
-/** The name of the Agent a live Instance runs as, for naming who made a call; none when it cannot be read. */
-export async function agentNameOf(env: Env, input: { ownerUserId: string; instanceId: string }): Promise<string | undefined> {
+/** The Agent a live Instance runs as, by name and harness, for naming who made a call; none when it cannot be read. */
+export async function callingAgentOf(env: Env, input: { ownerUserId: string; instanceId: string }):
+  Promise<{ name: string; harness?: string } | undefined> {
   try {
     const { instance } = await runtimeRepository(env).getInstance({ requestId: crypto.randomUUID(),
       instanceId: input.instanceId, actorUserId: input.ownerUserId });
-    return instance.agentName?.slice(0, 120) || undefined;
+    const name = instance.agentName?.slice(0, 120);
+    return name ? { name, ...(instance.agentHarness ? { harness: instance.agentHarness.slice(0, 80) } : {}) } : undefined;
   } catch {
     return undefined;
   }

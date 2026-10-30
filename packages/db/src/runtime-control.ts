@@ -434,6 +434,7 @@ function serializedInstance(row: QueryResultRow) {
     ...(row.run_status ? { runStatus: String(row.run_status) } : {}),
     ...(row.run_metadata_json === undefined ? {} : { runMetadata: metadata(row, "run_metadata_json") }),
     ...(typeof row.agent_name === "string" && row.agent_name ? { agentName: row.agent_name } : {}),
+    ...(typeof row.agent_harness === "string" && row.agent_harness ? { agentHarness: row.agent_harness } : {}),
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
 }
 
@@ -1742,7 +1743,7 @@ export class PostgresRuntimeRepository {
       const rows = await tx.query<QueryResultRow>({ name: "runtime_get_instance_v3", text: `SELECT i.*,
         r.workspace_machine_id,r.workspace_canonical_cwd,r.status AS run_status,
         r.metadata_json AS run_metadata_json,
-        COALESCE(s.display_name,r.metadata_json->>'agentName') AS agent_name
+        COALESCE(s.display_name,r.metadata_json->>'agentName') AS agent_name,b.harness AS agent_harness
         FROM data.instances i JOIN data.runs r ON r.run_id=i.run_id
         LEFT JOIN data.run_agent_registrations b ON b.run_id=r.run_id
         LEFT JOIN data.space_agent_registrations s ON s.space_id=b.space_id AND s.owner_user_id=b.owner_user_id

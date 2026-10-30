@@ -48,7 +48,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
       } },
     "../spaces": { getChannel: async () => ({ channel: { spaceId: "space" } }) },
     "../product-message-append": { dispatchProductMessageAppend: append },
-    "./agent-caller": { agentNameOf: async () => "claude" },
+    "./agent-caller": { callingAgentOf: async () => ({ name: "claude", harness: "claude" }) },
   })[name]);
   const executor = loadExecutor(name => ({
     "@xmatrix/protocol": protocol,
@@ -175,6 +175,7 @@ test("a private failure keeps the Hub's own next step, which carries no provider
   assert.equal(recorded.retryCommand, `@gmail:read:${id}`);
   assert.equal(recorded.resultVisibility, "private");
   assert.equal(recorded.requestedByAgent, "claude", "an Agent's call names the Agent that made it");
+  assert.equal(recorded.requestedByAgentHarness, "claude");
 });
 
 test("the person a private read ran for runs it again from its row; the result returns to them alone", async () => {

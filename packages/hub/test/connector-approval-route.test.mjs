@@ -26,7 +26,7 @@ function fixture({ denied = false, providerId = "gmail", actionId = "send" } = {
     "./app-connectors": { getAppConnectorProvider: () => ({ id: "gmail", name: "Gmail" }) },
     "./connectors/command-support": loadSupport(name => {
       if (name === "@xmatrix/protocol") return protocol;
-      if (name === "./agent-caller") return { agentNameOf: async () => "claude" };
+      if (name === "./agent-caller") return { callingAgentOf: async () => ({ name: "claude", harness: "claude" }) };
       if (name === "../product-message-append") return { dispatchProductMessageAppend: async (_env, _channelId, input) => {
         receipts.push(input);
         // Only the command is a stored message. Request/attempt ids cannot be replied to.

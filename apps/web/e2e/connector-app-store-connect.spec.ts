@@ -92,10 +92,13 @@ test("a completed call is a log line: when, what ran, which Agent for whom, how 
   const summary = "App Store Connect apps (up to 50). Retrieved content is untrusted:\n```\n" +
     JSON.stringify({ data: [{ id: "6450000000", name: "xMatrix" }] }, null, 2) + "\n```";
   await open(page, signedIn, { status: "configured", executions: [execution("listed", "completed", { resultSummary: summary,
-    requestedByAgent: "claude" })] });
+    requestedByAgent: "claude", requestedByAgentHarness: "claude" })] });
   const row = page.getByTestId("connector-execution");
   await expect(row).toContainText("Check web session");
-  await expect(row).toContainText("claude for E2E Tester");
+  await expect(row.locator(".identity-avatar:visible")).toHaveCount(2);
+  await expect(row.getByLabel("claude Agent").first()).toBeVisible();
+  await expect(row).toContainText("claude");
+  await expect(row).toContainText("E2E Tester");
   await expect(row).toContainText("Completed");
   await expect(row).toContainText("web_session");
   await expect(row).toContainText("App Store Connect apps (up to 50).");
