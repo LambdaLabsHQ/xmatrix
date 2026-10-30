@@ -93,7 +93,7 @@ import { removeRetiredBrowserReplica } from "@/lib/retired-browser-replica";
 import { maybePushRecipientScopedNativeMessageNotification } from "./recipient-scoped-native-message-notification";
 import { noteAgentAnswered } from "@/lib/star-prompt";
 import { useHumanFocusHistoryHttpFallback } from "./use-human-focus-history-http-fallback";
-import { invalidateWorkspaceResources, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
+import { invalidateWorkspaceResources, markHumanPushRetrying, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
@@ -2143,6 +2143,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         if (event.code === HUMAN_AUTH_REQUIRED_CLOSE_CODE) window.dispatchEvent(new Event(AUTH_TOKEN_REJECTED_EVENT));
         return humanSocketCloseDecision(event.code);
       },
+      onRetry: markHumanPushRetrying,
       heartbeat: {
         intervalMs: RELAY_PUSH_PING_INTERVAL_MS,
         timeoutMs: RELAY_PUSH_PONG_TIMEOUT_MS,

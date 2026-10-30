@@ -253,6 +253,12 @@ session (`lib/pages/page-client.ts`). It guarantees:
 - on resume: a suspended page replaces its socket, a page with no socket dials
   at once, a live socket is probed.
 
+A redial that has to wait out backoff (an attempt failed or the socket closed)
+calls `onRetry`; a socket replaced on purpose dials at once and does not. The
+open app's "Reconnecting to xMatrix…" tile (`connection-status.tsx`) waits
+for that signal, so the socket the iOS app replaces on every return to the
+foreground stays silent unless its redial fails.
+
 ### Human receive transport
 
 The Human connection opens its physical WebSocket in a same-origin Dedicated

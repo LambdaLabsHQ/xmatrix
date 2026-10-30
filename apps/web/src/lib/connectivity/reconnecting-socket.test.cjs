@@ -185,6 +185,18 @@ test("a resume after a suspension replaces a socket that still says OPEN", async
   assert.equal(sockets.length, 2);
 });
 
+test("a resume replaces its socket without a retry; only a redial that waits out backoff is one", async (t) => {
+  const retries = [];
+  const { sockets } = await opened(t, { onRetry: () => retries.push(sockets.length) });
+  win.dispatchEvent(new Event("xmatrix:native-resume"));
+  await flush();
+  assert.equal(sockets.length, 2);
+  assert.deepEqual(retries, [], "replacing a socket on purpose is not a failure");
+  sockets[1].drop();
+  await flush();
+  assert.deepEqual(retries, [2]);
+});
+
 test("a resume with no socket dials at once instead of waiting out the backoff", async (t) => {
   const { connection, sockets } = harness(t, { attempts: { current: 6 } });
   connection.start();
