@@ -1455,10 +1455,7 @@ test("a schedule is written without its emoji: `@` offers when the line runs, an
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   const server = pageDocument("# Relay\n\n## Status\n\nCheck the release\n");
-  await servePageSession(browser, server);
-  await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
-  const editor = browser.getByTestId("page-editor");
+  const editor = await openLivePage(browser, server);
   await editor.getByText("Check the release", { exact: true }).click();
   await browser.keyboard.press("End");
   await browser.keyboard.type(" @dai");

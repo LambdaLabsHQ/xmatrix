@@ -92,16 +92,21 @@ export function automationChips(openConversation: (conversationId: string) => vo
     },
     props: {
       decorations: (editor) => automationsKey.getState(editor)?.decorations,
-      // Clicking a line's timing offers what it can be instead, as Obsidian's task editor does.
-      handleClick(view, pos, event) {
-        if (!view.editable || !(event.target instanceof Element) || !event.target.closest(".page-schedule-timing")) {
-          return false;
-        }
-        const $pos = view.state.doc.resolve(pos);
-        const range = scheduleTimingRange($pos.parent, $pos.start());
-        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, range.to))
-          .setMeta(triggersKey, { kind: "schedule", from: range.from, to: range.to, query: "" }));
-        return true;
+      // Pressing a line's timing offers what it can be instead, as Obsidian's task editor does.
+      handleDOMEvents: {
+        mousedown(view, event) {
+          if (!view.editable || event.button !== 0 || !(event.target instanceof Element)) return false;
+          const timing = event.target.closest(".page-schedule-timing");
+          if (!timing) return false;
+          const pos = view.posAtDOM(timing, 0);
+          const $pos = view.state.doc.resolve(pos);
+          const range = scheduleTimingRange($pos.parent, $pos.start());
+          event.preventDefault();
+          view.focus();
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, range.to))
+            .setMeta(triggersKey, { kind: "schedule", from: range.from, to: range.to, query: "" }));
+          return true;
+        },
       },
     },
   });

@@ -6,7 +6,7 @@ import {
 } from "@xmatrix/protocol/page-document";
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  CalendarClock, FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pause, Pilcrow, Play, Quote, Table,
+  AlarmClock, FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pause, Pilcrow, Play, Quote, Repeat, Table,
 } from "lucide-react";
 import type { Node as DocNode, ResolvedPos } from "prosemirror-model";
 import { toggleMark } from "prosemirror-commands";
@@ -199,11 +199,13 @@ function referenceItem(trigger: PageTrigger, candidate: ReferenceCandidate): Men
 /** A schedule a pick writes into its line: `@` removes what was typed, a clicked timing is replaced. */
 function scheduleItem(trigger: PageTrigger, suggestion: ScheduleSuggestion): MenuItem {
   return {
-    key: `schedule:${suggestion.key}`, label: suggestion.label, hint: suggestion.hint, icon: <CalendarClock />,
+    key: `schedule:${suggestion.key}`, label: suggestion.label, hint: "",
+    icon: suggestion.key.startsWith("repeat") ? <Repeat /> : <AlarmClock />,
     run: (view) => {
       view.dispatch(view.state.tr.setMeta(triggersKey, "close"));
       writeScheduleTiming(view, trigger.from, suggestion.text,
         trigger.kind === "agent" ? { from: trigger.from, to: trigger.to } : undefined);
+      view.focus();
     },
   };
 }
@@ -212,11 +214,11 @@ function scheduleItem(trigger: PageTrigger, suggestion: ScheduleSuggestion): Men
 function scheduleMenu(trigger: PageTrigger, doc: DocNode): MenuItem[] {
   const paused = schedulePausedAt(doc, trigger.from);
   const toggle: MenuItem = {
-    key: "schedule:toggle", label: paused ? "Resume" : "Pause", icon: paused ? <Play /> : <Pause />,
-    hint: paused ? "Runs this line again" : "Keeps this line from running until it is resumed",
+    key: "schedule:toggle", label: paused ? "Resume" : "Pause", icon: paused ? <Play /> : <Pause />, hint: "",
     run: (view) => {
       view.dispatch(view.state.tr.setMeta(triggersKey, "close"));
       setSchedulePausedAt(view.state, view.dispatch, trigger.from, !paused);
+      view.focus();
     },
   };
   const all = ["every", "remind"].flatMap((word) => scheduleSuggestions(word));

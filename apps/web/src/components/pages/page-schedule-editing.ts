@@ -61,9 +61,9 @@ function reminders(now: Date): Array<{ words: string[]; at: Date; label: string 
 export function scheduleSuggestions(query: string, now = new Date()): ScheduleSuggestion[] {
   const wanted = query.toLowerCase();
   const repeat = (minutes: number, label: string): ScheduleSuggestion => ({ key: `repeat:${minutes}`,
-    label: `🔁 Repeat ${label}`, hint: "Runs this line on a schedule", text: `🔁 ${label}` });
+    label: `Repeat ${label}`, hint: "Runs this line on a schedule", text: `🔁 ${label}` });
   const remind = (at: Date, label: string): ScheduleSuggestion => ({ key: `remind:${at.getTime()}`,
-    label: `⏳ Remind ${label}`, hint: "Runs this line once, then checks it off", text: `⏳ ${scheduleTimeWithOffset(at)}` });
+    label: `Remind ${label}`, hint: "Runs this line once, then checks it off", text: `⏳ ${scheduleTimeWithOffset(at)}` });
   const typed = /^(\d+)([mhdw])$/u.exec(wanted);
   if (typed) {
     const [size, unit] = UNIT_WORDS[typed[2]!]!;

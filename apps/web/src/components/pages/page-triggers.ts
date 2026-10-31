@@ -55,8 +55,13 @@ export function pageTriggers(): Plugin<PageTrigger | null> {
         const meta = tr.getMeta(triggersKey) as PageTrigger | "close" | undefined;
         if (meta === "close") return null;
         if (meta) return meta;
-        // A clicked timing's menu stays open until the page or the caret moves.
-        if (value?.kind === "schedule" && !tr.docChanged && !tr.selectionSet) return value;
+        // A clicked timing's menu stays open while the caret stays in that timing.
+        if (value?.kind === "schedule") {
+          const from = tr.mapping.map(value.from, -1);
+          const to = tr.mapping.map(value.to, 1);
+          const head = state.selection.head;
+          if (state.selection.empty && head >= from && head <= to) return { ...value, from, to };
+        }
         return pageTriggerAt(state);
       },
     },
