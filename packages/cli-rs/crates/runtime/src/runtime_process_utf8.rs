@@ -498,9 +498,12 @@ const INBOUND_DELIVERY_BATCH_MAX_MESSAGES_ENV: &str = "XMATRIX_INBOUND_DELIVERY_
 const DEFAULT_INBOUND_DELIVERY_BATCH_MAX_MESSAGES: usize = 25;
 const LONG_LIVED_REGISTER_RETRY_BASE: std::time::Duration = std::time::Duration::from_secs(1);
 const LONG_LIVED_REGISTER_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(30);
-const DEFAULT_DAEMON_SELF_UPDATE_INTERVAL_SECS: u64 = 30 * 60;
+/// After a notice that did not end in a restart (the update failed, or the
+/// feed did not name the release yet), the next notice waits this long, so a
+/// release that cannot install here is not downloaded again every minute.
+const DAEMON_SELF_UPDATE_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 const DAEMON_SELF_UPDATE_STARTUP_TIMEOUT_SECS: u64 = 15;
-const DAEMON_SELF_UPDATE_PERIODIC_TIMEOUT_SECS: u64 = 120;
+const DAEMON_SELF_UPDATE_NOTICE_TIMEOUT_SECS: u64 = 120;
 const DAEMON_CONTROL_LONG_POLL_WAIT_MS: u64 = 25_000;
 const DAEMON_CONTROL_REQUEST_TIMEOUT_MS: u64 = 40_000;
 const DAEMON_COMMAND_LEASE_RENEW_INTERVAL_SECS: u64 = 15;

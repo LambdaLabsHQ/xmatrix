@@ -23,6 +23,7 @@ import {
   RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH,
   RELAY_RUNTIME_MACHINE_DAEMON_CLAIM_PATH,
   RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH,
+  RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH,
   type RelayRuntimeProductCallbackAdapter,
   type RelayRuntimeProductPortFactory,
 } from "./runtime-transport/relay-runtime-product-adapter";
@@ -53,6 +54,7 @@ import {
   parseAgentHostTraceCursor,
 } from "./agent-host-trace";
 import { answerHarnessReleaseWatch, RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH } from "./harness-release-watch";
+import { parseCliReleaseNotice } from "./cli-release-notice";
 import { analyticsWorkerVersion } from "./analytics-sampling";
 import { PageAssistantOutputReceiver, PAGE_ASSISTANT_OUTPUT_PATH } from "./page-assistant-output";
 import { receivePageAssistantOutput } from "./page-assistant-output-runtime";
@@ -490,6 +492,17 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       });
       const woken = await this.machineDaemonWakeSignals.wait(ownerUserId, machineId, hostId, waitMs);
       return Response.json({ woken }, { headers: { "cache-control": "no-store" } });
+    }
+    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH) {
+      const notice = parseCliReleaseNotice(await request.json().catch(() => null));
+      if (!notice) {
+        return Response.json({ error: "Invalid CLI release notice" }, {
+          status: 400, headers: { "cache-control": "no-store" },
+        });
+      }
+      if (!this.productAdapter) return runtimeTransportUnavailable("product");
+      return Response.json({ told: await this.productAdapter.noticeCliRelease(notice) },
+        { headers: { "cache-control": "no-store" } });
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH) {
       return answerHarnessReleaseWatch(this.env);

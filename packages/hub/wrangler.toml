@@ -20,8 +20,9 @@ invocation_logs = false
 
 [triggers]
 # Bounded passes that need the Worker's network: Sentry receipt recovery,
-# connector room cleanup, and the harness release watch (registries publish no
-# push feed). PostgreSQL owns its jobs. This trigger cannot call the retired
+# connector room cleanup, the harness release watch (registries publish no
+# push feed) and the CLI release notice (daemons update when told, not on a
+# clock of their own). PostgreSQL owns its jobs. This trigger cannot call the retired
 # projection exporter or its queue.
 crons = ["* * * * *"]
 

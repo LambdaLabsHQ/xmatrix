@@ -424,7 +424,8 @@ use super::{
     combined_inbound_channel_prompt, daemon_access_token_from_saved_session,
     daemon_broker_binding_from_values, daemon_managed_workspace_cwd,
     daemon_restart_waits_for_lock_from_env, daemon_run_exit_detail,
-    daemon_run_exit_from_status_file, daemon_self_update_timeout, daemon_spawn_claim_key,
+    cli_release_notice_applies, daemon_run_exit_from_status_file, daemon_self_update_timeout,
+    daemon_spawn_claim_key,
     daemon_spawn_cwd_from_values, daemon_spawn_uses_claude_print,
     decode_channel_image_attachment_data_url, default_downstream_kkp_flags,
     drain_pending_inbound_channel_messages, drain_ready_inbound_channel_messages,
@@ -1348,9 +1349,22 @@ fn daemon_self_update_timeout_keeps_startup_short() {
         Duration::from_secs(15)
     );
     assert_eq!(
-        daemon_self_update_timeout("periodic"),
+        daemon_self_update_timeout("notice"),
         Duration::from_secs(120)
     );
+}
+
+#[test]
+fn cli_release_notice_applies_only_to_a_newer_release_of_the_daemons_channel() {
+    assert!(cli_release_notice_applies("stable", "2.3.0", "2.2.0"));
+    assert!(!cli_release_notice_applies("stable", "2.3.0", "2.3.0"));
+    assert!(!cli_release_notice_applies("stable", "2.2.0", "2.3.0"));
+    assert!(cli_release_notice_applies("dev", "2.2.1-beta.20", "2.2.1-beta.9"));
+    assert!(cli_release_notice_applies("dev", "2.2.1-beta.20", "2.1.1-beta.23+abc"));
+    // A stable daemon never moves to a beta, nor a beta daemon on a stable notice.
+    assert!(!cli_release_notice_applies("dev", "2.3.1-beta.1", "2.3.0"));
+    assert!(!cli_release_notice_applies("stable", "2.3.0", "2.2.1-beta.20"));
+    assert!(!cli_release_notice_applies("stable", "not-a-version", "2.2.0"));
 }
 
 #[test]
