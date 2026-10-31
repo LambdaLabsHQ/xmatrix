@@ -1,5 +1,7 @@
+import { spaceBilling } from "@xmatrix/billing";
 import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
+import { recountBlobStorage } from "./storage-usage.js";
 import { SpaceControlError } from "./space-control.js";
 import { ACTIVE_RUN_STATUS_SQL, parseRestrictedChannelContentScope, sha256Hex } from "@xmatrix/protocol";
 
@@ -126,9 +128,13 @@ export async function purgeChannelRows(tx: DatabaseTransaction, input: {
     if (rows.length < limit) step++;
   }
   const complete = step === CHANNEL_PURGE_STEPS.length && pins.length < 500;
-  if (complete) await tx.query({ name: "channel_purge_channel_v1",
-    text: "DELETE FROM data.channels WHERE space_id=$1 AND channel_id=$2 AND mode='deleted'",
-    values: [input.spaceId, input.channelId], maxRows: 0 });
+  if (complete) {
+    await tx.query({ name: "channel_purge_channel_v1",
+      text: "DELETE FROM data.channels WHERE space_id=$1 AND channel_id=$2 AND mode='deleted'",
+      values: [input.spaceId, input.channelId], maxRows: 0 });
+    // The purge dropped the Channel's content refs in bulk, unmetered.
+    await recountBlobStorage(tx, spaceBilling, { spaceId: input.spaceId, now: input.at });
+  }
   await tx.query({ name: "channel_purge_progress_v1", text: `UPDATE data.channel_deletions SET
       step=$3,purged_rows=purged_rows+$4,updated_at=$5,state=$6,row_plan_digest=$7,
       completed_at=CASE WHEN $6='completed' THEN $5::timestamptz ELSE NULL END

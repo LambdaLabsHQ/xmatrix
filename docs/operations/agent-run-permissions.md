@@ -134,8 +134,8 @@ channel.attachments.write
 A Role Card, prompt, Agent command, runtime argument, or environment variable
 cannot grant or remove the permission.
 
-A Run with the permission can attach images, Markdown, or other files up to 64 MiB
-in any Channel it may write to, as a person would. Its Space's open Channels
+A Run with the permission can attach images, Markdown, or other files of any size
+(up to the 625 GiB storage ceiling) in any Channel it may write to, as a person would. Its Space's open Channels
 share the Space upload scope; a closed Channel's scope needs the exact Run's
 access to that Channel:
 

@@ -203,6 +203,17 @@ export async function seedTestSpacePlacement(client, spaceId, at) {
     VALUES ($2,'shard-0',1,'active',NULL,'test',$1,$1)`, [at, spaceId]);
 }
 
+/** A placed Space with its control head, owned by `ownerUserId`, for content authority tests. */
+export async function seedOwnedTestSpace(client, spaceId, ownerUserId) {
+  await seedTestSpacePlacement(client, spaceId, new Date().toISOString());
+  await client.query("INSERT INTO data.space_control_heads VALUES ($1,0,now())", [spaceId]);
+  await client.query(`INSERT INTO data.spaces
+    (space_id,owner_user_id,name,search_rank_sequence,version,metadata_json,created_at,updated_at)
+    VALUES ($1,$2,$1,$1,1,'{}',now(),now())`, [spaceId, ownerUserId]);
+  await client.query(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
+    VALUES ($1,$2,'owner',1,now(),now())`, [spaceId, ownerUserId]);
+}
+
 /** A bounded authority for catalog/message integration tests with slower CI connections. */
 export function integrationAuthority() {
   return createAuthorityDatabase({ connectionString, shardId: "shard-0", connectTimeoutMs: 60_000,

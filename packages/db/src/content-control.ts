@@ -1,9 +1,11 @@
+import { spaceBilling, type SpaceBillingPolicy } from "@xmatrix/billing";
+import { RELAY_V2_BLOB_MAX_BYTES, RELAY_V2_BLOB_MAX_PARTS } from "@xmatrix/protocol/relay-v2/message-attachment";
 import { ControlError } from "./control-error.js";
 import { storedIso } from "./stored-values.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
 import { initialMessageSource } from "./runtime-initial-input.js";
 import {
-  channelVisibilityScope,
+  channelVisibilityScope, lowercaseHex,
   immutableContentObjectKey, PAGE_MEDIA_OWNER_KIND, parseRestrictedChannelContentScope, restrictedChannelContentScope,
   uploadScopeCoversRefScope } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
@@ -25,10 +27,16 @@ import {
 } from "./placement.js";
 import { commandFields } from "./command-fields.js";
 import { readSpaceCommandReplay, storeSpaceCommandReplay } from "./command-replay.js";
+import { BLOB_STORAGE_CATEGORY, meterBlobStorage } from "./storage-usage.js";
 
 
-const MAX_BLOB_BYTES = 64 * 1024 * 1024;
+const MAX_BLOB_BYTES = RELAY_V2_BLOB_MAX_BYTES;
 const MAX_INTENT_TTL_MS = 24 * 60 * 60 * 1_000;
+/** Each multipart step keeps its intent live at least this long, however long the whole upload takes. */
+const MULTIPART_STEP_TTL_MS = 60 * 60 * 1_000;
+/** R2's part size bounds: 5 MiB, and one Worker request (100 MB). */
+const MULTIPART_MIN_PART_BYTES = 5 * 1024 * 1024;
+const MULTIPART_MAX_PART_BYTES = 100 * 1024 * 1024;
 const GC_SAFETY_MS = 31 * 24 * 60 * 60 * 1_000;
 const DECISION_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -77,12 +85,24 @@ function maintenancePass(input: { requestId: string; spaceId: string; limit?: nu
     cutoff: new Date(Date.parse(now) - retentionMs).toISOString() };
 }
 
+/** A multipart upload's progress: its R2 upload, part size, recorded parts and running SHA-256 state. */
+function serializeMultipart(row: QueryResultRow): Record<string, unknown> | undefined {
+  if (!row.multipart_upload_id) return undefined;
+  const state = row.multipart_sha256_state as Uint8Array | null;
+  return {
+    uploadId: row.multipart_upload_id, partBytes: Number(row.multipart_part_bytes),
+    etags: [...(row.multipart_etags as string[] | null ?? [])],
+    sha256State: state ? lowercaseHex(state) : null,
+  };
+}
+
 function serializeIntent(row: QueryResultRow): Record<string, unknown> {
+  const multipart = serializeMultipart(row);
   return {
     intentId: row.intent_id, scopeId: row.scope_id, contentHash: row.content_hash,
     objectKey: row.object_key, encodedBytes: Number(row.encoded_bytes), checksum: row.checksum,
     state: row.status, version: Number(row.version), createdAt: storedIso(row.created_at),
-    expiresAt: storedIso(row.expires_at),
+    expiresAt: storedIso(row.expires_at), ...(multipart ? { multipart } : {}),
   };
 }
 
@@ -119,7 +139,11 @@ export class PostgresContentRepository {
   private readonly channelDirectory: PostgresChannelSpaceDirectory;
   private readonly entityDirectory: PostgresEntitySpaceDirectory;
 
-  constructor(private readonly database: AuthorityDatabase, shardId: string) {
+  constructor(
+    private readonly database: AuthorityDatabase,
+    shardId: string,
+    private readonly billing: SpaceBillingPolicy = spaceBilling,
+  ) {
     if (database.cacheMode !== "disabled") throw new ContentControlError(
       "cached_authority_forbidden", 500, "Content authority requires uncached PostgreSQL",
     );
@@ -266,6 +290,21 @@ export class PostgresContentRepository {
       commitSequence: sequence, at: input.now, ttlMs: IDEMPOTENCY_TTL_MS });
   }
 
+  /** Meters an object whose last ref this transaction removed. */
+  private async releaseHeldObject(
+    tx: DatabaseTransaction, spaceId: string, objectId: string, byteLength: number, now: string,
+  ): Promise<boolean> {
+    const remaining = await tx.query({
+      name: "content_ref_remaining_v1",
+      text: `SELECT ref_id FROM data.content_refs
+        WHERE space_id = $1 AND child_object_id = $2 LIMIT 1`,
+      values: [spaceId, objectId], maxRows: 1,
+    });
+    if (remaining[0]) return false;
+    await meterBlobStorage(tx, this.billing, { spaceId, objects: -1, bytes: -byteLength, now });
+    return true;
+  }
+
   async createIntent(input: {
     requestId: string; commandId: string; intentId: string; scopeId: string;
     contentHash: string; encodedBytes: number; expiresAt: string; principal: ContentPrincipal; purpose?: "summon_decision" | "connector_result";
@@ -330,6 +369,11 @@ export class PostgresContentRepository {
           values: [scope.spaceId, intentId, scopeId, contentHash, objectKey,
             encodedBytes, now, expiresAt], maxRows: 0,
         });
+        if (!input.purpose) {
+          const refused = await this.billing.storageUpload(tx, { spaceId: scope.spaceId, now,
+            category: BLOB_STORAGE_CATEGORY, bytes: encodedBytes });
+          if (refused) throw new ContentControlError(refused.code, refused.status, refused.message, refused.retryable);
+        }
         if (input.purpose) await tx.query({ name: "content_decision_intent_mark_v1",
           text: "UPDATE data.blob_upload_intents SET purpose=$3 WHERE space_id=$1 AND intent_id=$2",
           values: [scope.spaceId, intentId, input.purpose], maxRows: 0 });
@@ -346,11 +390,8 @@ export class PostgresContentRepository {
     return result;
   }
 
-  async readIntent(input: {
-    requestId: string; intentId: string; principal: ContentPrincipal;
-  }): Promise<Record<string, unknown>> {
-    const requestId = text(input.requestId, "requestId", 200);
-    const intentId = text(input.intentId, "intentId");
+  /** The scope of an upload intent, found through its directory route or, before one, on the legacy path. */
+  private async intentScope(requestId: string, intentId: string) {
     const route = await this.entityDirectory.resolve(
       { requestId, operation: "content.intent.locate" }, "content-intent", intentId,
     );
@@ -372,23 +413,132 @@ export class PostgresContentRepository {
     if (!located[0]) throw new ContentControlError(
       "blob_intent_unavailable", 404, "live pending upload intent is required",
     );
-    const scope = await this.resolveScope(requestId, String(located[0].scope_id));
+    return this.resolveScope(requestId, String(located[0].scope_id));
+  }
+
+  /** A live pending intent the principal may use; private records only through their internal writer. */
+  private async liveIntent(
+    tx: DatabaseTransaction, spaceId: string, intentId: string, lock: boolean,
+  ): Promise<QueryResultRow> {
+    const rows = await tx.query<QueryResultRow>({
+      name: lock ? "content_intent_lock_live_v1" : "content_intent_read_v1",
+      text: `SELECT * FROM data.blob_upload_intents WHERE space_id = $1 AND intent_id = $2
+        AND status = 'pending' AND expires_at > clock_timestamp() LIMIT 1${lock ? " FOR UPDATE" : ""}`,
+      values: [spaceId, intentId], maxRows: 1,
+    });
+    if (!rows[0]) throw new ContentControlError(
+      "blob_intent_unavailable", 404, "live pending upload intent is required",
+    );
+    if (["summon_decision", "connector_result"].includes(String(rows[0].purpose))) throw new ContentControlError(
+      rows[0].purpose === "summon_decision" ? "decision_writer_required" : "private_record_writer_required",
+      403, "Private records require their internal writer");
+    return rows[0];
+  }
+
+  async readIntent(input: {
+    requestId: string; intentId: string; principal: ContentPrincipal;
+  }): Promise<Record<string, unknown>> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const intentId = text(input.intentId, "intentId");
+    const scope = await this.intentScope(requestId, intentId);
     return this.spaces.transaction(requestId, "content.intent.read", scope.spaceId, async (tx) => {
       await this.authorize(tx, scope, input.principal, "content_history_read");
-      const rows = await tx.query<QueryResultRow>({
-        name: "content_intent_read_v1",
-        text: `SELECT * FROM data.blob_upload_intents WHERE space_id = $1 AND intent_id = $2
-          AND status = 'pending' AND expires_at > clock_timestamp() LIMIT 1`,
-        values: [scope.spaceId, intentId], maxRows: 1,
-      });
-      if (!rows[0]) throw new ContentControlError(
-        "blob_intent_unavailable", 404, "live pending upload intent is required",
-      );
-      if (["summon_decision", "connector_result"].includes(String(rows[0].purpose))) throw new ContentControlError(
-        rows[0].purpose === "summon_decision" ? "decision_writer_required" : "private_record_writer_required",
-        403, "Private records require their internal writer");
-      return serializeIntent(rows[0]);
+      return serializeIntent(await this.liveIntent(tx, scope.spaceId, intentId, false));
     });
+  }
+
+  /**
+   * One step of an intent's multipart upload, on the live intent locked for it.
+   * `step` returns the update to apply, or null when the intent already shows
+   * it. Every step keeps the intent live for another `MULTIPART_STEP_TTL_MS`,
+   * so an upload may take as long as its parts keep coming.
+   */
+  private async multipartStep(
+    input: { requestId: string; intentId: string; principal: ContentPrincipal },
+    operation: string,
+    step: (row: QueryResultRow) => { set: string; values: unknown[] } | null,
+  ): Promise<Record<string, unknown>> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const intentId = text(input.intentId, "intentId");
+    const scope = await this.intentScope(requestId, intentId);
+    return this.spaces.transaction(requestId, operation, scope.spaceId, async (tx) => {
+      await this.authorize(tx, scope, input.principal, "content_new_work");
+      const row = await this.liveIntent(tx, scope.spaceId, intentId, true);
+      const change = step(row);
+      if (!change) return serializeIntent(row);
+      const now = new Date().toISOString();
+      const updated = await tx.query<QueryResultRow>({
+        name: `${operation.replaceAll(".", "_")}_v1`,
+        text: `UPDATE data.blob_upload_intents SET ${change.set},
+            expires_at=GREATEST(expires_at,$3::timestamptz)
+          WHERE space_id=$1 AND intent_id=$2 RETURNING *`,
+        values: [scope.spaceId, intentId, new Date(Date.parse(now) + MULTIPART_STEP_TTL_MS).toISOString(),
+          ...change.values],
+        maxRows: 1,
+      });
+      // Progress is a Space write: a Space move copies it with everything else.
+      await advanceSpaceControlHead(tx, { name: "content_multipart_head_v1", spaceId: scope.spaceId, at: now });
+      return serializeIntent(updated[0]!);
+    });
+  }
+
+  /**
+   * Records the R2 multipart upload an intent's body goes to. An intent keeps
+   * the first one recorded: a caller whose own upload lost that race sees the
+   * winner and aborts its own.
+   */
+  async beginMultipartUpload(input: {
+    requestId: string; intentId: string; principal: ContentPrincipal; uploadId: string; partBytes: number;
+  }): Promise<Record<string, unknown>> {
+    const uploadId = text(input.uploadId, "uploadId", 1024);
+    const partBytes = positive(input.partBytes, "partBytes", MULTIPART_MAX_PART_BYTES);
+    if (partBytes < MULTIPART_MIN_PART_BYTES || partBytes % 64 !== 0) {
+      throw new ContentControlError("invalid_command", 400, "partBytes is invalid");
+    }
+    return this.multipartStep(input, "content.multipart.begin", (row) => {
+      if (row.multipart_upload_id) return null;
+      if (Math.ceil(Number(row.encoded_bytes) / partBytes) > RELAY_V2_BLOB_MAX_PARTS) {
+        throw new ContentControlError("invalid_command", 400, "the upload needs more parts than storage takes");
+      }
+      return { set: `multipart_upload_id=$4,multipart_part_bytes=$5,multipart_etags='{}',
+        multipart_sha256_state=NULL`, values: [uploadId, partBytes] };
+    });
+  }
+
+  /**
+   * Records part `partNumber` of the intent's multipart upload: its R2 ETag and
+   * the SHA-256 state over every part through it. Parts are recorded in order;
+   * the last one's state is the whole body's digest. Recording a part already
+   * recorded with the same ETag is a replay.
+   */
+  async recordMultipartPart(input: {
+    requestId: string; intentId: string; principal: ContentPrincipal; uploadId: string;
+    partNumber: number; etag: string; sha256State: string;
+  }): Promise<Record<string, unknown>> {
+    const uploadId = text(input.uploadId, "uploadId", 1024);
+    const partNumber = positive(input.partNumber, "partNumber", RELAY_V2_BLOB_MAX_PARTS);
+    const etag = text(input.etag, "etag", 200);
+    const sha256State = hash(input.sha256State, "sha256State");
+    return this.multipartStep(input, "content.multipart.part", (row) => {
+      const etags = row.multipart_etags as string[] | null ?? [];
+      if (row.multipart_upload_id !== uploadId) throw new ContentControlError(
+        "multipart_upload_conflict", 409, "the intent's multipart upload changed");
+      if (etags.length >= partNumber && etags[partNumber - 1] === etag) return null;
+      if (etags.length !== partNumber - 1) throw new ContentControlError(
+        "multipart_part_conflict", 409, `part ${partNumber} is out of order; ${etags.length} parts are recorded`, true);
+      return { set: `multipart_etags=array_append(multipart_etags,$4::text),
+        multipart_sha256_state=decode($5,'hex')`, values: [etag, sha256State] };
+    });
+  }
+
+  /** Forgets the intent's multipart upload (its R2 upload was aborted), so the body can be sent again. */
+  async resetMultipartUpload(input: {
+    requestId: string; intentId: string; principal: ContentPrincipal; uploadId: string;
+  }): Promise<Record<string, unknown>> {
+    const uploadId = text(input.uploadId, "uploadId", 1024);
+    return this.multipartStep(input, "content.multipart.reset", (row) => row.multipart_upload_id !== uploadId ? null : {
+      set: `multipart_upload_id=NULL,multipart_part_bytes=NULL,multipart_etags=NULL,
+        multipart_sha256_state=NULL`, values: [] });
   }
 
   async commitRef(input: {
@@ -510,6 +660,14 @@ export class PostgresContentRepository {
             checksum, encodedBytes, now], maxRows: 1,
         });
         if (inserted.length === 1) {
+          const holders = await tx.query({
+            name: "content_object_holders_v1",
+            text: `SELECT ref_id FROM data.content_refs WHERE space_id = $1 AND child_object_id = $2 LIMIT 2`,
+            values: [scope.spaceId, objectId], maxRows: 2,
+          });
+          // The first ref to an object makes the Space hold its bytes.
+          if (holders.length === 1) await meterBlobStorage(tx, this.billing,
+            { spaceId: scope.spaceId, objects: 1, bytes: encodedBytes, now });
           result = { refId, scopeId, ownerKind, ownerId, contentHash: checksum,
             objectKey: input.objectKey, encodedBytes, checksum, version: 1, createdAt: now };
         } else {
@@ -864,7 +1022,7 @@ export class PostgresContentRepository {
     const placement = await this.spaces.resolve(requestId, "content.decisions.expire", spaceId);
     const result = await this.spaces.transaction(requestId, "content.decisions.expire", placement, async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "content_decision_expiry_lock_v1",
-        text: `SELECT r.ref_id,r.root_set_id,r.child_object_id,o.storage_key,o.checksum,o.gc_not_before
+        text: `SELECT r.ref_id,r.root_set_id,r.child_object_id,o.storage_key,o.checksum,o.gc_not_before,o.byte_length
           FROM data.content_refs r JOIN data.content_objects o
             ON o.space_id=r.space_id AND o.object_id=r.child_object_id
           WHERE r.space_id=$1 AND r.generation=0 AND r.owner_kind IN ('summon_decision','connector_result')
@@ -882,10 +1040,7 @@ export class PostgresContentRepository {
             AND generation=0 AND ref_id=$3 AND owner_kind IN ('summon_decision','connector_result')
             AND created_at <= $4::timestamptz`,
           values: [spaceId, row.root_set_id, row.ref_id, cutoff], maxRows: 0 });
-        const remaining = await tx.query({ name: "content_decision_remaining_v1",
-          text: `SELECT ref_id FROM data.content_refs WHERE space_id=$1 AND child_object_id=$2 LIMIT 1`,
-          values: [spaceId, row.child_object_id], maxRows: 1 });
-        if (!remaining.length) await tx.query({ name: "content_decision_gc_nominate_v1",
+        if (await this.releaseHeldObject(tx, spaceId, String(row.child_object_id), Number(row.byte_length), now)) await tx.query({ name: "content_decision_gc_nominate_v1",
           text: `INSERT INTO data.content_gc_candidates
             (space_id,object_id,storage_key,content_hash,reason,unreferenced_at,not_before,
              status,version,lease_until,attempts,last_checked_at,created_at,updated_at)
@@ -926,7 +1081,7 @@ export class PostgresContentRepository {
       await this.authorize(tx, scope, input.principal, "content_terminalize");
       const rows = await tx.query<QueryResultRow>({
         name: "content_ref_release_lock_v1",
-        text: `SELECT r.*,o.storage_key,o.checksum,o.gc_not_before
+        text: `SELECT r.*,o.storage_key,o.checksum,o.gc_not_before,o.byte_length
           FROM data.content_refs r JOIN data.content_objects o
             ON o.space_id = r.space_id AND o.object_id = r.child_object_id
           WHERE r.space_id = $1 AND r.root_set_id = $2 AND r.generation = 0
@@ -941,16 +1096,12 @@ export class PostgresContentRepository {
           AND generation = 0 AND ref_id = $3`,
         values: [scope.spaceId, located.root_set_id, refId], maxRows: 0,
       });
-      const remaining = await tx.query({
-        name: "content_ref_remaining_v1",
-        text: `SELECT ref_id FROM data.content_refs
-          WHERE space_id = $1 AND child_object_id = $2 LIMIT 1`,
-        values: [scope.spaceId, row.child_object_id], maxRows: 1,
-      });
+      const released = await this.releaseHeldObject(
+        tx, scope.spaceId, String(row.child_object_id), Number(row.byte_length), now);
       const requested = input.notBefore ? new Date(input.notBefore).getTime() : 0;
       const notBefore = new Date(Math.max(requested, Date.parse(now) + GC_SAFETY_MS,
         new Date(row.gc_not_before as Date | string).getTime())).toISOString();
-      if (!remaining[0]) await tx.query({
+      if (released) await tx.query({
         name: "content_gc_nominate_v1",
         text: `INSERT INTO data.content_gc_candidates
           (space_id,object_id,storage_key,content_hash,reason,unreferenced_at,not_before,
@@ -1007,7 +1158,7 @@ export class PostgresContentRepository {
         );
         seen.add(attachmentId);
         const contentHash = hash(attachment.contentHash, "contentHash");
-        const encodedBytes = positive(attachment.encodedBytes, "encodedBytes", 1024 * 1024 * 1024);
+        const encodedBytes = positive(attachment.encodedBytes, "encodedBytes", MAX_BLOB_BYTES);
         if (attachment.objectKey !== `objects/${contentHash}`) throw new ContentControlError(
           "invalid_command", 400, "Attachment object metadata is invalid",
         );

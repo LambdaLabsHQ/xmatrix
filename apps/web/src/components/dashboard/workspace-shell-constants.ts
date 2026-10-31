@@ -12,7 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { ChannelMessage } from "@xmatrix/protocol";
-import { RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES } from "@xmatrix/protocol/relay-v2/message-attachment";
+import { RELAY_V2_BLOB_MAX_BYTES } from "@xmatrix/protocol/relay-v2/message-attachment";
 
 export const HISTORY_REFRESH_INTERVAL_MS = 30000;
 /** When to re-read a channel's presence after one of its Instances went offline. */
@@ -105,7 +105,7 @@ export const MAX_ATTACHMENTS = 10;
 
 export const MAX_IMAGE_ATTACHMENT_BYTES = 1_000_000;
 
-export const MAX_ATTACHMENT_BYTES = RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES;
+export const MAX_ATTACHMENT_BYTES = RELAY_V2_BLOB_MAX_BYTES;
 
 export const MAX_COMPRESSED_IMAGE_DIMENSION = 1600;
 

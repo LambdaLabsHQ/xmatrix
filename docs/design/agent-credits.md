@@ -110,6 +110,12 @@ for the plan re-reads the summary, so the notice appears at once.
   in the page commit transaction before the revision is written: it advances a
   Free Space's counter, charges an Agent's credit in a paid Space, and refuses
   any revision during a past-due grace.
+- **Storage.** `storageUpload` runs when an upload is admitted, before any
+  byte is sent, and may refuse it; `storageChanged` runs in the transaction
+  that changes what a Space holds, with the byte delta and the new total from
+  `data.space_storage_usage` (see `docs/operations/blob-ref-commit.md`). The
+  official policy records storage without pricing it yet: a storage price or
+  allowance applies in those two hooks.
 - **State.** `data.space_credit_state` holds one row per Space: the current
   period, the three counters, the pack balance and the highest notice level sent.
   A write in a new month resets the counters in the same upsert. Seats come from

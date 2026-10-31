@@ -105,7 +105,7 @@ Each image and video preview has its own **Original** checkbox once preparation
 finishes. Checking it prepares the retained local source without compression;
 unchecking it restores automatic compression. Choices are independent and stay
 with the in-memory Channel draft. Originals retain their bytes, filename and
-MIME type, subject to the existing 64 MiB attachment limit. Images otherwise keep
+MIME type; attachments have no size limit below the 625 GiB storage ceiling. Images otherwise keep
 the 1 MB compression target. A quality change preserves attachment order and
 restores the previous file on failure or cancel.
 Uploads never block Send. A file still preparing or uploading goes with the

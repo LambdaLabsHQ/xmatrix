@@ -217,6 +217,10 @@ page image, a message attachment) goes the same way (`PUT
 reads a whole request into memory before its route runs, so a file sent
 through it shows no progress while the Worker re-sends it, and the upload's
 stall watchdog gave it up; the Hub streams it into storage as it arrives.
+A file larger than one request (64 MiB) goes as a multipart upload in 64 MiB
+parts (`…/multipart/parts/<n>/scope/<scope>`), each its own request with its
+own stall watchdog and transient retries; a resumed upload starts after the
+parts the Hub already recorded.
 Other writes keep going through the Web. Direct requests use the browser's default cache mode: a mode that
 skips the HTTP cache makes Chrome skip its preflight cache too, and ask again
 before every request. The Hub marks every direct answer `no-store`, so no answer
