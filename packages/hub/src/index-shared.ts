@@ -422,6 +422,8 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && path === HUB_ROUTES.secret_requests) return true;
   // Ask its owner, on a card in its Channel, to sign a harness in on one of their Machines.
   if (request.method === "POST" && path === HUB_ROUTES.harness_sign_in_requests) return true;
+  // Ask its own Machine to look at its harnesses again; the route refuses any other action.
+  if (request.method === "POST" && path === HUB_ROUTES.machine_harness_actions) return true;
   // Its Channel's connected apps and their commands.
   if (request.method === "GET" && path === HUB_ROUTES.connector_usage) return true;
   // Private connector reads are scoped to the live requesting Run's own Channel.

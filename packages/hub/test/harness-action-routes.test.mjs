@@ -43,8 +43,10 @@ test("the owner issues a preset and action only; the Hub never carries a command
 });
 
 test("Agent runs, bad input and offline Machines are refused before anything is issued", async () => {
-  const agent = route({ id: "agent-run:run", agentRun: { runId: "run", ownerUserId: "owner" } });
+  const agent = route({ id: "agent-run:run", agentRun: { runId: "run", ownerUserId: "owner", machineId: "machine:a" } });
   assert.equal((await agent.post({ machineId: "machine:a", presetId: "claude", action: "update" })).status, 403);
+  // Looking again is the one thing it may ask, and only of its own Machine.
+  assert.equal((await agent.post({ machineId: "machine:b", presetId: "custom", action: "refresh" })).status, 403);
   assert.deepEqual(agent.calls, []);
   // It follows its owner's harness actions, as the owner reads them.
   await agent.get("harness:00000000-0000-4000-8000-000000000000");
@@ -64,6 +66,15 @@ test("Agent runs, bad input and offline Machines are refused before anything is 
   assert.equal(twoHosts.calls.some(call => call.name === "issue"), false,
     "a hostname never disambiguates Machine identity");
   for (const caller of [owner, offline]) assert.equal(caller.calls.some(call => call.name === "issue"), false);
+});
+
+test("an Agent Run asks its own Machine to look at its harnesses again, as its owner", async () => {
+  const agent = route({ id: "agent-run:run", agentRun: { runId: "run", ownerUserId: "owner", machineId: "machine:a" } });
+  const response = await agent.post({ machineId: "machine:a", presetId: "custom", action: "refresh" });
+  assert.equal(response.status, 202);
+  const issued = agent.calls.find(call => call.name === "issue").input;
+  assert.deepEqual([issued.ownerUserId, issued.machineId, issued.payload.action], ["owner", "machine:a", "refresh"]);
+  assert.deepEqual(issued.principal, { kind: "user", id: "owner" });
 });
 
 test("an authority refusal is forwarded and status reads are owner-scoped", async () => {

@@ -111,9 +111,13 @@ recipe or control for one; anything else is refused when issued.
 
 - **Who.** Only the Machine's owner, signed in as a Human, issues an action:
   `POST /api/machine-daemons/harness-actions { machineId, hostId?, presetId,
-  action }`. Agent Runs are refused there; an Agent applies the official recipe
-  on its own Machine directly (`xmatrix harness install|update`), as its owner's
-  user, and cannot act on another Machine.
+  action }`. An Agent applies the official recipe on its own Machine directly
+  (`xmatrix harness install|update`), as its owner's user, and cannot act on
+  another Machine. The one action an Agent Run may issue there is `refresh` of
+  its own Machine (a read-only probe, issued as its owner): after any harness
+  change it makes, and before `xmatrix request sign-in`, the CLI asks the daemon
+  to look again, so the Hub's view of that Machine (routing, sign-in) shows the
+  change at once instead of at the next six-hourly probe.
 - **Command.** Machine control (PostgreSQL in production) stores a
   `harness_action` command only for an online daemon advertising
   `machine_harness_action_v1`. The payload is exactly `{ type, requestId,
