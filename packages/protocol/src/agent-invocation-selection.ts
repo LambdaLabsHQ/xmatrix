@@ -4,7 +4,8 @@ import { canonicalRegistrationHarness, parseSpaceAgentRegistrationKey,
 import { isOperationalMentionStart, nonOperationalMentionRanges,
   type NonOperationalMentionRange } from "./operational-mention-context.js";
 import { createInstanceMentionScanner, parseHarnessCapabilityMentions } from "./agent-mention.js";
-import { parseAutoLaunchMentions, parseLaunchConditions } from "./agent-auto-mention.js";
+import { isAutoLaunchSummonText, isConditionSummonText, parseAutoLaunchMentions, parseConditionSummon,
+  parseLaunchConditions } from "./agent-auto-mention.js";
 
 /** A capability invocation and an explicitly selected location are different
  * intents. Neither a display name nor possession of a key grants access. */
@@ -114,8 +115,10 @@ export function deriveHarnessInvocationSelections(source: {
   const envelope = (selections: unknown[]) => ({ schemaVersion: 1, sourceRevision: source.revision,
     sourceBodyHash: source.bodyHash, selections });
   const autos = parseAutoLaunchMentions(source.body)
-    .filter(mention => mention.text.slice(1, 5).toLowerCase() === "auto")
-    .map(mention => ({ start: mention.start, end: mention.start + 5, harness: undefined }));
+    .filter(mention => isAutoLaunchSummonText(mention.text))
+    // `@machine:Laptop` is bound by its first condition, `@auto` by its address.
+    .map(mention => ({ start: mention.start, end: isConditionSummonText(mention.text)
+      ? mention.conditions[0]?.end ?? mention.end : mention.start + 5, harness: undefined }));
   // `@name:new` / `@name:once`: the caller resolved each name in this Space;
   // an unresolved name stays text.
   const creates = createInstanceMentions(source.body).flatMap(mention => {
@@ -155,9 +158,11 @@ export function createInstanceMentions(body: string): Array<{ start: number; end
  * `hasRetiredAgentLaunchMention` refuses them before dispatch — never as a
  * silent workspace carrier. A contradiction is an error, never a silent choice.
  */
-export function selectionLaunchConditions(body: string, selection: { end: number; text: string }):
+export function selectionLaunchConditions(body: string, selection: { start: number; end: number; text: string }):
   ReturnType<typeof parseLaunchConditions> {
-  const options = parseLaunchConditions(body, selection.end);
+  // `@machine:Laptop`'s selection is its first condition; the rest follow it.
+  const options = (isConditionSummonText(selection.text) ? parseConditionSummon(body, selection.start) : undefined) ??
+    parseLaunchConditions(body, selection.end);
   const create = /^[@＠][^:\s]+:(new|once)!?(?::([\s\S]+))?$/iu.exec(selection.text);
   if (!create || options.error) return options;
   return { ...options, tags: { ...options.tags },

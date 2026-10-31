@@ -47,7 +47,7 @@ import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
 import { HARNESS_PROFILE_COPY } from "@/lib/harness-profile-copy";
 import { useOnboardingLocale } from "@/lib/onboarding-locale";
-import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonStartCandidates } from "./auto-launch-completion";
+import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonConditionCandidates, summonStartCandidates } from "./auto-launch-completion";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
@@ -341,11 +341,13 @@ export function useComposerCompletion({
     // auto starts a summon; it is not a condition on one. After a summon it is
     // offered only to an `@` typed there, which begins the next summon.
     const typingSummon = !fieldCompletion && Boolean(registrationMentionCompletion.active);
-    const choices = filterLaunchCandidates((bodySummon ? allChoices.filter(item =>
+    const choices = [...filterLaunchCandidates((bodySummon ? allChoices.filter(item =>
       item.id !== "launch:auto" || typingSummon) : summonStartCandidates(allChoices)).filter(item =>
       bodySummon || !item.launchTags?.harness ||
       !registrationMentionCompletion.candidates.some(candidate => candidate.invocationTarget &&
-        (candidate.mention || candidate.name).toLowerCase() === item.launchTags!.harness)), query);
+        (candidate.mention || candidate.name).toLowerCase() === item.launchTags!.harness)), query),
+    // A fresh `@` may open with a condition: `@Lap` offers `@machine:Laptop`.
+    ...(!bodySummon && typingSummon ? summonConditionCandidates(allChoices, query) : [])];
     // Old Profile rows appended a colon and led into the retired launch picker.
     // Harnesses now use condition tags; explicit registration targets remain typed.
     const references = registrationMentionCompletion.candidates.filter(candidate =>

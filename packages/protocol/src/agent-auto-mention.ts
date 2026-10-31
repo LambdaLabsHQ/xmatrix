@@ -1,4 +1,4 @@
-import { INTERACTION_LAUNCH_FIELDS, matchInteractionGrammar } from "./message-interaction-grammar.js";
+import { INTERACTION_LAUNCH_FIELDS, MESSAGE_INTERACTION_LIMITS, matchInteractionGrammar } from "./message-interaction-grammar.js";
 import { isHarnessParameterId, parseHarnessParameterValues } from "./harness-parameters.js";
 import { agentPresetForLauncher } from "./agent-presets.js";
 import { createInstanceMentionScanner, isAbsoluteLocalPath, repoSummonReference } from "./agent-mention.js";
@@ -164,6 +164,32 @@ export function parseLaunchConditions(body: string, from: number): Omit<AutoLaun
   return { end, tags, conditions };
 }
 
+/** `@machine:Laptop`: a condition written as the summon's first word. */
+const CONDITION_SUMMON = new RegExp(`(?:^|[\\s([{])[@＠](?=(?:${CONDITION_FIELDS}):)`, "gu");
+const CONDITION_SUMMON_TEXT = new RegExp(`^[@＠](?:${CONDITION_FIELDS}):`, "u");
+
+/** Whether a summon's text starts with a condition rather than an address. */
+export function isConditionSummonText(text: string): boolean {
+  return CONDITION_SUMMON_TEXT.test(text);
+}
+
+/** Whether a summon lets Jev choose the harness: `@auto …` or `@machine:…`. */
+export function isAutoLaunchSummonText(text: string): boolean {
+  return /^[@＠]auto(?![a-zA-Z0-9_-])/iu.test(text) || isConditionSummonText(text);
+}
+
+/**
+ * The conditions of a summon that opens with one, `@machine:Laptop repo:a/b`:
+ * an Auto summon whose `@` is also its first condition's start. Read as if the
+ * `@` were the space before a condition, so offsets stay the body's own.
+ */
+export function parseConditionSummon(body: string, at: number): Omit<AutoLaunchMention, "start" | "text"> | undefined {
+  if (!isConditionSummonText(body.slice(at))) return undefined;
+  const parsed = parseLaunchConditions(`${body.slice(0, at)} ${body.slice(at + 1)}`, at);
+  // A first word that is not a whole condition (`@repo:` alone) is prose.
+  return parsed.conditions[0]?.start === at + 1 ? parsed : undefined;
+}
+
 /** Shared Auto/direct-runtime grammar. The exported name remains compatible
  * with existing consumers; malformed conditions never relax a launch. */
 export function parseAutoLaunchMentions(body: string): AutoLaunchMention[] {
@@ -171,20 +197,28 @@ export function parseAutoLaunchMentions(body: string): AutoLaunchMention[] {
   /* `@auto[…]` was the shipped spelling and is no longer a mention at all: the
      lookahead refuses the bracket, so such a body reads as the prose it looks
      like and starts nothing. */
+  const starts = [
+    ...matchInteractionGrammar("launch.address.v1", body).map(match => ({ start: match.start, name: match.arguments.name! })),
+    ...(body.length > MESSAGE_INTERACTION_LIMITS.bodyLength ? [] : [...body.matchAll(CONDITION_SUMMON)]
+      .map(match => ({ start: match.index! + match[0].length - 1, name: undefined }))),
+  ].sort((left, right) => left.start - right.start);
   let consumedUntil = 0;
-  for (const match of matchInteractionGrammar("launch.address.v1", body)) {
-    if (match.start < consumedUntil) continue;
-    const name = match.arguments.name!;
-    const harness = name.toLowerCase() === "auto" ? undefined : agentPresetForLauncher(name)?.id;
-    if (name.toLowerCase() !== "auto" && !harness) continue;
-    const start = match.start;
-    const parsed = parseLaunchConditions(body, start + name.length + 1);
-    if (harness) {
-      if (parsed.tags.harness && parsed.tags.harness !== harness) {
-        parsed.error = "The harness condition conflicts with the addressed Agent.";
+  for (const { start, name } of starts) {
+    if (start < consumedUntil) continue;
+    let parsed: Omit<AutoLaunchMention, "start" | "text"> | undefined;
+    if (name === undefined) parsed = parseConditionSummon(body, start);
+    else {
+      const harness = name.toLowerCase() === "auto" ? undefined : agentPresetForLauncher(name)?.id;
+      if (name.toLowerCase() !== "auto" && !harness) continue;
+      parsed = parseLaunchConditions(body, start + name.length + 1);
+      if (harness) {
+        if (parsed.tags.harness && parsed.tags.harness !== harness) {
+          parsed.error = "The harness condition conflicts with the addressed Agent.";
+        }
+        parsed.tags.harness = harness;
       }
-      parsed.tags.harness = harness;
     }
+    if (!parsed) continue;
     mentions.push({ start, text: body.slice(start, parsed.end), ...parsed });
     consumedUntil = parsed.end;
   }

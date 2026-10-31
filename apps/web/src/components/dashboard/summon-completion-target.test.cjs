@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { summonAtCompletion, findLaunchFieldCompletion, filterLaunchCandidates, autoLaunchCandidates, completeLaunchFragment, summonStartCandidates } = require("./auto-launch-completion.ts");
+const { summonAtCompletion, findLaunchFieldCompletion, filterLaunchCandidates, autoLaunchCandidates, completeLaunchFragment, summonConditionCandidates, summonStartCandidates } = require("./auto-launch-completion.ts");
 
 test("runtime picks are top-level addresses and their conditions continue at the caret", () => {
   assert.equal(completeLaunchFragment("@cod", { start: 0, tokenEnd: 4 }, { harness: "codex" }).value, "@codex ");
@@ -302,4 +302,25 @@ test("a summon's first condition rows name each kind before a second of any", ()
   const fields = autoLaunchCandidates(many, { harness: "codex" }, runtimeDefault)
     .filter(candidate => candidate.id !== "launch:auto").slice(0, 5).map(candidate => candidate.launchField);
   assert.deepEqual(fields, ["repo", "pwd", "machine", "effort", "launch"]);
+});
+
+test("a fresh @ offers a condition by its value, and picking it opens the summon with it", () => {
+  const registrations = [{ key: { spaceId: "s", ownerUserId: "u", machineId: "machine:1", harness: "codex" },
+    machineName: "Laptop", state: "enabled", routingReady: true, models: [], modelCatalog: [],
+    live: { machine: { online: true } } }];
+  const all = autoLaunchCandidates({ repos: [{ value: "owner/lapis" }], workspaces: [] }, {}, registrations);
+  const offered = summonConditionCandidates(all, "Lap").map(item => item.name);
+  assert.deepEqual(offered, ["@repo:owner/lapis", "@machine:Laptop"]);
+  assert.deepEqual(summonConditionCandidates(all, "mach").map(item => item.name), ["@machine:Laptop"]);
+  assert.deepEqual(summonConditionCandidates(all, "machine:lap").map(item => item.name), ["@machine:Laptop"]);
+  // A bare `@` lists who to summon; Auto and runtimes are never conditions here.
+  assert.deepEqual(summonConditionCandidates(all, ""), []);
+  assert.deepEqual(summonConditionCandidates(all, "codex"), []);
+  const machine = all.find(item => item.launchField === "machine");
+  const picked = completeLaunchFragment("run @Lap tests", { start: 4, tokenEnd: 8 }, machine.launchTags);
+  assert.equal(picked.value, "run @machine:Laptop tests");
+  // The picked word is a summon, so the next conditions continue it.
+  assert.deepEqual(summonAtCompletion("@machine:Laptop ", 16).tags, { machine: "Laptop" });
+  const next = completeLaunchFragment("@machine:Laptop ", { start: 16, tokenEnd: 16 }, { effort: "high" });
+  assert.equal(next.value, "@machine:Laptop effort:high ");
 });

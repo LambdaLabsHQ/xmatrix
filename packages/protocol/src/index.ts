@@ -178,7 +178,7 @@ export type {
 export {
   AUTO_LAUNCH_FIELDS, formatAutoLaunchMention, hasRetiredAgentLaunchMention,
   launchHarnessParameters, machineLaunchTagValue, machineMentionValue, machineTagSelects,
-  parseAutoLaunchMentions, parseLaunchConditions,
+  parseAutoLaunchMentions, parseLaunchConditions, isConditionSummonText, isAutoLaunchSummonText,
   RETIRED_AGENT_LAUNCH_NOTICE,
 } from "./agent-auto-mention.js";
 export type {
