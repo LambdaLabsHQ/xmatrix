@@ -54,7 +54,7 @@ test("Automation authority creates a Human-owned task in PostgreSQL", async () =
 
   assert.deepEqual({ entityId: value.entityId, entityVersion: value.entityVersion,
     reused: value.reused }, { entityId: "task-1", entityVersion: 1, reused: false });
-  for (const name of ["automation_insert_v2", "automation_control_head_v1",
+  for (const name of ["automation_insert_v3", "automation_control_head_v1",
     "automation_outbox_v2", "automation_replay_write_v1"]) {
     assert.equal(db.calls.some((call) => call.name === name), true, name);
   }
@@ -215,7 +215,7 @@ test("a member rewriting another member's evaluation replaces it with one author
   const value = await replacement(db);
   assert.deepEqual({ entityId: value.entityId, entityVersion: value.entityVersion },
     { entityId: "task-replacement", entityVersion: 1 });
-  const inserted = db.calls.find((call) => call.name === "automation_insert_v2");
+  const inserted = db.calls.find((call) => call.name === "automation_insert_v3");
   assert.equal(inserted.values[1], "user-2");
   assert.deepEqual(db.calls.find((call) => call.name === "automation_remove_replaced_v1").values,
     ["task-authored", 3]);
@@ -275,7 +275,7 @@ test("a live Agent creates only its exact evaluator authority in PostgreSQL", as
     payload: evaluatorPayload({ kind: "agent", id: "agent-1" }),
   });
   assert.equal(value.entityId, "task-agent");
-  assert.equal(db.calls.some((call) => call.name === "automation_insert_v2"), true);
+  assert.equal(db.calls.some((call) => call.name === "automation_insert_v3"), true);
 });
 
 test("a registration Run's Instance lists Automations in its birth Channel without a Profile grant", async () => {

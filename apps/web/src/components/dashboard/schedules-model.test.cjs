@@ -72,13 +72,13 @@ test("Automations are grouped by what they are doing: attention, running, paused
   assert.deepEqual(groupSchedules([automation({ id: "on" })], true).map((group) => group.state), ["running"]);
 });
 
-test("running Automations come soonest first, paused ones by name, and detached ones need attention", () => {
+test("running Automations come soonest first, paused ones by name, and one whose line cannot run needs attention", () => {
   const groups = groupSchedules([
     automation({ id: "p2", name: "Zeta", enabled: false }),
     automation({ id: "late", name: "Late", nextRunAt: "2026-09-28T15:00:00.000Z" }),
     automation({ id: "p1", name: "Alpha", enabled: false }),
     automation({ id: "soon", name: "Soon", nextRunAt: "2026-09-28T13:00:00.000Z" }),
-    automation({ id: "gone", name: "Gone", detachedAt: "2026-09-27T00:00:00.000Z" }),
+    automation({ id: "gone", name: "Gone", enabled: false, problem: "Connect GitHub for this Space to run on its repositories" }),
   ], true);
   assert.deepEqual(groups.map((group) => [group.state, group.automations.map((item) => item.id)]),
     [["attention", ["gone"]], ["running", ["soon", "late"]], ["paused", ["p1", "p2"]]]);
@@ -86,7 +86,7 @@ test("running Automations come soonest first, paused ones by name, and detached 
 
 test("attention names what a person has to look at, most urgent first", () => {
   assert.equal(scheduleAttention(automation({}), true), null);
-  assert.match(scheduleAttention(automation({ detachedAt: "2026-09-27T00:00:00.000Z" }), true), /reference left/);
+  assert.match(scheduleAttention(automation({ enabled: false, problem: "Connect GitHub for this Space" }), true), /Connect GitHub/);
   assert.equal(scheduleAttention(automation({ latestExecution: { status: "failed", errorCode: "no_runtime" } }), true),
     "Its last run did not start: no_runtime");
   assert.equal(scheduleAttention(automation({ lastError: "Channel is archived" }), true),
@@ -95,11 +95,11 @@ test("attention names what a person has to look at, most urgent first", () => {
   assert.equal(scheduleAttention(automation({ enabled: false }), false), null);
 });
 
-test("a detached Automation counts as paused, and the summary names the soonest running one", () => {
+test("one whose line cannot run counts as paused, and the summary names the soonest running one", () => {
   const list = [
     automation({ id: "soon", pageId: "goals", nextRunAt: "2026-09-28T12:05:00.000Z" }),
     automation({ id: "later", pageId: "relay", nextRunAt: "2026-09-28T18:00:00.000Z" }),
-    automation({ id: "gone", pageId: "relay", detachedAt: "2026-09-27T00:00:00.000Z", nextRunAt: "2026-09-28T11:00:00.000Z" }),
+    automation({ id: "gone", pageId: "relay", enabled: false, problem: "🔁 runs at most every 15 minutes", nextRunAt: "2026-09-28T11:00:00.000Z" }),
     automation({ id: "off", channelId: "c-old", enabled: false }),
   ];
   const summary = scheduleSummary(list, true);
