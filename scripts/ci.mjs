@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -175,6 +175,11 @@ const rustClippy = {
 // compiles C (cl.exe and lib.exe), so its link output is overridden by the
 // `links` name the lockfile resolves (ring_core_<version>_). A ring upgrade
 // changes the name and the check fails until this matches it again.
+// The Windows lane can start before Cargo's Linux lane creates `target`.
+// Prepare their common parent before either compiler creates temporary files.
+if (selected.includes("rust-clippy") || selected.includes("rust-cli")) {
+  mkdirSync(path.join(rootDir, "packages/cli-rs/target"), { recursive: true });
+}
 const windowsTarget = "x86_64-pc-windows-msvc";
 const rustClippyWindows = {
   ...rustClippy,
