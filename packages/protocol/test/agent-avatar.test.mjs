@@ -89,7 +89,7 @@ test("ACP-native harnesses are registry entries with a launcher, ACP argv and ic
     jcode: ["jcode", ["acp"]],
     prime: ["prime-agent", ["--mode", "acp"]],
     trae: ["traecli", ["acp", "serve"]],
-    antigravity: ["agy_acp_server.par", ["--uid="]],
+    antigravity: ["agy", ["acp", "--dangerously-skip-permissions"]],
     autohand: ["autohand-acp", []],
     amp: ["amp-acp", []],
     reasonix: ["reasonix", ["acp"]],

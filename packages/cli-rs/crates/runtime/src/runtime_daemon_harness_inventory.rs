@@ -69,11 +69,7 @@ pub(crate) fn resolve_launcher(preset: &AgentPreset) -> Option<PathBuf> {
         .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
         .unwrap_or_default();
     paths.push(home.join(".local").join("bin"));
-    if preset.id == "cursor"
-        && let Some(local) = dirs::data_local_dir()
-    {
-        paths.push(local.join("cursor-agent"));
-    }
+    paths.extend(xmatrix_cli_agent::native_launcher_dirs(&preset.id));
     let paths = std::env::join_paths(paths).ok()?;
     resolve_launcher_in(preset, &paths, &home)
 }
@@ -112,18 +108,23 @@ fn cursor_launcher_candidate(path: &Path, cwd: &Path) -> bool {
     which::which_in("cursor-agent", Some(search), cwd).is_ok()
 }
 
-/// Bind a harness-specific recipe to the same identified launcher as inventory,
-/// rather than resolving Cursor's generic name against PATH a second time.
+/// A recipe that runs the harness's own launcher (`agy update`, Cursor's
+/// generic `agent`) uses the launcher inventory found, rather than resolving
+/// that name against PATH a second time: a native install outside PATH still
+/// updates. Any other program (`npm`, `bash`) is looked up on PATH.
 pub(crate) fn resolve_recipe_program(preset_id: &str, command: &str) -> Option<PathBuf> {
-    if preset_id == "cursor"
-        && xmatrix_cli_agent::launcher_stem_matches(command, &["agent", "cursor-agent"])
-    {
-        agent_presets()
-            .iter()
-            .find(|preset| preset.id == preset_id)
-            .and_then(resolve_launcher)
-    } else {
-        which::which(command).ok()
+    let own_launcher = agent_presets().iter().find(|preset| {
+        preset.id == preset_id
+            && (xmatrix_cli_agent::launcher_stem(&preset.runtime)
+                == xmatrix_cli_agent::launcher_stem(command)
+                || preset.launcher_names.iter().any(|name| {
+                    xmatrix_cli_agent::launcher_stem(name)
+                        == xmatrix_cli_agent::launcher_stem(command)
+                }))
+    });
+    match own_launcher {
+        Some(preset) => resolve_launcher(preset),
+        None => which::which(command).ok(),
     }
 }
 
@@ -542,6 +543,15 @@ mod tests {
         assert_eq!(
             resolve_recipe_program("codex", "npm"),
             which::which("npm").ok()
+        );
+        // `agy update` runs the launcher inventory found, even off PATH.
+        let antigravity = agent_presets()
+            .iter()
+            .find(|preset| preset.id == "antigravity")
+            .unwrap();
+        assert_eq!(
+            resolve_recipe_program("antigravity", "agy"),
+            resolve_launcher(antigravity)
         );
         let pattern = &preset
             .management

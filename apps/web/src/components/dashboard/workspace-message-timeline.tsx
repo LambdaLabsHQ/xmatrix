@@ -2690,7 +2690,8 @@ export const MessageRow = memo(function MessageRow({
               <QuotaRetryNotice id={quotaRetryId} channelId={channel.id} body={displayBody} spaceId={channel.spaceId??null}
                 token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
             ) : signedOutNotice ? (
-              <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} spaceId={channel?.spaceId ?? null} token={token}
+              <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} requestedBy={signedOutNotice.requestedBy}
+                spaceId={channel?.spaceId ?? null} token={token}
                 userId={currentUserIdentityId.replace(/^user:/, "")}
                 onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
                   signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}

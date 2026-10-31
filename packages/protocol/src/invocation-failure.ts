@@ -1,5 +1,5 @@
 import { machineTagSelects } from "./agent-auto-mention.js";
-import { hasControlCharacter } from "./field-validation.js";
+import { hasControlCharacter, replaceControlCharacters } from "./field-validation.js";
 import { harnessTooOldSentence, type HarnessTooOld } from "./harness-management.js";
 
 const REGISTRATION_JEV_FAILURES = {
@@ -394,20 +394,41 @@ export function harnessSignedOutSentence(signedOut: HarnessSignedOut): string {
   return `${signedOut.program}${signedOut.machineName ? ` on ${signedOut.machineName}` : ""} is not signed in, so it can't take work.`;
 }
 
-/** The kind of a Channel notice whose program is signed out: a summon refused
- * for it, or a turn it refused. The Web draws it as the sign-in, then sends
- * a refused summon again. */
+/** The kind of a Channel notice whose program needs signing in on its machine:
+ * a summon refused for it, a turn it refused, or an Agent's request
+ * (`xmatrix request sign-in`). The Web draws it as the sign-in, then sends a
+ * refused summon again. */
 export const HARNESS_SIGNED_OUT_NOTICE_KIND = "xmatrix.harness-signed-out.v1";
 
-/** A signed-out notice's facts: what to sign in, and the summon to send again
- * when it answers one (a turn failure answers none). */
+const SIGN_IN_REQUESTER_MAX = 120;
+const SIGN_IN_REASON_MAX = 500;
+
+/** A signed-out notice's facts: what to sign in, the summon to send again
+ * when it answers one (a turn failure answers none), and the Agent that asked
+ * for it when an Agent did. */
 export function harnessSignedOutNoticeOf(metadata: Record<string, unknown> | undefined):
-  { signedOut: HarnessSignedOut; summon?: { sourceMention: string; sourceMessageId: string } } | null {
+  { signedOut: HarnessSignedOut; summon?: { sourceMention: string; sourceMessageId: string }; requestedBy?: string } | null {
   if (!metadata || metadata.kind !== HARNESS_SIGNED_OUT_NOTICE_KIND) return null;
   const signedOut = parseHarnessSignedOut(metadata.signedOut);
   if (!signedOut) return null;
   const summon = refusedSummonOf(metadata);
-  return { signedOut, ...(summon ? { summon } : {}) };
+  const requestedBy = typeof metadata.requestedBy === "string" ? metadata.requestedBy.trim() : "";
+  return { signedOut, ...(summon ? { summon } : {}),
+    ...(requestedBy && requestedBy.length <= SIGN_IN_REQUESTER_MAX && !hasControlCharacter(requestedBy) ? { requestedBy } : {}) };
+}
+
+/** The card an Agent posts to ask a machine's owner to sign a program in
+ * there: the same notice a refused summon gets, naming who asks and why. */
+export function harnessSignInRequestNotice(input: { signedOut: HarnessSignedOut; agentName: string; reason?: string }):
+  { body: string; metadata: Record<string, unknown> } {
+  const agentName = replaceControlCharacters(input.agentName).trim().slice(0, SIGN_IN_REQUESTER_MAX) || "An Agent";
+  const reason = input.reason === undefined ? "" : replaceControlCharacters(input.reason).trim().slice(0, SIGN_IN_REASON_MAX);
+  const { program, machineName } = input.signedOut;
+  return {
+    body: `**${agentName}** asks to sign in ${program}${machineName ? ` on ${machineName}` : ""}${reason ? `: ${reason}` : "."}` +
+      "\n\nThe machine's owner signs it in on this card.",
+    metadata: { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut: input.signedOut, requestedBy: agentName },
+  };
 }
 
 function harnessSignedOutMessage(signedOut: HarnessSignedOut): string {
