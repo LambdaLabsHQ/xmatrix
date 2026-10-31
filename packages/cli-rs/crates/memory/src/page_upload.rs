@@ -53,7 +53,7 @@ pub(crate) async fn upload(
     file.take(MEDIA_MAX_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.is_empty() || bytes.len() as u64 > MEDIA_MAX_BYTES {
         return Err(CliError::Launch(
-            "Page media must be between 1 byte and 25 MiB".into(),
+            "Page media must be between 1 byte and 64 MiB".into(),
         ));
     }
     // Fail before uploading bytes when the target page is unavailable or read-only.
