@@ -163,13 +163,6 @@ export const DESKTOP_SETUP_VERSION = 1;
 
 export const AUTOMATION_REFRESH_INTERVAL_MS = 15_000;
 
-export const IMAGE_ATTACHMENT_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
-
-export const MARKDOWN_ATTACHMENT_TYPES = new Set(["text/markdown", "text/x-markdown"]);
-
-export const MARKDOWN_ATTACHMENT_EXTENSIONS = [".md", ".markdown", ".mdown", ".mkd"];
-
 export const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "🎉", "👀", "✅"];
 
 /* The one chip material: `LiquidGlassPill`, the primitive the composer's

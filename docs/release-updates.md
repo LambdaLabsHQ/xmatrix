@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Every client names a file's type from one table
+
+Which type a file extension names, which extension a saved copy gets and
+whether a conversation or a page shows a file inline now come from one table
+the Web, the Hub and the CLI all read. A conversation shows MKV, AVI and MPEG
+videos as video wherever the Web already did, downloads of audio get their
+extension, `xmatrix send --file` names every listed type (AVIF, Opus, WebA and
+more), and an Agent's local copy of an `audio/mp4` voice note is `.m4a`, not
+`.mp4`. Web, Hub and CLI, no API or schema change; recovery is a CI-validated
+release reverting the table.
+
 ## Unreleased: The site also answers at xmatrix.page
 
 xmatrix.sh is a country-code domain Google does not treat as generic, so the

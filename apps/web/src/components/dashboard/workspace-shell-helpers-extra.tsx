@@ -33,8 +33,6 @@ import {
 
 import { metadataString } from "./workspace-shell-formatters";
 
-export { channelAttachmentKindForMimeType } from "./workspace-shell-formatters";
-
 import {
   isLiveMachineDaemon,
   machineIdentityKeys,

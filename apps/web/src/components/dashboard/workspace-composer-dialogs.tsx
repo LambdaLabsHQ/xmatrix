@@ -27,7 +27,6 @@ import { WoodPanel } from "@/components/ui/material-surfaces";
 import type { ComposerChannelAttachment, TimelineItem } from "./workspace-shell-message-model";
 
 import {
-  IMAGE_ATTACHMENT_TYPES,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   COUNT_CHIP_MATERIAL_CLASS,
@@ -179,7 +178,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { cn } from "@/lib/utils";
 
-import { spaceVisibilityScope, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { attachmentKind, spaceVisibilityScope, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import type {
   ChannelAttachment,
@@ -1033,7 +1032,7 @@ export const Composer = memo(function Composer({
     const candidates: AttachmentDropCandidate[] = [];
     for (const image of images) {
       if (!image.mimeType.startsWith("image/")) continue;
-      if (!IMAGE_ATTACHMENT_TYPES.has(image.mimeType)) {
+      if (attachmentKind(image.mimeType) !== "image") {
         setAttachmentError("Only PNG, JPEG, WebP, and GIF images are supported.");
         continue;
       }

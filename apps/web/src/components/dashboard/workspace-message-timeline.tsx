@@ -3,7 +3,6 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { messageMachineIdentity, registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { AttachmentLightbox, ImageGalleryLightbox, LIGHTBOX_BUTTON_CLASS, type GalleryImage } from "./attachment-lightbox";
-import { attachmentMediaType } from "./attachment-media-type";
 import { MediaDownloadProgress, MediaPlayer } from "./media-player";
 import { AgentIdentityLabels } from "./agent-identity-labels";
 import { BranchBadge, tagClass } from "./status-tag";
@@ -11,7 +10,7 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { harnessSignedOutNoticeOf, machineOfflineNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
+import { attachmentKind, playableMediaKind, harnessSignedOutNoticeOf, machineOfflineNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { sameValue, shareByKey } from "../../lib/same-value";
 
@@ -83,7 +82,6 @@ import {
 } from "./workspace-shell-helpers";
 
 import {
-  channelAttachmentKindForMimeType,
   isThreadChannel,
 } from "./workspace-shell-helpers-extra";
 
@@ -1946,7 +1944,7 @@ export const MessageRow = memo(function MessageRow({
         const next: ChannelAttachment = {
           ...attachment,
           ...result.attachment,
-          kind: channelAttachmentKindForMimeType(result.attachment.mimeType, result.attachment.name),
+          kind: attachmentKind(result.attachment.mimeType, result.attachment.name),
           dataUrl: undefined,
           url: objectUrl,
           // Keep the body for clipboard copy: CSP blocks blob: object-URL requests.
@@ -2791,7 +2789,7 @@ export const MessageRow = memo(function MessageRow({
                       "col-span-2 sm:col-span-3"
                   )}
                 >
-                  {attachmentMediaType(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
+                  {playableMediaKind(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
                     <div className="app-paper-tile p-3">
                       <div className="mb-2 truncate text-sm font-medium">{displayAttachment.name}</div>
                       {source ? (

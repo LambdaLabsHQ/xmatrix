@@ -11,7 +11,7 @@
  * it is allowed to await anything: no await, no gap, for any source.
  */
 
-export type AttachmentIntakeKind = "image" | "video" | "markdown" | "file";
+import type { AttachmentKind } from "@xmatrix/protocol";
 
 export type AttachmentIntakeCandidate<TFile> = {
   file: TFile;
@@ -23,7 +23,7 @@ export type AttachmentIntakeEntry<TFile> = {
   id: string;
   file: TFile;
   name: string;
-  kind: AttachmentIntakeKind;
+  kind: AttachmentKind;
   size: number;
   /**
    * Set when the file can never upload. The row is still created — a rejected
@@ -63,8 +63,8 @@ export function planAttachmentIntake<TFile extends IntakeFileShape>(input: {
   maxAttachments: number;
   maxBytes: number;
   maxBytesLabel: string;
-  kindOf: (file: TFile) => AttachmentIntakeKind;
-  nameOf: (kind: AttachmentIntakeKind) => string;
+  kindOf: (file: TFile) => AttachmentKind;
+  nameOf: (kind: AttachmentKind) => string;
   makeId: () => string;
 }): AttachmentIntakePlan<TFile> {
   if (input.candidates.length === 0) {

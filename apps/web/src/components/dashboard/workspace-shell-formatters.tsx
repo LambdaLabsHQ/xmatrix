@@ -2,7 +2,7 @@
 import { usageWithoutQuota, accountQuotaUsageFromCandidates, mergeUsageAttributes } from "@xmatrix/protocol";
 export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "@xmatrix/protocol";
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
-import { attachmentMediaType, directMediaLink } from "./attachment-media-type";
+import { directMediaLink } from "./attachment-media-type";
 import { codeLanguageLabel, useHighlightedCode } from "./code-highlight";
 import { MediaLink } from "./media-player";
 import { MessageMarkdownImage } from "./message-markdown-image";
@@ -16,8 +16,6 @@ import {
   COLLAPSED_MESSAGE_PREVIEW_LINES,
   COLLAPSIBLE_MESSAGE_LENGTH,
   COLLAPSIBLE_MESSAGE_LINES,
-  IMAGE_ATTACHMENT_TYPES,
-  MARKDOWN_ATTACHMENT_TYPES,
 } from "./workspace-shell-constants";
 
 import type {
@@ -212,20 +210,6 @@ export async function copyTextToClipboard(text: string): Promise<void> {
 /** Compact number display for quota meters. */
 export function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
-}
-
-export function channelAttachmentKindForMimeType(
-  mimeType: string,
-  name = ""
-): "image" | "video" | "markdown" | "file" {
-  const normalized = mimeType.trim().toLowerCase();
-  const mime = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(normalized)
-    ? normalized
-    : "application/octet-stream";
-  if (IMAGE_ATTACHMENT_TYPES.has(mime)) return "image";
-  if (attachmentMediaType(mimeType, name) === "video") return "video";
-  if (MARKDOWN_ATTACHMENT_TYPES.has(mime)) return "markdown";
-  return "file";
 }
 
 export function busiestAgentInstance(

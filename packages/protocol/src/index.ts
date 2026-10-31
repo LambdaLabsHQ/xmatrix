@@ -494,13 +494,17 @@ export {
 export {
   GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
   gitHubFileReferences, gitHubFileUrl, mergePageText, mergePageWords,
-  PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, PAGE_MEDIA_TYPES, pageMediaFile, pageMediaReference, pageMediaReferences,
+  PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, pageMediaFile, pageMediaReference, pageMediaReferences,
   pageMediaRefId, parsePageMedia,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageEditGlimpses, pageHeadingSlug, pageLineDiff,
   pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
 } from "./page-markdown.js";
+export {
+  attachmentKind, extensionForMediaType, mediaTypeForName, mediaTypeOf, PAGE_MEDIA_TYPES, playableMediaKind,
+} from "./media-types.js";
+export type { AttachmentKind } from "./media-types.js";
 export type {
-  GitHubFileReference, PageBlock, PageEditGlimpse, PageEditSegment, PageLineDiff, PageMedia, PageMediaExtension, PageMergeResult, PageReferenceSpan,
+  GitHubFileReference, PageBlock, PageEditGlimpse, PageEditSegment, PageLineDiff, PageMedia, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
   markScheduleDone, pageSchedules, removeScheduleLine, scheduleTimeInRange, setScheduleStatus,
