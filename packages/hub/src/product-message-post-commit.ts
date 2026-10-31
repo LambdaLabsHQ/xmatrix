@@ -1,7 +1,7 @@
 import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
-import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
+import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, isAutoLaunchSummonText, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
   AGENT_QUOTA_RETRY_NOTICE_KIND } from "@xmatrix/protocol";
@@ -210,7 +210,7 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
   // Agent, Automation), or a Human's picker selections: every launch is the
   // registration dispatch, which records a refusal where the message shows it.
   const directMention = filterOperationalMentions(input.body, parseHarnessCapabilityMentions(input.body)).length > 0 ||
-    parseAutoLaunchMentions(input.body).some(mention => mention.text.slice(1, 5).toLowerCase() === "auto") ||
+    parseAutoLaunchMentions(input.body).some(mention => isAutoLaunchSummonText(mention.text)) ||
     filterOperationalMentions(input.body, createInstanceMentions(input.body)).length > 0;
   // A conversation's first message is read the same whoever wrote it.
   if (!directMention && input.senderKind !== "user" && input.sequence !== 1) return false;

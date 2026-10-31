@@ -185,6 +185,26 @@ export function summonStartCandidates(candidates: MentionCandidate[]): MentionCa
     .map(candidate => ({ ...candidate, kind: "agent" }));
 }
 
+/**
+ * A fresh `@` also takes a condition as its first word: `@Lap` offers
+ * `@machine:Laptop`, a summon that fixes the machine and lets Jev choose the
+ * rest. Matched on the value's words (or the field being typed), not on the
+ * field's description, so a short query does not list every condition.
+ */
+export function summonConditionCandidates(candidates: MentionCandidate[], query: string): MentionCandidate[] {
+  if (!query) return [];
+  const conditions = candidates.filter(candidate => candidate.launchField &&
+    candidate.launchField !== "harness" && candidate.launchField !== "launch");
+  const typed = query.toLowerCase();
+  const matched = query.includes(":") ? filterLaunchCandidates(conditions, query) : conditions.filter(candidate => {
+    const [field, ...rest] = candidate.name.split(":");
+    const value = rest.join(":").toLowerCase();
+    return field!.startsWith(typed) || value.startsWith(typed) ||
+      value.split(/[^\p{L}\p{N}]+/u).some(word => word.startsWith(typed));
+  });
+  return matched.map(candidate => ({ ...candidate, name: `@${candidate.name}` }));
+}
+
 /** Only an explicit completion replaces the active fragment; surrounding text is immutable. */
 export function completeLaunchFragment(body: string, active: ActiveMention, picked: AutoLaunchTags) {
   const prefix = body.slice(0, active.start);
@@ -198,10 +218,10 @@ export function completeLaunchFragment(body: string, active: ActiveMention, pick
     return { value: body.slice(0, start) + inserted + suffix, cursor: start + inserted.length };
   }
   const canonical = formatAutoLaunchMention(picked);
-  // A condition after a summon is just a field. A fresh Auto selection always
-  // inserts a new summon, including beside another summon.
-  const fragment = hasConditions && summon
-    ? canonical.slice("@auto ".length) : canonical;
+  // A condition after a summon is just a field. A fresh condition is itself the
+  // summon's first word (`@machine:Laptop`); a fresh Auto inserts `@auto`.
+  const fragment = !hasConditions ? canonical
+    : `${summon ? "" : "@"}${canonical.slice("@auto ".length)}`;
   const suffix = body.slice(active.tokenEnd);
   const inserted = fragment + (/^\s/u.test(suffix) ? "" : " ");
   return { value: prefix + inserted + suffix, cursor: prefix.length + inserted.length };

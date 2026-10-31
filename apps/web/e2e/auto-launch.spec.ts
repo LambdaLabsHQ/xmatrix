@@ -44,7 +44,7 @@ test("the Space preloads repositories before typing and a GitHub change refreshe
   expect((await fixtureRequests(page, "github-catalog-change")).length).toBe(1);
 });
 
-test("a fresh @ offers runtimes only, and conditions after the summon", async ({ page }) => {
+test("a bare @ offers runtimes only, a typed one also the conditions that may open a summon", async ({ page }) => {
   const input = page.locator(".composer-textarea").first();
   const overlay = page.locator(".app-mention-suggestions");
   await input.fill("@");
@@ -54,8 +54,14 @@ test("a fresh @ offers runtimes only, and conditions after the summon", async ({
   for (const condition of ["repo:owner/xmatrix", "model:test-model", "machine:"]) {
     await expect(overlay.getByRole("option").filter({ hasText: condition })).toHaveCount(0);
   }
+  // `@Mac` names the machine: the summon fixes it and Jev chooses the rest.
+  await input.fill("@Mac");
+  await overlay.getByRole("option").filter({ hasText: "@machine:My Mac" }).click();
+  await expectDraft(input, '@machine:"My Mac" ');
+  await expect(input.locator(".app-mention-chip[data-mention]").first()).toHaveText('@machine:"My Mac"');
+  await expect(overlay.getByRole("option").filter({ hasText: "repo:owner/xmatrix" })).toBeVisible();
   await input.fill("@xmat");
-  await expect(overlay.getByRole("option").filter({ hasText: "owner/xmatrix" })).toHaveCount(0);
+  await expect(overlay.getByRole("option").filter({ hasText: "@repo:owner/xmatrix" })).toBeVisible();
   await input.fill("@codex ");
   await expect(overlay.getByRole("option").filter({ hasText: "repo:owner/xmatrix" })).toBeVisible();
   await expect(overlay.getByRole("option").filter({ hasText: "model:test-model" })).toBeVisible();

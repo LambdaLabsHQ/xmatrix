@@ -1311,9 +1311,11 @@ export function groupedMentionCandidates(
     // Only this conversation's live Agents are listed here, and early screens
     // name no Run, Instance or Harness.
     { kind: "instance", label: "In this conversation" },
-    { kind: "launch", label: "Condition" },
     { kind: "service", label: "AI service" },
     { kind: "agent", label: "Agent" },
+    // After the Agents: a fresh `@` lists the conditions that may open a summon
+    // below who it may summon. After a summon, conditions are the whole list.
+    { kind: "launch", label: "Condition" },
     { kind: "user", label: "Human" },
     { kind: "app", label: "App" },
   ] as const)

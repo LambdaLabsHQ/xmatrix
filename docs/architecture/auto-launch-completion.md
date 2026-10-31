@@ -30,8 +30,13 @@ text, selection, caret, or IME behavior. The parser interprets each recognized
 mention in the committed message without creating a separate request field.
 
 Harness-first selection inserts a direct runtime address. Runtime rows show
-the address; other completion rows show `key:value` spelling. Both
-`@repo:owner` searches and direct fields such as `@auto repo:owner` are supported.
+the address; other completion rows show `key:value` spelling. A bare `@` lists
+who to summon only. Once something is typed after it, the conditions whose
+value (or field) matches are listed too, below the Agents, as summons that open
+with that condition: `@Lap` offers `@machine:Laptop`, and picking it inserts
+`@machine:Laptop ` — the machine is fixed and Jev chooses the rest; further
+conditions continue it as after any summon. `@repo:owner` searches and direct
+fields such as `@auto repo:owner` are both supported.
 Direct fields complete only immediately after a summon, not in ordinary prose.
 An explicit completion replaces only the active fragment, preserving all other
 characters, including field order, quoting, whitespace, and other summons.
@@ -51,7 +56,10 @@ Suggestions and highlights do not grant authority or promise availability.
 
 The stored/CLI representation is `@auto repo:owner/repo model:m effort:high`.
 Conditions are `key:value` words after the mention, in the grammar the rest of
-`@` already uses: a colon separates, and a value carrying whitespace is quoted
+`@` already uses. A condition may also be the summon's first word:
+`@machine:Laptop effort:high` is `@auto machine:Laptop effort:high`, and its
+derived selection is that first word. A first word that is not a whole
+condition (`@repo:` alone, an unknown key) is prose. In conditions, a colon separates, and a value carrying whitespace is quoted
 with doubled quotes exactly as a workspace tail is (`pwd:"/Users/me/my work"`).
 Fields are `repo`, `pwd`, `machine` (stable ID), `model`, `effort`, `harness`,
 `launch:force`, and runtime-discovered `param.<id>:<value>` choices.
