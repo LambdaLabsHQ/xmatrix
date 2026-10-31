@@ -154,7 +154,7 @@ export async function syncPageSchedules(env: Env, input: {
   ]);
   // The head may have moved past the revision that asked; its lines are what holds now.
   const lines = pageSchedules(page.body);
-  // Every page Automation has its line since migration 0234; one without is not this page's to sync.
+  // Every page Automation has its line since migration 0235; one without is not this page's to sync.
   const rows = (tasks as AutomationRecord[]).map(rowOf).filter((row) => row.source !== undefined);
   const { matches, removed } = matchSchedules(rows, lines);
   const problems: ScheduleSyncReport["problems"] = [];

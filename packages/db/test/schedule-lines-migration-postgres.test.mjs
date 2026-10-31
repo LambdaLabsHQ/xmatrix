@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { pageSchedules } from "@xmatrix/protocol";
 import { integration, migrationFixture } from "./postgres-database.fixture.mjs";
 
-const MIGRATION = "0234_contract_schedules_are_lines";
+const MIGRATION = "0235_contract_schedules_are_lines";
 
-// 0234 rewrites every page Automation's reference into the line that is now
+// 0235 rewrites every page Automation's reference into the line that is now
 // what it is. The Hub knows an Automation by the line it stores, and changes
 // it when the line says anything else; so each line must read back, through
 // the protocol's own parser, as exactly what its Automation already does.

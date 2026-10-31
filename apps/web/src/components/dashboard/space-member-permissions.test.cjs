@@ -43,9 +43,8 @@ test("switch state maps to the exact persisted policy", () => {
 });
 
 test("every Web creation surface consumes the shared policy projection", () => {
+  // Schedules are written in pages, so no schedule surface creates anything here.
   const sources = [
-    "schedules-view.tsx",
-    "workspace-composer-dialogs.tsx",
     "use-workspace-shell-actions.ts",
   ].map((file) => readDashboardSource(file));
   for (const source of sources) assert.match(source, /spaceMemberCanCreate\(/);

@@ -1,7 +1,9 @@
 import { pageSchedules, type PageSchedule, type SerializedAutomation } from "@xmatrix/protocol";
 import { pageDocToMarkdown, pageSchema } from "@xmatrix/protocol/page-document";
 import type { Node as DocNode } from "prosemirror-model";
-import { Plugin, PluginKey } from "prosemirror-state";
+import { Plugin, PluginKey, TextSelection } from "prosemirror-state";
+import { triggersKey } from "./page-triggers";
+import { scheduleTimingRange } from "./page-schedule-editing";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { formatAutomationNext } from "./page-automation-format";
 
@@ -88,6 +90,19 @@ export function automationChips(openConversation: (conversationId: string) => vo
         return { automations, decorations: chipDecorations(editor.doc, automations, openConversation) };
       },
     },
-    props: { decorations: (editor) => automationsKey.getState(editor)?.decorations },
+    props: {
+      decorations: (editor) => automationsKey.getState(editor)?.decorations,
+      // Clicking a line's timing offers what it can be instead, as Obsidian's task editor does.
+      handleClick(view, pos, event) {
+        if (!view.editable || !(event.target instanceof Element) || !event.target.closest(".page-schedule-timing")) {
+          return false;
+        }
+        const $pos = view.state.doc.resolve(pos);
+        const range = scheduleTimingRange($pos.parent, $pos.start());
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, range.to))
+          .setMeta(triggersKey, { kind: "schedule", from: range.from, to: range.to, query: "" }));
+        return true;
+      },
+    },
   });
 }

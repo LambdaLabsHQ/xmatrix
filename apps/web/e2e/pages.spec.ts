@@ -1451,6 +1451,37 @@ test("a page's schedules are task lines whose timing is quiet and whose state fo
 });
 
 
+test("a schedule is written without its emoji: `@` offers when the line runs, and its timing offers it again", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const server = pageDocument("# Relay\n\n## Status\n\nCheck the release\n");
+  await servePageSession(browser, server);
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const editor = browser.getByTestId("page-editor");
+  await editor.getByText("Check the release", { exact: true }).click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.type(" @dai");
+  const menu = browser.getByTestId("page-agent-menu");
+  await expect(menu.getByRole("option", { name: /Repeat every day/u })).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("pages-schedule-at-menu.png") });
+  await menu.getByRole("option", { name: /Repeat every day/u }).click();
+  // The pick is the line's text, and the line is a task.
+  await expect.poll(() => pageMarkdown(server)).toContain("- [ ] Check the release 🔁 every day");
+
+  // Its timing offers what it can be, and pausing it.
+  await editor.locator(".page-schedule-timing").click();
+  const schedule = browser.getByTestId("page-schedule-menu");
+  await expect(schedule.getByRole("option", { name: /Repeat every week/u })).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("pages-schedule-timing-menu.png") });
+  await schedule.getByRole("option", { name: /Repeat every week/u }).click();
+  await expect.poll(() => pageMarkdown(server)).toContain("- [ ] Check the release 🔁 every week");
+  await editor.locator(".page-schedule-timing").click();
+  await browser.getByTestId("page-schedule-menu").getByRole("option", { name: /^Pause/u }).click();
+  await expect.poll(() => pageMarkdown(server)).toContain("- [-] Check the release 🔁 every week");
+});
+
+
 test("a page's conversations sit beside what they are about, and one opens there among the others", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
   const release = { ...E2E_CHANNEL, id: "channel-release", name: "Release notes" };

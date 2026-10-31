@@ -908,7 +908,7 @@ change the line.
   Automations by trigger key, and delivered to the Automation's authority as
   "due now".
 - There is no Channel-scoped Automation and no reference link: contract
-  migration 0234 rewrote each page Automation's `[name](xmatrix:automation/<id>)`
+  migration 0235 rewrote each page Automation's `[name](xmatrix:automation/<id>)`
   reference into its line, after the line that held it, and wrote one with no
   reference paused at the end of its page.
 
