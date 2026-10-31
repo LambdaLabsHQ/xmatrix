@@ -2279,6 +2279,16 @@ async fn run_daemon_connection(
         && !app_version.trim().is_empty() {
             metadata["xmatrixAppVersion"] = serde_json::json!(app_version);
         }
+    // Only the profile that runs this machine's self-update asks the Hub for
+    // CLI release notices; a daemon with self-update turned off asks for none.
+    let cli_release_capability =
+        (update_authority && !daemon_self_update_disabled()).then_some(CLI_RELEASE_NOTICE_CAPABILITY);
+    if let (Some(capability), Some(capabilities)) = (
+        cli_release_capability,
+        metadata["capabilities"].as_array_mut(),
+    ) {
+        capabilities.push(serde_json::json!(capability));
+    }
 
     let mut relay = MachineDaemonConnectionClient::new(
         relay_url,
@@ -2317,7 +2327,10 @@ async fn run_daemon_connection(
             "machine_worktree_action_v1".to_string(),
             "bootstrap_prompt_texts_v1".to_string(),
             xmatrix_cli_core::hub_harness_registry::CAPABILITY.to_string(),
-        ],
+        ]
+        .into_iter()
+        .chain(cli_release_capability.map(str::to_string))
+        .collect(),
     );
     if let Some(activation) = activation.clone() {
         relay.set_activation(activation);
@@ -2397,6 +2410,9 @@ async fn run_daemon_connection(
         daemon_auth_refresh_requested.clone(),
     );
     let _run_handoff_handle = spawn_daemon_run_handoff_task(run_registry.clone());
+    // The Hub's CLI release notices wake the self-update task; only the
+    // update authority's profile runs one.
+    let cli_release_notices = Arc::new(tokio::sync::Notify::new());
     let (_disabled_update_guard, mut self_update_rx) = if update_authority {
         (
             None,
@@ -2406,6 +2422,7 @@ async fn run_daemon_connection(
                 run_registry.clone(),
                 relay.clone(),
                 profile_manager.clone(),
+                cli_release_notices.clone(),
             ),
         )
     } else {
@@ -2986,6 +3003,21 @@ async fn run_daemon_connection(
                         }
                     }
                     MachineDaemonConnectionEvent::RequestNoticeDelivery { .. } => {}
+                    MachineDaemonConnectionEvent::CliRelease { channel, version } => {
+                        if update_authority
+                            && cli_release_notice_applies(
+                                &channel,
+                                &version,
+                                xmatrix_cli_core::version::current(),
+                            )
+                        {
+                            eprintln!(
+                                "{} Hub announced xMatrix CLI {version} on the {channel} channel; updating",
+                                "○".cyan().bold()
+                            );
+                            cli_release_notices.notify_one();
+                        }
+                    }
                     MachineDaemonConnectionEvent::CommandCompletionAcked { control_id } => {
                         if let Err(error) = effect_journal
                             .lock()

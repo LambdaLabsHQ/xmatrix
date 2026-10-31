@@ -1,12 +1,16 @@
 import { daemonClientCompatibility as machineDaemonCompatibility } from "../legacy-client-compatibility";
 import {
   type MachineDaemonActivationReceipt,
+  type MachineDaemonCliReleaseNotice,
   type MachineDaemonClientMessage,
   type MachineDaemonConnectMessage,
   type MachineDaemonServerMessage,
 } from "@xmatrix/protocol/connections/machine-daemon";
 import {
   CLIENT_UPGRADE_REQUIRED_CLOSE_CODE,
+  cliReleaseChannelOf,
+  cliReleaseSupersedes,
+  MACHINE_CLI_RELEASE_CAPABILITY,
 } from "@xmatrix/protocol";
 
 import {
@@ -405,6 +409,27 @@ export class MachineDaemonRuntimeTransport {
       () => this.controller.socket.handleClose(ws, code, reason, wasClean),
       false,
     );
+  }
+
+  /**
+   * Pushes a CLI release to every daemon in this cell that follows its channel,
+   * runs an older version and said it updates on such a notice. The send joins
+   * each socket's queue like any other frame. Returns how many were told.
+   */
+  async noticeCliRelease(notice: MachineDaemonCliReleaseNotice): Promise<number> {
+    const behind = [...this.sockets.entries()].filter(([ws, session]) => {
+      const running = session.machineMetadata.xmatrixDaemonVersion;
+      return isWebSocketOpen(ws) && session.capabilities.includes(MACHINE_CLI_RELEASE_CAPABILITY) &&
+        typeof running === "string" && cliReleaseChannelOf(running) === notice.channel &&
+        cliReleaseSupersedes(notice.version, running);
+    });
+    let told = 0;
+    await Promise.all(behind.map(([ws, session]) => this.sockets.ordered.enqueue(ws, async () => {
+      if (this.sockets.get(ws) !== session) return;
+      this.sockets.send(ws, notice);
+      told += 1;
+    }, true)));
+    return told;
   }
 
   /**

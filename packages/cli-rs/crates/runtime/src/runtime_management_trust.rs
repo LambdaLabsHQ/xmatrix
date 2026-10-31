@@ -2276,20 +2276,28 @@ fn daemon_self_update_release_api_url() -> String {
         .unwrap_or_else(|_| default_cli_release_api_url().to_string())
 }
 
-fn daemon_self_update_interval() -> Duration {
-    let interval_secs = std::env::var("XMATRIX_DAEMON_SELF_UPDATE_INTERVAL_SECS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_DAEMON_SELF_UPDATE_INTERVAL_SECS);
+/// The capability a daemon declares when it updates itself on the Hub's
+/// `machine_cli_release` notice (`MACHINE_CLI_RELEASE_CAPABILITY` in protocol).
+const CLI_RELEASE_NOTICE_CAPABILITY: &str = "machine_cli_release_v1";
 
-    Duration::from_secs(interval_secs.max(60))
+/// Whether the Hub's CLI release notice names a newer release of the channel
+/// a daemon running `current` follows: a beta follows `dev`, a stable build
+/// `stable`. A notice for the other channel, or for this version or an older
+/// one, is not this daemon's to act on.
+fn cli_release_notice_applies(channel: &str, version: &str, current: &str) -> bool {
+    let follows = if current.split('+').next().unwrap_or(current).contains('-') {
+        "dev"
+    } else {
+        "stable"
+    };
+    channel == follows && release_version_is_newer(version, current)
 }
 
 fn daemon_self_update_timeout(phase: &str) -> Duration {
     let secs = if phase == "startup" {
         DAEMON_SELF_UPDATE_STARTUP_TIMEOUT_SECS
     } else {
-        DAEMON_SELF_UPDATE_PERIODIC_TIMEOUT_SECS
+        DAEMON_SELF_UPDATE_NOTICE_TIMEOUT_SECS
     };
     Duration::from_secs(secs)
 }
@@ -2372,12 +2380,18 @@ async fn daemon_self_update_and_restart_if_needed(
     Some(DaemonSelfUpdateOutcome::Restart(installed))
 }
 
+/// Updates the daemon when the Hub says its channel has a newer release
+/// (`machine_cli_release`, signalled through `notices`). The daemon keeps no
+/// clock of its own: besides the check at startup, a notice is the only thing
+/// that makes it read the release feed. Notices that arrive while an update is
+/// running collapse into one more attempt.
 fn spawn_daemon_self_update_task(
     hub_url: String,
     token_override: Option<String>,
     run_registry: DaemonRunRegistry,
     relay: SharedMachineDaemonConnection,
     profile_manager: ProfileManager,
+    notices: Arc<tokio::sync::Notify>,
 ) -> mpsc::UnboundedReceiver<DaemonSelfUpdateOutcome> {
     let (tx, rx) = mpsc::unbounded_channel();
     if daemon_self_update_disabled() {
@@ -2385,8 +2399,13 @@ fn spawn_daemon_self_update_task(
     }
 
     config::spawn_profile_task(async move {
+        let mut first = true;
         loop {
-            tokio::time::sleep(daemon_self_update_interval()).await;
+            if !first {
+                tokio::time::sleep(DAEMON_SELF_UPDATE_RETRY_AFTER).await;
+            }
+            first = false;
+            notices.notified().await;
             report_finished_daemon_children(&run_registry, &relay).await;
             if let Err(error) = seal_daemon_host_update_recovery(&profile_manager) {
                 eprintln!(
@@ -2398,7 +2417,7 @@ fn spawn_daemon_self_update_task(
             if let Some(installed) = daemon_self_update_and_restart_if_needed(
                 &hub_url,
                 token_override.as_deref(),
-                "periodic",
+                "notice",
             )
             .await
             {
