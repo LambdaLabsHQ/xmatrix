@@ -677,7 +677,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     description: "Connect one or more Cloudflare logins: subscribing to an alert type sets up its notification, alerts reach channels and Automations as they fire and resolve, and Agents read and write zones, DNS, registrar domains and Worker hostnames, read Workers logs, deployments and D1, and can roll a Worker back. D1 stays read-only. Every command can name the account it acts on.",
     oauth: { authorizeUrl: "https://dash.cloudflare.com/oauth2/auth", tokenUrl: "https://dash.cloudflare.com/oauth2/token",
       scopes: ["offline_access", "account-settings.read", "notifications.read", "notifications.write",
-        "workers-observability.write", "workers-scripts.read", "workers-scripts.edit", "d1.read",
+        "workers-observability.write", "workers-scripts.edit", "d1.read",
         "zone.read", "zone.write", "dns.read", "dns.write", "registrar-domains.read", "registrar-domains.admin"],
       tokenField: "oauthToken" },
     credentials: [
