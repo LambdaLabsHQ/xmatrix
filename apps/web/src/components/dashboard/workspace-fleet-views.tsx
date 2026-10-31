@@ -721,8 +721,6 @@ export function LocalMacView({
   );
 }
 
-type ThisMachineApp = { version?: string; update?: React.ReactNode };
-
 /**
  * The Space's Machines, read like every rail destination: the list names
  * each host (its WSL guests under it) and the paper shows the one chosen.
@@ -754,8 +752,8 @@ export function MachinesView({
     online: boolean;
     /** The desktop app's platform (`win32` / `darwin` / `linux`) for its OS mark. */
     platform?: string;
-    /** The desktop App running here. */
-    app?: ThisMachineApp;
+    /** How the desktop App running here updates, offered where its version is marked. */
+    appUpdate?: React.ReactNode;
     /** Its page, given the Hub's record of it (versions, last seen, load) to show beside the daemon. */
     content: (hubRecord: { facts: React.ReactNode; load: React.ReactNode } | null) => React.ReactNode;
   } | null;
@@ -995,7 +993,7 @@ export function MachinesView({
         {local ? thisMachine!.content(machine ? {
           facts: (
             <>
-              <MachineVersionFacts machine={machine} app={thisMachine!.app} />
+              <MachineVersionFacts machine={machine} appUpdate={thisMachine!.appUpdate} />
             </>
           ),
           load: <MachineLoadPanel machine={machine} now={now} token={token} />,
@@ -1508,15 +1506,13 @@ export {
   desktopUpdateLabel,
 } from "./workspace-shell-desktop-labels";
 
-/* `app` is the running desktop App on this machine: its own version and update
-   action. The Hub's App version is the one that started the daemon, which an
-   App updated since no longer is. */
-function MachineVersionFacts({ machine, app }: { machine: MachineSummary; app?: ThisMachineApp }) {
+/* `appUpdate` is how the desktop App running on this machine updates from here. */
+function MachineVersionFacts({ machine, appUpdate }: { machine: MachineSummary; appUpdate?: React.ReactNode }) {
   return <>
     <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} component="cli" /></ToolFact>
     <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} component="cli" /></ToolFact>
     <ToolFact label="App version">
-      <MachineVersionValue version={app ? app.version : machine.appVersion} component="desktop" update={app?.update} />
+      <MachineVersionValue version={machine.appVersion} component="desktop" update={appUpdate} />
     </ToolFact>
     <ToolFact label="Last seen">{machine.lastSeenAt ? relativeTime(machine.lastSeenAt) : "-"}</ToolFact>
   </>;

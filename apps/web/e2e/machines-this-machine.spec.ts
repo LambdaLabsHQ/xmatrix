@@ -21,9 +21,10 @@ const daemon = (machineId: string, hostName: string, platform: string) => ({
   metadata: { platform },
 });
 
-async function openAsDesktop(page: Page, machineId: string | undefined, named = true, platform = "darwin") {
+async function openAsDesktop(page: Page, machineId: string | undefined, named = true, platform = "darwin",
+  updateStatus: Record<string, unknown> = { state: "disabled", enabled: false }) {
   await page.setViewportSize({ width: 1400, height: 900 });
-  await page.addInitScript(({ id, host, named, platform }) => {
+  await page.addInitScript(({ id, host, named, platform, updateStatus }) => {
     const now = new Date().toISOString();
     (window as unknown as Record<string, unknown>).xmatrixDesktop = {
       client: platform === "darwin" ? "desktop" : platform, platform,
@@ -32,13 +33,15 @@ async function openAsDesktop(page: Page, machineId: string | undefined, named = 
       setBadge: async () => undefined, setTitle: async () => undefined, notify: async () => true,
       openExternal: async () => undefined, checkCliInstalled: async () => ({ installed: true }),
       openCliInstall: async () => undefined, checkForUpdates: async () => undefined,
-      getUpdateStatus: async () => ({ state: "disabled", enabled: false }),
+      getUpdateStatus: async () => ({ currentVersion: "0.16.600", updatedAt: now, ...updateStatus }),
+      onUpdateStatus: () => () => undefined,
+      installUpdate: async () => { (window as unknown as Record<string, unknown>).__installs = 1; return { state: "installing", enabled: true }; },
       getDaemonStatus: async () => ({ state: named ? "running" : "stopped", pid: named ? 1 : undefined, updatedAt: now }),
       startDaemon: async () => { (window as unknown as Record<string, unknown>).__daemonStarts = Number((window as unknown as Record<string, unknown>).__daemonStarts ?? 0) + 1; return { state: "running", pid: 1, updatedAt: now }; },
       getSetupStatus: async () => ({ setupVersion: 1, completedAt: now }),
       discoverAgentPresets: async () => [],
     };
-  }, { id: machineId, host: HOST, named, platform });
+  }, { id: machineId, host: HOST, named, platform, updateStatus });
   await openWorkspaceWithStubs(page, {
     spaces: [E2E_SPACE],
     workspaces: [workspace(MACHINE_ID, HOST, "xmatrix"), workspace("machine:other", "grok-bot", "grok")],
@@ -168,4 +171,24 @@ test("an owner keeps a Machine out of automatic assignment from its page", async
   await expect(page.getByText("Agents start here only when named, e.g. machine:grok-bot")).toBeVisible();
   await expect(other).toContainText("Named only");
   expect(await fixtureRequestBodies(page, "machine-auto-assign")).toEqual([{ autoAssign: false }]);
+});
+
+test("Update on a version opens, in place, how that machine updates it", async ({ page }) => {
+  await openAsDesktop(page, MACHINE_ID, true, "darwin", { state: "downloaded", enabled: true, version: "0.16.700" });
+  await fixtureJson(page, "releases", "**/api/releases/latest", {
+    releases: { cli: { version: "0.16.700" }, desktop: { version: "0.16.700" } },
+    devReleases: { cli: { version: "0.16.701-beta.3" }, desktop: { version: "0.16.701-beta.3" } },
+  });
+  await page.getByTestId("machine-row").filter({ has: page.getByTestId("this-machine-tag") }).click();
+  const update = page.getByRole("button", { name: "Update", exact: true });
+  await expect(update).toHaveCount(3);
+  // The App running here restarts into the update it already downloaded.
+  await update.nth(2).click();
+  await page.getByRole("button", { name: "Restart to update to v0.16.700" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Restart", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__installs)).toBe(1);
+  // The CLI says it updates itself and names the command to update it now.
+  await update.first().click();
+  await expect(page.getByText("The daemon installs v0.16.700 by itself.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "xmatrix update" })).toBeVisible();
 });

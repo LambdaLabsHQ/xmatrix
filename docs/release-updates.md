@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Update on a machine's version says how, in place
+
+A machine's daemon, CLI or App version marked Update was only a label: nothing
+said how to update it. The mark now opens, in place, how that component
+updates: the CLI and daemon install their release by themselves, with
+`xmatrix update` to copy for an update now; this machine's App offers its
+updater's own step (Restart to update once downloaded, otherwise Check for
+updates). A beta build is judged against the dev channel it follows, by its
+beta number, instead of being marked outdated against stable. Beta Web only;
+recovery is a CI-validated release reverting the Web change.
+
 ## Unreleased: Approved connector actions explain stale approval failures
 
 An action approved after its OAuth token approached expiry could refresh the
