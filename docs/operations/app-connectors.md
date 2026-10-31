@@ -85,9 +85,11 @@ provider's webhook at the ingress URL. Then subscribe a channel with
 
 Cloudflare connects with OAuth (`CONNECTOR_CLOUDFLARE_CLIENT_ID` /
 `CONNECTOR_CLOUDFLARE_CLIENT_SECRET`, a Cloudflare OAuth client whose allowed
-scopes include every scope in the manifest, `d1.read` among them) or with an
-account API token that has Notifications Edit, Workers Observability Write,
-Workers Scripts Edit and D1 Read.
+scopes include every scope in the manifest, `d1.read` and `registrar-domains.admin`
+among them; Cloudflare offers no `workers-scripts.read` OAuth scope, so the
+manifest asks for `workers-scripts.edit`, which also reads Workers) or with an account API token that has Notifications Edit, Workers
+Observability Write, Workers Scripts Read and Edit, D1 Read, Zone Read and
+Write, DNS Read and Write, and Registrar Domains Read and Admin.
 
 One connection holds any number of Cloudflare logins, bounded only by the
 256 KiB the platform stores for its `logins` credential. Every Connect adds a login
@@ -136,6 +138,16 @@ show at most 50 rows in the Channel. The `d1.read` grant is what keeps them
 read-only; the Hub also refuses a second statement or any statement that
 changes data before calling Cloudflare. Grants from before D1 was offered are
 told to reconnect.
+
+Zones, DNS, registrar domains and Worker hostnames are separate commands.
+Listing zones, DNS, registered domains, Workers, and checking a domain's price
+are reads. Creating a zone, adding a DNS record, registering a domain and
+attaching a hostname to a Worker are writes, so the Channel's approval policy
+applies. Adding DNS does not replace a different value already at that name.
+Registering charges the account's default payment method and turns auto-renew
+on; a premium name is refused. A login connected before these scopes existed
+is told to reconnect. The Cloudflare OAuth client must allow the new scopes
+before that reconnect succeeds. D1 is unchanged and stays read-only.
 
 ### App Store Connect
 
@@ -213,7 +225,7 @@ section, and none is ever shown again.
 | Bitbucket Cloud | `read_pull_request:<workspace/repo!5>` (read), `comment:<workspace/repo!5> <text>` |
 | Jira | `read_issue:<ENG-9>` (read), `comment:<ENG-9>`, `transition:<ENG-9> <status>` |
 | Vercel | `redeploy:<deployment id>` |
-| Cloudflare | `list_accounts:*`, `query_logs:[<account id>/]<worker> [minutes] [error\|warn\|log]`, `list_deployments:[<account id>/]<worker>`, `list_databases:<account id>\|*`, `query_database:[<account id>/]<database> <SELECT …>` (reads), `rollback:[<account id>/]<worker> [version id] [reason]` |
+| Cloudflare | `list_accounts:*`, `query_logs:[<account id>/]<worker> [minutes] [error\|warn\|log]`, `list_deployments:[<account id>/]<worker>`, `list_databases:<account id>\|*`, `query_database:[<account id>/]<database> <SELECT …>`, `list_zones:<account id>\|*`, `list_dns:[<account id>/]<zone>`, `list_domains:<account id>\|*`, `check_domain:[<account id>/]<domain>`, `list_workers:<account id>\|*` (reads), `rollback:[<account id>/]<worker> [version id] [reason]`, `create_zone:[<account id>/]<domain>`, `put_dns:[<account id>/]<zone> <TYPE> <name> <content>`, `register_domain:[<account id>/]<domain>`, `attach_domain:[<account id>/]<hostname> <worker>` |
 | App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `read_app:<bundle id>`, `review_messages:<bundle id>`, `web_session:*` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `subscriptions:<bundle id>` (read), `submit_subscriptions:<bundle id> [product id …]`, `release:<bundle id> <version> [phased]`, `pause_phased_release:<bundle id> <version>`, `resume_phased_release:<bundle id> <version>`, `complete_phased_release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]`. Signing: `signing:<bundle id>`, `read_certificate:<id>`, `read_profile:<id>` (reads), `register_bundle_id:<bundle id> <name> [platform=…]`, `enable_capability:<bundle id> <CAPABILITY>`, `create_certificate:<type> <signing request>`, `create_profile:<bundle id> <certificate id> [store=…]`. TestFlight: `testflight:<bundle id>`, `feedback:<bundle id> [crashes]`, `crash_log:<feedback id>` (reads), `add_to_group:<bundle id> <version> <build number> <group>`, `submit_beta_review:<bundle id> <version> <build number>`, `set_test_notes:<bundle id> <version> <build number> <locale> <notes>` |
 | Feishu | `send:<chat id>` |
 | Telegram | `send:<chat id>` |

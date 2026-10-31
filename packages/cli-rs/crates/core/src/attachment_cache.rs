@@ -159,16 +159,6 @@ pub fn store_cached_attachment_bytes(
     write_cached_attachment(&cache_stem_for_attachment(attachment, Some(bytes)), bytes)
 }
 
-pub(crate) fn copy_cached_attachment_to(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, bytes)
-}
-
 fn url_cache_key(url: &str) -> String {
     match reqwest::Url::parse(url) {
         Ok(parsed) if parsed.path().contains("/attachments/") => parsed.path().to_string(),

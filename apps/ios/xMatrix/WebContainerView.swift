@@ -366,6 +366,21 @@ struct WebContainerView: UIViewRepresentable {
             true
         }
 
+        /// How close to the left edge a touch must land to be a swipe's start.
+        static let edgeSwipePrepareWidth: CGFloat = 24
+
+        /// A touch at the left edge may become the swipe. The page sets the
+        /// swipe up as soon as the finger lands, invisibly, so by the time the
+        /// swipe is recognized it starts on a page that is ready; one that never
+        /// becomes a swipe is put away by the page.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            if gestureRecognizer is UIScreenEdgePanGestureRecognizer, let webView,
+               touch.location(in: webView).x <= Self.edgeSwipePrepareWidth {
+                runScript(webView, "window.__xmatrixBackGesture?.prepare?.()")
+            }
+            return true
+        }
+
         /// Distance or speed past which letting go goes Back.
         static let edgeSwipeBackDistance: CGFloat = 80
         static let edgeSwipeBackSpeed: CGFloat = 600

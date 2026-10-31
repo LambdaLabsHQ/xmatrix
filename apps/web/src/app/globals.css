@@ -9565,6 +9565,19 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
     background: transparent !important;
   }
 
+  /* The bar's paper moves to a band of its own, which fades on the compositor. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-topbar.app-mobile-channel-detail-bar {
+    background: transparent !important;
+  }
+
+  .xmatrix-app.xmatrix-app-shell .app-list-transition-band {
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: var(--mobile-topbar-space);
+    z-index: calc(var(--z-nav) - 1);
+    pointer-events: none;
+  }
+
   /* The list's bar lies over the conversation's for the length of the change:
      clear, so the sign and glyphs under it show, and out of reach. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-topbar.app-list-transition-target {

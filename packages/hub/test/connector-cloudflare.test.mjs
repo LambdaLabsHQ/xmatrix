@@ -180,6 +180,19 @@ async function act(body, routes) {
   return withApi({ ...oneAccount, ...routes }, () => action.execute({ credentials }, input));
 }
 
+/* An old grant answers Authentication error; the command names the reconnect that fixes it. */
+async function expectReconnect(action, pattern) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => new URL(String(url)).pathname.endsWith("/accounts")
+    ? Response.json({ success: true, result: [{ id: ACCOUNT, name: "Acme" }] })
+    : Response.json({ success: false, errors: [{ code: 10000, message: "Authentication error" }] });
+  try {
+    await assert.rejects(action(), pattern);
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
 test("query_logs counts a Worker's log messages over a bounded window", async () => {
   const { value, calls } = await act("@cloudflare:query_logs:xmatrix-hub 30", {
     [`POST accounts/${ACCOUNT}/workers/observability/telemetry/query`]: { calculations: [{ aggregates: [
@@ -418,16 +431,8 @@ test("D1 queries run one read-only statement and show bounded rows", async () =>
   assert.match(listed.value.summary, new RegExp(`stockpulse-db  ${db}  3\\.0 MiB`, "u"));
   assert.doesNotMatch(listed.value.summary, /tables/u, "Cloudflare's list reports 0 tables for every database");
 
-  const original = globalThis.fetch;
-  globalThis.fetch = async (url) => new URL(String(url)).pathname.endsWith("/accounts")
-    ? Response.json({ success: true, result: [{ id: ACCOUNT, name: "Acme" }] })
-    : Response.json({ success: false, errors: [{ code: 10000, message: "Authentication error" }] });
-  try {
-    await assert.rejects(CLOUDFLARE_ACTIONS.list_databases.execute({ credentials: { oauthToken: "old-grant" } }, {}),
-      /Reconnect Cloudflare in Apps to grant D1 read access/u, "a grant from before D1 was offered is told how to fix it");
-  } finally {
-    globalThis.fetch = original;
-  }
+  await expectReconnect(() => CLOUDFLARE_ACTIONS.list_databases.execute({ credentials: { oauthToken: "old-grant" } }, {}),
+    /Reconnect Cloudflare in Apps to grant D1 read access/u);
   assert.equal(CLOUDFLARE_ACTIONS.query_database.effect, "read");
 });
 
@@ -454,4 +459,91 @@ test("logins are not counted, and every page of accounts is read", async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+const ZONE = "abcdefabcdefabcdefabcdefabcdefab";
+const zone = { [`GET zones`]: [{ id: ZONE, name: "xmatrix.page", status: "active" }] };
+const standard = { name: "xmatrix.page", registrable: true, tier: "standard",
+  pricing: { currency: "USD", registration_cost: "10.20", renewal_cost: "10.20" } };
+
+test("zones, DNS, registrar and Worker hostnames are named reads and writes", async () => {
+  const listed = await act("@cloudflare:list_zones:*", zone);
+  assert.match(listed.value.summary, new RegExp(`Acme: 1 zones\\n\`\`\`\\nxmatrix\\.page  ${ZONE}  active\\n\`\`\``, "u"));
+  assert.equal(CLOUDFLARE_ACTIONS.list_zones.effect, "read");
+
+  const records = await act("@cloudflare:list_dns:xmatrix.page", { ...zone,
+    [`GET zones/${ZONE}/dns_records`]: [{ type: "A", name: "xmatrix.page", content: "192.0.2.1" }] });
+  assert.match(records.value.summary, /xmatrix\.page: 1 DNS records/u);
+  assert.match(records.value.summary, /A  xmatrix\.page  192\.0\.2\.1/u);
+
+  const kept = await act("@cloudflare:put_dns:xmatrix.page A @ 192.0.2.1", { ...zone,
+    [`GET zones/${ZONE}/dns_records`]: [{ type: "A", name: "xmatrix.page", content: "192.0.2.1" }] });
+  assert.match(kept.value.summary, /A xmatrix\.page already has that content/u);
+  assert.equal(kept.calls.some((call) => call.method === "POST"), false, "an identical record is not replaced");
+
+  const added = await act("@cloudflare:put_dns:xmatrix.page TXT www v=spf1 -all", { ...zone,
+    [`GET zones/${ZONE}/dns_records`]: [{ type: "TXT", name: "www.xmatrix.page", content: "v=spf1 ~all" }],
+    [`POST zones/${ZONE}/dns_records`]: { id: "rec" } });
+  assert.deepEqual(added.calls.find((call) => call.method === "POST").body,
+    { type: "TXT", name: "www.xmatrix.page", content: "v=spf1 -all", ttl: 1 });
+  const mail = await act("@cloudflare:put_dns:xmatrix.page MX @ 10 mail.xmatrix.page", { ...zone,
+    [`GET zones/${ZONE}/dns_records`]: [],
+    [`POST zones/${ZONE}/dns_records`]: { id: "mx" } });
+  assert.deepEqual(mail.calls.find((call) => call.method === "POST").body,
+    { type: "MX", name: "xmatrix.page", content: "mail.xmatrix.page", ttl: 1, priority: 10 });
+
+  const present = await act("@cloudflare:create_zone:xmatrix.page", zone);
+  assert.match(present.value.summary, new RegExp(`already has zone ${ZONE}`, "u"));
+  assert.equal(present.calls.some((call) => call.method === "POST"), false);
+  const created = await act("@cloudflare:create_zone:example.dev", { "GET zones": [],
+    "POST zones": { id: ZONE, name: "example.dev" } });
+  assert.deepEqual(created.calls.find((call) => call.method === "POST").body,
+    { name: "example.dev", account: { id: ACCOUNT }, type: "full" });
+
+  const workers = await act("@cloudflare:list_workers:*", { [`GET accounts/${ACCOUNT}/workers/scripts`]: [{ id: "xmatrix-web" }] });
+  assert.match(workers.value.summary, /1 Workers/u);
+  assert.match(workers.value.summary, /xmatrix-web/u);
+  const attached = await act("@cloudflare:attach_domain:www.xmatrix.page xmatrix-web", { ...zone,
+    [`PUT accounts/${ACCOUNT}/workers/domains`]: { hostname: "www.xmatrix.page", service: "xmatrix-web" } });
+  assert.deepEqual(attached.calls.find((call) => call.method === "PUT").body, {
+    hostname: "www.xmatrix.page", service: "xmatrix-web", environment: "production", enabled: true,
+    zone_id: ZONE, zone_name: "xmatrix.page" });
+  assert.match(attached.value.summary, /Attached www\.xmatrix\.page to xmatrix-web/u);
+
+  const owned = await act(`@cloudflare:list_domains:${ACCOUNT}`, {
+    [`GET accounts/${ACCOUNT}/registrar/registrations`]: [{ domain_name: "searchwire.dev", status: "active",
+      expires_at: "2027-10-09T00:00:00Z", auto_renew: true }] });
+  assert.match(owned.value.summary, /1 registered domains/u);
+  assert.match(owned.value.summary, /searchwire\.dev  active  expires 2027-10-09T00:00:00Z  auto-renew/u);
+
+  const price = await act("@cloudflare:check_domain:xmatrix.page", {
+    [`POST accounts/${ACCOUNT}/registrar/domain-check`]: { domains: [standard] } });
+  assert.match(price.value.summary, /xmatrix\.page: registrable standard, USD 10\.20 to register, USD 10\.20 to renew/u);
+
+  const bought = await act("@cloudflare:register_domain:xmatrix.page", {
+    [`POST accounts/${ACCOUNT}/registrar/domain-check`]: { domains: [standard] },
+    [`POST accounts/${ACCOUNT}/registrar/registrations`]: { state: "in_progress", context: { domain_name: "xmatrix.page" } } });
+  assert.deepEqual(bought.calls.find((call) => call.path.endsWith("/registrations")).body,
+    { domain_name: "xmatrix.page", auto_renew: true });
+  assert.equal(bought.calls.filter((call) => call.path.endsWith("/registrations")).length, 1);
+  assert.match(bought.value.summary, /registration in_progress, USD 10\.20 now, renews at USD 10\.20, auto-renew on/u);
+
+  await assert.rejects(act("@cloudflare:register_domain:premium.page", {
+    [`POST accounts/${ACCOUNT}/registrar/domain-check`]: { domains: [{ ...standard, name: "premium.page", tier: "premium" }] } }),
+    /premium/u);
+  await assert.rejects(act("@cloudflare:register_domain:missing.page", {
+    [`POST accounts/${ACCOUNT}/registrar/domain-check`]: { domains: [{ name: "missing.page", registrable: false,
+      reason: "extension_not_supported_via_api" }] } }), /extension_not_supported_via_api/u);
+
+  for (const command of ["@cloudflare:register_domain:xmatrix.page extra", "@cloudflare:put_dns:xmatrix.page SRV www host",
+    "@cloudflare:attach_domain:xmatrix.page Not A Worker", "@cloudflare:list_zones:not-an-account"]) {
+    const parsed = parseActionCommand("cloudflare", command);
+    assert.ok(parsed, command);
+    assert.equal(typeof CLOUDFLARE_ACTIONS[parsed.actionId].parse(parsed.statement), "string", command);
+  }
+  assert.equal(CLOUDFLARE_ACTIONS.register_domain.effect, "write");
+  assert.equal(CLOUDFLARE_ACTIONS.check_domain.effect, "read");
+
+  await expectReconnect(() => CLOUDFLARE_ACTIONS.list_zones.execute({ credentials: { oauthToken: "old-grant" } }, {}),
+    /Reconnect Cloudflare in Apps to grant zone, DNS and registrar access/u);
 });

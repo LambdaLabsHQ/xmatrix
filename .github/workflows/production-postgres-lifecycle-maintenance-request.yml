@@ -30,9 +30,13 @@ jobs:
   dispatch:
     if: github.ref == 'refs/heads/main'
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
-      # This broker checks out no code and receives no production credentials.
+      # Main's selection policy only. This job still receives no production credentials.
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 1
       - name: Dispatch from the latest successful production tag
         uses: actions/github-script@v7
         env:
@@ -42,6 +46,8 @@ jobs:
           # A runner-side "fetch failed" is retried rather than failing the job.
           retries: 3
           script: |
+            const { resolveMaintenanceRelease } = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/postgres-lifecycle-maintenance-policy.mjs`);
             const dryRun = context.eventName === "schedule" ? "false" : process.env.REQUEST_DRY_RUN;
             const maxRows = context.eventName === "schedule" ? "1000000" : process.env.REQUEST_MAX_ROWS;
             if (!/^(?:true|false)$/.test(dryRun)) throw new Error("invalid dry_run");
@@ -49,23 +55,27 @@ jobs:
             // Self-hosted runners have been served run lists days out of date
             // (they dispatched 0.16.316 and 0.16.336 after 0.16.347 shipped).
             // Ask for an uncached list and log what was seen.
-            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+            const listReleases = (params) => github.paginate(github.rest.actions.listWorkflowRuns, {
               ...context.repo, workflow_id: "production-release.yml",
-              event: "workflow_dispatch", status: "success", per_page: 100,
-              uncached: String(context.runId), headers: { "cache-control": "no-cache" },
+              event: "workflow_dispatch", per_page: 100, ...params,
+              uncached: `${context.runId}-${Date.now()}`, headers: { "cache-control": "no-cache" },
             });
-            // The list order is not a recency guarantee: it has returned old
-            // releases first. Choose exactly as the executor's policy does
-            // (latestMaintenanceRelease) -- the highest successful run id of
-            // the newest betas, which deploy the Hub, or of every release
-            // before the first beta -- or it refuses the tag. A stable ships
-            // an older beta's source and never deploys the Hub, so it is never chosen.
-            const successful = runs.filter((run) => run.conclusion === "success" && run.event === "workflow_dispatch" &&
-              /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-beta\.[1-9]\d*)?$/.test(run.head_branch));
-            const betas = successful.filter((run) => run.head_branch.includes("-beta."));
-            const production = (betas.length ? betas : successful).sort((left, right) => right.id - left.id)[0];
-            if (!production) throw new Error("no successful production release tag is available");
-            core.info(`Saw ${runs.length} successful releases; newest ${production.head_branch} (run ${production.id})`);
+            const history = await listReleases({ status: "success" });
+            const day = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            let production;
+            for (let attempt = 1; attempt <= 6; attempt += 1) {
+              const recent = await listReleases({ status: "success", created: `>=${day}` });
+              const open = [
+                ...await listReleases({ status: "in_progress" }),
+                ...await listReleases({ status: "queued" }),
+              ];
+              const decision = resolveMaintenanceRelease({ history, recent, openRuns: open });
+              core.info(`Saw ${history.length} successful releases and ${recent.length} since ${day}; choice ${decision.release?.head_branch ?? "none"} (run ${decision.release?.id ?? "none"}), wait ${decision.wait}`);
+              if (!decision.release) throw new Error("no successful production release tag is available");
+              if (!decision.wait) { production = decision.release; break; }
+              await new Promise((resolve) => setTimeout(resolve, 15_000));
+            }
+            if (!production) throw new Error("a newer Production Release was still running");
             const tagRef = (await github.rest.git.getRef({
               ...context.repo, ref: `tags/${production.head_branch}`,
             })).data.object;

@@ -2037,7 +2037,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     // Agents panel can show remaining allowance (1mo). Turn token usage alone
     // rarely includes subscription windows. Read before the first presence
     // publish. Generic ACP vendors have no quota hook and simply skip this.
-    let mut latest_usage = config.read_quota_usage(false).await;
+    let mut latest_usage = config.read_quota_usage(false, None).await;
     let mut initial_runtime_turn = runtime_state.begin_initial_message_turn(
         &relay,
         initial_message.is_some(),
@@ -2114,6 +2114,17 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     }
     write_current_run_model(latest_model.as_deref());
     write_current_run_effort(latest_effort.as_deref());
+    // The seed above ran before the session had a model. Now that it does,
+    // read the account that model draws on (a cache hit for single-account
+    // vendors).
+    if latest_model.is_some() {
+        latest_usage = merge_llm_usage(
+            latest_usage,
+            config
+                .read_quota_usage(false, latest_model.as_deref())
+                .await,
+        );
+    }
     {
         let mut presentation = app.presentation_snapshot(&skill_overlay);
         presentation.usage = latest_usage.clone();
@@ -2468,11 +2479,13 @@ impl AcpRun<'_> {
         match turn {
             Ok(turn) => {
                 self.latest_usage = merge_llm_usage(self.latest_usage.take(), turn.usage.clone());
+                self.latest_model = turn.model.clone().or(self.latest_model.take());
                 self.latest_usage = merge_llm_usage(
                     self.latest_usage.take(),
-                    self.config.read_quota_usage(true).await,
+                    self.config
+                        .read_quota_usage(true, self.latest_model.as_deref())
+                        .await,
                 );
-                self.latest_model = turn.model.clone().or(self.latest_model.take());
                 self.latest_goal = if turn
                     .goal
                     .as_ref()
@@ -2801,8 +2814,12 @@ async fn write_acp_message(write: &AppServerWrite, value: &Value) -> error::Resu
         .await
 }
 
+/// Quota hook: `force` bypasses the reader cache; the model is the session's
+/// current `provider/model` id when known, so a multi-provider harness reads
+/// the account that model actually draws on.
 type AcpQuotaHook = fn(
     bool,
+    Option<String>,
 ) -> std::pin::Pin<
     Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>,
 >;
@@ -2868,9 +2885,13 @@ struct AcpVendorConfig {
 
 impl AcpVendorConfig {
     /// The vendor's subscription quota; vendors without a hook have none.
-    async fn read_quota_usage(&self, force: bool) -> Option<protocol::LlmUsage> {
+    async fn read_quota_usage(
+        &self,
+        force: bool,
+        model: Option<&str>,
+    ) -> Option<protocol::LlmUsage> {
         match self.quota_usage {
-            Some(hook) => hook(force).await,
+            Some(hook) => hook(force, model.map(str::to_string)).await,
             None => None,
         }
     }
@@ -2922,8 +2943,8 @@ impl AcpVendorConfig {
             goal_turn_input: None,
             goal_status_from_update: None,
             goal_status_from_text: None,
-            // OpenCode Go and Cursor expose account quota behind their own
-            // stored credentials; every other generic ACP peer has no quota
+            // OpenCode (Go subscription or ChatGPT login) and Cursor expose
+            // account quota behind their own stored credentials; every other generic ACP peer has no quota
             // source here.
             quota_usage: match stem.as_str() {
                 "opencode" => Some(opencode_quota_hook),
@@ -2953,18 +2974,21 @@ impl AcpVendorConfig {
 
 fn grok_billing_quota_hook(
     force: bool,
+    _model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
     Box::pin(read_grok_build_billing_usage(force))
 }
 
 fn opencode_quota_hook(
     force: bool,
+    model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
-    Box::pin(read_opencode_zen_usage(force))
+    Box::pin(async move { read_opencode_usage_for_model(force, model.as_deref()).await })
 }
 
 fn cursor_quota_hook(
     force: bool,
+    _model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
     Box::pin(read_cursor_period_usage(force))
 }

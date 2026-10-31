@@ -15,6 +15,7 @@ import {
 } from "./human-port";
 import type { RuntimeSocketAdmit } from "./runtime-socket-admission";
 import type { AgentStatus } from "@xmatrix/protocol";
+import type { MachineDaemonCliReleaseNotice } from "@xmatrix/protocol/connections/machine-daemon";
 import type { ChannelAgentPresenceDelivery } from "./channel-agent-presence-delivery";
 import { MachineDaemonRuntimeTransport, sameRouteIdentity, type MachineDaemonSocketBackend,
   type MachineDaemonRouteIdentity } from "./machine-daemon-port";
@@ -37,6 +38,8 @@ export const RELAY_RUNTIME_AGENT_INSTANCE_CONNECT_PATH = "/internal/product-conn
 export const RELAY_RUNTIME_MACHINE_DAEMON_CONNECT_PATH = "/internal/product-connect/machine-daemon";
 export const RELAY_RUNTIME_MACHINE_DAEMON_CLAIM_PATH = "/internal/product-control/machine-daemon-claim";
 export const RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH = "/internal/product-control/machine-daemon-wait";
+export const RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH = "/internal/product-control/cli-release-notice";
+export const RELAY_RUNTIME_CLI_UPDATE_CHECK_PATH = "/internal/product-control/cli-update-check";
 export const RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH = "/internal/product-trace/instance-terminal";
 export const RELAY_RUNTIME_CHANNEL_MESSAGE_PATH = "/internal/product/channel-message";
 export const RELAY_RUNTIME_HUMAN_OBSERVABLE_EVENT_PATH = "/internal/product-human/observable-event";
@@ -350,6 +353,14 @@ export class RelayRuntimeProductCallbackAdapter {
 
   claimPendingMachineDaemonCommands(identity: MachineDaemonRouteIdentity) {
     return this.machineDaemon.claimPending(identity);
+  }
+
+  noticeCliRelease(notice: MachineDaemonCliReleaseNotice): Promise<number> {
+    return this.machineDaemon.noticeCliRelease(notice);
+  }
+
+  checkCliUpdate(identity: MachineDaemonRouteIdentity, requestId: string): Promise<boolean> {
+    return this.machineDaemon.checkCliUpdate(identity, requestId);
   }
 
   fetch(request: Request): Response {

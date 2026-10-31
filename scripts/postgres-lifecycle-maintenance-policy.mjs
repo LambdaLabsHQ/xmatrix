@@ -52,6 +52,28 @@ export function latestMaintenanceRelease(productionRuns) {
   return (betas.length ? betas : releases).sort((left, right) => right.id - left.id)[0];
 }
 
+const OPEN_RELEASE_STATUSES = new Set(["queued", "in_progress", "waiting", "requested"]);
+
+/**
+ * The broker's full success list is in flight for tens of seconds, so a release
+ * that succeeds during that read is missing from it. `recent` is a second,
+ * short success read taken after it. An open run only delays dispatch when
+ * treating it as already successful would change which tag is latest.
+ */
+export function resolveMaintenanceRelease({ history = [], recent = [], openRuns = [] } = {}) {
+  const release = latestMaintenanceRelease([...history, ...recent]) ?? null;
+  const wait = openRuns.some((run) => {
+    if (!OPEN_RELEASE_STATUSES.has(run.status)) return false;
+    if (run.event && run.event !== "workflow_dispatch") return false;
+    const winner = latestMaintenanceRelease([
+      ...history, ...recent,
+      { ...run, conclusion: "success", event: "workflow_dispatch" },
+    ]);
+    return Boolean(winner && winner.id === run.id && (!release || winner.id !== release.id));
+  });
+  return { release, wait };
+}
+
 /** Shared immutable-production boundary for bounded maintenance operators. */
 export function requirePublishedMaintenanceTarget(input) {
   if (!RELEASE_TAG_PATTERN.test(input.tag)) throw new Error("maintenance requires a production release tag");

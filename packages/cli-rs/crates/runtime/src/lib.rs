@@ -158,7 +158,7 @@ use xmatrix_harness::quota::claude::{
 use xmatrix_harness::quota::codex::{codex_wham_quota_usages, read_codex_chatgpt_usage};
 use xmatrix_harness::quota::cursor::read_cursor_period_usage;
 use xmatrix_harness::quota::grok::{grok_billing_quota_usages, read_grok_build_billing_usage};
-use xmatrix_harness::quota::opencode::read_opencode_zen_usage;
+use xmatrix_harness::quota::opencode::read_opencode_usage_for_model;
 use xmatrix_harness::quota::windows::is_rate_limit_snapshot_map;
 use xmatrix_harness::quota::zai::{read_zai_coding_plan_quota_usage, zai_monitor_quota_usages};
 use xmatrix_harness::usage::has_llm_usage;

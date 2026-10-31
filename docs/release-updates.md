@@ -13,6 +13,30 @@ temporary redirect. The Hub, its OAuth callbacks, webhooks, MCP endpoint, token
 issuer and the session cookie are unchanged. Stable Web only, no API or schema
 change; recovery is a CI-validated stable Web release without `web.siteOrigin`.
 
+## Unreleased: Seeing a CLI behind checks for its update at once
+
+The daemon updated only when the Hub's release push reached it, and a Machine
+page could not tell a check that ran from one that never arrived. A view that
+shows a Machine's CLI behind now asks its daemon to check now, and the daemon
+reports each step it actually takes (checking, installing a version, current,
+or failed with the reason) for the page to show. The Hub joins requests within
+a minute and touches only that Machine; the daemon folds requests into a
+running check and answers a request during its post-failure hold with that
+failure. Older daemons are answered "unsupported" without being asked. Hub,
+CLI and a Web proxy route, no schema change; recovery is a CI-validated release
+reverting the request route and report.
+
+## Unreleased: The daemon updates its CLI when a release is published
+
+A machine could run the previous CLI for up to 30 minutes after a release,
+because the daemon read its release feed on a 30-minute clock while the web
+already marked it "Update". The daemon now keeps no clock: besides its startup
+check it updates when the Hub pushes `machine_cli_release`. Every minute the Hub
+reads the stable and dev CLI feeds and tells, over their existing connection,
+the online daemons on that channel still behind it, until they reconnect on the
+new version. Hub and CLI, no schema change; older daemons keep their clock
+until they update. Recovery is a CI-validated release reverting the notice.
+
 ## Unreleased: Approved connector actions explain stale approval failures
 
 An action approved after its OAuth token approached expiry could refresh the
@@ -52,7 +76,18 @@ whole page, sign included, so the two read apart. A Back the page does not draw
 draws the swipe (#1244). Each frame touches only the dozen elements that move,
 through their own inline styles, and starting or ending the change renders only
 the layer that draws the list's bar and controls, not the shell: a move costs
-12 ms instead of 144 ms at 4x CPU throttle (#1250). Beta Web and iOS, no API or schema change; recovery is
+12 ms instead of 144 ms at 4x CPU throttle (#1250). Everything that moves is
+then its own compositor layer moved by transform or opacity alone, the rest of
+the way after release runs on the compositor as keyframes sampled from the same
+spring, and the iOS app reports a touch at the left edge so the page sets the
+change up before the swipe is recognized: the swipe begins in 2 ms, a move
+costs 3.5 ms and repaints only the sign, and a swipe that catches the
+spring-back carries on from where it is (#1255). The moving parts' own CSS
+transitions are off for the length of the change, so none trails the finger
+(the leaving name had stood 48 px behind it), and a drag seeks paused
+animations laid once for the whole way instead of writing inline styles: a
+drag frame takes 3.6 ms of main thread instead of 6.2 (#1260). Beta Web and
+iOS, no API or schema change; recovery is
 a CI-validated release reverting the change (an iOS build without it falls back
 to the snapshot slide, since the page answers only the new bridge call).
 

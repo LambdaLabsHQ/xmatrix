@@ -2276,55 +2276,112 @@ fn daemon_self_update_release_api_url() -> String {
         .unwrap_or_else(|_| default_cli_release_api_url().to_string())
 }
 
-fn daemon_self_update_interval() -> Duration {
-    let interval_secs = std::env::var("XMATRIX_DAEMON_SELF_UPDATE_INTERVAL_SECS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_DAEMON_SELF_UPDATE_INTERVAL_SECS);
+/// The capability a daemon declares when it updates itself on the Hub's
+/// `machine_cli_release` notice (`MACHINE_CLI_RELEASE_CAPABILITY` in protocol).
+const CLI_RELEASE_NOTICE_CAPABILITY: &str = "machine_cli_release_v1";
 
-    Duration::from_secs(interval_secs.max(60))
+/// The capability a daemon declares when it checks for a CLI update on the
+/// Hub's `machine_cli_update_check` and reports each step
+/// (`MACHINE_CLI_UPDATE_CHECK_CAPABILITY` in protocol).
+const CLI_UPDATE_CHECK_CAPABILITY: &str = "machine_cli_update_check_v1";
+
+/// Whether the Hub's CLI release notice names a newer release of the channel
+/// a daemon running `current` follows: a beta follows `dev`, a stable build
+/// `stable`. A notice for the other channel, or for this version or an older
+/// one, is not this daemon's to act on.
+fn cli_release_notice_applies(channel: &str, version: &str, current: &str) -> bool {
+    let follows = if current.split('+').next().unwrap_or(current).contains('-') {
+        "dev"
+    } else {
+        "stable"
+    };
+    channel == follows && release_version_is_newer(version, current)
 }
 
 fn daemon_self_update_timeout(phase: &str) -> Duration {
     let secs = if phase == "startup" {
         DAEMON_SELF_UPDATE_STARTUP_TIMEOUT_SECS
     } else {
-        DAEMON_SELF_UPDATE_PERIODIC_TIMEOUT_SECS
+        DAEMON_SELF_UPDATE_NOTICE_TIMEOUT_SECS
     };
     Duration::from_secs(secs)
 }
 
+/// What one self-update attempt came to.
+enum DaemonSelfUpdateAttempt {
+    Restart(DaemonSelfUpdateOutcome),
+    /// The channel's feed names nothing newer than this build.
+    Current,
+    /// Why no update was installed, as the person reading the Machine's page needs it.
+    Failed(String),
+}
+
+/// A `MachineCliUpdateStatus` without its time; the connection stamps it as it sends.
+fn cli_update_status(state: &str, version: Option<&str>, error: Option<&str>) -> serde_json::Value {
+    let mut status = serde_json::json!({ "state": state });
+    if let Some(version) = version {
+        status["version"] = serde_json::json!(version);
+    }
+    if let Some(error) = error {
+        status["error"] = serde_json::json!(error);
+    }
+    status
+}
+
+/// Startup's check: nothing to tell yet, the daemon is not connected. Windows
+/// hosts update through their supervisor's staged generations instead.
+#[cfg(not(windows))]
 async fn daemon_self_update_and_restart_if_needed(
     hub_url: &str,
     token_override: Option<&str>,
     phase: &str,
 ) -> Option<DaemonSelfUpdateOutcome> {
+    match daemon_self_update_attempt(hub_url, token_override, phase, &|_| {}).await {
+        DaemonSelfUpdateAttempt::Restart(outcome) => Some(outcome),
+        DaemonSelfUpdateAttempt::Current | DaemonSelfUpdateAttempt::Failed(_) => None,
+    }
+}
+
+/// Reads this build's channel feed and installs a newer release, telling
+/// `report` each step it actually takes: `checking`, `installing` the version,
+/// then `current` or `failed` with the exact reason.
+async fn daemon_self_update_attempt(
+    hub_url: &str,
+    token_override: Option<&str>,
+    phase: &str,
+    report: &(dyn Fn(serde_json::Value) + Send + Sync),
+) -> DaemonSelfUpdateAttempt {
+    let fail = |error: String| {
+        eprintln!("{} daemon self-update during {phase}: {error}", "⚠".yellow().bold());
+        report(cli_update_status("failed", None, Some(&error)));
+        DaemonSelfUpdateAttempt::Failed(error)
+    };
     if daemon_self_update_disabled() {
-        return None;
+        return fail("Self-update is turned off on this machine (XMATRIX_SKIP_DAEMON_SELF_UPDATE).".into());
     }
 
+    report(cli_update_status("checking", None, None));
     let release_api_url = daemon_self_update_release_api_url();
     let timeout = daemon_self_update_timeout(phase);
     let pending = match tokio::time::timeout(timeout, check_cli_update(&release_api_url, false))
         .await
     {
         Err(_) => {
-            eprintln!(
-                "{} daemon self-update check timed out after {}s during {phase}; continuing daemon startup",
-                "⚠".yellow().bold(),
+            return fail(format!(
+                "Reading the release feed {release_api_url} timed out after {}s.",
                 timeout.as_secs()
-            );
-            return None;
+            ));
         }
         Ok(Ok(CliUpdateCheck::Pending(update))) => update,
-        Ok(Ok(CliUpdateCheck::UpToDate { .. })) => return None,
-        Ok(Err(err)) => {
-            eprintln!(
-                "{} daemon self-update check failed during {phase}: {err}",
-                "⚠".yellow().bold()
-            );
-            return None;
+        Ok(Ok(CliUpdateCheck::UpToDate { .. })) => {
+            report(cli_update_status(
+                "current",
+                Some(xmatrix_cli_core::version::current()),
+                None,
+            ));
+            return DaemonSelfUpdateAttempt::Current;
         }
+        Ok(Err(err)) => return fail(format!("Reading the release feed {release_api_url} failed: {err}")),
     };
 
     eprintln!(
@@ -2338,6 +2395,8 @@ async fn daemon_self_update_and_restart_if_needed(
         pending.current_version.as_str(),
         pending.latest_version.as_str(),
     );
+    report(cli_update_status("installing", Some(pending.latest_version.as_str()), None));
+    let latest_version = pending.latest_version.clone();
 
     let installed = match tokio::time::timeout(
         daemon_self_update_timeout(phase),
@@ -2346,21 +2405,13 @@ async fn daemon_self_update_and_restart_if_needed(
     .await
     {
         Err(_) => {
-            eprintln!(
-                "{} daemon self-update install timed out after {}s during {phase}; continuing daemon startup",
-                "⚠".yellow().bold(),
+            return fail(format!(
+                "Installing xMatrix CLI {latest_version} timed out after {}s.",
                 daemon_self_update_timeout(phase).as_secs()
-            );
-            return None;
+            ));
         }
         Ok(Ok(installed)) => installed,
-        Ok(Err(err)) => {
-            eprintln!(
-                "{} daemon self-update install failed during {phase}: {err}",
-                "⚠".yellow().bold()
-            );
-            return None;
-        }
+        Ok(Err(err)) => return fail(format!("Installing xMatrix CLI {latest_version} failed: {err}")),
     };
 
     eprintln!(
@@ -2369,15 +2420,60 @@ async fn daemon_self_update_and_restart_if_needed(
         installed.previous_version,
         installed.latest_version
     );
-    Some(DaemonSelfUpdateOutcome::Restart(installed))
+    DaemonSelfUpdateAttempt::Restart(DaemonSelfUpdateOutcome::Restart(installed))
 }
 
+/// Shared by the self-update task and the requests for a check: a failed
+/// attempt holds further downloads for `DAEMON_SELF_UPDATE_RETRY_AFTER`, and a
+/// request in that hold is answered with that failure at once instead of
+/// waiting silently behind it.
+#[derive(Clone, Default)]
+pub(crate) struct DaemonCliUpdateGate(Arc<std::sync::Mutex<Option<(std::time::Instant, String)>>>);
+
+impl DaemonCliUpdateGate {
+    fn record(&self, failure: Option<String>) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = failure.map(|error| (std::time::Instant::now(), error));
+        }
+    }
+
+    /// The failure still holding further attempts, and for how much longer.
+    fn hold(&self) -> Option<(Duration, String)> {
+        let slot = self.0.lock().ok()?;
+        let (at, error) = slot.as_ref()?;
+        DAEMON_SELF_UPDATE_RETRY_AFTER
+            .checked_sub(at.elapsed())
+            .filter(|remaining| !remaining.is_zero())
+            .map(|remaining| (remaining, error.clone()))
+    }
+
+    /// Someone looking at this Machine asked for a check: start one, or say
+    /// at once why one is held.
+    pub(crate) fn request(&self, notices: &tokio::sync::Notify, relay: &SharedMachineDaemonConnection) {
+        match self.hold() {
+            Some((_, error)) => {
+                let _ = relay.report_cli_update(cli_update_status("failed", None, Some(&error)));
+            }
+            None => notices.notify_one(),
+        }
+    }
+}
+
+/// Updates the daemon when the Hub says its channel has a newer release
+/// (`machine_cli_release`) or someone viewing the Machine asks for a check
+/// (`machine_cli_update_check`), both signalled through `notices`. The daemon
+/// keeps no clock of its own: besides the check at startup, these are the only
+/// things that make it read the release feed. Signals that arrive while an
+/// attempt runs collapse into one more attempt; each step is reported to the
+/// Hub as it happens.
 fn spawn_daemon_self_update_task(
     hub_url: String,
     token_override: Option<String>,
     run_registry: DaemonRunRegistry,
     relay: SharedMachineDaemonConnection,
     profile_manager: ProfileManager,
+    notices: Arc<tokio::sync::Notify>,
+    gate: DaemonCliUpdateGate,
 ) -> mpsc::UnboundedReceiver<DaemonSelfUpdateOutcome> {
     let (tx, rx) = mpsc::unbounded_channel();
     if daemon_self_update_disabled() {
@@ -2385,25 +2481,34 @@ fn spawn_daemon_self_update_task(
     }
 
     config::spawn_profile_task(async move {
+        let report = {
+            let relay = relay.clone();
+            move |status: serde_json::Value| {
+                if let Err(error) = relay.report_cli_update(status) {
+                    eprintln!("{} CLI update status not sent: {error}", "⚠".yellow().bold());
+                }
+            }
+        };
         loop {
-            tokio::time::sleep(daemon_self_update_interval()).await;
+            if let Some((remaining, _)) = gate.hold() {
+                tokio::time::sleep(remaining).await;
+            }
+            notices.notified().await;
             report_finished_daemon_children(&run_registry, &relay).await;
             if let Err(error) = seal_daemon_host_update_recovery(&profile_manager) {
-                eprintln!(
-                    "{} daemon update deferred because recovery sealing failed: {error}",
-                    "⚠".yellow().bold()
-                );
+                let error = format!("The update was deferred: recovery sealing failed: {error}");
+                eprintln!("{} {error}", "⚠".yellow().bold());
+                report(cli_update_status("failed", None, Some(&error)));
+                gate.record(Some(error));
                 continue;
             }
-            if let Some(installed) = daemon_self_update_and_restart_if_needed(
-                &hub_url,
-                token_override.as_deref(),
-                "periodic",
-            )
-            .await
-            {
-                let _ = tx.send(installed);
-                break;
+            match daemon_self_update_attempt(&hub_url, token_override.as_deref(), "notice", &report).await {
+                DaemonSelfUpdateAttempt::Restart(installed) => {
+                    let _ = tx.send(installed);
+                    break;
+                }
+                DaemonSelfUpdateAttempt::Current => gate.record(None),
+                DaemonSelfUpdateAttempt::Failed(error) => gate.record(Some(error)),
             }
         }
     });

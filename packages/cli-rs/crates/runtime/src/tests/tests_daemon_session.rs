@@ -424,7 +424,9 @@ use super::{
     combined_inbound_channel_prompt, daemon_access_token_from_saved_session,
     daemon_broker_binding_from_values, daemon_managed_workspace_cwd,
     daemon_restart_waits_for_lock_from_env, daemon_run_exit_detail,
-    daemon_run_exit_from_status_file, daemon_self_update_timeout, daemon_spawn_claim_key,
+    cli_release_notice_applies, cli_update_status, daemon_run_exit_from_status_file, daemon_self_update_attempt,
+    daemon_self_update_timeout, DaemonCliUpdateGate, DaemonSelfUpdateAttempt,
+    daemon_spawn_claim_key,
     daemon_spawn_cwd_from_values, daemon_spawn_uses_claude_print,
     decode_channel_image_attachment_data_url, default_downstream_kkp_flags,
     drain_pending_inbound_channel_messages, drain_ready_inbound_channel_messages,
@@ -1348,9 +1350,68 @@ fn daemon_self_update_timeout_keeps_startup_short() {
         Duration::from_secs(15)
     );
     assert_eq!(
-        daemon_self_update_timeout("periodic"),
+        daemon_self_update_timeout("notice"),
         Duration::from_secs(120)
     );
+}
+
+#[test]
+fn cli_release_notice_applies_only_to_a_newer_release_of_the_daemons_channel() {
+    assert!(cli_release_notice_applies("stable", "2.3.0", "2.2.0"));
+    assert!(!cli_release_notice_applies("stable", "2.3.0", "2.3.0"));
+    assert!(!cli_release_notice_applies("stable", "2.2.0", "2.3.0"));
+    assert!(cli_release_notice_applies("dev", "2.2.1-beta.20", "2.2.1-beta.9"));
+    assert!(cli_release_notice_applies("dev", "2.2.1-beta.20", "2.1.1-beta.23+abc"));
+    // A stable daemon never moves to a beta, nor a beta daemon on a stable notice.
+    assert!(!cli_release_notice_applies("dev", "2.3.1-beta.1", "2.3.0"));
+    assert!(!cli_release_notice_applies("stable", "2.3.0", "2.2.1-beta.20"));
+    assert!(!cli_release_notice_applies("stable", "not-a-version", "2.2.0"));
+}
+
+#[test]
+fn a_cli_update_status_names_its_step_and_why_it_failed() {
+    assert_eq!(cli_update_status("checking", None, None), serde_json::json!({ "state": "checking" }));
+    assert_eq!(
+        cli_update_status("installing", Some("2.3.2"), None),
+        serde_json::json!({ "state": "installing", "version": "2.3.2" })
+    );
+    assert_eq!(
+        cli_update_status("failed", None, Some("checksum mismatch")),
+        serde_json::json!({ "state": "failed", "error": "checksum mismatch" })
+    );
+}
+
+#[test]
+fn a_failed_update_holds_the_next_attempt_and_a_current_one_does_not() {
+    let gate = DaemonCliUpdateGate::default();
+    assert!(gate.hold().is_none());
+    gate.record(Some("checksum mismatch".into()));
+    let (remaining, error) = gate.hold().expect("a failure holds further downloads");
+    assert_eq!(error, "checksum mismatch");
+    assert!(!remaining.is_zero());
+    // A check that found nothing newer holds nothing: the next request checks at once.
+    gate.record(None);
+    assert!(gate.hold().is_none());
+}
+
+#[tokio::test]
+async fn self_update_turned_off_is_reported_as_the_reason_not_silence() {
+    let _guard = test_process_env_lock();
+    let previous = std::env::var_os("XMATRIX_SKIP_DAEMON_SELF_UPDATE");
+    unsafe { std::env::set_var("XMATRIX_SKIP_DAEMON_SELF_UPDATE", "1") };
+    let reports = std::sync::Mutex::new(Vec::new());
+    let attempt = daemon_self_update_attempt("https://hub.invalid", None, "notice", &|status| {
+        reports.lock().expect("reports").push(status)
+    })
+    .await;
+    match previous {
+        Some(value) => unsafe { std::env::set_var("XMATRIX_SKIP_DAEMON_SELF_UPDATE", value) },
+        None => unsafe { std::env::remove_var("XMATRIX_SKIP_DAEMON_SELF_UPDATE") },
+    }
+    assert!(matches!(attempt, DaemonSelfUpdateAttempt::Failed(ref error) if error.contains("XMATRIX_SKIP_DAEMON_SELF_UPDATE")));
+    let reports = reports.into_inner().expect("reports");
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0]["state"], "failed");
 }
 
 #[test]
