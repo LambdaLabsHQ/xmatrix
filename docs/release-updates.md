@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: The daemon updates its CLI when a release is published
+
+A machine could run the previous CLI for up to 30 minutes after a release,
+because the daemon read its release feed on a 30-minute clock while the web
+already marked it "Update". The daemon now keeps no clock: besides its startup
+check it updates when the Hub pushes `machine_cli_release`. Every minute the Hub
+reads the stable and dev CLI feeds and tells, over their existing connection,
+the online daemons on that channel still behind it, until they reconnect on the
+new version. Hub and CLI, no schema change; older daemons keep their clock
+until they update. Recovery is a CI-validated release reverting the notice.
+
 ## Unreleased: Approved connector actions explain stale approval failures
 
 An action approved after its OAuth token approached expiry could refresh the
