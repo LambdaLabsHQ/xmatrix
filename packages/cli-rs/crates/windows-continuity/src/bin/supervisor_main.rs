@@ -814,7 +814,7 @@ fn supervise_stable_daemon(
             nonce,
         },
     )?;
-    append_kernel_event(&events, &kernel, "commit_exit_granted", "draining", None)?;
+    append_kernel_event(events, kernel, "commit_exit_granted", "draining", None)?;
     Ok(true)
 }
 

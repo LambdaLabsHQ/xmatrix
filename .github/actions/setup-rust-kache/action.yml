@@ -19,6 +19,8 @@ runs:
       uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
       with:
         components: clippy
+        # The Linux Clippy job also checks the Windows target (scripts/ci.mjs).
+        targets: x86_64-pc-windows-msvc
 
     - name: Install pinned Windows Rust toolchain
       if: runner.os == 'Windows'
