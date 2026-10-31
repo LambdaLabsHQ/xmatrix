@@ -64,11 +64,6 @@ export function matchSchedules<R extends ScheduleRow>(rows: readonly R[], lines:
   return { matches: lines.map((line) => ({ line, row: paired.get(line) })), removed: [...free] };
 }
 
-/** What a revision's schedule lines are, to tell whether a revision changed them. */
-export function schedulesKey(body: string): string {
-  return JSON.stringify(pageSchedules(body).map((line) => [line.source, line.blockId]));
-}
-
 export interface ScheduleSyncReport {
   /** Lines that do not run as written, each with why. */
   problems: Array<{ source: string; problem: string }>;

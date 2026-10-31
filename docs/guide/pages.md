@@ -59,51 +59,48 @@ Select a passage in a page and start a discussion: a conversation anchored to th
 
 ## Automations
 
-An Automation is a standing instruction attached to a section: on a schedule, or when something happens, it starts an agent to keep that section true. Each run happens in a fresh conversation linked to the section.
+An Automation is a schedule written in a page: a standing instruction in the section it keeps true that, on a cadence, at a time, or when something happens, starts an agent to keep that section true. It is a line of the page, written the way [Obsidian Tasks](https://publish.obsidian.md/tasks/) writes a recurring or scheduled task, and you read and change it like any other text. Each run happens in a fresh conversation linked to the section.
 
-```sh
-xmatrix page automation create <page-id> \
-  --block open-work \
-  --name "Triage new issues" \
-  --every 12h \
-  -m "@auto repo:acme/web read the issues opened since the last run and update this section"
+```markdown
+## Open work
+- [ ] @auto repo:acme/web read the issues opened since the last run and update this section 🔁 every 12 hours
+- [ ] Remind me to renew the domain ⏳ 2026-11-03 09:00 +08:00
 ```
 
-The instruction is an ordinary message, read with the [same syntax](syntax.md) as one you type. Start it with `@auto` or a harness name so that an agent is started; without a mention the Automation only posts its text. Do not address a numbered instance such as `@claude:2`: each run's conversation is new, so no such instance exists there.
+The text before `🔁` or `⏳` is an ordinary message, read with the [same syntax](syntax.md) as one you type. Start it with `@auto` or a harness name so that an agent is started; without a mention the schedule only posts its text. Do not address a numbered instance such as `@claude:2`: each run's conversation is new, so no such instance exists there.
 
 ### When it runs
 
-`--every` sets the cadence: a number with `m`, `h` or `d`, such as `30m`, `12h` or `1d`.
+`🔁` sets the cadence: `every 30 minutes`, `every 12 hours`, `every day`, `every 2 weeks`, or short forms such as `every 12h`. It runs at most every 15 minutes and at least every 30 days.
 
-`--on` adds an event that also runs it. It can be repeated, up to eight triggers.
+After the cadence, `, on <event>` adds an event that also runs it, up to eight.
 
-| Trigger | Runs when |
+| After `🔁 every day` | Runs when |
 | --- | --- |
-| `--on merged:owner/repo` | A pull request is merged in that repository |
-| `--on merged:owner/repo@main:src/api,docs` | The same, limited to a branch and to paths |
-| `--on ci-failed:owner/repo` | CI fails in that repository |
-| `--on ci-failed:owner/repo@main:build.yml` | The same, limited to a branch and a workflow |
-| `--on sentry:issue.created:web` | A connected app's event arrives: `<app>:<event>[:<source>]` |
-| `--on linear:*` | Any event of that app |
+| `, on merged:owner/repo` | A pull request is merged in that repository |
+| `, on merged:owner/repo@main:src/api,docs` | The same, limited to a branch and to paths |
+| `, on ci-failed:owner/repo` | CI fails in that repository |
+| `, on ci-failed:owner/repo@main:build.yml` | The same, limited to a branch and a workflow |
+| `, on sentry:issue.created:web` | A connected app's event arrives: `<app>:<event>[:<source>]` |
+| `, on linear:*` | Any event of that app |
 
 Events that arrive close together are combined into one run, and the run's message names them.
 
-### Managing them
+`⏳` with a date, a time and its offset runs it once, as a reminder that waits on you in Needs you. When it has run, its line is checked off: `- [x] … ✅ 2026-11-03`. With `🔁`, `⏳` sets when its first run happens.
+
+### Changing them
+
+Change the line. `- [-]` pauses a schedule and `- [ ]` resumes it; deleting the line deletes it. A line that cannot run as written, such as `every 3 months` or an event in a repository the Space's GitHub connection does not cover, shows why next to it, and `xmatrix page edit` prints it.
+
+A schedule runs as the person who last changed its line, with that person's access; when an agent changes it, as the agent's owner.
 
 ```sh
 xmatrix page automation list <page-id>
-xmatrix page automation edit <page-id> <automation-id> --version <n> --every 6h
-xmatrix page automation pause <page-id> <automation-id> --version <n>
-xmatrix page automation resume <page-id> <automation-id> --version <n>
-xmatrix page automation run <page-id> <automation-id> --version <n>      # once now; the cadence is unchanged
-xmatrix page automation delete <page-id> <automation-id> --version <n>
+xmatrix page automation run <page-id> <automation-id>      # once now; the cadence is unchanged
+xmatrix page automation pause|resume|delete <page-id> <automation-id>
 ```
 
-`--version` is the version `list` prints. It stops two people from overwriting each other's change.
-
-An Automation is referenced in its section's text. Removing the reference from the page pauses it, and `xmatrix page automation attach` puts it back and resumes it. In the app the same controls are under **Schedules**.
-
-An Automation runs as the person who created it, with that person's access.
+In the app, the Space's schedules are listed under **Schedules**.
 
 ## Public pages
 

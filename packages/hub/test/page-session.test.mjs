@@ -671,20 +671,13 @@ test("random Agents' edits, people's typing and commits always end on one page e
   }
 });
 
-test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
+test("an Agent edit answers which sections it removed and which schedule lines cannot run", async () => {
   const h = harness();
   const ann = await annConnected(h);
-  const original = h.ports.commit;
-  const detached = [{ automationId: "a-1", name: "Dependency sweep" }];
-  h.ports.commit = async (principal, input) => ({ ...await original(principal, input),
-    detachedAutomations: detached, attachedAutomations: [] });
-  const result = await h.session.submitEdit(agent, { baseRevision: 1, body: "# Project\n\n## Status\n\nIn progress\n",
-    conversationIds: [] });
+  const result = await h.session.submitEdit(agent, { baseRevision: 1,
+    body: "# Project\n\n## Status\n\nIn progress\n\n- [ ] Sweep 🔁 every 3 months\n", conversationIds: [] });
   assert.deepEqual(result.removedSections, ["Notes"]);
-  assert.deepEqual(result.detachedAutomations, detached);
-  assert.deepEqual(result.attachedAutomations, []);
-  assert.deepEqual(h.notices.find((notice) => notice.type === "committed").detachedAutomations, detached,
-    "people on the page see it too");
+  assert.deepEqual(result.scheduleProblems.map((line) => line.source), ["- [ ] Sweep 🔁 every 3 months"]);
   assert.doesNotMatch(ann.text.toString(), /## Notes/u);
 });
 

@@ -109,7 +109,7 @@ A message sent from the CLI is read with the same [syntax](syntax.md) as one typ
 | `xmatrix page history <page-id>` | List revisions |
 | `xmatrix page linked` · `link` | Pages linked to a conversation |
 | `xmatrix page resolve <page-id> <link-id>` | Resolve a discussion |
-| `xmatrix page automation …` | Automations. See [Pages and Automations](pages.md#automations). |
+| `xmatrix page automation …` | List, run, pause, resume or delete a page's schedules. See [Pages and Automations](pages.md#automations). |
 
 For local images and videos, run `xmatrix page upload <page-id> ./screenshot.png`,
 then insert its returned `![media](xmatrix:page-media/…)` Markdown with
