@@ -2328,7 +2328,9 @@ fn cli_update_status(state: &str, version: Option<&str>, error: Option<&str>) ->
     status
 }
 
-/// Startup's check: nothing to tell yet, the daemon is not connected.
+/// Startup's check: nothing to tell yet, the daemon is not connected. Windows
+/// hosts update through their supervisor's staged generations instead.
+#[cfg(not(windows))]
 async fn daemon_self_update_and_restart_if_needed(
     hub_url: &str,
     token_override: Option<&str>,
