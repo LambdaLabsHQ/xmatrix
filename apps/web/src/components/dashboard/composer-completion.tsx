@@ -56,6 +56,7 @@ import {
   connectorCompletionRecovery,
   groupedMentionCandidates,
   DEFAULT_OPEN_MENTION_KINDS,
+  CONDITION_LISTING_ROWS,
   DEFAULT_OPEN_MENTION_ROWS,
   parseAppMentions,
   resolveMentionCompletion,
@@ -379,7 +380,10 @@ export function useComposerCompletion({
         // A folded section shows no rows at all — its own one-line header is
         // the whole section until it is opened.
         openKinds: mentionListingFolds ? [...DEFAULT_OPEN_MENTION_KINDS, "launch"] : undefined,
-        limitPerKind: mentionListingFolds ? DEFAULT_OPEN_MENTION_ROWS : 100,
+        // Conditions on a summon are the whole list there, so they get the room
+        // the other sections would have taken.
+        limitPerKind: !mentionListingFolds ? 100 : mentionSuggestions.every(candidate => candidate.kind === "launch")
+          ? CONDITION_LISTING_ROWS : DEFAULT_OPEN_MENTION_ROWS,
       }),
     [expandedMentionKinds, mentionListingFolds, mentionSuggestions]
   );
