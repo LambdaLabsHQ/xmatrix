@@ -262,7 +262,9 @@ impl AcpSession {
         let resume_session_id = resume_requested
             .then(|| load_acp_resume_session_id(&resume_namespace, resume_session_key))
             .flatten();
-        let new_session_params = || acp_session_new_params(&workspace_path, trusted_rules);
+        let rules_channel = self.config.trusted_rules;
+        let new_session_params =
+            || acp_session_new_params(&workspace_path, trusted_rules, rules_channel);
         let result = if let Some(session_id) = resume_session_id.as_deref() {
             match self
                 .request_with_login_retry(

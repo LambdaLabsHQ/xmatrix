@@ -2051,8 +2051,8 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     // Only vendors with a native trusted-instruction channel (session/new
     // `_meta.rules`) consume trusted rules here; other vendors keep the
     // bootstrap and deliver it as a prefix on the first user prompt.
-    let trusted_rules = if config.session_new_meta_rules && (!resume_requested || role_active) {
-        grok_acp_trusted_rules(auto_join_channel_id.as_deref())
+    let trusted_rules = if config.trusted_rules.is_some() && (!resume_requested || role_active) {
+        acp_trusted_rules(auto_join_channel_id.as_deref())
     } else {
         None
     };
@@ -2943,9 +2943,10 @@ struct AcpVendorConfig {
     /// unless a request fails with authRequired (-32000), in which case the
     /// generic `{methodId: "login"}` flow is attempted once.
     authenticate: Option<Value>,
-    /// Deliver trusted rules via session/new `_meta.rules`; otherwise the
-    /// bootstrap falls back to a prefix on the first user prompt.
-    session_new_meta_rules: bool,
+    /// The vendor's system channel for trusted rules on session/new. Without
+    /// one, trusted Agent instructions refuse the launch and the bootstrap is
+    /// a prefix on the first user prompt.
+    trusted_rules: Option<AcpTrustedRules>,
     /// optionId used when a permission request carries no selectable options;
     /// None answers such requests with -32601.
     permission_fallback_option_id: Option<&'static str>,
@@ -2992,7 +2993,7 @@ impl AcpVendorConfig {
             display_name: "Grok".to_string(),
             trace_source: "grok_acp".to_string(),
             authenticate: Some(serde_json::json!({ "methodId": "cached_token" })),
-            session_new_meta_rules: true,
+            trusted_rules: Some(AcpTrustedRules::MetaRules),
             permission_fallback_option_id: Some("allow-always"),
             preferred_model_env: Some("XMATRIX_GROK_MODEL"),
             turn_timeout_env: "XMATRIX_GROK_APP_TURN_TIMEOUT_SECS",
@@ -3025,7 +3026,10 @@ impl AcpVendorConfig {
             display_name,
             trace_source: format!("{stem}_acp"),
             authenticate: None,
-            session_new_meta_rules: false,
+            trusted_rules: match stem.as_str() {
+                "antigravity" => Some(AcpTrustedRules::AntigravitySystemPrompt),
+                _ => None,
+            },
             permission_fallback_option_id: None,
             preferred_model_env: None,
             turn_timeout_env: "XMATRIX_ACP_TURN_TIMEOUT_SECS",
@@ -3149,16 +3153,42 @@ struct AcpSession {
     questions: crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,
 }
 
-fn acp_session_new_params(workspace_path: &str, trusted_rules: Option<&str>) -> Value {
+/// Where a vendor takes a session's trusted rules (the registration's
+/// instructions and the Channel contract) as system text when it opens one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AcpTrustedRules {
+    /// Grok: `_meta.rules`.
+    MetaRules,
+    /// Antigravity CLI: `_meta.antigravity.systemPrompt.append`, which it
+    /// appends to its own system prompt (`agy acp`'s NewSessionParams).
+    AntigravitySystemPrompt,
+}
+
+impl AcpTrustedRules {
+    fn meta(self, rules: &str) -> Value {
+        match self {
+            Self::MetaRules => serde_json::json!({ "rules": rules }),
+            Self::AntigravitySystemPrompt => {
+                serde_json::json!({ "antigravity": { "systemPrompt": { "append": rules } } })
+            }
+        }
+    }
+}
+
+fn acp_session_new_params(
+    workspace_path: &str,
+    trusted_rules: Option<&str>,
+    channel: Option<AcpTrustedRules>,
+) -> Value {
     let mut params = serde_json::json!({
         "cwd": workspace_path,
         "mcpServers": [],
     });
-    if let Some(rules) = trusted_rules
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        params["_meta"] = serde_json::json!({ "rules": rules });
+    if let (Some(rules), Some(channel)) = (
+        trusted_rules.map(str::trim).filter(|value| !value.is_empty()),
+        channel,
+    ) {
+        params["_meta"] = channel.meta(rules);
     }
     params
 }
