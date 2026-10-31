@@ -275,6 +275,10 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
   `failed`. `login_cancel` ends the process tree. Sign-in never takes the
   preset's install/update lock and its argv only ever comes from the compiled
   registry.
+- **From an Agent.** `xmatrix request sign-in <harness> [--machine]` posts the
+  same signed-out card in the Agent's Channel; its owner signs in there for any
+  harness on any of their Machines, without an Agent for it in that Space. A
+  harness with no remote sign-in gets the card's set-up text and Check again.
 - **State.** Installed presets with a status command report `login`
   (`signed_in`, `signed_out`, `unknown`) on their inventory item; each sign-in
   action re-probes the preset.

@@ -721,6 +721,38 @@ mod tests {
     }
 
     #[test]
+    fn request_sign_in_names_a_harness_and_optionally_a_machine() {
+        let cli = Cli::try_parse_from([
+            "xmatrix",
+            "request",
+            "sign-in",
+            "agy",
+            "--machine",
+            "srv2006562",
+            "--reason",
+            "nightly report",
+        ])
+        .expect("request sign-in should parse");
+        let Some(Commands::Request {
+            command:
+                RequestCommand::SignIn {
+                    harness,
+                    machine,
+                    reason,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected request sign-in command");
+        };
+        assert_eq!(harness, "agy");
+        assert_eq!(machine.as_deref(), Some("srv2006562"));
+        assert_eq!(reason.as_deref(), Some("nightly report"));
+        assert!(!json);
+        assert!(Cli::try_parse_from(["xmatrix", "request", "sign-in"]).is_err());
+    }
+
+    #[test]
     fn request_secrets_parses_json_flag() {
         let cli = Cli::try_parse_from(["xmatrix", "request", "secrets", "--json"])
             .expect("request secrets should parse");
@@ -1367,6 +1399,25 @@ pub enum RequestCommand {
         /// Optional command to run with the secret once answered; must follow `--`.
         #[arg(last = true, allow_hyphen_values = true)]
         command: Vec<String>,
+    },
+    /// Ask a Machine's owner, on a card in this Channel, to sign a harness in there
+    ///
+    /// For a harness xMatrix can sign in remotely, the owner signs in on the
+    /// card itself; for any other, the card says what to set up on that
+    /// Machine. Only the owner signs in, never this Agent. The command returns
+    /// as soon as the card is posted.
+    SignIn {
+        /// The harness: its id (`antigravity`) or its launcher (`agy`).
+        harness: String,
+        /// Machine ID or Machine name (`xmatrix agent list`); defaults to this Agent's own Machine.
+        #[arg(long)]
+        machine: Option<String>,
+        /// Why this Agent needs it, shown on the card.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Ask a Space admin, on a card in this Channel, to let Agents read secrets without asking
     ///

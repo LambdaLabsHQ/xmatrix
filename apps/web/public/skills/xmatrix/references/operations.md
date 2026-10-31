@@ -148,6 +148,16 @@ once, and nothing changes until then:
 xmatrix request secret-access <alias>... --reason "<why>"
 ```
 
+A harness on a Machine (this one or another of its owner's) that is not
+signed in answers nothing sent to it. Only the Machine's owner signs it in; ask
+them on a card in this Channel. For a harness xMatrix signs in remotely the
+owner signs in on the card itself, otherwise the card says what to set up
+there. The command returns once the card is posted:
+
+```bash
+xmatrix request sign-in <harness> [--machine <machine-name>] --reason "<why>"
+```
+
 On Windows PowerShell 5.1, if the command itself uses `powershell -Command`,
 pass the script as one complete argv. Use outer single quotes and doubled
 single quotes for script string literals so `$env:<ENV_NAME>` is not expanded

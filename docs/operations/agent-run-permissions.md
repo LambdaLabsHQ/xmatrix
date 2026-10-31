@@ -114,6 +114,17 @@ admin's session): one click for a secret the Space holds, or the value for a
 new one (saved as `ask`). Either way that Run may read it at once. Nothing
 passes through the daemon, and the value never appears in the Channel.
 
+## Asking a Machine's owner to sign a harness in
+
+`xmatrix request sign-in <harness> [--machine <id-or-name>] [--reason <why>]`
+posts a card in the Run's Channel (`POST /api/harness-sign-in-requests`,
+message kind `xmatrix.system.harness-sign-in-request`) for its own Machine or
+another of its owner's. The card is the signed-out notice a refused summon
+gets (`xmatrix.harness-signed-out.v1`, plus `requestedBy`), so the Machine's
+owner signs the harness in on it through the Machine's own harness actions,
+with or without an Agent for that harness in the Space. A harness the Machine
+reports as not installed is refused. The Run never signs anything in.
+
 ## Saving a credential an Agent already holds
 
 A live ordinary Run may add a new secret to its Space with

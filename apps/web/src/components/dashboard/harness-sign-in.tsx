@@ -27,11 +27,17 @@ const SETTLED = (status?: HarnessActionStatus["status"]) => Boolean(status && ![
 const OBSERVATION_TIMEOUT = 20 * 60_000;
 const LOGIN_STATE_LABEL = { signed_in: "Signed in", signed_out: "Not signed in", unknown: "Could not check" } as const;
 
+/** Which program on whose Machine a sign-in is for: an Agent registration, or
+ * just the owner's Machine, since a harness signs in on its Machine, not in a Space. */
+export type HarnessSignInTarget = Pick<AgentRegistrationSummary, "machineName"> & {
+  key: Pick<AgentRegistrationSummary["key"], "ownerUserId" | "machineId" | "harness">;
+};
+
 /** What the owner sees of a harness's own sign-in on one Machine, and the
  * steps that sign it in from here: the daemon runs the harness's official
  * sign-in, this shows its link and code, and hands back a pasted code. */
 export function harnessSignInView(input: {
-  registration: AgentRegistrationSummary; userId?: string;
+  registration: HarnessSignInTarget; userId?: string;
   daemons?: readonly { userId: string; machineId?: string; hostId?: string; status: string; metadata: Record<string, unknown> }[];
 }) {
   const { registration, userId } = input;
@@ -67,7 +73,7 @@ export function signedOutRegistrations(registrations: readonly AgentRegistration
 }
 
 export function HarnessSignInSection({ registration, token, userId, bare = false, signInLabel = "Sign in", onSignedIn }: {
-  registration: AgentRegistrationSummary; token: string; userId: string;
+  registration: HarnessSignInTarget; token: string; userId: string;
   /** Called once a sign-in started here finishes signed in. */
   onSignedIn?: () => void;
   /** Only the sign-in itself, under a sentence the caller already wrote. */
@@ -268,7 +274,7 @@ async function checkHarnessAgain(token: string, daemon: { machineId?: string; ho
  * machine, and the one thing to do: sign it in from here, or, for a program
  * set up only on its machine, its own words and a check after setting it up. */
 export function HarnessSignedOutBody({ registration, token, userId, copy, program, machine, onSignedIn }: {
-  registration: AgentRegistrationSummary; token: string; userId: string; copy: OnboardingCopy;
+  registration: HarnessSignInTarget; token: string; userId: string; copy: OnboardingCopy;
   program: string; machine: string; onSignedIn?: () => void;
 }) {
   const queryClient = useQueryClient();
