@@ -125,17 +125,19 @@ test("a retryable database outage on a socket is reported once, with its evidenc
   const errors = [];
   t.mock.method(console, "warn", () => {});
   t.mock.method(console, "error", (...args) => { errors.push(args[0]); });
-  const database = createAuthorityDatabase({ connectionString: "postgres://PRIVATE_SENTINEL", shardId: "shard-0",
-    clientFactory: () => ({ connect: async () => {}, end: async () => {}, async query(input) {
-      if (typeof input === "object" && /PRIVATE_SENTINEL_TABLE/u.test(input.text)) throw new Error("Query read timeout");
-      return { rows: [{ backend_pid: 1, configured: "" }] };
-    } }) });
+  // A Hyperdrive stall: the query is sent and its answer never arrives.
+  const stalled = { connect: async () => {}, end: async () => {}, async query(input) {
+    if (typeof input === "object" && /PRIVATE_SENTINEL_TABLE/u.test(input.text)) throw new Error("Query read timeout");
+    return { rows: [{ backend_pid: 1, configured: "" }] };
+  } };
+  const database = createAuthorityDatabase({ shardId: "shard-0", clientFactory: () => stalled,
+    connectionString: "postgres://PRIVATE_SENTINEL" });
+  const connect = () => database.transaction({ requestId: "PRIVATE_SENTINEL", operation: "agent.connect" }, tx =>
+    tx.query({ name: "agent_connect_v1", text: "SELECT 1 FROM PRIVATE_SENTINEL_TABLE", maxRows: 1 }));
   const replies = [];
-  const sockets = new RuntimeSocketState("test", (_id, message, failure) => ({ message, failure }), () => {});
-  await sockets.answerOperation({ send: raw => replies.push(JSON.parse(raw)) }, "request", "Request failed",
-    () => database.transaction({ requestId: "PRIVATE_SENTINEL", operation: "agent.connect" }, tx =>
-      tx.query({ name: "agent_connect_v1", text: "SELECT 1 FROM PRIVATE_SENTINEL_TABLE", maxRows: 1 })),
-    () => "relay.authenticate");
+  const agentSocket = { send(raw) { replies.push(JSON.parse(raw)); } };
+  await new RuntimeSocketState("agent", (_id, message, failure) => ({ message, failure }), () => {})
+    .answerOperation(agentSocket, "connect", "Connect failed", connect, () => "relay.authenticate");
   await sendErrorReports();
   assert.equal(replies[0].failure.code, "postgres_runtime_unavailable");
   assert.equal(replies[0].failure.retryable, true, "the client redials");
