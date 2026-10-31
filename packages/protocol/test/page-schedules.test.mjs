@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 
-import { markScheduleDone, pageSchedules, scheduleLine } from "../dist/index.js";
+import { markScheduleDone, pageSchedules } from "../dist/index.js";
 
 
 const page = [
@@ -55,13 +55,10 @@ test("shorthand cadences, emoji variation selectors and the first-run time", () 
   assert.equal(schedule.at, "2026-11-01T02:00:00.000Z");
 });
 
-test("a line written by scheduleLine reads back as the same schedule", () => {
-  const triggers = [{ kind: "ci-failed", repository: "acme/api", branch: "main", workflow: "CI" },
-    { kind: "event", provider: "sentry", source: "*", feature: "issue.created" }];
-  const line = scheduleLine({ instruction: "Fix it", intervalMinutes: 1440, triggers });
-  assert.equal(line, "- [ ] Fix it 🔁 every day, on ci-failed:acme/api@main:CI, on sentry:issue.created");
-  const [schedule] = pageSchedules(line);
-  assert.deepEqual(schedule.triggers, triggers);
+test("events after the cadence read back as stored triggers, paths and all", () => {
+  const [schedule] = pageSchedules("- [ ] Fix it 🔁 every day, on ci-failed:acme/api@main:CI, on sentry:issue.created");
+  assert.deepEqual(schedule.triggers, [{ kind: "ci-failed", repository: "acme/api", branch: "main", workflow: "CI" },
+    { kind: "event", provider: "sentry", source: "*", feature: "issue.created" }]);
   assert.equal(schedule.intervalMinutes, 1440);
 });
 

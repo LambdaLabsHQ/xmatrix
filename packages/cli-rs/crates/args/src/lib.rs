@@ -2125,6 +2125,7 @@ pub enum PageCommand {
     /// `[-]` pauses one and `[x]` marks one done. Write and change them with `page edit` in the section
     /// they keep true; each runs as whoever last changed its line (an Agent as its owner), in a fresh
     /// conversation. Use `@auto repo:<owner/repo>` in what to do to address an Agent each time.
+    /// Any other live Agents receive context only. Without an Agent mention an occurrence only posts its text.
     #[command(alias = "automations")]
     Automation {
         #[command(subcommand)]

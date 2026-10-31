@@ -20,9 +20,9 @@ import { markdownLines, pageBlocks } from "./page-markdown.js";
  * Nothing else stores what a schedule is: the page's head revision does.
  */
 
-export const SCHEDULE_RECURRENCE = "🔁";
-export const SCHEDULE_AT = "⏳";
-export const SCHEDULE_DONE = "✅";
+const SCHEDULE_RECURRENCE = "🔁";
+const SCHEDULE_AT = "⏳";
+const SCHEDULE_DONE = "✅";
 
 export type PageScheduleStatus = "running" | "paused" | "done";
 
@@ -110,7 +110,7 @@ function parseScheduleText(text: string, outsideCode: string): Omit<PageSchedule
 }
 
 /** 🔁's rule: `every <n> <unit>` (or `every <unit>`, `every 12h`), then `, on <trigger>` for each event. */
-export function parseRecurrence(rule: string): { intervalMinutes: number; triggers: AutomationTrigger[] }
+function parseRecurrence(rule: string): { intervalMinutes: number; triggers: AutomationTrigger[] }
   | { error: string } {
   // Events follow the cadence after commas; a merge trigger's own paths are commas without `on`.
   const [written = "", ...events] = rule.split(/,\s*(?=on\s)/u).map((part) => part.trim());
@@ -145,7 +145,7 @@ export function parseRecurrence(rule: string): { intervalMinutes: number; trigge
 }
 
 /** One event as written after `on`, as the stored trigger; the same spelling as `--on`. */
-export function scheduleTriggerFrom(value: string): Record<string, unknown> | undefined {
+function scheduleTriggerFrom(value: string): Record<string, unknown> | undefined {
   const [kind = "", rest = ""] = splitOnce(value, ":");
   if (!rest) return undefined;
   if (kind === "merged" || kind === "ci-failed") {
@@ -164,23 +164,13 @@ export function scheduleTriggerFrom(value: string): Record<string, unknown> | un
   return { kind: "event", provider: kind, source: source || "*", ...(feature !== "*" ? { feature } : {}) };
 }
 
-/** How a trigger is written after `on`. */
-export function scheduleTriggerText(trigger: AutomationTrigger): string {
-  if (trigger.kind === "event") {
-    return `${trigger.provider}:${trigger.feature ?? "*"}${trigger.source === "*" ? "" : `:${trigger.source}`}`;
-  }
-  const target = `${trigger.repository}${trigger.branch ? `@${trigger.branch}` : ""}`;
-  if (trigger.kind === "merged") return `merged:${target}${trigger.paths?.length ? `:${trigger.paths.join(",")}` : ""}`;
-  return `ci-failed:${target}${trigger.workflow ? `:${trigger.workflow}` : ""}`;
-}
-
 function splitOnce(value: string, separator: string): [string, string] {
   const at = value.indexOf(separator);
   return at < 0 ? [value, ""] : [value.slice(0, at), value.slice(at + separator.length)];
 }
 
 /** ⏳'s time: a date and time with its offset (`2026-11-03 09:00 +08:00`, ISO, or Z), as UTC. */
-export function parseScheduleTime(value: string): string | undefined {
+function parseScheduleTime(value: string): string | undefined {
   const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)\s*(Z|[+-]\d{2}:?\d{2})$/iu.exec(value.trim());
   if (!match) return undefined;
   const offset = match[3]!.toUpperCase() === "Z" ? "Z"
@@ -188,34 +178,6 @@ export function parseScheduleTime(value: string): string | undefined {
   const time = match[2]!.length === 5 ? `${match[2]}:00` : match[2]!;
   const ms = Date.parse(`${match[1]}T${time}${offset}`);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
-}
-
-/** How a cadence is written after `every`. */
-export function scheduleCadenceText(minutes: number): string {
-  for (const [unit, size] of [["week", 10080], ["day", 1440], ["hour", 60]] as const) {
-    if (minutes % size === 0) return minutes === size ? `every ${unit}` : `every ${minutes / size} ${unit}s`;
-  }
-  return `every ${minutes} minutes`;
-}
-
-/** A schedule's line, as the page writes it. */
-export function scheduleLine(input: { instruction: string; status?: PageScheduleStatus; intervalMinutes?: number;
-  at?: string; atText?: string; triggers?: AutomationTrigger[]; doneOn?: string }): string {
-  const mark = input.status === "paused" ? "-" : input.status === "done" ? "x" : " ";
-  const fields: string[] = [];
-  if (input.intervalMinutes !== undefined) {
-    fields.push(`${SCHEDULE_RECURRENCE} ${[scheduleCadenceText(input.intervalMinutes),
-      ...(input.triggers ?? []).map((trigger) => `on ${scheduleTriggerText(trigger)}`)].join(", ")}`);
-  }
-  if (input.atText ?? input.at) fields.push(`${SCHEDULE_AT} ${input.atText ?? scheduleTimeText(input.at!)}`);
-  if (input.doneOn) fields.push(`${SCHEDULE_DONE} ${input.doneOn}`);
-  const instruction = input.instruction.replace(/\s+/gu, " ").replace(/[🔁⏳✅]/gu, "").trim();
-  return `- [${mark}] ${instruction} ${fields.join(" ")}`;
-}
-
-/** A UTC time as ⏳ writes it. */
-export function scheduleTimeText(iso: string): string {
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} Z`;
 }
 
 /** Whether a one-time time is ahead and within the year a reminder may be set. */

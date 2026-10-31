@@ -502,8 +502,7 @@ export type {
   GitHubFileReference, PageBlock, PageEditGlimpse, PageEditSegment, PageLineDiff, PageMedia, PageMediaExtension, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
-  markScheduleDone, pageSchedules, parseRecurrence, removeScheduleLine, setScheduleStatus, parseScheduleTime, SCHEDULE_AT, SCHEDULE_DONE, SCHEDULE_RECURRENCE,
-  scheduleCadenceText, scheduleLine, scheduleTimeInRange, scheduleTimeText, scheduleTriggerFrom, scheduleTriggerText,
+  markScheduleDone, pageSchedules, removeScheduleLine, scheduleTimeInRange, setScheduleStatus,
 } from "./page-schedules.js";
 export type { PageSchedule, PageScheduleStatus } from "./page-schedules.js";
 export {

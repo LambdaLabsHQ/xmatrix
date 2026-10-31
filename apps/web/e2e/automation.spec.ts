@@ -88,7 +88,16 @@ async function openSchedule(page: Page, name: string) {
   await expect(page.locator(".app-tool-detail").getByRole("heading", { level: 2, name })).toBeVisible();
 }
 
+/** An Automation on the Goals page's Architecture section, which stubAutomationPages serves. */
+const PAGE_AUTOMATION = { ...E2E_AUTOMATION, pageId: `goals-${E2E_SPACE.id}`, spaceId: E2E_SPACE.id, blockId: "architecture" };
+
 /** Confirms Delete on the open schedule and waits for its row to leave the list. */
+async function openPageSchedule(page: Page, automation: typeof PAGE_AUTOMATION & { source?: string }) {
+  await openWorkspaceWithStubs(page, { ...E2E_AUTOMATION_READY_FIXTURES, automations: [automation] });
+  await stubAutomationPages(page);
+  await openSchedule(page, "Existing schedule");
+}
+
 async function deleteExistingSchedule(page: Page) {
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete" }).click();
@@ -122,13 +131,7 @@ test("Automation renders genuine empty catalogs only after loading succeeds", as
 });
 
 test("a schedule is changed on its page, and deleting it leaves nothing on a schedule", async ({ page }) => {
-  await openWorkspaceWithStubs(page, {
-    ...E2E_AUTOMATION_READY_FIXTURES,
-    automations: [{ ...E2E_AUTOMATION, pageId: `goals-${E2E_SPACE.id}`, spaceId: E2E_SPACE.id, blockId: "architecture",
-      source: "- [ ] Run the existing schedule. 🔁 every hour" }],
-  });
-  await stubAutomationPages(page);
-  await openSchedule(page, "Existing schedule");
+  await openPageSchedule(page, { ...PAGE_AUTOMATION, source: "- [ ] Run the existing schedule. 🔁 every hour" });
   const detail = page.locator(".app-tool-detail");
   await expect(detail.getByText("- [ ] Run the existing schedule. 🔁 every hour", { exact: true })).toBeVisible();
   await expect(page.getByLabel("What it does each time")).toHaveCount(0);
@@ -139,12 +142,7 @@ test("a schedule is changed on its page, and deleting it leaves nothing on a sch
 });
 
 test("a schedule's Edit opens its page", async ({ page }) => {
-  await openWorkspaceWithStubs(page, {
-    ...E2E_AUTOMATION_READY_FIXTURES,
-    automations: [{ ...E2E_AUTOMATION, pageId: `goals-${E2E_SPACE.id}`, spaceId: E2E_SPACE.id, blockId: "architecture" }],
-  });
-  await stubAutomationPages(page);
-  await openSchedule(page, "Existing schedule");
+  await openPageSchedule(page, PAGE_AUTOMATION);
   await page.getByRole("button", { name: "Edit on its page" }).click();
   await expect(page).toHaveURL(new RegExp(`/pages\\?page=goals-${E2E_SPACE.id}`));
 });
@@ -182,7 +180,7 @@ test("Schedules lists Automations by page and makes none; an empty Space is sent
 test("a page's Automation is listed under its page on the page tree, says what it is doing, and its address names it", async ({ page }) => {
   await openWorkspaceWithStubs(page, {
     ...E2E_AUTOMATION_READY_FIXTURES,
-    automations: [{ ...E2E_AUTOMATION, pageId: `goals-${E2E_SPACE.id}`, spaceId: E2E_SPACE.id, blockId: "architecture" }],
+    automations: [PAGE_AUTOMATION],
   });
   const goals = await stubAutomationPages(page);
   await page.getByRole("button", { name: "Schedules" }).click();

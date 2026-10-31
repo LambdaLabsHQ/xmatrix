@@ -4,7 +4,7 @@ import {
   inTestTransaction, MOCK_TOKEN, randomUUID, startPgHubWorker,
 } from "./agent-launch-postgres.fixture.mjs";
 
-import { withPageAgentRun } from "./support/page-agent.mjs";
+import { grantPageAccess, withPageAgentRun } from "./support/page-agent.mjs";
 
 // A page's schedules (docs/design/pages-live-document.md §6.1): a schedule is
 // a line of its page, synced to its Automation after each revision as whoever
@@ -203,13 +203,7 @@ test("an Agent Run writes a private page's schedules from its own authorized con
 
     // Read access is not enough to change a schedule.
     const spaceId = decodeURIComponent(pages.split("/")[3]);
-    await inTestTransaction(async (tx) => {
-      await tx.query({ text: "UPDATE data.space_members SET role='member' WHERE space_id=$1 AND user_id=$2",
-        values: [spaceId, userId] });
-      await tx.query({ text: `INSERT INTO data.page_access (space_id,page_id,subject_kind,subject_id,access,created_at)
-        VALUES ($1,$2,'user',$3,'read',now()) ON CONFLICT (space_id,page_id,subject_kind,subject_id) DO UPDATE SET access='read'`,
-        values: [spaceId, page.pageId, userId] });
-    });
+    await grantPageAccess(inTestTransaction, { spaceId, pageId: page.pageId, userId, access: "read" });
     const readOnly = await worker.fetch(`${automations}/${created.id}`, { method: "DELETE", headers: asRun });
     assert.equal(readOnly.status, 403);
     assert.equal((await readOnly.json()).code, "page_edit_forbidden");
