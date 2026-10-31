@@ -20,6 +20,29 @@ function grantVerifier(providerId: string, credentials: Readonly<Record<string, 
 /** Refresh and verify Notion OAuth and Sentry installations before any action, without replaying writes. */
 export async function connectionCredentials(env: Env, spaceId: string, providerId: string):
   Promise<Record<string, string>> {
+  return (await connectionCredentialGrant(env, spaceId, providerId)).values;
+}
+
+/**
+ * The Hub's own write of values a provider renewed during an action (a web
+ * session's rotated cookies, a number read from the provider): it applies only
+ * to the credentials the action read, so a Space admin's newer save is never
+ * overwritten, and each save moves the version the next one expects.
+ */
+export function credentialRenewal(env: Env, spaceId: string, providerId: string, version: number) {
+  const allowed = (getAppConnectorProvider(providerId)?.credentials ?? []).map((field) => field.id);
+  let expected = version;
+  return async (fields: Readonly<Record<string, string>>): Promise<void> => {
+    await connectorCredentialRepository(env).put({ requestId: crypto.randomUUID(), spaceId, providerId,
+      actorUserId: "hub:provider-renewal", fields: { ...fields }, policy: { allowed },
+      at: new Date().toISOString(), asHub: true, expectedVersion: expected });
+    expected += 1;
+  };
+}
+
+/** The connection's values and the credential version they stand at, after any refresh this call saved. */
+export async function connectionCredentialGrant(env: Env, spaceId: string, providerId: string):
+  Promise<{ values: Record<string, string>; version: number }> {
   const repository = connectorCredentialRepository(env);
   const resolved = await repository.resolve({ requestId: crypto.randomUUID(), spaceId, providerId });
   // A Slack workspace speaks for one Space: while bindings made before that
@@ -30,6 +53,8 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
       "This Slack workspace is also connected to another xMatrix Space; disconnect it in one of them");
   }
   const credentials: Record<string, string> = { ...resolved?.values };
+  /* A Hub write must name the version it read; each one it makes moves it on by one. */
+  let version = resolved?.version ?? 0;
   const verify = grantVerifier(providerId, credentials);
   let refreshed = await refreshOAuthFields(env, providerId, credentials).catch(error => {
     if (verify || ["google", "googlecalendar", "googlesearchconsole", "googleadsense", "googleanalytics", "googleads", "googlebusinessprofile", "gcp", "bitbucket", "pagerduty", "sentry", "discord", "stripe"].includes(providerId)) throw error;
@@ -39,7 +64,8 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
     const manifest = getAppConnectorProvider(providerId);
     await repository.put({ requestId: crypto.randomUUID(), spaceId, providerId, actorUserId: "hub:oauth-refresh",
       fields, policy: { allowed: (manifest?.credentials ?? []).map((field) => field.id) },
-      at: new Date().toISOString(), asHub: true, expectedVersion: resolved?.version });
+      at: new Date().toISOString(), asHub: true, expectedVersion: version });
+    version += 1;
     for (const [name, value] of Object.entries(fields)) {
       if (value === null) delete credentials[name];
       else credentials[name] = value;
@@ -63,5 +89,5 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
   if (getAppConnectorProvider(providerId)?.oauth?.flow === "composio") {
     credentials.composioApiKey = oauthClient(env, providerId)?.clientSecret ?? "";
   }
-  return credentials;
+  return { values: credentials, version };
 }

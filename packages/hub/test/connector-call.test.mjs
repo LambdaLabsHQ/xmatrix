@@ -15,6 +15,7 @@ import { runCliCommand } from "../src/cli-commands.ts";
 import { CONNECTOR_CALL_COMMAND } from "../src/cli-commands-call.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { withProviderResponses as fetched } from "./support/fetch-responses.mjs";
+import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
 
 const loadRoute = await compileCommonJsSourceModule(new URL("../src/index-routes-connector-call.ts", import.meta.url));
 const loadExecutor = await compileCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url));
@@ -57,7 +58,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
     "../app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
     "./command-support": support,
     "./credentials": { connectorPermissionRepository: () => ({ mode: async input => { policies.push(input); return mode; } }) },
-    "./connection-credentials": { connectionCredentials: async () => credentials },
+    "./connection-credentials": connectionCredentialsDouble(async () => credentials),
     "./http": { ConnectorRemedy, ProviderRequestError },
     "../usage-cost-metering": metering,
   })[name] ?? {});

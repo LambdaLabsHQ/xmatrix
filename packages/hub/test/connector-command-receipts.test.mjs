@@ -10,6 +10,7 @@ import { withProviderResponses } from "./support/fetch-responses.mjs";
 import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 import { AppControlError } from "../../db/src/app-control.ts";
+import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
 
 const mailbox = { address: "mailbox@example.test", account: "ca_mailbox", owner: "user:owner" };
 const id = "18f2a9c0d1e2b3a4";
@@ -41,7 +42,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
     "./action-parse": { parseActionCommand },
     "./action-catalog": { connectorActionCatalog },
     "./subscription-parse": subscriptionParse,
-    "./connection-credentials": { connectionCredentials: async () => credentials },
+    "./connection-credentials": connectionCredentialsDouble(async () => credentials),
     "./credentials": { connectorPermissionRepository: () => ({ mode: async () => "write" }) },
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "owner", machineId: "machine", harnessId: "codex" }) },
     "./http": { ConnectorRemedy, ProviderRequestError },
