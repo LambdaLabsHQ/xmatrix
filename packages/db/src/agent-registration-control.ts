@@ -414,8 +414,10 @@ export class PostgresAgentRegistrationRepository {
           row.parameter_model, models, Date.now());
         return { ...parameterObservation,
           key, displayName: String(row.display_name), version: Number(row.version),
+          // With no declared models the runtime's default model runs, so its
+          // entry (and the efforts it reports) stays; the environment pass below narrows it.
           modelCatalog: routingModelCatalogObservation(row.catalog_models, row.catalog_observed_at, Date.now())?.value
-            .filter(model => models.includes(model.model)),
+            .filter(model => models.length ? models.includes(model.model) : model.model === parameterObservation?.parameterModel),
           ownerName: String(row.owner_name || "Space member"), machineName: "Registered machine", models,
           routingReady: row.current_owner !== null && row.grant_state === "active" && row.policy_state === "enabled" &&
             configuration.routing?.enabled === true && (configuration.routing.models.length === 0 ||

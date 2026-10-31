@@ -1293,6 +1293,9 @@ export const DEFAULT_OPEN_MENTION_KINDS: ReadonlyArray<MentionCandidateSection["
  */
 export const DEFAULT_OPEN_MENTION_ROWS = 6;
 
+/** Rows a summon's condition listing shows when it is the only section. */
+export const CONDITION_LISTING_ROWS = 12;
+
 export function groupedMentionCandidates(
   candidates: MentionCandidate[],
   options: number | MentionCandidateSectionOptions = 2

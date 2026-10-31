@@ -152,6 +152,26 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
     }
   }
   add("launch", "force", "force · Start without xMatrix's intent check");
+  return interleaveLaunchFields(result);
+}
+
+/**
+ * A folded listing shows only its first rows, so one long field (a Space's
+ * hundred repositories) must not hide every other kind of condition. Rows take
+ * turns by field — one repository, one machine, one effort, … — keeping each
+ * field's own order, so the first screen names every kind a summon can take.
+ */
+function interleaveLaunchFields(candidates: MentionCandidate[]): MentionCandidate[] {
+  const groups = new Map<string, MentionCandidate[]>();
+  for (const candidate of candidates) {
+    const key = candidate.launchField ?? candidate.id;
+    groups.set(key, [...groups.get(key) ?? [], candidate]);
+  }
+  const lists = [...groups.values()];
+  const result: MentionCandidate[] = [];
+  for (let round = 0; result.length < candidates.length; round++) {
+    for (const list of lists) if (list[round]) result.push(list[round]!);
+  }
   return result;
 }
 
