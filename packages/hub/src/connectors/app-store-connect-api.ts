@@ -1,3 +1,4 @@
+import { readBoundedStream } from "@xmatrix/protocol";
 import { pemPrivateKeyBytes } from "../push/apns";
 import { base64UrlEncodeValue } from "../relay-v2-primitives";
 import { connectorIngressUrl } from "./credentials";
@@ -23,6 +24,9 @@ const TOKEN_SECONDS = 600;
 const MAX_PAGES = 5;
 const MAX_LIST_BYTES = 1024 * 1024;
 const MAX_PROBLEM = 900;
+/* A sales report is a gzipped tab-separated file; a summary for one month of a small team is kilobytes. */
+const MAX_REPORT_BYTES = 2 * 1024 * 1024;
+const REPORT_TIMEOUT_MS = 30_000;
 
 export const BUNDLE_ID = /^[A-Za-z0-9][A-Za-z0-9.-]{0,154}$/u;
 const WEBHOOK_EVENTS = ["APP_STORE_VERSION_APP_VERSION_STATE_UPDATED", "BUILD_UPLOAD_STATE_UPDATED",
@@ -46,6 +50,8 @@ export interface AppStoreConnectApi {
     quiet?: boolean }): Promise<Record<string, unknown>>;
   /** A collection and what it includes, following Apple's own next links for at most `pages` pages. */
   list(path: string, query?: Record<string, string>, pages?: number): Promise<{ rows: AppleResource[]; included: AppleResource[] }>;
+  /** A gzipped report (sales, finance) as text; undefined when Apple has no report for that period (404). */
+  report(path: string, query: Record<string, string>): Promise<string | undefined>;
 }
 
 export function appleResource(value: unknown): AppleResource | undefined {
@@ -138,6 +144,27 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
   };
   return {
     request,
+    async report(path, query) {
+      authorization ??= bearer(credentials, Math.floor(now() / 1_000));
+      const signal = AbortSignal.timeout(REPORT_TIMEOUT_MS);
+      const response = await fetch(apiUrl(path, query), { redirect: "manual", signal,
+        headers: { authorization: await authorization, accept: "application/a-gzip", "user-agent": "xMatrix-Connectors" } });
+      const bytes = await readBoundedStream(response.body, MAX_REPORT_BYTES,
+        () => new ProviderRequestError(502, "App Store Connect report is too large"), signal);
+      if (response.status === 404) return undefined;
+      if (!response.ok) {
+        let payload: Record<string, unknown> = {};
+        try { payload = record(JSON.parse(new TextDecoder().decode(bytes))); } catch { /* not JSON */ }
+        const problem = appleProblem(payload, false);
+        const hint = response.status === 403 ? " (reports need an API key with the Sales, Finance or Admin role)" : "";
+        throw new ProviderRequestError(response.status, `App Store Connect returned ${response.status}${problem ? `: ${problem}` : ""}${hint}`);
+      }
+      const gzipped = bytes[0] === 0x1f && bytes[1] === 0x8b;
+      if (!gzipped) return new TextDecoder().decode(bytes);
+      const inflated = new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")));
+      return new TextDecoder().decode(await readBoundedStream(inflated.body, MAX_REPORT_BYTES * 8,
+        () => new ProviderRequestError(502, "App Store Connect report is too large"), signal));
+    },
     async list(path, query = {}, pages = MAX_PAGES) {
       const rows: AppleResource[] = [], included: AppleResource[] = [];
       let next: string | undefined = apiUrl(path, query).toString();
