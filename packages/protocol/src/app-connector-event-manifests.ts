@@ -233,8 +233,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
         readAction("list_properties", "List properties", "List the GA4 properties of the connected Google account with their account.", "*"),
-        readAction("report", "Traffic report", "Sessions, users, engaged sessions, engagement rate and key events. channel=organic keeps Organic Search sessions only. Defaults: by=date days=28 limit=50.",
-          "<property id> [by=date,month,page,channel,source,medium,country,device|none] [days=1-1095] [limit=1-250] [channel=organic|direct|referral|social|paid|email]"),
+        readAction("report", "Traffic report", "Sessions, users, engaged sessions, engagement rate and key events; metrics=app reads an app's active users, new users (first opens), sessions, events and engagement time, by platform, os, version or event. channel=organic keeps Organic Search sessions only. Defaults: by=date days=28 limit=50 metrics=traffic.",
+          "<property id> [by=date,month,page,channel,source,medium,country,device,platform,os,version,event,stream|none] [days=1-1095] [limit=1-250] [channel=organic|direct|referral|social|paid|email] [metrics=traffic|app]"),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/analytics.readonly"], secretRefs: [] },
@@ -479,6 +479,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       readAction("builds", "List builds", "The newest uploaded builds and whether Apple finished processing them, optionally of one version.", "<com.example.app> [<1.2.0>]"),
       readAction("read_version", "Read version", "A version's state, build, App Review readiness and listing text per language.", "<com.example.app> <1.2.0>"),
       readAction("reviews", "Customer reviews", "The 20 newest App Store reviews with their ids, optionally only unanswered ones.", "<com.example.app> [unanswered]"),
+      readAction("sales", "Downloads and sales", "Sales and Trends per day or month: downloads (first-time installs), redownloads, updates and in-app units, top countries and developer proceeds, for one app or all. The vendor number is in Payments and Financial Reports; the key needs the Sales, Finance or Admin role.", "<com.example.app|*> vendor=<vendor number> [by=day|month] [days=1-31] [months=1-12]"),
       readAction("review_messages", "App Review messages", "The newest App Review thread: the rejection reasons and what the reviewer wrote. Needs the web session credential.", "<com.example.app>"),
       readAction("web_session", "Check web session", "Whether the saved App Store Connect web session still works, and whose it is.", "*"),
       writeAction("create_app", "Create app record", "Create the App Store app record for a registered bundle ID, with its first version to prepare. Needs the web session credential.", '<com.example.app> {"name":"Example","sku":"EXAMPLE","locale":"en-US","version":"1.0","platform":"ios"}'),
