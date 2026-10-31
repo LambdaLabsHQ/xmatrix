@@ -206,7 +206,7 @@ export function MachineVersionValue({ version, component, className, behind }: {
   component: ReleaseComponent;
   className?: string;
   /** The live update state where an updater reports one (this machine's App). */
-  behind?: (latestVersion: string) => React.ReactNode;
+  behind?: (latestVersion: string, publishedAt?: string) => React.ReactNode;
 }) {
   const latest = useLatestComponentRelease(component, version);
   const outdated = releaseVersionStatus(version, latest?.version) === "outdated" && latest;
@@ -215,13 +215,13 @@ export function MachineVersionValue({ version, component, className, behind }: {
       <span className="min-w-0 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
         {version ? formatVersion(version) : "unknown"}
       </span>
-      {outdated && (behind ? behind(latest.version) : <ReleaseAge component={component} latest={latest} />)}
+      {outdated && (behind ? behind(latest.version, latest.publishedAt) : <ReleaseAge component={component} latest={latest} />)}
       <ReleaseNotesLink version={outdated ? latest.version : version} />
     </span>
   );
 }
 
-function ReleaseAge({ component, latest }: { component: ReleaseComponent; latest: LatestRelease }) {
+export function ReleaseAge({ component, latest }: { component: ReleaseComponent; latest: LatestRelease }) {
   const published = latest.publishedAt ? Date.parse(latest.publishedAt) : Number.NaN;
   const next = formatVersion(latest.version);
   if (Number.isFinite(published) && Date.now() - published <= SELF_UPDATE_GRACE_MS[component]) {
@@ -267,7 +267,7 @@ export function NotUpdated({ label = "Not updated", children }: { label?: string
 const CLI_UPDATE_COMMAND = "xmatrix update";
 
 /** How a component on another machine is updated by hand. */
-function ComponentUpdateSteps({ component }: { component: ReleaseComponent }) {
+export function ComponentUpdateSteps({ component }: { component: ReleaseComponent }) {
   const { copied, copy } = useCopyToClipboard(CLI_UPDATE_COMMAND);
   if (component === "desktop") {
     return <>Open xMatrix on that machine and choose Settings › Desktop app › Check for updates.</>;

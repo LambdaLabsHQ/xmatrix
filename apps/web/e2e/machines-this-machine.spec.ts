@@ -180,15 +180,19 @@ const releasedAt = (ageMs: number) => ({
   devReleases: {},
 });
 
-async function openThisMachine(page: Page, release: object, updateStatus: Record<string, unknown>) {
+async function openThisMachine(page: Page, release: object, updateStatus: Record<string, unknown>,
+  cliCheck: object = { outcome: "checking", cliUpdate: { state: "installing", version: "0.16.700", at: new Date().toISOString() } }) {
   await openAsDesktop(page, MACHINE_ID, true, "darwin", updateStatus);
   await fixtureJson(page, "releases", "**/api/releases/latest", release);
+  await fixtureJson(page, "cli-check", "**/api/xmatrix/machine-daemons/cli-update-check", cliCheck);
   await page.getByTestId("machine-row").filter({ has: page.getByTestId("this-machine-tag") }).click();
 }
 
 test("a version behind a fresh release shows only what its update is really doing", async ({ page }) => {
   await openThisMachine(page, releasedAt(60_000), { state: "downloaded", enabled: true, version: "0.16.700" });
-  await expect(page.getByText(/^v0\.16\.700 released/u)).toHaveCount(2);
+  // Seeing the CLI behind asks its daemon once, however many rows show it; they show what it reports.
+  await expect(page.getByText("Installing v0.16.700")).toHaveCount(2);
+  expect(await fixtureRequestBodies(page, "cli-check")).toEqual([{ machineId: MACHINE_ID }]);
   await expect(page.getByText("v0.16.700 downloaded")).toBeVisible();
   await expect(page.getByRole("button", { name: /^(Update|Not updated)$/u })).toHaveCount(0);
   await page.getByRole("button", { name: "Restart to update", exact: true }).click();
@@ -198,11 +202,12 @@ test("a version behind a fresh release shows only what its update is really doin
 
 test("a version still behind long after its release says it did not update, and how to fix it in place", async ({ page }) => {
   await openThisMachine(page, releasedAt(2 * 24 * 60 * 60_000),
-    { state: "error", enabled: true, message: "The update server could not be reached." });
+    { state: "error", enabled: true, message: "The update server could not be reached." },
+    { outcome: "checking", cliUpdate: { state: "failed", error: "Release feed https://xmatrix.sh/api/cli/releases/latest timed out", at: new Date().toISOString() } });
   const late = page.getByRole("button", { name: "Not updated", exact: true });
   await expect(late).toHaveCount(3);
   await late.first().click();
-  await expect(page.getByText("v0.16.700 was released")).toBeVisible();
+  await expect(page.getByText("Release feed https://xmatrix.sh/api/cli/releases/latest timed out")).toBeVisible();
   await expect(page.getByRole("button", { name: "xmatrix update" })).toBeVisible();
   await late.nth(2).click();
   await expect(page.getByText("The update server could not be reached.")).toBeVisible();
@@ -212,4 +217,13 @@ test("a version still behind long after its release says it did not update, and 
 test("seeing the App behind starts one update check at once", async ({ page }) => {
   await openThisMachine(page, releasedAt(60_000), { state: "not-available", enabled: true });
   await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, number>).__quietChecks)).toBe(1);
+});
+
+test("a Machine that cannot be asked says why, with the fix", async ({ page }) => {
+  await openThisMachine(page, releasedAt(60_000), { state: "downloaded", enabled: true, version: "0.16.700" },
+    { outcome: "unsupported", daemonVersion: "0.16.600" });
+  const late = page.getByRole("button", { name: "Not updated", exact: true });
+  await expect(late).toHaveCount(2);
+  await late.first().click();
+  await expect(page.getByText("v0.16.600 cannot be asked to update from here.")).toBeVisible();
 });

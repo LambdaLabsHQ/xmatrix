@@ -9,9 +9,11 @@ behind its channel now starts one quiet update check at once (once per release
 per page), and the mark shows only the updater's real state: checking,
 downloading with progress, or downloaded with Restart to update. A downloaded
 update also installs by itself once the person is away (idle five minutes or
-the screen locks); the daemon runs separately, so Agents keep running. A
-component that did not update reads "Not updated" with the reason and the fix
-in place. Betas are judged against the dev channel they follow. Beta Web and
+the screen locks); the daemon runs separately, so Agents keep running. Seeing a
+Machine's CLI behind asks its daemon to check once (per Machine and release, per
+page), and the mark shows what the daemon reports: checking, installing vX, or
+the failure. A component that did not update reads "Not updated" with the
+reason and the fix in place. Betas are judged against the dev channel they follow. Beta Web and
 desktop; recovery is a CI-validated release reverting this change.
 ## Unreleased: Seeing a CLI behind checks for its update at once
 
