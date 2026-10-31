@@ -411,7 +411,7 @@
   {
     "id": "opencode",
     "displayName": "OpenCode",
-    "description": "OpenCode CLI through the generic ACP backend (`opencode acp`, the vendor's native ACP server).",
+    "description": "OpenCode 2 CLI through the generic ACP backend (`opencode acp`, the vendor's native ACP server).",
     "runtime": "opencode",
     "avatarUrl": "/agent-vendors/opencode.svg",
     "defaultArgs": [],
@@ -419,7 +419,7 @@
     "acpArgs": ["acp"],
     "launcherNames": ["opencode", "opencode.exe", "opencode.cmd", "opencode.bat"],
     "classicConfigDirs": ["~/.config/opencode", "~/.local/share/opencode"],
-    "installHint": "npm install -g opencode-ai",
+    "installHint": "npm install -g @opencode/cli",
     "management": {
       "version": {
         "command": "opencode",
@@ -429,45 +429,45 @@
       "install": {
         "unix": {
           "command": "npm",
-          "args": ["install", "-g", "opencode-ai@latest"]
+          "args": ["install", "-g", "@opencode/cli@latest"]
         },
         "windows": {
           "command": "npm",
-          "args": ["install", "-g", "opencode-ai@latest"]
+          "args": ["install", "-g", "@opencode/cli@latest"]
         }
       },
       "update": {
         "unix": {
-          "command": "opencode",
-          "args": ["upgrade"]
+          "command": "sh",
+          "args": ["-c", "case \"$(opencode --version)\" in 'opencode v'*) exec opencode upgrade ;; *) exec opencode upgrade --major ;; esac"]
         },
         "windows": {
-          "command": "opencode",
-          "args": ["upgrade"]
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "if ((opencode --version) -like 'opencode v*') { opencode upgrade } else { opencode upgrade --major }; exit $LASTEXITCODE"]
         }
       },
       "uninstall": {
         "unix": {
-          "command": "opencode",
-          "args": ["uninstall", "--keep-config", "--keep-data", "--force"]
+          "command": "sh",
+          "args": ["-c", "case \"$(opencode --version)\" in 'opencode v'*) exec opencode uninstall --force ;; *) exec opencode uninstall --keep-config --keep-data --force ;; esac"]
         },
         "windows": {
-          "command": "opencode",
-          "args": ["uninstall", "--keep-config", "--keep-data", "--force"]
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "if ((opencode --version) -like 'opencode v*') { opencode uninstall --force } else { opencode uninstall --keep-config --keep-data --force }; exit $LASTEXITCODE"]
         }
       },
       "login": {
         "flow": "device_code",
         "start": {
           "command": "opencode",
-          "args": ["providers", "login", "-p", "openai", "-m", "ChatGPT Pro/Plus (headless)"]
+          "args": ["auth", "login", "openai", "--method", "chatgpt-headless"]
         },
-        "urlRegex": "Go to:\\s*(https://\\S+)",
+        "urlRegex": "(https://auth\\.openai\\.com/\\S+)",
         "codeRegex": "Enter code:\\s*([A-Z0-9]{4}-[A-Z0-9]+)",
         "status": {
           "command": "opencode",
-          "args": ["providers", "list"],
-          "signedInRegex": "\\b[1-9]\\d* credentials?\\b"
+          "args": ["auth", "list"],
+          "signedInRegex": "(?m)\\s(?:stored|environment)\\s*$"
         }
       },
       "autoUpdate": {
@@ -482,11 +482,11 @@
             "disabled": false
           }
         ],
-        "notes": "Package-manager ownership can suppress native updates; autoupdate also accepts notify."
+        "notes": "OpenCode 2 replaces the 1.x line under the same command and data directory; 1.x cannot open a database 2 has migrated, so updates move 1.x to 2 with `upgrade --major`. Package-manager ownership can suppress native updates; autoupdate also accepts notify."
       },
-      "latest": { "kind": "npm", "package": "opencode-ai" },
-      "sources": ["https://opencode.ai/docs/", "https://opencode.ai/docs/config/", "https://opencode.ai/docs/cli/"],
-      "checkedAt": "2026-09-30"
+      "latest": { "kind": "npm", "package": "@opencode/cli" },
+      "sources": ["https://opencode.ai/v2/docs/", "https://opencode.ai/v2/docs/migrate-v1/", "https://opencode.ai/v2/docs/cli/commands"],
+      "checkedAt": "2026-10-31"
     }
   },
   {

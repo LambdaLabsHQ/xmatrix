@@ -7,7 +7,7 @@ test('installer accepts only native-owned package selections on both platforms',
     file: 'npm', args: ['install', '--global', '--no-audit', '--no-fund', '@openai/codex'],
   });
   assert.deepEqual(agentPresetInstallCommand('opencode', 'win32'), {
-    file: 'cmd.exe', args: ['/d', '/s', '/c', 'npm install --global --no-audit --no-fund opencode-ai'],
+    file: 'cmd.exe', args: ['/d', '/s', '/c', 'npm install --global --no-audit --no-fund @opencode/cli'],
   });
   assert.deepEqual(agentPresetInstallCommand('copilot', 'darwin').args.at(-1), '@github/copilot');
   assert.deepEqual(agentPresetInstallCommand('qwen', 'linux').args.at(-1), '@qwen-code/qwen-code');
