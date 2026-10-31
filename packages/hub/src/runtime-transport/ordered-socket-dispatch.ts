@@ -1,5 +1,5 @@
 export { RuntimeAuthorityOperationError } from "./runtime-operation-failure";
-import { RuntimeClientOperationError, runtimeOperationFailure, runtimeOperationMessage, type RuntimeFailureStage, type RuntimeOperationFailure } from "./runtime-operation-failure";
+import { RuntimeClientOperationError, runtimeFailureReported, runtimeOperationFailure, runtimeOperationMessage, type RuntimeFailureStage, type RuntimeOperationFailure } from "./runtime-operation-failure";
 
 /**
  * How long one frame may hold a socket's order before the next frame proceeds.
@@ -156,7 +156,7 @@ export class RuntimeSocketState<Session extends RuntimeTransportSession, Message
     const failure = stage ? { ...origin, originStage: origin.stage, stage } : origin;
     if (stage) {
       const ordinary = error instanceof RuntimeClientOperationError && error.ordinary;
-      (ordinary ? console.warn : console.error)("xMatrix runtime failure stage", failure);
+      (ordinary || runtimeFailureReported(error) ? console.warn : console.error)("xMatrix runtime failure stage", failure);
     }
     this.send(ws, this.errorMessage(requestId, runtimeTransportError(error, fallback), failure));
   }
