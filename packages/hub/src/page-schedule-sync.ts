@@ -226,14 +226,15 @@ export async function syncPageSchedules(env: Env, input: {
         mode: await effectivelyRestricted(env, spaceId, pageId, userId) ? "closed" : "open",
         metadata: { createdBy: "page-automation", fromPageId: pageId }, principal,
       });
-      await command(`${index}:create`, {
+      const refused = await creationRefused(() => command(`${index}:create`, {
         kind: "automation_put", automationId, expectedVersion: 0, channelId, pageId, enabled,
         nextRunAt: once ? line.at ?? new Date(now).toISOString()
           : line.at ?? new Date(now + initialDelayMs(env, intervalMinutes)).toISOString(),
         payload: commandPayload(hubBoundary, parsed, undefined, channelId, principal, userId, automationId),
         automationAction: "create",
-      });
-      changed = true;
+      }));
+      if (refused) problems.push({ source: line.source, problem: refused });
+      else changed = true;
       continue;
     }
 
@@ -255,12 +256,16 @@ export async function syncPageSchedules(env: Env, input: {
     // An Automation runs as its author: a change to what it does, by anyone else, makes it theirs.
     if (redefined && binding.authorityRootUserId !== userId) {
       const replacementId = crypto.randomUUID();
-      await command(`${index}:replace:${row.id}`, {
+      const refused = await creationRefused(() => command(`${index}:replace:${row.id}`, {
         kind: "automation_put", automationId: replacementId, expectedVersion: 0, channelId: row.channelId, pageId,
         enabled, nextRunAt,
         payload: commandPayload(hubBoundary, parsed, undefined, row.channelId, principal, userId, replacementId),
         automationAction: "update", replacesAutomation: { automationId: row.id, expectedVersion: row.version },
-      });
+      }));
+      if (refused) {
+        problems.push({ source: line.source, problem: refused });
+        continue;
+      }
     } else {
       await command(`${index}:put:${row.id}:${row.version}`, {
         kind: "automation_put", automationId: row.id, expectedVersion: row.version, channelId: row.channelId,
@@ -274,6 +279,21 @@ export async function syncPageSchedules(env: Env, input: {
   }
   if (changed) await notifyWorkspaceResource(env, { spaceId, resource: "automations" });
   return { problems };
+}
+
+/**
+ * A Space whose admins keep Automation creation to themselves refuses a new
+ * schedule written by a member or an Agent Run. That line alone does not run,
+ * and says why; the page's other lines still sync.
+ */
+async function creationRefused(create: () => Promise<unknown>): Promise<string | null> {
+  try {
+    await create();
+    return null;
+  } catch (error) {
+    if ((error as { code?: unknown })?.code !== "space_member_automation_creation_disabled") throw error;
+    return "This Space's admins allow only admins to add schedules";
+  }
 }
 
 /**

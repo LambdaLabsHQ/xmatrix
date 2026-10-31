@@ -96,13 +96,35 @@ async function configureAgent(worker, token, key, configuration) {
   });
 }
 
-/** An Automation is made on a page section (docs/design/pages-live-document.md §6). */
-function createAutomation(worker, token, page, name) {
-  return requestJson(worker, token, `/api/spaces/${encodeURIComponent(page.spaceId)}/pages/${
-    encodeURIComponent(page.pageId)}/automations`, {
-    method: "POST",
-    body: JSON.stringify({ name, instruction: `${name} message`, intervalMinutes: 60 }),
-  });
+const scheduleLine = (name) => `- [ ] ${name} message 🔁 every hour`;
+
+/** An Automation is a line of its page (docs/design/pages-live-document.md §6.1): writing it is what makes one. */
+async function writeSchedule(worker, token, page, name) {
+  const path = `/api/spaces/${encodeURIComponent(page.spaceId)}/pages/${encodeURIComponent(page.pageId)}`;
+  const current = (await requestJson(worker, token, path)).payload.page;
+  const written = await requestJson(worker, token, path, { method: "PUT", body: JSON.stringify({
+    baseRevision: current.headRevision, body: `${current.body.trimEnd()}\n\n${scheduleLine(name)}\n` }) });
+  assert.equal(written.response.status, 200, JSON.stringify(written.payload));
+}
+
+async function editPage(worker, token, page, change) {
+  const path = `/api/spaces/${encodeURIComponent(page.spaceId)}/pages/${encodeURIComponent(page.pageId)}`;
+  const current = (await requestJson(worker, token, path)).payload.page;
+  const written = await requestJson(worker, token, path, { method: "PUT", body: JSON.stringify({
+    baseRevision: current.headRevision, body: change(current.body) }) });
+  assert.equal(written.response.status, 200, JSON.stringify(written.payload));
+}
+
+/** The page's Automations once one whose instruction starts with `name` has synced. */
+async function syncedWith(worker, token, page, name) {
+  const path = `/api/spaces/${encodeURIComponent(page.spaceId)}/pages/${encodeURIComponent(page.pageId)}/automations`;
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const { automations } = (await requestJson(worker, token, path)).payload;
+    if (automations?.some((item) => item.source?.includes(`${name} message`))) return automations;
+    assert.ok(Date.now() < deadline, `${name} did not sync: ${JSON.stringify(automations)}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 async function createPage(worker, token, spaceId) {
@@ -138,13 +160,8 @@ test("Space member creation policies default open and restrict every new Human c
   assert.equal(foreignMachine.response.status, 403, JSON.stringify(foreignMachine.payload));
   assert.equal(foreignMachine.payload.code, "registration_owner_required");
 
-  const existingAutomation = await createAutomation(
-    worker,
-    MEMBER_TOKEN,
-    page,
-    "Existing member Automation",
-  );
-  assert.equal(existingAutomation.response.status, 201, JSON.stringify(existingAutomation.payload));
+  await writeSchedule(worker, MEMBER_TOKEN, page, "Existing member Automation");
+  const existingAutomation = (await syncedWith(worker, OWNER_TOKEN, page, "Existing member Automation"))[0];
 
   const restricted = await requestJson(
     worker,
@@ -212,40 +229,15 @@ test("Space member creation policies default open and restrict every new Human c
   const retiredRoutes = await worker.fetch("/api/roles", { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
   assert.equal(retiredRoutes.status, 404, "the Role package routes are retired");
 
-  const memberAutomationDenied = await createAutomation(
-    worker,
-    MEMBER_TOKEN,
-    page,
-    "Blocked member Automation",
-  );
-  assert.equal(memberAutomationDenied.response.status, 403, JSON.stringify(memberAutomationDenied.payload));
-  assert.equal(memberAutomationDenied.payload.code, "space_member_automation_creation_disabled");
+  // In one edit a member changes their existing schedule and adds a new one: the change syncs, the new line
+  // is refused while admins keep creation to themselves.
+  await editPage(worker, MEMBER_TOKEN, page, (body) => `${body.replace("Existing member Automation message",
+    "Existing member Automation updated message").trimEnd()}\n\n${scheduleLine("Blocked member Automation")}\n`);
+  const afterUpdate = await syncedWith(worker, OWNER_TOKEN, page, "Existing member Automation updated");
+  assert.deepEqual(afterUpdate.map((item) => item.id), [existingAutomation.id], "the member's new line is refused");
 
-  const adminAutomation = await createAutomation(
-    worker,
-    ADMIN_TOKEN,
-    page,
-    "Admin Automation",
-  );
-  assert.equal(adminAutomation.response.status, 201, JSON.stringify(adminAutomation.payload));
-
-  const existingAutomationUpdate = await requestJson(
-    worker,
-    MEMBER_TOKEN,
-    `/api/automations/${encodeURIComponent(existingAutomation.payload.automation.id)}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        expectedVersion: existingAutomation.payload.automation.version,
-        name: "Existing member Automation updated",
-      }),
-    },
-  );
-  assert.equal(
-    existingAutomationUpdate.response.status,
-    200,
-    JSON.stringify(existingAutomationUpdate.payload),
-  );
+  await writeSchedule(worker, ADMIN_TOKEN, page, "Admin Automation");
+  await syncedWith(worker, OWNER_TOKEN, page, "Admin Automation");
 
   const agents = await requestJson(worker, MEMBER_TOKEN, `/api/spaces/${encodeURIComponent(spaceId)}/agent-registrations`);
   assert.equal(agents.response.status, 200, JSON.stringify(agents.payload));
@@ -320,12 +312,14 @@ test("Agent principals never inherit the Human admin creation exception", async 
     const { token: runToken } = await launchScenarioRun(worker, scenario);
 
     const page = await createPage(worker, MOCK_TOKEN, spaceId);
-    const automationDenied = await createAutomation(worker, runToken, page, "Agent-made Automation");
-    assert.equal(automationDenied.response.status, 403, JSON.stringify(automationDenied.payload));
-    assert.equal(
-      automationDenied.payload.code,
-      "space_member_automation_creation_disabled",
-    );
+    await writeSchedule(worker, MOCK_TOKEN, page, "Owner-made Automation");
+    const [owned] = await syncedWith(worker, MOCK_TOKEN, page, "Owner-made Automation");
+    // The Run changes its owner's schedule and adds one of its own: only the change syncs.
+    await editPage(worker, runToken, page, (body) => `${body.replace("Owner-made Automation message",
+      "Owner-made Automation changed message").trimEnd()}\n\n${scheduleLine("Agent-made Automation")}\n`);
+    const synced = await syncedWith(worker, MOCK_TOKEN, page, "Owner-made Automation changed");
+    assert.deepEqual(synced.map((item) => item.id), [owned.id],
+      "a Run's new schedule is refused even though its owner is the Space's owner");
 
     // A Run adds an Agent for its owner only as a member may: the owner's admin
     // exception to "admins only" never passes to it.

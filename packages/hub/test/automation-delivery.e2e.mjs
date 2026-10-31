@@ -8,7 +8,6 @@ import {
   createSpaceAndChannel,
   createTask,
   isSpawnOf,
-  json,
   listTasks,
   MOCK_TOKEN,
   randomUUID,
@@ -90,7 +89,8 @@ test("a reminder is delivered once, waits on its author, and stops at the time i
   });
   try {
     const { space } = await createSpaceAndChannel(worker, unique);
-    const at = new Date(Date.now() + 3_000).toISOString();
+    // A line's time is to the second.
+    const at = new Date(Math.ceil((Date.now() + 4_000) / 1_000) * 1_000).toISOString();
     const task = await createTask(worker, { spaceId: space.id, name: "Call the hotel",
       message: { body: `Call Allende Canggu ${unique}` }, at });
     assert.equal(task.once, true);
@@ -188,7 +188,7 @@ test("pausing before due prevents the scheduled message commit", async () => {
       XMATRIX_MOCK_AUTH_EMAIL: "scheduled-message-paused@example.com",
       XMATRIX_MOCK_AUTH_NAME: "Scheduled Message Paused",
       RELAY_AUTOMATION_EXECUTION_ENABLED: "true",
-      XMATRIX_MOCK_SCHEDULE_DELAY_MS: "2000",
+      XMATRIX_MOCK_SCHEDULE_DELAY_MS: "4000",
     },
   });
   try {
@@ -201,18 +201,20 @@ test("pausing before due prevents the scheduled message commit", async () => {
       intervalMinutes: 15,
     });
     const channel = { id: task.channelId };
-    const paused = (await json(await worker.fetch(
+    const pausing = await worker.fetch(
       `/api/automations/${encodeURIComponent(task.id)}/pause`,
       {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ expectedVersion: task.version }),
       },
-    ))).automation;
-    assert.equal(paused.enabled, false);
-    // The 2000ms seed starts when the page reference enables the Automation.
-    // This wait is longer, so a pause that did not stick would still deliver.
-    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    );
+    assert.equal(pausing.status, 200, await pausing.clone().text());
+    // Its `[-]` line pauses it once its revision syncs.
+    await waitForTask(worker, task.id, (candidate) => candidate.enabled === false);
+    // The 4000ms seed starts when its line makes it. This wait is longer, so a
+    // pause that did not stick would still deliver.
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
     assert.equal((await channelHistory(worker, channel.id)).some((message) => message.body === body), false);
     const persisted = (await listTasks(worker)).automations.find((candidate) => candidate.id === task.id);
     assert.equal(persisted.deliveryCount, 0);
@@ -238,7 +240,7 @@ test("one occurrence associates every concurrent invocation with its own persist
       { token: MOCK_TOKEN, spaceId: space.id, name: `multiple-${unique}`, machineId, hostId });
     const summon = `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}"`;
     const task = await createTask(worker, { spaceId: space.id, name: "Concurrent occurrence invocations",
-      message: { body: `${summon} inspect first\n${summon} inspect second` }, intervalMinutes: 15 });
+      message: { body: `${summon} inspect first ${summon} inspect second` }, intervalMinutes: 15 });
     const first = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
       isSpawnOf(message, registration), "first invocation", 20_000);
     const second = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&

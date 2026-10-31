@@ -38,33 +38,50 @@ export async function createSpaceAndChannel(worker, unique, suffix = "main") {
 
 const automationPages = new WeakMap();
 
+/** A schedule line (docs/design/pages-live-document.md §6.1): its instruction, then when it runs. */
+export function scheduleLine(instruction, { intervalMinutes, at }) {
+  const when = at ? `⏳ ${new Date(at).toISOString().replace(/\.\d{3}Z$/u, "Z")}` : `🔁 every ${intervalMinutes} minutes`;
+  return `- [ ] ${instruction} ${when}`;
+}
+
 /**
- * A page's Automation, made through its page (docs/design/pages-live-document.md
- * §6): an Automation belongs to a page section and runs in a conversation of
- * its own. The Space gets one "Automations" page the first time.
+ * A page's Automation, made the only way one is: writing its line on a page.
+ * The Space gets one "Automations" page the first time; this waits until the
+ * line has synced and returns its Automation.
  */
-export async function createTask(worker, { spaceId, token = MOCK_TOKEN, message, expression, ...input }) {
+export async function createTask(worker, { spaceId, token = MOCK_TOKEN, message, expression, intervalMinutes, at,
+  instruction: given }) {
   const headers = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
   const pages = automationPages.get(worker) ?? new Map();
   automationPages.set(worker, pages);
+  const instruction = expression?.text ?? message?.body ?? given;
+  const line = scheduleLine(instruction, { intervalMinutes, at });
+  const base = `/api/spaces/${encodeURIComponent(spaceId)}/pages`;
   if (!pages.has(spaceId)) {
-    const created = await worker.fetch(`/api/spaces/${encodeURIComponent(spaceId)}/pages`, {
-      method: "POST", headers, body: JSON.stringify({ title: "Automations", body: "# Automations\n\n## Schedules\n" }) });
+    const created = await worker.fetch(base, { method: "POST", headers,
+      body: JSON.stringify({ title: "Automations", body: `# Automations\n\n## Schedules\n\n${line}\n` }) });
     assert.equal(created.status, 200, await created.clone().text());
     pages.set(spaceId, (await created.json()).page.pageId);
+  } else {
+    const path = `${base}/${encodeURIComponent(pages.get(spaceId))}`;
+    const current = (await json(await worker.fetch(path, { headers }))).page;
+    const written = await worker.fetch(path, { method: "PUT", headers, body: JSON.stringify({
+      baseRevision: current.headRevision, body: `${current.body.trimEnd()}\n${line}\n` }) });
+    assert.equal(written.status, 200, await written.clone().text());
   }
-  const instruction = expression?.text ?? message?.body ?? input.instruction;
-  const response = await worker.fetch(
-    `/api/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pages.get(spaceId))}/automations`, {
-      method: "POST", headers, body: JSON.stringify({ blockId: "schedules", ...input, instruction }) });
-  assert.equal(response.status, 201, await response.clone().text());
-  return (await json(response)).automation;
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const automation = (await listTasks(worker, spaceId, token)).automations.find((item) => item.source === line);
+    if (automation) return automation;
+    assert.ok(Date.now() < deadline, `the schedule line did not sync: ${line}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
-export async function listTasks(worker, spaceId) {
+export async function listTasks(worker, spaceId, token = MOCK_TOKEN) {
   const query = spaceId ? `?spaceId=${encodeURIComponent(spaceId)}` : "";
   return json(await worker.fetch(`/api/automations${query}`, {
-    headers: { Authorization: `Bearer ${MOCK_TOKEN}` },
+    headers: { Authorization: `Bearer ${token}` },
   }));
 }
 
