@@ -11,7 +11,6 @@ async function execute(outcome) {
   const commands = [];
   const support = await loadCommonJsSourceModule(new URL("../src/connectors/command-support.ts", import.meta.url), name => {
     if (name === "@xmatrix/protocol") return protocol;
-    if (name === "@xmatrix/db") return { ControlError };
     if (name === "../apps") return {
       async appCommand(_env, command, input) {
         commands.push({ command, input });
@@ -25,6 +24,7 @@ async function execute(outcome) {
     if (["../product-message-append", "../private-response",
       "../spaces"].includes(name)) return {};
     if (name === "./agent-caller") return { callingAgentOf: async () => undefined };
+    if (name === "@xmatrix/db") return { ControlError };
     assert.fail(`unexpected import: ${name}`);
   });
   let attempts = 0;
