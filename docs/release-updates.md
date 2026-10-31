@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Seeing a CLI behind checks for its update at once
+
+The daemon updated only when the Hub's release push reached it, and a Machine
+page could not tell a check that ran from one that never arrived. A view that
+shows a Machine's CLI behind now asks its daemon to check now, and the daemon
+reports each step it actually takes (checking, installing a version, current,
+or failed with the reason) for the page to show. The Hub joins requests within
+a minute and touches only that Machine; the daemon folds requests into a
+running check and answers a request during its post-failure hold with that
+failure. Older daemons are answered "unsupported" without being asked. Hub,
+CLI and a Web proxy route, no schema change; recovery is a CI-validated release
+reverting the request route and report.
+
 ## Unreleased: The daemon updates its CLI when a release is published
 
 A machine could run the previous CLI for up to 30 minutes after a release,

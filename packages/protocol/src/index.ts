@@ -424,9 +424,11 @@ export type {
   MachineDaemonSleepCommand,
   MachineDaemonSleepResultReport,
 } from "./connections/machine-daemon.js";
-export { MACHINE_SLEEP_CAPABILITY, MACHINE_CLI_RELEASE_CAPABILITY } from "./connections/machine-daemon.js";
-export type { CliReleaseChannel, MachineDaemonCliReleaseNotice } from "./connections/machine-daemon.js";
-export { cliReleaseChannelOf, cliReleaseSupersedes } from "./cli-release.js";
+export { MACHINE_SLEEP_CAPABILITY, MACHINE_CLI_RELEASE_CAPABILITY, MACHINE_CLI_UPDATE_CHECK_CAPABILITY,
+  MACHINE_CLI_UPDATE_CHECK_COALESCE_MS } from "./connections/machine-daemon.js";
+export type { CliReleaseChannel, MachineDaemonCliReleaseNotice, MachineDaemonCliUpdateCheck, MachineCliUpdateState,
+  MachineCliUpdateStatus, MachineCliUpdateCheckOutcome, MachineCliUpdateCheckResponse } from "./connections/machine-daemon.js";
+export { cliReleaseChannelOf, cliReleaseSupersedes, parseMachineCliUpdateStatus } from "./cli-release.js";
 
 
 export type {

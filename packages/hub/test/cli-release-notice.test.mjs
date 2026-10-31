@@ -112,3 +112,20 @@ test("a pass tells the cells of owners behind each channel and fails loudly on a
     ],
   }), /stable: cell answered 500; dev: cell answered 500/);
 });
+
+test("a requested update check goes only to that Machine's daemon, and only if it can check", async () => {
+  const runtime = transport();
+  const capable = await connect(runtime, "capable", "2.3.1", ["machine_cli_release_v1", "machine_cli_update_check_v1"]);
+  const other = await connect(runtime, "other", "2.3.1", ["machine_cli_release_v1", "machine_cli_update_check_v1"]);
+  const old = await connect(runtime, "old", "2.2.0");
+  const checks = (socket) => socket.sent.filter((frame) => frame.type === "machine_cli_update_check");
+  const route = (machineId) => ({ ownerUserId: "user-1", machineId, hostId: "host-1" });
+
+  assert.equal(await runtime.checkCliUpdate(route("capable"), "cli-update:1"), true);
+  assert.deepEqual(checks(capable), [{ type: "machine_cli_update_check", requestId: "cli-update:1" }]);
+  assert.deepEqual(checks(other), []);
+  // A daemon that never said it checks on request is not asked, nor is a Machine with no live socket.
+  assert.equal(await runtime.checkCliUpdate(route("old"), "cli-update:2"), false);
+  assert.deepEqual(checks(old), []);
+  assert.equal(await runtime.checkCliUpdate(route("missing"), "cli-update:3"), false);
+});

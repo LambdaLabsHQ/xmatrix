@@ -202,6 +202,8 @@ export const HUB_ROUTES = {
   machine_harness_action: (controlId: string) =>
     `/api/machine-daemons/harness-actions/${encodeURIComponent(controlId)}`,
   /** The owner lists and reclaims the git worktrees on one of their Machines. */
+  /** The owner's view saw a Machine's CLI behind: its daemon checks for an update now. */
+  machine_cli_update_check: "/api/machine-daemons/cli-update-check",
   machine_worktree_actions: "/api/machine-daemons/worktree-actions",
   machine_worktree_action: (controlId: string) =>
     `/api/machine-daemons/worktree-actions/${encodeURIComponent(controlId)}`,

@@ -2283,11 +2283,14 @@ async fn run_daemon_connection(
     // CLI release notices; a daemon with self-update turned off asks for none.
     let cli_release_capability =
         (update_authority && !daemon_self_update_disabled()).then_some(CLI_RELEASE_NOTICE_CAPABILITY);
-    if let (Some(capability), Some(capabilities)) = (
-        cli_release_capability,
-        metadata["capabilities"].as_array_mut(),
-    ) {
-        capabilities.push(serde_json::json!(capability));
+    // The same profile takes requests to check for an update now. With
+    // self-update off it still says it can check, so the Hub can tell the
+    // owner exactly why it will not (no release capability beside it).
+    let cli_update_check_capability = update_authority.then_some(CLI_UPDATE_CHECK_CAPABILITY);
+    if let Some(capabilities) = metadata["capabilities"].as_array_mut() {
+        for capability in cli_release_capability.into_iter().chain(cli_update_check_capability) {
+            capabilities.push(serde_json::json!(capability));
+        }
     }
 
     let mut relay = MachineDaemonConnectionClient::new(
@@ -2330,6 +2333,7 @@ async fn run_daemon_connection(
         ]
         .into_iter()
         .chain(cli_release_capability.map(str::to_string))
+        .chain(cli_update_check_capability.map(str::to_string))
         .collect(),
     );
     if let Some(activation) = activation.clone() {
@@ -2413,6 +2417,7 @@ async fn run_daemon_connection(
     // The Hub's CLI release notices wake the self-update task; only the
     // update authority's profile runs one.
     let cli_release_notices = Arc::new(tokio::sync::Notify::new());
+    let cli_update_gate = DaemonCliUpdateGate::default();
     let (_disabled_update_guard, mut self_update_rx) = if update_authority {
         (
             None,
@@ -2423,6 +2428,7 @@ async fn run_daemon_connection(
                 relay.clone(),
                 profile_manager.clone(),
                 cli_release_notices.clone(),
+                cli_update_gate.clone(),
             ),
         )
     } else {
@@ -3003,6 +3009,15 @@ async fn run_daemon_connection(
                         }
                     }
                     MachineDaemonConnectionEvent::RequestNoticeDelivery { .. } => {}
+                    MachineDaemonConnectionEvent::CliUpdateCheck { request_id } => {
+                        if update_authority {
+                            eprintln!(
+                                "{} xMatrix asked for a CLI update check ({request_id}); checking",
+                                "○".cyan().bold()
+                            );
+                            cli_update_gate.request(&cli_release_notices, &relay);
+                        }
+                    }
                     MachineDaemonConnectionEvent::CliRelease { channel, version } => {
                         if update_authority
                             && cli_release_notice_applies(

@@ -7,7 +7,7 @@ import {
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
   MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS,
-  MACHINE_SLEEP_CAPABILITY, stableMachineDaemonId,
+  MACHINE_SLEEP_CAPABILITY, parseMachineCliUpdateStatus, stableMachineDaemonId,
   sha256Hex } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
 
@@ -20,6 +20,7 @@ import {
 import { ensureMachineName, requireMachineName } from "./machine-names.js";
 import { recordRegistrationQuotaProbeResult } from "./agent-registration-quota-probe.js";
 import { recordHarnessActionInventory } from "./machine-harness-actions.js";
+import { recordMachineCliUpdateStatus } from "./machine-cli-release.js";
 import { recordMachineRunTerminalReport, type MachineRunTerminalEvent } from "./machine-run-terminal-reports.js";
 import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
@@ -598,6 +599,13 @@ export class PostgresMachineControlRepository {
             AND (metadata_json->'harnesses'->>'capturedAt' IS NULL
               OR (metadata_json->'harnesses'->>'capturedAt')::timestamptz<$4::timestamptz)`,
           values: [daemonId, connectionEpoch, JSON.stringify(harnesses), harnesses.capturedAt], maxRows: 0 });
+
+        // What the daemon's own CLI update is doing, ordered by when the Hub heard it (one clock
+        // with the Hub-recorded request it follows). An invalid report is dropped like an invalid inventory.
+        const cliUpdate = parseMachineCliUpdateStatus(payload.cliUpdate);
+        if (cliUpdate && connectionEpoch !== undefined) {
+          await recordMachineCliUpdateStatus(tx, { daemonId, connectionEpoch, status: { ...cliUpdate, at } });
+        }
 
         runLifecycleChannelIds = await this.snapshotRoutes(tx, {
           ownerUserId, machineId, hostId, payload, at,
