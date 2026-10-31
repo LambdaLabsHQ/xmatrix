@@ -202,6 +202,52 @@ fn select_harness_daemon<'a>(
         .ok_or_else(|| CliError::Launch("Machine not found".into()))
 }
 
+/// Asks this Machine's daemon, through the Hub, to probe its harnesses again
+/// and report them, and waits for its answer (at most two minutes). This is
+/// how a change an Agent made here reaches the Hub's view of the Machine.
+async fn refresh_own_machine_inventory(
+    hub_url: &str,
+    token: &str,
+    machine_id: &str,
+) -> error::Result<serde_json::Value> {
+    let actions = format!("{}/api/machine-daemons/harness-actions", hub_url.trim_end_matches('/'));
+    let queued: serde_json::Value = xmatrix_cli_core::http::request_json(
+        &actions,
+        "POST",
+        Some(token),
+        Some(serde_json::json!({ "machineId": machine_id, "presetId": "custom", "action": "refresh" })),
+    )
+    .await?;
+    let control = queued
+        .get("controlId")
+        .and_then(|value| value.as_str())
+        .filter(|id| id.starts_with("harness:"))
+        .ok_or_else(|| CliError::Launch("The Hub did not queue the refresh".into()))?
+        .replace(':', "%3A");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let status: serde_json::Value = xmatrix_cli_core::http::request_json(
+            &format!("{actions}/{control}"),
+            "GET",
+            Some(token),
+            None,
+        )
+        .await?;
+        match status.get("status").and_then(|value| value.as_str()) {
+            Some("queued" | "running") => continue,
+            Some("succeeded") => return Ok(status),
+            _ => {
+                return Err(CliError::Launch(format!(
+                    "the refresh ended {}",
+                    status.get("error").and_then(|value| value.as_str()).unwrap_or("without a result")
+                )));
+            }
+        }
+    }
+    Err(CliError::Launch("the Machine did not answer the refresh within two minutes".into()))
+}
+
 /// The owner's Machine a target names: its stable id, or the Machine name
 /// only one of them has (`xmatrix agent list` shows names). A computer's
 /// hostname is never a Machine's identity, so it is not read here.
@@ -251,6 +297,16 @@ async fn cmd_request_sign_in(
         Some(target) => Some(owned_machine_id(&owned_harness_daemons(hub_url, token).await?, target)?),
         None => None,
     };
+    // On its own Machine the Agent may have just installed the harness: have
+    // the daemon look again first, so the card and its check see it.
+    let local_id = xmatrix_cli_core::config::get_or_create_machine_identity(hub_url)
+        .await?
+        .machine_id;
+    if machine_id.as_deref().is_none_or(|id| id == local_id)
+        && let Err(err) = refresh_own_machine_inventory(hub_url, token, &local_id).await
+    {
+        eprintln!("This Machine's daemon did not look at its harnesses again ({err}); asking with its last check.");
+    }
     let mut body = serde_json::json!({
         "harness": harness.trim(),
         // A retry of this request replays its card; another request is a new one.
@@ -316,8 +372,30 @@ async fn request_harness_cli_action(
             return Err(CliError::Auth("An Agent applies harness actions on its own machine only; remote actions require that machine owner's login".into()));
         }
         // The Agent runs as this machine's user: it applies the official
-        // recipe here itself, as its owner would.
-        return apply_harness_locally(preset_id, action).await;
+        // recipe here itself, as its owner would. Then this Machine's daemon
+        // looks again and reports, so routing and sign-in see what changed.
+        if action != "refresh" {
+            apply_harness_locally(preset_id, action).await?;
+        }
+        let token = resolve_auth_token(token_override, hub_url).await?;
+        return match refresh_own_machine_inventory(hub_url, &token, &local_id).await {
+            Ok(status) if action == "refresh" => {
+                println!("{}", status.get("result").unwrap_or(&status));
+                Ok(())
+            }
+            Ok(_) => Ok(()),
+            // A Hub or daemon that cannot take the refresh still has the local probe.
+            Err(err) if action == "refresh" => {
+                eprintln!("This Machine's daemon did not look again ({err}); probing here only.");
+                apply_harness_locally(preset_id, action).await
+            }
+            Err(err) => {
+                eprintln!(
+                    "Done here, but this Machine's daemon did not look again, so xMatrix still shows its last check: {err}"
+                );
+                Ok(())
+            }
+        };
     }
     let token = resolve_auth_token(token_override, hub_url).await?;
     let daemons = owned_harness_daemons(hub_url, &token).await?;

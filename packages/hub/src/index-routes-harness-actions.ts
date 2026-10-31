@@ -12,8 +12,10 @@ import { isMachineField, issueToOnlineDaemon, MACHINE_ACTION_DELIVERY, NO_STORE,
 /**
  * Only a Machine's owner, signed in as a Human, asks it to act on a harness.
  * The request names a preset and an action; the daemon runs the official
- * recipe compiled into it. An Agent Run is refused here: an Agent asks the
- * owner through the request broker on its own Machine instead.
+ * recipe compiled into it. An Agent Run applies recipes on its own Machine
+ * itself; here it may only ask its own Machine to look at its harnesses again
+ * (`refresh`, a read-only probe the owner sees anyway), so what it changed
+ * there reaches the Hub's view of that Machine.
  */
 export interface HarnessActionPort extends MachineActionDelivery {
   authenticate: typeof requireAuth;
@@ -36,8 +38,7 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
   const port = { ...HARNESS_ACTION_PORT, ...dependencies };
   app.post(HUB_ROUTES.machine_harness_actions, (c) => privateRouteResponse(c, async () => {
     const authenticated = await port.authenticate(c.req.raw, c.env);
-    if (authenticated.agentRun) return refuse("Harness actions require the Machine's owner", 403);
-    const user = requireHumanAuth(authenticated);
+    const run = authenticated.agentRun;
     const body = await readActionBody(c.req.raw, 4_096, "Harness action");
     if (body instanceof Response) return body;
     const machineId = isMachineField(body.machineId) ? body.machineId : undefined;
@@ -48,6 +49,10 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
     // Only `login_finish` carries the code the harness's sign-in page showed the owner.
     const code = body.code === undefined ? undefined
       : action === "login_finish" && validHarnessLoginCode(body.code) ? body.code.trim() : null;
+    if (run && !(action === "refresh" && body.machineId === run.machineId)) {
+      return refuse("Harness actions require the Machine's owner", 403);
+    }
+    const user = run ? { id: run.ownerUserId } : requireHumanAuth(authenticated);
     if (!machineId || hostId === null || !presetId || !action || code === null) {
       return refuse("Invalid harness action request", 400);
     }
