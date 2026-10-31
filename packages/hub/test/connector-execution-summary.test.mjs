@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as protocol from "@xmatrix/protocol";
 import { appRequestFields } from "../../db/src/app-control.ts";
+import { ControlError } from "../../db/src/control-error.ts";
 import { SENTRY_ACTIONS } from "../src/connectors/actions/sentry.ts";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
@@ -10,6 +11,7 @@ async function execute(outcome) {
   const commands = [];
   const support = await loadCommonJsSourceModule(new URL("../src/connectors/command-support.ts", import.meta.url), name => {
     if (name === "@xmatrix/protocol") return protocol;
+    if (name === "@xmatrix/db") return { ControlError };
     if (name === "../apps") return {
       async appCommand(_env, command, input) {
         commands.push({ command, input });

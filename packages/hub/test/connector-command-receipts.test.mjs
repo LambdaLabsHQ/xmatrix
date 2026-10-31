@@ -10,6 +10,7 @@ import { withProviderResponses } from "./support/fetch-responses.mjs";
 import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 import { AppControlError } from "../../db/src/app-control.ts";
+import { ControlError } from "../../db/src/control-error.ts";
 import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
 
 const mailbox = { address: "mailbox@example.test", account: "ca_mailbox", owner: "user:owner" };
@@ -23,6 +24,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
   const persisted = [], receipts = [];
   const support = await loadCommonJsSourceModule(new URL("../src/connectors/command-support.ts", import.meta.url), name => {
     if (name === "@xmatrix/protocol") return protocol;
+    if (name === "@xmatrix/db") return { ControlError };
     if (name === "../apps") return {
       appCommand: async (_env, command, input) => { persisted.push({ command, input }); },
       usableAppConnections: async () => [{ id: "space:gmail", providerId: "gmail", status: "configured" }],

@@ -1,3 +1,4 @@
+import { ControlError } from "@xmatrix/db";
 import { connectorReceiptBody, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest, AppConnectorRemedy, ConnectorResultVisibility } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
@@ -13,10 +14,16 @@ export function record(value: unknown): Record<string, unknown> {
   return plainRecord(value) ?? {};
 }
 
+/** A refused Hub write keeps the Hub's own error contract: a lock timeout or
+ * outage the message authority answered as a retryable 503 stays one for the
+ * caller, instead of becoming an unexplained 500 it reports a second time. */
 async function failure(operation: string, response: Response): Promise<Error> {
   const payload = record(await response.json().catch(() => ({})));
   const detail = typeof payload.error === "string" && payload.error.trim() ? `: ${payload.error.trim()}` : "";
-  return new Error(`${operation} failed (${response.status})${detail}`);
+  const message = `${operation} failed (${response.status})${detail}`;
+  return typeof payload.code === "string" && typeof payload.retryable === "boolean"
+    ? new ControlError(payload.code, response.status, message, payload.retryable)
+    : new Error(message);
 }
 
 export interface CommandScope {
