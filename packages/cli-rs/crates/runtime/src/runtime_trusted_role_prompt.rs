@@ -13,9 +13,9 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::{
-    CliError, GoalCommand, decode_channel_image_attachment_data_url, env_flag, error,
-    goal_resume_turn_payload, protocol, use_codex_app_backend, use_grok_app_backend,
-    use_zcode_app_backend, uses_claude_code_runtime,
+    AcpVendorConfig, CliError, GoalCommand, decode_channel_image_attachment_data_url, env_flag,
+    error, goal_resume_turn_payload, protocol, use_acp_backend, use_codex_app_backend,
+    use_grok_app_backend, use_zcode_app_backend, uses_claude_code_runtime,
 };
 
 pub(crate) fn claude_stream_extra_args(
@@ -86,9 +86,10 @@ pub(crate) fn trusted_role_is_active() -> bool {
 }
 
 /// Only trusted registration instructions and the official Channel contract
-/// enter Grok's native system channel. Never accept a composed user bootstrap:
-/// it may already contain Channel history, names, task text and attachments.
-pub(crate) fn grok_acp_trusted_rules(channel_id: Option<&str>) -> Option<String> {
+/// enter an ACP vendor's native system channel (Grok's `_meta.rules`,
+/// Antigravity's system prompt). Never accept a composed user bootstrap: it
+/// may already contain Channel history, names, task text and attachments.
+pub(crate) fn acp_trusted_rules(channel_id: Option<&str>) -> Option<String> {
     let mut rules = trusted_role_system_prompt_from_env()
         .into_iter()
         .collect::<Vec<_>>();
@@ -123,6 +124,9 @@ pub(crate) fn selected_runtime_supports_trusted_role(
     }
     if use_codex_app_backend(tool) || use_grok_app_backend(tool) {
         return true;
+    }
+    if use_acp_backend() {
+        return AcpVendorConfig::generic(tool).trusted_rules.is_some();
     }
     env_flag("XMATRIX_HEADLESS")
         && (std::env::var("XMATRIX_AGENT_BACKEND")
