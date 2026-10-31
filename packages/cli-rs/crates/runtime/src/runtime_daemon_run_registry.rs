@@ -1217,6 +1217,7 @@ async fn send_daemon_run_snapshot(
             captured_at: None,
             machine_resources: resources,
             harness_inventory: None,
+            cli_update: None,
             runs,
         });
         (run_count, report)
@@ -1288,6 +1289,7 @@ impl DaemonRunProgressReporter {
             captured_at: None,
             machine_resources: resources,
             harness_inventory: None,
+            cli_update: None,
             runs: changed.clone(),
         });
         if let Err(err) = report {
