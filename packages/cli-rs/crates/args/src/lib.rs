@@ -728,7 +728,7 @@ mod tests {
             "sign-in",
             "agy",
             "--machine",
-            "srv2006562",
+            "build-box",
             "--reason",
             "nightly report",
         ])
@@ -746,7 +746,7 @@ mod tests {
             panic!("expected request sign-in command");
         };
         assert_eq!(harness, "agy");
-        assert_eq!(machine.as_deref(), Some("srv2006562"));
+        assert_eq!(machine.as_deref(), Some("build-box"));
         assert_eq!(reason.as_deref(), Some("nightly report"));
         assert!(!json);
         assert!(Cli::try_parse_from(["xmatrix", "request", "sign-in"]).is_err());
