@@ -202,6 +202,94 @@ fn select_harness_daemon<'a>(
         .ok_or_else(|| CliError::Launch("Machine not found".into()))
 }
 
+/// The owner's Machine a target names: its stable id, or the Machine name
+/// only one of them has (`xmatrix agent list` shows names). A computer's
+/// hostname is never a Machine's identity, so it is not read here.
+fn owned_machine_id(daemons: &[serde_json::Value], target: &str) -> error::Result<String> {
+    let id = |daemon: &serde_json::Value| {
+        daemon
+            .get("machineId")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    };
+    let named = |key: &str| {
+        daemons
+            .iter()
+            .filter(|daemon| {
+                daemon
+                    .get(key)
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|name| name.trim().eq_ignore_ascii_case(target.trim()))
+            })
+            .filter_map(id)
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let by_id = named("machineId");
+    let found = if by_id.is_empty() { named("machineName") } else { by_id };
+    match found.len() {
+        1 => Ok(found.into_iter().next().unwrap()),
+        0 => Err(CliError::Launch(format!(
+            "No Machine of this Agent's owner is named {target}; `xmatrix agent list` lists them"
+        ))),
+        _ => Err(CliError::Launch(format!(
+            "More than one Machine is named {target}; use its Machine ID"
+        ))),
+    }
+}
+
+/// Asks a Machine's owner, on a card in this Agent's Channel, to sign a
+/// harness in there. Only the owner signs in; this returns once it is posted.
+async fn cmd_request_sign_in(
+    hub_url: &str,
+    token: &str,
+    harness: &str,
+    machine: Option<&str>,
+    reason: Option<String>,
+    json: bool,
+) -> error::Result<()> {
+    let machine_id = match machine {
+        Some(target) => Some(owned_machine_id(&owned_harness_daemons(hub_url, token).await?, target)?),
+        None => None,
+    };
+    let mut body = serde_json::json!({
+        "harness": harness.trim(),
+        // A retry of this request replays its card; another request is a new one.
+        "requestId": uuid::Uuid::new_v4().to_string(),
+    });
+    if let Some(machine_id) = machine_id {
+        body["machineId"] = machine_id.into();
+    }
+    if let Some(reason) = reason.map(|reason| reason.trim().to_string()).filter(|reason| !reason.is_empty()) {
+        body["reason"] = reason.into();
+    }
+    let posted: serde_json::Value = xmatrix_cli_core::http::request_json(
+        &xmatrix_cli_core::protocol::with_route(
+            hub_url,
+            xmatrix_cli_core::protocol::HubRoutes::HARNESS_SIGN_IN_REQUESTS,
+        ),
+        "POST",
+        Some(token),
+        Some(body),
+    )
+    .await?;
+    if json {
+        println!("{posted}");
+        return Ok(());
+    }
+    let program = posted["program"].as_str().unwrap_or(harness);
+    let machine = posted["machineName"].as_str().unwrap_or("its Machine");
+    let how = if posted["signInHere"].as_bool() == Some(true) {
+        "they sign in on the card"
+    } else {
+        "the card says what to set up there"
+    };
+    println!(
+        "Asked the owner of {machine}, on a card in this Channel, to sign in {program}: {how}. \
+         `xmatrix harness list --local` on that Machine, or `xmatrix agent list`, shows when it can take work."
+    );
+    Ok(())
+}
+
 async fn request_harness_cli_action(
     hub_url: &str,
     token_override: Option<&str>,
@@ -320,6 +408,22 @@ mod harness_cli_tests {
             "a"
         );
     }
+    #[test]
+    fn a_sign_in_request_names_a_machine_by_id_or_by_its_one_machine_name() {
+        let daemons = vec![
+            serde_json::json!({"machineId":"m1","machineName":"srv","hostName":"box","status":"online"}),
+            serde_json::json!({"machineId":"m1","machineName":"srv","status":"offline"}),
+            serde_json::json!({"machineId":"m2","machineName":"Laptop","hostName":"srv","status":"online"}),
+            serde_json::json!({"machineId":"m3","machineName":"laptop","status":"offline"}),
+        ];
+        assert_eq!(owned_machine_id(&daemons, "m2").unwrap(), "m2");
+        // Two records of one Machine are still one Machine; a hostname is not its name.
+        assert_eq!(owned_machine_id(&daemons, "SRV").unwrap(), "m1");
+        assert!(owned_machine_id(&daemons, "box").is_err());
+        assert!(owned_machine_id(&daemons, "laptop").is_err(), "two Machines share the name");
+        assert!(owned_machine_id(&daemons, "missing").is_err());
+    }
+
     #[test]
     fn online_connection_wins_over_old_record_of_same_machine() {
         let daemons = vec![

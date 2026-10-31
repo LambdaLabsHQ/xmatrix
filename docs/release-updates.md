@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Codex on credits no longer shows LIMIT
+
+ChatGPT now reports a Codex account as not allowed as soon as its plan week is
+used up, even while credits keep serving it. Such Instances showed LIMIT and
+routing could treat them as refusing work. The CLI now records the account as
+serving while it has credits and no overage or spend limit is reached, so the
+Agents list shows credits and routing keeps using it. CLI only, no API or
+schema change; recovery is a CI-validated CLI release reverting the check.
+
 ## Unreleased: Every client names a file's type from one table
 
 Which type a file extension names, which extension a saved copy gets and

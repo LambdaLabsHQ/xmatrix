@@ -134,8 +134,8 @@ test("a remote sign-in carries a pasted code only on login_finish and answers wi
 
 test("sign-in is offered exactly for presets with an official headless sign-in", () => {
   const signIn = AGENT_PRESETS.filter(preset => harnessActionAvailable(preset.management, "login_start")).map(preset => preset.id);
-  assert.deepEqual(signIn.sort(), ["claude", "cline", "codex", "copilot", "cursor", "devin", "grok", "hermes", "jcode", "kilo",
-    "kimi", "kiro", "omp", "opencode", "qoder", "zcode"]);
+  assert.deepEqual(signIn.sort(), ["antigravity", "claude", "cline", "codex", "copilot", "cursor", "devin", "grok", "hermes",
+    "jcode", "kilo", "kimi", "kiro", "omp", "opencode", "qoder", "zcode"]);
   for (const preset of AGENT_PRESETS) {
     const login = preset.management.login;
     if (!login) continue;
@@ -162,6 +162,15 @@ test("a Cursor CLI from before its ACP mode is too old, and is named as the prog
   // Dated builds compare by date, not by their hash.
   assert.equal(compareHarnessVersions("2026.01.01-abc", "2026.01.01"), 0);
   assert.equal(compareHarnessVersions("2.1.302", "2.1.4"), 1);
+});
+
+test("an Antigravity CLI from before `agy acp` is too old", () => {
+  const antigravity = AGENT_PRESETS.find((preset) => preset.id === "antigravity").management;
+  // 1.4.10 answers `agy help acp` with "unknown subcommand: acp"; 1.4.11 serves ACP.
+  assert.deepEqual(harnessTooOld(antigravity, "1.4.10"),
+    { program: "Antigravity CLI", version: "1.4.10", minimumVersion: "1.4.11" });
+  assert.equal(harnessTooOld(antigravity, "1.4.11"), undefined);
+  assert.equal(harnessTooOld(antigravity, "1.10.0"), undefined);
 });
 
 test("every minimum version names the program it is a version of", () => {

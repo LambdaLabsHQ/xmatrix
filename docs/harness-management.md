@@ -42,10 +42,14 @@ the `pi-acp` launcher and probes `pi`; Vibe checks `vibe-acp` and probes `vibe`.
 Cursor recognizes current `agent` and legacy `cursor-agent` aliases without
 changing existing registered launch contracts. Cursor inventory and update recipes
 prefer the unambiguous `cursor-agent` launcher. A generic `agent` is accepted
-only beside that launcher, never from an unrelated vendor directory; native
-Cursor install locations are searched even before a daemon inherits updated PATH.
+only beside that launcher, never from an unrelated vendor directory.
 The official [Cursor installer](https://cursor.com/install?win32=true) installs
 both names and publishes timestamped versions such as `2026.09.28-64d2043`.
+A native installer's own directory outside the common user bins (Cursor's
+`cursor-agent` data directory; Antigravity's `%LOCALAPPDATA%\agy\bin` on
+Windows) is searched by inventory, recipes and launches, so a daemon started
+before the installer changed the user PATH still finds the launcher. A recipe
+that runs the harness's own launcher (`agy update`) runs the one inventory found.
 
 After daemon readiness, one background task probes every preset serially, then
 refreshes every six hours. Each version process has a five-second deadline,
@@ -271,18 +275,24 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
   `failed`. `login_cancel` ends the process tree. Sign-in never takes the
   preset's install/update lock and its argv only ever comes from the compiled
   registry.
+- **From an Agent.** `xmatrix request sign-in <harness> [--machine]` posts the
+  same signed-out card in the Agent's Channel; its owner signs in there for any
+  harness on any of their Machines, without an Agent for it in that Space. A
+  harness with no remote sign-in gets the card's set-up text and Check again.
 - **State.** Installed presets with a status command report `login`
   (`signed_in`, `signed_out`, `unknown`) on their inventory item; each sign-in
   action re-probes the preset.
 
-Presets with a sign-in today: codex, claude, cline, copilot, cursor, devin
-(in a pseudo-terminal), grok, hermes, jcode, kilo, kimi, kiro, omp (paste the
-code or the address the browser ends on), opencode, qoder and zcode. gemini,
+Presets with a sign-in today: antigravity (in a pseudo-terminal; the CLI gives
+up 60 seconds after it prints the link, so paste the code within a minute),
+codex, claude, cline, copilot, cursor, devin (in a pseudo-terminal), grok,
+hermes, jcode, kilo, kimi, kiro, omp (paste the code or the address the browser
+ends on), opencode, qoder and zcode. gemini,
 goose and openclaw sign in only inside an interactive terminal; pi, vibe, junie
 and qwen have no official headless sign-in (API keys or their TUI). auggie and
 commandcode accept only a localhost browser callback (commandcode also takes a
 pasted API key), dimcode prints no link even in a terminal, and codebuddy,
-droid, prime, trae, antigravity, autohand, amp, reasonix and deepseek have no CLI sign-in
+droid, prime, trae, autohand, amp, reasonix and deepseek have no CLI sign-in
 (in-app, ACP `authenticate`, API keys or enterprise tokens; DeepSeek Harness
 reads `DEEPSEEK_API_KEY`).
 

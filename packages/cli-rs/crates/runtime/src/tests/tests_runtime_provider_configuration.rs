@@ -493,11 +493,11 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             ".config/trae_cli",
         ),
         (
-            "agy_acp_server.par",
+            "agy",
             "antigravity",
             "Google Antigravity",
-            &["--uid="][..],
-            ".gemini",
+            &["acp", "--dangerously-skip-permissions"][..],
+            ".gemini/antigravity-cli",
         ),
         (
             "autohand-acp",

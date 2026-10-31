@@ -24,6 +24,7 @@ test("an Agent Run reaches the Human collaboration routes by default", () => {
   assert.equal(allowed("GET", "/api/spaces/space-2/cross-space-read-grants/csr_1"), true, "poll that answer");
   assert.equal(allowed("GET", "/api/machine-daemons"), true, "read its owner's Machines");
   assert.equal(allowed("GET", "/api/machine-daemons/harness-actions/harness:1"), true, "follow a harness action");
+  assert.equal(allowed("POST", "/api/harness-sign-in-requests"), true, "ask its owner to sign a harness in");
 });
 
 test("an Agent Run arranges pages as its owner may", () => {

@@ -208,7 +208,7 @@ export type {
 } from "./agent-launch.js";
 export {
   DECISION_ANSWER_ISSUES, daemonOfflineRefusal, launchRefusal, parameterFailureCodeFromDecisionRecord, parseDecisionAnswerFailure, parseHarnessTooOld,
-  HARNESS_SIGNED_OUT_NOTICE_KIND, harnessSignedOutNoticeOf, harnessSignedOutSentence, parseHarnessSignedOut,
+  HARNESS_SIGNED_OUT_NOTICE_KIND, harnessSignedOutNoticeOf, harnessSignedOutSentence, harnessSignInRequestNotice, parseHarnessSignedOut,
   MACHINE_OFFLINE_NOTICE_KIND, machineOfflineNoticeOf, parseOfflineMachines, parseMachineAgents, type MachineAgents,
   PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage, rejectionCause,
   REGISTRATION_PREPARATION_REJECTION_CODES, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS,
