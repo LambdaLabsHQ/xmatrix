@@ -1,15 +1,18 @@
 # Release Updates
 
-## Unreleased: Update on a machine's version says how, in place
+## Unreleased: A machine's versions show what their update is really doing
 
-A machine's daemon, CLI or App version marked Update was only a label: nothing
-said how to update it. The mark now opens, in place, how that component
-updates: the CLI and daemon install their release by themselves, with
-`xmatrix update` to copy for an update now; this machine's App offers its
-updater's own step (Restart to update once downloaded, otherwise Check for
-updates). A beta build is judged against the dev channel it follows, by its
-beta number, instead of being marked outdated against stable. Beta Web only;
-recovery is a CI-validated release reverting the Web change.
+A machine with automatic updates on still showed a yellow Update beside its
+versions, and the desktop App installed a downloaded update only when someone
+quit it, so a Mac left open stayed on an old build. Seeing this machine's App
+behind its channel now starts one quiet update check at once (once per release
+per page), and the mark shows only the updater's real state: checking,
+downloading with progress, or downloaded with Restart to update. A downloaded
+update also installs by itself once the person is away (idle five minutes or
+the screen locks); the daemon runs separately, so Agents keep running. A
+component that did not update reads "Not updated" with the reason and the fix
+in place. Betas are judged against the dev channel they follow. Beta Web and
+desktop; recovery is a CI-validated release reverting this change.
 
 ## Unreleased: Approved connector actions explain stale approval failures
 

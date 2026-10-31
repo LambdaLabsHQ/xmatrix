@@ -44,7 +44,8 @@ export async function GET(request: Request) {
     const devEntries = await Promise.all(
       DEV_COMPONENTS.map(async (component) => {
         try {
-          return [component, { version: releaseVersionFromTag((await fetchDevRelease(component)).tag_name) }] as const;
+          const release = await fetchDevRelease(component);
+          return [component, { version: releaseVersionFromTag(release.tag_name), publishedAt: release.publishedAt }] as const;
         } catch {
           return null;
         }

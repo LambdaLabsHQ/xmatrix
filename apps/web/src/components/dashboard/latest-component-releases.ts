@@ -11,7 +11,8 @@ import { xmatrixApiRequest } from "@/lib/query/api-client";
    channel, not the web/hub version this page was built at. */
 export type ReleaseComponent = "cli" | "desktop";
 
-type ComponentReleases = Partial<Record<ReleaseComponent, { version?: unknown }>>;
+type ComponentReleases = Partial<Record<ReleaseComponent, { version?: unknown; publishedAt?: unknown }>>;
+export type LatestRelease = { version: string; publishedAt?: string };
 type LatestReleasesResponse = { releases?: ComponentReleases; devReleases?: ComponentReleases };
 
 // A page left open picks up a release published since once the answer is this old.
@@ -22,13 +23,18 @@ function isBetaVersion(version: string): boolean {
 }
 
 /** The newest release of `component` on the channel a build of `version` follows. */
-export function useLatestComponentRelease(component: ReleaseComponent, version?: string): string | undefined {
+export function useLatestComponentRelease(component: ReleaseComponent, version?: string, enabled = true): LatestRelease | undefined {
   const latest = useQuery({
+    enabled,
     queryKey: ["releases", "latest"],
     staleTime: LATEST_RELEASES_STALE_MS,
     queryFn: ({ signal }) => xmatrixApiRequest<LatestReleasesResponse>({ url: "/api/releases/latest", signal }),
   });
   const channel = version && isBetaVersion(version) ? latest.data?.devReleases : latest.data?.releases;
-  const newest = channel?.[component]?.version;
-  return typeof newest === "string" && newest ? newest : undefined;
+  const newest = channel?.[component];
+  if (typeof newest?.version !== "string" || !newest.version) return undefined;
+  return {
+    version: newest.version,
+    ...(typeof newest.publishedAt === "string" ? { publishedAt: newest.publishedAt } : {}),
+  };
 }

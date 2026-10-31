@@ -1,54 +1,82 @@
 "use client";
 
-import { CircleArrowUp, Loader2, RefreshCw } from "lucide-react";
-import type { DesktopUpdateStatus } from "@/lib/desktop/bridge";
+import { useEffect } from "react";
+import { CircleArrowUp, RefreshCw } from "lucide-react";
+import { getDesktopBridge, type DesktopUpdateStatus } from "@/lib/desktop/bridge";
 import { actionClass } from "@/components/ui/action-tone";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { cn } from "@/lib/utils";
+import { NotUpdated, VersionNote } from "./workspace-admin-views";
+import { formatVersion } from "./workspace-shell-formatters";
 
-/* This machine's App, updated where its version is marked: the App's own
-   updater downloads in the background and installs on restart, so the step
-   left for the person is the restart (or a check, when nothing is fetched). */
-export function DesktopAppUpdateNow({ status, checking, onCheck, onInstall }: {
+/* Releases this page already asked the App to check for: one quiet check per
+   release per page, however many places show the version. */
+const checkedReleases = new Set<string>();
+
+/* This machine's App behind its channel's newest release. Seeing that starts
+   one update check at once; after that the mark shows only what the App's
+   updater reports, so "Downloading" is a download really running. */
+export function DesktopAppBehind({ latestVersion, status, checking, onCheck, onInstall }: {
+  latestVersion: string;
   /** The updater's state; null on an App build that does not stream it. */
   status: DesktopUpdateStatus | null;
   checking: boolean;
   onCheck: () => void;
   onInstall: () => void;
 }) {
+  // Absent on App builds from before quiet checks.
+  const checkQuietly = getDesktopBridge()?.checkForUpdatesQuietly;
+  const resting = status?.enabled === true && (status.state === "idle" || status.state === "not-available");
+  const asked = checkedReleases.has(latestVersion);
+  useEffect(() => {
+    if (!resting || !checkQuietly || checkedReleases.has(latestVersion)) return;
+    checkedReleases.add(latestVersion);
+    void checkQuietly();
+  }, [resting, checkQuietly, latestVersion]);
+
+  const next = formatVersion(status?.version || latestVersion);
   const button = actionClass({ variant: "secondary", size: "sm" });
+  const checkButton = (
+    <span className="mt-1 block">
+      <button type="button" className={button} onClick={onCheck} disabled={checking}>
+        <AnimatedIcon icon={RefreshCw} className={cn("size-4", checking && "animate-spin")} />
+        {checking ? "Checking…" : "Check for updates"}
+      </button>
+    </span>
+  );
   if (!status) {
-    return <>This App build installs updates when it restarts. Quit and reopen xMatrix to update it.</>;
+    return <NotUpdated>This App build installs updates only when it restarts. Quit and reopen xMatrix to install {next}.</NotUpdated>;
   }
-  if (!status.enabled) {
-    return <>Updates are turned off for this App build. Download the latest xMatrix from xmatrix.sh/download.</>;
+  if (!status.enabled || status.state === "disabled") {
+    return <NotUpdated label="Update">
+      Automatic updates are off for this App{status.message ? `: ${status.message}` : "."} Download {next} from xmatrix.sh/download.
+    </NotUpdated>;
   }
-  const next = status.version ? ` v${status.version.replace(/^v/u, "")}` : "";
   switch (status.state) {
-    case "downloaded":
-      return <button type="button" className={button} onClick={onInstall}>
-        <CircleArrowUp className="size-4" />Restart to update to{next || " the new version"}
-      </button>;
+    case "checking":
+      return <VersionNote busy>Checking for updates</VersionNote>;
     case "available":
-      return <button type="button" className={button} onClick={onInstall}>
-        <CircleArrowUp className="size-4" />Download{next}
-      </button>;
-    case "installing":
-      return <span className="inline-flex items-center gap-1.5"><AnimatedIcon icon={Loader2} className="size-4 animate-spin" />Restarting…</span>;
     case "downloading":
-      return <span className="inline-flex items-center gap-1.5">
-        <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />
-        Downloading{next}{status.percent === undefined ? "…" : ` · ${Math.round(status.percent)}%`}
-      </span>;
-    default: {
-      const busy = checking || status.state === "checking";
-      return <span className="inline-flex flex-wrap items-center gap-2">
-        <button type="button" className={button} onClick={onCheck} disabled={busy}>
-          <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy && "animate-spin")} />
-          {busy ? "Checking…" : "Check for updates"}
+      return <VersionNote busy>
+        Downloading {next}{status.percent === undefined ? "" : ` · ${Math.round(status.percent)}%`}
+      </VersionNote>;
+    case "downloaded":
+      return <>
+        <VersionNote>{next} downloaded</VersionNote>
+        <button type="button" onClick={onInstall}
+          className="inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-xs font-semibold text-foreground hover:bg-muted">
+          <CircleArrowUp className="size-3.5" />Restart to update
         </button>
-        {status.state === "error" && status.message && <span role="alert" className="text-destructive">{status.message}</span>}
-      </span>;
-    }
+      </>;
+    case "installing":
+      return <VersionNote busy>Restarting into {next}</VersionNote>;
+    case "error":
+      return <NotUpdated>{status.message || "The App could not fetch its update."}{checkButton}</NotUpdated>;
+    default:
+      // Resting: the check this view starts is a moment away, unless it already ran.
+      if (checkQuietly && !asked) return <VersionNote busy>Checking for updates</VersionNote>;
+      return <NotUpdated>
+        {checkQuietly ? `The App's update feed does not offer ${next} yet.` : `This App has not fetched ${next} yet.`}{checkButton}
+      </NotUpdated>;
   }
 }

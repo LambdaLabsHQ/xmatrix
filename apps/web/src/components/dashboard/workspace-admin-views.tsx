@@ -7,7 +7,7 @@ import type {
 } from "./workspace-shell-agent-config-types";
 
 import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
-import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
+import { useLatestComponentRelease, type LatestRelease, type ReleaseComponent } from "./latest-component-releases";
 import { releaseNotesPath } from "@xmatrix/protocol";
 
 import {
@@ -53,7 +53,10 @@ import {
   AlertTriangle,
   Check,
   Copy,
+  Loader2,
 } from "lucide-react";
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { relativeTime } from "./workspace-shell-presence";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { sameValue } from "../../lib/same-value";
 
@@ -189,62 +192,92 @@ export function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** A component's version, marked when it is older than the newest release of
-    the channel it follows. The mark opens, in place, how that component updates. */
-export function MachineVersionValue({ version, component, className, update }: {
+/* A component behind the newest release of its channel shows only what is
+   really happening: the live state its updater reports, or, where nothing
+   reports one, how long ago that release came out until it is plainly late. */
+const SELF_UPDATE_GRACE_MS: Record<ReleaseComponent, number> = {
+  cli: 15 * 60_000,
+  desktop: 24 * 60 * 60_000,
+};
+
+/** A component's version and, when it is behind its channel, what its update is doing. */
+export function MachineVersionValue({ version, component, className, behind }: {
   version?: string;
   component: ReleaseComponent;
   className?: string;
-  /** The way to update it from here (this machine's App), shown in place of the instructions. */
-  update?: React.ReactNode;
+  /** The live update state where an updater reports one (this machine's App). */
+  behind?: (latestVersion: string) => React.ReactNode;
 }) {
-  const latestVersion = useLatestComponentRelease(component, version);
-  const status = releaseVersionStatus(version, latestVersion);
-  const [open, setOpen] = useState(false);
-  const outdated = status === "outdated";
+  const latest = useLatestComponentRelease(component, version);
+  const outdated = releaseVersionStatus(version, latest?.version) === "outdated" && latest;
   return (
     <span className={cn("flex min-h-5 min-w-0 flex-wrap items-center gap-1.5", className)}>
       <span className="min-w-0 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
         {version ? formatVersion(version) : "unknown"}
       </span>
-      {outdated && (
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-          className={statusChipClass("attention", "inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 px-1.5")}
-          title={`${formatVersion(latestVersion!)} is available.`}
-        >
-          <AlertTriangle className="size-3.5" />
-          Update
-        </button>
-      )}
-      <ReleaseNotesLink version={outdated ? latestVersion : version} />
-      {outdated && open && (
-        <span className="basis-full text-xs leading-5 text-muted-foreground">
-          {update ?? <ComponentUpdateSteps component={component} latestVersion={latestVersion!} />}
-        </span>
-      )}
+      {outdated && (behind ? behind(latest.version) : <ReleaseAge component={component} latest={latest} />)}
+      <ReleaseNotesLink version={outdated ? latest.version : version} />
     </span>
+  );
+}
+
+function ReleaseAge({ component, latest }: { component: ReleaseComponent; latest: LatestRelease }) {
+  const published = latest.publishedAt ? Date.parse(latest.publishedAt) : Number.NaN;
+  const next = formatVersion(latest.version);
+  if (Number.isFinite(published) && Date.now() - published <= SELF_UPDATE_GRACE_MS[component]) {
+    return <VersionNote>{next} released {relativeTime(latest.publishedAt!)}</VersionNote>;
+  }
+  return (
+    <NotUpdated>
+      {next} was released {latest.publishedAt ? relativeTime(latest.publishedAt) : "earlier"} and has not installed here.{" "}
+      <ComponentUpdateSteps component={component} />
+    </NotUpdated>
+  );
+}
+
+/** A plain note beside a version: what its update is doing right now. */
+export function VersionNote({ busy, children }: { busy?: boolean; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex h-5 shrink-0 items-center gap-1 text-xs text-muted-foreground">
+      {busy && <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />}
+      {children}
+    </span>
+  );
+}
+
+/** A version that did not update: the mark opens why and the fix, in place. */
+export function NotUpdated({ label = "Not updated", children }: { label?: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={statusChipClass("attention", "inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 px-1.5")}
+      >
+        <AlertTriangle className="size-3.5" />
+        {label}
+      </button>
+      {open && <span className="order-last basis-full text-xs leading-5 text-muted-foreground">{children}</span>}
+    </>
   );
 }
 
 const CLI_UPDATE_COMMAND = "xmatrix update";
 
-/** How a component on another machine reaches its channel's newest release. */
-function ComponentUpdateSteps({ component, latestVersion }: { component: ReleaseComponent; latestVersion: string }) {
+/** How a component on another machine is updated by hand. */
+function ComponentUpdateSteps({ component }: { component: ReleaseComponent }) {
   const { copied, copy } = useCopyToClipboard(CLI_UPDATE_COMMAND);
-  const latest = formatVersion(latestVersion);
   if (component === "desktop") {
-    return <>The xMatrix app downloads {latest} by itself and installs it when it restarts.
-      To update now, open xMatrix on that machine and choose Settings › Desktop app › Check for updates.</>;
+    return <>Open xMatrix on that machine and choose Settings › Desktop app › Check for updates.</>;
   }
-  return <>The daemon installs {latest} by itself. To update now, run{" "}
+  return <>Run{" "}
     <button type="button" onClick={() => void copy()} title="Copy"
       className="inline-flex items-center gap-1 rounded bg-muted px-1 font-mono text-foreground">
       {CLI_UPDATE_COMMAND}
       {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-    </button>{" "}on that machine.</>;
+    </button>{" "}on that machine to install it now.</>;
 }
 
 export function ReleaseNotesLink({ version }: { version?: string }) {

@@ -35,6 +35,7 @@ async function openAsDesktop(page: Page, machineId: string | undefined, named = 
       openCliInstall: async () => undefined, checkForUpdates: async () => undefined,
       getUpdateStatus: async () => ({ currentVersion: "0.16.600", updatedAt: now, ...updateStatus }),
       onUpdateStatus: () => () => undefined,
+      checkForUpdatesQuietly: async () => { (window as unknown as Record<string, number>).__quietChecks = ((window as unknown as Record<string, number>).__quietChecks ?? 0) + 1; },
       installUpdate: async () => { (window as unknown as Record<string, unknown>).__installs = 1; return { state: "installing", enabled: true }; },
       getDaemonStatus: async () => ({ state: named ? "running" : "stopped", pid: named ? 1 : undefined, updatedAt: now }),
       startDaemon: async () => { (window as unknown as Record<string, unknown>).__daemonStarts = Number((window as unknown as Record<string, unknown>).__daemonStarts ?? 0) + 1; return { state: "running", pid: 1, updatedAt: now }; },
@@ -173,22 +174,42 @@ test("an owner keeps a Machine out of automatic assignment from its page", async
   expect(await fixtureRequestBodies(page, "machine-auto-assign")).toEqual([{ autoAssign: false }]);
 });
 
-test("Update on a version opens, in place, how that machine updates it", async ({ page }) => {
-  await openAsDesktop(page, MACHINE_ID, true, "darwin", { state: "downloaded", enabled: true, version: "0.16.700" });
-  await fixtureJson(page, "releases", "**/api/releases/latest", {
-    releases: { cli: { version: "0.16.700" }, desktop: { version: "0.16.700" } },
-    devReleases: { cli: { version: "0.16.701-beta.3" }, desktop: { version: "0.16.701-beta.3" } },
-  });
+const releasedAt = (ageMs: number) => ({
+  releases: { cli: { version: "0.16.700", publishedAt: new Date(Date.now() - ageMs).toISOString() },
+    desktop: { version: "0.16.700", publishedAt: new Date(Date.now() - ageMs).toISOString() } },
+  devReleases: {},
+});
+
+async function openThisMachine(page: Page, release: object, updateStatus: Record<string, unknown>) {
+  await openAsDesktop(page, MACHINE_ID, true, "darwin", updateStatus);
+  await fixtureJson(page, "releases", "**/api/releases/latest", release);
   await page.getByTestId("machine-row").filter({ has: page.getByTestId("this-machine-tag") }).click();
-  const update = page.getByRole("button", { name: "Update", exact: true });
-  await expect(update).toHaveCount(3);
-  // The App running here restarts into the update it already downloaded.
-  await update.nth(2).click();
-  await page.getByRole("button", { name: "Restart to update to v0.16.700" }).click();
+}
+
+test("a version behind a fresh release shows only what its update is really doing", async ({ page }) => {
+  await openThisMachine(page, releasedAt(60_000), { state: "downloaded", enabled: true, version: "0.16.700" });
+  await expect(page.getByText(/^v0\.16\.700 released/u)).toHaveCount(2);
+  await expect(page.getByText("v0.16.700 downloaded")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^(Update|Not updated)$/u })).toHaveCount(0);
+  await page.getByRole("button", { name: "Restart to update", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Restart", exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__installs)).toBe(1);
-  // The CLI says it updates itself and names the command to update it now.
-  await update.first().click();
-  await expect(page.getByText("The daemon installs v0.16.700 by itself.")).toBeVisible();
+});
+
+test("a version still behind long after its release says it did not update, and how to fix it in place", async ({ page }) => {
+  await openThisMachine(page, releasedAt(2 * 24 * 60 * 60_000),
+    { state: "error", enabled: true, message: "The update server could not be reached." });
+  const late = page.getByRole("button", { name: "Not updated", exact: true });
+  await expect(late).toHaveCount(3);
+  await late.first().click();
+  await expect(page.getByText("v0.16.700 was released")).toBeVisible();
   await expect(page.getByRole("button", { name: "xmatrix update" })).toBeVisible();
+  await late.nth(2).click();
+  await expect(page.getByText("The update server could not be reached.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check for updates" })).toBeVisible();
+});
+
+test("seeing the App behind starts one update check at once", async ({ page }) => {
+  await openThisMachine(page, releasedAt(60_000), { state: "not-available", enabled: true });
+  await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, number>).__quietChecks)).toBe(1);
 });

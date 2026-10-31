@@ -254,6 +254,7 @@ export function getLatestReleaseManifest(release: GitHubRelease, origin: string,
     trainVersion: XMATRIX_VERSION,
     releaseVersion,
     tag_name: release.tag_name,
+    publishedAt: release.publishedAt,
     releaseNotesUrl: releaseNotesPath(releaseVersion) ? `${origin}${releaseNotesPath(releaseVersion)}` : undefined,
     assets: release.assets.map((asset) => ({
       name: asset.name,

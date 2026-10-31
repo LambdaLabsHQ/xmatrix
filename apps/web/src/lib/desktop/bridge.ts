@@ -140,6 +140,8 @@ export type DesktopBridge = {
     identityToken: string; givenName?: string; familyName?: string;
   }>;
   checkForUpdates: () => Promise<DesktopUpdateStatus | void>;
+  /** Fetches a newer release now, without dialogs (builds since 2.3). */
+  checkForUpdatesQuietly?: () => Promise<DesktopUpdateStatus | void>;
   getUpdateStatus?: () => Promise<DesktopUpdateStatus>;
   installUpdate?: () => Promise<DesktopUpdateStatus>;
   showUpdateNotification?: (payload?: DesktopNotification) => Promise<boolean>;

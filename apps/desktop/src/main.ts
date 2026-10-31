@@ -72,6 +72,7 @@ import {
   type DesktopNotificationPayload,
 } from "./notifications";
 import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-errors";
+import { installWhenIdle } from "./idle-update-install";
 import { desktopUpdateFeedUrl, desktopWebUrl, isDesktopWebOrigin } from "./release-channel";
 import { daemonFailureNeedsLogin, redactDaemonDetail } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
@@ -1363,6 +1364,8 @@ function showUpdateNotification(payload?: DesktopNotificationPayload) {
   });
 }
 
+let cancelIdleUpdateInstall: (() => void) | undefined;
+
 function configureAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -1426,8 +1429,10 @@ function configureAutoUpdates() {
     setUpdateStatus("downloaded", {
       version: info.version,
       percent: 100,
-      message: "The downloaded update will install automatically when xMatrix restarts.",
+      message: "The update installs by itself once you step away from the computer.",
     });
+    cancelIdleUpdateInstall?.();
+    cancelIdleUpdateInstall = installWhenIdle({ powerMonitor, install: () => void installDownloadedUpdate() });
     if (shouldNotify) {
       showUpdateNotification();
       void showMessageBox({
@@ -3003,6 +3008,8 @@ function registerIpcHandlers() {
   }));
 
   ipcMain.handle("desktop:check-for-updates", secureIpc(() => checkForUpdates(true)));
+  // The Web saw a newer release than this App: fetch it now, without dialogs.
+  ipcMain.handle("desktop:check-for-updates-quietly", secureIpc(() => checkForUpdates(false)));
   ipcMain.handle("desktop:get-update-status", secureIpc(() => getUpdateStatus()));
   ipcMain.handle("desktop:install-update", secureIpc(() => installDownloadedUpdate()));
   ipcMain.handle("desktop:show-update-notification", secureIpc((_event, payload?: DesktopNotificationPayload) =>
