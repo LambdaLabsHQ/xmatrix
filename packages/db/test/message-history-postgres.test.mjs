@@ -169,7 +169,54 @@ integration("one fenced statement reads the authorized page, its Thread summarie
     "a Space blocked after its route was read is refused");
 }));
 
-integration("search candidates cover only readable live messages, newest first, with a rank cursor", () => withSeededSpace("search", async ({ sql, id, database, seeded, space }) => {
+integration("a Space-wide search page reads only the newest readable messages it returns", () => withSeededSpace("search-walk", async ({ sql, id, database, seeded, space }) => {
+  // Hundreds of readable Channels, their messages interleaved in rank order
+  // and stored in no particular order, as a long-lived Space's are.
+  await sql(`INSERT INTO data.channels
+    (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,metadata_json,created_at,updated_at)
+    SELECT $2||'-'||c,$1,$2||'-'||c,$2||'-'||c,'open',$2||'-'||c,1,'{}',now(),now()
+    FROM generate_series(1,300) c`, [space, `walk-${id}`]);
+  await sql(`INSERT INTO data.messages
+    (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,message_kind,
+     content_hash,payload_kind,payload_ref,sent_at,updated_at,search_rank_sequence,created_at,payload_bundle_base64)
+    SELECT $1,$2||'-'||c,$2||'-'||c||'-'||s,s,1,'user',$3,'message','hash','inline','inline',now(),now(),
+      'walk:'||lpad((s*1000+c)::text,10,'0'),now(),'bundle'
+    FROM generate_series(1,300) c, generate_series(1,20) s ORDER BY random()`, [space, `walk-${id}`, seeded.author]);
+  await sql("ANALYZE data.channels");
+  await sql("ANALYZE data.messages");
+  const statements = [];
+  const recording = {
+    cacheMode: "disabled",
+    openSession: () => database.openSession(),
+    close: () => database.close(),
+    health: (context) => database.health(context),
+    transaction: (context, callback) => database.transaction(context, (transaction) => callback({
+      query: (query) => { statements.push(query); return transaction.query(query); },
+    })),
+  };
+  const page = await new PostgresMessageRepository(recording).searchCandidates({ requestId: `${id}-walk`,
+    spaceId: space, principal: { kind: "user", id: seeded.reader }, limit: 50 });
+  assert.equal(page.length, 50);
+  assert.deepEqual(page.map((candidate) => candidate.searchRankSequence),
+    Array.from({ length: 50 }, (_, index) => `walk:${String(20_300 - index).padStart(10, "0")}`),
+    "the page is the Space's newest readable messages");
+  const search = statements.find((query) => query.name.startsWith("message_search"));
+  const nodes = function* (node) { yield node; for (const child of node.Plans ?? []) yield* nodes(child); };
+  // Production's planner, costing a large Space's scattered rows, joined the
+  // readable Channels to their messages and sorted them all. Whichever way the
+  // planner prefers to join, the page must not depend on it.
+  for (const planner of ["RESET enable_nestloop", "SET enable_nestloop = off"]) {
+    await sql(planner);
+    const plan = (await sql(`EXPLAIN (ANALYZE, FORMAT JSON) ${search.text}`, search.values))
+      .rows[0]["QUERY PLAN"][0].Plan;
+    const messageRows = [...nodes(plan)].filter((node) => node["Relation Name"] === "messages")
+      .reduce((total, node) => total + node["Actual Rows"] * node["Actual Loops"], 0);
+    assert.ok(messageRows <= 60, `${planner}: one page of 50 read ${messageRows} of the Space's 6,000 messages`);
+  }
+  await sql("RESET enable_nestloop");
+}));
+
+integration("search candidates cover only readable live messages, newest first, with a rank cursor",() => withSeededSpace("search", async ({ sql, id, database, seeded, space }) => {
   await sql(`INSERT INTO data.messages
     (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,message_kind,
      content_hash,payload_kind,payload_ref,sent_at,updated_at,search_rank_sequence,created_at,payload_bundle_base64)
