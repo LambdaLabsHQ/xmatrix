@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { PostgresAppCredentialRepository } from "@xmatrix/db";
-import { connectionString, connectorDatabase, integration } from "../../db/test/postgres-database.fixture.mjs";
+import { connectionString, integration } from "../../db/test/postgres-database.fixture.mjs";
 import { connectionCredentialGrant, credentialRenewal } from "../src/connectors/connection-credentials.ts";
+import { withConnectorSpace } from "./support/connector-postgres-space.mjs";
 
 /* What an action saves back for its connection (rotated cookies, a number read from the provider) is the Hub's own
    write: it must apply to the credentials the action read, follow its own earlier saves, and never undo an admin's. */
@@ -10,31 +11,17 @@ const PROVIDER = "appstoreconnect";
 const policy = { allowed: ["issuerId", "keyId", "privateKey", "webhookSecret", "vendorNumber", "webSession"] };
 
 async function withConnection(run) {
-  const { client, database, sql } = await connectorDatabase("credential-renewal-test");
-  const space = `credential-renewal-${crypto.randomUUID()}`;
-  const material = "credential-renewal-encryption-test-material";
-  const store = new PostgresAppCredentialRepository(database, material);
-  const env = { RELAY_POSTGRES: { connectionString }, RELAY_POSTGRES_SHARD_ID: "shard-0", XMATRIX_SECRET_CATALOG_KEY: material };
-  const read = async () => store.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: PROVIDER });
-  const adminSave = fields => store.put({ requestId: crypto.randomUUID(), spaceId: space, providerId: PROVIDER,
-    actorUserId: "owner", fields, policy, at: new Date().toISOString() });
-  try {
-    await sql(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
-      VALUES ($1,'owner','owner',1,now(),now())`, [space]);
-    await sql(`INSERT INTO data.app_connector_connections
-      (space_id,connection_id,version,provider_id,provider_name,status,auth_mode,scopes_json,secret_refs_json,
-       capabilities_json,channel_ids_json,created_by,search_rank_sequence,created_at,updated_at)
-      VALUES ($1,$1||':'||$2,1,$2,'App Store Connect','configured','api-token','[]','[]','[]','[]','owner',$1||':rank',
-        now()-interval '1 second',now()-interval '1 second')`, [space, PROVIDER]);
-    await adminSave({ keyId: "2X9R4HXF34", privateKey: "key", webSession: "myacinfo=first" });
-    await run({ env, space, read, adminSave, store });
-  } finally {
-    for (const table of ["app_connector_credentials", "app_connector_connections", "space_members"]) {
-      await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
-    }
-    await database.close?.();
-    await client.end();
-  }
+  await withConnectorSpace({ name: "credential-renewal", providerId: PROVIDER, providerName: "App Store Connect", authMode: "api-token" },
+    async ({ space, database }) => {
+      const material = "credential-renewal-encryption-test-material";
+      const store = new PostgresAppCredentialRepository(database, material);
+      const env = { RELAY_POSTGRES: { connectionString }, RELAY_POSTGRES_SHARD_ID: "shard-0", XMATRIX_SECRET_CATALOG_KEY: material };
+      const read = async () => store.resolve({ requestId: crypto.randomUUID(), spaceId: space, providerId: PROVIDER });
+      const adminSave = fields => store.put({ requestId: crypto.randomUUID(), spaceId: space, providerId: PROVIDER,
+        actorUserId: "owner", fields, policy, at: new Date().toISOString() });
+      await adminSave({ keyId: "2X9R4HXF34", privateKey: "key", webSession: "myacinfo=first" });
+      await run({ env, space, read, adminSave, store });
+    });
 }
 
 integration("an action's renewals save against the version it read, one after another", async () => {
