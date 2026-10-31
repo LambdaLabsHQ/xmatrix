@@ -465,7 +465,7 @@ mod tests {
         );
         assert_eq!(
             runtime_install_hint("opencode"),
-            Some("npm install -g opencode-ai")
+            Some("npm install -g @opencode/cli")
         );
         assert_eq!(
             runtime_install_hint("pi-acp"),

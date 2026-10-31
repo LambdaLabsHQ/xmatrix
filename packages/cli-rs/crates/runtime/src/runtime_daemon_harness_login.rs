@@ -762,6 +762,12 @@ mod tests {
                 Some("V2YJ-KXLA"),
             ),
             (
+                "opencode",
+                "\u{250c}  Connect an integration\n\u{1b}[?25l\u{2502}\n\u{25d2}  Starting authorization\u{1b}[999D\u{1b}[J\u{25c7}  Authorization started\n\u{1b}[?25h\u{2502}\n\u{25cf}  Enter code: RQOV-QIQIE\n\u{2502}\n\u{25cf}  https://auth.openai.com/codex/device\n\u{2502}\n\u{25c7}  Waiting for authorization...\n",
+                "https://auth.openai.com/codex/device",
+                Some("RQOV-QIQIE"),
+            ),
+            (
                 "jcode",
                 "Jcode Account Login\n  Opening the secure account approval page:\n  https://jcode.sh/account?flow=c6578cb7-4fc5-4dff-aa1b-095c2818c5d1\n  Waiting for browser approval. Press Ctrl-C to cancel...\n",
                 "https://jcode.sh/account?flow=c6578cb7-4fc5-4dff-aa1b-095c2818c5d1",
@@ -776,6 +782,21 @@ mod tests {
             );
             assert_eq!(login(id).flow, LoginFlow::DeviceCode, "{id}");
         }
+    }
+
+    #[test]
+    fn opencode_status_reads_credential_rows_of_auth_list() {
+        // `opencode auth list` prints one row per connection, ending in its
+        // kind, or one line when nothing is connected.
+        let pattern = login("opencode")
+            .status
+            .as_ref()
+            .and_then(|status| status.signed_in_regex.as_deref())
+            .unwrap();
+        let signed_in = Regex::new(pattern).unwrap();
+        assert!(signed_in.is_match("OpenAI  ChatGPT Pro/Plus            stored\n"));
+        assert!(signed_in.is_match("Anthropic  ANTHROPIC_API_KEY           environment\n"));
+        assert!(!signed_in.is_match("No authenticated integrations\n"));
     }
 
     #[test]

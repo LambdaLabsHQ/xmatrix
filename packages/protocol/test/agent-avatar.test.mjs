@@ -48,7 +48,7 @@ test("opencode and pi are generic ACP presets with their own vendor icons", () =
   assert.equal(opencode?.backend, "acp");
   assert.equal(opencode?.runtime, "opencode");
   assert.deepEqual(opencode?.acpArgs, ["acp"]);
-  assert.equal(opencode?.installHint, "npm install -g opencode-ai");
+  assert.equal(opencode?.installHint, "npm install -g @opencode/cli");
   // Pi has no ACP server; the launcher is the ACP-registry pi-acp bridge,
   // which already speaks ACP with no subcommand.
   const pi = agentPresetById("pi");

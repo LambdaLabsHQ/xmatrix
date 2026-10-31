@@ -4,7 +4,7 @@ import { execFile, spawn } from "node:child_process";
 // never become shell input. Installation does not register or authenticate an agent.
 const packages: Readonly<Record<string, readonly string[]>> = {
   codex: ["@openai/codex"],
-  opencode: ["opencode-ai"],
+  opencode: ["@opencode/cli"],
   pi: ["@earendil-works/pi-coding-agent", "pi-acp"],
   copilot: ["@github/copilot"],
   gemini: ["@google/gemini-cli"],
