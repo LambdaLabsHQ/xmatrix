@@ -48,7 +48,8 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
     lines.push(...postgresConflictMetadata(extra as Record<string, unknown>));
     lines.push(...messageSearchFailureMetadata((extra as Record<string, unknown>).message_search_failure));
     lines.push(...runtimeDatabaseFailureMetadata((extra as Record<string, unknown>).runtime_database_reason));
-    lines.push(...machineDaemonCredentialFailureMetadata((extra as Record<string, unknown>).machine_credential_reason));
+    lines.push(...machineDaemonCredentialFailureMetadata((extra as Record<string, unknown>).machine_credential_reason,
+      (extra as Record<string, unknown>).machine_credential_expired_for_s));
     lines.push(...machineRegistryCausalityMetadata(extra as Record<string, unknown>));
     lines.push(...durableObjectFailureMetadata((extra as Record<string, unknown>).durable_object_failure));
     const diagnosticId = safeServerDiagnosticId((extra as Record<string, unknown>).diagnosticId);
