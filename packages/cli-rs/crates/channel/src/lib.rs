@@ -1119,6 +1119,15 @@ pub(crate) fn channel_file_mime_type(path: &Path) -> &'static str {
         Some("json") => "application/json",
         Some("pdf") => "application/pdf",
         Some("zip") => "application/zip",
+        Some("mp4") | Some("m4v") => "video/mp4",
+        Some("mov") => "video/quicktime",
+        Some("webm") => "video/webm",
+        Some("mp3") => "audio/mpeg",
+        Some("m4a") => "audio/mp4",
+        Some("aac") => "audio/aac",
+        Some("flac") => "audio/flac",
+        Some("wav") => "audio/wav",
+        Some("ogg") | Some("oga") => "audio/ogg",
         _ => "application/octet-stream",
     }
 }
@@ -3761,5 +3770,20 @@ mod tests {
             super::shell_quote("https://example.com/attachment?token=one'two"),
             "'https://example.com/attachment?token=one'\\''two'"
         );
+    }
+
+    #[test]
+    fn audio_and_video_files_are_sent_with_a_playable_type() {
+        use std::path::Path;
+        for (name, expected) in [
+            ("IMG_2120.MOV", "video/quicktime"),
+            ("cut.mp4", "video/mp4"),
+            ("song.flac", "audio/flac"),
+            ("song.mp3", "audio/mpeg"),
+            ("take.wav", "audio/wav"),
+            ("blob.bin", "application/octet-stream"),
+        ] {
+            assert_eq!(super::channel_file_mime_type(Path::new(name)), expected, "{name}");
+        }
     }
 }
