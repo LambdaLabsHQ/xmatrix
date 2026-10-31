@@ -57,7 +57,7 @@ const CLIENT_NETWORK_REASON_MAX_CHARS: usize = 240;
 const CLIENT_NETWORK_SAMPLE_MAX_CHANNELS: usize = 1;
 const CLIENT_NETWORK_SAMPLE_FAILURE_LOG_INTERVAL_MS: u64 = 60_000;
 static LAST_CLIENT_NETWORK_SAMPLE_FAILURE_LOG_MS: AtomicU64 = AtomicU64::new(0);
-const CHANNEL_ATTACHMENT_PRODUCT_MEDIA_MAX_BYTES: u64 = crate::media_cache::MEDIA_MAX_BYTES;
+const CHANNEL_ATTACHMENT_PRODUCT_MEDIA_MAX_BYTES: u64 = crate::private_upload::BLOB_MAX_BYTES;
 const CHANNEL_ATTACHMENT_PRODUCT_MEDIA_NOT_FOUND_RETRY_MS: [u64; 2] = [100, 250];
 // Delivery is at-least-once: a retry can race the first successful frame, and
 // a reconnect replays everything after the last ack, including what this

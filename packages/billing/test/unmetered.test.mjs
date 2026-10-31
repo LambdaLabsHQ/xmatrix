@@ -10,6 +10,8 @@ test("by default nothing is metered and no billing table is read", async () => {
   await spaceBilling.spaceCreated(tx, input);
   assert.equal(await spaceBilling.spaceDeletion(tx, input), null);
   assert.equal(await spaceBilling.seatAdmission(tx, input), null);
+  assert.equal(await spaceBilling.storageUpload(tx, { ...input, category: "attachments", bytes: 2 ** 40 }), null);
+  await spaceBilling.storageChanged(tx, { ...input, category: "attachments", deltaBytes: 2 ** 40, totalBytes: 2 ** 40 });
   assert.equal(spaceBilling.message.accepts, "TRUE");
   assert.doesNotMatch(spaceBilling.message.ctes, /billing/u);
   assert.equal(spaceBilling.message.rejection({}, input), null);

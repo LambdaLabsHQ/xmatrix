@@ -10,11 +10,17 @@ import {
   postgresAuthorityShardId,
   type PostgresAuthorityBindingEnv,
 } from "./postgres-authority-http";
+import { RELAY_V2_BLOB_PART_BYTES, relayV2BlobUploadPaths } from "@xmatrix/protocol/relay-v2/message-attachment";
 import {
   RELAY_R2_UPLOAD_CHECKSUM_HEADER,
+  completeRelayR2Multipart,
   executeRelayR2UploadGatewayRequest,
+  startRelayR2Multipart,
+  uploadRelayR2MultipartPart,
   type RelayPrivateR2UploadPort,
   type RelayR2LiveUploadIntentContext,
+  type RelayR2MultipartProgress,
+  type RelayR2MultipartState,
   type RelayR2StoredUploadMetadata,
 } from "./relay-r2-upload-gateway";
 
@@ -29,7 +35,8 @@ export const RELAY_R2_BLOB_REF_RELEASE_PATH = "/api/relay-v2/private-r2/blob-ref
 
 /** The blob intents and references the upload API records. */
 export type RelayR2ContentAuthority = Pick<PostgresContentRepository,
-  "createIntent" | "readIntent" | "commitRef" | "readRef" | "releaseRef">;
+  "createIntent" | "readIntent" | "commitRef" | "readRef" | "releaseRef" |
+  "beginMultipartUpload" | "recordMultipartPart" | "resetMultipartUpload">;
 
 /** Blob intents and references live with their scope on its Space shard. */
 export function relayContentRepository(env: PostgresAuthorityBindingEnv & PostgresAuthorityFleetEnv): PostgresContentRepository {
@@ -133,6 +140,20 @@ function principal(value: RelayR2UploadPrincipal): RelayR2UploadPrincipal {
   return { kind: value.kind, id: bounded(value.id, "principal.id") };
 }
 
+function multipartState(value: unknown): RelayR2MultipartState {
+  const state = record(value);
+  if (!Array.isArray(state.etags) || state.etags.some((etag) => typeof etag !== "string" || etag.length === 0) ||
+      (state.sha256State !== null && (typeof state.sha256State !== "string" || !SHA256.test(state.sha256State)))) {
+    throw new Error("Content authority returned an invalid multipart upload");
+  }
+  return {
+    uploadId: bounded(state.uploadId, "uploadId", 1024),
+    partBytes: integer(state.partBytes, "partBytes"),
+    etags: state.etags as string[],
+    sha256State: state.sha256State as string | null,
+  };
+}
+
 function intentContext(value: JsonRecord): RelayR2LiveUploadIntentContext & { version: number } {
   const contentHash = hash(value.contentHash);
   const objectKey = bounded(value.objectKey, "objectKey", 1024);
@@ -151,6 +172,7 @@ function intentContext(value: JsonRecord): RelayR2LiveUploadIntentContext & { ve
     expiresAt,
     state: "pending",
     allowStaging: true,
+    ...(value.multipart === undefined ? {} : { multipart: multipartState(value.multipart) }),
     version: integer(value.version, "version"),
   };
 }
@@ -234,6 +256,28 @@ export function cloudflareRelayPrivateR2UploadPort(bucket: R2Bucket): RelayPriva
       const current = await bucket.head(key);
       if (current?.etag === etag) await bucket.delete(key);
     },
+    async createMultipart(key, customMetadata) {
+      return (await bucket.createMultipartUpload(key, { customMetadata: { ...customMetadata } })).uploadId;
+    },
+    async uploadPart(key, uploadId, partNumber, body, length) {
+      // R2 takes a stream only with a known length; the hashing pipe lost the request's.
+      const fixed = new FixedLengthStream(length);
+      const [part] = await Promise.all([
+        bucket.resumeMultipartUpload(key, uploadId).uploadPart(partNumber, fixed.readable),
+        body.pipeTo(fixed.writable),
+      ]);
+      return part.etag;
+    },
+    async completeMultipart(key, uploadId, etags) {
+      await bucket.resumeMultipartUpload(key, uploadId)
+        .complete(etags.map((etag, index) => ({ partNumber: index + 1, etag })));
+      const stored = await bucket.head(key);
+      if (!stored) throw new Error("completed multipart upload did not materialize");
+      return uploadMetadata(stored);
+    },
+    async abortMultipart(key, uploadId) {
+      await bucket.resumeMultipartUpload(key, uploadId).abort();
+    },
   };
 }
 
@@ -268,7 +312,10 @@ export async function handleRelayR2UploadIntentCreate(input: {
     encodedSize: intent.encodedSize,
     expiresAt: new Date(intent.expiresAt).toISOString(),
     upload: {
-      finalPath: `${RELAY_R2_UPLOAD_PREFIX}/${encodeURIComponent(intent.intentId)}/scope/${encodeURIComponent(intent.visibilityScopeId)}`,
+      finalPath: relayV2BlobUploadPaths(intent.intentId, intent.visibilityScopeId).single,
+      multipartPath: relayV2BlobUploadPaths(intent.intentId, intent.visibilityScopeId).multipart,
+      // A body larger than this goes in parts of exactly this size (RELAY_V2_BLOB_PART_BYTES).
+      partBytes: RELAY_V2_BLOB_PART_BYTES,
       stagingPath: `${RELAY_R2_UPLOAD_PREFIX}/${encodeURIComponent(intent.intentId)}/staging/scope/${encodeURIComponent(intent.visibilityScopeId)}`,
       verifyPath: `${RELAY_R2_UPLOAD_PREFIX}/${encodeURIComponent(intent.intentId)}/verify/scope/${encodeURIComponent(intent.visibilityScopeId)}`,
       checksumHeader: RELAY_R2_UPLOAD_CHECKSUM_HEADER,
@@ -304,6 +351,62 @@ export async function handleRelayR2UploadPut(input: IntentObjectInput & {
     bucket: cloudflareRelayPrivateR2UploadPort(input.bucket),
   });
   return Response.json(verified, { headers: { "cache-control": "private, no-store" } });
+}
+
+/** The intent's multipart progress, recorded on the live intent by the content authority. */
+function multipartProgress(input: IntentObjectInput): RelayR2MultipartProgress {
+  const step = async (call: () => Promise<unknown>) => intentContext(await contentCall(call)).multipart;
+  const command = () => ({ requestId: crypto.randomUUID(), intentId: input.intentId, principal: principal(input.principal) });
+  return {
+    async begin(uploadId, partBytes) {
+      const state = await step(() => input.content.beginMultipartUpload({ ...command(), uploadId, partBytes }));
+      if (!state) throw new Error("Content authority did not record the multipart upload");
+      return state;
+    },
+    async record(uploadId, partNumber, etag, sha256State) {
+      const state = await step(() => input.content.recordMultipartPart({
+        ...command(), uploadId, partNumber, etag, sha256State,
+      }));
+      if (!state) throw new Error("Content authority did not record the multipart part");
+      return state;
+    },
+    async reset(uploadId) {
+      await step(() => input.content.resetMultipartUpload({ ...command(), uploadId }));
+    },
+  };
+}
+
+const NO_STORE = { headers: { "cache-control": "private, no-store" } } as const;
+
+/** Starts, or resumes, an intent's multipart upload and says which part to send next. */
+export async function handleRelayR2MultipartStart(input: IntentObjectInput & { now: number }): Promise<Response> {
+  const intent = await uploadIntent(input);
+  return Response.json(await startRelayR2Multipart({
+    now: input.now, visibilityScopeId: intent.visibilityScopeId, intent,
+    bucket: cloudflareRelayPrivateR2UploadPort(input.bucket), progress: multipartProgress(input),
+  }), NO_STORE);
+}
+
+/** Streams one part of an intent's multipart upload into storage. */
+export async function handleRelayR2MultipartPart(input: IntentObjectInput & {
+  request: Request; partNumber: string; now: number;
+}): Promise<Response> {
+  if (!/^[1-9][0-9]{0,4}$/u.test(input.partNumber)) fail("invalid_request", 400, "part number is invalid");
+  const intent = await uploadIntent(input);
+  return Response.json(await uploadRelayR2MultipartPart({
+    request: input.request, now: input.now, visibilityScopeId: intent.visibilityScopeId, intent,
+    partNumber: Number(input.partNumber), bucket: cloudflareRelayPrivateR2UploadPort(input.bucket),
+    progress: multipartProgress(input),
+  }), NO_STORE);
+}
+
+/** Publishes an intent's verified parts as its immutable object. */
+export async function handleRelayR2MultipartComplete(input: IntentObjectInput & { now: number }): Promise<Response> {
+  const intent = await uploadIntent(input);
+  return Response.json(await completeRelayR2Multipart({
+    now: input.now, visibilityScopeId: intent.visibilityScopeId, intent,
+    bucket: cloudflareRelayPrivateR2UploadPort(input.bucket), progress: multipartProgress(input),
+  }), NO_STORE);
 }
 
 async function verifyIntentObject(bucket: R2Bucket, intent: RelayR2LiveUploadIntentContext): Promise<RelayR2StoredUploadMetadata> {

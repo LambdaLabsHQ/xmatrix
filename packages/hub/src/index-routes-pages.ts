@@ -27,6 +27,7 @@ import { findAppConnection } from "./apps";
 import type { Env } from "./types";
 import { platformAdminSpaceId } from "./admin-platform-access";
 import { relayContentRepository } from "./relay-r2-upload-private-api";
+import { r2ObjectResponse, readR2Object } from "./r2-range-response";
 import { parsePageAssistantOutput, PAGE_ASSISTANT_OUTPUT_PATH } from "./page-assistant-output";
 import { relayRuntimeCellNamed, relayRuntimeOwnerCellName } from "./relay-authority-locator";
 import { RELAY_RUNTIME_CELL_HEADER } from "./runtime-transport/runtime-cell-locator";
@@ -165,22 +166,10 @@ async function pageMediaResponse(c: Context<{ Bindings: Env }>, input: { spaceId
   const bucket = c.env.RELAY_PAYLOAD_BUCKET;
   if (!bucket) throw new ServiceUnavailable("private_storage_unavailable", "Page media is unavailable");
   const key = immutableContentObjectKey(spaceVisibilityScope(input.spaceId), media.contentHash);
-  const ranged = c.req.raw.headers.has("range");
-  const object = await (ranged ? bucket.get(key, { range: c.req.raw.headers }).catch(() => bucket.get(key))
-    : bucket.get(key));
+  const { object, ranged } = await readR2Object(bucket, key, c.req.raw.headers);
   if (!object) return notShown();
-  const headers = new Headers({ "content-type": media.mimeType, "cache-control": input.cacheControl,
-    "x-content-type-options": "nosniff", "accept-ranges": "bytes", etag: object.httpEtag });
-  const range = ranged ? object.range : undefined;
-  if (!range) {
-    headers.set("content-length", String(object.size));
-    return new Response(object.body, { status: 200, headers });
-  }
-  const offset = "suffix" in range ? object.size - range.suffix : range.offset ?? object.size - range.length!;
-  const length = "suffix" in range ? range.suffix : range.length ?? object.size - offset;
-  headers.set("content-length", String(length));
-  headers.set("content-range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
-  return new Response(object.body, { status: 206, headers });
+  return r2ObjectResponse(object, ranged, new Headers({ "content-type": media.mimeType,
+    "cache-control": input.cacheControl, "x-content-type-options": "nosniff", etag: object.httpEtag }));
 }
 
 /** A started page's document is at most this much Yjs state. */

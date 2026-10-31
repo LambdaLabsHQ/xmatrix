@@ -18,7 +18,6 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use xmatrix_cli_args::{ChannelCommand, ChannelVisibilityState, SpaceCommand, WorktreeState};
 use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_marker};
 use xmatrix_cli_core::error::{self, CliError};
-use xmatrix_cli_core::hex::sha256_hex;
 use xmatrix_cli_core::human_connection::{HumanConnectionClient, HumanConnectionEvent};
 use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
@@ -33,7 +32,7 @@ pub use read_context::{
 };
 
 const CHANNEL_FILE_ATTACHMENT_LIMIT: usize = 4;
-const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::media_cache::MEDIA_MAX_BYTES;
+const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::private_upload::BLOB_MAX_BYTES;
 // Relay authority bounds one channel-history query to 200 enriched rows (older
 // Hubs clamp to 50, and any Hub may return fewer under its page byte budget).
 // Fetching history is still unbounded from the CLI's perspective, but it must
@@ -906,7 +905,8 @@ async fn show_unread_messages(
 pub struct PendingFileAttachment {
     name: String,
     mime_type: String,
-    bytes: Vec<u8>,
+    path: PathBuf,
+    size: u64,
     content_hash: String,
 }
 
@@ -955,15 +955,16 @@ pub(crate) fn load_channel_file_attachments(
         let size = metadata.len();
         if size == 0 || size > CHANNEL_FILE_ATTACHMENT_MAX_BYTES {
             return Err(CliError::Launch(format!(
-                "{} must be between 1 byte and 64 MiB",
-                path.display()
+                "{} must be between 1 byte and {} GiB",
+                path.display(),
+                CHANNEL_FILE_ATTACHMENT_MAX_BYTES >> 30
             )));
         }
 
         let mime_type = channel_file_mime_type(path);
-        let bytes = std::fs::read(path)
+        // Hashed from disk in chunks; the upload reads the file again as it sends it.
+        let (content_hash, size) = xmatrix_cli_core::private_upload::sha256_file(path)
             .map_err(|err| CliError::Launch(format!("Cannot read {}: {err}", path.display())))?;
-        let content_hash = sha256_hex(&bytes);
         let name = path
             .file_name()
             .and_then(|value| value.to_str())
@@ -975,7 +976,8 @@ pub(crate) fn load_channel_file_attachments(
         attachments.push(PendingFileAttachment {
             name,
             mime_type: mime_type.to_string(),
-            bytes,
+            path: path.clone(),
+            size,
             content_hash,
         });
     }
@@ -1050,7 +1052,7 @@ async fn upload_channel_file_attachments(
     )?;
     let mut uploaded = Vec::with_capacity(attachments.len());
     for attachment in attachments {
-        let encoded_bytes = attachment.bytes.len() as u64;
+        let encoded_bytes = attachment.size;
         let requested_id = uuid::Uuid::new_v4().to_string();
         let attachment_id = xmatrix_cli_core::private_upload::upload(
             hub_url,
@@ -1062,7 +1064,8 @@ async fn upload_channel_file_attachments(
                 ref_id: &requested_id,
                 content_hash: &attachment.content_hash,
                 mime_type: &attachment.mime_type,
-                bytes: attachment.bytes,
+                path: &attachment.path,
+                size: attachment.size,
             },
         )
         .await?;
@@ -3138,8 +3141,11 @@ mod tests {
             path.file_name().unwrap().to_string_lossy()
         );
         assert_eq!(attachments[0].mime_type, "image/png");
-        assert_eq!(attachments[0].bytes, [137, 80, 78, 71]);
-        assert_eq!(attachments[0].content_hash.len(), 64);
+        assert_eq!(attachments[0].size, 4);
+        assert_eq!(
+            attachments[0].content_hash,
+            xmatrix_cli_core::hex::sha256_hex(&[137, 80, 78, 71])
+        );
 
         let _ = std::fs::remove_file(path);
     }
@@ -3155,7 +3161,7 @@ mod tests {
 
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].mime_type, "text/markdown");
-        assert_eq!(attachments[0].bytes, b"# Deployment guide\n");
+        assert_eq!(attachments[0].size, 19);
 
         let _ = std::fs::remove_file(path);
     }

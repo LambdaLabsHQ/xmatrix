@@ -302,6 +302,13 @@ export const spaceBilling: SpaceBillingPolicy = {
 
   seatAdmission,
 
+  // Storage is recorded, not yet priced: the core keeps each Space's held bytes
+  // in data.space_storage_usage and calls these in the same transaction. A
+  // storage price or allowance applies here — refuse an upload that would
+  // exceed it in storageUpload, charge the held bytes in storageChanged.
+  async storageUpload() { return null; },
+  async storageChanged() {},
+
   message: {
     // The exact Free counter and a paid Space's credit advance in the
     // publishing statement itself, so their row locks are not held across

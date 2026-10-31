@@ -1,5 +1,5 @@
 import { PAGE_MEDIA_TYPES, pageMediaReference, parsePageMedia } from "@xmatrix/protocol";
-import { RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES } from "@xmatrix/protocol/relay-v2/message-attachment";
+import { RELAY_V2_BLOB_MAX_BYTES } from "@xmatrix/protocol/relay-v2/message-attachment";
 import { pageSchema } from "@xmatrix/protocol/page-document";
 import { Fragment, Slice, type Node as DocNode } from "prosemirror-model";
 import { Plugin } from "prosemirror-state";
@@ -137,8 +137,8 @@ export function pageMediaPaste(input: {
     const upload = input.upload();
     if (!upload) return;
     const accepted = files.filter((file) => {
-      if (file.size <= RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES) return true;
-      input.onFailure(`${file.name || "The file"} is larger than ${RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES / 1024 / 1024} MB.`);
+      if (file.size <= RELAY_V2_BLOB_MAX_BYTES) return true;
+      input.onFailure(`${file.name || "The file"} is larger than ${RELAY_V2_BLOB_MAX_BYTES / 1024 ** 3} GB.`);
       return false;
     });
     const placed = await Promise.all(accepted.map(async (file) => {

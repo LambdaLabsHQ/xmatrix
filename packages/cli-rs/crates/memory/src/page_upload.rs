@@ -1,14 +1,11 @@
 //! Explicit local-file upload. Page text never causes an implicit file read.
 
-use std::io::Read;
 use std::path::Path;
 
 use serde::Deserialize;
 use xmatrix_cli_core::error::{CliError, Result};
 use xmatrix_cli_core::protocol::with_route;
-use xmatrix_cli_core::{
-    hex::sha256_hex, http, media_cache::MEDIA_MAX_BYTES, page_media, private_upload,
-};
+use xmatrix_cli_core::{http, page_media, private_upload};
 
 #[derive(Deserialize)]
 struct PageAccessResponse {
@@ -41,20 +38,19 @@ pub(crate) async fn upload(
     let mime_type = page_media::page_media_type(extension).ok_or_else(|| {
         CliError::Launch("Pages accept PNG, JPEG, GIF, WebP, AVIF, MP4, WebM and MOV files".into())
     })?;
-    let file = std::fs::File::open(path)
+    let metadata = std::fs::metadata(path)
         .map_err(|err| CliError::Launch(format!("Cannot open {}: {err}", path.display())))?;
-    if !file.metadata()?.is_file() {
+    if !metadata.is_file() {
         return Err(CliError::Launch(format!(
             "{} is not a regular file",
             path.display()
         )));
     }
-    let mut bytes = Vec::new();
-    file.take(MEDIA_MAX_BYTES + 1).read_to_end(&mut bytes)?;
-    if bytes.is_empty() || bytes.len() as u64 > MEDIA_MAX_BYTES {
-        return Err(CliError::Launch(
-            "Page media must be between 1 byte and 64 MiB".into(),
-        ));
+    if metadata.len() == 0 || metadata.len() > private_upload::BLOB_MAX_BYTES {
+        return Err(CliError::Launch(format!(
+            "Page media must be between 1 byte and {} GiB",
+            private_upload::BLOB_MAX_BYTES >> 30
+        )));
     }
     // Fail before uploading bytes when the target page is unavailable or read-only.
     // The Hub rechecks Page authority when the content ref is committed.
@@ -68,7 +64,8 @@ pub(crate) async fn upload(
     if !access.page.can_edit {
         return Err(CliError::Launch("You cannot edit this Page".into()));
     }
-    let hash = sha256_hex(&bytes);
+    let (hash, size) = private_upload::sha256_file(path)
+        .map_err(|err| CliError::Launch(format!("Cannot read {}: {err}", path.display())))?;
     private_upload::upload(
         hub,
         token,
@@ -79,7 +76,8 @@ pub(crate) async fn upload(
             ref_id: &format!("page-media:{page}:{hash}"),
             content_hash: &hash,
             mime_type,
-            bytes,
+            path,
+            size,
         },
     )
     .await?;

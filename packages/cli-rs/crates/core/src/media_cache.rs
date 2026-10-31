@@ -20,10 +20,6 @@ use crate::error::{CliError, Result};
 use crate::hex::lowercase_hex;
 use crate::http;
 
-/// The largest Page media body the CLI uploads; the same ceiling the Web
-/// enforces (`RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES`).
-pub const MEDIA_MAX_BYTES: u64 = 64 * 1024 * 1024;
-
 /// Where the copy a harness's file tool opens is written.
 pub enum LocalCopy<'a> {
     /// `<prefix>-<id, up to 12 characters>-<name>.<extension of its type>` in the attachment cache.
