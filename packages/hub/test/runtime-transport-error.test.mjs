@@ -108,6 +108,21 @@ test("a repository rejection on a socket is reported once, under the id its clie
     [["xMatrix runtime authority rejection", frame.failure.diagnosticId]]);
 });
 
+test("XMATRIX-HUB-7F: a stale lease logs which fence refused it and on what command type", async () => {
+  const stale = Object.assign(new ControlError("machine_command_stale_lease", 409, "Machine command lease is stale"),
+    { reason: "renew.epoch", commandType: "spawn" });
+  const { frame, logged } = await answered(stale);
+  assert.equal(frame.failure.code, "machine_command_stale_lease");
+  const [[, detail]] = logged.error.filter(([message]) => message === "xMatrix runtime authority rejection");
+  assert.deepEqual([detail.authorityReason, detail.commandType], ["renew.epoch", "spawn"]);
+  assert.doesNotMatch(JSON.stringify(frame), /renew\.epoch|spawn/, "the labels stay in the Hub's log");
+  const unlabelled = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
+    { reason: "Private Reason", commandType: { nested: true } }));
+  const [[, plain]] = unlabelled.logged.error;
+  assert.equal(plain.authorityReason, undefined);
+  assert.equal(plain.commandType, undefined);
+});
+
 test("a permanent authority rejection never becomes automatically retryable", async () => {
   const failure = new RuntimeAuthorityOperationError("append-message", 403, {
     code: "agent_run_forbidden", retryable: true, diagnosticId: "Bearer private-token",

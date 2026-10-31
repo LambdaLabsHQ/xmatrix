@@ -56,8 +56,12 @@ export class RuntimeAuthorityOperationError extends Error {
     // unpublished code into `runtime.authority_rejected`, which names no cause.
     const authorityCode = typeof value.code === "string" && AUTHORITY_CODE.test(value.code)
       ? value.code : "unknown";
+    // Which fence refused, and on what command type (static labels, e.g. a stale lease's).
+    const label = (field: unknown) => typeof field === "string" && AUTHORITY_CODE.test(field) ? field : undefined;
+    const authorityReason = label(value.reason), commandType = label(value.commandType);
     (this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
-      "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status });
+      "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status,
+        ...(authorityReason ? { authorityReason } : {}), ...(commandType ? { commandType } : {}) });
   }
 }
 
@@ -82,7 +86,8 @@ const rejections = new WeakMap<object, RuntimeAuthorityOperationError>();
 
 function authorityRejection(error: object): RuntimeAuthorityOperationError | undefined {
   if (error instanceof ControlError) {
-    const body = { code: error.code, retryable: error.retryable };
+    const { reason, commandType } = error as ControlError & { reason?: unknown; commandType?: unknown };
+    const body = { code: error.code, retryable: error.retryable, reason, commandType };
     return Object.hasOwn(APPROVAL_MESSAGES, error.code)
       ? new RuntimeApprovalOperationError(error.name, error.status, body)
       : new RuntimeAuthorityOperationError(error.name, error.status, body);
