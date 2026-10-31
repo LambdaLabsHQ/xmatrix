@@ -62,6 +62,8 @@ async function installNativeBridge(page: Page, client: "android" | "ios") {
     const appLinkListeners = new Set<(href: string) => boolean>();
     (window as typeof window & { __openAppLinkForTest?: (href: string) => boolean })
       .__openAppLinkForTest = (href) => Array.from(appLinkListeners).reverse().some((listener) => listener(href));
+    (window as typeof window & { __appLinkListenerCountForTest?: () => number })
+      .__appLinkListenerCountForTest = () => appLinkListeners.size;
     const listeners = new Set<() => boolean>();
     const disabledUpdateStatus = () => ({
       state: "disabled" as const,
@@ -233,6 +235,11 @@ test("the iOS app's edge swipe goes Back in the page, and a notification opens w
   const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
   await page.goto("/app/personal-sspaceperso/channels");
+  await expect(generalChannelRow(page)).toBeVisible();
+  // The init-script bridge exists before the live shell subscribes to it.
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __appLinkListenerCountForTest?: () => number }
+  ).__appLinkListenerCountForTest?.() ?? 0)).toBeGreaterThan(0);
   await page.evaluate(() => { (window as typeof window & { __samePage?: boolean }).__samePage = true; });
   const entries = await historyLength(page);
 
