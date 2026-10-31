@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
-const { isBrowserNotice, isClientDisconnect, isStaleBuild } = require("./error-noise.ts");
+const { isBrowserNotice, isBrowserNoticeReport, isClientDisconnect, isStaleBuild } = require("./error-noise.ts");
 
 test("a stale build is recognised from a failed chunk fetch or a module webpack no longer has", () => {
   const chunk = Object.assign(new Error("Loading chunk 925 failed."), { name: "ChunkLoadError" });
@@ -19,6 +19,14 @@ test("ResizeObserver's dropped layout pass is a browser notice, not a page failu
   assert.equal(isBrowserNotice(new Error("ResizeObserver loop limit exceeded")), true);
   assert.equal(isBrowserNotice("ResizeObserver loop completed with undelivered notifications."), true);
   assert.equal(isBrowserNotice(new Error("Cannot render ResizeObserver panel")), false);
+});
+
+test("XMATRIX-WEB-7: the notice is recognised when the browser's error event carries no Error", () => {
+  const report = message => ({ exception: { values: [{ type: "Error", value: message }] } });
+  assert.equal(isBrowserNoticeReport(null, report("ResizeObserver loop limit exceeded")), true);
+  assert.equal(isBrowserNoticeReport(undefined, report("ResizeObserver loop completed with undelivered notifications.")), true);
+  assert.equal(isBrowserNoticeReport(null, report("Cannot read properties of null (reading 'dataset')")), false);
+  assert.equal(isBrowserNoticeReport(new Error("render failed"), {}), false);
 });
 
 test("only a response the visitor stopped reading counts as a disconnect", () => {
