@@ -21,7 +21,8 @@ test("sales options name a vendor and whole past days or months", () => {
   assert.deepEqual(salesOptions("vendor=89123456 by=month months=2", noon).periods, ["2026-09", "2026-08"]);
   assert.deepEqual(salesOptions("vendor=89123456 months=1", Date.UTC(2026, 0, 15)).periods, ["2025-12"]);
   assert.equal(salesOptions("vendor=89123456", noon).periods.length, 14);
-  for (const bad of ["", "days=3", "vendor=abc", "vendor=89123456 days=32", "vendor=89123456 by=week",
+  assert.deepEqual(salesOptions("days=1", noon), { frequency: "DAILY", periods: ["2026-10-30"] }, "the vendor may come from the connection");
+  for (const bad of ["vendor=abc", "vendor=89123456 days=32", "vendor=89123456 by=week",
     "vendor=89123456 by=day months=2", "vendor=89123456 by=month days=2", "vendor=89123456 months=13", "vendor=89123456 colour=red"]) {
     assert.equal(typeof salesOptions(bad, noon), "string", bad);
   }
@@ -57,4 +58,30 @@ test("sales across all apps counts every row and explains a refused key", async 
   assert.match(all.value.summary, /2026-\d\d\t45\t0\t0\t0/u);
   await assert.rejects(run({ "GET /v1/salesReports": { status: 403, errors: [{ detail: "not allowed" }] } },
     "@appstoreconnect:sales:* vendor=89123456 days=1"), /403: not allowed \(reports need an API key with the Sales, Finance or Admin role\)/u);
+});
+
+test("sales keeps the vendor number it was given and asks for it once when there is none", async () => {
+  const saved = [];
+  const command = "@appstoreconnect:sales:* vendor=89123456 days=1";
+  const { ACTIONS: actions, withApple } = await import("./support/app-store-connect-double.mjs");
+  const { credentials } = await import("./support/app-store-connect-double.mjs");
+  const routes = { "GET /v1/salesReports": () => report(line("1", "3", "US", APP.id)) };
+  await withApple(routes, () => actions.sales.execute({ credentials, saveCredentials: async (fields) => { saved.push(fields); } }, statement(command)));
+  assert.deepEqual(saved, [{ vendorNumber: "89123456" }]);
+  const later = await withApple(routes, () => actions.sales.execute({ credentials: { ...credentials, vendorNumber: "89123456" },
+    saveCredentials: async (fields) => { saved.push(fields); } }, statement("@appstoreconnect:sales:* days=1")));
+  assert.equal(later.calls[0].query["filter[vendorNumber]"], "89123456");
+  assert.equal(saved.length, 1, "a number already kept is not saved again");
+  await assert.rejects(run(routes, "@appstoreconnect:sales:* days=1"), (error) => error.fix?.field === "webSession" && /vendor=<number>/u.test(error.message));
+  const web = { ...routes, "GET /olympus/v1/session": { provider: { providerId: 1234567, name: "Team" } },
+    "GET /WebObjects/iTunesConnect.woa/ra/paymentConsolidation/providers/1234567/sapVendorNumbers": { data: [{ sapVendorNumber: "87654321", name: "Team" }] } };
+  const found = await withApple(web, () => actions.sales.execute({ credentials: { ...credentials, webSession: "myacinfo=abc" },
+    saveCredentials: async (fields) => { saved.push(fields); } }, statement("@appstoreconnect:sales:* days=1")));
+  assert.equal(found.calls.find(call => call.path === "/v1/salesReports").query["filter[vendorNumber]"], "87654321", "the web session finds the number");
+  assert.ok(found.calls.find(call => call.path === "/olympus/v1/session").cookie.includes("myacinfo=abc"));
+  assert.deepEqual(saved.at(-1), { vendorNumber: "87654321" });
+  const several = { ...web, "GET /WebObjects/iTunesConnect.woa/ra/paymentConsolidation/providers/1234567/sapVendorNumbers":
+    { data: [{ vendorNumber: "87654321" }, { vendorNumber: "87654322" }] } };
+  await assert.rejects(withApple(several, () => actions.sales.execute({ credentials: { ...credentials, webSession: "myacinfo=abc" } },
+    statement("@appstoreconnect:sales:* days=1"))), /several vendor numbers \(87654321, 87654322\)/u);
 });
