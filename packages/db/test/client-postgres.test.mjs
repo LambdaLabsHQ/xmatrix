@@ -94,7 +94,8 @@ integration("writer lock failures retain the live blocker without identities or 
         const [evidence] = databaseFailureEvidence(error);
         assert.equal(evidence.lockWait?.status, mode === "available" ? "sampled" : "unavailable");
         if (mode === "available") {
-          assert.equal(evidence.lockWait.waiter.owner, owner);
+          assert.equal(evidence.lockWait.waiter.owner,
+            `op:${owner === "catalog" ? "channel.channel_configure" : "runtime.execution-report"}`);
           assert.equal(evidence.lockWait.waiter.wait, "Lock");
           assert.equal(evidence.lockWait.blockers.length, 1);
           assert.equal(evidence.lockWait.blockers[0].owner, "execution-report");
@@ -158,8 +159,10 @@ integration("Agent message Channel lock failures retain either Channel's live bl
   try {
     await holder.query("CREATE SCHEMA data; CREATE TABLE data.channels (channel_id text PRIMARY KEY)");
     await holder.query("INSERT INTO data.channels VALUES ('private-a'),('private-b')");
-    for (const channel of ["private-a", "private-b"]) {
-      await holder.query("BEGIN; SET LOCAL application_name='xmatrix-agent-launch-coordinator'");
+    // HUB-AZ/B3 blockers read `other`: a holder that names its operation is reported by it.
+    for (const [channel, holderName, blocker] of [["private-a", "xmatrix-agent-launch-coordinator", "launch"],
+      ["private-b", "xmatrix-pages page.edit", "op:page.edit"]]) {
+      await holder.query(`BEGIN; SET LOCAL application_name='${holderName}'`);
       await holder.query("SELECT 1 FROM data.channels WHERE channel_id=$1 FOR UPDATE", [channel]);
       await assert.rejects(database.transaction({ requestId: "private-request", operation: "message.append" },
         tx => lockAgentRunChannels(tx, "private-b", "private-a")), error => {
@@ -167,9 +170,9 @@ integration("Agent message Channel lock failures retain either Channel's live bl
         const [evidence] = databaseFailureEvidence(error);
         assert.equal(evidence.queryName, "channel_lifecycle_lock_runtime_new_work_v1");
         assert.equal(evidence.lockWait?.status, "sampled");
-        assert.equal(evidence.lockWait.waiter.owner, "message");
+        assert.equal(evidence.lockWait.waiter.owner, "op:message.append");
         assert.equal(evidence.lockWait.waiter.wait, "Lock");
-        assert.equal(evidence.lockWait.blockers[0].owner, "launch");
+        assert.equal(evidence.lockWait.blockers[0].owner, blocker);
         assert.equal(evidence.lockWait.blockers[0].state, "idle in transaction");
         assert.ok(evidence.lockWait.blockers[0].ageMs >= 1);
         assert.doesNotMatch(JSON.stringify(evidence), /private-|SELECT|postgres:\/\//u);

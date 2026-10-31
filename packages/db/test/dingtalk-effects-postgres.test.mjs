@@ -13,8 +13,8 @@ async function operation(f,kind,authority,db=f.database) {
 async function waiting(f,needle) {
   const deadline=Date.now()+1500;
   while(Date.now()<deadline) {
-    const rows=(await f.sql(`SELECT query FROM pg_stat_activity WHERE application_name=$1
-      AND wait_event_type='Lock'`,[f.applicationName])).rows;
+    const rows=(await f.sql(`SELECT query FROM pg_stat_activity WHERE application_name LIKE $1
+      AND wait_event_type='Lock'`,[`${f.applicationName} %`])).rows;
     if(rows.some(r=>r.query.includes(needle))) return;
     await new Promise(r=>setTimeout(r,10));
   }
