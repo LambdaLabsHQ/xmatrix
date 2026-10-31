@@ -1,7 +1,7 @@
 import {
   DEFAULT_HUB_URL, HUB_ROUTES, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
   spaceVisibilityScope,
-  type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageConversation, type PageDocument,
+  type PageAwareness, type PageBlame, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type SerializedAutomation,
@@ -210,9 +210,7 @@ export interface PagePresenceState {
 
 export type PageSessionNotice =
   | { type: "session"; headRevision: number | null; canEdit: boolean }
-  /** The Automations the commit paused because their reference left the page. */
-  | { type: "committed"; revision: number; headRevision: number; author?: string;
-    detachedAutomations?: PageAutomationAnchorChange[] }
+  | { type: "committed"; revision: number; headRevision: number; author?: string }
   | { type: "suggestion"; revision: number; author: string }
   | { type: "access"; canEdit?: boolean; canRead?: boolean }
   | { type: "error"; code: string }

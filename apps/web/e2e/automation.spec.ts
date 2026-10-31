@@ -88,20 +88,20 @@ async function openSchedule(page: Page, name: string) {
   await expect(page.locator(".app-tool-detail").getByRole("heading", { level: 2, name })).toBeVisible();
 }
 
+/** An Automation on the Goals page's Architecture section, which stubAutomationPages serves. */
+const PAGE_AUTOMATION = { ...E2E_AUTOMATION, pageId: `goals-${E2E_SPACE.id}`, spaceId: E2E_SPACE.id, blockId: "architecture" };
+
 /** Confirms Delete on the open schedule and waits for its row to leave the list. */
+async function openPageSchedule(page: Page, automation: typeof PAGE_AUTOMATION & { source?: string }) {
+  await openWorkspaceWithStubs(page, { ...E2E_AUTOMATION_READY_FIXTURES, automations: [automation] });
+  await stubAutomationPages(page);
+  await openSchedule(page, "Existing schedule");
+}
+
 async function deleteExistingSchedule(page: Page) {
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete" }).click();
   await expect(scheduleRow(page, "Existing schedule")).toHaveCount(0);
-}
-
-async function openAutomationEditor(page: Page, automation: typeof E2E_AUTOMATION) {
-  await openWorkspaceWithStubs(page, {
-    ...E2E_AUTOMATION_READY_FIXTURES,
-    automations: [automation],
-  });
-  await openSchedule(page, automation.name);
-  await page.getByRole("button", { name: "Edit" }).click();
 }
 
 test("Automation distinguishes failed catalogs from empty catalogs", async ({ page }) => {
@@ -130,41 +130,21 @@ test("Automation renders genuine empty catalogs only after loading succeeds", as
   await expect(page.getByText("Loading schedules…")).toHaveCount(0);
 });
 
-test("channel readers see Automation expectations without management controls", async ({ page }) => {
-  const readOnlyTask = {
-    ...E2E_AUTOMATION,
-    canManage: false,
-    capabilities: {
-      update: false,
-      pause: false,
-      requestPause: false,
-      resume: false,
-      delete: false,
-      reasonRequired: false,
-    },
-  };
-  await openWorkspaceWithStubs(page, {
-    ...E2E_AUTOMATION_READY_FIXTURES,
-    automations: [readOnlyTask],
-  });
-
-  const details = page.locator(".app-details");
-  await expect(details.getByText("Existing schedule", { exact: true })).toBeVisible();
-  await expect(details.getByText(readOnlyTask.expression.text, { exact: true })).toBeVisible();
-  await expect(details.getByText("Root evaluation · actor user:e2e-user", { exact: true })).toBeVisible();
-  await expect(details.getByText("read only", { exact: true })).toBeVisible();
-  await expect(details.getByRole("button", { name: "Pause" })).toHaveCount(0);
-  await expect(details.getByRole("button", { name: "Delete lineage" })).toHaveCount(0);
-});
-
-test("Automation exits edit mode when the edited task is deleted", async ({ page }) => {
-  await openAutomationEditor(page, E2E_AUTOMATION);
-  await expect(page.getByLabel("Name")).toHaveValue("Existing schedule");
-  await expect(page.getByLabel("What it does each time")).toHaveValue(E2E_AUTOMATION.expression.text);
+test("a schedule is changed on its page, and deleting it leaves nothing on a schedule", async ({ page }) => {
+  await openPageSchedule(page, { ...PAGE_AUTOMATION, source: "- [ ] Run the existing schedule. 🔁 every hour" });
+  const detail = page.locator(".app-tool-detail");
+  await expect(detail.getByText("- [ ] Run the existing schedule. 🔁 every hour", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("What it does each time")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "Conversation" })).toHaveCount(0);
 
   await deleteExistingSchedule(page);
-  await expect(page.getByLabel("Name")).toHaveCount(0);
   await expect(page.getByText("Nothing in this Space runs on a schedule")).toBeVisible();
+});
+
+test("a schedule's Edit opens its page", async ({ page }) => {
+  await openPageSchedule(page, PAGE_AUTOMATION);
+  await page.getByRole("button", { name: "Edit on its page" }).click();
+  await expect(page).toHaveURL(new RegExp(`/pages\\?page=goals-${E2E_SPACE.id}`));
 });
 
 test("deleting an Automation that moved on since the list loaded deletes its current version", async ({ page }) => {
@@ -200,7 +180,7 @@ test("Schedules lists Automations by page and makes none; an empty Space is sent
 test("a page's Automation is listed under its page on the page tree, says what it is doing, and its address names it", async ({ page }) => {
   await openWorkspaceWithStubs(page, {
     ...E2E_AUTOMATION_READY_FIXTURES,
-    automations: [{ ...E2E_AUTOMATION, pageId: `goals-${E2E_SPACE.id}`, spaceId: E2E_SPACE.id, blockId: "architecture" }],
+    automations: [PAGE_AUTOMATION],
   });
   const goals = await stubAutomationPages(page);
   await page.getByRole("button", { name: "Schedules" }).click();
@@ -226,18 +206,15 @@ test("a page's Automation is listed under its page on the page tree, says what i
   await expect(page).toHaveURL(new RegExp(`/pages\\?page=goals-${E2E_SPACE.id}`));
 });
 
-test("a conversation's details open its Automation in Schedules instead of offering to add one", async ({ page }) => {
+test("a conversation's details list no schedules: a schedule is a line of its page", async ({ page }) => {
   await openWorkspaceWithStubs(page, {
     ...E2E_AUTOMATION_READY_FIXTURES,
     automations: [E2E_AUTOMATION],
   });
   const details = page.locator(".app-details");
-  await expect(details.getByText("Existing schedule", { exact: true })).toBeVisible();
+  await expect(details).toBeVisible();
+  await expect(details.getByText("Existing schedule", { exact: true })).toHaveCount(0);
   await expect(details.getByRole("button", { name: "Add schedule" })).toHaveCount(0);
-  await details.getByRole("button", { name: "Edit Existing schedule" }).click();
-  await details.getByRole("button", { name: "Open in Schedules" }).click();
-  await expect(page.getByLabel("Name")).toHaveValue("Existing schedule");
-  await expect(page).toHaveURL(/[?&]schedule=task-local/);
 });
 
 test("Automation refreshes task state while the page remains open", async ({ page }) => {

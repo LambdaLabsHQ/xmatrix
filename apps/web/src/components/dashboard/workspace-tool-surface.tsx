@@ -107,7 +107,6 @@ export function ToolSurface({
   onRevealLocalWorkspace,
   onCheckLocalRuntime,
   onCompleteDesktopSetup,
-  onUpdateAutomation,
   onToggleAutomation,
   onRunAutomation,
   onDeleteAutomation,
@@ -244,8 +243,6 @@ export function ToolSurface({
         token={token ?? ""}
         automations={currentSpaceAutomations}
         executionEnabled={automationExecutionEnabled}
-        spaces={spaces}
-        currentUserId={user.id}
         channels={currentSpaceChannels}
         busy={automationBusy}
         error={automationError}
@@ -253,7 +250,6 @@ export function ToolSurface({
         loadingAutomations={loadingAutomations}
         focusAutomationId={scheduleFocusId ?? undefined}
         onFocusConsumed={onScheduleFocusConsumed}
-        onUpdateAutomation={onUpdateAutomation}
         onToggleAutomation={onToggleAutomation}
         onRunAutomation={onRunAutomation}
         onDeleteAutomation={onDeleteAutomation}

@@ -763,57 +763,66 @@ records, never a second place they live.
   write-back (§5).
 - **Launch targets** (parent §3.1).
 
-### 6.1 An Automation is a live reference in its section
+### 6.1 An Automation is a line of its section
 
 An Automation is a standing rule, "when this happens, have an Agent do that,
 so that what this section says stays true". A conversation is linear and
 sinks when idle, so an Automation never belongs to one; it belongs to the
-section it keeps true, and it is written there:
+section it keeps true, and it is a line of that section, written as Obsidian
+Tasks writes a recurring or scheduled task (decided by Daniel 2026-10-31):
 
 ```
 ## 1. Architecture: no bloat
-- Cadence: [Code audit](xmatrix:automation/7c5c472c-…)
+- [ ] @auto repo:acme/api audit the code for bloat; record it here 🔁 every 12 hours
+- [ ] @codex review each merge 🔁 every day, on merged:acme/api@main
+- [ ] Remind @Yiming to renew the domain ⏳ 2026-11-03 09:00 +08:00
+- [x] Remind Daniel about the quarterly tax ⏳ 2026-10-30 09:00 +08:00 ✅ 2026-10-30
+- [-] Sweep Sentry 🔁 every week
 ```
 
-- **The reference is the anchor.** The Automation's section is the section
-  whose text holds its reference in the page's head revision; moving the
-  reference moves the Automation, and renaming the heading changes nothing.
-  The Automation's page is fixed when it is created; a reference to it on
-  another page is an ordinary link.
-- **The editor renders it as a chip** with its triggers, whether it is
-  running, the next run and a link to the last one, so the page never restates
-  a schedule in prose (§2.4) and prose and schedule cannot disagree. `page
-  read` lists it under `live:` like every live reference.
-- **Deleting the reference pauses the Automation** (reason `detached`); it is
-  not deleted. Putting the reference back, by undo or by restoring a
-  revision, resumes one that was paused only for that reason. The Space's
-  Schedules list every Automation, with *Delete*. The edit says so
-  when it happens: its result names each Automation it detached or resumed
-  and each top section it removed, `page edit` prints a line for each, and
-  people on the page see a notice. A resumed Automation that never ran gets
-  its first delay again, at most one interval.
-- **Each occurrence works in a fresh conversation.** The Automation has a
-  conversation of its own, created with it, whose authority times it; nothing
-  is posted there. Each occurrence opens a new conversation as the
-  Automation's author, linked to its section and named for the Automation and
-  the occurrence's time, posts its message there and writes back to the
-  section (§5). An occurrence never inherits an earlier one's chatter: what
-  carries over lives on the page. The chip and Schedules open the last
-  occurrence's conversation. An Automation with connector or GitHub event
-  triggers uses closed occurrence conversations even when its Page is readable
-  to the whole Space. Any captured trigger event also requires a closed
-  conversation, even if its trigger configuration has since changed. A retry
-  that finds an older open conversation refuses to append those private
-  details.
-- **An edit can set the next run.** The cadence counts from it, so
-  Automations on the same cadence need not run in the same minute
-  (`xmatrix page automation edit --next <UTC time>`).
-- **Nothing runs unanchored.** An Automation is created only in a page
-  section: from the page, `xmatrix page automation create` or a Management
-  Agent acting through the page. The Space's Schedules only lists and
-  manages them. There is no message macro for it: saying "audit
-  this every 12 hours" in a conversation is an ordinary request an Agent acts
-  on by creating the Automation where it belongs.
+- **The line is what it is.** A task with `🔁` or `⏳` outside code is a
+  schedule; its description, before the first of them, is what each
+  occurrence posts. `🔁` takes a cadence (`every 12 hours`, `every day`,
+  `every 2 weeks`, `every 12h`) and, after commas, the events that also make
+  it due (§6.2); `⏳` alone runs it once at that time, written with its
+  offset, and with `🔁` sets when its first occurrence runs. `[ ]` runs, `[-]`
+  (Obsidian's cancelled) pauses, `[x]` is done; deleting the line deletes it,
+  and moving it to another section moves it. People and Agents edit it like
+  any other text; nothing else stores what it is. `@` in the line says who
+  runs it, as in a message; `/` stays a command; neither is reused for time.
+- **The editor quiets its timing** (from `🔁` or `⏳` on) and draws after
+  the line, from the Automation it is, when it runs next; clicking that opens
+  the conversation its last occurrence ran in. A line that cannot run as
+  written says why there instead (a cadence out of bounds, a time without its
+  offset, an event in a repository the Space's GitHub connection does not
+  cover), and `page edit` prints it. `page read` lists the page's schedules
+  under `automations:`.
+- **Each revision syncs its lines.** After a revision moves the page's head,
+  the Hub makes the page's Automations what its lines say, as that revision's
+  author (an Agent's author is its owner): a new line creates one, a changed
+  line changes it, a removed line deletes it, `[-]` or `[x]` stops it. Each
+  Automation keeps the line it was synced from; the next sync knows it by that
+  line, then by its instruction, then by its place in its section. An
+  occurrence runs only while its line is still running in the head, so a sync
+  that has not landed never runs what the page no longer says.
+- **A delivered reminder is checked off**: the Hub writes `[x] … ✅ <day>` into
+  its line, as Obsidian does for a done task. Giving it a new time and `[ ]`
+  arms it again.
+- **Each occurrence works in a fresh conversation.** Each occurrence opens a
+  new conversation as the Automation's author, linked to its section and
+  named for the Automation and the occurrence's time, posts its message there
+  and writes back to the section (§5). An occurrence never inherits an earlier
+  one's chatter: what carries over lives on the page. An Automation with
+  connector or GitHub event triggers uses closed occurrence conversations even
+  when its Page is readable to the whole Space. Any captured trigger event
+  also requires a closed conversation, even if its trigger configuration has
+  since changed. A retry that finds an older open conversation refuses to
+  append those private details.
+- **Nothing runs unanchored.** An Automation exists only as a page line. The
+  Space's Schedules only lists them and runs, pauses, resumes or deletes one
+  by changing its line. There is no message macro: saying "audit this every
+  12 hours" in a conversation is an ordinary request an Agent acts on by
+  writing the line where it belongs.
 
 ### 6.2 Triggers
 
@@ -827,17 +836,17 @@ while the Space is still connected to it.
 
 | Trigger | Fires when |
 |---|---|
-| `every <interval>` | The interval has passed since the last occurrence (the existing cadence bounds) |
-| `merged <owner/repo>[@branch] [paths…]` | A pull request is merged into the branch (default: the default branch), touching one of the paths if any are given |
-| `ci-failed <owner/repo>[@branch] [workflow]` | A workflow run on the branch concludes with failure |
-| `<app>:<event>[:<source>]` | A connected app delivers that event (`connector-platform.md` §3.4) |
+| `🔁 every <interval>` | The interval has passed since the last occurrence (15 minutes to 30 days) |
+| `, on merged:<owner/repo>[@branch][:path,…]` | A pull request is merged into the branch (default: the default branch), touching one of the paths if any are given |
+| `, on ci-failed:<owner/repo>[@branch][:workflow]` | A workflow run on the branch concludes with failure |
+| `, on <app>:<event\|*>[:<source>]` | A connected app delivers that event (`connector-platform.md` §3.4) |
 
-A reminder (`xmatrix page automation create --at <time with its offset>`)
+A reminder (`⏳ <time with its offset>` without `🔁`)
 is for a dated commitment the page records: a booking, a deadline, a renewal.
 It runs once at its time, within a year, in its own conversation like any
 occurrence; its message waits on its author, so it lands in their Needs you
-and is pushed to their devices. Once delivered it stops and its section shows
-it done; giving it a new time (`edit --at`) arms it again. It has no cadence
+and is pushed to their devices. Once delivered it stops and its line is checked off
+(`[x] … ✅ <day>`); giving it a new time and `[ ]` arms it again. It has no cadence
 or triggers, and resuming it keeps its time, which must still be ahead.
 
 Events coalesce: an occurrence takes every event recorded before it (the last
@@ -863,43 +872,45 @@ Access follows the page, for people and Agents alike:
   configuration, including repository names, follows the Page's visibility.
   An authorized author or Agent can also publish event content into Page prose;
   the automatic event projection does not restrict those explicit Page writes.
-- **Create, edit, pause, resume, move, delete**: anyone who can edit the page.
-  On a suggest-only page an Agent's change is refused and it asks a person,
-  because an Automation is not text a person can review as a suggestion.
+- **Create, edit, pause, resume, move, delete**: anyone who can edit the page,
+  by editing its line. On a suggest-only page an Agent's edit is a
+  suggestion, which changes nothing until a person accepts it.
 - **Authority does not change hands in place.** An Automation runs with its
-  author's Machines, Agents and name. Pause, resume, move and delete keep the
-  author. An edit by anyone else atomically replaces it with a new Automation
-  whose author is the editor (an Agent's author is its owner), and the
-  reference in the body is rewritten to the new id in the same page revision.
-  Every change is a page revision, so History shows who changed which
-  Automation, in which conversation. An Agent's reference edits are attributed
-  to its actual Run conversation. The Automation's timer conversation remains
-  independently private; authoring does not grant the Agent access to it.
+  author's Machines, Agents and name: whoever last changed what its line does
+  (an Agent's author is its owner). Pausing, resuming and moving it keep its
+  author; a change to what it does by anyone else atomically replaces it with
+  a new Automation whose author is that writer. Every change is a page
+  revision, so History shows who changed which line, in which conversation.
+  The Automation's timer conversation remains private to the Hub; it is never
+  shown or linked as the Automation's conversation.
 
-Agents use `xmatrix page automation list|create|edit|pause|resume|delete
-<page-id>`, with `--block <heading-slug>` choosing the section for create and
-move; the command writes the reference into the section as part of the same
-change.
+Agents write and change lines with `xmatrix page edit`, and use `xmatrix page
+automation list|run|pause|resume|delete <page-id>`; pause, resume and delete
+change the line.
 
 ### 6.4 Storage and execution
 
-- `data.automations` gains `page_id`; the section is derived from the
-  reference, never stored. The Channel-family authority of the Automation's
-  conversation keeps executing it exactly as before: alarm, occurrences,
+- `data.automations` rows hold what runs and how it has run: `page_id`, and in
+  `payload_json` the line each was synced from (`source`), the instruction,
+  cadence, triggers and a reminder's time (`at`). The section is derived from
+  the line, never stored as authority. The Channel-family authority of the
+  Automation's timer conversation keeps executing it: alarm, occurrences,
   deadlines and cancellation are unchanged (docs/architecture/
   automation-execution-cancellation.md).
-- Each committed page revision reconciles its references with the page's
-  Automations: a reference that disappeared pauses its Automation as
-  `detached`, one that reappeared resumes it, and a reference to an unknown
-  or foreign id renders as a broken reference.
+- After each committed revision that moves the head, the page session syncs
+  the page's lines to its Automations (`page-schedule-sync.ts`), one sync at a
+  time per page; restoring a revision and creating a page with schedule lines
+  sync the same way. Dispatch rechecks the line in the head before each
+  occurrence and fails it permanently when the line is gone, stopped or
+  unreadable.
 - Event triggers are matched by the Hub where the event arrives (the GitHub
   webhook, a connector's event ingress) against an index of enabled
   Automations by trigger key, and delivered to the Automation's authority as
   "due now".
-- There is no Channel-scoped Automation: the page creates one on one of its
-  sections. The contract migration moved the existing ones: each
-  one's reference was appended to the page its conversation was last linked
-  to, or else its Space's first root page.
+- There is no Channel-scoped Automation and no reference link: contract
+  migration 0235 rewrote each page Automation's `[name](xmatrix:automation/<id>)`
+  reference into its line, after the line that held it, and wrote one with no
+  reference paused at the end of its page.
 
 ### 6.5 A GitHub file is embedded by reference
 
@@ -1063,8 +1074,8 @@ Shipped:
 
 Open:
 
-- Automations as live references in their section, with page access, event
-  triggers and the removal of Channel-scoped Automations (§6).
+- Automation timing moved off each Automation's timer conversation onto its
+  page (§6.4).
 - Change events pushed to a Run when a block it read or edited changes
   (§3.1), and "changes since your last visit" for people.
 - Live references for GitHub issues and pull requests (§2.4).

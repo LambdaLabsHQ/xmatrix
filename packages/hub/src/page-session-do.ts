@@ -17,6 +17,7 @@ import { pageCoWriteDataPoint } from "./page-co-write-diagnostics";
 import { tellPageCoWriter } from "./page-co-write-instruction";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 import { parsePageOutputWrite } from "./page-output-receipts";
+import { pageSchedules } from "@xmatrix/protocol";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -128,9 +129,8 @@ export class RelayPageSession extends DurableObject<Env> {
         try {
           const result = await pages(this.env).edit({ requestId: crypto.randomUUID(), spaceId: this.need("space"),
             pageId: this.need("page"), principal: pagePrincipalFromSession(principal), ...input });
-          await tellPageAutomationChannels(this.env, result.automationChannels);
+          if (result.revision.kind !== "suggestion") this.schedulesChanged(principal, input.body, result.page.headRevision);
           return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision,
-            detachedAutomations: result.detachedAutomations, attachedAutomations: result.attachedAutomations,
             agentSuggestOnly: result.page.agentSuggestOnly };
         } catch (error) {
           if (error instanceof PageControlError && error.code === "page_revision_conflict") {
@@ -409,6 +409,34 @@ export class RelayPageSession extends DurableObject<Env> {
    * last of them leaves; an Agent's edit is summarised at once. One at a time:
    * a change during a summary is picked up when that summary ends.
    */
+  /**
+   * The page's schedules are its lines (pages-live-document.md §6.1): a
+   * revision that changed them is synced to its Automations as whoever wrote
+   * it, after the commit, one sync at a time. A revision that left every
+   * schedule line as it was syncs nothing.
+   */
+  private schedulesSynced: string | null = null;
+  private schedulesSyncing: Promise<void> = Promise.resolve();
+
+  private schedulesChanged(principal: PageSessionPrincipal, body: string, revision: number): void {
+    const key = JSON.stringify(pageSchedules(body).map((line) => [line.source, line.blockId]));
+    if (key === this.schedulesSynced) return;
+    this.schedulesSynced = key;
+    const userId = principal.kind === "agent" ? principal.ownerUserId ?? "" : principal.id;
+    if (!userId) return;
+    // Loaded when a schedule line changes: the sync reaches the Space's connections, which a page session
+    // otherwise never needs.
+    this.schedulesSyncing = this.schedulesSyncing.then(async () => (await import("./page-schedule-sync")).syncPageSchedules(this.env, {
+      spaceId: this.need("space"), pageId: this.need("page"), revision, userId, viaAgentRun: principal.kind === "agent",
+    })).then(() => undefined, (error) => {
+      // The next revision that touches a schedule line syncs again; dispatch checks the line meanwhile.
+      this.schedulesSynced = null;
+      console.error("Page schedules did not sync", { pageId: this.pageId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+    this.later(this.schedulesSyncing);
+  }
+
   /** Work that outlives the call that started it; a test's context may not retain it. */
   private later(task: Promise<unknown>): void {
     try { this.ctx.waitUntil(task); } catch { void task; }

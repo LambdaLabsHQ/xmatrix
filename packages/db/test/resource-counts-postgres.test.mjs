@@ -3,7 +3,7 @@ import { integration } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
 import { PostgresUserPreferenceRepository, PostgresPushDeviceRepository,
   PostgresAssistantMemoryRepository, PostgresSharedMemoryRepository, PostgresPageRepository } from "../dist/index.js";
-import { reconcilePageAutomations, removePageAutomations } from "../dist/automation-page-anchor.js";
+import { removePageAutomations } from "../dist/automation-page-anchor.js";
 
 // These exercise persistence and complete reads beyond former quotas. Existing
 // owner tests cover access, encryption, replay and provider retirement evidence.
@@ -76,7 +76,7 @@ integration("assistant memory retains entries beyond 80 and shared memory admits
   }
 });
 
-integration("page anchoring reconciles and removes every automation beyond 200", async () => {
+integration("removing a page removes every automation beyond 200", async () => {
   const f = await spaceSecretFixture();
   try {
     await f.client.query(`INSERT INTO data.space_control_heads(space_id,commit_sequence,updated_at)
@@ -91,8 +91,6 @@ integration("page anchoring reconciles and removes every automation beyond 200",
     const context = { requestId: crypto.randomUUID(), operation: "test.anchors",
       placement: { spaceId: f.ids.space, shardId: "shard-0", placementEpoch: 1 } };
     const input = { spaceId: f.ids.space, pageId: page.pageId, at: new Date().toISOString() };
-    const result = await f.database.transaction(context, tx => reconcilePageAutomations(tx, { ...input, body: "", revision: 2 }));
-    assert.equal(result.detached.length, 251);
     await f.database.transaction(context, tx => removePageAutomations(tx, input));
     assert.equal((await f.client.query("SELECT count(*)::int AS n FROM data.automations WHERE page_id=$1", [page.pageId])).rows[0].n, 0);
   } finally {

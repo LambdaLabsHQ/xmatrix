@@ -991,12 +991,14 @@ export interface SerializedAutomation {
   channelId: string;
   /** The page it belongs to (docs/design/pages-live-document.md §6); its section is where the page references it. */
   pageId?: string;
-  /** The section of the page its reference is in, when read through its page ('' before the first heading). */
+  /** The section of the page its line is in, when read through its page ('' before the first heading). */
   blockId?: string;
   /** The page's Space, with pageId. */
   spaceId?: string;
-  /** When its reference left the page; it stays paused until the reference is back. */
-  detachedAt?: string;
+  /** The page line it is (docs/design/pages-live-document.md §6.1), as last synced. */
+  source?: string;
+  /** Why its line does not run as written, when it does not. */
+  problem?: string;
   /** What else makes it run now, besides its cadence (a page's Automation only). */
   triggers?: AutomationTrigger[];
   /** Events that made it due and that its next occurrence will name. */

@@ -2118,7 +2118,14 @@ pub enum PageCommand {
         #[command(subcommand)]
         command: PageMigrationCommand,
     },
-    /// A page's Automations: standing rules that keep its sections true, each referenced in its section
+    /// A page's schedules: lines of its text, written as Obsidian Tasks writes a recurring or scheduled task
+    ///
+    /// `- [ ] <what to do> 🔁 every 12 hours[, on merged:owner/repo@main]` runs on a cadence;
+    /// `- [ ] <what to do> ⏳ 2026-11-03 09:00 +08:00` runs once, as a reminder that waits on its author.
+    /// `[-]` pauses one and `[x]` marks one done. Write and change them with `page edit` in the section
+    /// they keep true; each runs as whoever last changed its line (an Agent as its owner), in a fresh
+    /// conversation. Use `@auto repo:<owner/repo>` in what to do to address an Agent each time.
+    /// Any other live Agents receive context only. Without an Agent mention an occurrence only posts its text.
     #[command(alias = "automations")]
     Automation {
         #[command(subcommand)]
@@ -2128,7 +2135,7 @@ pub enum PageCommand {
 
 #[derive(Subcommand)]
 pub enum PageAutomationCommand {
-    /// List a page's Automations with their section, cadence and state
+    /// List a page's schedules with their section, state and line
     #[command(alias = "ls")]
     List {
         /// Page ID
@@ -2137,151 +2144,42 @@ pub enum PageAutomationCommand {
         #[arg(long)]
         space: Option<String>,
     },
-    /// Create an Automation in a section; it runs as your owner, each occurrence in a fresh conversation.
-    ///
-    /// Use `@auto repo:<owner/repo>` to address an Agent each time.
-    /// `--every` controls cadence; `--at` makes a reminder instead: it runs
-    /// once at that time, waits on your owner in Needs you (pushed to their
-    /// devices), then stops. Use `pwd:"<registered-path>"` instead of
-    /// `repo:` for a registered directory. Each occurrence's conversation is new,
-    /// so an exact `@agent:N` finds no live instance there;
-    /// other live Agents receive context.
-    /// Without an Agent mention, it only posts its text.
-    Create {
-        /// Page ID
-        page: String,
-        /// Heading slug of the section it keeps true (the end of the page when omitted)
-        #[arg(long)]
-        block: Option<String>,
-        /// Its name, shown in the section
-        #[arg(long)]
-        name: String,
-        /// How often it runs: minutes, or a number with m, h or d (e.g. 12h)
-        #[arg(long, required_unless_present = "at", conflicts_with = "at")]
-        every: Option<String>,
-        /// Run once, as a reminder, at this time with its offset, within a year
-        /// (e.g. 2026-10-29T18:00+08:00 for 18:00 in Bali, or 2026-10-29T10:00Z)
-        #[arg(long, conflicts_with = "triggers")]
-        at: Option<String>,
-        /// Also run on an event (repeatable): merged:owner/repo[@branch][:path,…],
-        /// ci-failed:owner/repo[@branch][:workflow], or a connector event
-        /// <connector>:<event|*>[:<source>] (e.g. sentry:issue.created:web)
-        #[arg(long = "on")]
-        triggers: Vec<String>,
-        /// What to do each time (posted in its conversation, e.g. "@auto repo:owner/repo …")
-        #[arg(long = "message", short = 'm')]
-        instruction: Option<String>,
-        /// Read what to do each time from a file
-        #[arg(long, short = 'f')]
-        file: Option<PathBuf>,
-        /// Read what to do each time from stdin
-        #[arg(long = "stdin")]
-        stdin: bool,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// Change an Automation's name, cadence or instruction; someone else's is replaced by yours
-    Edit {
+    /// Pause a schedule: its line becomes `- [-]`
+    Pause {
         /// Page ID
         page: String,
         /// Automation ID (from `xmatrix page automation list`)
         automation: String,
-        /// The version you read (from `xmatrix page automation list`)
-        #[arg(long)]
-        version: u64,
-        /// New name
-        #[arg(long)]
-        name: Option<String>,
-        /// New cadence: minutes, or a number with m, h or d
-        #[arg(long)]
-        every: Option<String>,
-        /// When its next occurrence runs, as a UTC time such as 2026-10-11T02:00:00Z; its cadence counts from there
-        #[arg(long, conflicts_with = "at")]
-        next: Option<String>,
-        /// A reminder's new time, with its offset (e.g. 2026-10-29T18:00+08:00); arms it again if it has run
-        #[arg(long, conflicts_with = "every")]
-        at: Option<String>,
-        /// Replace its event triggers (repeatable; see `create --help`)
-        #[arg(long = "on", conflicts_with = "no_triggers")]
-        triggers: Vec<String>,
-        /// Remove its event triggers
-        #[arg(long = "no-triggers")]
-        no_triggers: bool,
-        /// New instruction
-        #[arg(long = "message", short = 'm')]
-        instruction: Option<String>,
-        /// Read the new instruction from a file
-        #[arg(long, short = 'f')]
-        file: Option<PathBuf>,
-        /// Read the new instruction from stdin
-        #[arg(long = "stdin")]
-        stdin: bool,
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,
     },
-    /// Pause an Automation; its reference stays on the page
-    Pause {
-        /// Page ID
-        page: String,
-        /// Automation ID
-        automation: String,
-        /// The version you read
-        #[arg(long)]
-        version: u64,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// Resume a paused Automation
+    /// Resume a paused schedule: its line becomes `- [ ]`
     Resume {
         /// Page ID
         page: String,
         /// Automation ID
         automation: String,
-        /// The version you read
-        #[arg(long)]
-        version: u64,
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,
     },
-    /// Run a running Automation once now; its cadence stays
+    /// Run a running schedule once now; its cadence stays
     Run {
         /// Page ID
         page: String,
         /// Automation ID
         automation: String,
-        /// The version you read
-        #[arg(long)]
-        version: u64,
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,
     },
-    /// Put an Automation's reference in a section, which moves it there or resumes a detached one
-    Attach {
-        /// Page ID
-        page: String,
-        /// Automation ID
-        automation: String,
-        /// Heading slug (the end of the page when omitted)
-        #[arg(long)]
-        block: Option<String>,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// Delete an Automation and take its reference out of the page
+    /// Delete a schedule by taking its line out of the page
     Delete {
         /// Page ID
         page: String,
         /// Automation ID
         automation: String,
-        /// The version you read
-        #[arg(long)]
-        version: u64,
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,

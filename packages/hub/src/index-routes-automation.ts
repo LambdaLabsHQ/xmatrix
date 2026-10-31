@@ -290,21 +290,22 @@ async function replaceAutomation(boundary: AutomationRouteBoundary, input: {
 }
 
 /**
- * A page's Automation is changed through its page (docs/design/pages-live-document.md §6),
- * which also keeps the page's reference to it right; the Space-wide routes hand it over.
+ * A page's Automation is a line of its page (docs/design/pages-live-document.md §6.1): what it does
+ * and when change in that line, and pausing, resuming or deleting it changes the line. The
+ * Space-wide routes hand it over.
  */
 async function throughPage(context: { user: AuthUser; automation: AutomationRecord; body: Record<string, unknown> },
   request: Request, env: Env, action: "update" | "pause" | "resume" | "delete"): Promise<Response | undefined> {
   const { automation } = context;
   if (typeof automation.pageId !== "string" || typeof automation.spaceId !== "string") return undefined;
+  if (action === "update") {
+    return Response.json({ error: "A schedule is a line of its page: change what it does or when in that line",
+      code: "schedule_lives_in_its_line" }, { status: 409 });
+  }
   try {
-    if (action === "delete") {
-      await pages.deletePageAutomation(env, request, context.user, automation.spaceId, automation.pageId,
-        automation.id, context.body);
-      return Response.json({ ok: true, automationId: automation.id });
-    }
-    return Response.json({ automation: await pages.changePageAutomation(env, request, context.user,
-      automation.spaceId, automation.pageId, automation.id, action, context.body) });
+    const changed = await pages.changePageAutomation(env, request, context.user, automation.spaceId,
+      automation.pageId, automation.id, action);
+    return Response.json(action === "delete" ? { ok: true, automationId: automation.id } : { automation: changed ?? automation });
   } catch (error) {
     return pages.pageAutomationFailure(error);
   }
@@ -336,8 +337,8 @@ export function registerIndexRoutesAutomation(
   // An Automation belongs to the page section it keeps true
   // (docs/design/pages-live-document.md §6).
   app.post(HUB_ROUTES.automations, (c) => c.json({
-    error: "An Automation lives on a page: create it in a page section with " +
-      "POST /api/spaces/:spaceId/pages/:pageId/automations or `xmatrix page automation create`",
+    error: "An Automation is a line of a page: write `- [ ] <what to do> 🔁 every 12 hours` "
+      + "(or `⏳ <time with its offset>` to run once) in the section it keeps true",
     code: "automation_lives_on_a_page",
   }, 410));
 

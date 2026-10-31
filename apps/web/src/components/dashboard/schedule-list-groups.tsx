@@ -47,8 +47,8 @@ export function ScheduleListGroups({ automations, executionEnabled, where, now, 
   limit?: number;
 }) {
   const groups = useMemo(() => groupSchedules(automations, executionEnabled), [automations, executionEnabled]);
-  const whenOf = (automation: SerializedAutomation) => automation.detachedAt ? "detached"
-    : scheduleRunning(automation) ? nextRunPhrase(automation.nextRunAt, now) : "paused";
+  const whenOf = (automation: SerializedAutomation) => scheduleRunning(automation)
+    ? nextRunPhrase(automation.nextRunAt, now) : "paused";
   return groups.map((group) => (
     <ToolListGroup key={group.state} title={titles[group.state]} count={group.automations.length}
       limit={limit}>

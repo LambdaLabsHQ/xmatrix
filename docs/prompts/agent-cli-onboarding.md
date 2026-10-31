@@ -109,14 +109,16 @@ Step 4a: Use the Space's secrets.
 
   Or put the script in a `.ps1` file and run `powershell -File`.
 
-Step 4b: Manage a page's Automations (docs/design/pages-live-document.md §6).
-- An Automation belongs to the page section it keeps true, and its reference `[name](xmatrix:automation/<id>)` sits in that section's text. `xmatrix page read <page-id>` lists the page's Automations under `automations:`; `xmatrix page automation list <page-id>` shows each one's section, cadence, state and CAS version.
-- Create one: `xmatrix page automation create <page-id> --block <heading-slug> --name "<name>" --every 12h -m "@auto repo:<owner/repo> <what to do>"`. Use `pwd:"<registered-path>"` instead of `repo:` for a registered directory. Each occurrence runs in a fresh conversation linked to the section, as your owner, so it keeps running after this Run ends and starts from the page rather than from earlier occurrences.
-- Also run it on events: `--on merged:<owner/repo>[@branch][:path,…]` (a pull request merged into the branch, default the repository's default branch, touching one of the paths) or `--on ci-failed:<owner/repo>[@branch][:workflow]`. The Space's GitHub connection must cover the repository. An event makes it due now; events coalesce, and the occurrence's message names them.
-- Anyone who can edit the page manages its Automations, from any conversation. On a page that takes Agent edits as suggestions, ask a person instead.
-- `edit`, `pause`, `resume`, `run` and `delete` take the Automation id and `--version <n>`; `run` makes a running Automation's next occurrence due now without changing its cadence. Editing an Automation someone else authored replaces it with one authored by your owner and points the page's reference at it; it never runs someone else's text under another name.
-- Deleting its reference from the page pauses it (`detached`); `xmatrix page automation attach <page-id> <id> --block <slug>` puts the reference back, which resumes it or moves it to another section.
-- `--every` controls the cadence. A finished occurrence leaves its Agent available for follow-up messages; any Agent can stop (`@<agent>:<N>:stop`) or restart (`@<agent>:<N>:reborn`) an Instance, its own included.
+Step 4b: Write a page's schedules (docs/design/pages-live-document.md §6.1).
+- A schedule is a line of the page section it keeps true, written as Obsidian Tasks writes a recurring or scheduled task. Write and change it with `xmatrix page edit` like any text:
+  - `- [ ] @auto repo:<owner/repo> <what to do> 🔁 every 12 hours` runs on a cadence (`every 30 minutes`, `every day`, `every 2 weeks`; `12h`, `1d` also read).
+  - `🔁 every day, on merged:<owner/repo>[@branch][:path,…], on ci-failed:<owner/repo>[@branch][:workflow]` also runs on those events; `on <app>:<event|*>[:<source>]` on a connected app's. The Space's connection must cover the repository or app. An event makes it due now; events coalesce, and the occurrence's message names them.
+  - `- [ ] <what to remind> ⏳ 2026-11-03 09:00 +08:00` runs once, at that time with its offset, as a reminder that waits on its author; once delivered its line becomes `- [x] … ✅ <day>`. With `🔁`, `⏳` sets when the first occurrence runs.
+  - `- [-]` pauses it; `- [ ]` resumes it; deleting the line deletes it.
+- Each occurrence runs in a fresh conversation linked to the section, as whoever last changed the line (an Agent as its owner), so it keeps running after this Run ends and starts from the page rather than from earlier occurrences.
+- `xmatrix page read <page-id>` lists the page's schedules under `automations:`; `xmatrix page automation list <page-id>` shows each one's section, state and line, and `run <page-id> <id>` makes a running one due now without changing its cadence. `page edit` prints any schedule line that cannot run as written, with why.
+- Anyone who can edit the page manages its schedules. On a page that takes Agent edits as suggestions, ask a person instead.
+- A finished occurrence leaves its Agent available for follow-up messages; any Agent can stop (`@<agent>:<N>:stop`) or restart (`@<agent>:<N>:reborn`) an Instance, its own included.
 - Each occurrence's conversation is new, so start its Agent with a harness mention such as `@auto`; an exact `@<agent>:<channel-instance-number>` finds no live instance there; other live Agents receive context only. Without an Agent mention an occurrence only posts its text in its conversation; it does not choose or start an Agent.
 
 - Secret values are never printed in chat; Space admins decide how Agents get each secret.

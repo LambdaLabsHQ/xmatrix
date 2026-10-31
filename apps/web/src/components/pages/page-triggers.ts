@@ -12,7 +12,9 @@ export type PageTrigger =
   | { kind: "insert"; from: number; to: number; query: string }
   | { kind: "channel"; from: number; to: number; query: string }
   | { kind: "page"; from: number; to: number; query: string; section: string | null }
-  | { kind: "agent"; from: number; to: number; query: string };
+  | { kind: "agent"; from: number; to: number; query: string }
+  /** A schedule line's timing, clicked: `from`…`to` is the timing the pick replaces (page-schedule-editing.ts). */
+  | { kind: "schedule"; from: number; to: number; query: string };
 
 export const triggersKey = new PluginKey<PageTrigger | null>("page-triggers");
 
@@ -49,7 +51,19 @@ export function pageTriggers(): Plugin<PageTrigger | null> {
     key: triggersKey,
     state: {
       init: () => null,
-      apply: (tr, _value, _old, state) => tr.getMeta(triggersKey) === "close" ? null : pageTriggerAt(state),
+      apply: (tr, value, _old, state) => {
+        const meta = tr.getMeta(triggersKey) as PageTrigger | "close" | undefined;
+        if (meta === "close") return null;
+        if (meta) return meta;
+        // A clicked timing's menu stays open while the caret stays in that timing.
+        if (value?.kind === "schedule") {
+          const from = tr.mapping.map(value.from, -1);
+          const to = tr.mapping.map(value.to, 1);
+          const head = state.selection.head;
+          if (state.selection.empty && head >= from && head <= to) return { ...value, from, to };
+        }
+        return pageTriggerAt(state);
+      },
     },
   });
 }

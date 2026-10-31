@@ -6,14 +6,9 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
 import {
-  AUTOMATION_MAX_INTERVAL_MINUTES,
-  AUTOMATION_MIN_INTERVAL_MINUTES,
-  isAutomationIntervalMinutes,
   pageBlocks,
-  type AutomationUpdateRequest,
   type SerializedAutomation,
   type ChannelSnapshot,
-  type SerializedSpace,
 } from "@xmatrix/protocol";
 import { AlertTriangle, ChevronRight, Clock, FileText, Loader2, MessageSquare, Pause, Pencil, Play,
   Trash2, Zap } from "lucide-react";
@@ -22,9 +17,7 @@ import { PageTreeRow } from "@/components/pages/page-tree-row";
 import { pageChildren } from "@/lib/pages/page-client";
 import { formatAutomationCadence, formatAutomationNext, formatAutomationTrigger } from "@/components/pages/page-automation-format";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { noticeClass } from "@/components/ui/status-tone";
-import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { ListSkeleton } from "./content-skeleton";
 import { nextRunPhrase, useScheduleWhere } from "./schedule-list-groups";
@@ -32,17 +25,14 @@ import {
   scheduleAttention, scheduleDone, scheduleRunning, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
   SCHEDULE_STATES, type ScheduleCounts, type SchedulePageNode, type ScheduleState,
 } from "./schedules-model";
-import { spaceMemberCanCreate } from "./space-member-permissions";
 import { formatRelativeAge } from "./time-display";
 import {
   ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolSplit,
 } from "./tool-split";
-import { AutomationExpressionGuidance, automationExpressionFromText } from "./workspace-admin-views";
 import { evaluationBindingLabel, formatDateTime } from "./workspace-shell-recovered";
 
 /** What Schedules can do to an Automation; whoever shows Schedules passes these through. */
 export type ScheduleActions = {
-  onUpdateAutomation: (automationId: string, input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
   onToggleAutomation: (automation: SerializedAutomation) => void;
   onRunAutomation: (automation: SerializedAutomation) => void;
   onDeleteAutomation: (automation: SerializedAutomation) => void;
@@ -62,8 +52,6 @@ export function SchedulesView({
   token,
   automations,
   executionEnabled,
-  spaces,
-  currentUserId,
   channels,
   busy,
   error,
@@ -71,7 +59,6 @@ export function SchedulesView({
   loadingAutomations,
   focusAutomationId,
   onFocusConsumed,
-  onUpdateAutomation,
   onToggleAutomation,
   onRunAutomation,
   onDeleteAutomation,
@@ -83,14 +70,12 @@ export function SchedulesView({
   token: string;
   automations: SerializedAutomation[];
   executionEnabled: boolean | null;
-  spaces: SerializedSpace[];
-  currentUserId: string;
   channels: ChannelSnapshot[];
   busy: string | null;
   error: string | null;
   loadError: string | null;
   loadingAutomations: boolean;
-  /** An Automation to open with its editor, e.g. from a conversation's details. */
+  /** An Automation to open, e.g. from a conversation's details. */
   focusAutomationId?: string;
   onFocusConsumed?: () => void;
   onOpenPage: (pageId: string) => void;
@@ -99,7 +84,6 @@ export function SchedulesView({
 } & ScheduleActions) {
   const { user } = useAuth();
   const [selectedId, select] = useViewSelection("automation");
-  const [editingId, setEditingId] = useState<string | null>(null);
   // Relative times ("next in 8 min") stay true while the view is open.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -139,10 +123,7 @@ export function SchedulesView({
   const tree = useMemo(() => scheduleTree(automations, childrenOf, (pageId) => sectionIds.get(pageId) ?? [],
     executionEnabled), [automations, childrenOf, sectionIds, executionEnabled]);
 
-  const selectedSpace = spaces.find((space) => space.id === spaceId);
-  const memberMayCreate = spaceMemberCanCreate(selectedSpace, currentUserId, "automationCreation");
-
-  // Opened for one Automation: choose it, with its editor.
+  // Opened for one Automation: choose it.
   useEffect(() => {
     if (!focusAutomationId) return;
     const automation = automations.find((candidate) => candidate.id === focusAutomationId);
@@ -151,20 +132,12 @@ export function SchedulesView({
       return;
     }
     select(automation.id, { replace: true });
-    setEditingId(automation.capabilities.update ? automation.id : null);
     onFocusConsumed?.();
   }, [focusAutomationId, automations, loadingAutomations, onFocusConsumed, select]);
-  // The editor belongs to the chosen Automation, while it can still be changed.
-  useEffect(() => {
-    if (editingId && (editingId !== selectedId ||
-      !automations.some((automation) => automation.id === editingId && automation.capabilities.update))) {
-      setEditingId(null);
-    }
-  }, [editingId, automations, selectedId]);
 
   const stateOf = (automation: SerializedAutomation) => scheduleState(automation, executionEnabled);
-  const whenOf = (automation: SerializedAutomation) => automation.detachedAt ? "detached"
-    : scheduleRunning(automation) ? nextRunPhrase(automation.nextRunAt, now) : "paused";
+  const whenOf = (automation: SerializedAutomation) => scheduleRunning(automation)
+    ? nextRunPhrase(automation.nextRunAt, now) : "paused";
 
   // The tree is the page tree; each row's icon says what its Automation is doing.
   const row = (automation: SerializedAutomation, depth: number) => {
@@ -208,29 +181,21 @@ export function SchedulesView({
       section={sectionTitle(selected)}
       now={now}
       executionEnabled={executionEnabled}
-      currentUserId={currentUserId}
-      memberMayCreate={memberMayCreate}
-      spaceName={selectedSpace?.name}
       busy={busy}
       error={error}
-      editing={editingId === selected.id}
       onBack={() => select(null)}
-      onEditingChange={(editing) => setEditingId(editing ? selected.id : null)}
-      onUpdate={(input) => {
-        onUpdateAutomation(selected.id, input);
-        setEditingId(null);
-      }}
       onToggle={() => onToggleAutomation(selected)}
       onRun={() => onRunAutomation(selected)}
       onDelete={() => onDeleteAutomation(selected)}
       onOpenWhere={() => selected.pageId ? onOpenPage(selected.pageId) : onOpenConversation(selected.channelId)}
-      onOpenConversation={() => onOpenConversation(selected.lastChannelId ?? selected.channelId)}
+      onOpenConversation={() => selected.lastChannelId && onOpenConversation(selected.lastChannelId)}
     />
   ) : automations.length === 0 && !loadingAutomations && !loadError ? (
     <ToolDetailEmpty icon={<Clock />} title="Nothing in this Space runs on a schedule">
       <p>
-        An Automation keeps one section of a page true, and is made there: open a page and schedule it from the
-        section it should keep up to date. Everything that runs is listed here.
+        A schedule is a line of a page, in the section it keeps true: write{" "}
+        <code>- [ ] what to do 🔁 every day</code>, or <code>⏳ 2026-11-03 09:00 +08:00</code> to run once.
+        Everything that runs is listed here.
       </p>
       <Button size="sm" variant="outline" onClick={onOpenPages}><FileText /> Open Pages</Button>
     </ToolDetailEmpty>
@@ -419,15 +384,9 @@ function ScheduleDetail({
   section,
   now,
   executionEnabled,
-  currentUserId,
-  memberMayCreate,
-  spaceName,
   busy,
   error,
-  editing,
   onBack,
-  onEditingChange,
-  onUpdate,
   onToggle,
   onRun,
   onDelete,
@@ -440,15 +399,9 @@ function ScheduleDetail({
   section: string | null;
   now: number;
   executionEnabled: boolean | null;
-  currentUserId: string;
-  memberMayCreate: boolean;
-  spaceName?: string;
   busy: string | null;
   error: string | null;
-  editing: boolean;
   onBack: () => void;
-  onEditingChange: (editing: boolean) => void;
-  onUpdate: (input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
   onToggle: () => void;
   onRun: () => void;
   onDelete: () => void;
@@ -459,8 +412,7 @@ function ScheduleDetail({
   const attention = scheduleAttention(automation, executionEnabled);
   const triggers = automation.triggers ?? [];
   const lastRan = formatRelativeAge(automation.lastRunAt ?? automation.lastDeliveryAt, now);
-  const canToggle = !automation.detachedAt &&
-    (automation.enabled ? automation.capabilities.pause : automation.capabilities.resume);
+  const canToggle = automation.enabled ? automation.capabilities.pause : automation.capabilities.resume;
   const readOnly = !automation.capabilities.update && !automation.capabilities.pause &&
     !automation.capabilities.resume && !automation.capabilities.delete;
 
@@ -479,7 +431,7 @@ function ScheduleDetail({
       status={
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {STATE_ICON[state]}
-          <span className="text-foreground">{automation.detachedAt ? "Detached" : running ? "Running" : scheduleDone(automation) ? "Done" : "Paused"}</span>
+          <span className="text-foreground">{running ? "Running" : scheduleDone(automation) ? "Done" : "Paused"}</span>
           <span>· {formatAutomationCadence(automation)}</span>
           {running && <span title={formatDateTime(automation.nextRunAt)}>· {formatAutomationNext(automation.nextRunAt)}</span>}
           <span>· {lastRan ? `ran ${lastRan}` : "not run yet"}</span>
@@ -501,13 +453,12 @@ function ScheduleDetail({
               {busy === `run:${automation.id}` ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Zap />} Run now
             </Button>
           )}
-          {automation.detachedAt && automation.pageId && (
-            <Button size="sm" variant="outline" onClick={onOpenWhere}><FileText /> Put it back on its page</Button>
+          {automation.lastChannelId && (
+            <Button size="sm" variant="outline" onClick={onOpenConversation}><MessageSquare /> Last run</Button>
           )}
-          <Button size="sm" variant="outline" onClick={onOpenConversation}><MessageSquare /> {automation.lastChannelId ? "Last run" : "Conversation"}</Button>
-          {automation.capabilities.update && !editing && (
-            <Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => onEditingChange(true)}>
-              <Pencil /> Edit
+          {automation.capabilities.update && automation.pageId && (
+            <Button size="sm" variant="outline" onClick={onOpenWhere} title="A schedule is a line of its page">
+              <Pencil /> Edit on its page
             </Button>
           )}
           {automation.capabilities.delete && (
@@ -528,23 +479,14 @@ function ScheduleDetail({
         </p>
       )}
 
-      {editing ? (
-        <ToolDetailSection title="Change it">
-          <ScheduleEditor
-            automation={automation}
-            busy={busy}
-            replacesOthers={automation.authorityRootUserId !== currentUserId}
-            memberMayCreate={memberMayCreate}
-            spaceName={spaceName}
-            onCancel={() => onEditingChange(false)}
-            onSave={onUpdate}
-          />
-        </ToolDetailSection>
-      ) : (
-        <ToolDetailSection title="What it does each time">
-          <p className="whitespace-pre-wrap break-words text-sm leading-6">{automation.expression.text}</p>
-        </ToolDetailSection>
+      {automation.problem && (
+        <p role="alert" className={noticeClass("attention", "rounded-lg p-3 flex items-start gap-2 text-sm")}>
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" /> <span className="min-w-0 break-words">{automation.problem}</span>
+        </p>
       )}
+      <ToolDetailSection title="Its line">
+        <p className="whitespace-pre-wrap break-words font-mono text-sm leading-6">{automation.source ?? automation.expression.text}</p>
+      </ToolDetailSection>
 
       <ToolDetailSection title="When it runs">
         <ToolFacts>
@@ -572,64 +514,3 @@ function ScheduleDetail({
   );
 }
 
-/** Changes what an Automation does and how often; where it lives is its page's business. */
-function ScheduleEditor({ automation, busy, replacesOthers, memberMayCreate, spaceName, onCancel, onSave }: {
-  automation: SerializedAutomation;
-  busy: string | null;
-  replacesOthers: boolean;
-  memberMayCreate: boolean;
-  spaceName?: string;
-  onCancel: () => void;
-  onSave: (input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
-}) {
-  const [name, setName] = useState(automation.name);
-  const [intervalMinutes, setIntervalMinutes] = useState(automation.intervalMinutes);
-  const [instruction, setInstruction] = useState(automation.expression.text);
-  const saving = busy === `edit:${automation.id}`;
-  // Saving someone else's Automation makes one of your own in its place, which the Space's policy governs.
-  const allowed = !replacesOthers || memberMayCreate;
-  // A reminder has no cadence: its time is set on its page.
-  const canSave = allowed && !busy && name.trim().length > 0 && instruction.trim().length > 0 &&
-    (automation.once || isAutomationIntervalMinutes(intervalMinutes));
-  return (
-    <form className="space-y-3" onSubmit={(event) => {
-      event.preventDefault();
-      if (canSave) onSave({ name: name.trim(), expression: automationExpressionFromText(instruction),
-        ...(automation.once ? {} : { intervalMinutes }) });
-    }}>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
-        <label className="block text-xs font-bold text-muted-foreground">
-          Name
-          <Input value={name} onChange={(event) => setName(event.target.value)} className="mt-1" />
-        </label>
-        {!automation.once && (
-          <label className="block text-xs font-bold text-muted-foreground">
-            Every (minutes)
-            <Input type="number" min={AUTOMATION_MIN_INTERVAL_MINUTES} max={AUTOMATION_MAX_INTERVAL_MINUTES}
-              step={15} inputMode="numeric" value={intervalMinutes}
-              onChange={(event) => setIntervalMinutes(Number(event.target.value))} className="mt-1" />
-          </label>
-        )}
-      </div>
-      <label className="block text-xs font-bold text-muted-foreground">
-        What it does each time
-        <Textarea value={instruction} onChange={(event) => setInstruction(event.target.value)}
-          className="mt-1 min-h-32 resize-y text-sm font-normal text-foreground" />
-        <AutomationExpressionGuidance compact />
-      </label>
-      {replacesOthers && (
-        <p className={noticeClass("attention", "rounded-lg p-3 text-xs")}>
-          {memberMayCreate
-            ? "Saving replaces this schedule with your own copy, which runs as you."
-            : `Only owners and admins can create Automations in ${spaceName ?? "this Space"}, so only its author can change this one.`}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <Button size="sm" type="submit" disabled={!canSave}>
-          {saving && <AnimatedIcon icon={Loader2} className="animate-spin" />} Save changes
-        </Button>
-        <Button size="sm" variant="ghost" type="button" disabled={saving} onClick={onCancel}>Cancel</Button>
-      </div>
-    </form>
-  );
-}

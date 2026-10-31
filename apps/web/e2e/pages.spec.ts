@@ -1423,12 +1423,13 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   await expect.poll(async () => fixtureRequestBodies(browser, "link-resolve")).toEqual([{ resolved: true }]);
 });
 
-test("a page's Automations are chips in their sections", async ({ page: browser }) => {
+test("a page's schedules are task lines whose timing is quiet and whose state follows them", async ({ page: browser }) => {
   const nextRunAt = new Date(Date.now() + 3 * 3_600_000).toISOString();
+  const line = "- [ ] check the release 🔁 every day, on merged:acme/widgets";
   const release = { id: "auto-release", version: 1, ownerUserId: "e2e-user", authorityRootUserId: "e2e-user",
-    name: "Release check", channelId: E2E_CHANNEL.id, pageId: "p-relay", spaceId: E2E_SPACE.id, blockId: "status",
-    canManage: true, capabilities: { update: true, pause: true, requestPause: false, resume: false, delete: true,
-      reasonRequired: false },
+    name: "check the release", channelId: E2E_CHANNEL.id, pageId: "p-relay", spaceId: E2E_SPACE.id, blockId: "status",
+    source: line, canManage: true, capabilities: { update: true, pause: true, requestPause: false, resume: false,
+      delete: true, reasonRequired: false },
     expression: { kind: "text", language: "natural-language", text: "check the release" },
     message: { body: "check the release" }, intervalMinutes: 1440, enabled: true,
     triggers: [{ kind: "merged", repository: "acme/widgets", installationId: "1" }],
@@ -1438,16 +1439,43 @@ test("a page's Automations are chips in their sections", async ({ page: browser 
   await fixtureJson(browser, "page-automations", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/automations$/u,
     { automations: [release] }, { method: "GET" });
   const editor = await openLivePage(browser,
-    "# Relay\n\n## Status\n\nIn progress\n\n[Release check](xmatrix:automation/auto-release)\n\n## Notes\n\nnone\n");
-  // The reference reads as a chip whose state comes from the Automation, not from the page's text.
-  await expect(editor.locator(".page-automation-chip")).toHaveText("Release check");
-  await expect(editor.locator(".page-automation-status")).toHaveText("daily · next in 3 h");
-  await browser.screenshot({ path: test.info().outputPath("pages-automation-chip.png") });
-  // There is no page-wide list, and a heading offers nothing to attach: a running one is its chip.
-  await expect(browser.getByTestId("pages-view").getByRole("button", { name: "Page menu" })).toHaveCount(0);
-  const notes = editor.locator("h2", { hasText: "Notes" });
-  await notes.hover();
-  await expect(notes.getByRole("button")).toHaveCount(0);
+    `# Relay\n\n## Status\n\nIn progress\n\n${line}\n- [ ] sweep 🔁 every 3 months\n\n## Notes\n\nnone\n`);
+  // The line stays text; its timing is quiet, and after it its Automation says when it runs next.
+  await expect(editor.locator(".page-schedule-timing").first()).toHaveText("🔁 every day, on merged:acme/widgets");
+  const statuses = editor.locator(".page-automation-status");
+  await expect(statuses.first()).toHaveText("next in 3 h");
+  // A line that cannot run says why where it is written.
+  await expect(statuses.nth(1)).toHaveAttribute("data-state", "problem");
+  await expect(statuses.nth(1)).toContainText("every and a cadence");
+  await browser.screenshot({ path: test.info().outputPath("pages-schedule-lines.png") });
+});
+
+
+test("a schedule is written without its emoji: `@` offers when the line runs, and its timing offers it again", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const server = pageDocument("# Relay\n\n## Status\n\nCheck the release\n");
+  const editor = await openLivePage(browser, server);
+  await editor.getByText("Check the release", { exact: true }).click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.type(" @dai");
+  const menu = browser.getByTestId("page-agent-menu");
+  await expect(menu.getByRole("option", { name: /Repeat every day/u })).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("pages-schedule-at-menu.png") });
+  await menu.getByRole("option", { name: /Repeat every day/u }).click();
+  // The pick is the line's text, and the line is a task.
+  await expect.poll(() => pageMarkdown(server)).toContain("- [ ] Check the release 🔁 every day");
+
+  // Its timing offers what it can be, and pausing it.
+  await editor.locator(".page-schedule-timing").click();
+  const schedule = browser.getByTestId("page-schedule-menu");
+  await expect(schedule.getByRole("option", { name: /Repeat every week/u })).toBeVisible();
+  await browser.screenshot({ path: test.info().outputPath("pages-schedule-timing-menu.png") });
+  await schedule.getByRole("option", { name: /Repeat every week/u }).click();
+  await expect.poll(() => pageMarkdown(server)).toContain("- [ ] Check the release 🔁 every week");
+  await editor.locator(".page-schedule-timing").click();
+  await browser.getByTestId("page-schedule-menu").getByRole("option", { name: /^Pause/u }).click();
+  await expect.poll(() => pageMarkdown(server)).toContain("- [-] Check the release 🔁 every week");
 });
 
 

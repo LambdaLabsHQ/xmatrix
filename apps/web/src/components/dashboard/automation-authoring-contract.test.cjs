@@ -4,7 +4,6 @@ const path = require("node:path");
 const test = require("node:test");
 
 const repoRoot = path.join(__dirname, "..", "..", "..", "..", "..");
-const admin = fs.readFileSync(path.join(__dirname, "workspace-admin-views.tsx"), "utf8");
 
 const cliArgs = fs.readFileSync(
   path.join(repoRoot, "packages", "cli-rs", "crates", "args", "src", "lib.rs"),
@@ -24,7 +23,7 @@ const skill = fs.readFileSync(
 );
 function assertAutomationSemantics(source, label) {
   assert.doesNotMatch(source, /oneshot:/, `${label} must not offer a lifetime option`);
-  assert.match(source, /--every|resume interval|cadence/, `${label} must distinguish cadence`);
+  assert.match(source, /🔁|--every|resume interval|cadence/, `${label} must distinguish cadence`);
   assert.match(
     source,
     /(?:every|other) live Agents receive(?: the scheduled message)?(?: as)? context(?: only)?|everyone else receives context only/,
@@ -39,7 +38,6 @@ function assertAutomationSemantics(source, label) {
 
 test("UI, CLI, bootstrap, and public Agent materials retain one Automation contract", () => {
   for (const [label, source] of [
-    ["Web guidance", admin],
     ["CLI help", cliArgs],
     ["trusted bootstrap", bootstrap],
     ["Agent onboarding", onboarding],

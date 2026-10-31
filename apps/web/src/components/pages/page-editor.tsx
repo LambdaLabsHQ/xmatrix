@@ -6,7 +6,7 @@ import {
 } from "@xmatrix/protocol/page-document";
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
-  FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pilcrow, Quote, Table,
+  AlarmClock, FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pause, Pilcrow, Play, Quote, Repeat, Table,
 } from "lucide-react";
 import type { Node as DocNode, ResolvedPos } from "prosemirror-model";
 import { toggleMark } from "prosemirror-commands";
@@ -42,6 +42,9 @@ import {
   type HeadingActions, type ReadCard, type SectionNote,
 } from "./page-editor-setup";
 import { insertReference, triggersKey, type PageTrigger } from "./page-triggers";
+import {
+  schedulePausedAt, scheduleSuggestions, setSchedulePausedAt, writeScheduleTiming, type ScheduleSuggestion,
+} from "./page-schedule-editing";
 import type { WriteAgent } from "./page-write-with";
 import { instanceMention, type PageInstance } from "./page-instances";
 import {
@@ -193,8 +196,41 @@ function referenceItem(trigger: PageTrigger, candidate: ReferenceCandidate): Men
   };
 }
 
+/** A schedule a pick writes into its line: `@` removes what was typed, a clicked timing is replaced. */
+function scheduleItem(trigger: PageTrigger, suggestion: ScheduleSuggestion): MenuItem {
+  return {
+    key: `schedule:${suggestion.key}`, label: suggestion.label, hint: "",
+    icon: suggestion.key.startsWith("repeat") ? <Repeat /> : <AlarmClock />,
+    run: (view) => {
+      view.dispatch(view.state.tr.setMeta(triggersKey, "close"));
+      writeScheduleTiming(view, trigger.from, suggestion.text,
+        trigger.kind === "agent" ? { from: trigger.from, to: trigger.to } : undefined);
+      view.focus();
+    },
+  };
+}
+
+/** What a clicked timing offers: every schedule it can be, and pausing or resuming it. */
+function scheduleMenu(trigger: PageTrigger, doc: DocNode): MenuItem[] {
+  const paused = schedulePausedAt(doc, trigger.from);
+  const toggle: MenuItem = {
+    key: "schedule:toggle", label: paused ? "Resume" : "Pause", icon: paused ? <Play /> : <Pause />, hint: "",
+    run: (view) => {
+      view.dispatch(view.state.tr.setMeta(triggersKey, "close"));
+      setSchedulePausedAt(view.state, view.dispatch, trigger.from, !paused);
+      view.focus();
+    },
+  };
+  const all = ["every", "remind"].flatMap((word) => scheduleSuggestions(word));
+  return [toggle, ...all.map((suggestion) => scheduleItem(trigger, suggestion))];
+}
+
 function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefined,
-  sections: ReadonlyMap<string, PageSections>, fragment: PageLiveSession["fragment"]): MenuItem[] {
+  sections: ReadonlyMap<string, PageSections>, fragment: PageLiveSession["fragment"], doc: DocNode): MenuItem[] {
+  if (trigger.kind === "schedule") return scheduleMenu(trigger, doc);
+  // `@` also says when the line runs, as Obsidian's task suggestions do; it needs no Agent catalog.
+  const schedules = trigger.kind === "agent"
+    ? scheduleSuggestions(trigger.query).map((suggestion) => scheduleItem(trigger, suggestion)) : [];
   if (trigger.kind === "insert") {
     return matchingItems(trigger.query).map((item) => ({ key: item.label, label: item.label, hint: item.hint, icon: item.icon,
       run: (view) => {
@@ -202,7 +238,7 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
         item.run(view.state, view.dispatch, view);
       } }));
   }
-  if (!completion) return [];
+  if (!completion) return schedules;
   if (trigger.kind === "channel") {
     return channelReferenceCandidates(completion.channels, trigger.query, completion.spaceId, null, completion.channelActivityMs)
       .map((candidate) => referenceItem(trigger, candidate));
@@ -247,7 +283,7 @@ function triggerItems(trigger: PageTrigger, completion: PageCompletion | undefin
         insertReference(trigger, `@${agent.harness}`)(view.state, view.dispatch, view);
         completion.summonAgent(agent.harness, blockId, sharedPosition(view.state, fragment, trigger.from));
       },
-    }))];
+    })), ...schedules];
 }
 
 /** The page `[[page#` names: the best match for what was typed before the `#`. */
@@ -257,7 +293,7 @@ function sectionPage(trigger: PageTrigger & { kind: "page" }, completion: PageCo
 }
 
 const MENU_LABELS: Record<PageTrigger["kind"], string> = {
-  insert: "Insert", page: "Pages", channel: "Channels", agent: "Agents",
+  insert: "Insert", page: "Pages", channel: "Channels", agent: "Agents", schedule: "Schedule",
 };
 
 /** A menu starts again at its first row when what it lists changes. */
@@ -857,7 +893,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
   const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
   const trigger = canEdit && toolbar?.trigger && toolbar.focused ? toolbar.trigger : null;
-  const menuItems = trigger ? triggerItems(trigger, completion, sectionsRead, session.fragment) : [];
+  const menuItems = trigger && current
+    ? triggerItems(trigger, completion, sectionsRead, session.fragment, current.state.doc) : [];
   menu.current.items = menuItems;
   const menuAt = trigger && menuItems.length ? place(trigger.from) : null;
   const namedPage = trigger?.kind === "page" && trigger.section !== null && completion ? sectionPage(trigger, completion) : null;

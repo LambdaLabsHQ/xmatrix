@@ -1,50 +1,43 @@
-//! `xmatrix page automation`: a page's Automations
-//! (docs/design/pages-live-document.md §6). Each keeps a section true and is
-//! referenced in it; whoever can edit the page manages them, and a Run does so
-//! as its owner, so what it sets up keeps running after the Run ends.
-
-use std::path::PathBuf;
+//! `xmatrix page automation`: a page's schedules
+//! (docs/design/pages-live-document.md §6.1). A schedule is a line of its
+//! page, written as Obsidian Tasks writes a recurring or scheduled task
+//! (`- [ ] <what to do> 🔁 every 12 hours`, or `⏳ <time with its offset>` to
+//! run once); it is written and changed with `page edit` like any text. These
+//! commands list them, run one now, and pause, resume or delete one by
+//! changing its line.
 
 use colored::Colorize;
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde_json::json;
 use xmatrix_cli_args::PageAutomationCommand;
-use xmatrix_cli_core::error::{self, CliError};
+use xmatrix_cli_core::error;
 use xmatrix_cli_core::http;
 use xmatrix_cli_core::protocol::with_route;
-use xmatrix_cli_core::text_input::{self, TextSource};
 
-use crate::page::{PAGE_TEXT_ROUTES, enc, page_route, resolve_space};
+use crate::page::{enc, page_route, resolve_space};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PageAutomation {
     pub id: String,
-    pub version: u64,
-    pub name: String,
-    pub interval_minutes: u64,
     /// A reminder: it runs once at `next_run_at`, then stops.
     #[serde(default)]
     pub once: bool,
     pub enabled: bool,
-    /// The section its reference is in; absent while detached.
+    /// The section its line is in.
     #[serde(default)]
     pub block_id: Option<String>,
+    /// Its line, as last synced.
     #[serde(default)]
-    pub detached_at: Option<String>,
+    pub source: Option<String>,
+    /// Why its line does not run as written.
+    #[serde(default)]
+    pub problem: Option<String>,
     pub next_run_at: String,
     #[serde(default)]
     pub last_run_at: Option<String>,
-    pub channel_id: String,
     #[serde(default)]
-    pub expression: Option<PageAutomationExpression>,
-    #[serde(default)]
-    pub triggers: Vec<Value>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct PageAutomationExpression {
-    pub text: String,
+    pub last_channel_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -52,237 +45,39 @@ struct ListResponse {
     automations: Vec<PageAutomation>,
 }
 
-#[derive(Deserialize)]
-struct OneResponse {
-    automation: PageAutomation,
-}
-
-/// How often, in words.
-pub(crate) fn render_cadence(minutes: u64) -> String {
-    match minutes {
-        1440 => "daily".into(),
-        m if m % 1440 == 0 => format!("every {} days", m / 1440),
-        60 => "hourly".into(),
-        m if m % 60 == 0 => format!("every {} h", m / 60),
-        m => format!("every {m} min"),
-    }
-}
-
-/// One line per Automation: id and version to act on it, where it is, how
-/// often, whether it runs; then what it does each time.
+/// One schedule: its id to act on it, where it is, whether and when it runs,
+/// then its line.
 pub(crate) fn render_page_automation(automation: &PageAutomation) -> String {
     let place = match automation.block_id.as_deref() {
-        None => "(detached)".to_string(),
-        Some("") => "(top of page)".to_string(),
+        None | Some("") => "(top of page)".to_string(),
         Some(block) => format!("#{block}"),
     };
-    let state = if automation.detached_at.is_some() {
-        "detached: put its reference back to resume it".to_string()
+    let state = if let Some(problem) = automation.problem.as_deref() {
+        format!("⚠ {problem}")
     } else if automation.once && !automation.enabled && automation.last_run_at.is_some() {
-        "done: give it a new time with --at to remind again".to_string()
+        "done: give its ⏳ a new time to remind again".to_string()
     } else if !automation.enabled {
         "paused".to_string()
     } else {
         format!("next {}", automation.next_run_at)
     };
-    let last = automation
-        .last_run_at
-        .as_deref()
-        .map(|at| format!(" · last {at}"))
-        .unwrap_or_default();
-    let instruction = automation
-        .expression
-        .as_ref()
-        .map(|expression| expression.text.replace('\n', " "))
-        .unwrap_or_default();
-    let instruction: String = instruction.chars().take(160).collect();
-    let triggers = automation
-        .triggers
-        .iter()
-        .map(render_trigger)
-        .collect::<Vec<_>>();
-    let triggers = if triggers.is_empty() {
-        String::new()
-    } else {
-        format!(" · on {}", triggers.join(", "))
+    let last = match (&automation.last_run_at, &automation.last_channel_id) {
+        (Some(at), Some(channel)) => format!(" · last {at} in {channel}"),
+        (Some(at), None) => format!(" · last {at}"),
+        _ => String::new(),
     };
     format!(
-        "{} v{} · {} · {place} · {}{triggers} · {state}{last} · conversation {}\n    {instruction}",
+        "{} · {place} · {state}{last}\n    {}",
         automation.id,
-        automation.version,
-        automation.name,
-        if automation.once {
-            "once".to_string()
-        } else {
-            render_cadence(automation.interval_minutes)
-        },
-        automation.channel_id
+        automation.source.as_deref().unwrap_or_default()
     )
-}
-
-/// A trigger as `--on` spells it.
-pub(crate) fn render_trigger(trigger: &Value) -> String {
-    let field = |name: &str| {
-        trigger
-            .get(name)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-    };
-    let kind = field("kind");
-    if kind == "event" {
-        let feature = match field("feature") {
-            "" => "*",
-            feature => feature,
-        };
-        return match field("source") {
-            "" | "*" => format!("{}:{feature}", field("provider")),
-            source => format!("{}:{feature}:{source}", field("provider")),
-        };
-    }
-    let branch = match field("branch") {
-        "" => String::new(),
-        branch => format!("@{branch}"),
-    };
-    let rest = if kind == "merged" {
-        trigger
-            .get("paths")
-            .and_then(Value::as_array)
-            .map(|paths| {
-                paths
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            })
-            .unwrap_or_default()
-    } else {
-        field("workflow").to_string()
-    };
-    let rest = if rest.is_empty() {
-        rest
-    } else {
-        format!(":{rest}")
-    };
-    format!("{kind}:{}{branch}{rest}", field("repository"))
-}
-
-/// `--on` as the trigger the Hub takes: merged:owner/repo[@branch][:path,…],
-/// ci-failed:owner/repo[@branch][:workflow], or a connector event
-/// <provider>:<feature|*>[:<source>]. The Hub validates the connector's names.
-pub fn parse_trigger(value: &str) -> error::Result<Value> {
-    let value = value.trim();
-    let invalid = || {
-        CliError::Launch(format!(
-            "--on takes merged:owner/repo[@branch][:path,…], ci-failed:owner/repo[@branch][:workflow] or <connector>:<event|*>[:<source>], not {value:?}"
-        ))
-    };
-    let (kind, rest) = value.split_once(':').ok_or_else(invalid)?;
-    if kind != "merged" && kind != "ci-failed" {
-        let provider_shaped = kind
-            .chars()
-            .next()
-            .is_some_and(|first| first.is_ascii_lowercase())
-            && kind
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        let (feature, source) = rest.split_once(':').unwrap_or((rest, "*"));
-        if !provider_shaped
-            || feature.is_empty()
-            || source.is_empty()
-            || source.contains(char::is_whitespace)
-        {
-            return Err(invalid());
-        }
-        let mut trigger = json!({ "kind": "event", "provider": kind, "source": source });
-        if feature != "*" {
-            trigger["feature"] = json!(feature);
-        }
-        return Ok(trigger);
-    }
-    let (target, extra) = rest.split_once(':').unwrap_or((rest, ""));
-    let (repository, branch) = target.split_once('@').unwrap_or((target, ""));
-    if repository
-        .split('/')
-        .filter(|part| !part.is_empty())
-        .count()
-        != 2
-    {
-        return Err(invalid());
-    }
-    let mut trigger = json!({ "kind": kind, "repository": repository });
-    if !branch.is_empty() {
-        trigger["branch"] = json!(branch);
-    }
-    if !extra.is_empty() {
-        if kind == "merged" {
-            trigger["paths"] = json!(
-                extra
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|p| !p.is_empty())
-                    .collect::<Vec<_>>()
-            );
-        } else {
-            trigger["workflow"] = json!(extra);
-        }
-    }
-    Ok(trigger)
-}
-
-/// A cadence as minutes: a number of minutes, or a number with m, h or d.
-pub fn parse_every(value: &str) -> error::Result<u64> {
-    let value = value.trim().to_ascii_lowercase();
-    let (number, unit) = match value.char_indices().find(|(_, c)| !c.is_ascii_digit()) {
-        Some((at, _)) => (&value[..at], value[at..].trim()),
-        None => (value.as_str(), "m"),
-    };
-    let multiplier = match unit {
-        "m" | "min" => 1,
-        "h" => 60,
-        "d" => 1440,
-        _ => 0,
-    };
-    match number.parse::<u64>() {
-        Ok(amount) if multiplier > 0 && amount > 0 => Ok(amount * multiplier),
-        _ => Err(CliError::Launch(format!(
-            "--every takes minutes, or a number with m, h or d (e.g. 12h), not {value:?}"
-        ))),
-    }
-}
-
-/// The instruction from -m, -f or --stdin, when one is given.
-fn instruction_input(
-    instruction: Option<String>,
-    file: Option<PathBuf>,
-    stdin: bool,
-) -> error::Result<Option<String>> {
-    match [instruction.is_some(), file.is_some(), stdin]
-        .iter()
-        .filter(|given| **given)
-        .count()
-    {
-        0 => return Ok(None),
-        1 => {}
-        _ => {
-            return Err(CliError::Launch(
-                "give the instruction with only one of -m, -f or --stdin".into(),
-            ));
-        }
-    }
-    let (text, source) = match (instruction, file) {
-        (_, Some(file)) => (text_input::read_text_file(&file)?, TextSource::File),
-        (Some(instruction), None) => (instruction, TextSource::Argument),
-        (None, None) => (text_input::read_stdin_text()?, TextSource::Stdin),
-    };
-    text_input::ensure_text_intact("Automation instruction", &text, source, PAGE_TEXT_ROUTES)?;
-    Ok(Some(text))
 }
 
 fn automations_route(space: &str, page: &str) -> String {
     format!("{}/automations", page_route(space, page))
 }
 
-/// A page's Automations, for `page read`'s header; none when they cannot be read.
+/// A page's schedules, for `page read`'s header; none when they cannot be read.
 pub(crate) async fn page_automations(
     hub_url: &str,
     token: &str,
@@ -310,339 +105,103 @@ pub(crate) fn render_page_automations_header(automations: &[PageAutomation]) -> 
     out
 }
 
-async fn send(
-    hub_url: &str,
-    token: &str,
-    route: &str,
-    method: &str,
-    body: Value,
-) -> error::Result<PageAutomation> {
-    let response: OneResponse =
-        http::request_json(&with_route(hub_url, route), method, Some(token), Some(body)).await?;
-    Ok(response.automation)
-}
-
-fn done(verb: &str, automation: &PageAutomation) {
-    println!(
-        "{} {verb}\n{}",
-        "✓".green().bold(),
-        render_page_automation(automation)
-    );
-}
-
-async fn set_running(
-    hub_url: &str,
-    token: &str,
-    space: Option<String>,
-    page: &str,
-    automation: &str,
-    version: u64,
-    action: &str,
-) -> error::Result<()> {
-    let space = resolve_space(hub_url, token, space).await?;
-    let route = format!(
-        "{}/{}/{action}",
-        automations_route(&space, page),
-        enc(automation)
-    );
-    let changed = send(
-        hub_url,
-        token,
-        &route,
-        "POST",
-        json!({ "expectedVersion": version }),
-    )
-    .await?;
-    done(
-        match action {
-            "pause" => "Paused",
-            "run" => "Due now; it runs in a new conversation",
-            _ => "Resumed",
-        },
-        &changed,
-    );
-    Ok(())
-}
-
 pub(crate) async fn cmd_page_automation(
     hub_url: &str,
     token: &str,
     command: PageAutomationCommand,
 ) -> error::Result<()> {
-    match command {
+    let (page, automation, space, action) = match command {
         PageAutomationCommand::List { page, space } => {
             let space = resolve_space(hub_url, token, space).await?;
             let url = with_route(hub_url, &automations_route(&space, &page));
             let response: ListResponse = http::request_json(&url, "GET", Some(token), None).await?;
             if response.automations.is_empty() {
-                println!("(no Automations on this page)");
+                println!(
+                    "(no schedules on this page: write `- [ ] <what to do> 🔁 every 12 hours` in a section with `page edit`)"
+                );
             }
             for automation in &response.automations {
                 println!("{}", render_page_automation(automation));
             }
-            Ok(())
-        }
-        PageAutomationCommand::Create {
-            page,
-            block,
-            name,
-            every,
-            at,
-            triggers,
-            instruction,
-            file,
-            stdin,
-            space,
-        } => {
-            let triggers = triggers
-                .iter()
-                .map(|trigger| parse_trigger(trigger))
-                .collect::<error::Result<Vec<_>>>()?;
-            let instruction = instruction_input(instruction, file, stdin)?.ok_or_else(|| {
-                CliError::Launch("give what to do each time with -m, -f or --stdin".into())
-            })?;
-            let space = resolve_space(hub_url, token, space).await?;
-            let mut body = json!({ "name": name, "instruction": instruction });
-            match (every, at) {
-                (_, Some(at)) => body["at"] = json!(at.trim()),
-                (Some(every), None) => body["intervalMinutes"] = json!(parse_every(&every)?),
-                (None, None) => {
-                    return Err(CliError::Launch(
-                        "give how often with --every, or one time with --at".into(),
-                    ));
-                }
-            }
-            if let Some(block) = block {
-                body["blockId"] = json!(block);
-            }
-            if !triggers.is_empty() {
-                body["triggers"] = json!(triggers);
-            }
-            let created = send(
-                hub_url,
-                token,
-                &automations_route(&space, &page),
-                "POST",
-                body,
-            )
-            .await?;
-            done("Created; its reference is in the section", &created);
-            Ok(())
-        }
-        PageAutomationCommand::Edit {
-            page,
-            automation,
-            version,
-            name,
-            every,
-            next,
-            at,
-            triggers,
-            no_triggers,
-            instruction,
-            file,
-            stdin,
-            space,
-        } => {
-            let mut body = Map::new();
-            if let Some(next) = next {
-                body.insert("nextRunAt".into(), json!(next.trim()));
-            }
-            if let Some(at) = at {
-                body.insert("at".into(), json!(at.trim()));
-            }
-            if no_triggers || !triggers.is_empty() {
-                let triggers = triggers
-                    .iter()
-                    .map(|trigger| parse_trigger(trigger))
-                    .collect::<error::Result<Vec<_>>>()?;
-                body.insert("triggers".into(), json!(triggers));
-            }
-            body.insert("expectedVersion".into(), json!(version));
-            if let Some(name) = name {
-                body.insert("name".into(), json!(name));
-            }
-            if let Some(every) = every {
-                body.insert("intervalMinutes".into(), json!(parse_every(&every)?));
-            }
-            if let Some(instruction) = instruction_input(instruction, file, stdin)? {
-                body.insert("instruction".into(), json!(instruction));
-            }
-            let space = resolve_space(hub_url, token, space).await?;
-            let route = format!("{}/{}", automations_route(&space, &page), enc(&automation));
-            let edited = send(hub_url, token, &route, "PATCH", Value::Object(body)).await?;
-            done(
-                if edited.id == automation {
-                    "Edited"
-                } else {
-                    "Replaced with yours (it runs as its author)"
-                },
-                &edited,
-            );
-            Ok(())
+            return Ok(());
         }
         PageAutomationCommand::Pause {
             page,
             automation,
-            version,
             space,
-        } => set_running(hub_url, token, space, &page, &automation, version, "pause").await,
+        } => (page, automation, space, "pause"),
         PageAutomationCommand::Resume {
             page,
             automation,
-            version,
             space,
-        } => set_running(hub_url, token, space, &page, &automation, version, "resume").await,
+        } => (page, automation, space, "resume"),
         PageAutomationCommand::Run {
             page,
             automation,
-            version,
             space,
-        } => set_running(hub_url, token, space, &page, &automation, version, "run").await,
-        PageAutomationCommand::Attach {
-            page,
-            automation,
-            block,
-            space,
-        } => {
-            let space = resolve_space(hub_url, token, space).await?;
-            let route = format!(
-                "{}/{}/reference",
-                automations_route(&space, &page),
-                enc(&automation)
-            );
-            let attached = send(
-                hub_url,
-                token,
-                &route,
-                "POST",
-                json!({ "blockId": block.unwrap_or_default() }),
-            )
-            .await?;
-            done("Its reference is in the section", &attached);
-            Ok(())
-        }
+        } => (page, automation, space, "run"),
         PageAutomationCommand::Delete {
             page,
             automation,
-            version,
             space,
-        } => {
-            let space = resolve_space(hub_url, token, space).await?;
-            let url = with_route(
-                hub_url,
-                &format!(
-                    "{}/{}?expectedVersion={version}",
-                    automations_route(&space, &page),
-                    enc(&automation)
-                ),
-            );
-            let _: Value = http::request_json(&url, "DELETE", Some(token), None).await?;
-            println!(
-                "{} Deleted {automation}; its reference is out of the page",
-                "✓".green().bold()
-            );
-            Ok(())
+        } => (page, automation, space, "delete"),
+    };
+    let space = resolve_space(hub_url, token, space).await?;
+    let route = format!("{}/{}", automations_route(&space, &page), enc(&automation));
+    let (route, method) = if action == "delete" {
+        (route, "DELETE")
+    } else {
+        (format!("{route}/{action}"), "POST")
+    };
+    http::request_json::<serde_json::Value>(
+        &with_route(hub_url, &route),
+        method,
+        Some(token),
+        Some(json!({})),
+    )
+    .await?;
+    println!(
+        "{} {}",
+        "✓".green().bold(),
+        match action {
+            "pause" => "Paused: its line is now `- [-]`",
+            "resume" => "Resumed: its line is now `- [ ]`",
+            "delete" => "Deleted: its line is out of the page",
+            _ => "Due now; it runs in a new conversation",
         }
-    }
+    );
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_trigger_is_spelled_the_same_way_in_and_out() {
-        for spelled in [
-            "merged:acme/widgets",
-            "merged:acme/widgets@dev:packages/hub,docs",
-            "ci-failed:acme/widgets:CI",
-            "sentry:issue.created:web",
-            "webhook:*",
-            "gitlab:pipelines:group/app",
-        ] {
-            assert_eq!(render_trigger(&parse_trigger(spelled).unwrap()), spelled);
-        }
-        assert_eq!(
-            parse_trigger("merged:acme/widgets@main:packages/hub").unwrap(),
-            json!({ "kind": "merged", "repository": "acme/widgets", "branch": "main", "paths": ["packages/hub"] })
-        );
-        assert_eq!(
-            parse_trigger("linear:issue").unwrap(),
-            json!({ "kind": "event", "provider": "linear", "source": "*", "feature": "issue" })
-        );
-        for bad in [
-            "nightly",
-            "merged:acme",
-            "merged:",
-            "ci-failed:a/b/c",
-            "Sentry:x",
-            "sentry:",
-            "sentry:x:",
-        ] {
-            assert!(parse_trigger(bad).is_err(), "{bad}");
-        }
+    fn automation(json: serde_json::Value) -> PageAutomation {
+        serde_json::from_value(json).unwrap()
     }
 
     #[test]
-    fn a_cadence_is_minutes_or_a_number_with_a_unit() {
-        assert_eq!(parse_every("90").unwrap(), 90);
-        assert_eq!(parse_every("30m").unwrap(), 30);
-        assert_eq!(parse_every(" 12h ").unwrap(), 720);
-        assert_eq!(parse_every("2d").unwrap(), 2880);
-        for bad in ["", "0", "h", "12w", "1.5h"] {
-            assert!(parse_every(bad).is_err(), "{bad}");
-        }
-        assert_eq!(render_cadence(720), "every 12 h");
-        assert_eq!(render_cadence(1440), "daily");
-        assert_eq!(render_cadence(45), "every 45 min");
-    }
-
-    #[test]
-    fn a_line_says_where_it_is_and_whether_it_runs() {
-        let automation = |block: Option<&str>, enabled: bool, detached: bool| PageAutomation {
-            id: "a-1".into(),
-            version: 3,
-            name: "Code audit".into(),
-            interval_minutes: 720,
-            once: false,
-            enabled,
-            block_id: block.map(str::to_string),
-            detached_at: detached.then(|| "2026-09-27T00:00:00.000Z".into()),
-            next_run_at: "2026-09-28T06:00:00.000Z".into(),
-            last_run_at: None,
-            channel_id: "c-1".into(),
-            expression: Some(PageAutomationExpression {
-                text: "@auto repo:o/r\naudit".into(),
-            }),
-            triggers: Vec::new(),
-        };
+    fn a_schedule_says_where_it_is_whether_it_runs_and_its_line() {
+        let running = automation(json!({
+            "id": "a-1", "enabled": true, "blockId": "audit", "nextRunAt": "2026-11-01T02:00:00.000Z",
+            "source": "- [ ] Audit the code 🔁 every 12 hours",
+        }));
         assert_eq!(
-            render_page_automation(&automation(Some("architecture"), true, false)),
-            "a-1 v3 · Code audit · #architecture · every 12 h · next 2026-09-28T06:00:00.000Z · conversation c-1\n    @auto repo:o/r audit"
+            render_page_automation(&running),
+            "a-1 · #audit · next 2026-11-01T02:00:00.000Z\n    - [ ] Audit the code 🔁 every 12 hours"
         );
-        assert!(render_page_automation(&automation(None, false, true)).contains("(detached)"));
-        assert!(
-            render_page_automation(&automation(Some("ui"), false, false)).contains(" · paused ·")
-        );
-        let header = render_page_automations_header(&[automation(Some(""), true, false)]);
-        assert!(header.starts_with("automations:\n  - a-1 v3 · Code audit · (top of page)"));
-        assert!(!header.contains("audit\n    "));
-        let reminder = PageAutomation {
-            once: true,
-            ..automation(Some("plans"), true, false)
-        };
-        assert!(
-            render_page_automation(&reminder)
-                .contains(" · #plans · once · next 2026-09-28T06:00:00.000Z ·")
-        );
-        let reminded = PageAutomation {
-            enabled: false,
-            last_run_at: Some("2026-09-28T06:00:01.000Z".into()),
-            ..reminder
-        };
-        assert!(
-            render_page_automation(&reminded).contains(" · done: give it a new time with --at")
-        );
+        let stuck = automation(json!({
+            "id": "a-2", "enabled": false, "nextRunAt": "2026-11-01T02:00:00.000Z",
+            "problem": "Connect GitHub for this Space to run on its repositories",
+        }));
+        assert!(render_page_automation(&stuck).starts_with("a-2 · (top of page) · ⚠ Connect GitHub"));
+        let done = automation(json!({
+            "id": "a-3", "once": true, "enabled": false, "nextRunAt": "2026-11-01T02:00:00.000Z",
+            "lastRunAt": "2026-11-01T02:00:03.000Z", "lastChannelId": "c-9",
+        }));
+        assert!(render_page_automation(&done).starts_with(
+            "a-3 · (top of page) · done: give its ⏳ a new time to remind again · last 2026-11-01T02:00:03.000Z in c-9"
+        ));
     }
 }

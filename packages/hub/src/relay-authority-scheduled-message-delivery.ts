@@ -53,7 +53,12 @@ export interface ScheduledMessageDeliveryPort {
   /** Opens the occurrence's own conversation as its authority root; returns its id. */
   openConversation(input: { occurrence: AutomationOccurrenceRow; automation: AutomationExecutionRow;
     /** The Automation's stored name, and what it says to fall back on for a row without one. */
-    storedName: unknown; body: string; userId: string; privateEvents: boolean }): Promise<string>;
+    storedName: unknown;
+    /** The schedule line it was synced from. */
+    source: unknown;
+    body: string; userId: string; privateEvents: boolean }): Promise<string>;
+  /** Checks a delivered reminder's line off on its page, as Obsidian marks a done task. */
+  reminderDone?(input: { automation: AutomationExecutionRow; source: string; userId: string; deliveredAt: string }): void;
 }
 
 export interface ScheduledMessageDelivery {
@@ -66,7 +71,7 @@ export interface ScheduledMessageDelivery {
 }
 
 export async function dispatchScheduledMessageOccurrence(
-  port: Pick<ScheduledMessageDeliveryPort, "appendMessage" | "schedulePostCommit" | "openConversation">,
+  port: Pick<ScheduledMessageDeliveryPort, "appendMessage" | "schedulePostCommit" | "openConversation" | "reminderDone">,
   occurrence: AutomationOccurrenceRow,
   automation: AutomationExecutionRow,
   payload: Record<string, unknown>,
@@ -110,7 +115,7 @@ export async function dispatchScheduledMessageOccurrence(
   // never becomes the next one's context; what carries over is on the page.
   // Opened before the prepared boundary, idempotently, so a retry reopens it.
   const channelId = await port.openConversation({ occurrence, automation, userId: authorityRootUserId,
-    storedName: payload.name, body, privateEvents: carriesEvents(payload.triggers) || carriesEvents(events) });
+    storedName: payload.name, source: payload.source, body, privateEvents: carriesEvents(payload.triggers) || carriesEvents(events) });
   const appMentions = Array.isArray(expression?.appMentions) ? expression.appMentions
     : Array.isArray(message?.appMentions) ? message.appMentions : undefined;
   // Prepared is the durable delivery-acceptance boundary. Automation edits only
@@ -139,6 +144,9 @@ export async function dispatchScheduledMessageOccurrence(
   });
   const deliveredAt = new Date().toISOString();
   await schedule.finishMessage(occurrence, automation, channelId, deliveredAt);
+  if (automationRunsOnce(payload) && typeof payload.source === "string" && payload.source) {
+    port.reminderDone?.({ automation, source: payload.source, userId: authorityRootUserId, deliveredAt });
+  }
   port.schedulePostCommit({
     channelId,
     messageId: occurrence.message_id,

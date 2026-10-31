@@ -12,10 +12,7 @@ import { draftSummonReadingsForDisplay, forceDraftSummon } from "./summon-intent
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
-  AUTOMATION_MAX_INTERVAL_MINUTES,
-  AUTOMATION_MIN_INTERVAL_MINUTES,
   digestCanonicalCloneCborV1,
-  isAutomationIntervalMinutes,
   parseAgentInvocationSelections,
   type AgentInvocationSelection,
 } from "@xmatrix/protocol";
@@ -23,14 +20,8 @@ import {
 import { AgentIdentityLabels } from "./agent-identity-labels";
 
 import { MESSAGE_SURFACE_METRICS_EVENT, messageSurfaceOf } from "./message-surface-metrics";
-import {
-  AutomationExpressionGuidance,
-  DetailBlock,
-  automationExpressionFromText,
-} from "./workspace-admin-views";
-import { formatAutomationCadence } from "@/components/pages/page-automation-format";
+import { DetailBlock } from "./workspace-admin-views";
 
-import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
 import { WoodPanel } from "@/components/ui/material-surfaces";
 
 import type { ComposerChannelAttachment, TimelineItem } from "./workspace-shell-message-model";
@@ -78,8 +69,6 @@ import {
   cleanStatusChips,
   clipboardHasTextPayload,
   defaultAttachmentName,
-  evaluationBindingLabel,
-  formatDateTime,
   formatFileSize,
   formatMember,
   latestEventTimestampMs,
@@ -116,29 +105,20 @@ export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
 import { AgentInstanceTagChips } from "./agent-instance-tag-chips";
 import { LoadingImage } from "./content-skeleton";
-import { BranchBadge, tagClass, UsageMeterFill } from "./status-tag";
+import { BranchBadge, UsageMeterFill } from "./status-tag";
 
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
 import {
   ChevronLeft,
   FileText,
-  Loader2,
   Paperclip,
-  Pause,
-  Pencil,
-  Play,
   Quote,
   RefreshCw,
   Reply,
-  Trash2,
   Video,
   X,
 } from "lucide-react";
-
-import { Textarea } from "@/components/ui/textarea";
-
-import { Input } from "@/components/ui/input";
 
 import { Face } from "@/components/dashboard/face";
 
@@ -193,8 +173,6 @@ import {
   type DesktopClipboardImage,
 } from "@/lib/desktop/bridge";
 
-import { spaceMemberCanCreate } from "./space-member-permissions";
-
 import { xmatrixApiRequest, xmatrixRawResponse } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
@@ -209,8 +187,6 @@ import type {
   SerializedAgentInstance,
   SerializedAppConnectorConnection,
   ChannelSnapshot,
-  SerializedAutomation,
-  AutomationUpdateRequest,
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -1569,18 +1545,10 @@ export const ChannelDetails = memo(function ChannelDetails({
   token,
   connectorRevision,
   currentUserMemberId,
-  currentUserId,
   onOpenAgentTrace,
   onRunChannelCommand,
   onManageApps,
   onDeleteChannel,
-  automations,
-  automationExecutionEnabled,
-  automationBusy,
-  onToggleAutomation,
-  onUpdateAutomation,
-  onDeleteAutomation,
-  onOpenSchedule,
   wideOnly = false,
   mobileOverlayOpen = false,
   onCloseMobileOverlay,
@@ -1592,8 +1560,6 @@ export const ChannelDetails = memo(function ChannelDetails({
   token?: string;
   connectorRevision?: string;
   currentUserMemberId: string;
-  /** The reader's user id, as Space members and Automation authors name them (no `user:` prefix). */
-  currentUserId: string;
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
   /**
    * Post a command (`@github:subscribe:…`, `@agent:1 /model …`) as a message in
@@ -1603,14 +1569,6 @@ export const ChannelDetails = memo(function ChannelDetails({
   onRunChannelCommand?: (body: string) => void;
   onManageApps: () => void;
   onDeleteChannel?: () => void;
-  automations: SerializedAutomation[];
-  automationExecutionEnabled: boolean | null;
-  automationBusy: string | null;
-  onToggleAutomation: (automation: SerializedAutomation) => void;
-  onUpdateAutomation: (automationId: string, input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
-  onDeleteAutomation: (automation: SerializedAutomation) => void;
-  /** Opens Schedules at one Automation, with its editor. */
-  onOpenSchedule: (automationId: string) => void;
   wideOnly?: boolean;
   /** Mobile "More" entry: present this rail as a full-screen channel details sheet. */
   mobileOverlayOpen?: boolean;
@@ -1619,13 +1577,9 @@ export const ChannelDetails = memo(function ChannelDetails({
   const machineCatalog = useAgentRegistrationCatalog(space?.id ?? "", token ?? "", Boolean(space?.id && token));
   const [aboutSummaryBusy, setAboutSummaryBusy] = useState(false);
   const [aboutSummaryError, setAboutSummaryError] = useState<string | null>(null);
-  const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null);
-  const [automationMessageDraft, setAutomationMessageDraft] = useState("");
-  const [automationIntervalDraft, setAutomationIntervalDraft] = useState(AUTOMATION_MIN_INTERVAL_MINUTES);
   const channelId = channel?.id;
   const channelSpaceId = channel?.spaceId;
   useEffect(() => {
-    setEditingAutomationId(null);
     setAboutSummaryError(null);
   }, [channelId]);
 
@@ -1662,31 +1616,6 @@ export const ChannelDetails = memo(function ChannelDetails({
       setAboutSummaryBusy(false);
     }
   }, [aboutSummaryBusy, channel, token]);
-
-  const channelAutomations = useMemo(
-    () => automations.filter((automation) => automation.channelId === channelId),
-    [automations, channelId]
-  );
-  const currentSpaceRole = space?.members.find(
-    (member) => member.userId === currentUserId
-  )?.role;
-  const canCreateAutomation = Boolean(
-    currentSpaceRole &&
-    currentSpaceRole !== "viewer" &&
-    spaceMemberCanCreate(space, currentUserId, "automationCreation")
-  );
-  // Any Channel member may rewrite a schedule; saving someone else's replaces it
-  // with one that runs as you, which the Space's creation policy also governs.
-  const authoredByCurrentUser = (automation: SerializedAutomation) =>
-    automation.authorityRootUserId === currentUserId;
-  const canEditAutomation = (automation: SerializedAutomation) =>
-    automation.capabilities.update &&
-    (authoredByCurrentUser(automation) || canCreateAutomation);
-  const startEditingAutomation = (automation: SerializedAutomation) => {
-    setEditingAutomationId(automation.id);
-    setAutomationMessageDraft(automation.expression.text);
-    setAutomationIntervalDraft(automation.intervalMinutes);
-  };
 
   useEffect(() => {
     if (!mobileOverlayOpen || !onCloseMobileOverlay) return;
@@ -1840,184 +1769,6 @@ export const ChannelDetails = memo(function ChannelDetails({
           />
 
           {/* Automations are made on a page, in the section they keep true; this lists the ones running here. */}
-          {channelAutomations.length > 0 && (
-          <DetailBlock title="Schedules">
-            <div className="space-y-2">
-              {channelAutomations.map((automation) => (
-                  <div key={automation.id} className="border-t border-border/60 py-2 text-sm first:border-t-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            {canEditAutomation(automation) ? (
-                              <button
-                                type="button"
-                                onClick={() => startEditingAutomation(automation)}
-                                className="truncate text-left font-medium hover:underline"
-                                title="Edit this schedule"
-                              >
-                                {automation.name}
-                              </button>
-                            ) : (
-                              <span className="truncate font-medium">{automation.name}</span>
-                            )}
-                            <span
-                              className={statusChipClass(
-                                automation.enabled && automationExecutionEnabled !== false
-                                  ? "settled"
-                                  : automation.enabled
-                                    ? "alert"
-                                    : "secondary",
-                                "app-automation-state shrink-0 px-1.5 py-0.5 text-[10px]"
-                              )}
-                            >
-                              {automation.enabled && automationExecutionEnabled === false
-                                ? "execution unavailable"
-                                : automation.enabled
-                                  ? "enabled"
-                                  : "paused"}
-                            </span>
-                            {!automation.capabilities.update && !automation.capabilities.pause && !automation.capabilities.resume &&
-                              !automation.capabilities.delete && (
-                              <span className={tagClass()}>
-                                read only
-                              </span>
-                            )}
-                          </div>
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {formatAutomationCadence(automation)} · next {formatDateTime(automation.nextRunAt)}
-                          </p>
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {evaluationBindingLabel(automation.input)}
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-4 text-muted-foreground">
-                            {automation.expression.text}
-                          </p>
-                        </div>
-                        {canEditAutomation(automation) || (automation.enabled ? automation.capabilities.pause : automation.capabilities.resume) || automation.capabilities.delete ? (
-                        <div className="flex shrink-0 items-center gap-1">
-                          {canEditAutomation(automation) && <button
-                            type="button"
-                            title="Edit"
-                            aria-label={`Edit ${automation.name}`}
-                            aria-pressed={editingAutomationId === automation.id}
-                            disabled={Boolean(automationBusy)}
-                            onClick={() => editingAutomationId === automation.id
-                              ? setEditingAutomationId(null)
-                              : startEditingAutomation(automation)}
-                            className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                          >
-                            <Pencil className="size-3.5" />
-                          </button>}
-                          {(automation.enabled ? automation.capabilities.pause : automation.capabilities.resume) && <button
-                            type="button"
-                            title={automation.enabled ? "Pause" : "Resume"}
-                            disabled={Boolean(automationBusy) || (!automation.enabled && automationExecutionEnabled !== true)}
-                            onClick={() => onToggleAutomation(automation)}
-                            className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                          >
-                            {automationBusy === `toggle:${automation.id}` ? (
-                              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
-                            ) : automation.enabled ? (
-                              <Pause className="size-3.5" />
-                            ) : (
-                              <Play className="size-3.5" />
-                            )}
-                          </button>}
-                          {automation.capabilities.delete && <button
-                            type="button"
-                            title="Delete lineage"
-                            disabled={Boolean(automationBusy)}
-                            onClick={() => onDeleteAutomation(automation)}
-                            className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
-                          >
-                            {automationBusy === `delete:${automation.id}` ? (
-                              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="size-3.5" />
-                            )}
-                          </button>}
-                        </div>
-                        ) : null}
-                      </div>
-                      {canEditAutomation(automation) && editingAutomationId === automation.id && (
-                        <div className="mt-2 space-y-2 border-t border-border/60 pt-2">
-                          {!authoredByCurrentUser(automation) && (
-                            <p className={noticeClass("attention", "p-2 text-[11px]")}>
-                              Saving replaces this schedule with your own copy, which runs as you.
-                            </p>
-                          )}
-                          {!automation.once && (
-                            <label className="block text-[11px] font-bold text-muted-foreground">
-                              Resume every (minutes)
-                              <Input
-                                type="number"
-                                min={AUTOMATION_MIN_INTERVAL_MINUTES}
-                                max={AUTOMATION_MAX_INTERVAL_MINUTES}
-                                step={15}
-                                value={automationIntervalDraft}
-                                onChange={(event) => setAutomationIntervalDraft(Number(event.target.value))}
-                                className="mt-1 h-8"
-                              />
-                            </label>
-                          )}
-                          <label className="block text-[11px] font-bold text-muted-foreground">
-                            Expression data
-                            <Textarea
-                              value={automationMessageDraft}
-                              onChange={(event) => setAutomationMessageDraft(event.target.value)}
-                              className="mt-1 min-h-28 resize-y text-xs font-normal text-foreground"
-                            />
-                            <AutomationExpressionGuidance compact />
-                          </label>
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => onOpenSchedule(automation.id)}
-                              className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                            >
-                              Open in Schedules
-                            </button>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setEditingAutomationId(null)}
-                                className="rounded px-2 py-1 text-[11px] font-bold text-muted-foreground hover:bg-muted"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                disabled={
-                                  Boolean(automationBusy) ||
-                                  automationMessageDraft.trim().length === 0 ||
-                                  (!automation.once && !isAutomationIntervalMinutes(automationIntervalDraft))
-                                }
-                                onClick={() => {
-                                  onUpdateAutomation(automation.id, {
-                                    expression: automationExpressionFromText(automationMessageDraft),
-                                    ...(automation.once ? {} : { intervalMinutes: automationIntervalDraft }),
-                                  });
-                                  setEditingAutomationId(null);
-                                }}
-                                className="rounded bg-primary px-2 py-1 text-[11px] font-bold text-primary-foreground disabled:opacity-50"
-                              >
-                                Save
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )
-                )}
-              {automationExecutionEnabled === false && (
-                <p className={noticeClass("alert", "text-[11px]")}>
-                  Evaluation resume is unavailable. Existing suspended evaluations will not run.
-                </p>
-              )}
-            </div>
-          </DetailBlock>
-          )}
           {/* The desktop title carries delete; the phone has no title icons. */}
           {onDeleteChannel && mobileOverlayOpen && <button type="button" onClick={onDeleteChannel}
             className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}

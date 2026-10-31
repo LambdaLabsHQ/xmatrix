@@ -1,7 +1,7 @@
 import {
   PAGE_AGENT_INK_MS, PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, mergePageWords, pageAuthorColor,
   pageChangedBlocks,
-  pageRemovedSections,
+  pageRemovedSections, pageSchedules,
   parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
 import {
@@ -116,7 +116,7 @@ export interface PageSessionPorts {
 }
 
 /** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
-export type PageSessionCommit = Omit<PageEditResult, "removedSections"> & { agentSuggestOnly: boolean };
+export type PageSessionCommit = Omit<PageEditResult, "removedSections" | "scheduleProblems"> & { agentSuggestOnly: boolean };
 
 export interface PageSessionPresent {
   name: string;
@@ -658,7 +658,7 @@ export class PageSession {
     this.settle();
     await this.persist();
     this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
-      headRevision: result.headRevision, author: author.label, detachedAutomations: result.detachedAutomations }));
+      headRevision: result.headRevision, author: author.label }));
     return { revision: result.revision, kind: result.kind };
   }
 
@@ -821,7 +821,7 @@ export class PageSession {
         const result = await this.ports.commit(principal, { baseRevision: input.baseRevision, body: input.body,
           conversationIds: input.conversationIds, coAuthors: [], blockIds: [] });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] } as PageEditResult;
+        return { ...result, removedSections: [], scheduleProblems: [] } as PageEditResult;
       }
       // Pending human edits commit under their own authors first.
       await this.commitNow();
@@ -859,7 +859,7 @@ export class PageSession {
       if (result.kind === "suggestion") {
         this.setHead({ ...this.base, agentSuggestOnly: result.agentSuggestOnly });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] } as PageEditResult;
+        return { ...result, removedSections: [], scheduleProblems: [] } as PageEditResult;
       }
       this.setHead({ ...this.base, revision: result.headRevision, body: target,
         agentSuggestOnly: result.agentSuggestOnly });
@@ -880,8 +880,10 @@ export class PageSession {
       this.settle();
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
-        headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
-      return { ...result, removedSections: pageRemovedSections(current, target) } as PageEditResult;
+        headRevision: result.headRevision, author: principal.label }));
+      return { ...result, removedSections: pageRemovedSections(current, target),
+        scheduleProblems: pageSchedules(target).flatMap((line) => line.error
+          ? [{ source: line.source, problem: line.error }] : []) } as PageEditResult;
     });
   }
 

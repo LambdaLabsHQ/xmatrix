@@ -8,9 +8,11 @@ import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mj
 // publish a connector event merely because its authorized author received it.
 const load = await compileCommonJsSourceModule(new URL("../src/automation-occurrence-conversation.ts", import.meta.url));
 
-function fixture(existingMode) {
+const LINE = "- [ ] Audit changes 🔁 every day";
+
+function fixture(existingMode, body = `## Audit\n${LINE}\n`) {
   const opened = [], appended = [];
-  const page = { pageId: "page", body: "[Audit](xmatrix:automation/automation)", accessMode: "space" };
+  const page = { pageId: "page", body, accessMode: "space" };
   const conversations = load(name => ({
     "@xmatrix/db": { PostgresPageRepository: class {
       async read() { return { page }; }
@@ -28,12 +30,13 @@ function fixture(existingMode) {
       appendMessage: async command => { appended.push(command); }, schedulePostCommit() {},
       openConversation: input => conversations.openOccurrenceConversation({}, {
         spaceId: "space", pageId: "page", automationId: "automation", occurrenceId: input.occurrence.id,
-        name: "Audit", scheduledFor: input.occurrence.scheduled_for, userId: input.userId,
+        name: "Audit", source: input.source, scheduledFor: input.occurrence.scheduled_for, userId: input.userId,
         privateEvents: input.privateEvents,
       }),
     }, { id: "occurrence", message_id: "message", scheduled_for: "2026-10-17T00:00:00.000Z", trigger_events: events },
     { id: "automation", channel_id: "timing-channel", owner_user_id: "author" },
-    { payloadVersion: 2, name: "Audit", message: { body: "Audit changes" }, ...(triggers ? { triggers } : {}) },
+    { payloadVersion: 2, name: "Audit", message: { body: "Audit changes" }, source: LINE,
+      ...(triggers ? { triggers } : {}) },
     { async requireEvaluationAuthority() {}, async markPrepared() {}, async finishMessage() {} });
   } };
 }
@@ -60,4 +63,17 @@ test("retrying a pre-fix open occurrence cannot append newly received private co
   await assert.rejects(f.dispatch({ events: [{ kind: "event", summary: "SYNTHETIC-PRIVATE-SUMMARY" }] }),
     /automation_private_event_requires_closed_conversation/u);
   assert.equal(f.appended.length, 0);
+});
+
+// The page's line is what the schedule is: an occurrence whose line was taken
+// out, paused or rewritten since its last sync fails for good instead of
+// running what the page no longer says.
+test("an occurrence runs only while its line is still running on its page", async () => {
+  for (const body of ["## Audit\n", `## Audit\n${LINE.replace("[ ]", "[-]")}\n`,
+    "## Audit\n- [ ] Audit changes 🔁 every 3 months\n"]) {
+    const f = fixture(undefined, body);
+    await assert.rejects(f.dispatch(), /not found running on its page/u);
+    assert.equal(f.opened.length, 0);
+    assert.equal(f.appended.length, 0);
+  }
 });
