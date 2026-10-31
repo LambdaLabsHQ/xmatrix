@@ -11,6 +11,7 @@ import {
   cliReleaseChannelOf,
   cliReleaseSupersedes,
   MACHINE_CLI_RELEASE_CAPABILITY,
+  MACHINE_CLI_UPDATE_CHECK_CAPABILITY,
 } from "@xmatrix/protocol";
 
 import {
@@ -430,6 +431,17 @@ export class MachineDaemonRuntimeTransport {
       told += 1;
     }, true)));
     return told;
+  }
+
+  /**
+   * Asks one Machine's daemon to check for a CLI update now. Only the route's
+   * sole live owner that declared update checks is asked; returns whether it
+   * was. Not a command: the daemon answers through its `cliUpdate` report.
+   */
+  async checkCliUpdate(identity: MachineDaemonRouteIdentity, requestId: string): Promise<boolean> {
+    const route = this.resolveSoleRoute(identity);
+    if (!route.owner || !route.owner[1].capabilities.includes(MACHINE_CLI_UPDATE_CHECK_CAPABILITY)) return false;
+    return await this.deliver(identity, { type: "machine_cli_update_check", requestId }) > 0;
   }
 
   /**

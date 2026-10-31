@@ -3,7 +3,7 @@
  * that channel supersedes it. A stable `X.Y.Z` follows `stable`; a beta
  * `X.Y.Z-beta.N` follows `dev`. Build metadata (`+…`) is ignored.
  */
-import type { CliReleaseChannel } from "./connections/machine-daemon.js";
+import type { CliReleaseChannel, MachineCliUpdateState, MachineCliUpdateStatus } from "./connections/machine-daemon.js";
 
 const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/u;
 
@@ -37,4 +37,19 @@ export function cliReleaseSupersedes(latest: string, current: string): boolean {
     if (delta !== 0) return delta > 0;
   }
   return (next.beta ?? 0) > (running.beta ?? 0);
+}
+
+const CLI_UPDATE_STATES: readonly string[] = ["checking", "installing", "current", "failed"];
+
+/** A status one can trust, or `undefined`. */
+export function parseMachineCliUpdateStatus(value: unknown): MachineCliUpdateStatus | undefined {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  if (!record || !CLI_UPDATE_STATES.includes(record.state as string) || typeof record.at !== "string" ||
+      !Number.isFinite(Date.parse(record.at))) return undefined;
+  const version = typeof record.version === "string" && record.version.length > 0 && record.version.length <= 64
+    ? record.version : undefined;
+  const error = typeof record.error === "string" && record.error.trim() ? record.error.trim().slice(0, 500) : undefined;
+  if (record.state === "failed" && !error) return undefined;
+  return { state: record.state as MachineCliUpdateState, ...(version ? { version } : {}),
+    ...(error ? { error } : {}), at: new Date(record.at).toISOString() };
 }

@@ -24,6 +24,7 @@ import {
   RELAY_RUNTIME_MACHINE_DAEMON_CLAIM_PATH,
   RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH,
   RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH,
+  RELAY_RUNTIME_CLI_UPDATE_CHECK_PATH,
   type RelayRuntimeProductCallbackAdapter,
   type RelayRuntimeProductPortFactory,
 } from "./runtime-transport/relay-runtime-product-adapter";
@@ -95,6 +96,16 @@ function humanFanoutResponse(
       });
 }
 
+/** A cell's answer to a Machine control: refused when unreadable, otherwise what `run` says. */
+async function answerMachineControl<T>(adapter: RelayRuntimeProductCallbackAdapter | undefined, value: T | undefined,
+  invalid: string, run: (adapter: RelayRuntimeProductCallbackAdapter, value: T) => Promise<Record<string, unknown>>):
+  Promise<Response> {
+  const headers = { "cache-control": "no-store" };
+  if (value === undefined) return Response.json({ error: invalid }, { status: 400, headers });
+  if (!adapter) return runtimeTransportUnavailable("product");
+  return Response.json(await run(adapter, value), { headers });
+}
+
 function runtimeTransportUnavailable(kind: "product" | "Human"): Response {
   return Response.json({ error: `Relay Runtime ${kind} transport is unavailable` }, {
     status: 503,
@@ -116,7 +127,7 @@ function observableDeliveryResponse(delivered: boolean | number): Response {
 async function machineDaemonRequestScope(request: Request) {
   const body = await request.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
   return { ownerUserId: boundedId(body.ownerUserId), machineId: boundedId(body.machineId),
-    hostId: boundedId(body.hostId) || "", waitMs: body.waitMs };
+    hostId: boundedId(body.hostId) || "", waitMs: body.waitMs, requestId: boundedId(body.requestId) };
 }
 
 function boundedPrincipalId(value: unknown): string | undefined {
@@ -493,16 +504,16 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       const woken = await this.machineDaemonWakeSignals.wait(ownerUserId, machineId, hostId, waitMs);
       return Response.json({ woken }, { headers: { "cache-control": "no-store" } });
     }
+    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_CLI_UPDATE_CHECK_PATH) {
+      const { ownerUserId, machineId, hostId, requestId } = await machineDaemonRequestScope(request);
+      return answerMachineControl(this.productAdapter,
+        ownerUserId && machineId && requestId ? { ownerUserId, machineId, hostId, requestId } : undefined,
+        "Invalid CLI update check scope",
+        async (adapter, { requestId: id, ...route }) => ({ asked: await adapter.checkCliUpdate(route, id) }));
+    }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH) {
-      const notice = parseCliReleaseNotice(await request.json().catch(() => null));
-      if (!notice) {
-        return Response.json({ error: "Invalid CLI release notice" }, {
-          status: 400, headers: { "cache-control": "no-store" },
-        });
-      }
-      if (!this.productAdapter) return runtimeTransportUnavailable("product");
-      return Response.json({ told: await this.productAdapter.noticeCliRelease(notice) },
-        { headers: { "cache-control": "no-store" } });
+      return answerMachineControl(this.productAdapter, parseCliReleaseNotice(await request.json().catch(() => null)),
+        "Invalid CLI release notice", async (adapter, notice) => ({ told: await adapter.noticeCliRelease(notice) }));
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH) {
       return answerHarnessReleaseWatch(this.env);

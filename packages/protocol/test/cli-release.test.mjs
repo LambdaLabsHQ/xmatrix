@@ -3,8 +3,22 @@ import { test } from "node:test";
 
 import { loadTypescriptModule } from "./load-typescript-module.mjs";
 
-const { cliReleaseChannelOf, cliReleaseSupersedes } =
+const { cliReleaseChannelOf, cliReleaseSupersedes, parseMachineCliUpdateStatus } =
   await loadTypescriptModule(new URL("../src/cli-release.ts", import.meta.url));
+
+test("a daemon's CLI update status is read only when it says what is happening", () => {
+  const at = "2026-10-31T14:00:00.000Z";
+  assert.deepEqual(parseMachineCliUpdateStatus({ state: "checking", at }), { state: "checking", at });
+  assert.deepEqual(parseMachineCliUpdateStatus({ state: "installing", version: "2.3.1", at }),
+    { state: "installing", version: "2.3.1", at });
+  assert.deepEqual(parseMachineCliUpdateStatus({ state: "failed", error: " feed down ", at }),
+    { state: "failed", error: "feed down", at });
+  // A failure without its reason, an unknown state or a missing time is not a status.
+  assert.equal(parseMachineCliUpdateStatus({ state: "failed", at }), undefined);
+  assert.equal(parseMachineCliUpdateStatus({ state: "waiting", at }), undefined);
+  assert.equal(parseMachineCliUpdateStatus({ state: "current" }), undefined);
+  assert.equal(parseMachineCliUpdateStatus("current"), undefined);
+});
 
 test("a version names its channel", () => {
   assert.equal(cliReleaseChannelOf("2.3.0"), "stable");

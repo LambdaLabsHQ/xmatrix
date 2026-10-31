@@ -316,6 +316,8 @@ export interface MachineDaemonRunSnapshotReport {
   machineResources?: import("../agent-routing.js").MachineResourceObservation;
   /** Additive, bounded observation; older Hubs ignore this field. */
   harnessInventory?: import("../harness-management.js").HarnessInventory;
+  /** What the daemon's CLI update is doing; from a daemon declaring `machine_cli_update_check_v1`. */
+  cliUpdate?: MachineCliUpdateStatus;
   runs: MachineDaemonRunSnapshotItem[];
 }
 
@@ -562,6 +564,62 @@ export interface MachineDaemonCliReleaseNotice {
 }
 
 /**
+ * The capability a daemon advertises when it checks for a CLI update on the
+ * Hub's `machine_cli_update_check` and reports what that check is doing
+ * (`MachineRunSnapshot.cliUpdate`).
+ */
+export const MACHINE_CLI_UPDATE_CHECK_CAPABILITY = "machine_cli_update_check_v1";
+
+/**
+ * A person is looking at this daemon's version and it may be behind: check the
+ * channel's release feed now and install a newer release if there is one. Not
+ * a command: nothing is claimed or answered beyond the daemon's `cliUpdate`
+ * report. Requests that arrive while a check runs join that check.
+ */
+export interface MachineDaemonCliUpdateCheck {
+  type: "machine_cli_update_check";
+  requestId: string;
+}
+
+/**
+ * What the daemon's own CLI update is doing, as it reports it: `checking` the
+ * feed, `installing` `version`, `current` (the feed names nothing newer) or
+ * `failed` with the exact `error`. A daemon that restarts on the new version
+ * reconnects with fresh metadata, so no state outlives the process it
+ * describes.
+ */
+export type MachineCliUpdateState = "checking" | "installing" | "current" | "failed";
+export interface MachineCliUpdateStatus {
+  state: MachineCliUpdateState;
+  /** The release being installed (`installing`), or the version found current. */
+  version?: string;
+  /** Why the update did not happen (`failed`). */
+  error?: string;
+  /** When the daemon (or, for a requested check, the Hub) recorded this state. */
+  at: string;
+}
+
+/**
+ * `POST /api/machine-daemons/cli-update-check` `{ machineId }`: the owner's
+ * view saw this Machine's CLI behind and asks its daemon to check now.
+ * `checking`: the daemon was asked, or a check asked within the last minute is
+ * still the latest word (`coalesced`); follow `cliUpdate` on the Machine read.
+ * Otherwise no daemon was asked, and the outcome says why: `offline`,
+ * `unsupported` (the daemon, `daemonVersion`, predates update checks or does
+ * not hold this Machine's update authority) or `self_update_disabled`.
+ */
+export type MachineCliUpdateCheckOutcome = "checking" | "offline" | "unsupported" | "self_update_disabled";
+export interface MachineCliUpdateCheckResponse {
+  outcome: MachineCliUpdateCheckOutcome;
+  coalesced?: boolean;
+  daemonVersion?: string;
+  cliUpdate?: MachineCliUpdateStatus;
+}
+
+/** A request within this long of the last one joins it instead of asking the daemon again. */
+export const MACHINE_CLI_UPDATE_CHECK_COALESCE_MS = 60_000;
+
+/**
  * The Hub decided a resting Run has been idle long enough to sleep
  * (docs/instance-sleep.md). The daemon verifies its own facts first: the Run
  * still rests, with no task execution, background task or other activity for
@@ -669,6 +727,7 @@ export type MachineDaemonServerMessage =
   | MachineDaemonUnregistered
   | MachineDaemonShutdown
   | MachineDaemonCliReleaseNotice
+  | MachineDaemonCliUpdateCheck
   | { type: "machine_daemon_connected"; daemon: SerializedMachineDaemon; connectionEpoch: number; activation?: MachineDaemonActivationReceipt;
       /** The Hub's harness registry (`agent-presets.json` text), for a daemon declaring `hub_harness_registry_v1`. */
       harnessRegistry?: string }

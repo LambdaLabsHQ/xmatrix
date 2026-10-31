@@ -1093,6 +1093,9 @@ pub enum MachineDaemonReport {
         machine_resources: Option<serde_json::Value>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         harness_inventory: Option<serde_json::Value>,
+        /// What this daemon's own CLI update is doing (`MachineCliUpdateStatus`).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        cli_update: Option<serde_json::Value>,
         runs: Vec<MachineRunSnapshotItem>,
     },
     MachineSpawnResult {
@@ -1218,6 +1221,10 @@ pub enum MachineDaemonConnectionEvent {
     /// Hub's word that `channel` (`stable` or `dev`) has a newer CLI release
     /// than this daemon reported. Not a command: nothing is claimed or
     /// answered; the daemon reads its own release feed before updating.
+    /// The owner's view asked this daemon to check for a CLI update now.
+    CliUpdateCheck {
+        request_id: String,
+    },
     CliRelease {
         channel: String,
         version: String,
@@ -1580,6 +1587,27 @@ impl MachineDaemonConnectionClient {
             captured_at: None,
             machine_resources: None,
             harness_inventory: Some(inventory),
+            cli_update: None,
+            runs: Vec::new(),
+        })
+    }
+
+    /// Tell the Hub what this daemon's CLI update is doing (`MachineCliUpdateStatus`),
+    /// stamped now. Offline, the status is dropped: a reconnect starts from fresh metadata.
+    pub fn report_cli_update(&self, mut status: serde_json::Value) -> Result<()> {
+        if !self.is_connected() {
+            return Ok(());
+        }
+        status["at"] = serde_json::json!(machine_report_at_rfc3339());
+        self.send_report(MachineDaemonReport::MachineRunSnapshot {
+            request_id: None,
+            snapshot_complete: Some(false),
+            registry_connection_epoch: None,
+            registry_sequence: None,
+            captured_at: None,
+            machine_resources: None,
+            harness_inventory: None,
+            cli_update: Some(status),
             runs: Vec::new(),
         })
     }
@@ -3183,6 +3211,21 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
                 },
             },
         ),
+        "machine_cli_update_check" => Some(
+            match value
+                .get("requestId")
+                .and_then(serde_json::Value::as_str)
+                .filter(|text| !text.is_empty() && text.len() <= 200)
+            {
+                Some(request_id) => MachineDaemonConnectionEvent::CliUpdateCheck {
+                    request_id: request_id.to_string(),
+                },
+                None => MachineDaemonConnectionEvent::Error {
+                    message: "Invalid CLI update check".into(),
+                    correlation: None,
+                },
+            },
+        ),
         "machine_cli_release" => {
             let field = |name: &str| {
                 value
@@ -3721,6 +3764,41 @@ mod tests {
             ),
             Some(MachineDaemonConnectionEvent::Error { .. })
         ));
+    }
+
+    #[test]
+    fn machine_parser_reads_cli_update_checks() {
+        match parse_machine_daemon_server_event(
+            r#"{"type":"machine_cli_update_check","requestId":"cli-update:1"}"#,
+        ) {
+            Some(MachineDaemonConnectionEvent::CliUpdateCheck { request_id }) => {
+                assert_eq!(request_id, "cli-update:1");
+            }
+            other => panic!("expected a CLI update check, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_machine_daemon_server_event(r#"{"type":"machine_cli_update_check"}"#),
+            Some(MachineDaemonConnectionEvent::Error { .. })
+        ));
+    }
+
+    #[test]
+    fn machine_cli_update_status_rides_a_partial_snapshot() {
+        let report = MachineDaemonReport::MachineRunSnapshot {
+            request_id: None,
+            snapshot_complete: Some(false),
+            registry_connection_epoch: None,
+            registry_sequence: None,
+            captured_at: None,
+            machine_resources: None,
+            harness_inventory: None,
+            cli_update: Some(serde_json::json!({ "state": "checking", "at": "2026-10-31T14:00:00Z" })),
+            runs: Vec::new(),
+        };
+        let value = serde_json::to_value(&report).expect("snapshot serializes");
+        assert_eq!(value["type"], "machine_run_snapshot");
+        assert_eq!(value["cliUpdate"]["state"], "checking");
+        assert!(value.get("harnessInventory").is_none());
     }
 
     #[test]
@@ -4446,6 +4524,7 @@ mod tests {
             captured_at: Some("2026-09-05T00:00:00Z".to_string()),
             machine_resources: None,
             harness_inventory: None,
+            cli_update: None,
             runs: Vec::new(),
         };
         let value = serde_json::to_value(report).expect("serialize machine report");
@@ -4523,6 +4602,7 @@ mod tests {
             captured_at: None,
             machine_resources: None,
             harness_inventory: None,
+            cli_update: None,
             runs: Vec::new(),
         };
         let first = client.bind_registry_causality(report).unwrap();
@@ -4542,6 +4622,7 @@ mod tests {
                 captured_at: None,
                 machine_resources: None,
                 harness_inventory: None,
+                cli_update: None,
                 runs: Vec::new(),
             })
             .unwrap();
