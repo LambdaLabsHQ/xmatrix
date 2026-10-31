@@ -191,7 +191,7 @@ async function openThisMachine(page: Page, release: object, updateStatus: Record
 test("a version behind a fresh release shows only what its update is really doing", async ({ page }) => {
   await openThisMachine(page, releasedAt(60_000), { state: "downloaded", enabled: true, version: "0.16.700" });
   // Seeing the CLI behind asks its daemon once, however many rows show it; they show what it reports.
-  await expect(page.getByText("Installing v0.16.700")).toHaveCount(2);
+  await expect(page.getByText("Updating to v0.16.700")).toHaveCount(2);
   expect(await fixtureRequestBodies(page, "cli-check")).toEqual([{ machineId: MACHINE_ID }]);
   await expect(page.getByText("v0.16.700 downloaded")).toBeVisible();
   await expect(page.getByRole("button", { name: /^(Update|Not updated)$/u })).toHaveCount(0);

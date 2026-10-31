@@ -45,7 +45,7 @@ export function DesktopAppBehind({ latestVersion, status, checking, onCheck, onI
     </span>
   );
   if (!status) {
-    return <NotUpdated>This App build installs updates only when it restarts. Quit and reopen xMatrix to install {next}.</NotUpdated>;
+    return <NotUpdated>This App build updates only when it restarts. Quit and reopen xMatrix to update to {next}.</NotUpdated>;
   }
   if (!status.enabled || status.state === "disabled") {
     return <NotUpdated label="Update">
@@ -69,7 +69,7 @@ export function DesktopAppBehind({ latestVersion, status, checking, onCheck, onI
         </button>
       </>;
     case "installing":
-      return <VersionNote busy>Restarting into {next}</VersionNote>;
+      return <VersionNote busy>Restarting to update to {next}</VersionNote>;
     case "error":
       return <NotUpdated>{status.message || "The App could not fetch its update."}{checkButton}</NotUpdated>;
     default:

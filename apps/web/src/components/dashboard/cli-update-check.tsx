@@ -53,7 +53,7 @@ export function CliBehind({ token, machineId, daemon, latestVersion, publishedAt
   const status = newest(ask.data.cliUpdate, parseMachineCliUpdateStatus(daemon?.metadata?.cliUpdate));
   switch (status?.state) {
     case "installing":
-      return <VersionNote busy>Installing {status.version ? formatVersion(status.version) : next}</VersionNote>;
+      return <VersionNote busy>Updating to {status.version ? formatVersion(status.version) : next}</VersionNote>;
     case "failed":
       return <NotUpdated>{status.error} <ComponentUpdateSteps component="cli" /></NotUpdated>;
     case "current":

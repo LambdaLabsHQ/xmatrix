@@ -229,7 +229,7 @@ export function ReleaseAge({ component, latest }: { component: ReleaseComponent;
   }
   return (
     <NotUpdated>
-      {next} was released {latest.publishedAt ? relativeTime(latest.publishedAt) : "earlier"} and has not installed here.{" "}
+      {next} was released {latest.publishedAt ? relativeTime(latest.publishedAt) : "earlier"} and this machine has not updated to it.{" "}
       <ComponentUpdateSteps component={component} />
     </NotUpdated>
   );
@@ -277,7 +277,7 @@ export function ComponentUpdateSteps({ component }: { component: ReleaseComponen
       className="inline-flex items-center gap-1 rounded bg-muted px-1 font-mono text-foreground">
       {CLI_UPDATE_COMMAND}
       {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-    </button>{" "}on that machine to install it now.</>;
+    </button>{" "}on that machine to update now.</>;
 }
 
 export function ReleaseNotesLink({ version }: { version?: string }) {

@@ -3,15 +3,15 @@
 ## Unreleased: A machine's versions show what their update is really doing
 
 A machine with automatic updates on still showed a yellow Update beside its
-versions, and the desktop App installed a downloaded update only when someone
+versions, and the desktop App applied a downloaded update only when someone
 quit it, so a Mac left open stayed on an old build. Seeing this machine's App
 behind its channel now starts one quiet update check at once (once per release
 per page), and the mark shows only the updater's real state: checking,
 downloading with progress, or downloaded with Restart to update. A downloaded
-update also installs by itself once the person is away (idle five minutes or
+update also applies itself once the person is away (idle five minutes or
 the screen locks); the daemon runs separately, so Agents keep running. Seeing a
 Machine's CLI behind asks its daemon to check once (per Machine and release, per
-page), and the mark shows what the daemon reports: checking, installing vX, or
+page), and the mark shows what the daemon reports: checking, updating to vX, or
 the failure. A component that did not update reads "Not updated" with the
 reason and the fix in place. Betas are judged against the dev channel they follow. Beta Web and
 desktop; recovery is a CI-validated release reverting this change.
