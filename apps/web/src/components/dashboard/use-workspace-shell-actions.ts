@@ -1258,7 +1258,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const {
     toggleAutomation,
     runAutomation,
-    updateAutomation,
     deleteAutomation,
   } = useWorkspaceAutomationActions({
     token: s.token,
@@ -1316,12 +1315,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const nextPath = appViewPath(null, "profile", spaceId, s.spaces);
     pushBrowserPath(nextPath);
     setBrowserPath(nextPath);
-  }
-
-  /** Schedules, opened at one Automation with its editor. */
-  function openSchedule(automationId: string) {
-    setScheduleFocusId(automationId);
-    changeAppView("automation", automationId);
   }
 
   const clearScheduleFocus = useCallback(() => setScheduleFocusId(null), [setScheduleFocusId]);
@@ -2898,14 +2891,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     completeDesktopSetup,
     toggleAutomation,
     runAutomation,
-    updateAutomation,
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
     openHarnessProfile,
     openHumanProfile,
     profileUserId,
-    openSchedule,
     clearScheduleFocus,
     openAppsForSpace,
     backToMore,

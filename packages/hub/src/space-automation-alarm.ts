@@ -10,6 +10,7 @@ import {
 } from "./relay-authority-scheduled-message-delivery";
 import { dispatchScheduledOccurrence } from "./scheduled-occurrence-dispatch";
 import { machineDaemonCommand } from "./machines";
+import { markReminderDone } from "./page-schedule-sync";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import type { Env } from "./types";
 
@@ -39,11 +40,18 @@ export async function runSpaceAutomationAlarm(env: Env, spaceId: string, ports: 
         schedulePostCommit: (input) => ports.waitUntil(dispatchProductMessagePostCommit({
           env, ...input, scheduleBackground: (task) => ports.waitUntil(task),
         })),
-        openConversation: ({ occurrence, automation, storedName, body, userId, privateEvents }) => {
+        openConversation: ({ occurrence, automation, storedName, source, body, userId, privateEvents }) => {
           if (!automation.page_id) throw new Error("Automation has no page to run its occurrence from");
           return openOccurrenceConversation(env, { spaceId, pageId: String(automation.page_id),
             automationId: automation.id, occurrenceId: occurrence.id, name: automationName(storedName, body),
-            scheduledFor: occurrence.scheduled_for, userId, privateEvents });
+            source: typeof source === "string" ? source : "", scheduledFor: occurrence.scheduled_for, userId,
+            privateEvents });
+        },
+        reminderDone: ({ automation, source, userId, deliveredAt }) => {
+          if (!automation.page_id) return;
+          ports.waitUntil(markReminderDone(env, { spaceId, pageId: String(automation.page_id), source, userId,
+            day: deliveredAt.slice(0, 10) }).catch((error) => console.error("Reminder line was not checked off", {
+            automationId: automation.id, error: error instanceof Error ? error.message : String(error) })));
         },
       }, occurrence, automation, payload, lifecycle),
   };

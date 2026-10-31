@@ -315,12 +315,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     completeDesktopSetup,
     toggleAutomation,
     runAutomation,
-    updateAutomation,
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
     openHarnessProfile,
-    openSchedule,
     clearScheduleFocus,
     openAppsForSpace,
     backToMore,
@@ -985,10 +983,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const manageSelectedApps = useStableCallback(() => {
     if (selectedChannel) openAppsForSpace(selectedChannel.spaceId);
   });
-  const toggleDetailsAutomation = useStableCallback(toggleAutomation);
-  const updateDetailsAutomation = useStableCallback(updateAutomation);
-  const deleteDetailsAutomation = useStableCallback(deleteAutomation);
-  const openDetailsSchedule = useStableCallback(openSchedule);
   const closeDetailsOverlay = useStableCallback(closeMobileChannelDetails);
   const selectSearchChannel = useStableCallback((channelId: string) => navigateToChannel(channelId));
   const selectSearchMessage = useStableCallback((channelId: string, messageId: string) =>
@@ -1362,18 +1356,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       token={token}
       connectorRevision={latestChannelConnectorStateMessageId(renderableHistory)}
       currentUserMemberId={humanMemberId}
-      currentUserId={user.id}
       onOpenAgentTrace={openAgentTrace}
       onRunChannelCommand={canUseSelectedChannel ? runSelectedChannelCommand : undefined}
       onManageApps={manageSelectedApps}
       onDeleteChannel={canDeleteSelectedChannel ? openSelectedChannelDeletion : undefined}
-      automations={automations}
-      automationExecutionEnabled={automationExecutionEnabled}
-      automationBusy={automationBusy}
-      onToggleAutomation={toggleDetailsAutomation}
-      onUpdateAutomation={updateDetailsAutomation}
-      onDeleteAutomation={deleteDetailsAutomation}
-      onOpenSchedule={openDetailsSchedule}
       mobileOverlayOpen={mobileChannelDetailsOpen}
       onCloseMobileOverlay={closeDetailsOverlay}
     />}
@@ -1480,7 +1466,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onRevealLocalWorkspace={(workspace) => void revealLocalWorkspace(workspace)}
       onCheckLocalRuntime={(runtime) => void checkLocalRuntime(runtime)}
       onCompleteDesktopSetup={() => void completeDesktopSetup()}
-      onUpdateAutomation={(automationId, input) => void updateAutomation(automationId, input)}
       onToggleAutomation={(automation) => void toggleAutomation(automation)}
       onRunAutomation={(automation) => void runAutomation(automation)}
       onDeleteAutomation={(automation) => void deleteAutomation(automation)}

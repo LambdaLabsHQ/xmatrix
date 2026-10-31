@@ -269,12 +269,11 @@ async function appUsers(tx: DatabaseTransaction, pairs: Array<{ spaceId: string;
  * reason. It stays on the wire for CLIs that still require the field. */
 function capabilities(row: QueryResultRow) {
   if (row.page_id) {
-    // A page's Automation is managed through its page, by whoever can edit it;
-    // a detached one resumes only when its reference is back.
+    // A page's Automation is a line of its page, managed by whoever can edit it.
     const canManage = row.can_manage === true;
     const enabled = row.enabled === true;
     return { update: canManage, pause: canManage && enabled, requestPause: false,
-      resume: canManage && !enabled && !row.detached_at, run: canManage && enabled, delete: canManage,
+      resume: canManage && !enabled, run: canManage && enabled, delete: canManage,
       reasonRequired: false };
   }
   if (row.agent_principal_id) {
@@ -387,7 +386,6 @@ function automationFromRow(row: QueryResultRow): Record<string, unknown> {
     authorityRootUserId: authorityRoot(row), channelId: String(row.channel_id),
     ...(row.page_id ? { pageId: String(row.page_id) } : {}),
     ...(row.page_id && row.channel_space_id ? { spaceId: String(row.channel_space_id) } : {}),
-    ...(row.detached_at ? { detachedAt: iso(row.detached_at) } : {}),
     ...(Array.isArray(row.trigger_events) && row.trigger_events.length ? { triggerEvents: row.trigger_events } : {}),
     canManage, capabilities: taskCapabilities, expression, message,
     ...(lastMessageId ? { lastMessageId } : {}),
@@ -728,10 +726,6 @@ export class PostgresAutomationRepository {
               !["merged", "ci-failed", "event"].includes(String(json(trigger).kind))))) {
           throw new AutomationControlError("invalid_automation_request", 400, "triggers are invalid");
         }
-        // Created detached, it starts running once the page references it.
-        const detached = current ? Boolean(current.detached_at) : Boolean(pageId) && input.detached === true;
-        if (detached && input.enabled) throw new AutomationControlError("automation_detached", 409,
-          "Its reference is not on the page; put the reference back to resume it");
         if (current && current.channel_id !== channelRow.channel_id) {
           const previousChannel = await automationChannel(tx, String(current.channel_id),
             channelPrincipal, "automation_new_work");
@@ -765,12 +759,11 @@ export class PostgresAutomationRepository {
               "conflict", 409, "Replaced Automation changed");
             replacedVersion = Number(replaced.version) + 1;
           }
-          await tx.query({ name: "automation_insert_v2", text: `INSERT INTO data.automations
+          await tx.query({ name: "automation_insert_v3", text: `INSERT INTO data.automations
             (automation_id,owner_user_id,channel_id,next_run_at,enabled,version,payload_json,created_at,updated_at,
-             page_id,detached_at)
-            VALUES ($1,$2,$3,$4,$5,1,$6::jsonb,$7,$7,$8,$9)`, values: [automationId, actorUserId,
-            channelRow.channel_id, nextRunAt, input.enabled, JSON.stringify(payload), at, pageId ?? null,
-            detached ? at : null], maxRows: 0 });
+             page_id)
+            VALUES ($1,$2,$3,$4,$5,1,$6::jsonb,$7,$7,$8)`, values: [automationId, actorUserId,
+            channelRow.channel_id, nextRunAt, input.enabled, JSON.stringify(payload), at, pageId ?? null], maxRows: 0 });
         } else {
           await tx.query({ name: "automation_cancel_changed_occurrences_v1", text: `UPDATE
             data.automation_occurrences SET status='cancelled',lease_owner=NULL,lease_until=NULL,

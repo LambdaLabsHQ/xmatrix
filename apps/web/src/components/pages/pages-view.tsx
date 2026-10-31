@@ -936,12 +936,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         setHeadRevision(event.headRevision);
         // An Agent that just edited is on the page from now; its caret shows once its live Run is known.
         void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree-agents") });
-        // Taking a reference out pauses its Automation; whoever is on the page hears it at once.
-        const detached = event.detachedAutomations ?? [];
-        if (detached.length) {
-          setNotice(`${event.author ?? "An edit"} removed the reference to ${detached.map((automation) =>
-            `“${automation.name}”`).join(", ")}, so ${detached.length === 1 ? "it is" : "they are"} paused. Put the reference back to resume.`);
-        }
       }
       // A co-writing Agent's suggestion is laid over the page as it arrives.
       if (event.type === "suggestion") waitingRefetch.current();

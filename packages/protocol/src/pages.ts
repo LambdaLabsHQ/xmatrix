@@ -63,21 +63,19 @@ export interface PageRevision {
   createdAt: string;
 }
 
-/** An Automation a page edit detached or attached (docs/design/pages-live-document.md §6.1). */
-export interface PageAutomationAnchorChange { automationId: string; name: string }
+/** A schedule line that does not run as written, and why (docs/design/pages-live-document.md §6.1). */
+export interface PageScheduleProblem { source: string; problem: string }
 
 /**
  * A whole-document page edit as committed, and what it did besides its text:
- * the Automations whose reference it removed (now paused) or brought back
- * (resumed), and the top sections it removed. The writer is told at once, as
- * an edit that drops sections is otherwise silent.
+ * the schedule lines it left that cannot run as written, and the top sections
+ * it removed. The writer is told at once, as either is otherwise silent.
  */
 export interface PageEditResult {
   revision: number;
   kind: PageRevision["kind"];
   headRevision: number;
-  detachedAutomations: PageAutomationAnchorChange[];
-  attachedAutomations: PageAutomationAnchorChange[];
+  scheduleProblems: PageScheduleProblem[];
   /** Titles of the depth 1 and 2 headings the edit removed or renamed. */
   removedSections: string[];
 }

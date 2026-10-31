@@ -35,7 +35,7 @@ export function pageHeadingSlug(text: string): string {
 }
 
 /** Each line with its offsets, and whether it is prose: outside fenced code and not a fence itself. */
-function* markdownLines(markdown: string): Generator<{ line: string; offset: number; end: number; prose: boolean }> {
+export function* markdownLines(markdown: string): Generator<{ line: string; offset: number; end: number; prose: boolean }> {
   let offset = 0;
   let fence: string | null = null;
   const lines = markdown.split("\n");
@@ -403,66 +403,6 @@ export function pageReferenceSpans(text: string): PageReferenceSpan[] {
     end: match.index! + match[0].length,
     text: match[0],
   }));
-}
-
-/** The link scheme of an Automation's live reference (docs/design/pages-live-document.md §6.1). */
-export const AUTOMATION_REFERENCE_SCHEME = "xmatrix:automation/";
-
-const AUTOMATION_REFERENCE = /\]\(xmatrix:automation\/([A-Za-z0-9:._-]{1,200})\)/gu;
-
-/** The markdown line that places an Automation in a section: a link its editor renders as a chip. */
-export function automationReferenceMarkdown(automationId: string, name: string): string {
-  const label = name.replace(/\s+/gu, " ").trim().replace(/[[\]\\]/gu, "\\$&") || "Automation";
-  return `[${label}](${AUTOMATION_REFERENCE_SCHEME}${automationId})`;
-}
-
-/** Each Automation referenced in the page's text, outside code, with the section that holds its first reference. */
-export function automationReferences(markdown: string): Map<string, string> {
-  const references = new Map<string, string>();
-  const blocks = pageBlocks(markdown);
-  for (const { line, offset, prose } of markdownLines(markdown)) {
-    if (!prose) continue;
-    for (const match of line.replace(/`[^`]*`/gu, (code) => " ".repeat(code.length)).matchAll(AUTOMATION_REFERENCE)) {
-      const id = match[1]!;
-      if (references.has(id)) continue;
-      const at = offset + match.index!;
-      references.set(id, [...blocks].reverse().find((block) => block.start <= at)?.id ?? "");
-    }
-  }
-  return references;
-}
-
-/** The page with an Automation's reference at the end of a section ('' or an unknown id: the end of the page). */
-export function insertAutomationReference(markdown: string, blockId: string, automationId: string,
-  name: string): string {
-  const line = automationReferenceMarkdown(automationId, name);
-  const block = blockId ? pageBlocks(markdown).find((candidate) => candidate.id === blockId) : undefined;
-  const end = block ? block.end : markdown.length;
-  const before = markdown.slice(0, end).replace(/\s+$/u, "");
-  const after = markdown.slice(end);
-  return `${before}${before ? "\n\n" : ""}${line}\n${after ? `\n${after.replace(/^\s+/u, "")}` : ""}`;
-}
-
-/** The page with every reference to one Automation pointing at another, as a replacement does. */
-export function replaceAutomationReference(markdown: string, fromId: string, toId: string): string {
-  return markdown.split(`](${AUTOMATION_REFERENCE_SCHEME}${fromId})`).join(`](${AUTOMATION_REFERENCE_SCHEME}${toId})`);
-}
-
-/** The page without any reference to an Automation; a line left with no words goes with it. */
-export function removeAutomationReference(markdown: string, automationId: string): string {
-  const target = `](${AUTOMATION_REFERENCE_SCHEME}${automationId})`;
-  const lines: string[] = [];
-  for (const line of markdown.split("\n")) {
-    let rest = line;
-    for (let end = rest.indexOf(target); end >= 0; end = rest.indexOf(target)) {
-      let start = rest.lastIndexOf("[", end);
-      while (start > 0 && rest[start - 1] === "\\") start = rest.lastIndexOf("[", start - 2);
-      rest = `${rest.slice(0, Math.max(0, start))}${rest.slice(end + target.length)}`;
-    }
-    if (rest === line) lines.push(line);
-    else if (/[\p{L}\p{N}]/u.test(rest.replace(/^\s*\d+[.)]/u, ""))) lines.push(trimEnd(rest, " \t"));
-  }
-  return lines.join("\n").replace(/\n{3,}/gu, "\n\n");
 }
 
 /**

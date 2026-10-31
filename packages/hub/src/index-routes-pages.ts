@@ -9,7 +9,7 @@ import { publishPreReviewVerdict } from "./github-pre-review";
 import { gitHubFileReferenceHref, gitHubFileReferences, immutableContentObjectKey, pageLineDiff, pageMediaFile,
   pageMediaReferences, parseGitHubFileReference, spaceVisibilityScope, utf8ByteLength, type PageAwareness,
   type PageBlame, type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity,
-  type PublicPage } from "@xmatrix/protocol";
+  type PublicPage, pageSchedules } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
 import { PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
@@ -20,7 +20,7 @@ import { pageConversation, pageTreeDiscussions, workingBySection } from "./page-
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { requireMachineDaemonAuth } from "./index-shared";
-import { tellPageAutomationChannels } from "./page-automation-wake";
+import { syncPageSchedules } from "./page-schedule-sync";
 import { tellPageCoWriter } from "./page-co-write-instruction";
 import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
@@ -360,6 +360,11 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       ...(body.afterPageId !== undefined ? { afterPageId: body.afterPageId as string | null } : {}),
       ...(body.accessMode !== undefined ? { accessMode: body.accessMode as "open" | "restricted" } : {}),
     });
+    // Schedules written in a new page's markdown are its Automations from its first revision.
+    if (!started && pageSchedules(String(body.body ?? "")).length) {
+      await syncPageSchedules(c.env, { spaceId, pageId: created.page.pageId, revision: created.page.headRevision,
+        userId: authUser.agentRun?.ownerUserId ?? authUser.id, viaAgentRun: Boolean(authUser.agentRun) });
+    }
     if (!started) return created;
     let seeded = false;
     try {
@@ -769,7 +774,9 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       principal: runPrincipalOf(authUser), revision: Number(c.req.param("revision")),
       baseRevision: integer(body.baseRevision),
     });
-    await tellPageAutomationChannels(c.env, result.automationChannels);
+    await syncPageSchedules(c.env, { spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+      revision: result.page.headRevision, userId: authUser.agentRun?.ownerUserId ?? authUser.id,
+      viaAgentRun: Boolean(authUser.agentRun) });
     await refreshSession(c.env, c.req.param("spaceId"), c.req.param("pageId"), authUser);
     return { page: result.page, revision: result.revision };
   }));

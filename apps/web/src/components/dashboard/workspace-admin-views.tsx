@@ -92,35 +92,9 @@ import type {
   SerializedMachineDaemon,
   SerializedAutomation,
   SerializedAutomationCatalog,
-  AutomationExpressionInput,
-  AutomationUpdateRequest,
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
-
-export function AutomationExpressionGuidance({ compact = false }: { compact?: boolean }) {
-  return (
-    <div
-      className={cn(
-        compact ? "mt-1 space-y-0.5 text-[11px]" : "mt-2 space-y-1 text-xs",
-        "text-muted-foreground"
-      )}
-    >
-      <p>
-        <strong className="text-foreground">Agent:</strong> @auto repo:&lt;owner/repo&gt; addresses an Agent. The resume interval controls when the Automation runs again. Use pwd:&quot;&lt;registered-path&gt;&quot; for a registered directory.
-      </p>
-      <p>
-        <strong className="text-foreground">Existing live Agent:</strong> @agent:N addresses that Channel instance. It must be online; everyone else receives context only.
-      </p>
-      <p>
-        <strong className="text-foreground">No Agent mention:</strong> only the Channel expression or App action is posted.
-      </p>
-      <p>
-        <strong className="text-foreground">Editing keeps its creator:</strong> changing this form never changes the captured Human or Agent author.
-      </p>
-    </div>
-  );
-}
 
 export function ErrorPanel({ title, error }: { title: string; error: string }) {
   return (
@@ -429,27 +403,6 @@ export async function fetchAutomations(
     executionEnabled: data.executionEnabled === true,
     agentManagementEnabled: data.agentManagementEnabled === true,
   };
-}
-
-export function automationExpressionFromText(text: string): AutomationExpressionInput {
-  return { kind: "text", language: "natural-language", text };
-}
-
-export async function patchAutomation(
-  token: string,
-  automationId: string,
-  input: AutomationUpdateRequest
-): Promise<SerializedAutomation> {
-  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automationId), {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(input),
-    cache: "no-store",
-  });
-  return requireField<SerializedAutomation>(res, "automation", "The Automation");
 }
 
 export async function setAutomationPaused(

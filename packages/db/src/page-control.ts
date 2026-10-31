@@ -11,11 +11,11 @@ import { channelCapabilityPredicate, requireChannelCapability } from "./channel-
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
-import { reconcilePageAutomations, removePageAutomations } from "./automation-page-anchor.js";
+import { removePageAutomations } from "./automation-page-anchor.js";
 import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
-  PageAuthor, PageAutomationAnchorChange, PageBlame, PageBlockAwareness, PageDocument, PageLink, PageLinkAnchor, PageMessageEdit, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
+  PageAuthor, PageBlame, PageBlockAwareness, PageDocument, PageLink, PageLinkAnchor, PageMessageEdit, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
 } from "@xmatrix/protocol";
 
 export type { PageAuthor, PageDocument, PageLink, PageRevision, PageSummary, PublicPage };
@@ -263,14 +263,11 @@ interface CoWritingInput {
 }
 
 /**
- * A committed revision. When it moved the head, `automationChannels` are the
- * conversations whose Automations it paused or resumed; their coordinators
- * must hear of it (docs/design/pages-live-document.md §6.4). The detached and
- * attached Automations are told to whoever wrote the edit.
+ * A committed revision. Its schedule lines are synced to the page's
+ * Automations after the commit, by the Hub (docs/design/pages-live-document.md §6.4).
  */
 export interface PageCommit {
-  page: PageSummary; revision: PageRevision; automationChannels: string[];
-  detachedAutomations: PageAutomationAnchorChange[]; attachedAutomations: PageAutomationAnchorChange[];
+  page: PageSummary; revision: PageRevision;
 }
 
 interface AccessView { canRead: boolean; canEdit: boolean }
@@ -834,15 +831,14 @@ export class PostgresPageRepository {
     await this.chargeRevision(tx, spaceId, actor, now);
     await this.insertRevision(tx, spaceId, pageId, revision, text, authors, conversationIds,
       suggestion ? "suggestion" : input.kind, input.baseRevision, now);
-    const anchoring = suggestion ? { channels: [], detached: [], attached: [] } : await (async () => {
+    if (!suggestion) {
       await tx.query({
         name: "page_head_advance_v1",
         text: `UPDATE data.pages SET head_revision=$3, version=version+1, updated_at=$4
           WHERE space_id=$1 AND page_id=$2`,
         values: [spaceId, pageId, revision, now], maxRows: 0,
       });
-      return reconcilePageAutomations(tx, { spaceId, pageId, body: text, at: now, revision });
-    })();
+    }
     for (const conversationId of conversationIds) {
       for (const block of blocks.length ? blocks : [""]) {
         await this.recordLink(tx, spaceId, actor, principal,
@@ -853,8 +849,7 @@ export class PostgresPageRepository {
     return { page: this.summary(updated), revision: {
       revision, kind: suggestion ? "suggestion" : input.kind, authors, conversationIds,
       basedOnRevision: input.baseRevision, createdAt: now,
-    }, automationChannels: anchoring.channels, detachedAutomations: anchoring.detached,
-    attachedAutomations: anchoring.attached };
+    } };
   }
 
   /** Accepts a suggestion, or restores an earlier revision, as a new head. */

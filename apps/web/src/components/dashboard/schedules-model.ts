@@ -29,7 +29,7 @@ export interface ScheduleSummary {
 
 /** Why a person should look at an Automation now, or null when nothing is wrong. */
 export function scheduleAttention(automation: SerializedAutomation, executionEnabled: boolean | null): string | null {
-  if (automation.detachedAt) return "Paused: its reference left the page";
+  if (automation.problem) return automation.problem;
   if (automation.latestExecution?.status === "failed") {
     const reason = automation.latestExecution.errorMessage || automation.latestExecution.errorCode;
     return reason ? `Its last run did not start: ${reason}` : "Its last run did not start";
@@ -40,7 +40,7 @@ export function scheduleAttention(automation: SerializedAutomation, executionEna
 }
 
 export function scheduleRunning(automation: SerializedAutomation): boolean {
-  return automation.enabled && !automation.detachedAt;
+  return automation.enabled;
 }
 
 /** A reminder that has reminded: it rests until it is given a new time. */

@@ -1,5 +1,5 @@
 import { PostgresPageRepository } from "@xmatrix/db";
-import { automationReferences, plainRecord } from "@xmatrix/protocol";
+import { pageSchedules, plainRecord } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { deterministicConversationId } from "./deterministic-id";
 import { openConversation } from "./system-conversation";
@@ -42,6 +42,8 @@ export function occurrenceConversationName(name: string, scheduledFor: string): 
  */
 export async function openOccurrenceConversation(env: Env, input: {
   spaceId: string; pageId: string; automationId: string; occurrenceId: string; name: string;
+  /** The schedule's line as last synced: it runs only while the page still says so. */
+  source: string;
   scheduledFor: string; userId: string; privateEvents: boolean;
 }): Promise<string> {
   const principal = { kind: "user" as const, id: input.userId };
@@ -51,6 +53,12 @@ export async function openOccurrenceConversation(env: Env, input: {
     repository.read({ requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId, principal }),
     effectivelyRestricted(env, input.spaceId, input.pageId, input.userId),
   ]);
+  // The page's text is what the schedule is (docs/design/pages-live-document.md §6.1). A line
+  // taken out, stopped or rewritten since its last sync does not run as it was.
+  const line = pageSchedules(page.body).find((candidate) => candidate.source === input.source);
+  if (!line || line.status !== "running" || line.error) {
+    throw new Error("Its schedule line was not found running on its page");
+  }
   await openConversation(env, { spaceId: input.spaceId, channelId, userId: input.userId,
     name: occurrenceConversationName(input.name, input.scheduledFor), mode: restricted || input.privateEvents ? "closed" : "open",
     metadata: { createdBy: "page-automation", fromPageId: input.pageId, automationId: input.automationId,
@@ -64,7 +72,7 @@ export async function openOccurrenceConversation(env: Env, input: {
       throw new Error("automation_private_event_requires_closed_conversation");
     }
   }
-  const blockId = automationReferences(page.body).get(input.automationId);
+  const blockId = line.blockId;
   await repository.link({ requestId: crypto.randomUUID(), spaceId: input.spaceId, principal,
     conversationId: channelId, pageId: input.pageId, ...(blockId ? { blockId } : {}), source: "reference" });
   return channelId;

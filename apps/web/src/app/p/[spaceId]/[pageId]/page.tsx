@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
 import {
-  AUTOMATION_REFERENCE_SCHEME, gitHubFileUrl, pageMediaFile, parseGitHubFileReference, parsePageMedia,
+  gitHubFileUrl, pageMediaFile, parseGitHubFileReference, parsePageMedia,
   withRoute,
 } from "@xmatrix/protocol";
 import { BrandMark } from "@/components/shared/brand-mark";
@@ -37,8 +37,6 @@ function publicPageUrl(spaceId: string, pageId: string) {
       return withRoute(getXMatrixHubUrl(), `/api/public/spaces/${encodeURIComponent(spaceId)}/pages/${
         encodeURIComponent(pageId)}/media/${media.file}`);
     }
-    // A reminder the page keeps stays its name; a public reader sees no schedule (page-automation-chips.ts).
-    if (url.startsWith(AUTOMATION_REFERENCE_SCHEME)) return url;
     const reference = parseGitHubFileReference(url);
     return reference ? gitHubFileUrl(reference) : defaultUrlTransform(url);
   };
@@ -87,9 +85,7 @@ const publicPageComponents: Components = {
     ? <video src={src} title={alt} controls preload="metadata" playsInline className="max-w-full rounded-md" />
     // eslint-disable-next-line @next/next/no-img-element -- markdown images are arbitrary, not next/image assets.
     : <img src={src} alt={alt ?? ""} title={title} />,
-  a: ({ href, children, ...props }) => href?.startsWith(AUTOMATION_REFERENCE_SCHEME)
-    ? <span className="page-automation-chip" data-state="public">{children}</span>
-    : <a href={href} {...withoutNode(props)}>{children}</a>,
+  a: ({ href, children, ...props }) => <a href={href} {...withoutNode(props)}>{children}</a>,
   table: (props) => <div className="page-table-scroll"><table {...withoutNode(props)} /></div>,
   td: cell("td"),
   th: cell("th"),

@@ -1,11 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
-import type {
-  AutomationUpdateRequest,
-  SerializedAutomation,
-} from "@xmatrix/protocol";
+import type { SerializedAutomation } from "@xmatrix/protocol";
 import {
   fetchAutomation,
-  patchAutomation,
   removeAutomation,
   replaceAutomation,
   setAutomationPaused,
@@ -94,37 +90,6 @@ export function useWorkspaceAutomationActions(state: AutomationActionState) {
     }
   }
 
-  async function updateAutomation(
-    automationId: string,
-    input: Omit<AutomationUpdateRequest, "expectedVersion">
-  ) {
-    const token = state.token;
-    if (!token || state.busy) return;
-    state.setBusy(`edit:${automationId}`);
-    state.setError(null);
-    try {
-      const current = state.automations.find((automation) => automation.id === automationId);
-      if (!current) throw new UserFacingProblem("Automation is no longer available.");
-      // An edit is never retried: it would overwrite the change it conflicted with.
-      const updated = await patchAutomation(token, automationId, {
-        ...input,
-        expectedVersion: current.version,
-      }).catch(async (error: unknown) => {
-        await reread(token, error, current);
-        throw error;
-      });
-      // Another author's evaluation comes back as the editor's replacement under a new id.
-      state.setAutomations((automations) => sortAutomations(replaceAutomation(
-        automations.filter((automation) => automation.id !== automationId || automation.id === updated.id),
-        updated,
-      )));
-    } catch (error) {
-      state.setError(userErrorMessage(error, "Couldn't update the Automation"));
-    } finally {
-      state.setBusy(null);
-    }
-  }
-
   async function deleteAutomation(automation: SerializedAutomation) {
     const token = state.token;
     if (!token || state.busy) return;
@@ -151,7 +116,6 @@ export function useWorkspaceAutomationActions(state: AutomationActionState) {
   return {
     toggleAutomation,
     runAutomation,
-    updateAutomation,
     deleteAutomation,
   };
 }

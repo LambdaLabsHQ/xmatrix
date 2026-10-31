@@ -491,18 +491,21 @@ export {
   restrictedChannelContentScope, spaceVisibilityScope, uploadScopeCoversRefScope,
 } from "./restricted-content-scope.js";
 export {
-  AUTOMATION_REFERENCE_SCHEME, automationReferenceMarkdown,
-  automationReferences, GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
-  gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, mergePageWords,
+  GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
+  gitHubFileReferences, gitHubFileUrl, mergePageText, mergePageWords,
   PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, PAGE_MEDIA_TYPES, pageMediaFile, pageMediaReference, pageMediaReferences,
   pageMediaRefId, parsePageMedia,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageEditGlimpses, pageHeadingSlug, pageLineDiff,
   pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
-  removeAutomationReference, replaceAutomationReference,
 } from "./page-markdown.js";
 export type {
   GitHubFileReference, PageBlock, PageEditGlimpse, PageEditSegment, PageLineDiff, PageMedia, PageMediaExtension, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
+export {
+  markScheduleDone, pageSchedules, parseRecurrence, removeScheduleLine, setScheduleStatus, parseScheduleTime, SCHEDULE_AT, SCHEDULE_DONE, SCHEDULE_RECURRENCE,
+  scheduleCadenceText, scheduleLine, scheduleTimeInRange, scheduleTimeText, scheduleTriggerFrom, scheduleTriggerText,
+} from "./page-schedules.js";
+export type { PageSchedule, PageScheduleStatus } from "./page-schedules.js";
 export {
   channelReferenceSpans, channelReferenceToken, loneMessageReference,
   messageReferenceSpans,
@@ -522,7 +525,7 @@ export type { AppSelectionView } from "./app-view-address.js";
 export { externalAppSource, messageExternalAppSource } from "./external-app-source.js";
 export type { ExternalAppSource } from "./external-app-source.js";
 export type {
-  PageAuthor, PageAutomationAnchorChange, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageConversation,
+  PageAuthor, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageConversation, PageScheduleProblem,
   PageDocument, PageGitHubFile, PageLink, PageMessageEdit, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
   PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PagePresent,
   PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
