@@ -9,7 +9,7 @@ pub use message_receipt::cmd_message_receipt;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use colored::Colorize;
@@ -961,7 +961,7 @@ pub(crate) fn load_channel_file_attachments(
             )));
         }
 
-        let mime_type = channel_file_mime_type(path);
+        let mime_type = xmatrix_cli_core::media_types::media_type_for_path(path);
         // Hashed from disk in chunks; the upload reads the file again as it sends it.
         let (content_hash, size) = xmatrix_cli_core::private_upload::sha256_file(path)
             .map_err(|err| CliError::Launch(format!("Cannot read {}: {err}", path.display())))?;
@@ -1087,49 +1087,6 @@ async fn upload_channel_file_attachments(
         });
     }
     Ok(uploaded)
-}
-
-pub fn channel_image_mime_type(path: &Path) -> Option<&'static str> {
-    match path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => Some("image/png"),
-        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
-        Some("webp") => Some("image/webp"),
-        Some("gif") => Some("image/gif"),
-        _ => None,
-    }
-}
-
-pub(crate) fn channel_file_mime_type(path: &Path) -> &'static str {
-    if let Some(image) = channel_image_mime_type(path) {
-        return image;
-    }
-    match path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("md") | Some("markdown") => "text/markdown",
-        Some("txt") | Some("log") => "text/plain",
-        Some("json") => "application/json",
-        Some("pdf") => "application/pdf",
-        Some("zip") => "application/zip",
-        Some("mp4") | Some("m4v") => "video/mp4",
-        Some("mov") => "video/quicktime",
-        Some("webm") => "video/webm",
-        Some("mp3") => "audio/mpeg",
-        Some("m4a") => "audio/mp4",
-        Some("aac") => "audio/aac",
-        Some("flac") => "audio/flac",
-        Some("wav") => "audio/wav",
-        Some("ogg") | Some("oga") => "audio/ogg",
-        _ => "application/octet-stream",
-    }
 }
 
 fn uploaded_attachment_bindings(uploaded: &[UploadedMessageAttachment]) -> Vec<serde_json::Value> {
@@ -2998,9 +2955,9 @@ mod tests {
 
     use super::{
         OpenedChannelThread, agent_sender_env_value, attachment_visibility_scope_id,
-        channel_create_body, channel_entity_token, channel_image_mime_type, cmd_channel_create,
-        decode_send_newline_escapes, format_history_message_at, is_agent_execution_context,
-        is_intake, process_descends_from_tracked_pid, resolve_channel_selector,
+        channel_create_body, channel_entity_token, cmd_channel_create, decode_send_newline_escapes,
+        format_history_message_at, is_agent_execution_context, is_intake,
+        process_descends_from_tracked_pid, resolve_channel_selector,
         should_refuse_user_attributed_send_without_agent_identity, tracked_ancestor_pid,
     };
     use std::collections::{HashMap, HashSet};
@@ -3196,30 +3153,6 @@ mod tests {
                 "mimeType": "text/markdown",
                 "name": "deployment-guide.md",
             })],
-        );
-    }
-
-    #[test]
-    fn cli_send_file_accepts_supported_image_extensions() {
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.PNG")),
-            Some("image/png")
-        );
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.jpeg")),
-            Some("image/jpeg")
-        );
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.webp")),
-            Some("image/webp")
-        );
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.gif")),
-            Some("image/gif")
-        );
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.svg")),
-            None
         );
     }
 
@@ -3770,20 +3703,5 @@ mod tests {
             super::shell_quote("https://example.com/attachment?token=one'two"),
             "'https://example.com/attachment?token=one'\\''two'"
         );
-    }
-
-    #[test]
-    fn audio_and_video_files_are_sent_with_a_playable_type() {
-        use std::path::Path;
-        for (name, expected) in [
-            ("IMG_2120.MOV", "video/quicktime"),
-            ("cut.mp4", "video/mp4"),
-            ("song.flac", "audio/flac"),
-            ("song.mp3", "audio/mpeg"),
-            ("take.wav", "audio/wav"),
-            ("blob.bin", "application/octet-stream"),
-        ] {
-            assert_eq!(super::channel_file_mime_type(Path::new(name)), expected, "{name}");
-        }
     }
 }

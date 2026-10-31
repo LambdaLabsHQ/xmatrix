@@ -2,7 +2,7 @@ use xmatrix_cli_account::{cmd_list, cmd_login, cmd_logout, cmd_status, cmd_whoam
 use xmatrix_cli_agent::{apply_agent_spawn_path, cmd_agent};
 use xmatrix_cli_args as cli;
 pub use xmatrix_cli_channel::{
-    agent_sender_env_value, channel_image_mime_type, channel_label, channel_name_from_cache,
+    agent_sender_env_value, channel_label, channel_name_from_cache,
     format_history_message, load_channel_image_attachments,
 };
 use xmatrix_cli_channel::{

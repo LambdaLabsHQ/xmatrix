@@ -1,6 +1,7 @@
 import { diff3Merge, diffComm, diffIndices } from "node-diff3";
 import { trimEnd } from "./field-validation.js";
 import { stripHtmlTags } from "./html-text.js";
+import { extensionForMediaType, PAGE_MEDIA_TYPES } from "./media-types.js";
 
 /**
  * Markdown helpers shared by the page live session, the Web editor and the
@@ -588,19 +589,11 @@ export function gitHubFileReferences(markdown: string): string[] {
  */
 export const PAGE_MEDIA_SCHEME = "xmatrix:page-media/";
 
-/** What a page shows inline, by the extension its reference carries. Never markup (no SVG). */
-export const PAGE_MEDIA_TYPES = {
-  png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif",
-  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
-} as const;
-
-export type PageMediaExtension = keyof typeof PAGE_MEDIA_TYPES;
-
 export interface PageMedia {
   /** `<sha-256>.<extension>`, what the reference ends with. */
   file: string;
   contentHash: string;
-  mimeType: (typeof PAGE_MEDIA_TYPES)[PageMediaExtension];
+  mimeType: string;
   video: boolean;
 }
 
@@ -612,7 +605,7 @@ export function pageMediaFile(file: string): PageMedia | null {
   const match = PAGE_MEDIA_FILE.exec(file);
   const extension = match?.[2];
   if (!match || !extension || !Object.hasOwn(PAGE_MEDIA_TYPES, extension)) return null;
-  const mimeType = PAGE_MEDIA_TYPES[extension as PageMediaExtension];
+  const mimeType = PAGE_MEDIA_TYPES[extension]!;
   return { file, contentHash: match[1]!, mimeType, video: mimeType.startsWith("video/") };
 }
 
@@ -623,10 +616,9 @@ export function parsePageMedia(src: string): PageMedia | null {
 
 /** The reference for content of a type pages show; null for any other type. */
 export function pageMediaReference(contentHash: string, mimeType: string): string | null {
-  const type = mimeType.split(";", 1)[0]!.trim().toLowerCase();
-  const extension = (Object.keys(PAGE_MEDIA_TYPES) as PageMediaExtension[])
-    .find((key) => PAGE_MEDIA_TYPES[key] === type);
-  return extension && /^[0-9a-f]{64}$/u.test(contentHash) ? `${PAGE_MEDIA_SCHEME}${contentHash}.${extension}` : null;
+  const extension = extensionForMediaType(mimeType);
+  return extension && Object.hasOwn(PAGE_MEDIA_TYPES, extension) && /^[0-9a-f]{64}$/u.test(contentHash)
+    ? `${PAGE_MEDIA_SCHEME}${contentHash}.${extension}` : null;
 }
 
 /** Each media file (`<sha-256>.<extension>`) the page's text references. */

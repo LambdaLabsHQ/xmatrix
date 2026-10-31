@@ -23,20 +23,7 @@ const LOCAL_DIR: &str = "page-media";
 /// An image whose text is still arriving is held this long at most; past it, it is text.
 const MAX_HELD_IMAGE: usize = 4096;
 
-/// The type a page's file is served as, by its extension.
-pub fn page_media_type(extension: &str) -> Option<&'static str> {
-    Some(match extension {
-        "png" => "image/png",
-        "jpg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "avif" => "image/avif",
-        "mp4" => "video/mp4",
-        "webm" => "video/webm",
-        "mov" => "video/quicktime",
-        _ => return None,
-    })
-}
+pub use crate::media_types::page_media_type;
 
 /// `<sha-256>.<extension>` when `file` names a file pages show.
 fn page_media_file_name(file: &str) -> Option<&str> {

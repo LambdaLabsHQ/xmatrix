@@ -169,7 +169,7 @@ impl CachedMedia<'_> {
                 attachment_cache_dir().join(format!(
                     "{prefix}-{}-{safe_name}.{}",
                     &id[..id.len().min(12)],
-                    media_extension(mime_type, name),
+                    crate::media_types::media_extension(mime_type, name),
                 ))
             }
         };
@@ -196,72 +196,9 @@ fn cached_body_is_whole(path: &Path, expected_size: Option<u64>) -> bool {
     })
 }
 
-/// The extension a file of this type and name is saved with.
-pub(crate) fn media_extension(mime_type: &str, name: &str) -> &'static str {
-    let lower_mime = mime_type.to_ascii_lowercase();
-    for (needle, extension) in [
-        ("png", "png"),
-        ("jpeg", "jpg"),
-        ("jpg", "jpg"),
-        ("gif", "gif"),
-        ("webp", "webp"),
-        ("avif", "avif"),
-        ("pdf", "pdf"),
-        ("mp4", "mp4"),
-        ("quicktime", "mov"),
-        ("webm", "webm"),
-        ("flac", "flac"),
-        ("wav", "wav"),
-        ("audio/mpeg", "mp3"),
-        ("ogg", "ogg"),
-        ("markdown", "md"),
-    ] {
-        if lower_mime.contains(needle) {
-            return extension;
-        }
-    }
-    Path::new(name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| match value.to_ascii_lowercase().as_str() {
-            "png" => "png",
-            "jpg" | "jpeg" => "jpg",
-            "gif" => "gif",
-            "webp" => "webp",
-            "avif" => "avif",
-            "mp4" => "mp4",
-            "mov" => "mov",
-            "webm" => "webm",
-            "mp3" => "mp3",
-            "m4a" => "m4a",
-            "flac" => "flac",
-            "wav" => "wav",
-            "ogg" => "ogg",
-            "md" | "markdown" => "md",
-            "txt" => "txt",
-            "pdf" => "pdf",
-            "zip" => "zip",
-            "json" => "json",
-            _ => "bin",
-        })
-        .unwrap_or("bin")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn audio_and_video_attachments_keep_a_playable_extension() {
-        assert_eq!(media_extension("audio/flac", "track.flac"), "flac");
-        assert_eq!(media_extension("audio/mpeg", "track.mp3"), "mp3");
-        assert_eq!(media_extension("audio/wav", "take.wav"), "wav");
-        assert_eq!(media_extension("video/quicktime", "IMG_2120.mov"), "mov");
-        assert_eq!(
-            media_extension("application/octet-stream", "song.m4a"),
-            "m4a"
-        );
-    }
 
     #[test]
     fn a_cached_body_is_reused_only_at_the_stated_size() {
