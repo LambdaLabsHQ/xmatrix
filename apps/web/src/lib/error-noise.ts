@@ -16,6 +16,17 @@ export function isBrowserNotice(error: unknown): boolean {
   return /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications)/u.test(message);
 }
 
+/**
+ * Whether a report is a browser notice. The browser raises ResizeObserver's
+ * notice as an error event without an Error, so Sentry's global handler
+ * passes `null` as the original exception and builds the report from the
+ * message alone (XMATRIX-WEB-7). Read the report's own exception too.
+ */
+export function isBrowserNoticeReport(originalException: unknown,
+  event: { exception?: { values?: readonly { value?: string }[] } }): boolean {
+  return isBrowserNotice(originalException) || isBrowserNotice(event.exception?.values?.[0]?.value);
+}
+
 /** The visitor went away while the Web was still streaming the page: nothing on our side failed. */
 export function isClientDisconnect(error: unknown): boolean {
   return error instanceof Error && error.message === "failed to pipe response" &&

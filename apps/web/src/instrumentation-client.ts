@@ -1,4 +1,4 @@
-import { isBrowserNotice, isStaleBuild } from "./lib/error-noise";
+import { isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
 
 // The Desktop and iOS apps load this same Web app, so this also reports their
 // page errors. A build without a DSN (local, self-hosted) reports nothing.
@@ -34,7 +34,7 @@ async function startErrorReporting(dsn: string) {
     },
     beforeSend(event, hint) {
       // A reload fixes a stale build, and the failure screen offers it; neither is a defect to report.
-      if (isStaleBuild(hint.originalException) || isBrowserNotice(hint.originalException)) return null;
+      if (isStaleBuild(hint.originalException) || isBrowserNoticeReport(hint.originalException, event)) return null;
       if (event.request?.url) event.request = { url: pathOnly(event.request.url) };
       delete event.user;
       return event;
