@@ -205,7 +205,7 @@ const rustClippyWindows = {
 
 function ringLinksName() {
   const lock = readFileSync(path.join(rootDir, "packages/cli-rs/Cargo.lock"), "utf8");
-  const version = /\[\[package\]\]\nname = "ring"\nversion = "([^"]+)"/.exec(lock)?.[1];
+  const version = /\[\[package\]\]\r?\nname = "ring"\r?\nversion = "([^"]+)"/.exec(lock)?.[1];
   if (!version) fail("packages/cli-rs/Cargo.lock does not resolve ring.");
   return `ring_core_${version.replaceAll(/[.-]/g, "_")}_`;
 }
