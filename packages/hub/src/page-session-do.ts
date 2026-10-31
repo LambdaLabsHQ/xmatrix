@@ -18,6 +18,7 @@ import { tellPageCoWriter } from "./page-co-write-instruction";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 import { parsePageOutputWrite } from "./page-output-receipts";
 import { pageSchedules } from "@xmatrix/protocol";
+import { syncPageSchedules } from "./page-schedule-sync";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -424,9 +425,7 @@ export class RelayPageSession extends DurableObject<Env> {
     this.schedulesSynced = key;
     const userId = principal.kind === "agent" ? principal.ownerUserId ?? "" : principal.id;
     if (!userId) return;
-    // Loaded when a schedule line changes: the sync reaches the Space's connections, which a page session
-    // otherwise never needs.
-    this.schedulesSyncing = this.schedulesSyncing.then(async () => (await import("./page-schedule-sync")).syncPageSchedules(this.env, {
+    this.schedulesSyncing = this.schedulesSyncing.then(() => syncPageSchedules(this.env, {
       spaceId: this.need("space"), pageId: this.need("page"), revision, userId, viaAgentRun: principal.kind === "agent",
     })).then(() => undefined, (error) => {
       // The next revision that touches a schedule line syncs again; dispatch checks the line meanwhile.
