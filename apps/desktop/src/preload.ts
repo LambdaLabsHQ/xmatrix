@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld("xmatrixDesktop", {
   authorizeInBrowser: (request: { url: string; redirectParam: string }) =>
     ipcRenderer.invoke("desktop:authorize-in-browser", request),
   checkForUpdates: () => ipcRenderer.invoke("desktop:check-for-updates"),
+  checkForUpdatesQuietly: () => ipcRenderer.invoke("desktop:check-for-updates-quietly"),
   getUpdateStatus: () => ipcRenderer.invoke("desktop:get-update-status"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
   showUpdateNotification: (payload?: DesktopNotification) =>

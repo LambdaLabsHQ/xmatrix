@@ -1,5 +1,6 @@
 "use client";
 
+import { CliBehind } from "./cli-update-check";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { agentLaunchExecutable } from "@xmatrix/protocol";
 import { openRepositoryToStar } from "./star-prompt";
@@ -752,6 +753,8 @@ export function MachinesView({
     online: boolean;
     /** The desktop app's platform (`win32` / `darwin` / `linux`) for its OS mark. */
     platform?: string;
+    /** The desktop App running here, behind its channel: what its updater is doing. */
+    appBehind?: (latestVersion: string) => React.ReactNode;
     /** Its page, given the Hub's record of it (versions, last seen, load) to show beside the daemon. */
     content: (hubRecord: { facts: React.ReactNode; load: React.ReactNode } | null) => React.ReactNode;
   } | null;
@@ -991,7 +994,7 @@ export function MachinesView({
         {local ? thisMachine!.content(machine ? {
           facts: (
             <>
-              <MachineVersionFacts machine={machine} />
+              <MachineVersionFacts machine={machine} token={token} appBehind={thisMachine!.appBehind} />
             </>
           ),
           load: <MachineLoadPanel machine={machine} now={now} token={token} />,
@@ -1000,7 +1003,7 @@ export function MachinesView({
             <ToolDetailSection title="Daemon">
               <ToolFacts>
                 <ToolFact label="Daemon">{daemonPresenceLabel(machine.daemon)}</ToolFact>
-                <MachineVersionFacts machine={machine} />
+                <MachineVersionFacts machine={machine} token={token} />
               </ToolFacts>
               <MachineLoadPanel machine={machine} now={now} token={token} />
             </ToolDetailSection>
@@ -1504,11 +1507,19 @@ export {
   desktopUpdateLabel,
 } from "./workspace-shell-desktop-labels";
 
-function MachineVersionFacts({ machine }: { machine: MachineSummary }) {
+/* `appBehind` is the live update state of the desktop App running on this
+   machine; the CLI's comes from its daemon, asked when seen behind. */
+function MachineVersionFacts({ machine, token, appBehind }: {
+  machine: MachineSummary; token?: string | null; appBehind?: (latestVersion: string) => React.ReactNode;
+}) {
+  const cliBehind = (latestVersion: string, publishedAt?: string) => <CliBehind token={token}
+    machineId={machine.machineId} daemon={machine.daemon} latestVersion={latestVersion} publishedAt={publishedAt} />;
   return <>
-    <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} component="cli" /></ToolFact>
-    <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} component="cli" /></ToolFact>
-    <ToolFact label="App version"><MachineVersionValue version={machine.appVersion} component="desktop" /></ToolFact>
+    <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} component="cli" behind={cliBehind} /></ToolFact>
+    <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} component="cli" behind={cliBehind} /></ToolFact>
+    <ToolFact label="App version">
+      <MachineVersionValue version={machine.appVersion} component="desktop" behind={appBehind} />
+    </ToolFact>
     <ToolFact label="Last seen">{machine.lastSeenAt ? relativeTime(machine.lastSeenAt) : "-"}</ToolFact>
   </>;
 }

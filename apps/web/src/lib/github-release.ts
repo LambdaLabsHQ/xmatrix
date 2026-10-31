@@ -254,6 +254,7 @@ export function getLatestReleaseManifest(release: GitHubRelease, origin: string,
     trainVersion: XMATRIX_VERSION,
     releaseVersion,
     tag_name: release.tag_name,
+    publishedAt: release.publishedAt,
     releaseNotesUrl: releaseNotesPath(releaseVersion) ? `${origin}${releaseNotesPath(releaseVersion)}` : undefined,
     assets: release.assets.map((asset) => ({
       name: asset.name,
@@ -299,7 +300,7 @@ export async function fetchPublishedReleaseNotes(version: string) {
   return publishedReleaseNotes(release.body);
 }
 
-function releaseVersionFromTag(tagName: string) {
+export function releaseVersionFromTag(tagName: string) {
   return tagName.replace(/^(?:cli|desktop|android)-v/, "").replace(/^v/, "");
 }
 

@@ -21,9 +21,10 @@ const daemon = (machineId: string, hostName: string, platform: string) => ({
   metadata: { platform },
 });
 
-async function openAsDesktop(page: Page, machineId: string | undefined, named = true, platform = "darwin") {
+async function openAsDesktop(page: Page, machineId: string | undefined, named = true, platform = "darwin",
+  updateStatus: Record<string, unknown> = { state: "disabled", enabled: false }) {
   await page.setViewportSize({ width: 1400, height: 900 });
-  await page.addInitScript(({ id, host, named, platform }) => {
+  await page.addInitScript(({ id, host, named, platform, updateStatus }) => {
     const now = new Date().toISOString();
     (window as unknown as Record<string, unknown>).xmatrixDesktop = {
       client: platform === "darwin" ? "desktop" : platform, platform,
@@ -32,13 +33,16 @@ async function openAsDesktop(page: Page, machineId: string | undefined, named = 
       setBadge: async () => undefined, setTitle: async () => undefined, notify: async () => true,
       openExternal: async () => undefined, checkCliInstalled: async () => ({ installed: true }),
       openCliInstall: async () => undefined, checkForUpdates: async () => undefined,
-      getUpdateStatus: async () => ({ state: "disabled", enabled: false }),
+      getUpdateStatus: async () => ({ currentVersion: "0.16.600", updatedAt: now, ...updateStatus }),
+      onUpdateStatus: () => () => undefined,
+      checkForUpdatesQuietly: async () => { (window as unknown as Record<string, number>).__quietChecks = ((window as unknown as Record<string, number>).__quietChecks ?? 0) + 1; },
+      installUpdate: async () => { (window as unknown as Record<string, unknown>).__installs = 1; return { state: "installing", enabled: true }; },
       getDaemonStatus: async () => ({ state: named ? "running" : "stopped", pid: named ? 1 : undefined, updatedAt: now }),
       startDaemon: async () => { (window as unknown as Record<string, unknown>).__daemonStarts = Number((window as unknown as Record<string, unknown>).__daemonStarts ?? 0) + 1; return { state: "running", pid: 1, updatedAt: now }; },
       getSetupStatus: async () => ({ setupVersion: 1, completedAt: now }),
       discoverAgentPresets: async () => [],
     };
-  }, { id: machineId, host: HOST, named, platform });
+  }, { id: machineId, host: HOST, named, platform, updateStatus });
   await openWorkspaceWithStubs(page, {
     spaces: [E2E_SPACE],
     workspaces: [workspace(MACHINE_ID, HOST, "xmatrix"), workspace("machine:other", "grok-bot", "grok")],
@@ -168,4 +172,58 @@ test("an owner keeps a Machine out of automatic assignment from its page", async
   await expect(page.getByText("Agents start here only when named, e.g. machine:grok-bot")).toBeVisible();
   await expect(other).toContainText("Named only");
   expect(await fixtureRequestBodies(page, "machine-auto-assign")).toEqual([{ autoAssign: false }]);
+});
+
+const releasedAt = (ageMs: number) => ({
+  releases: { cli: { version: "0.16.700", publishedAt: new Date(Date.now() - ageMs).toISOString() },
+    desktop: { version: "0.16.700", publishedAt: new Date(Date.now() - ageMs).toISOString() } },
+  devReleases: {},
+});
+
+async function openThisMachine(page: Page, release: object, updateStatus: Record<string, unknown>,
+  cliCheck: object = { outcome: "checking", cliUpdate: { state: "installing", version: "0.16.700", at: new Date().toISOString() } }) {
+  await openAsDesktop(page, MACHINE_ID, true, "darwin", updateStatus);
+  await fixtureJson(page, "releases", "**/api/releases/latest", release);
+  await fixtureJson(page, "cli-check", "**/api/xmatrix/machine-daemons/cli-update-check", cliCheck);
+  await page.getByTestId("machine-row").filter({ has: page.getByTestId("this-machine-tag") }).click();
+}
+
+test("a version behind a fresh release shows only what its update is really doing", async ({ page }) => {
+  await openThisMachine(page, releasedAt(60_000), { state: "downloaded", enabled: true, version: "0.16.700" });
+  // Seeing the CLI behind asks its daemon once, however many rows show it; they show what it reports.
+  await expect(page.getByText("Updating to v0.16.700")).toHaveCount(2);
+  expect(await fixtureRequestBodies(page, "cli-check")).toEqual([{ machineId: MACHINE_ID }]);
+  await expect(page.getByText("v0.16.700 downloaded")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^(Update|Not updated)$/u })).toHaveCount(0);
+  await page.getByRole("button", { name: "Restart to update", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Restart", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__installs)).toBe(1);
+});
+
+test("a version still behind long after its release says it did not update, and how to fix it in place", async ({ page }) => {
+  await openThisMachine(page, releasedAt(2 * 24 * 60 * 60_000),
+    { state: "error", enabled: true, message: "The update server could not be reached." },
+    { outcome: "checking", cliUpdate: { state: "failed", error: "Release feed https://xmatrix.sh/api/cli/releases/latest timed out", at: new Date().toISOString() } });
+  const late = page.getByRole("button", { name: "Not updated", exact: true });
+  await expect(late).toHaveCount(3);
+  await late.first().click();
+  await expect(page.getByText("Release feed https://xmatrix.sh/api/cli/releases/latest timed out")).toBeVisible();
+  await expect(page.getByRole("button", { name: "xmatrix update" })).toBeVisible();
+  await late.nth(2).click();
+  await expect(page.getByText("The update server could not be reached.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check for updates" })).toBeVisible();
+});
+
+test("seeing the App behind starts one update check at once", async ({ page }) => {
+  await openThisMachine(page, releasedAt(60_000), { state: "not-available", enabled: true });
+  await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, number>).__quietChecks)).toBe(1);
+});
+
+test("a Machine that cannot be asked says why, with the fix", async ({ page }) => {
+  await openThisMachine(page, releasedAt(60_000), { state: "downloaded", enabled: true, version: "0.16.700" },
+    { outcome: "unsupported", daemonVersion: "0.16.600" });
+  const late = page.getByRole("button", { name: "Not updated", exact: true });
+  await expect(late).toHaveCount(2);
+  await late.first().click();
+  await expect(page.getByText("v0.16.600 cannot be asked to update from here.")).toBeVisible();
 });
