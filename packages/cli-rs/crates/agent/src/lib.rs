@@ -660,12 +660,33 @@ mod tests {
     }
 }
 
+/// Where a harness's official installer puts its launcher outside the common
+/// user bin directories. The installer adds it to the user PATH, which a
+/// daemon started before the install never sees, so inventory, recipes and
+/// launches look here too.
+pub fn native_launcher_dirs(preset_id: &str) -> Vec<PathBuf> {
+    let Some(local) = dirs::data_local_dir() else {
+        return Vec::new();
+    };
+    match preset_id {
+        "cursor" => vec![local.join("cursor-agent")],
+        // install.ps1: %LOCALAPPDATA%\agy\bin\agy.exe. Unix installs into ~/.local/bin.
+        "antigravity" if cfg!(windows) => vec![local.join("agy").join("bin")],
+        _ => Vec::new(),
+    }
+}
+
 fn common_user_bin_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(home) = dirs::home_dir() {
         paths.push(home.join(".cargo").join("bin"));
         paths.push(home.join(".local").join("bin"));
         paths.push(home.join("bin"));
+    }
+
+    #[cfg(windows)]
+    for preset in agent_presets() {
+        paths.extend(native_launcher_dirs(&preset.id));
     }
 
     #[cfg(unix)]
