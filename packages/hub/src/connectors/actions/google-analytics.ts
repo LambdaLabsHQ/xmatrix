@@ -19,8 +19,14 @@ const PROPERTY = /^(?:properties\/)?(\d{1,20})$/u;
 const DIMENSIONS: Record<string, string> = {
   date: "date", month: "yearMonth", page: "landingPagePlusQueryString", channel: "sessionDefaultChannelGroup",
   source: "sessionSource", medium: "sessionMedium", country: "country", device: "deviceCategory",
+  /* App streams (a Firebase project's iOS and Android apps). */
+  platform: "platform", os: "operatingSystem", version: "appVersion", event: "eventName", stream: "streamName",
 };
-const METRICS = ["sessions", "totalUsers", "engagedSessions", "engagementRate", "keyEvents"];
+/* `metrics=traffic` reads like a website; `metrics=app` counts an app's users, installs (first opens) and events. */
+const METRIC_SETS: Record<string, string[]> = {
+  traffic: ["sessions", "totalUsers", "engagedSessions", "engagementRate", "keyEvents"],
+  app: ["activeUsers", "newUsers", "sessions", "eventCount", "userEngagementDuration"],
+};
 /* `channel=organic` keeps sessions Google files under one default channel group. */
 const CHANNELS: Record<string, string> = {
   organic: "Organic Search", direct: "Direct", referral: "Referral", social: "Organic Social",
@@ -36,12 +42,12 @@ export function analyticsProperty(target: string): string | undefined {
   return match ? `properties/${match[1]}` : undefined;
 }
 
-export interface AnalyticsReportOptions { dimensions: string[]; startDate: string; endDate: string; limit: number; channel?: string }
+export interface AnalyticsReportOptions { dimensions: string[]; startDate: string; endDate: string; limit: number; channel?: string; metrics?: string[] }
 
-/** `by=date,page days=28 limit=50 channel=organic`; every key is optional. Dates are whole UTC days ending today. */
+/** `by=date,page days=28 limit=50 channel=organic metrics=app`; every key is optional. Dates are whole UTC days ending today. */
 export function analyticsReportOptions(input: string, now = Date.now()): AnalyticsReportOptions | string {
-  const options = keyedOptions(input, ["by", "days", "limit", "channel"],
-    "use by=<date,page,…|none> days=<1-1095> limit=<1-250> channel=<organic,…>");
+  const options = keyedOptions(input, ["by", "days", "limit", "channel", "metrics"],
+    "use by=<date,page,…|none> days=<1-1095> limit=<1-250> channel=<organic,…> metrics=<traffic|app>");
   if (typeof options === "string") return options;
   const by = options.get("by") ?? "date";
   const dimensions = mappedChoices(by === "none" ? [] : by.split(","), DIMENSIONS, 3);
@@ -54,18 +60,21 @@ export function analyticsReportOptions(input: string, now = Date.now()): Analyti
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ROWS) return `limit is a whole number from 1 to ${MAX_ROWS}`;
   const channels = mappedChoices(options.has("channel") ? [options.get("channel")!] : [], CHANNELS);
   if (!channels) return `channel is one of ${Object.keys(CHANNELS).join(", ")}`;
+  const set = options.get("metrics") ?? "traffic";
+  if (!Object.hasOwn(METRIC_SETS, set)) return `metrics is one of ${Object.keys(METRIC_SETS).join(", ")}`;
   const { start, end } = trailingDays(days, now);
   return { dimensions, startDate: isoDate(start), endDate: isoDate(end),
-    limit, ...(channels.length ? { channel: channels[0]! } : {}) };
+    limit, ...(channels.length ? { channel: channels[0]! } : {}), ...(set === "traffic" ? {} : { metrics: METRIC_SETS[set]! }) };
 }
 
-/** The runReport body: one date range, the fixed traffic metrics, newest dates first or most sessions first. */
+/** The runReport body: one date range, one metric set, newest dates first or the largest first metric first. */
 export function analyticsReportBody(options: AnalyticsReportOptions): Record<string, unknown> {
+  const metrics = options.metrics ?? METRIC_SETS.traffic!;
   return {
     dateRanges: [{ startDate: options.startDate, endDate: options.endDate }],
     dimensions: options.dimensions.map(name => ({ name })),
-    metrics: METRICS.map(name => ({ name })),
-    orderBys: [options.dimensions[0] === "date" ? { dimension: { dimensionName: "date" }, desc: true } : { metric: { metricName: "sessions" }, desc: true }],
+    metrics: metrics.map(name => ({ name })),
+    orderBys: [options.dimensions[0] === "date" ? { dimension: { dimensionName: "date" }, desc: true } : { metric: { metricName: metrics[0]! }, desc: true }],
     limit: options.limit,
     metricAggregations: ["TOTAL"],
     ...(options.channel ? { dimensionFilter: { filter: { fieldName: "sessionDefaultChannelGroup",
@@ -133,7 +142,7 @@ export const GOOGLE_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
         readable(options.dimensions, [...values(row, "dimensionValues"), ...values(row, "metricValues")]).join("\t"));
       const totals = Array.isArray(result.totals) ? readable([], values(result.totals[0], "metricValues")) : [];
       const lines = [header.join("\t"), ...rows, ...(totals.length ? [`TOTAL\t${totals.join("\t")}`] : [])];
-      return { summary: `Google Analytics traffic for ${input.property}${options.channel ? ` (${options.channel} sessions)` : ""}, ` +
+      return { summary: `Google Analytics ${options.metrics ? "app activity (newUsers counts first opens)" : "traffic"} for ${input.property}${options.channel ? ` (${options.channel} sessions)` : ""}, ` +
         `${options.startDate} to ${options.endDate} in the property time zone (recent days are still being processed):\n` +
         quoteRetrievedText(rows.length ? lines.join("\n") : "(no data for this range)") };
     },

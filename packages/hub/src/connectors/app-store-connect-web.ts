@@ -93,7 +93,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
     body?: Record<string, unknown>): Promise<Record<string, unknown>> => {
     if (!cookies.size) throw new ConnectorRemedy(401, EXPIRED, RENEW);
     const url = new URL(path, ORIGIN);
-    if (url.origin !== ORIGIN || !/^\/(iris\/v1|olympus\/v1)\//u.test(url.pathname)) throw new ProviderRequestError(502, "App Store Connect returned a link outside its website API");
+    if (url.origin !== ORIGIN || !/^\/(iris\/v1|olympus\/v1|WebObjects\/iTunesConnect\.woa\/ra\/paymentConsolidation)\//u.test(url.pathname)) throw new ProviderRequestError(502, "App Store Connect returned a link outside its website API");
     for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
     // The website's own client marks its iris calls with this header; Apple refuses some without it.
     const response = await fetch(url, { method, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS), headers: { cookie: cookieHeader(cookies),

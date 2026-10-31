@@ -644,6 +644,11 @@ impl AcpSession {
                     self.presentation.model = Some(model);
                 }
                 let cancellation_detail = acp_turn_cancellation_detail(&display_name, &result);
+                // A turn the agent ended before finishing its work is a failed turn.
+                let incomplete_detail = cancellation_detail
+                    .is_none()
+                    .then(|| acp_turn_incomplete_detail(&display_name, &result))
+                    .flatten();
                 if latest_goal.is_none() {
                     latest_goal = self
                         .config
@@ -695,6 +700,8 @@ impl AcpSession {
                     .send(
                         if cancellation_detail.is_some() {
                             "turn_cancelled"
+                        } else if incomplete_detail.is_some() {
+                            "turn_failed"
                         } else {
                             "turn_completed"
                         },
@@ -715,8 +722,8 @@ impl AcpSession {
                     failure_reported_by_hub: false,
                     local_output: output,
                     restart_after_turn: false,
-                    failed: cancellation_detail.is_some(),
-                    failure_detail: cancellation_detail,
+                    failed: cancellation_detail.is_some() || incomplete_detail.is_some(),
+                    failure_detail: cancellation_detail.or(incomplete_detail),
                     usage: latest_usage,
                     goal: latest_goal,
                     model: latest_model,
@@ -1023,6 +1030,25 @@ fn acp_turn_cancellation_detail(display_name: &str, result: &Value) -> Option<St
                 .unwrap_or_default()
         )
     })
+}
+
+/// ACP's stop reasons for a turn the agent ended before its work was done:
+/// out of output tokens, out of the requests it may make in one turn, or a
+/// refusal. Each is a failed turn, said in the agent's own terms.
+fn acp_turn_incomplete_detail(display_name: &str, result: &Value) -> Option<String> {
+    let reason = result
+        .get("stopReason")
+        .and_then(Value::as_str)
+        .map(|reason| reason.trim().to_ascii_lowercase())?;
+    let why = match reason.as_str() {
+        "max_tokens" => "it reached its output token limit",
+        "max_turn_requests" => "it reached the number of model requests one turn may make",
+        "refusal" => "the model refused to continue",
+        _ => return None,
+    };
+    Some(format!(
+        "{display_name} stopped this turn before finishing: {why} (stopReason {reason})"
+    ))
 }
 
 fn acp_turn_result_is_cancelled(turn: &CodexTurnResult) -> bool {

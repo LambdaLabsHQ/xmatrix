@@ -328,6 +328,29 @@ async fn codex_native_parameters_are_observed_immediately_and_unconfirmed_values
 }
 
 #[tokio::test]
+async fn an_acp_restart_chooses_the_sessions_model_and_effort_again() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cwd = Some(env!("CARGO_MANIFEST_DIR"));
+        let args = [harness_parameter_fixture_path(), "acp-model-effort".to_string()];
+        let mut session = AcpSession::spawn("node", &args, cwd, AcpVendorConfig::generic("cursor"))
+            .await
+            .unwrap();
+        session.initialize(cwd, None, false, None).await.unwrap();
+        assert_eq!(session.set_model("model-b").await.unwrap(), "model-b");
+        assert_eq!(session.set_effort("low").await.unwrap(), "low");
+        // The new process opens at the agent's defaults (model-a, high).
+        super::restart_acp_app_session(&mut session, "node", &args, cwd, None, None)
+            .await
+            .unwrap();
+        assert_eq!(session.current_model(), Some("model-b"));
+        assert_eq!(session.current_effort(), Some("low"));
+        session.shutdown().await;
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn acp_future_parameter_uses_native_control_and_requires_authoritative_confirmation() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let mut session = AcpSession::spawn_stdio_with_prefix_args(

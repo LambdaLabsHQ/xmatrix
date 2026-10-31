@@ -17,7 +17,11 @@ Channel launch and Space routing authorities. Explicit Profile/Instance and life
 
 The same `@` search offers Auto, authorized repository references, registered
 directories, machine labels, declared/reported models, reasoning effort and
-harnesses. Selecting a condition establishes an Auto invocation automatically;
+harnesses. The unfiltered condition listing after a summon takes rows from each
+field in turn (one repository, one directory, one machine, one effort, …), so
+its first screen names every kind of condition rather than the first field's
+many values; a registration with no declared models offers the efforts its
+runtime reports for the default model. Selecting a condition establishes an Auto invocation automatically;
 users need not learn a parameter syntax. Directories bind their exact machine.
 The message text is the source of truth. There is no separate request field or
 selected-condition header. The native textarea contains the complete message;

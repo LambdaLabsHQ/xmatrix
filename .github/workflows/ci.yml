@@ -127,7 +127,7 @@ jobs:
       # and the duplicate scan beside them (node-tests (duplicates)), the
       # Web unit tests (web-unit), production build (web-build) and its lint
       # and typecheck (web-check), the Hub typecheck and deploy bundle
-      # (hub-check) and Linux Clippy (rust-clippy). The Node tests and the
+      # (hub-check) and Clippy for Linux and Windows (rust-clippy). The Node tests and the
       # duplicate scan gate every release train, so a pull request runs them
       # too: one that fails them after merge fails the train for every change
       # riding it. A release train runs the full tier for what it ships: the

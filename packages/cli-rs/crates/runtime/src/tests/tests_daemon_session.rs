@@ -623,6 +623,32 @@ fn acp_mid_turn_abort_is_not_a_successful_completion() {
 }
 
 #[test]
+fn an_acp_turn_the_agent_ended_unfinished_is_a_failed_turn() {
+    for (reason, why) in [
+        ("max_tokens", "it reached its output token limit"),
+        ("max_turn_requests", "it reached the number of model requests one turn may make"),
+        ("refusal", "the model refused to continue"),
+    ] {
+        let result = serde_json::json!({ "stopReason": reason });
+        assert_eq!(
+            super::acp_turn_incomplete_detail("Kimi Code", &result).as_deref(),
+            Some(
+                format!("Kimi Code stopped this turn before finishing: {why} (stopReason {reason})")
+                    .as_str()
+            )
+        );
+        assert!(super::acp_turn_cancellation_detail("Kimi Code", &result).is_none());
+    }
+    for finished in ["end_turn", "cancelled"] {
+        assert!(
+            super::acp_turn_incomplete_detail("Kimi Code", &serde_json::json!({ "stopReason": finished }))
+                .is_none(),
+            "{finished}"
+        );
+    }
+}
+
+#[test]
 fn daemon_managed_workspace_cwd_leaf_is_short_and_portable() {
     // Every Run path is rendered under this leaf, and on Windows the whole
     // path has 260 characters. Composite keys reach ~88 characters, so the leaf
