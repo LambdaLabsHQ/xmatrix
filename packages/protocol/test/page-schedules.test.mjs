@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 
 
@@ -78,4 +79,36 @@ test("pausing, resuming and deleting a schedule edit its line", async () => {
   const removed = removeScheduleLine(page, source);
   assert.ok(!removed.includes("Audit the code"));
   assert.ok(removed.includes("## Audit\n- [-] Sweep Sentry"));
+});
+
+test("resuming removes only a terminal done field and preserves other whitespace", async () => {
+  const { setScheduleStatus } = await import("../dist/index.js");
+  for (const [source, expected] of [
+    ["  + [x] Remind ⏳ 2026-11-03 09:00 +08:00\t✅ 2026-10-31",
+      "  + [ ] Remind ⏳ 2026-11-03 09:00 +08:00"],
+    ["- [-] Audit 🔁 every hour \t", "- [ ] Audit 🔁 every hour \t"],
+    ["- [x] Audit ✅ earlier 🔁 every hour", "- [ ] Audit ✅ earlier 🔁 every hour"],
+  ]) {
+    assert.equal(setScheduleStatus(source, source.trim(), "running"), expected);
+  }
+});
+
+test("schedule parsing and state changes finish on long whitespace", () => {
+  // A malformed line must not hang the runner; the coarse bound includes
+  // process/module startup and also covers valid schedule state transitions.
+  const entrypoint = new URL("../dist/index.js", import.meta.url);
+  const script = [
+    'import assert from "node:assert/strict";',
+    "const { pageSchedules, setScheduleStatus, markScheduleDone, removeScheduleLine } = await import("
+      + JSON.stringify(entrypoint.href) + ");",
+    'const whitespace = "\\t".repeat(1_000_000);',
+    'const malformed = "*\\t[ ]\\t" + whitespace + "x\\u2028y 🔁 every hour";',
+    'assert.deepEqual(pageSchedules(malformed + "\\n- [ ] Next 🔁 every day").map(schedule => schedule.instruction), ["Next"]);',
+    'const source = "*\\t[ ]\\t" + whitespace + "Audit 🔁 every hour";',
+    'assert.equal(pageSchedules(source)[0].instruction, "Audit");',
+    'assert.equal(setScheduleStatus(source, source, "paused"), "*\\t[-]\\t" + whitespace + "Audit 🔁 every hour");',
+    'assert.equal(markScheduleDone(source, source, "2026-10-31"), "*\\t[x]\\t" + whitespace + "Audit 🔁 every hour ✅ 2026-10-31");',
+    'assert.equal(removeScheduleLine(source, source), "");',
+  ].join("\n");
+  execFileSync(process.execPath, ["--input-type=module", "--eval", script], { timeout: 10_000 });
 });

@@ -33,23 +33,41 @@ test("merges and failed workflows fire a page's Automation, each once", async ()
     };
     const space = (await call("/api/spaces", "POST", { name: `Triggers ${randomUUID()}` })).space;
     const pages = `/api/spaces/${encodeURIComponent(space.id)}/pages`;
+    const goals = (line) => `# Goals\n\n## Architecture\n\nNo bloat.\n\n${line}\n\n## UI\n\nConsistent.\n`;
+    const audit = (on) => `- [ ] Audit what changed 🔁 every 12 hours, ${on}`;
     const page = (await call(pages, "POST", { title: "Goals",
-      body: "# Goals\n\n## Architecture\n\nNo bloat.\n\n## UI\n\nConsistent.\n" })).page;
+      body: goals(audit("on merged:acme/widgets")) })).page;
     const automations = `${pages}/${encodeURIComponent(page.pageId)}/automations`;
-    const create = (triggers, status = 201) => call(automations, "POST", { name: "Code audit",
-      instruction: "Audit what changed", intervalMinutes: 720, blockId: "architecture", triggers }, status);
+    const write = async (line) => {
+      const current = (await call(`${pages}/${page.pageId}`)).page;
+      return call(`${pages}/${page.pageId}`, "PUT", { baseRevision: current.headRevision, body: goals(line) });
+    };
+    /** Its Automation once the line just written has synced. */
+    const synced = async (line, until = () => true) => {
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        const found = (await call(automations)).automations.find((item) => item.source === line);
+        if (found && until(found)) return found;
+        assert.ok(Date.now() < deadline, `${line} did not sync: ${JSON.stringify(found)}`);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    };
 
-    const unconnected = await create([{ kind: "merged", repository: "acme/widgets" }], 409);
-    assert.equal(unconnected.code, "github_connection_required");
+    // A line whose events the Space cannot receive is kept, stopped, and says why.
+    const unconnected = await synced(audit("on merged:acme/widgets"));
+    assert.equal(unconnected.enabled, false);
+    assert.match(unconnected.problem, /Connect GitHub/u);
     await connectGitHubInstallation(worker, { spaceId: space.id, userId, installationId });
-    assert.equal((await create([{ kind: "merged", repository: "someone/else" }], 409)).code,
-      "github_repository_not_connected");
-    assert.equal((await create([{ kind: "nightly" }], 400)).code, "invalid_trigger");
+    await write(audit("on merged:someone/else"));
+    assert.match((await synced(audit("on merged:someone/else"))).problem, /does not cover someone\/else/u);
+    const nightly = await write(audit("on nightly"));
+    assert.equal(nightly.scheduleProblems.length, 1, "an event it does not know is named when the line is written");
 
-    const { automation } = await create([
-      { kind: "merged", repository: "acme/widgets", paths: ["packages/hub"] },
-      { kind: "ci-failed", repository: "acme/widgets", workflow: "CI" },
-    ]);
+    const line = audit("on merged:acme/widgets:packages/hub, on ci-failed:acme/widgets:CI");
+    await write(line);
+    const automation = await synced(line, (item) => item.enabled);
+    assert.equal(automation.id, unconnected.id, "fixing its line keeps the same Automation");
+    assert.equal(automation.blockId, "architecture");
     assert.deepEqual(automation.triggers, [
       { kind: "merged", repository: "acme/widgets", paths: ["packages/hub"], installationId },
       { kind: "ci-failed", repository: "acme/widgets", workflow: "CI", installationId },

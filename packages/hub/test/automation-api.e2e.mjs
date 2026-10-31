@@ -10,6 +10,7 @@ import {
   randomUUID,
   startPgHubWorker,
   test,
+  waitForTask,
 } from "./automation-api.fixture.mjs";
 
 test("scheduled cadence stays anchored and coalesces missed intervals", () => {
@@ -27,7 +28,7 @@ test("scheduled cadence stays anchored and coalesces missed intervals", () => {
   );
 });
 
-test("the Space-wide catalog reads and changes a page's Automations; only a page creates one", async () => {
+test("the Space-wide catalog reads a page's schedules and changes them through their lines; only a line makes one", async () => {
   const unique = randomUUID();
   const worker = await startPgHubWorker({
     vars: {
@@ -43,21 +44,15 @@ test("the Space-wide catalog reads and changes a page's Automations; only a page
     const createdAfter = Date.now();
     const created = await createTask(worker, {
       spaceId: first.space.id,
-      name: "Morning review",
       message: { body: "Review the open work and report blockers." },
       intervalMinutes: 60,
-      deliveryCount: 999,
-      lastMessageId: "message:forged",
-      lastError: "forged",
     });
     const secondTask = await createTask(worker, {
       spaceId: second.space.id,
-      name: "Other Space schedule",
       message: { body: "Post in the other Space." },
       intervalMinutes: 120,
     });
 
-    assert.equal(created.name, "Morning review");
     assert.equal(created.spaceId, first.space.id);
     assert.equal(created.expression.text, "Review the open work and report blockers.");
     assert.equal(created.intervalMinutes, 60);
@@ -74,24 +69,13 @@ test("the Space-wide catalog reads and changes a page's Automations; only a page
     assert.equal(exact.id, created.id);
     assert.equal(exact.pageId, created.pageId);
 
-    const updated = (await json(await worker.fetch(
-      `/api/automations/${encodeURIComponent(created.id)}`,
-      {
-        method: "PATCH",
-        headers: authHeaders,
-        body: JSON.stringify({
-          expectedVersion: created.version,
-          name: "Daily review",
-          expression: { kind: "text", language: "natural-language", text: "Review open work and propose the next action." },
-          intervalMinutes: 24 * 60,
-        }),
-      },
-    ))).automation;
-    assert.equal(updated.id, created.id, "its author edits it in place");
-    assert.equal(updated.name, "Daily review");
-    assert.equal(updated.expression.text, "Review open work and propose the next action.");
-    assert.equal(updated.intervalMinutes, 24 * 60);
-    assert.equal(updated.createdAt, created.createdAt);
+    // What it does and when is its line; the catalog does not edit it.
+    const update = await worker.fetch(`/api/automations/${encodeURIComponent(created.id)}`, {
+      method: "PATCH", headers: authHeaders,
+      body: JSON.stringify({ expectedVersion: created.version, intervalMinutes: 24 * 60 }),
+    });
+    assert.equal(update.status, 409);
+    assert.equal((await update.json()).code, "schedule_lives_in_its_line");
 
     const global = await listTasks(worker);
     assert.deepEqual(
@@ -101,7 +85,7 @@ test("the Space-wide catalog reads and changes a page's Automations; only a page
     const scoped = await listTasks(worker, first.space.id);
     assert.deepEqual(scoped.automations.map((task) => task.id), [created.id]);
 
-    // An Automation belongs to a page section; the Space-wide route no longer makes one.
+    // An Automation is a line of a page; the Space-wide route makes none.
     const channelCreate = await worker.fetch("/api/automations", {
       method: "POST",
       headers: authHeaders,
@@ -113,42 +97,48 @@ test("the Space-wide catalog reads and changes a page's Automations; only a page
     });
     assert.equal(channelCreate.status, 410);
     assert.equal((await channelCreate.json()).code, "automation_lives_on_a_page");
-    const invalidInterval = await worker.fetch(
-      `/api/automations/${encodeURIComponent(created.id)}`,
-      {
-        method: "PATCH",
-        headers: authHeaders,
-        body: JSON.stringify({ expectedVersion: updated.version, intervalMinutes: 14 }),
-      },
-    );
-    assert.equal(invalidInterval.status, 400);
 
     const forgedPause = await worker.fetch(
       `/api/automations/${encodeURIComponent(created.id)}/pause`,
       {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ expectedVersion: updated.version, authorityRootUserId: "attacker" }),
+        body: JSON.stringify({ expectedVersion: created.version, authorityRootUserId: "attacker" }),
       },
     );
     assert.equal(forgedPause.status, 400);
 
-    const paused = (await json(await worker.fetch(
+    // Pausing writes `[-]` on its line, whose revision then pauses it.
+    const pausing = (await json(await worker.fetch(
       `/api/automations/${encodeURIComponent(created.id)}/pause`,
       {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ expectedVersion: updated.version }),
+        body: JSON.stringify({ expectedVersion: created.version }),
       },
     ))).automation;
-    assert.equal(paused.enabled, false);
+    assert.equal(pausing.id, created.id);
+    const paused = await waitForTask(worker, created.id, (task) => task.enabled === false);
+    const page = (await json(await worker.fetch(
+      `/api/spaces/${encodeURIComponent(first.space.id)}/pages/${encodeURIComponent(created.pageId)}`,
+      { headers: authHeaders }))).page;
+    assert.match(page.body, /^- \[-\] Review the open work/mu);
 
+    // Deleting removes its line.
     const removed = await worker.fetch(
       `/api/automations/${encodeURIComponent(created.id)}`,
       { method: "DELETE", headers: authHeaders, body: JSON.stringify({ expectedVersion: paused.version }) },
     );
     assert.equal(removed.status, 200);
-    assert.equal((await listTasks(worker)).automations.some((task) => task.id === created.id), false);
+    const deadline = Date.now() + 15_000;
+    while ((await listTasks(worker)).automations.some((task) => task.id === created.id)) {
+      assert.ok(Date.now() < deadline, "removing its line deletes it");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const after = (await json(await worker.fetch(
+      `/api/spaces/${encodeURIComponent(first.space.id)}/pages/${encodeURIComponent(created.pageId)}`,
+      { headers: authHeaders }))).page;
+    assert.doesNotMatch(after.body, /Review the open work/u);
   } finally {
     await worker.stop();
   }

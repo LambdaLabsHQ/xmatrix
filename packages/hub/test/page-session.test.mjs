@@ -1094,6 +1094,8 @@ test("pages written by hand and Agent edits in any markdown style merge as the s
 
 const summarySessionModule = await compileCommonJsSourceModule(new URL("../src/page-session-do.ts", import.meta.url));
 const summarySessionRequire = createRequire(new URL("../src/page-session-do.ts", import.meta.url));
+// Syncing schedule lines reaches the Worker-only App connections; these sessions write none.
+const noScheduleSync = { async syncPageSchedules() { return { problems: [] }; } };
 
 function summaryGateFixture({ sockets, stored, beforeStart } = {}) {
   const data = new Map(stored ? [["summary", stored]] : []);
@@ -1105,7 +1107,8 @@ function summaryGateFixture({ sockets, stored, beforeStart } = {}) {
       await beforeStart?.();
       return { started: true, requestId, revision: 3 };
     },
-  } : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
+  } : name === "./page-schedule-sync" ? noScheduleSync
+    : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
   const socket = (kind) => ({ deserializeAttachment: () => ({ principal: { kind, id: kind, label: kind } }) });
   const connected = (sockets ?? []).map(socket);
   const object = Object.create(SummarySession.prototype);
@@ -1921,6 +1924,7 @@ function coWritingFixture({ sockets = [], rows = [] } = {}) {
       async coWritersToWake() { return rows; }
       async reopenCoWriting(input) { reopened.push(input); return { reopened: true }; } } }
     : name === "./postgres-authority-fleet" ? { createPostgresAuthorityDatabase: () => ({}) }
+    : name === "./page-schedule-sync" ? noScheduleSync
     : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
   const connected = sockets.map((attachment) => ({ deserializeAttachment: () => ({ spaceId: "space", pageId: "page",
     connectionId: attachment.principal.id, ...attachment }) }));
