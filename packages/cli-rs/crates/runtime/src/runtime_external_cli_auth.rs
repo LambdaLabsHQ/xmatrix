@@ -2153,6 +2153,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
         cmd_args,
         cwd,
         resume_session_key: resume_session_key.as_deref(),
+        trusted_rules,
         runtime_state: &runtime_state,
         skill_overlay,
         latest_model,
@@ -2162,6 +2163,9 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
         latest_usage,
     };
     let mut events = RunLoopEvents::new(event_rx, &relay, auto_join_channel_id.as_deref(), &agent);
+    // Every message's local attachment copies stay for the whole Run: its
+    // prompt names them, and the agent may open one in a later turn.
+    let mut materialized_inbound_images = Vec::new();
 
     run.sync();
     if let Some(requested) =
@@ -2270,6 +2274,9 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                                 )?;
                                 blocks.extend(message_blocks);
                                 prompt_parts.push(message_text);
+                                if !inbound_images.paths().is_empty() {
+                                    materialized_inbound_images.push(inbound_images);
+                                }
                             }
                             let text = combined_inbound_channel_prompt(prompt_parts);
                             match bootstrap.take() {
@@ -2408,6 +2415,8 @@ struct AcpRun<'a> {
     cmd_args: &'a [String],
     cwd: Option<&'a str>,
     resume_session_key: Option<&'a str>,
+    /// The trusted rules the session opened with, for a session a restart opens anew.
+    trusted_rules: Option<String>,
     runtime_state: &'a AgentRuntimeStateTracker,
     skill_overlay: Vec<String>,
     latest_model: Option<String>,
@@ -2453,6 +2462,7 @@ impl AcpRun<'_> {
             self.cmd_args,
             self.cwd,
             self.resume_session_key,
+            self.trusted_rules.as_deref(),
         )
         .await?;
         self.latest_goal = self.app.loaded_goal.take().or(self.latest_goal.take());
@@ -2719,17 +2729,97 @@ async fn submit_acp_turn_interruptible(
     .await
 }
 
+/// Start the agent again and resume its session. The model, effort and
+/// parameters chosen in the session that ended are chosen again: they were
+/// the person's, not the process's. A choice the agent no longer offers is
+/// reported and left at its default.
 async fn restart_acp_app_session(
     app: &mut AcpSession,
     cmd: &str,
     cmd_args: &[String],
     cwd: Option<&str>,
     resume_session_key: Option<&str>,
+    trusted_rules: Option<&str>,
 ) -> error::Result<()> {
+    let chosen = AcpSessionChoices::of(app);
     app.shutdown().await;
     *app = AcpSession::spawn(cmd, cmd_args, cwd, app.config.clone()).await?;
-    let _ = app.initialize(cwd, resume_session_key, true, None).await?;
+    let _ = app.initialize(cwd, resume_session_key, true, trusted_rules).await?;
+    chosen.restore(app).await;
     Ok(())
+}
+
+/// What a session had chosen: its model, effort and other parameter values.
+struct AcpSessionChoices {
+    model: Option<String>,
+    effort: Option<String>,
+    parameters: Vec<(String, String)>,
+}
+
+impl AcpSessionChoices {
+    fn of(app: &AcpSession) -> Self {
+        let effort_id = app.presentation.effort_config_id.as_deref();
+        let parameters = app
+            .presentation
+            .parameters
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter(|parameter| {
+                !matches!(parameter.id.as_str(), "model" | "models")
+                    && Some(parameter.id.as_str()) != effort_id
+            })
+            .filter_map(|parameter| {
+                parameter
+                    .current_value
+                    .clone()
+                    .map(|value| (parameter.id.clone(), value))
+            })
+            .collect();
+        Self {
+            model: app.current_model().map(str::to_string),
+            effort: app.current_effort().map(str::to_string),
+            parameters,
+        }
+    }
+
+    async fn restore(self, app: &mut AcpSession) {
+        let name = app.config.display_name.clone();
+        let warn = |what: &str, err: &CliError| {
+            eprintln!(
+                "{} {name} kept its default {what} after restarting: {err}",
+                "⚠".yellow().bold()
+            );
+        };
+        if let Some(model) = self.model.filter(|model| app.current_model() != Some(model.as_str()))
+            && let Err(err) = app.set_model(&model).await
+        {
+            warn("model", &err);
+        }
+        if let Some(effort) = self
+            .effort
+            .filter(|effort| app.current_effort() != Some(effort.as_str()))
+            && app.presentation.effort_config_id.is_some()
+            && let Err(err) = app.set_effort(&effort).await
+        {
+            warn("effort", &err);
+        }
+        for (id, value) in self.parameters {
+            let current = app
+                .presentation
+                .parameters
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .find(|parameter| parameter.id == id)
+                .and_then(|parameter| parameter.current_value.clone());
+            if current.as_deref() != Some(value.as_str())
+                && let Err(err) = app.set_parameter(&id, &value).await
+            {
+                warn(&id, &err);
+            }
+        }
+    }
 }
 
 fn acp_presentation_snapshot(
