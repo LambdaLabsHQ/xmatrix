@@ -26,7 +26,7 @@ test("expanded desktop workspace switcher is one glass panel floating over the l
 
   /* At rest the header is the name and the chevron at the row's end, with
      no glass of its own. */
-  const trigger = page.locator(".app-space-switcher-trigger");
+  const trigger = page.locator(".xmatrix-app-shell:not([aria-busy]) .app-space-switcher-trigger");
   await expect(trigger).not.toContainText("LL");
   await expect(trigger).not.toContainText(/\b(Pro|Free)\b/u);
   await expect(page.locator(".app-space-switcher-rename")).toHaveCount(0);
