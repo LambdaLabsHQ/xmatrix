@@ -30,7 +30,7 @@ jobs each finish in about two minutes including setup:
   `tsc`, beside `next lint`); in the full tier the checked build stays the
   authoritative Web lint and typecheck;
 - `hub-check`: the Hub typecheck and its deploy bundle;
-- `rust-clippy`: Clippy on the complete Rust workspace and all targets.
+- `rust-clippy`: Clippy on the complete Rust workspace and all targets, for Linux and, cross-checked from Linux, for `x86_64-pc-windows-msvc`, so Windows-only code fails the pull request rather than a beta's cli-build.
 
 A release train runs the full tier for what it ships. Every train runs the
 protocol, billing, PostgreSQL package and script tests and the duplicate-code

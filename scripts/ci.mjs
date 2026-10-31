@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -165,6 +166,44 @@ const rustClippy = {
   cwd: path.join(rootDir, "packages/cli-rs"),
   env: rustCache.env,
 };
+
+// Windows-only code (`cfg(windows)`) is compiled nowhere else before a pull
+// request merges: the native Windows suite gates the stable train, and a beta
+// first builds it in the release's cli-build, where a dead function under
+// `deny(warnings)` failed two betas in a row. Clippy cross-checks that target
+// from Linux. Checking needs no Windows linker or SDK; only ring's build script
+// compiles C (cl.exe and lib.exe), so its link output is overridden by the
+// `links` name the lockfile resolves (ring_core_<version>_). A ring upgrade
+// changes the name and the check fails until this matches it again.
+const windowsTarget = "x86_64-pc-windows-msvc";
+const rustClippyWindows = {
+  ...rustClippy,
+  label: `Check Clippy for ${windowsTarget} (-D warnings)`,
+  args: [
+    "clippy",
+    "--workspace",
+    "--all-targets",
+    "--locked",
+    "--target",
+    windowsTarget,
+    "--config",
+    `target.${windowsTarget}.${ringLinksName()}.rustc-link-lib=[]`,
+    "--",
+    "-D",
+    "warnings",
+  ],
+  env: {
+    ...rustClippy.env,
+    CARGO_TARGET_DIR: path.join(rootDir, "packages/cli-rs/target/clippy-windows"),
+  },
+};
+
+function ringLinksName() {
+  const lock = readFileSync(path.join(rootDir, "packages/cli-rs/Cargo.lock"), "utf8");
+  const version = /\[\[package\]\]\nname = "ring"\nversion = "([^"]+)"/.exec(lock)?.[1];
+  if (!version) fail("packages/cli-rs/Cargo.lock does not resolve ring.");
+  return `ring_core_${version.replaceAll(/[.-]/g, "_")}_`;
+}
 
 // `rust-cli` compiles the tests first, then runs Clippy beside their run: the
 // suite mostly waits on spawned processes and timers, so the check fits in its
@@ -496,9 +535,18 @@ const partitions = {
       env: androidToolchainEnv(),
     },
   ],
-  "rust-cli": [rustCliTestBuild, rustClippyBesideTests, rustCliTestBesideClippy],
-  // Pull request CI compiles and lints every Rust target; tests run after merge.
-  "rust-clippy": [rustClippy],
+  "rust-cli": [
+    rustCliTestBuild,
+    rustClippyBesideTests,
+    { ...rustClippyWindows, parallelGroup: "rust-cli", parallelLane: "clippy" },
+    rustCliTestBesideClippy,
+  ],
+  // Pull request CI compiles and lints every Rust target, for Linux and for
+  // Windows side by side; tests run after merge.
+  "rust-clippy": [
+    { ...rustClippy, parallelGroup: "rust-clippy", parallelLane: "linux" },
+    { ...rustClippyWindows, parallelGroup: "rust-clippy", parallelLane: "windows" },
+  ],
   duplicates: [
     {
       label: "Check duplicated code",
