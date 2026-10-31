@@ -48,9 +48,13 @@ import {
   type ChannelViewerStateAuthority,
 } from "./channel-viewer-state";
 
+import { useState } from "react";
 import {
   AlertTriangle,
+  Check,
+  Copy,
 } from "lucide-react";
+import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { sameValue } from "../../lib/same-value";
 
 import { LiquidGlassCard, WoodPanel } from "@/components/ui/material-surfaces";
@@ -185,31 +189,62 @@ export function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** A component's version, marked when it is older than that component's stable release. */
-export function MachineVersionValue({ version, component, className }: {
+/** A component's version, marked when it is older than the newest release of
+    the channel it follows. The mark opens, in place, how that component updates. */
+export function MachineVersionValue({ version, component, className, update }: {
   version?: string;
   component: ReleaseComponent;
   className?: string;
+  /** The way to update it from here (this machine's App), shown in place of the instructions. */
+  update?: React.ReactNode;
 }) {
-  const latestVersion = useLatestComponentRelease(component);
+  const latestVersion = useLatestComponentRelease(component, version);
   const status = releaseVersionStatus(version, latestVersion);
+  const [open, setOpen] = useState(false);
+  const outdated = status === "outdated";
   return (
     <span className={cn("flex min-h-5 min-w-0 flex-wrap items-center gap-1.5", className)}>
       <span className="min-w-0 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
         {version ? formatVersion(version) : "unknown"}
       </span>
-      {status === "outdated" && (
-        <span
-          className={statusChipClass("attention", "inline-flex h-5 shrink-0 items-center gap-1 px-1.5")}
-          title={`The latest stable release is ${formatVersion(latestVersion!)}.`}
+      {outdated && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className={statusChipClass("attention", "inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 px-1.5")}
+          title={`${formatVersion(latestVersion!)} is available.`}
         >
           <AlertTriangle className="size-3.5" />
           Update
+        </button>
+      )}
+      <ReleaseNotesLink version={outdated ? latestVersion : version} />
+      {outdated && open && (
+        <span className="basis-full text-xs leading-5 text-muted-foreground">
+          {update ?? <ComponentUpdateSteps component={component} latestVersion={latestVersion!} />}
         </span>
       )}
-      <ReleaseNotesLink version={status === "outdated" ? latestVersion : version} />
     </span>
   );
+}
+
+const CLI_UPDATE_COMMAND = "xmatrix update";
+
+/** How a component on another machine reaches its channel's newest release. */
+function ComponentUpdateSteps({ component, latestVersion }: { component: ReleaseComponent; latestVersion: string }) {
+  const { copied, copy } = useCopyToClipboard(CLI_UPDATE_COMMAND);
+  const latest = formatVersion(latestVersion);
+  if (component === "desktop") {
+    return <>The xMatrix app downloads {latest} by itself and installs it when it restarts.
+      To update now, open xMatrix on that machine and choose Settings › Desktop app › Check for updates.</>;
+  }
+  return <>The daemon installs {latest} by itself. To update now, run{" "}
+    <button type="button" onClick={() => void copy()} title="Copy"
+      className="inline-flex items-center gap-1 rounded bg-muted px-1 font-mono text-foreground">
+      {CLI_UPDATE_COMMAND}
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+    </button>{" "}on that machine.</>;
 }
 
 export function ReleaseNotesLink({ version }: { version?: string }) {

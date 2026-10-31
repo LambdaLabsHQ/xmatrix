@@ -957,7 +957,15 @@ export function releaseVersionStatus(
   latestVersion: string | undefined,
 ): "current" | "outdated" | "unknown" {
   if (!version || !latestVersion) return "unknown";
-  return compareReleaseVersions(version, latestVersion) < 0 ? "outdated" : "current";
+  const release = compareReleaseVersions(version, latestVersion);
+  if (release !== 0) return release < 0 ? "outdated" : "current";
+  // Betas of one release are ordered by their number: 2.2.1-beta.19 < 2.2.1-beta.20.
+  return (betaNumber(version) ?? Infinity) < (betaNumber(latestVersion) ?? Infinity) ? "outdated" : "current";
+}
+
+function betaNumber(version: string): number | undefined {
+  const match = /-[0-9A-Za-z-]*?\.?(\d+)$/u.exec(version.trim().split("+", 1)[0] ?? "");
+  return match ? Number.parseInt(match[1]!, 10) : undefined;
 }
 
 export function formatVersion(version: string): string {

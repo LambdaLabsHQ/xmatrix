@@ -1,5 +1,6 @@
 "use client";
 
+import { DesktopAppUpdateNow } from "./desktop-app-update-now";
 import { useMemo } from "react";
 import type {
   ChannelSnapshot,
@@ -351,6 +352,11 @@ export function ToolSurface({
           name: "Unnamed machine",
           online: desktopDaemonStatus?.state === "running",
           platform: desktopContext?.platform,
+          app: {
+            version: desktopContext.version,
+            update: <DesktopAppUpdateNow status={desktopUpdateBridgeAvailable ? desktopUpdateStatus : null}
+              checking={checkingDesktopUpdates} onCheck={onCheckDesktopUpdates} onInstall={onInstallDesktopUpdate} />,
+          },
           summary: `${desktopDaemonStatus?.state === "running" ? "Daemon online" : "Daemon offline"} · ${localDirectories} ${localDirectories === 1 ? "directory" : "directories"}`,
           content: (hubRecord) => (
         <LocalMacView

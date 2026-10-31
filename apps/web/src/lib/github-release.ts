@@ -299,7 +299,7 @@ export async function fetchPublishedReleaseNotes(version: string) {
   return publishedReleaseNotes(release.body);
 }
 
-function releaseVersionFromTag(tagName: string) {
+export function releaseVersionFromTag(tagName: string) {
   return tagName.replace(/^(?:cli|desktop|android)-v/, "").replace(/^v/, "");
 }
 

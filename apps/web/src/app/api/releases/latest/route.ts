@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 
 import {
+  fetchDevRelease,
   fetchLatestStableAndroidRelease,
   fetchLatestStableCliRelease,
   fetchLatestStableDesktopMacRelease,
   getLatestReleaseManifest,
+  releaseVersionFromTag,
 } from "@/lib/github-release";
 
 const RELEASE_TARGETS = {
@@ -22,6 +24,8 @@ const RELEASE_TARGETS = {
   },
 } as const;
 
+const DEV_COMPONENTS = ["cli", "desktop"] as const;
+
 export async function GET(request: Request) {
   try {
     const origin = new URL(request.url).origin;
@@ -35,11 +39,24 @@ export async function GET(request: Request) {
       })
     );
 
+    // A beta build follows the dev channel, so it is judged against that
+    // channel's newest beta. A component with no dev release is left out.
+    const devEntries = await Promise.all(
+      DEV_COMPONENTS.map(async (component) => {
+        try {
+          return [component, { version: releaseVersionFromTag((await fetchDevRelease(component)).tag_name) }] as const;
+        } catch {
+          return null;
+        }
+      })
+    );
+
     return NextResponse.json(
       {
         version: entries[0]?.[1].trainVersion,
         trainVersion: entries[0]?.[1].trainVersion,
         releases: Object.fromEntries(entries),
+        devReleases: Object.fromEntries(devEntries.filter((entry) => entry !== null)),
       },
       {
         headers: {

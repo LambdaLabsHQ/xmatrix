@@ -119,3 +119,25 @@ test("the provider's verdict on the account decides whether a used-up window is 
     "10/10 05:28", "a limit tells its window's tag when it comes back");
   assert.equal(usageLimitSummary({ ...week, quotaAccount: { allowed: true, credits: { unlimited: true } } }).note, "credits");
 });
+
+function releaseVersionStatusFixture() {
+  const parseReleaseVersion = compileFunction("parseReleaseVersion");
+  const compareReleaseVersions = compileFunction("compareReleaseVersions", { parseReleaseVersion });
+  const betaNumber = compileFunction("betaNumber");
+  return compileFunction("releaseVersionStatus", { compareReleaseVersions, betaNumber });
+}
+
+test("a stable build is outdated only behind the newest stable release", () => {
+  const releaseVersionStatus = releaseVersionStatusFixture();
+  assert.equal(releaseVersionStatus("2.2.0", "2.3.0"), "outdated");
+  assert.equal(releaseVersionStatus("2.3.0", "2.3.0"), "current");
+  assert.equal(releaseVersionStatus(undefined, "2.3.0"), "unknown");
+});
+
+test("a beta is ordered by its number within one release", () => {
+  const releaseVersionStatus = releaseVersionStatusFixture();
+  assert.equal(releaseVersionStatus("2.2.1-beta.19", "2.2.1-beta.20"), "outdated");
+  assert.equal(releaseVersionStatus("2.2.1-beta.20", "2.2.1-beta.20"), "current");
+  assert.equal(releaseVersionStatus("2.1.1-beta.23", "2.2.1-beta.20"), "outdated");
+  assert.equal(releaseVersionStatus("2.2.1-beta.20", "2.2.1"), "outdated");
+});
