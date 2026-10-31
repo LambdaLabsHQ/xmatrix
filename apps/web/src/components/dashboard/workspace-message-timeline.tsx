@@ -1869,14 +1869,17 @@ export const MessageRow = memo(function MessageRow({
   const connectorReceipt = useMemo(() => message.senderKind === "app" && message.provenance === "system_fact"
     ? parseConnectorReceipt(message.body) : undefined, [message.senderKind, message.provenance, message.body]);
   const questionnaire = questionnaireMetadata(message.metadata);
-  const onboardingStage = onboardingStageOf(message.metadata);
-  const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
-  const offlineNotice = signedOutNotice ? null : machineOfflineNoticeOf(message.metadata);
+  /* Cards the Hub posts are drawn only from a message the Hub wrote: its provenance is a key
+     callers cannot set, while the card fields themselves are not. Anyone else's lookalike reads as text. */
+  const hubMetadata = message.provenance === "system_fact" ? message.metadata : undefined;
+  const onboardingStage = onboardingStageOf(hubMetadata);
+  const signedOutNotice = harnessSignedOutNoticeOf(hubMetadata);
+  const offlineNotice = signedOutNotice ? null : machineOfflineNoticeOf(hubMetadata);
   const turnFailure = signedOutNotice ? null : turnFailureEvidenceOf(message.metadata);
   const quotaRetryId = quotaRetryOfferId(message.metadata);
-  const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
-  const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
-  const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
+  const crossSpaceRead = crossSpaceReadMetadata(hubMetadata);
+  const secretRequest = crossSpaceRead ? null : secretRequestMetadata(hubMetadata);
+  const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(hubMetadata);
   const routingDecision = parsePresentedRoutingDecision(message.metadata?.routingDecision);
   const collapsible = !routingDecision && isLongMessageBody(displayBody);
   /* A thread is its own Channel, so it can be archived while its parent stays

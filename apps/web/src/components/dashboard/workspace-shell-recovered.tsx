@@ -1269,12 +1269,18 @@ export function truncateNotificationText(value: string, maxLength = 180): string
 /* The banner is titled by where the message is, so several Agents talking in
    one channel read as one conversation; who said it leads the body. */
 export function nativeMessageNotificationTitle(message: ChannelMessage, channelName: string | undefined): string {
-  if (secretRequestMetadata(messageRichMetadata(message))) return "Secret requested";
+  if (secretRequestMetadata(hubWrittenMetadata(message))) return "Secret requested";
   return channelName || "xMatrix";
 }
 
+/** A message's metadata when the Hub wrote it; a secret request only reads as one from the Hub. */
+function hubWrittenMetadata(message: ChannelMessage): Record<string, unknown> | undefined {
+  const metadata = messageRichMetadata(message);
+  return messageProvenance(metadata) === "system_fact" ? metadata : undefined;
+}
+
 export function nativeMessageNotificationBody(message: ChannelMessage): string {
-  const secretRequest = secretRequestMetadata(messageRichMetadata(message));
+  const secretRequest = secretRequestMetadata(hubWrittenMetadata(message));
   if (secretRequest) {
     return truncateNotificationText(`${secretRequest.agentName || "An Agent"} asks for the secret ${secretRequest.secretRef}`);
   }
