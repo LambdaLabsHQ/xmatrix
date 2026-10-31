@@ -6,6 +6,7 @@ import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts
 import { commandResult } from "../src/connectors/command-support.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 import { AppControlError } from "../../db/src/app-control.ts";
+import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
 
 async function dispatcher({ providerId, spaceId, mode, repository, publish = async () => {}, imports = {} }) {
   const dependencies = {
@@ -36,10 +37,10 @@ test("approved actions report stale authority before provider I/O and mask unkno
         checks++;
         if (during !== "preflight" || checks === 2) throw failure;
       } }, imports: {
-        "./connection-credentials": { connectionCredentials: async () => {
+        "./connection-credentials": connectionCredentialsDouble(async () => {
           if (during === "credentials") throw failure;
           return { oauthToken: "token", customerId: "1234567890" };
-        } },
+        }),
       } });
     const action = { effect: "write", requires: [], parse: () => { throw new Error("must use frozen input"); },
       execute: async context => { await context.authorizeWrite(); writes++; return { summary: "written" }; } };
@@ -64,7 +65,7 @@ test("Gmail ask stages a request, allow executes, and disallow blocks before pro
         staged = { requestId: input.requestId, status: "pending" }; return staged;
     } }, imports: {
       "../workspace-resource-notification": { notifyWorkspaceResource: async (_env, change) => { announced.push(change); } },
-      "./connection-credentials": { connectionCredentials: async () => ({ mailboxes: "[]" }) },
+      "./connection-credentials": connectionCredentialsDouble(async () => ({ mailboxes: "[]" })),
     } });
   const action = { effect: "write", requires: [], parse: () => ({}), prepare: async () => {
     prepared++; return { from: "from@example.test", to: "to@example.test", subject: "Subject", body: "Body", raw: "private" };
@@ -142,7 +143,7 @@ test("Calendar approval stores the prepared event preview without executing the 
   const preview = { change: "update", calendar: "owner@example.com", title: "Changed meeting", start: "2026-10-29", end: "2026-10-30", sendUpdates: "all" };
   const commands = await dispatcher({ providerId: "googlecalendar", spaceId: "s", mode: async () => "ask",
     repository: { find: async () => null, create: async input => { staged = input; return { requestId: input.requestId, status: "pending" }; } },
-    imports: { "./connection-credentials": { connectionCredentials: async () => ({ oauthToken: "a" }) },
+    imports: { "./connection-credentials": connectionCredentialsDouble(async () => ({ oauthToken: "a" })),
       "../workspace-resource-notification": { notifyWorkspaceResource: async () => {} } } });
   const action = { effect: "write", requires: ["oauthToken"], parse: () => ({ calendar: "primary" }),
     prepare: async () => ({ calendar: "owner@example.com", preview: JSON.stringify(preview), body: '{"summary":"Changed meeting"}' }),
@@ -163,7 +164,7 @@ test("Calendar Allow schedules directly and a policy change during preparation p
     let mode = null, approvals = 0;
     const commands = await dispatcher({ providerId: "googlecalendar", spaceId: "s", mode: async () => mode,
       repository: { find: async () => null, create: async () => { approvals++; throw new Error("Allow must not ask"); } },
-      imports: { "./connection-credentials": { connectionCredentials: async () => ({ oauthToken: "a" }) } } });
+      imports: { "./connection-credentials": connectionCredentialsDouble(async () => ({ oauthToken: "a" })) } });
     const calendar = { id: "owner@example.com", primary: true, summary: "Work", timeZone: "UTC" };
     const event = { kind: "calendar#event", id: "abcde12345", etag: '"v1"' };
     const fetch = stubFetchResponses([{ body: calendar }, { body: event }], {
@@ -183,4 +184,17 @@ test("Calendar Allow schedules directly and a policy change during preparation p
       if (!revokeDuringPreparation) assert.equal(fetch.calls[1].body.summary, "AI arranged meeting");
     } finally { fetch.restore(); }
   }
+});
+
+// What an action saves back for its connection names the credential version the action read.
+test("an action's saveCredentials renews the credentials at the version it read", async () => {
+  const renewals = [];
+  const commands = await dispatcher({ providerId: "appstoreconnect", spaceId: "s", mode: async () => "write", repository: {},
+    imports: { "./connection-credentials": connectionCredentialsDouble(async () => ({ keyId: "KEY", privateKey: "p8" }), renewals) } });
+  const action = { effect: "read", requires: ["keyId", "privateKey"], parse: () => ({}),
+    execute: async context => { await context.saveCredentials({ vendorNumber: "87654321" }); return { summary: "read" }; } };
+  const result = await commands.runConnectorAction("appstoreconnect", { env: {}, channelId: "c", messageId: "m", actorUserId: "owner",
+    senderKind: "user" }, "sales", action, { target: "*", text: "" });
+  assert.match(result, /read/u);
+  assert.deepEqual(renewals, [{ version: 1, fields: { vendorNumber: "87654321" } }]);
 });

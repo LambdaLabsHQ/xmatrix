@@ -10,11 +10,11 @@ import { getAppConnectorProvider } from "../app-connectors";
 import { parseActionCommand } from "./action-parse";
 import { connectorActionCatalog } from "./action-catalog";
 import { commandResult, commandScope, publishCommandStatus, withExecution } from "./command-support";
-import { connectionCredentials } from "./connection-credentials";
+import { connectionCredentialGrant, credentialRenewal } from "./connection-credentials";
 import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
-import { connectorPermissionRepository, connectorActionRequestRepository, connectorCredentialRepository } from "./credentials";
+import { connectorPermissionRepository, connectorActionRequestRepository } from "./credentials";
 import { ConnectorRemedy, ProviderRequestError } from "./http";
 import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
@@ -343,7 +343,8 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     receiptSecret: input.env.RELAY_R2_CAPABILITY_HMAC_SECRET,
     attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) }) : undefined;
   const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
-  const credentials = native ? {} : await connectionCredentials(input.env, spaceId, providerId);
+  const grant = native ? undefined : await connectionCredentialGrant(input.env, spaceId, providerId);
+  const credentials = grant?.values ?? {};
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
   const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
   if (missing.length > 0) {
@@ -356,13 +357,9 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const instanceId = input.senderKind === "agent" ? input.senderId : undefined;
   const caller = { userId: input.actorUserId,
     ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };
-  const declared = (getAppConnectorProvider(providerId)!.credentials ?? []).map(field => field.id);
-  const saveCredentials = async (fields: Readonly<Record<string, string>>) => {
-    await connectorCredentialRepository(input.env).put({ requestId: crypto.randomUUID(), spaceId, providerId, actorUserId: "hub:provider-renewal",
-      fields: { ...fields }, policy: { allowed: declared }, at: new Date().toISOString(), asHub: true });
-  };
+  const saveCredentials = grant ? credentialRenewal(input.env, spaceId, providerId, grant.version) : undefined;
   const usage = upstreamMeter(input.env, { spaceId, connector: providerId, action: actionId });
-  return { credentials, caller, authorizeWrite, usage, ...(native ? {} : { saveCredentials }), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  return { credentials, caller, authorizeWrite, usage, ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }

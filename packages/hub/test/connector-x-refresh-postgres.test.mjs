@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { DatabaseCommitUnknownError, PostgresAppCredentialRepository } from "@xmatrix/db";
-import { connectionString, connectorDatabase, integration } from "../../db/test/postgres-database.fixture.mjs";
+import { connectionString, integration } from "../../db/test/postgres-database.fixture.mjs";
 import { oauthClient } from "../src/connectors/oauth.ts";
 import { connectXAccount, parseXAccounts, xAccountFields } from "../src/connectors/x-accounts.ts";
 import { refreshXAccount } from "../src/connectors/x-api.ts";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
+import { withConnectorSpace } from "./support/connector-postgres-space.mjs";
 
 const client = oauthClient({ CONNECTOR_X_CLIENT_ID: "company-app", CONNECTOR_X_CLIENT_SECRET: "test-client-secret" }, "x");
 const policy = { allowed: ["accounts"] };
@@ -13,42 +14,27 @@ const remoteTokens = id => ({ access_token: `rotated-access-${id}`, refresh_toke
   token_type: "bearer", expires_in: 7200 });
 
 async function withDatabase(run, { empty = false } = {}) {
-  const { client: sqlClient, database, sql } = await connectorDatabase("x-refresh-test");
-  const space = `x-refresh-${crypto.randomUUID()}`;
-  const accounts = ["101", "202"].map((id, index) => ({ id, username: index ? "personal" : "company",
-    generation: crypto.randomUUID(), ownerUserId: "owner", clientId: client.clientId,
-    accessToken: `initial-access-${id}`, refreshToken: `initial-refresh-${id}`, expiresAt: Date.now() - 1000,
-    scopes: client.manifest.oauth.scopes.join(" ") }));
-  const material = "x-refresh-encryption-test-material";
-  const store = new PostgresAppCredentialRepository(database, material);
-  const write = values => store.put({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x", actorUserId: "owner",
-    fields: xAccountFields(values), policy, at: new Date().toISOString() });
-  const read = async () => parseXAccounts((await store.resolve({ requestId: crypto.randomUUID(),
-    spaceId: space, providerId: "x" }))?.values.accounts);
-  const snapshot = () => store.installationSnapshot({ requestId: crypto.randomUUID(), spaceId: space,
-    actorUserId: "owner", providerId: "x" });
-  const env = { RELAY_POSTGRES: { connectionString }, RELAY_POSTGRES_SHARD_ID: "shard-0", XMATRIX_SECRET_CATALOG_KEY: material };
-  const connect = (account, original) => connectXAccount(env, { spaceId: space, actorUserId: "owner",
-    fields: xAccountFields([account]), snapshot: original });
-  const newGrant = () => ({ ...accounts[0], id: "303", username: "another", generation: crypto.randomUUID(),
-    accessToken: "oauth-new-access", refreshToken: "oauth-new-refresh", expiresAt: Date.now() + 7_200_000 });
-  try {
-    await sql(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
-      VALUES ($1,'owner','owner',1,now(),now())`, [space]);
-    await sql(`INSERT INTO data.app_connector_connections
-      (space_id,connection_id,version,provider_id,provider_name,status,auth_mode,scopes_json,secret_refs_json,
-       capabilities_json,channel_ids_json,created_by,search_rank_sequence,created_at,updated_at)
-      VALUES ($1,$1||':x',1,'x','X','configured','oauth','[]','[]','[]','[]','owner',$1||':rank',
-        now()-interval '1 second',now()-interval '1 second')`, [space]);
+  await withConnectorSpace({ name: "x-refresh", providerId: "x", providerName: "X", authMode: "oauth" }, async ({ space, database, sql }) => {
+    const accounts = ["101", "202"].map((id, index) => ({ id, username: index ? "personal" : "company",
+      generation: crypto.randomUUID(), ownerUserId: "owner", clientId: client.clientId,
+      accessToken: `initial-access-${id}`, refreshToken: `initial-refresh-${id}`, expiresAt: Date.now() - 1000,
+      scopes: client.manifest.oauth.scopes.join(" ") }));
+    const material = "x-refresh-encryption-test-material";
+    const store = new PostgresAppCredentialRepository(database, material);
+    const write = values => store.put({ requestId: crypto.randomUUID(), spaceId: space, providerId: "x", actorUserId: "owner",
+      fields: xAccountFields(values), policy, at: new Date().toISOString() });
+    const read = async () => parseXAccounts((await store.resolve({ requestId: crypto.randomUUID(),
+      spaceId: space, providerId: "x" }))?.values.accounts);
+    const snapshot = () => store.installationSnapshot({ requestId: crypto.randomUUID(), spaceId: space,
+      actorUserId: "owner", providerId: "x" });
+    const env = { RELAY_POSTGRES: { connectionString }, RELAY_POSTGRES_SHARD_ID: "shard-0", XMATRIX_SECRET_CATALOG_KEY: material };
+    const connect = (account, original) => connectXAccount(env, { spaceId: space, actorUserId: "owner",
+      fields: xAccountFields([account]), snapshot: original });
+    const newGrant = () => ({ ...accounts[0], id: "303", username: "another", generation: crypto.randomUUID(),
+      accessToken: "oauth-new-access", refreshToken: "oauth-new-refresh", expiresAt: Date.now() + 7_200_000 });
     if (!empty) await write(accounts);
     await run({ space, store, sql, accounts, read, write, snapshot, connect, newGrant });
-  } finally {
-    for (const table of ["app_connector_credentials", "app_connector_connections", "space_members"]) {
-      await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
-    }
-    await database.close?.();
-    await sqlClient.end();
-  }
+  });
 }
 
 function gatedProvider(tokens) {
