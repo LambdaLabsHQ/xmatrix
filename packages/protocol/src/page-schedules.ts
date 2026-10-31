@@ -48,7 +48,11 @@ export interface PageSchedule {
   end: number;
 }
 
-const TASK = /^(\s*)[-*+]\s\[([ xX-])\]\s+(.*)$/u;
+// Schedule text contains a non-whitespace signifier. Keep its first character
+// disjoint from the separator so a malformed line cannot redistribute blanks.
+const TASK = /^(\s*)[-*+]\s\[([ xX-])\]\s+(\S.*)$/u;
+// Start at a whitespace-run boundary so a missing done field is scanned once.
+const DONE_SUFFIX = /(?<!\s)\s*✅[^🔁⏳✅]*$/u;
 const SIGNIFIER = /[🔁⏳✅]/u;
 const UNITS: Record<string, number> = {
   minute: 1, minutes: 1, min: 1, mins: 1, m: 1,
@@ -195,7 +199,7 @@ export function markScheduleDone(markdown: string, source: string, day: string):
   const schedule = pageSchedules(markdown).find((candidate) => candidate.source === source);
   if (!schedule || schedule.status === "done") return markdown;
   const line = markdown.slice(schedule.start, schedule.end);
-  const marked = line.replace(/\[[ -]\]/u, "[x]").replace(/\s*✅[^🔁⏳✅]*$/u, "");
+  const marked = line.replace(/\[[ -]\]/u, "[x]").replace(DONE_SUFFIX, "");
   return `${markdown.slice(0, schedule.start)}${marked} ${SCHEDULE_DONE} ${day}${markdown.slice(schedule.end)}`;
 }
 
@@ -204,7 +208,7 @@ export function setScheduleStatus(markdown: string, source: string, status: "run
   const schedule = pageSchedules(markdown).find((candidate) => candidate.source === source);
   if (!schedule) return markdown;
   const line = markdown.slice(schedule.start, schedule.end);
-  const marked = line.replace(/\[[ xX-]\]/u, status === "paused" ? "[-]" : "[ ]").replace(/\s*✅[^🔁⏳✅]*$/u, "");
+  const marked = line.replace(/\[[ xX-]\]/u, status === "paused" ? "[-]" : "[ ]").replace(DONE_SUFFIX, "");
   return `${markdown.slice(0, schedule.start)}${marked}${markdown.slice(schedule.end)}`;
 }
 
