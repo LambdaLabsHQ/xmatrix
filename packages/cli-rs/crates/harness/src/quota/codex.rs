@@ -103,24 +103,14 @@ async fn read_codex_usage_from_endpoint(
     if let Some(cached) = CODEX_CHATGPT_USAGE.hit_unless_forced(&key, force) {
         return cached;
     }
-    let access_token = snapshot.access_token;
-    let account_id = snapshot.account_id;
-
-    let mut request = provider_client()
-        .get(endpoint)
-        .header(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {access_token}"),
-        )
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header(reqwest::header::USER_AGENT, "xmatrix-cli");
-    if let Some(account_id) = account_id.as_deref() {
-        request = request.header("ChatGPT-Account-Id", account_id);
-    }
-
-    let value = CODEX_CHATGPT_USAGE
-        .fetch_json(&key, "codex", request)
-        .await?;
+    let value = fetch_wham_usage_json(
+        &key,
+        "codex",
+        &snapshot.access_token,
+        snapshot.account_id.as_deref(),
+        endpoint,
+    )
+    .await?;
 
     // The request may outlive an account switch at the same config home.
     // Reject that response before caching or returning it to the daemon; the
@@ -129,14 +119,43 @@ async fn read_codex_usage_from_endpoint(
         return None;
     }
 
+    store_wham_usage(&key, &value)
+}
+
+/// One bounded `wham/usage` request for a ChatGPT access token.
+async fn fetch_wham_usage_json(
+    cache_key: &str,
+    label: &str,
+    access_token: &str,
+    account_id: Option<&str>,
+    endpoint: &str,
+) -> Option<Value> {
+    let mut request = provider_client()
+        .get(endpoint)
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {access_token}"),
+        )
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::USER_AGENT, "xmatrix-cli");
+    if let Some(account_id) = account_id {
+        request = request.header("ChatGPT-Account-Id", account_id);
+    }
+    CODEX_CHATGPT_USAGE
+        .fetch_json(cache_key, label, request)
+        .await
+}
+
+/// Parse a `wham/usage` body, stamp it, and remember it under `cache_key`.
+fn store_wham_usage(cache_key: &str, value: &Value) -> Option<LlmUsage> {
     // This endpoint is the account-level quota authority. Restrict parsing to
     // its wham envelope rather than accepting any rate-limit-like nested
     // object that could resemble an app-server session snapshot.
-    let mut usage = codex_wham_usage_from_value(&value);
+    let mut usage = codex_wham_usage_from_value(value);
     if let Some(usage) = usage.as_mut() {
         usage.quota_observed_at = super::observed_now();
     }
-    CODEX_CHATGPT_USAGE.store(&key, usage.clone());
+    CODEX_CHATGPT_USAGE.store(cache_key, usage.clone());
     usage
 }
 
@@ -154,26 +173,9 @@ pub(crate) async fn read_chatgpt_wham_usage_with_token(
     if let Some(cached) = CODEX_CHATGPT_USAGE.hit_unless_forced(cache_key, force) {
         return cached;
     }
-    let mut request = provider_client()
-        .get(endpoint)
-        .header(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {access_token}"),
-        )
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header(reqwest::header::USER_AGENT, "xmatrix-cli");
-    if let Some(account_id) = account_id {
-        request = request.header("ChatGPT-Account-Id", account_id);
-    }
-    let value = CODEX_CHATGPT_USAGE
-        .fetch_json(cache_key, "chatgpt", request)
-        .await?;
-    let mut usage = codex_wham_usage_from_value(&value);
-    if let Some(usage) = usage.as_mut() {
-        usage.quota_observed_at = super::observed_now();
-    }
-    CODEX_CHATGPT_USAGE.store(cache_key, usage.clone());
-    usage
+    let value =
+        fetch_wham_usage_json(cache_key, "chatgpt", access_token, account_id, endpoint).await?;
+    store_wham_usage(cache_key, &value)
 }
 
 /// Backwards-compatible entry point used by the Codex runtime: resolve the
