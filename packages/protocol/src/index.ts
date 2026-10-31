@@ -283,6 +283,7 @@ export type { ClientDefectAction } from "./client-defect-actions.js";
 export {
   hmacBytes, hmacHex, lowercaseHex, sha256BytesSync, sha256Hex, timingSafeEqual, utf8ByteLength,
 } from "./hex.js";
+export { ResumableSha256 } from "./resumable-sha256.js";
 export {
   isHostDerivedMachineId, legacyMachineDaemonId, sha256HexSync, stableMachineDaemonId,
 } from "./machine-daemon-id.js";

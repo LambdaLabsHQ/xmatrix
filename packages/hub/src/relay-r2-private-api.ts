@@ -1,5 +1,6 @@
 import { ControlError } from "@xmatrix/db";
 import { readBoundedStream } from "./read-bounded-stream";
+import { r2ObjectResponse, readR2Object } from "./r2-range-response";
 import { plainRecord } from "@xmatrix/protocol";
 import {
   parseRelayV2MessageAttachmentAuthority,
@@ -317,8 +318,9 @@ export async function handleRelayV2MessageAttachmentProductMedia(input: {
     attachmentId,
   });
   let object: R2ObjectBody | null;
+  let ranged: boolean;
   try {
-    object = await input.bucket.get(authority.object.objectKey);
+    ({ object, ranged } = await readR2Object(input.bucket, authority.object.objectKey, input.request.headers));
   } catch {
     throw apiError(
       "private_storage_unavailable",
@@ -346,9 +348,10 @@ export async function handleRelayV2MessageAttachmentProductMedia(input: {
       "message attachment failed immutable storage verification",
     );
   }
-  const headers = new Headers({
+  // A `Range` request is answered in part: a large video plays from where it
+  // is sought, and an interrupted download resumes.
+  return r2ObjectResponse(object, ranged, new Headers({
     "content-type": authority.attachment.mimeType,
-    "content-length": String(authority.object.encodedBytes),
     "cache-control": "private, no-store",
     "x-content-type-options": "nosniff",
     "x-xmatrix-attachment-id": authority.attachment.id,
@@ -356,12 +359,13 @@ export async function handleRelayV2MessageAttachmentProductMedia(input: {
     "x-xmatrix-attachment-version": String(authority.attachment.version),
     "x-xmatrix-attachment-size": String(authority.attachment.size),
     "x-xmatrix-content-hash": authority.object.contentHash,
-  });
-  return new Response(object.body, { status: 200, headers });
+  }));
 }
 
 function metadataFromR2Object(object: R2Object): RelayPrivateR2ObjectMetadata | null {
-  const customChecksum = object.customMetadata?.sha256;
+  // A multipart object has no native SHA-256; the Hub verified its bytes
+  // before publishing it under the hash its metadata names.
+  const customChecksum = object.customMetadata?.sha256 ?? object.customMetadata?.["xmatrix-content-hash"];
   const nativeChecksum = object.checksums?.sha256
     ? lowercaseHex(object.checksums.sha256)
     : undefined;

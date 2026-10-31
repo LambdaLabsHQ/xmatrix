@@ -12,9 +12,45 @@ export const RELAY_V2_BLOB_REF_PATH =
   "/api/relay-v2/private-r2/blob-refs" as const;
 export const RELAY_V2_BLOB_UPLOAD_CHECKSUM_HEADER =
   "x-xmatrix-content-sha256" as const;
-/** Ordinary product write ceiling; the larger read ceiling covers migrated history. */
-export const RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES = 64 * 1024 * 1024;
-export const RELAY_V2_MESSAGE_ATTACHMENT_MAX_BYTES = 1024 * 1024 * 1024;
+/**
+ * One upload request body. A blob up to this size goes in one PUT; a larger one
+ * goes in parts of exactly this size (the last one shorter). It stays below the
+ * Cloudflare Worker request body limit (100 MB on every plan) the Hub and the
+ * Web proxy both sit behind, and is a whole number of SHA-256 blocks, so the Hub
+ * can carry one running digest from part to part.
+ */
+export const RELAY_V2_BLOB_PART_BYTES = 64 * 1024 * 1024;
+/** R2's own ceiling on the parts of one multipart upload. */
+export const RELAY_V2_BLOB_MAX_PARTS = 10_000;
+/**
+ * The largest private blob (Channel attachment, Page media), 625 GiB: as many
+ * parts as R2 takes, each as large as a Worker request may be. R2 itself stores
+ * objects up to 5 TiB, but every byte reaches it through a Worker request, and
+ * 10,000 parts that each fit one cannot carry more. This is the only size
+ * ceiling; storage is metered per Space instead (`space_storage_usage`).
+ */
+export const RELAY_V2_BLOB_MAX_BYTES = RELAY_V2_BLOB_MAX_PARTS * RELAY_V2_BLOB_PART_BYTES;
+
+/** How many parts a blob of `encodedBytes` is sent in; 1 means one PUT. */
+export function relayV2BlobPartCount(encodedBytes: number, partBytes = RELAY_V2_BLOB_PART_BYTES): number {
+  return Math.max(1, Math.ceil(encodedBytes / partBytes));
+}
+
+/** The Hub routes one upload intent is written through, all bound to its visibility scope. */
+export function relayV2BlobUploadPaths(intentId: string, visibilityScopeId: string) {
+  const base = `${RELAY_V2_BLOB_UPLOAD_PREFIX}/${encodeURIComponent(intentId)}`;
+  const scope = `/scope/${encodeURIComponent(visibilityScopeId)}`;
+  return {
+    /** One PUT of the whole body. */
+    single: `${base}${scope}`,
+    /** POST: start, or resume, the multipart upload. */
+    multipart: `${base}/multipart${scope}`,
+    /** PUT: part `partNumber` (from 1), in order. */
+    part: (partNumber: number) => `${base}/multipart/parts/${partNumber}${scope}`,
+    /** POST: publish the verified parts as the immutable object. */
+    complete: `${base}/multipart/complete${scope}`,
+  };
+}
 
 export interface RelayV2MessageAttachmentDescriptor {
   id: string;
@@ -140,7 +176,7 @@ export function parseRelayV2MessageAttachmentAuthority(
       input.size,
       "attachment authority.size",
       1,
-      RELAY_V2_MESSAGE_ATTACHMENT_MAX_BYTES,
+      RELAY_V2_BLOB_MAX_BYTES,
     ),
     version: integer(input.version, "attachment authority.version", 1),
     ...parseAttachmentPresentation(input, "attachment authority"),

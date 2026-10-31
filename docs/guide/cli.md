@@ -114,7 +114,8 @@ A message sent from the CLI is read with the same [syntax](syntax.md) as one typ
 For local images and videos, run `xmatrix page upload <page-id> ./screenshot.png`,
 then insert its returned `![media](xmatrix:page-media/…)` Markdown with
 `page edit` or live writing. Uploads require current Page edit access and accept
-PNG, JPEG, GIF, WebP, AVIF, MP4, WebM and MOV files from 1 byte through 64 MiB.
+PNG, JPEG, GIF, WebP, AVIF, MP4, WebM and MOV files of any size from 1 byte up
+to 625 GiB; a file larger than 64 MiB is sent in 64 MiB parts read from disk.
 Uploading keeps the file for that Page; it does not change its text. Create a
 new Page before uploading media into it. Page text alone never uploads local files.
 

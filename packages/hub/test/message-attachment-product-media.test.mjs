@@ -129,3 +129,34 @@ test("Agent product-media read uses owner ACL authority and streams immutable by
   assert.equal(response.headers.get("content-length"), String(bytes.byteLength));
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
 });
+
+test("a Range read of a multipart-published attachment answers just that part", async () => {
+  const contentHash = "c".repeat(64);
+  const size = 10_000;
+  const ranged = request();
+  const withRange = new Request(ranged, { headers: { ...Object.fromEntries(ranged.headers), range: "bytes=100-199" } });
+  const response = await handleRelayV2MessageAttachmentProductMedia({
+    request: withRange,
+    userId: "owner-1",
+    async attachmentAuthority() {
+      return Response.json({
+        channelId: "channel-1", messageId: "message-1", visibilityScopeId: "space:space-1",
+        attachment: { id: "attachment-1", mimeType: "video/mp4", name: "clip.mp4", size, version: 1 },
+        object: { checksum: contentHash, contentHash, encodedBytes: size, objectKey: `objects/${contentHash}` },
+      });
+    },
+    bucket: {
+      async get(objectKey, options) {
+        assert.equal(objectKey, `objects/${contentHash}`);
+        assert.equal(options.range.get("range"), "bytes=100-199");
+        // A multipart object carries no native SHA-256, only the hash the Hub verified.
+        return { body: new Uint8Array(100), size, range: { offset: 100, length: 100 }, checksums: {},
+          customMetadata: { "xmatrix-content-hash": contentHash }, etag: "etag-1" };
+      },
+    },
+  });
+  assert.equal(response.status, 206);
+  assert.equal(response.headers.get("content-range"), `bytes 100-199/${size}`);
+  assert.equal(response.headers.get("content-length"), "100");
+  assert.equal(response.headers.get("x-xmatrix-attachment-size"), String(size));
+});

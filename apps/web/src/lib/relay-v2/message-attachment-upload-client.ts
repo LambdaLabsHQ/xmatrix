@@ -3,10 +3,13 @@ import {
   RELAY_V2_BLOB_REF_PATH,
   RELAY_V2_BLOB_UPLOAD_CHECKSUM_HEADER,
   RELAY_V2_BLOB_UPLOAD_INTENT_PATH,
-  RELAY_V2_BLOB_UPLOAD_PREFIX,
+  relayV2BlobPartCount,
+  relayV2BlobUploadPaths,
 } from "@xmatrix/protocol/relay-v2/message-attachment";
 import { lowercaseHex } from "@xmatrix/protocol";
-import { XMatrixApiError, shouldRetryXMatrixQuery, xmatrixRawResponse, xmatrixRetryDelayMs } from "../query/api-client";
+import {
+  XMatrixApiError, isTransientFailure, shouldRetryXMatrixQuery, xmatrixRawResponse, xmatrixRetryDelayMs,
+} from "../query/api-client";
 import { directHubRequest } from "../query/hub-read";
 const HASH_CHUNK_BYTES = 4 * 1024 * 1024;
 const UPLOAD_INTENT_TTL_MS = 60 * 60 * 1_000;
@@ -27,6 +30,15 @@ export const UPLOAD_CONTROL_DEADLINE_MS = 15_000;
  * transfer alive forever.
  */
 export const UPLOAD_STALL_DEADLINE_MS = 30_000;
+
+/**
+ * Publishing a multipart upload asks R2 to stitch up to 10,000 parts, which
+ * takes longer than a JSON hop; still bounded, still replayed when transient.
+ */
+const MULTIPART_COMPLETE_DEADLINE_MS = 60_000;
+
+/** How often one part is sent again after a transient failure before the upload fails. */
+const PART_ATTEMPTS = 5;
 
 export interface PreparedMessageAttachmentUpload {
   attachmentId: string;
@@ -121,17 +133,17 @@ async function jsonResponse(
  * carries the same `requestId`, which the Hub treats as one command; bounded
  * by the hop's own deadline as well as the policy.
  */
-async function replayTransient<T>(attempt: () => Promise<T>, signal: AbortSignal): Promise<T> {
+async function replayTransient<T>(attempt: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   for (let failures = 0; ; failures += 1) {
     try {
       return await attempt();
     } catch (error) {
-      if (signal.aborted || !shouldRetryXMatrixQuery(failures, error)) throw error;
+      if (signal?.aborted || !shouldRetryXMatrixQuery(failures, error)) throw error;
       await new Promise<void>((resolve, reject) => {
-        const wake = () => { clearTimeout(timer); reject(signal.reason); };
-        const timer = setTimeout(() => { signal.removeEventListener("abort", wake); resolve(); },
+        const wake = () => { clearTimeout(timer); reject(signal?.reason); };
+        const timer = setTimeout(() => { signal?.removeEventListener("abort", wake); resolve(); },
           xmatrixRetryDelayMs(failures, error));
-        signal.addEventListener("abort", wake, { once: true });
+        signal?.addEventListener("abort", wake, { once: true });
       });
     }
   }
@@ -173,10 +185,8 @@ export async function prepareMessageAttachmentUpload(input: {
     input.onProgress?.(Math.max(1, Math.min(8, Math.round(progress * 0.08))));
   });
   const intentId = randomId();
-  const expectedUploadPath =
-    `${RELAY_V2_BLOB_UPLOAD_PREFIX}/${encodeURIComponent(intentId)}` +
-    `/scope/${encodeURIComponent(input.visibilityScopeId)}`;
-  let uploadPath: string;
+  const paths = relayV2BlobUploadPaths(intentId, input.visibilityScopeId);
+  let partBytes: number | undefined;
   const intentDeadline = deadlineSignal(input.controlDeadlineMs ?? UPLOAD_CONTROL_DEADLINE_MS);
   try {
     // The deadline has to stay armed across reading the body, not just until
@@ -204,16 +214,18 @@ export async function prepareMessageAttachmentUpload(input: {
       "Failed to create attachment upload",
       intentDeadline.signal,
     ), intentDeadline.signal);
-    const upload = admitted.upload;
-    uploadPath = upload && typeof upload === "object" &&
-      typeof (upload as { finalPath?: unknown }).finalPath === "string"
-      ? (upload as { finalPath: string }).finalPath
-      : "";
+    const upload = (admitted.upload && typeof admitted.upload === "object" ? admitted.upload : {}) as {
+      finalPath?: unknown; partBytes?: unknown;
+    };
     // The Hub selects the owning scoped authority. Accept only the exact path
     // implied by this request, so a malformed response cannot redirect the
     // authenticated upload to another Hub route or visibility scope.
-    if (uploadPath !== expectedUploadPath) {
+    if (upload.finalPath !== paths.single) {
       throw new Error("Attachment upload authority returned an invalid path");
+    }
+    // The largest body the Hub takes in one request; a larger file goes in parts of it.
+    if (Number.isSafeInteger(upload.partBytes) && (upload.partBytes as number) > 0) {
+      partBytes = upload.partBytes as number;
     }
   } catch (error) {
     throw deadlineError(error, "Creating the attachment upload");
@@ -221,7 +233,9 @@ export async function prepareMessageAttachmentUpload(input: {
     intentDeadline.done();
   }
 
-  const put = (url: string, headers: Record<string, string>) => new Promise<void>((resolve, reject) => {
+  /** One PUT of `body`, which starts `offset` bytes into the file, for progress. */
+  const put = (url: string, headers: Record<string, string>, body: Blob, offset: number) =>
+    new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("PUT", url);
     request.setRequestHeader("Authorization", `Bearer ${input.token}`);
@@ -256,8 +270,9 @@ export async function prepareMessageAttachmentUpload(input: {
         armStall();
       }
       if (!event.lengthComputable || event.total <= 0) return;
+      const sent = offset + (event.loaded / event.total) * body.size;
       input.onProgress?.(
-        Math.max(8, Math.min(99, 8 + Math.round((event.loaded / event.total) * 91))),
+        Math.max(8, Math.min(99, 8 + Math.round((sent / input.file.size) * 91))),
       );
     };
     request.onload = () => {
@@ -295,7 +310,7 @@ export async function prepareMessageAttachmentUpload(input: {
     // `send` must still disarm it, or the watchdog outlives the request.
     armStall();
     try {
-      request.send(input.file);
+      request.send(body);
     } catch (error) {
       clearStall();
       reject(error instanceof Error ? error : new Error("Failed to upload attachment"));
@@ -304,18 +319,27 @@ export async function prepareMessageAttachmentUpload(input: {
   // The body goes to the Hub straight when this page may ask it directly: the Web's Worker reads a whole request
   // into memory before answering it, so through the Web the browser sees no progress while the Worker re-sends
   // the file, and a large one stalls out. The Hub streams it into storage as it arrives. A token or client the
-  // Hub does not take from here, or no answer across origins, sends it through the Web, as reads do.
-  const direct = directHubRequest(input.token);
-  if (direct) {
-    try {
-      await put(`${direct.origin}${uploadPath}`, direct.headers);
-    } catch (error) {
-      if (!(error instanceof XMatrixApiError) || !(error.status === 401 || error.status === 426 ||
-          error.code === "network_error")) throw error;
-      await put(webProxyPath(uploadPath), {});
+  // Hub does not take from here, or no answer across origins, sends it through the Web, as reads do — and so
+  // does every later part of the same file.
+  let direct = directHubRequest(input.token);
+  const send = async (path: string, body: Blob, offset: number) => {
+    if (direct) {
+      try {
+        await put(`${direct.origin}${path}`, direct.headers, body, offset);
+        return;
+      } catch (error) {
+        if (!(error instanceof XMatrixApiError) || !(error.status === 401 || error.status === 426 ||
+            error.code === "network_error")) throw error;
+        direct = null;
+      }
     }
+    await put(webProxyPath(path), {}, body, offset);
+  };
+
+  if (partBytes === undefined || input.file.size <= partBytes) {
+    await send(paths.single, input.file, 0);
   } else {
-    await put(webProxyPath(uploadPath), {});
+    await uploadInParts({ ...input, paths, partBytes, send });
   }
 
   input.onProgress?.(100);
@@ -329,6 +353,69 @@ export async function prepareMessageAttachmentUpload(input: {
     mimeType: input.mimeType,
     name: input.file.name || "attachment",
   };
+}
+
+/** A JSON control hop of a multipart upload, under its own deadline and replayed when transient. */
+async function multipartControl(
+  token: string, path: string, what: string, deadlineMs: number,
+): Promise<Record<string, unknown>> {
+  const deadline = deadlineSignal(deadlineMs);
+  try {
+    return await replayTransient(async () => jsonResponse(
+      await xmatrixRawResponse(webProxyPath(path), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+        signal: deadline.signal,
+      }),
+      `Failed to ${what}`,
+      deadline.signal,
+    ), deadline.signal);
+  } catch (error) {
+    throw deadlineError(error, what.charAt(0).toUpperCase() + what.slice(1));
+  } finally {
+    deadline.done();
+  }
+}
+
+/**
+ * Sends a file larger than one request in parts, from wherever the Hub says
+ * the upload stands: a part it already holds is not sent again, and a part
+ * that fails transiently is sent again on its own. The Hub checks the file's
+ * SHA-256 across the parts before publishing them.
+ */
+async function uploadInParts(input: {
+  file: File;
+  token: string;
+  paths: ReturnType<typeof relayV2BlobUploadPaths>;
+  partBytes: number;
+  controlDeadlineMs?: number;
+  send: (path: string, body: Blob, offset: number) => Promise<void>;
+}): Promise<void> {
+  const controlMs = input.controlDeadlineMs ?? UPLOAD_CONTROL_DEADLINE_MS;
+  const status = await multipartControl(input.token, input.paths.multipart, "start the attachment upload", controlMs);
+  if (status.complete === true) return;
+  const partBytes = status.partBytes;
+  if (partBytes !== input.partBytes || status.partCount !== relayV2BlobPartCount(input.file.size, partBytes) ||
+      !Number.isSafeInteger(status.uploadedParts) || (status.uploadedParts as number) < 0) {
+    throw new Error("Attachment upload authority returned an invalid multipart upload");
+  }
+  const partCount = status.partCount as number;
+  for (let part = (status.uploadedParts as number) + 1; part <= partCount; part += 1) {
+    const offset = (part - 1) * partBytes;
+    const body = input.file.slice(offset, Math.min(input.file.size, offset + partBytes));
+    for (let failures = 0; ; failures += 1) {
+      try {
+        await input.send(input.paths.part(part), body, offset);
+        break;
+      } catch (error) {
+        if (failures + 1 >= PART_ATTEMPTS || !isTransientFailure(error)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, xmatrixRetryDelayMs(failures, error)));
+      }
+    }
+  }
+  await multipartControl(input.token, input.paths.complete, "finish the attachment upload",
+    Math.max(controlMs, MULTIPART_COMPLETE_DEADLINE_MS));
 }
 
 export async function commitMessageAttachmentRefs(input: {

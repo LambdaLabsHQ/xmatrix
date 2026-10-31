@@ -502,7 +502,7 @@ export function agentRunHttpRouteAllowed(
   if (
     canWriteAttachments &&
     request.method === "PUT" &&
-    /^\/api\/relay-v2\/private-r2\/uploads\/[^/]+(?:\/staging)?(?:\/scope\/[^/]+)?$/.test(path)
+    /^\/api\/relay-v2\/private-r2\/uploads\/[^/]+(?:\/staging|\/multipart\/parts\/[1-9][0-9]*)?(?:\/scope\/[^/]+)?$/.test(path)
   ) {
     return true;
   }
@@ -513,7 +513,7 @@ export function agentRunHttpRouteAllowed(
       path === RELAY_R2_UPLOAD_INTENT_PATH ||
       path === RELAY_R2_BLOB_REF_PATH ||
       path === RELAY_R2_BLOB_REF_RELEASE_PATH ||
-      /^\/api\/relay-v2\/private-r2\/uploads\/[^/]+\/verify(?:\/scope\/[^/]+)?$/.test(path) ||
+      /^\/api\/relay-v2\/private-r2\/uploads\/[^/]+\/(?:verify|multipart|multipart\/complete)(?:\/scope\/[^/]+)?$/.test(path) ||
       /^\/api\/channels\/[^/]+\/messages\/[^/]+\/attachments$/.test(path)
     )
   ) {
