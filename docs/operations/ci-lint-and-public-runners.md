@@ -217,3 +217,6 @@ separate per-file slot pool and adaptive admission. GitHub-hosted VMs and
 non-Linux validation keep their existing paths. Runner labels, deployment
 routes and signing do not change. Direct build commands outside `ci.mjs` and
 production artifact builds do not participate in this cooperative pool.
+
+The Rust runner prepares the shared target parent before starting its Linux
+and Windows Clippy lanes, including on a cold checkout with no build outputs.
