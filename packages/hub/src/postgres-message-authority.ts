@@ -21,10 +21,10 @@ import {
 } from "@xmatrix/db";
 
 import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message-command";
-import { agentAvatarUrlFromMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
+import { agentAvatarUrlFromMetadata, attachmentKind, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
   questionnaireStateOf, commandResultOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
   type QuestionnaireState } from "@xmatrix/protocol";
-import { REDACTED_CONTENT_HASH, productGatewayAttachmentKind } from "./product-message-command";
+import { REDACTED_CONTENT_HASH } from "./product-message-command";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import {
   decodeRelayV2MessagePayloadBundle,
@@ -797,7 +797,7 @@ export function postgresProductMessage(message: Record<string, unknown>): Record
             ...attachment,
             channelId: message.channelId,
             messageId: message.messageId,
-            kind: productGatewayAttachmentKind(String(attachment.mimeType ?? "")),
+            kind: attachmentKind(String(attachment.mimeType ?? ""), String(attachment.name ?? "")),
           }))
         : message.attachments,
       ...(rich.replyToMessageId ? { replyToMessageId: rich.replyToMessageId } : {}),

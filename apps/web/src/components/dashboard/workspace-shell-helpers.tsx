@@ -1,5 +1,5 @@
 "use client";
-import { decodeChannelSnapshot } from "@xmatrix/protocol";
+import { attachmentKind, decodeChannelSnapshot, extensionForMediaType, mediaTypeForName } from "@xmatrix/protocol";
 import type { UnsentMessageAction } from "./message-unsent-notice";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, glideTimelineLanding, timelineLayoutMoved } from "./timeline-send-rise";
@@ -31,9 +31,6 @@ import {
   RELAY_CLIENT_PROFILE_STORAGE_KEY,
 } from "./workspace-shell-constants";
 
-import {
-  channelAttachmentKindForMimeType,
-} from "./workspace-shell-formatters";
 import {
   pointerActivationAlreadyHandled,
   pointerActivationIsPending,
@@ -768,7 +765,7 @@ export function presentationAttachmentKind(attachment: ChannelAttachment): Chann
   ) {
     return attachment.kind;
   }
-  return channelAttachmentKindForMimeType(attachment.mimeType, attachment.name);
+  return attachmentKind(attachment.mimeType, attachment.name);
 }
 
 export function attachmentSource(attachment: ChannelAttachment): string {
@@ -797,42 +794,11 @@ export function attachmentDownloadName(attachment: ChannelAttachment): string {
 
 export function attachmentFilenameForMimeType(name: string, mimeType: string): string {
   const safeName = name.replace(/[\\/\r\n]/g, "_").slice(0, 120) || "attachment";
-  const extension = attachmentExtensionForMimeType(mimeType);
+  const extension = extensionForMediaType(mimeType);
   if (!extension) return safeName;
-
-  const knownExtensionMatch = safeName.match(/\.(png|jpe?g|webp|gif|md|markdown|mdown|mkd|mp4|mov|webm|ogv|m4v)$/i);
-  if (knownExtensionMatch) {
-    return `${safeName.slice(0, -knownExtensionMatch[0].length)}.${extension}`;
-  }
-  return `${safeName}.${extension}`;
-}
-
-export function attachmentExtensionForMimeType(mimeType: string): string | null {
-  switch (mimeType.toLowerCase()) {
-    case "image/png":
-      return "png";
-    case "image/jpeg":
-      return "jpg";
-    case "image/webp":
-      return "webp";
-    case "image/gif":
-      return "gif";
-    case "text/markdown":
-    case "text/x-markdown":
-      return "md";
-    case "video/mp4":
-      return "mp4";
-    case "video/quicktime":
-      return "mov";
-    case "video/webm":
-      return "webm";
-    case "video/ogg":
-      return "ogv";
-    case "video/x-m4v":
-      return "m4v";
-    default:
-      return null;
-  }
+  // A known extension is replaced by the stored type's own; any other name keeps its tail.
+  const stem = mediaTypeForName(safeName) ? safeName.replace(/\.[a-z0-9]+$/iu, "") : safeName;
+  return `${stem}.${extension}`;
 }
 
 function attachmentFetchHref(attachment: ChannelAttachment): string {

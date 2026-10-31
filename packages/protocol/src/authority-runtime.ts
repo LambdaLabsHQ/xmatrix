@@ -1,4 +1,5 @@
 import { trimEnd } from "./field-validation.js";
+import type { AttachmentKind } from "./media-types.js";
 import type { AgentTraceOrder } from "./trace-order.js";
 import type { AgentStatusChip } from "./agent-status-tags.js";
 import type { AgentRegistrationKey } from "./agent-registration.js";
@@ -590,7 +591,7 @@ export interface ChannelReactionActor {
 
 export interface ChannelAttachment {
   id: string;
-  kind: "image" | "video" | "markdown" | "file";
+  kind: AttachmentKind;
   name: string;
   mimeType: string;
   size: number;

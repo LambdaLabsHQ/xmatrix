@@ -1,12 +1,11 @@
 "use client";
 import { loadImage, canvasToBlob } from "./image-canvas";
 export { loadImage, canvasToBlob } from "./image-canvas";
-import { attachmentMediaMimeType } from "./attachment-media-type";
 import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
+import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -77,14 +76,11 @@ import {
 import {
   AGENT_SPAWN_HANDOFF_GRACE_MS,
   AGENT_SPAWN_PENDING_MAX_AGE_MS,
-  MARKDOWN_ATTACHMENT_EXTENSIONS,
-  MARKDOWN_ATTACHMENT_TYPES,
   MAX_COMPRESSED_IMAGE_DIMENSION,
   MAX_IMAGE_ATTACHMENT_BYTES,
 } from "./workspace-shell-constants";
 
 import {
-  channelAttachmentKindForMimeType,
   agentInstanceUsageLimit,
   attentionSummaryFromEvent,
   formatPercent,
@@ -345,27 +341,19 @@ export function formatFileSize(bytes: number): string {
   return `${value >= 10 || unitIndex === 0 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
+/** A Markdown file by its stated type or its name: browsers often state none, or plain text, for `.md`. */
 export function isMarkdownAttachmentFile(file: File): boolean {
-  const type = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
-  return MARKDOWN_ATTACHMENT_TYPES.has(type) || MARKDOWN_ATTACHMENT_EXTENSIONS.some((extension) => name.endsWith(extension));
+  return attachmentKind(file.type) === "markdown" || mediaTypeForName(file.name) === "text/markdown";
 }
 
 export function attachmentMimeTypeForFile(file: File): string {
   if (isMarkdownAttachmentFile(file)) return "text/markdown";
-  return normalizeAttachmentMimeType(attachmentMediaMimeType(file.type, file.name));
-}
-
-export function normalizeAttachmentMimeType(mimeType: string): string {
-  const normalized = mimeType.trim().toLowerCase();
-  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(normalized)
-    ? normalized
-    : "application/octet-stream";
+  return mediaTypeOf(file.type, file.name);
 }
 
 export function channelAttachmentKindForFile(file: File): ChannelAttachment["kind"] {
   if (isMarkdownAttachmentFile(file)) return "markdown";
-  return channelAttachmentKindForMimeType(file.type, file.name);
+  return attachmentKind(file.type, file.name);
 }
 
 export function defaultAttachmentName(kind: ChannelAttachment["kind"]): string {
