@@ -86,7 +86,8 @@ provider's webhook at the ingress URL. Then subscribe a channel with
 Cloudflare connects with OAuth (`CONNECTOR_CLOUDFLARE_CLIENT_ID` /
 `CONNECTOR_CLOUDFLARE_CLIENT_SECRET`, a Cloudflare OAuth client whose allowed
 scopes include every scope in the manifest, `d1.read` and `registrar-domains.admin`
-among them) or with an account API token that has Notifications Edit, Workers
+among them; Cloudflare offers no `workers-scripts.read` OAuth scope, so the
+manifest asks for `workers-scripts.edit`, which also reads Workers) or with an account API token that has Notifications Edit, Workers
 Observability Write, Workers Scripts Read and Edit, D1 Read, Zone Read and
 Write, DNS Read and Write, and Registrar Domains Read and Admin.
 

@@ -6,6 +6,12 @@
 //! endpoint reports only the percentage used and the window reset, so the
 //! meters carry a percent and a reset instant rather than used/limit amounts.
 //!
+//! When OpenCode runs an `openai/*` model on a ChatGPT login (`opencode auth
+//! login` → OpenAI → ChatGPT), the account quota is the ChatGPT subscription's
+//! own 5h/1w windows. OpenCode stores that OAuth login under the `openai` entry
+//! of the same `auth.json`, so the reader asks ChatGPT's `wham/usage` with it,
+//! exactly as the Codex reader does for a Codex login.
+//!
 //! ACP `usage_update` notifications already carry the session's context usage
 //! and cost; this reader adds the account-level quota windows that the generic
 //! ACP path otherwise cannot see.
@@ -44,6 +50,112 @@ fn opencode_auth_dirs() -> Vec<PathBuf> {
         dirs.push(PathBuf::from(appdata).join("opencode"));
     }
     dirs
+}
+
+fn opencode_auth_file() -> Option<Value> {
+    opencode_auth_dirs().iter().find_map(|dir| {
+        let raw = std::fs::read_to_string(dir.join("auth.json")).ok()?;
+        serde_json::from_str::<Value>(&raw).ok()
+    })
+}
+
+/// The ChatGPT OAuth login OpenCode stored for its `openai` provider.
+#[derive(Debug, PartialEq, Eq)]
+struct OpenCodeChatGptLogin {
+    access_token: String,
+    account_id: Option<String>,
+}
+
+/// Read the `openai` OAuth entry. An API-key entry has no subscription quota,
+/// and an expired access token is skipped rather than refreshed: refreshing
+/// would rotate the refresh token OpenCode itself owns.
+fn opencode_chatgpt_login_from_auth(value: &Value, now_ms: i64) -> Option<OpenCodeChatGptLogin> {
+    let entry = value.as_object()?.get("openai")?.as_object()?;
+    if entry
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind != "oauth")
+    {
+        return None;
+    }
+    let access_token = first_string(entry, &["access", "access_token", "accessToken"])?;
+    if let Some(expires) = entry.get("expires").and_then(Value::as_i64)
+        && expires <= now_ms
+    {
+        return None;
+    }
+    Some(OpenCodeChatGptLogin {
+        access_token,
+        account_id: first_string(entry, &["accountId", "account_id"]),
+    })
+}
+
+fn now_unix_ms() -> i64 {
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+/// ChatGPT subscription windows for OpenCode's stored `openai` OAuth login.
+pub async fn read_opencode_chatgpt_usage(force: bool) -> Option<LlmUsage> {
+    let auth = opencode_auth_file()?;
+    read_opencode_chatgpt_usage_from(&auth, force, super::codex::CODEX_CHATGPT_USAGE_URL).await
+}
+
+async fn read_opencode_chatgpt_usage_from(
+    auth: &Value,
+    force: bool,
+    endpoint: &str,
+) -> Option<LlmUsage> {
+    let login = opencode_chatgpt_login_from_auth(auth, now_unix_ms())?;
+    let key = format!(
+        "opencode-openai\u{0}{}",
+        login.account_id.as_deref().unwrap_or("")
+    );
+    super::codex::read_chatgpt_wham_usage_with_token(
+        &key,
+        &login.access_token,
+        login.account_id.as_deref(),
+        force,
+        endpoint,
+    )
+    .await
+}
+
+/// Which account an OpenCode model draws on, from its `provider/model` id.
+#[derive(Debug, PartialEq, Eq)]
+enum OpenCodeQuotaSource {
+    Go,
+    ChatGpt,
+    /// The model is not known yet: try Go first, then ChatGPT.
+    Unknown,
+    /// A provider with no account quota reader (API keys, other vendors).
+    None,
+}
+
+fn opencode_quota_source(model: Option<&str>) -> OpenCodeQuotaSource {
+    let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) else {
+        return OpenCodeQuotaSource::Unknown;
+    };
+    let Some((provider, _)) = model.split_once('/') else {
+        return OpenCodeQuotaSource::Unknown;
+    };
+    match provider.to_ascii_lowercase().as_str() {
+        "opencode-go" => OpenCodeQuotaSource::Go,
+        "openai" => OpenCodeQuotaSource::ChatGpt,
+        _ => OpenCodeQuotaSource::None,
+    }
+}
+
+/// The account quota behind the model OpenCode is running.
+pub async fn read_opencode_usage_for_model(force: bool, model: Option<&str>) -> Option<LlmUsage> {
+    match opencode_quota_source(model) {
+        OpenCodeQuotaSource::Go => read_opencode_zen_usage(force).await,
+        OpenCodeQuotaSource::ChatGpt => read_opencode_chatgpt_usage(force).await,
+        OpenCodeQuotaSource::Unknown => match read_opencode_zen_usage(force).await {
+            Some(usage) => Some(usage),
+            None => read_opencode_chatgpt_usage(force).await,
+        },
+        OpenCodeQuotaSource::None => None,
+    }
 }
 
 fn opencode_key_from_auth_file(path: &PathBuf) -> Option<String> {
@@ -143,6 +255,96 @@ pub(crate) fn opencode_zen_usage_from_value(value: &Value) -> Option<LlmUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opencode_model_provider_selects_the_quota_account() {
+        assert_eq!(
+            opencode_quota_source(Some("openai/gpt-6.1-terra")),
+            OpenCodeQuotaSource::ChatGpt
+        );
+        assert_eq!(
+            opencode_quota_source(Some("opencode-go/kimi-k2")),
+            OpenCodeQuotaSource::Go
+        );
+        assert_eq!(
+            opencode_quota_source(Some("anthropic/claude-opus")),
+            OpenCodeQuotaSource::None
+        );
+        assert_eq!(opencode_quota_source(None), OpenCodeQuotaSource::Unknown);
+        assert_eq!(
+            opencode_quota_source(Some(" ")),
+            OpenCodeQuotaSource::Unknown
+        );
+    }
+
+    #[test]
+    fn opencode_chatgpt_login_reads_live_oauth_and_skips_keys_and_expired_tokens() {
+        let auth = serde_json::json!({
+            "openai": {
+                "type": "oauth",
+                "access": "tok",
+                "refresh": "r",
+                "expires": 2_000,
+                "accountId": "acct"
+            }
+        });
+        assert_eq!(
+            opencode_chatgpt_login_from_auth(&auth, 1_000),
+            Some(OpenCodeChatGptLogin {
+                access_token: "tok".into(),
+                account_id: Some("acct".into()),
+            })
+        );
+        assert_eq!(opencode_chatgpt_login_from_auth(&auth, 2_000), None);
+        let api_key = serde_json::json!({ "openai": { "type": "api", "key": "sk" } });
+        assert_eq!(opencode_chatgpt_login_from_auth(&api_key, 0), None);
+        let go_only = serde_json::json!({ "opencode-go": { "type": "api", "key": "k" } });
+        assert_eq!(opencode_chatgpt_login_from_auth(&go_only, 0), None);
+    }
+
+    #[tokio::test]
+    async fn opencode_chatgpt_login_reads_wham_windows_with_account_header() {
+        use std::io::Write;
+        let auth = serde_json::json!({
+            "openai": { "type": "oauth", "access": "tok", "accountId": "acct-1",
+                        "expires": i64::MAX }
+        });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!(
+            "http://{}/backend-api/wham/usage",
+            listener.local_addr().unwrap()
+        );
+        let server = std::thread::spawn(move || {
+            let (mut stream, request) =
+                crate::quota::read_fixture_http_request(&listener, "no wham request");
+            let body = serde_json::json!({
+                "rate_limit": {
+                    "allowed": true,
+                    "primary_window": { "used_percent": 12, "limit_window_seconds": 18000, "reset_at": 1_900_000_000 },
+                    "secondary_window": { "used_percent": 40, "limit_window_seconds": 604800, "reset_at": 1_900_500_000 }
+                }
+            })
+            .to_string();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            request
+        });
+
+        let usage = read_opencode_chatgpt_usage_from(&auth, true, &endpoint)
+            .await
+            .expect("chatgpt usage");
+        let request = server.join().unwrap();
+        assert!(request.contains("authorization: bearer tok"), "{request}");
+        assert!(request.contains("chatgpt-account-id: acct-1"), "{request}");
+        let quotas = crate::quota::assert_provider_window_labels(usage, &["5h", "1w"]);
+        assert_eq!(quotas[0].percent, Some(12.0));
+        assert_eq!(quotas[1].percent, Some(40.0));
+    }
 
     #[test]
     fn opencode_usage_endpoint_extracts_rolling_weekly_monthly_windows() {
