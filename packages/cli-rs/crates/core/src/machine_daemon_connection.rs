@@ -1215,6 +1215,13 @@ pub enum MachineDaemonConnectionEvent {
     ShutdownRequested {
         reason: Option<String>,
     },
+    /// Hub's word that `channel` (`stable` or `dev`) has a newer CLI release
+    /// than this daemon reported. Not a command: nothing is claimed or
+    /// answered; the daemon reads its own release feed before updating.
+    CliRelease {
+        channel: String,
+        version: String,
+    },
 }
 
 /// Report identities the daemon request broker gives its approval cards.
@@ -3176,6 +3183,24 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
                 },
             },
         ),
+        "machine_cli_release" => {
+            let field = |name: &str| {
+                value
+                    .get(name)
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|text| !text.is_empty() && text.len() <= 64)
+                    .map(str::to_string)
+            };
+            Some(match (field("channel"), field("version")) {
+                (Some(channel), Some(version)) => {
+                    MachineDaemonConnectionEvent::CliRelease { channel, version }
+                }
+                _ => MachineDaemonConnectionEvent::Error {
+                    message: "Invalid CLI release notice".into(),
+                    correlation: None,
+                },
+            })
+        }
         "error" => {
             let message = value
                 .get("message")
@@ -3677,6 +3702,25 @@ mod tests {
             parse_machine_daemon_server_event(r#"{"type":"agent_instance_connected","agent":{}}"#)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn machine_parser_reads_cli_release_notices() {
+        match parse_machine_daemon_server_event(
+            r#"{"type":"machine_cli_release","channel":"stable","version":"2.3.0"}"#,
+        ) {
+            Some(MachineDaemonConnectionEvent::CliRelease { channel, version }) => {
+                assert_eq!(channel, "stable");
+                assert_eq!(version, "2.3.0");
+            }
+            other => panic!("expected a CLI release notice, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_machine_daemon_server_event(
+                r#"{"type":"machine_cli_release","channel":"stable"}"#
+            ),
+            Some(MachineDaemonConnectionEvent::Error { .. })
+        ));
     }
 
     #[test]

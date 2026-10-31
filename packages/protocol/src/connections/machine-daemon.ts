@@ -542,6 +542,25 @@ export interface MachineDaemonWorktreeActionCommand {
 /** The capability a daemon advertises when it puts a Run to sleep on the Hub's word. */
 export const MACHINE_SLEEP_CAPABILITY = "machine_sleep_agent_v1";
 
+/** The capability a daemon advertises when it updates itself on a CLI release notice. */
+export const MACHINE_CLI_RELEASE_CAPABILITY = "machine_cli_release_v1";
+
+/** The CLI release channels: a stable `X.Y.Z` follows `stable`, a beta `X.Y.Z-beta.N` follows `dev`. */
+export type CliReleaseChannel = "stable" | "dev";
+
+/**
+ * The newest CLI release of a channel, pushed to a daemon that follows that
+ * channel and runs an older version. Not a command: nothing is claimed or
+ * answered. The daemon reads its channel's release feed itself and updates
+ * through its own self-update path; a notice it cannot act on is dropped and
+ * repeated on the Hub's next pass while the daemon is still behind.
+ */
+export interface MachineDaemonCliReleaseNotice {
+  type: "machine_cli_release";
+  channel: CliReleaseChannel;
+  version: string;
+}
+
 /**
  * The Hub decided a resting Run has been idle long enough to sleep
  * (docs/instance-sleep.md). The daemon verifies its own facts first: the Run
@@ -649,6 +668,7 @@ export type MachineDaemonServerMessage =
   | MachineDaemonAuthRefreshed
   | MachineDaemonUnregistered
   | MachineDaemonShutdown
+  | MachineDaemonCliReleaseNotice
   | { type: "machine_daemon_connected"; daemon: SerializedMachineDaemon; connectionEpoch: number; activation?: MachineDaemonActivationReceipt;
       /** The Hub's harness registry (`agent-presets.json` text), for a daemon declaring `hub_harness_registry_v1`. */
       harnessRegistry?: string }

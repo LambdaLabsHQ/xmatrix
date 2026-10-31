@@ -6,6 +6,7 @@ import { maintainChannelDeletions } from "./channel-deletion-maintenance";
 import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
 import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
+import { noticeCliReleases } from "./cli-release-notice";
 import { connectorGoogleChatRoomRepository, connectorFeishuRoomRepository, connectorTelegramRoomRepository, connectorTeamsRoomRepository } from "./connectors/credentials";
 import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
@@ -170,6 +171,7 @@ export default {
     run("Sentry event recovery", () => drainSentryEvents(env));
     run("Gmail notification recovery and renewal", () => drainGmailNotifications(env));
     run("Harness release watch", () => watchHarnessReleasesBesidePostgres(env));
+    run("CLI release notice", () => noticeCliReleases(env));
     run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
     run("Admin activity rollup", () => rollUpAdminActivityOnSchedule(env, event.scheduledTime));
     for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
