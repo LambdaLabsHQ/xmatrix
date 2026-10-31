@@ -16,7 +16,7 @@ use crate::fields::{first_f64, first_reset_at, first_string};
 use crate::host::{lowercase_hex, provider_client};
 use crate::usage::{LlmQuotaAccount, LlmQuotaCredits, LlmQuotaUsage, LlmUsage, has_llm_usage};
 
-const CODEX_CHATGPT_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+pub(crate) const CODEX_CHATGPT_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 
 static CODEX_CHATGPT_USAGE: KeyedProviderUsageCache =
     KeyedProviderUsageCache::new(Duration::from_secs(120), Duration::from_secs(60));
@@ -137,6 +137,42 @@ async fn read_codex_usage_from_endpoint(
         usage.quota_observed_at = super::observed_now();
     }
     CODEX_CHATGPT_USAGE.store(&key, usage.clone());
+    usage
+}
+
+/// ChatGPT subscription windows for a token held outside a Codex config home
+/// (OpenCode stores its own ChatGPT OAuth login). `cache_key` must identify the
+/// account so two logins never share one slot; the token itself is never part
+/// of the key.
+pub(crate) async fn read_chatgpt_wham_usage_with_token(
+    cache_key: &str,
+    access_token: &str,
+    account_id: Option<&str>,
+    force: bool,
+    endpoint: &str,
+) -> Option<LlmUsage> {
+    if let Some(cached) = CODEX_CHATGPT_USAGE.hit_unless_forced(cache_key, force) {
+        return cached;
+    }
+    let mut request = provider_client()
+        .get(endpoint)
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {access_token}"),
+        )
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::USER_AGENT, "xmatrix-cli");
+    if let Some(account_id) = account_id {
+        request = request.header("ChatGPT-Account-Id", account_id);
+    }
+    let value = CODEX_CHATGPT_USAGE
+        .fetch_json(cache_key, "chatgpt", request)
+        .await?;
+    let mut usage = codex_wham_usage_from_value(&value);
+    if let Some(usage) = usage.as_mut() {
+        usage.quota_observed_at = super::observed_now();
+    }
+    CODEX_CHATGPT_USAGE.store(cache_key, usage.clone());
     usage
 }
 
