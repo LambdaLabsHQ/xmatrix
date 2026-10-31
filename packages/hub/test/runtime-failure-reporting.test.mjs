@@ -117,3 +117,35 @@ test("unclassified runtime database failures retain phase and mapped origin once
   assert.deepEqual(sentryEventMetadata({ context: { runtime_database_reason: "PRIVATE_SENTINEL" } }), []);
   assert.doesNotMatch(JSON.stringify(exceptionEvents(envelopes)), /PRIVATE_SENTINEL/u);
 });
+
+// XMATRIX-HUB-7J/8Y: a retryable outage on a socket logged two console-only
+// errors (authority rejection, failure stage) and dropped the database evidence.
+test("a retryable database outage on a socket is reported once, with its evidence (XMATRIX-HUB-7J/8Y)", async (t) => {
+  const envelopes = captureErrorReports(t);
+  const errors = [];
+  t.mock.method(console, "warn", () => {});
+  t.mock.method(console, "error", (...args) => { errors.push(args[0]); });
+  // A Hyperdrive stall: the query is sent and its answer never arrives.
+  const stalled = { connect: async () => {}, end: async () => {}, async query(input) {
+    if (typeof input === "object" && /PRIVATE_SENTINEL_TABLE/u.test(input.text)) throw new Error("Query read timeout");
+    return { rows: [{ backend_pid: 1, configured: "" }] };
+  } };
+  const database = createAuthorityDatabase({ shardId: "shard-0", clientFactory: () => stalled,
+    connectionString: "postgres://PRIVATE_SENTINEL" });
+  const connect = () => database.transaction({ requestId: "PRIVATE_SENTINEL", operation: "agent.connect" }, tx =>
+    tx.query({ name: "agent_connect_v1", text: "SELECT 1 FROM PRIVATE_SENTINEL_TABLE", maxRows: 1 }));
+  const replies = [];
+  const agentSocket = { send(raw) { replies.push(JSON.parse(raw)); } };
+  await new RuntimeSocketState("agent", (_id, message, failure) => ({ message, failure }), () => {})
+    .answerOperation(agentSocket, "connect", "Connect failed", connect, () => "relay.authenticate");
+  await sendErrorReports();
+  assert.equal(replies[0].failure.code, "postgres_runtime_unavailable");
+  assert.equal(replies[0].failure.retryable, true, "the client redials");
+  const events = exceptionEvents(envelopes);
+  assert.equal(events.length, 1, "one report, not a console line per layer");
+  assert.equal(events[0].tags.operation, "runtime.database");
+  assert.equal(events[0].extra.diagnosticId, replies[0].failure.diagnosticId);
+  assert.equal(JSON.parse(events[0].extra.database_failure_attempts)[0].queryName, "agent_connect_v1");
+  assert.deepEqual(errors, [], "the authority rejection and failure stage only warn");
+  assert.doesNotMatch(JSON.stringify([events, replies]), /PRIVATE_SENTINEL/u);
+});

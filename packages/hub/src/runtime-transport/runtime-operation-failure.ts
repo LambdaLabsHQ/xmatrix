@@ -40,7 +40,8 @@ export class RuntimeAuthorityOperationError extends Error {
   readonly failure: RuntimeOperationFailure;
   /** A 409 saying the command or message id is already committed. */
   readonly committedIdentityConflict: boolean;
-  constructor(operation: string, status: number, body: unknown) {
+  /** `reported`: the original failure already owns its Sentry event, with its evidence. */
+  constructor(operation: string, status: number, body: unknown, readonly reported = false) {
     super(`PostgreSQL rejected ${operation} (${status})`);
     const value = body && typeof body === "object" ? body as Record<string, unknown> : {};
     const code = typeof value.code === "string" && PUBLIC_CODES.has(value.code)
@@ -59,7 +60,7 @@ export class RuntimeAuthorityOperationError extends Error {
     // Which fence refused, and on what command type (static labels, e.g. a stale lease's).
     const label = (field: unknown) => typeof field === "string" && AUTHORITY_CODE.test(field) ? field : undefined;
     const authorityReason = label(value.reason), commandType = label(value.commandType);
-    (this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
+    (reported || this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
       "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status,
         ...(authorityReason ? { authorityReason } : {}), ...(commandType ? { commandType } : {}) });
   }
@@ -94,12 +95,21 @@ function authorityRejection(error: object): RuntimeAuthorityOperationError | und
   }
   if (postgresTransactionConflict(error)) {
     reportPostgresConflict(error);
-    return new RuntimeAuthorityOperationError("postgres", 503, { code: TRANSACTION_CONFLICT.code, retryable: true });
+    return new RuntimeAuthorityOperationError("postgres", 503, { code: TRANSACTION_CONFLICT.code, retryable: true }, true);
   }
   if (retryablePostgresFailure(error)) {
-    return new RuntimeAuthorityOperationError("postgres", 503, { code: "postgres_runtime_unavailable", retryable: true });
+    // An outage met on a socket (XMATRIX-HUB-7J/8Y) is reported once, as the
+    // database failure with its attempts' evidence, under the id the client gets.
+    const diagnosticId = `diag_${crypto.randomUUID()}`;
+    return new RuntimeAuthorityOperationError("postgres", 503, { code: "postgres_runtime_unavailable", retryable: true,
+      diagnosticId }, reportRuntimeDatabaseFailure(error, diagnosticId));
   }
   return undefined;
+}
+
+/** Whether a socket failure's original already owns its report, so a stage log only warns. */
+export function runtimeFailureReported(error: unknown): boolean {
+  return authorityOperationError(error)?.reported === true;
 }
 
 /** The authority fenced this frame because a newer connect replaced its connection. */
