@@ -2968,11 +2968,21 @@ export class PostgresMessageRepository {
     }
     const authorId = authorKind === "user" ? bounded(input.authorId, "authorId") : null;
     const placement = await this.placement(input.requestId, "message.search", spaceId);
+    // A Channel filter reads a handful of Channels: their messages, sorted, are
+    // few. Across a Space the reader may read most of its messages, so the read
+    // walks the Space's rank index newest first and stops at the page. As a join
+    // PostgreSQL would fetch and sort every readable message for one page, which
+    // in a Space with a thousand readable Channels outlasted the read timeout.
+    // Wrapped in IS TRUE the membership test is not turned into that join: it
+    // stays a hashed probe of the readable Channels that the walk filters on.
+    const readable = channelId === null
+      ? "(m.channel_id IN (SELECT channel_id FROM readable)) IS TRUE"
+      : "m.channel_id IN (SELECT channel_id FROM readable)";
     const rows = await this.database.transaction({
       requestId: input.requestId, operation: "message.search", statement: "single_read",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
     }, (transaction) => transaction.query<QueryResultRow>({
-      name: "message_search_candidates_v3",
+      name: channelId === null ? "message_search_candidates_v4" : "message_search_channel_candidates_v4",
       text: `WITH readable AS MATERIALIZED (
           SELECT c.channel_id FROM data.channels c
           WHERE c.space_id=$1 AND ($6::text IS NULL OR c.channel_id=$6 OR (c.metadata_json->>'kind'='thread' AND c.metadata_json->>'threadRootChannelId'=$6))
@@ -2982,7 +2992,7 @@ export class PostgresMessageRepository {
         SELECT m.message_id,m.channel_id,m.timeline_sequence,m.entity_version,m.search_rank_sequence,
           m.author_kind,m.author_id,m.payload_bundle_base64,m.legacy_body,m.attachments_json,m.sent_at
         FROM data.messages m
-        WHERE m.space_id=$1 AND m.channel_id IN (SELECT channel_id FROM readable)
+        WHERE m.space_id=$1 AND ${readable}
           AND m.deleted_at IS NULL AND m.recalled_at IS NULL
           AND ($4::text IS NULL OR m.search_rank_sequence < $4)
           AND ($7::text IS NULL OR m.author_kind=$7) AND ($8::text IS NULL OR m.author_id=$8)
