@@ -203,13 +203,19 @@ pub(crate) fn codex_wham_usage_from_value(value: &Value) -> Option<LlmUsage> {
     }
 }
 
-/// Whether ChatGPT still serves the account, from the same `wham/usage` read:
-/// `rate_limit.allowed` already accounts for credits and spend controls, and
-/// `credits` is what a request draws on once the windows are used up.
+/// Whether ChatGPT still serves the account, from the same `wham/usage` read.
+/// `rate_limit.allowed` turns false as soon as the plan windows are used up,
+/// even while `credits` keep serving requests; the account refuses only when
+/// no credits are left or an overage or spend limit is reached.
 fn codex_wham_account(value: &Value) -> Option<LlmQuotaAccount> {
+    let reached = |pointer: &str| value.pointer(pointer).and_then(Value::as_bool) == Some(true);
+    let credits_serve = (reached("/credits/has_credits") || reached("/credits/unlimited"))
+        && !reached("/credits/overage_limit_reached")
+        && !reached("/spend_control/reached");
     let allowed = value
         .pointer("/rate_limit/allowed")
-        .and_then(Value::as_bool);
+        .and_then(Value::as_bool)
+        .map(|allowed| allowed || credits_serve);
     let credits = value
         .get("credits")
         .and_then(Value::as_object)
@@ -528,12 +534,17 @@ mod tests {
         let payload = serde_json::json!({
             "plan_type": "pro",
             "rate_limit": {
-                "allowed": true,
+                "allowed": false,
                 "limit_reached": true,
                 "primary_window": { "used_percent": 100, "limit_window_seconds": 604800, "reset_at": 1791631680 }
             },
-            "credits": { "has_credits": true, "unlimited": false, "balance": "137.5" },
-            "spend_control": { "reached": false }
+            "credits": {
+                "has_credits": true,
+                "unlimited": false,
+                "overage_limit_reached": false,
+                "balance": "137.5"
+            },
+            "spend_control": { "reached": false, "individual_limit": null }
         });
         let usage = codex_wham_usage_from_value(&payload).unwrap();
         assert_eq!(usage.quota_usages.unwrap()[0].percent, Some(100.0));
@@ -562,6 +573,24 @@ mod tests {
                 allowed: Some(false),
                 credits: None
             })
+        );
+
+        let spend_capped = serde_json::json!({
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": { "used_percent": 100, "limit_window_seconds": 604800 }
+            },
+            "credits": { "has_credits": true, "unlimited": false, "overage_limit_reached": false, "balance": "5" },
+            "spend_control": { "reached": true }
+        });
+        assert_eq!(
+            codex_wham_usage_from_value(&spend_capped)
+                .unwrap()
+                .quota_account
+                .unwrap()
+                .allowed,
+            Some(false)
         );
     }
 
