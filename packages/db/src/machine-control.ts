@@ -89,6 +89,14 @@ export class MachineControlError extends ControlError {
   override name = "MachineControlError";
 }
 
+/** Which lease fence refused a daemon frame, and on what command type: static
+ * labels only, logged with the rejection so a stale lease names its cause. */
+export class MachineStaleLeaseError extends MachineControlError {
+  constructor(message: string, readonly reason: string, readonly commandType?: string) {
+    super("machine_command_stale_lease", 409, message);
+  }
+}
+
 function channelCapabilityError(failure: ChannelCapabilityFailure): MachineControlError {
   return new MachineControlError(failure.code, failure.status, failure.message);
 }
@@ -1347,8 +1355,8 @@ export class PostgresMachineControlRepository {
         RETURNING version,lease_generation,lease_until`,
       values: [leaseOwner, leaseMs, row.command_id, row.version, QUOTA_PROBE_WINDOW_MS], maxRows: 1 });
       const lease = updated[0];
-      if (!lease) throw new MachineControlError("machine_command_stale_lease", 409,
-        "Machine claim lost its compare-and-swap race");
+      if (!lease) throw new MachineStaleLeaseError("Machine claim lost its compare-and-swap race", "claim.race",
+        String(row.command_type));
       const relayLease = { leaseOwner, leaseGeneration: Number(lease.lease_generation),
         entityVersion: Number(lease.version), daemonEpoch: connectionEpoch };
       commands.push({ controlId: row.command_id, commandType: row.command_type,
@@ -1369,24 +1377,27 @@ export class PostgresMachineControlRepository {
    * run a second time, and whoever waited on it saw nothing for hours.
    */
   private async exactLeased(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
-    machineId: string, connectionEpoch: number, fence: "live" | "generation" = "live") {
+    machineId: string, connectionEpoch: number, action: "renew" | "complete" | "retry",
+    fence: "live" | "generation" = "live") {
     const controlId = text(input.controlId, "controlId", 200);
     const lease = record(input.relayLease, "relayLease");
     const leaseOwner = text(lease.leaseOwner, "relayLease.leaseOwner", 700);
-    if (fence === "live" && lease.daemonEpoch !== connectionEpoch) throw new MachineControlError(
-      "machine_command_stale_lease", 409, "Machine lease belongs to another Daemon epoch");
+    if (fence === "live" && lease.daemonEpoch !== connectionEpoch) throw new MachineStaleLeaseError(
+      "Machine lease belongs to another Daemon epoch", `${action}.epoch`);
     const rows = await tx.query<QueryResultRow>({ name: "machine_control_lease_lock_v3", text: `SELECT *,
       lease_until>clock_timestamp() AND (command_type<>'quota_probe' OR expires_at>clock_timestamp()) AS lease_live
       FROM data.machine_daemon_commands WHERE command_id=$1 AND owner_user_id=$2 AND machine_id=$3 FOR UPDATE`, values: [controlId, ownerUserId, machineId], maxRows: 1 });
     const command = rows[0];
     if (!command) throw new MachineControlError("machine_command_not_found", 404,
       "Machine command not found");
-    if (command.status !== "leased" || command.lease_owner !== leaseOwner ||
-        Number(command.lease_generation) !== integer(lease.leaseGeneration, "leaseGeneration", 1) ||
-        Number(command.version) !== integer(lease.entityVersion, "entityVersion", 2) ||
-        (fence === "live" && command.lease_live !== true)) {
-      throw new MachineControlError("machine_command_stale_lease", 409,
-        "Machine command lease is stale");
+    const stale = command.status !== "leased" ? "status"
+      : command.lease_owner !== leaseOwner ? "owner"
+        : Number(command.lease_generation) !== integer(lease.leaseGeneration, "leaseGeneration", 1) ? "generation"
+          : Number(command.version) !== integer(lease.entityVersion, "entityVersion", 2) ? "version"
+            : fence === "live" && command.lease_live !== true ? "expired" : undefined;
+    if (stale) {
+      throw new MachineStaleLeaseError("Machine command lease is stale", `${action}.${stale}`,
+        String(command.command_type));
     }
     return { command, controlId, leaseOwner };
   }
@@ -1394,7 +1405,7 @@ export class PostgresMachineControlRepository {
   private async renew(tx: DatabaseTransaction, input: Record<string, unknown>, current: QueryResultRow,
     connectionEpoch: number, at: string) {
     const exact = await this.exactLeased(tx, input, String(current.owner_user_id),
-      String(current.machine_id), connectionEpoch);
+      String(current.machine_id), connectionEpoch, "renew");
     if (input.expected !== undefined) {
       const expected = record(input.expected, "expected");
       const issued = record(exact.command.payload_json, "issuedPayload");
@@ -1434,8 +1445,8 @@ export class PostgresMachineControlRepository {
         updated_at=clock_timestamp()
       WHERE command_id=$2 AND version=$3 AND lease_owner=$4 RETURNING version,lease_until`, values: [leaseMs,
       exact.controlId, exact.command.version, exact.leaseOwner], maxRows: 1 });
-    if (!rows[0]) throw new MachineControlError("machine_command_stale_lease", 409,
-      "Machine command renewal lost its compare-and-swap race");
+    if (!rows[0]) throw new MachineStaleLeaseError("Machine command renewal lost its compare-and-swap race",
+      "renew.race", String(exact.command.command_type));
     return { daemon: daemon(current), connectionEpoch, audit: {
       commandId: input.commandId, action: "renew", at, persisted: false },
     leaseUntil: new Date(rows[0]!.lease_until as string | Date).toISOString(),
@@ -1467,7 +1478,7 @@ export class PostgresMachineControlRepository {
       return { reused: true, ...completionFacts(String(prior.command_type),
         prior.payload_json as Record<string, unknown>, payload) };
     }
-    const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch,
+    const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch, "complete",
       // A quota probe answers for one connection; its result expires with it.
       prior.command_type === "quota_probe" ? "live" : "generation");
     exactResult(String(exact.command.command_type), exact.command.payload_json as Record<string, unknown>,
@@ -1478,8 +1489,8 @@ export class PostgresMachineControlRepository {
       lease_until=NULL,version=version+1,updated_at=$3,completed_at=$3 WHERE command_id=$4
       AND version=$5 RETURNING command_id`, values: [status, JSON.stringify(payload), at,
       exact.controlId, exact.command.version], maxRows: 1 });
-    if (!rows[0]) throw new MachineControlError("machine_command_stale_lease", 409,
-      "Machine completion lost its compare-and-swap race");
+    if (!rows[0]) throw new MachineStaleLeaseError("Machine completion lost its compare-and-swap race",
+      "complete.race", String(exact.command.command_type));
     const issued = exact.command.payload_json as Record<string, unknown>;
     if (exact.command.command_type === "quota_probe" && status === "completed") {
       await recordRegistrationQuotaProbeResult(tx, { ownerUserId, machineId, hostId,
@@ -1499,15 +1510,15 @@ export class PostgresMachineControlRepository {
 
   private async retry(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
     machineId: string, connectionEpoch: number) {
-    const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch);
+    const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch, "retry");
     const backoffMs = Math.min(integer(input.backoffMs ?? 0, "backoffMs"), 300_000);
     const rows = await tx.query({ name: "machine_control_retry_v2", text: `UPDATE
       data.machine_daemon_commands SET status='pending',lease_owner=NULL,lease_until=NULL,
       available_at=clock_timestamp()+($1::integer*interval '1 millisecond'),
       version=version+1,updated_at=clock_timestamp() WHERE command_id=$2 AND version=$3
       RETURNING command_id`, values: [backoffMs, exact.controlId, exact.command.version], maxRows: 1 });
-    if (!rows[0]) throw new MachineControlError("machine_command_stale_lease", 409,
-      "Machine retry lost its compare-and-swap race");
+    if (!rows[0]) throw new MachineStaleLeaseError("Machine retry lost its compare-and-swap race",
+      "retry.race", String(exact.command.command_type));
   }
 
   async list(input: { requestId: string; ownerUserId: string; cursor?: string; limit?: number }) {

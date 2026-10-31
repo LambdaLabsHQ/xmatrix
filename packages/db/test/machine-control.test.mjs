@@ -320,7 +320,8 @@ test("Machine lease liveness is decided by PostgreSQL clock evidence", async () 
 
   await assert.rejects(new PostgresMachineControlRepository(db).command(relayCommandRequest(leaseOwner, { commandId: "renew-stale-db-clock", action: "renew", controlId: "spawn-1", relayLease: {
       leaseOwner, leaseGeneration: 1, entityVersion: 2, daemonEpoch: 1,
-    } })), (error) => error instanceof MachineControlError && error.code === "machine_command_stale_lease");
+    } })), (error) => error instanceof MachineControlError && error.code === "machine_command_stale_lease" &&
+      error.reason === "renew.expired" && error.commandType === "spawn", "HUB-7F: the refusal names its fence");
   const lock = db.calls.find((call) => call.name === "machine_control_lease_lock_v3");
   assert.match(lock.text, /lease_until>clock_timestamp\(\) AND \(command_type<>'quota_probe' OR expires_at>clock_timestamp\(\)\) AS lease_live/u);
 });
@@ -355,8 +356,8 @@ test("a result lands after its lease lapsed or its connection turned over, fence
 
   const reclaimed = make({ ...lapsed, lease_generation: 2, version: 3 });
   await assert.rejects(new PostgresMachineControlRepository(reclaimed).command(input),
-    (error) => error instanceof MachineControlError && error.code === "machine_command_stale_lease",
-    "once re-claimed, only the new holder decides");
+    (error) => error instanceof MachineControlError && error.code === "machine_command_stale_lease" &&
+      error.reason === "complete.generation", "once re-claimed, only the new holder decides");
   assert.equal(reclaimed.calls.some((call) => call.name === "machine_control_complete_v1"), false);
 });
 
