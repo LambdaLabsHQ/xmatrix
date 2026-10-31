@@ -97,7 +97,7 @@ async fn local_upload_sends_bytes_and_returns_markdown_only_after_binding() {
 #[tokio::test]
 async fn unsupported_empty_and_oversized_files_are_refused_before_network_io() {
     let base = std::env::temp_dir().join(format!("page-upload-limits-{}", std::process::id()));
-    for (extension, size) in [("svg", 16), ("png", 0), ("mp4", 25 * 1024 * 1024 + 1)] {
+    for (extension, size) in [("svg", 16), ("png", 0), ("mp4", 64 * 1024 * 1024 + 1)] {
         let path = base.with_extension(extension);
         let file = std::fs::File::create(&path).unwrap();
         file.set_len(size).unwrap();

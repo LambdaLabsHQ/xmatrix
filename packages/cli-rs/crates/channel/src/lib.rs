@@ -955,7 +955,7 @@ pub(crate) fn load_channel_file_attachments(
         let size = metadata.len();
         if size == 0 || size > CHANNEL_FILE_ATTACHMENT_MAX_BYTES {
             return Err(CliError::Launch(format!(
-                "{} must be between 1 byte and 25 MiB",
+                "{} must be between 1 byte and 64 MiB",
                 path.display()
             )));
         }

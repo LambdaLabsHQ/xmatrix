@@ -978,7 +978,7 @@ WebM, QuickTime) into the editor puts it in the text as a markdown image,
 - **An Agent can upload a local image or video.** `xmatrix page upload <page>
   <file>` uploads through the same private-content intent, verified bytes and
   Page-owned ref as the editor, then prints Markdown for `page edit` or live
-  writing. It accepts the types above, from 1 byte through 25 MiB, and never
+  writing. It accepts the types above, from 1 byte through 64 MiB, and never
   changes the Page's text itself. Create a Page before uploading into it.
   The Hub checks the exact live Run, its owner's current Page edit access,
   the Space and canonical Page/content-hash ref before binding, including on
