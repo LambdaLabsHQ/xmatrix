@@ -30,6 +30,7 @@ export async function withApple(routes, work) {
     const result = typeof route === "function" ? route(call) : route;
     if (result === undefined) return Response.json({ errors: [{ status: "404", code: "NOT_FOUND", detail: `no route ${call.method} ${call.path}` }] }, { status: 404 });
     if (result === null) return new Response(null, { status: 204 });
+    if (result instanceof Response) return result;
     /* A route may also answer with headers, such as the cookies Apple's website rotates. */
     const { responseHeaders, ...document } = result;
     return Response.json(document, { status: result.status ?? 200, headers: responseHeaders ?? {} });
