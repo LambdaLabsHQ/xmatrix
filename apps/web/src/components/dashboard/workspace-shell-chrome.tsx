@@ -379,11 +379,13 @@ export const CreateFab = memo(function CreateFab({ action }: { action: CreateAct
 export const MobileTabDock = memo(function MobileTabDock({
   activeView,
   hidden,
+  disabled,
   statusLive,
   onChangeView,
 }: {
   activeView: AppView;
   hidden?: boolean;
+  disabled?: boolean;
   /** An Agent in the Space is working now: the Status pulse runs. */
   statusLive?: boolean;
   onChangeView: (view: AppView) => void;
@@ -417,6 +419,7 @@ export const MobileTabDock = memo(function MobileTabDock({
             key={item.view}
             type="button"
             aria-label={item.label}
+            disabled={disabled}
             aria-current={active ? "page" : undefined}
             className={cn(
               "app-mobile-tab-button",

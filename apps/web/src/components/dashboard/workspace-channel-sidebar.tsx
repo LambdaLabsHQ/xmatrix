@@ -953,7 +953,7 @@ export function StartupShell({
       )}
       <LiquidGlassFilter />
       <div className="app-ambient pointer-events-none fixed inset-0" />
-      {showMobileTabDock && <MobileTabDock activeView="messages" onChangeView={inert} />}
+      {showMobileTabDock && <MobileTabDock activeView="messages" disabled onChangeView={inert} />}
       {/* Rail and sidebar keep the desktop silhouette so the signed-in
           shell drops in without a layout jump. */}
       <aside

@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: The phone's loading dock waits until it can navigate
+
+The startup frame drew enabled Pages/Channels/Status/More buttons with inert
+handlers. A tap before session resolution disappeared when the real shell
+mounted. Those placeholder buttons are now disabled; the real dock enables
+them when it can navigate. Web only, no API or schema change; recovery is a
+CI-validated release reverting the disabled startup state.
+
 ## Unreleased: Codex on credits no longer shows LIMIT
 
 ChatGPT now reports a Codex account as not allowed as soon as its plan week is

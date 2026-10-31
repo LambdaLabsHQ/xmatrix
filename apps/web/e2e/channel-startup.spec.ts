@@ -9,6 +9,28 @@ test.use(E2E_DESKTOP_CONTEXT);
 
 const BACKGROUND_READS = ["workspaces", "automations", "machine-daemons"];
 
+test.describe("Phone startup navigation", () => {
+  test.use(E2E_MOBILE_CONTEXT);
+  test("the loading dock cannot accept a tap until the workspace can respond", async ({ page }) => {
+    await installRealAuthWorkspace(page);
+    await fixtureRule(page, { id: "held-startup-session", pattern: "**/api/auth/get-session**",
+      responder: { kind: "deferred", json: SIGNED_IN_SESSION, headers: SESSION_JWT_HEADERS } });
+    await page.goto("/app", { waitUntil: "domcontentloaded" });
+    await expect.poll(async () => (await fixtureRequests(page, "held-startup-session")).length).toBeGreaterThan(0);
+    const loading = page.locator(".xmatrix-app-shell[aria-busy=true]");
+    await expect(loading).toBeVisible();
+    for (const name of ["Pages", "Channels", "Status", "More"]) {
+      await expect(loading.getByRole("button", { name, exact: true })).toBeDisabled();
+    }
+    await releaseFixture(page, "held-startup-session");
+    await expect(loading).toHaveCount(0);
+    const pages = page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Pages", exact: true });
+    await expect(pages).toBeEnabled();
+    await pages.tap();
+    await expect(page).toHaveURL(/\/pages$/u);
+  });
+});
+
 async function expectBackgroundReads(page: Page, started: boolean, timeout?: number) {
   for (const id of BACKGROUND_READS) {
     if (started) {
