@@ -743,7 +743,7 @@ test("a single read runs as one statement without BEGIN or COMMIT", async () => 
   assert.equal(queries.length, 1);
   assert.match(queries[0].input.text, /set_config\('xmatrix\.request_id', \$6, true\)/u);
   assert.match(queries[0].input.text, /CROSS JOIN LATERAL \(SELECT route FROM routes WHERE id = \$1\)/u);
-  assert.deepEqual(queries[0].input.values.slice(0, 2), ["channel-1", "xmatrix-hub"]);
+  assert.deepEqual(queries[0].input.values.slice(0, 2), ["channel-1", "xmatrix-hub channel.resolve-space"]);
   assert.equal(queries[0].input.values[5], "read-1");
   assert.deepEqual(observations.map((observation) => observation.queryName),
     ["database_phase_pool_checkout_v1", "route_v1"]);

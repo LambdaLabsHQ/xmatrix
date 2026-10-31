@@ -3,6 +3,9 @@ import type { ClientConfig, QueryResult } from "pg";
 const STATES = ["active", "idle in transaction", "idle in transaction (aborted)", "idle", "unknown"];
 const WAITS = ["Lock", "Client", "IO", "IPC", "LWLock", "Timeout", "Activity", "BufferPin", "none", "other"];
 const OWNERS = ["execution-report", "runtime", "message", "launch", "catalog", "other"];
+/** A transaction's `application_name` is `<application> <operation>` (PostgreSQL keeps
+ * 63 bytes), so a lock's evidence names the operation holding it as `op:<operation>`. */
+const OPERATION_OWNER = /^op:[a-z][a-z0-9_.:-]{0,61}$/u;
 interface Backend {
   state: string;
   wait: string;
@@ -24,7 +27,8 @@ export function parsePostgresLockWait(value: unknown): PostgresLockWait | undefi
       !Array.isArray(item.blockers) || item.blockers.length > 4) return;
   const valid = (backend: Backend) => backend && Object.keys(backend).length === 4 &&
     Object.keys(backend).every(key => ["state", "wait", "owner", "ageMs"].includes(key)) &&
-    STATES.includes(backend.state) && WAITS.includes(backend.wait) && OWNERS.includes(backend.owner) &&
+    STATES.includes(backend.state) && WAITS.includes(backend.wait) &&
+    (OWNERS.includes(backend.owner) || OPERATION_OWNER.test(backend.owner)) &&
     Number.isSafeInteger(backend.ageMs) && backend.ageMs >= 0 && backend.ageMs <= 120_000;
   if (item.status === "sampled" ? !valid(item.waiter!) : item.waiter !== undefined || item.blockers.length) return;
   if (!item.blockers.every(valid)) return;
@@ -46,10 +50,12 @@ const projection = (alias: string) => `json_build_object(
   'wait',CASE WHEN ${alias}.wait_event_type IS NULL THEN 'none'
     WHEN ${alias}.wait_event_type IN ('Lock','Client','IO','IPC','LWLock','Timeout','Activity','BufferPin')
     THEN ${alias}.wait_event_type ELSE 'other' END,
-  'owner',CASE ${alias}.application_name WHEN 'xmatrix-execution-report' THEN 'execution-report'
+  'owner',CASE WHEN ${alias}.application_name ~ '^[^ ]+ [a-z][a-z0-9_.:-]{0,61}$'
+      THEN 'op:'||split_part(${alias}.application_name,' ',2)
+    ELSE CASE ${alias}.application_name WHEN 'xmatrix-execution-report' THEN 'execution-report'
     WHEN 'xmatrix-hub-runtime' THEN 'runtime' WHEN 'xmatrix-hub-message-authority' THEN 'message'
     WHEN 'xmatrix-agent-launch-coordinator' THEN 'launch'
-    WHEN 'xmatrix-hub-channel-catalog' THEN 'catalog' ELSE 'other' END,
+    WHEN 'xmatrix-hub-channel-catalog' THEN 'catalog' ELSE 'other' END END,
   'ageMs',LEAST(120000,GREATEST(0,COALESCE(EXTRACT(epoch FROM (clock_timestamp()-${alias}.xact_start))*1000,0)))::int)`;
 
 /** Sample while the row lock is still waiting: after 55P03 the wait edge has already disappeared. */
@@ -87,10 +93,10 @@ async function sample(selector: number | string, config: ClientConfig,
 export function watchPostgresLockWait(queryName: string, backendPid: number | undefined,
   options: { connectionString: string; lockTimeoutMs: number; clientFactory: (config: ClientConfig) => DiagnosticClient },
 ): (() => Promise<PostgresLockWait | undefined>) | undefined {
-  if (!["runtime_execution_report_owner_v4", "channel_lifecycle_lock_runtime_new_work_v1",
-    "message_append_preflight_v4", "channel_mutation_root_lock_v2",
+  if (!(["runtime_execution_report_owner_v4", "message_append_preflight_v4", "channel_mutation_root_lock_v2",
     "channel_mutation_head_advance_v1"].includes(queryName) ||
-      !backendPid) return;
+      // Every Channel capability check and lifecycle lock waits on the same Channel row (HUB-AZ, HUB-BA).
+      /^channel_(capability|lifecycle_lock)_[a-z_]+_v[0-9]+$/u.test(queryName)) || !backendPid) return;
   return watch(backendPid, Math.min(500, Math.max(1, Math.floor(options.lockTimeoutMs / 2))), options);
 }
 

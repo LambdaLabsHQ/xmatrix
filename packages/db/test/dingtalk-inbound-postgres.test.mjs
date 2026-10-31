@@ -120,7 +120,7 @@ function holdQuery(database,name) {
 }
 async function assertWaiting(f,pattern="SELECT pg_advisory_xact_lock%") {
   const until = Date.now()+1500;
-  do { const rows = (await f.sql(`SELECT pid FROM pg_stat_activity WHERE application_name='dingtalk-inbound-boundary'
+  do { const rows = (await f.sql(`SELECT pid FROM pg_stat_activity WHERE application_name LIKE 'dingtalk-inbound-boundary %'
     AND wait_event_type='Lock' AND query LIKE $1`,[pattern])).rows;
     if (rows.length) return;
     await new Promise(resolve => setTimeout(resolve,10));

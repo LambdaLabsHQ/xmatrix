@@ -79,7 +79,7 @@ integration("message append preflight retains its blocker; append recovers pre-C
         assert.equal(evidence.queryName, "message_append_preflight_v4");
         assert.equal(evidence.lockWait?.status, unavailable ? "unavailable" : "sampled");
         if (!unavailable) {
-          assert.equal(evidence.lockWait.waiter.owner, "message");
+          assert.equal(evidence.lockWait.waiter.owner, "op:message.append", "a waiter names its operation");
           assert.equal(evidence.lockWait.waiter.wait, "Lock");
           assert.equal(evidence.lockWait.blockers[0].owner, "launch");
           assert.equal(evidence.lockWait.blockers[0].state, "idle in transaction");

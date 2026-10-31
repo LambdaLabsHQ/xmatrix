@@ -387,6 +387,9 @@ test("origin wait snapshots reach read_issue with strict content-free validation
     for (const [snapshot, valid] of [[lockWait, true], [{ ...lockWait, blockers: Array(5).fill(backend) }, false],
       [{ ...lockWait, pid: "private-id" }, false], [{ ...lockWait, waiter: { ...backend, query: "private-sql" } }, false],
       [{ ...lockWait, blockers: [{ ...backend, owner: "private-user" }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, owner: "op:page.edit" }] }, true],
+      [{ ...lockWait, blockers: [{ ...backend, owner: "op:Private User" }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, owner: `op:${"a".repeat(63)}` }] }, false],
       [{ ...lockWait, blockers: [{ ...backend, ageMs: 120001 }] }, false],
       [{ status: "busy", blockers: [] }, true], [{ status: "missing", blockers: [backend] }, false]]) {
       const { result } = await run([{ body: issue }, { body: { ...event, context: {

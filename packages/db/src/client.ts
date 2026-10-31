@@ -565,7 +565,9 @@ function transactionSettingValues(
   options: ResolvedOptions,
 ): string[] {
   return [
-    context.operation === "runtime.execution-report" ? "xmatrix-execution-report" : options.applicationName,
+    // `<application> <operation>`: a lock waiter's evidence names the operation holding its row.
+    `${context.operation === "runtime.execution-report" ? "xmatrix-execution-report" : options.applicationName} ${
+      context.operation}`.slice(0, 63),
     String(options.statementTimeoutMs),
     String(options.transactionTimeoutMs),
     String(options.lockTimeoutMs),
