@@ -66,6 +66,14 @@ async function openSlowHistory(page: Page, device: string, messageCount: number)
   }
   await expect.poll(async () => (await fixtureRequests(page, SLOW_HISTORY_RULE)).length).toBeGreaterThan(0);
   await expect(page.locator(".app-message-timeline-skeleton")).toBeVisible();
+  // History stays held while the conversation slides in. Compare its loading
+  // and loaded rows at rest, not at different points of that navigation.
+  await expect.poll(() => page.locator(".app-message-timeline-skeleton").evaluate((element) => {
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      if (node.getAnimations().some((animation) => animation.pending || animation.playState === "running")) return false;
+    }
+    return true;
+  })).toBe(true);
 }
 
 /** What a message row places: itself, its avatar, its sender's line and its first line of text. */

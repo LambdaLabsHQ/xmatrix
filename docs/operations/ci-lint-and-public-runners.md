@@ -220,3 +220,5 @@ production artifact builds do not participate in this cooperative pool.
 
 The Rust runner prepares the shared target parent before starting its Linux
 and Windows Clippy lanes, including on a cold checkout with no build outputs.
+Its ring link-name lookup accepts both LF and CRLF lockfiles, including native
+Windows checkouts; the dependency and warning policies are unchanged.
