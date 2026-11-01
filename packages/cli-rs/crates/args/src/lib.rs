@@ -753,6 +753,44 @@ mod tests {
     }
 
     #[test]
+    fn request_settings_names_addresses_and_may_wait() {
+        let cli = Cli::try_parse_from([
+            "xmatrix",
+            "request",
+            "settings",
+            "connector:appstoreconnect/webSession",
+            "connector:appstoreconnect/vendorNumber",
+            "--reason",
+            "sales report",
+            "--wait",
+        ])
+        .expect("request settings should parse");
+        let Some(Commands::Request {
+            command:
+                RequestCommand::Settings {
+                    settings,
+                    reason,
+                    wait,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected request settings command");
+        };
+        assert_eq!(
+            settings,
+            vec![
+                "connector:appstoreconnect/webSession".to_string(),
+                "connector:appstoreconnect/vendorNumber".to_string()
+            ]
+        );
+        assert_eq!(reason.as_deref(), Some("sales report"));
+        assert!(wait);
+        assert!(!json);
+        assert!(Cli::try_parse_from(["xmatrix", "request", "settings"]).is_err());
+    }
+
+    #[test]
     fn request_secrets_parses_json_flag() {
         let cli = Cli::try_parse_from(["xmatrix", "request", "secrets", "--json"])
             .expect("request secrets should parse");
@@ -1415,6 +1453,27 @@ pub enum RequestCommand {
         /// Why this Agent needs it, shown on the card.
         #[arg(long)]
         reason: Option<String>,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask a Space admin, on a card in this Channel, for connector settings only a person can make
+    ///
+    /// Name each setting by address: `connector:<app>/<field>` for a sign-in or
+    /// credential (`connector:appstoreconnect/webSession`), or
+    /// `connector:<app>/connect` to connect the App again. A Space admin makes
+    /// it on the card; the value goes to the connection, never into chat. With
+    /// `--wait` the command returns once every setting is in and checked.
+    Settings {
+        /// Setting addresses, for example `connector:appstoreconnect/webSession`.
+        #[arg(required = true, num_args = 1..)]
+        settings: Vec<String>,
+        /// Why this Agent needs them, shown on the card.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Wait until every setting is in and its connection passed a check (up to 30 minutes).
+        #[arg(long)]
+        wait: bool,
         /// Print machine-readable JSON.
         #[arg(long)]
         json: bool,

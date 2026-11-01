@@ -30,6 +30,8 @@ impl HubRoutes {
     pub const CONNECTOR_USAGE: &str = "/api/connectors/usage";
     pub const SECRET_REQUESTS: &str = "/api/secret-requests";
     pub const HARNESS_SIGN_IN_REQUESTS: &str = "/api/harness-sign-in-requests";
+    pub const SETTINGS_REQUESTS: &str = "/api/settings-requests";
+    pub const SETTINGS_REQUEST_STATUS: &str = "/api/settings-requests/status";
     pub const DAEMON_CONTROL: &str = "/api/daemon/control";
     pub const DAEMON_COMMAND_LEASE_RENEW: &str = "/api/daemon/command-lease/renew";
     pub const DAEMON_COMMAND_ADMIT_AUTHORIZE: &str = "/api/daemon/command-admit-authorize";

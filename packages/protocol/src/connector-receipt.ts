@@ -77,8 +77,8 @@ export function connectorReceiptPreview(preview: string): string | undefined {
 export interface ConnectorReceiptFix {
   providerId: string;
   actionId: string;
-  /** The execution whose read can run again once the fix is in. */
-  executionId: string;
+  /** The execution whose read can run again once the fix is in; none on a card an Agent asked for. */
+  executionId?: string;
   remedy: { kind: "credential"; field: string } | { kind: "reconnect" };
 }
 
@@ -96,12 +96,47 @@ export function connectorReceiptFixesOf(metadata: Record<string, unknown> | unde
     const fix = item as Record<string, unknown>;
     const remedy = fix.remedy && typeof fix.remedy === "object" ? fix.remedy as Record<string, unknown> : undefined;
     const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === fix.providerId);
-    if (!manifest || typeof fix.actionId !== "string" || !FIX_ID.test(fix.actionId) ||
-      typeof fix.executionId !== "string" || !FIX_ID.test(fix.executionId) || !remedy) return [];
-    const base = { providerId: manifest.id, actionId: fix.actionId, executionId: fix.executionId };
+    if (!manifest || typeof fix.actionId !== "string" || !FIX_ID.test(fix.actionId) || !remedy ||
+      (fix.executionId !== undefined && (typeof fix.executionId !== "string" || !FIX_ID.test(fix.executionId)))) return [];
+    const base = { providerId: manifest.id, actionId: fix.actionId,
+      ...(typeof fix.executionId === "string" ? { executionId: fix.executionId } : {}) };
     if (remedy.kind === "reconnect") return [{ ...base, remedy: { kind: "reconnect" } }];
     const field = manifest.credentials?.find((candidate) => candidate.id === remedy.field);
     return remedy.kind === "credential" && field && !field.generated && !field.managed
       ? [{ ...base, remedy: { kind: "credential", field: field.id } }] : [];
   });
+}
+
+/** Metadata key of a card an Agent posted to ask for settings (`xmatrix request settings`). */
+export const SETTINGS_REQUEST_KEY = "xmatrixSettingsRequest";
+
+/** Where a fix's setting lives: `connector:<app>/<field>`, or `connector:<app>/connect` for the connection itself. */
+export function settingAddress(fix: Pick<ConnectorReceiptFix, "providerId" | "remedy">): string {
+  return `connector:${fix.providerId}/${fix.remedy.kind === "credential" ? fix.remedy.field : "connect"}`;
+}
+
+/** The fix a setting address names, when it names a known App's typed field or its connection. */
+export function settingAddressFix(address: string): Omit<ConnectorReceiptFix, "executionId"> | undefined {
+  const match = /^connector:([a-z0-9-]{1,80})\/([A-Za-z0-9_]{1,80})$/u.exec(address.trim());
+  if (!match) return undefined;
+  const remedy = match[2] === "connect" ? { kind: "reconnect" } : { kind: "credential", field: match[2] };
+  return connectorReceiptFixesOf({ [CONNECTOR_RECEIPT_FIXES_KEY]: [{ providerId: match[1], actionId: "settings", remedy }] })[0];
+}
+
+/** The connection as a settings card reads it. */
+export interface SettingsConnectionState {
+  status: string;
+  lastCheckedAt?: string;
+  credentialFields?: string[];
+}
+
+/**
+ * Whether a connection now has what a fix asked for: the Hub checked it after
+ * the card was written, the check passed, and a field it lacked is saved.
+ */
+export function connectorFixSettled(fix: Pick<ConnectorReceiptFix, "remedy">, connection: SettingsConnectionState | undefined,
+  askedAt: string): boolean {
+  if (!connection || connection.status !== "configured" || !connection.lastCheckedAt) return false;
+  if (Date.parse(connection.lastCheckedAt) <= Date.parse(askedAt)) return false;
+  return fix.remedy.kind !== "credential" || !connection.credentialFields || connection.credentialFields.includes(fix.remedy.field);
 }
