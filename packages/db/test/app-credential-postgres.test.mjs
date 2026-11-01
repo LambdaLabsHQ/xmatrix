@@ -928,7 +928,7 @@ integration("create-only App preparation preserves an existing verified grant an
   await withSentryAuthority(async ({ install, apps, space, connectionRow }) => {
     await install();
     const before = await connectionRow();
-    const input = { commandId: `initialize-sentry-${space}`, spaceId: space, actorUserId: "owner", at,
+    const input = { commandId: `initialize-sentry-${space}`, spaceId: space, actorUserId: "owner", at: new Date().toISOString(),
       provider: { id: "sentry", name: "Sentry", authMode: "oauth", scopes: [], secretRefs: [], capabilities: [], metadataFields: [] },
       body: { initializeOnly: true, status: "disconnected" } };
     const first = await apps.upsert(input), replay = await apps.upsert(input);
@@ -1253,6 +1253,8 @@ integration("GitHub Connect rejects retired Channel config and preserves workflo
 
 
 integration("an imported PR subscription keeps its identity through update, routing and removal", async () => {
+  // Replay admission uses the real PostgreSQL clock, not the historical event fixtures.
+  const at = new Date().toISOString();
   await withDatabase(async ({ sql, database, space }) => {
     const apps = new PostgresAppRepository(database);
     await addConnection(sql, space, "github");
