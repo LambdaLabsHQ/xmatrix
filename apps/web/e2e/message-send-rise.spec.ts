@@ -159,6 +159,28 @@ function movesOfRowAbove(frames: Awaited<ReturnType<typeof paintedTimelineFrames
   return paintedRowMoves(frames).filter((move) => move.row === `message:rise-${HISTORY_LENGTH}`).map((move) => move.by);
 }
 
+/** A display frame, in ms. */
+const FRAME_MS = 1000 / 60;
+
+/**
+ * How far the newest message of the history moved in each display frame's
+ * time. The rows move on the compositor, by the clock; a page too busy to
+ * draw for a few frames shows in its next frame how far they went in all of
+ * them, and that counts as those frames' moves, by the frames' own times.
+ */
+function movesOfRowAbovePerFrame(frames: Awaited<ReturnType<typeof paintedTimelineFrames>>) {
+  const row = `message:rise-${HISTORY_LENGTH}`;
+  const moves: number[] = [];
+  frames.forEach((frame, index) => {
+    const before = frames[index - 1];
+    const top = frame.tops[row];
+    const was = before?.tops[row];
+    if (!before || top === undefined || was === undefined || Math.abs(top - was) <= 1) return;
+    moves.push((top - was) / Math.max(1, Math.round((frame.frameTime - before.frameTime) / FRAME_MS)));
+  });
+  return moves;
+}
+
 test("the new row comes in and the list comes to rest in the same frame", async ({ page }) => {
   await openChannelRecordingRises(page);
   // When each of the two animations ends, on the document's clock: the row's
@@ -294,7 +316,8 @@ test("a message that comes in while the list is on its way to rest goes on from 
   // Two ways to rest were given: the first, and the one that took over from where it had come.
   expectDrawnRises(await listRises(page), 2);
   expect(moves.filter((by) => by < 0).length).toBeGreaterThan(1);
-  expect(Math.max(...moves.map((by) => Math.abs(by)))).toBeLessThan(travelled * 0.6);
+  const perFrame = movesOfRowAbovePerFrame(frames);
+  expect(Math.max(...perFrame.map((by) => Math.abs(by))), JSON.stringify(perFrame)).toBeLessThan(travelled * 0.6);
   expect(Math.max(0, ...moves)).toBeLessThan(8);
   expect(paintedRowOverlaps(frames)).toEqual([]);
 });
@@ -516,6 +539,7 @@ for (const { change, answer } of [
     expect(travelled, JSON.stringify(moves)).toBeGreaterThan(8);
     // One way, over several frames, none of them most of the way.
     expect(moves.every((by) => Math.sign(by) === Math.sign(moves[0]!)), JSON.stringify(moves)).toBe(true);
-    expect(Math.max(...moves.map((by) => Math.abs(by))), JSON.stringify(moves)).toBeLessThan(travelled * 0.5);
+    const perFrame = movesOfRowAbovePerFrame(frames);
+    expect(Math.max(...perFrame.map((by) => Math.abs(by))), JSON.stringify(perFrame)).toBeLessThan(travelled * 0.5);
   });
 }
