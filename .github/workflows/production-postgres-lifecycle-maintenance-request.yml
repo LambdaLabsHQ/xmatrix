@@ -30,7 +30,7 @@ jobs:
   dispatch:
     if: github.ref == 'refs/heads/main'
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
-    timeout-minutes: 8
+    timeout-minutes: 60
     steps:
       # Main's selection policy only. This job still receives no production credentials.
       - uses: actions/checkout@v6
@@ -62,8 +62,12 @@ jobs:
             });
             const history = await listReleases({ status: "success" });
             const day = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            // A release normally takes 9 minutes (p90 26 minutes). Waiting only
+            // six short polls skipped the daily pass whenever a train overlapped.
+            // Keep the wait bounded and leave job time for API/tag verification.
+            const deadline = Date.now() + 45 * 60 * 1000;
             let production;
-            for (let attempt = 1; attempt <= 6; attempt += 1) {
+            while (Date.now() < deadline) {
               const recent = await listReleases({ status: "success", created: `>=${day}` });
               const open = [
                 ...await listReleases({ status: "in_progress" }),
@@ -73,7 +77,8 @@ jobs:
               core.info(`Saw ${history.length} successful releases and ${recent.length} since ${day}; choice ${decision.release?.head_branch ?? "none"} (run ${decision.release?.id ?? "none"}), wait ${decision.wait}`);
               if (!decision.release) throw new Error("no successful production release tag is available");
               if (!decision.wait) { production = decision.release; break; }
-              await new Promise((resolve) => setTimeout(resolve, 15_000));
+              const remaining = deadline - Date.now();
+              if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, remaining)));
             }
             if (!production) throw new Error("a newer Production Release was still running");
             const tagRef = (await github.rest.git.getRef({
