@@ -1,0 +1,45 @@
+name: Setup Unix Rust toolchain
+description: Install and verify the same reviewed compiler for Clippy and published CLI artifacts.
+inputs:
+  components:
+    description: Additional Rust components required by this job.
+    required: false
+    default: ""
+  targets:
+    description: Additional Rust target triples required by this job.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Unix Rust toolchain
+      env:
+        # rustup 1.29 downloads and unpacks concurrently by default. The
+        # dedicated Linux runner has a tight memory cgroup, so keep toolchain
+        # installation inside rustup's documented low-memory floor.
+        RUSTUP_CONCURRENT_DOWNLOADS: "1"
+        RUSTUP_UNPACK_RAM: "220200960"
+      uses: dtolnay/rust-toolchain@d86e0fa8f147d6539442c26a61ebba8becc19489 # 1.96.0
+      with:
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+
+    - name: Add Cargo to PATH on Unix
+      shell: bash
+      run: |
+        set -euo pipefail
+        for candidate in \
+          "${CARGO_HOME:-$HOME/.cargo}/bin" \
+          "$HOME/.cargo/bin"; do
+          if [ -d "$candidate" ]; then
+            echo "$candidate" >> "$GITHUB_PATH"
+            export PATH="$candidate:$PATH"
+          fi
+        done
+        rustc --version
+        cargo --version
+        rustc_verbose_version="$(rustc -vV)"
+        if ! grep -Fqx 'release: 1.96.0' <<< "$rustc_verbose_version"; then
+          echo "required Unix Rust release must be 1.96.0" >&2
+          exit 1
+        fi

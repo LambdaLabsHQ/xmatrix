@@ -53,6 +53,7 @@ test("Rust runner setup changes cannot bypass both platform test partitions", ()
   for (const file of [
     ".github/actions/configure-windows-runner/action.yml",
     ".github/actions/setup-rust-kache/action.yml",
+    ".github/actions/setup-unix-rust-toolchain/action.yml",
     ".github/actions/setup-windows-rust-cli/action.yml"]) {
     assert.deepEqual(
       affectedPartitions([file]),

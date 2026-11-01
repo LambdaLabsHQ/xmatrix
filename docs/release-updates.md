@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: CLI releases use the compiler their pull requests checked
+
+Unix release builds used the runner image's default Rust while PR Clippy used
+1.96.0, so new compiler warnings could first fail a production release. Linux
+and both macOS CLI targets now install and verify the same reviewed compiler
+as PR Clippy, matching the existing Windows pin. No API or schema change;
+signing, artifact verification and release gates are unchanged. Recovery is a
+CI-validated forward release updating the shared compiler pin after native
+qualification.
+
 ## Unreleased: A daemon reconnect leaves old snapshots behind
 
 HUB-BF exposed a snapshot queued before disconnect and sent after the next
