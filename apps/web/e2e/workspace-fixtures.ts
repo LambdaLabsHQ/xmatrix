@@ -404,7 +404,7 @@ export async function openGeneralChannelWithHistory(
    finished trading places, and a dock tab's bar has finished sliding in with
    its page. Layout read during either is a frame of the motion. */
 export async function screenChangeLanded(page: Page): Promise<void> {
-  await expect(page.locator("[data-list-transition], .app-dock-tab-slide-outgoing")).toHaveCount(0);
+  await expect(page.locator("[data-list-transition], .app-dock-tab-slide-outgoing, .app-dock-tab-slide-incoming")).toHaveCount(0);
 }
 
 /* A conversation opens on a plain tail of its rows and the virtual list takes
