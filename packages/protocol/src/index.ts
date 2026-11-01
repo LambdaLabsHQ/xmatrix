@@ -512,7 +512,7 @@ export {
 export type { PageSchedule, PageScheduleStatus } from "./page-schedules.js";
 export {
   channelReferenceSpans, channelReferenceToken, loneMessageReference,
-  messageReferenceSpans,
+  messageReferenceLabels, messageReferenceSpans,
 } from "./message-references.js";
 export type {
   ChannelReferenceSpan, MessageReferenceSpan,

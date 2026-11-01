@@ -50,3 +50,31 @@ export function loneMessageReference(text: string): MessageReferenceSpan | null 
   const [span, extra] = messageReferenceSpans(trimmed);
   return span && !extra && span.start === 0 && span.end === trimmed.length ? span : null;
 }
+
+/**
+ * Text with each reference drawn as its label, for previews that cannot hold a
+ * chip (list rows, notifications). A target the reader cannot see reads as
+ * "Page" or "Channel"; a locator is never shown, not even one a stored preview
+ * cut short.
+ */
+export function messageReferenceLabels(text: string, names: {
+  page?: (pageId: string) => string | undefined;
+  channel?: (channelId: string) => string | undefined;
+}): string {
+  let result = "";
+  let cursor = 0;
+  for (const span of messageReferenceSpans(text)) {
+    result += text.slice(cursor, span.start);
+    if (span.kind === "page") {
+      result += names.page?.(span.pageId)?.trim() || "Page";
+      if (span.blockId) result += " › Section";
+      if (span.revision != null) result += ` (r${span.revision})`;
+    } else {
+      result += names.channel?.(span.channelId)?.trim() || "Channel";
+    }
+    cursor = span.end;
+  }
+  result += text.slice(cursor);
+  return result.replace(/\b(page|channel):[0-9a-f-]+(?:\.{3}|…)?$/iu,
+    (_, kind: string) => kind.toLowerCase() === "page" ? "Page" : "Channel");
+}
