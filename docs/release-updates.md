@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Daily PostgreSQL maintenance waits for a release to finish
+
+A concurrent Production Release could outlast the lifecycle broker's six
+short polls and skip the daily cleanup. The broker now waits up to 45 minutes,
+within a 60-minute job, and reselects the latest successful beta before
+verifying its annotated tag and exact SHA. An exhausted wait still refuses
+to dispatch a stale tag. No retention, schema or credential change; recovery
+is a CI-validated revert of the broker workflow. See
+[lifecycle retention](operations/postgres-lifecycle-retention.md).
+
 ## Unreleased: Update manifests name their actual publication workflow
 
 Public client update manifests now identify Production Release beside their
