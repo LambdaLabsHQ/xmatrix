@@ -102,6 +102,7 @@ const rustToolchainPaths = [
   "scripts/ci-cargo-fetch.mjs",
   ".github/actions/configure-windows-runner",
   ".github/actions/setup-rust-kache",
+  ".github/actions/setup-unix-rust-toolchain",
   ".github/actions/setup-windows-rust-cli",
   ".github/scripts/kache-cache.ps1",
   ".github/scripts/reclaim-windows-rust-disk.ps1",

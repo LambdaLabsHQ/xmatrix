@@ -7,6 +7,21 @@ and all targets before the full Cargo suite. Native Windows still runs the full
 Cargo suite. Install the pinned Rust 1.96.0 toolchain and its `clippy` component
 before running the Rust partition locally.
 
+Unix PR Clippy and all three Unix CLI release targets install and verify the
+same immutable compiler through `setup-unix-rust-toolchain`; the runner's
+ambient default is not a build input. It currently selects the reviewed Rust
+1.96.0 used by native Windows validation and release too. Upgrades must qualify
+the complete native suite and change CI and release together. The shared action
+only selects the compiler and requested target; signing, artifact handoff and
+release authorization retain their existing owners.
+
+This replaces the Unix release's floating runner default, which let a green
+1.96 PR fail only when a release used new 1.99 diagnostics. Existing artifacts
+and tags remain immutable; migration evidence is a successful beta across all
+four CLI targets, with the actual compiler versions recorded in the build logs.
+Recovery is a CI-validated forward release changing the shared compiler pin;
+do not restore ambient-default compilation or relax warning gates.
+
 Run the lint gates independently with `pnpm lint:check` and `pnpm lint:clippy`.
 Oxlint's configuration is `.oxlintrc.json` (exact version pinned in the
 lockfile); Clippy's thresholds are in `packages/cli-rs/clippy.toml`. Both
