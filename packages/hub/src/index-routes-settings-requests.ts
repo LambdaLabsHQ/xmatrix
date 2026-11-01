@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import {
-  CONNECTOR_RECEIPT_FIXES_KEY, connectorFixSettled, HUB_ROUTES, SETTINGS_REQUEST_KEY, settingAddress, settingAddressFix,
+  CONNECTOR_RECEIPT_FIXES_KEY, connectorFixSettled, connectorReceiptFixesOf, HUB_ROUTES, SETTINGS_REQUEST_KEY, settingAddress, settingAddressFix,
   type ConnectorReceiptFix, type SettingsConnectionState,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
@@ -40,8 +40,12 @@ const PORT: SettingsRequestPort = {
   append: appendChannelMessage,
 };
 
-/** `connector:<app>/<field>` addresses, each a typed field or a connection, without repeats. */
-export function settingsOf(value: unknown): Omit<ConnectorReceiptFix, "executionId">[] | string {
+/**
+ * `connector:<app>/<field>` addresses, each a typed field or a connection, without repeats, with any value
+ * the Agent suggests for a plain field. A secret never takes a suggestion.
+ */
+export function settingsOf(value: unknown, proposals: unknown = {}): Omit<ConnectorReceiptFix, "executionId">[] | string {
+  if (!proposals || typeof proposals !== "object" || Array.isArray(proposals)) return "proposals maps a setting to a suggested value";
   if (!Array.isArray(value) || !value.length || value.length > MAX_SETTINGS) {
     return `Name 1 to ${MAX_SETTINGS} settings, such as connector:appstoreconnect/webSession`;
   }
@@ -50,6 +54,12 @@ export function settingsOf(value: unknown): Omit<ConnectorReceiptFix, "execution
     const fix = typeof address === "string" ? settingAddressFix(address) : undefined;
     if (!fix) return `${String(address)} is not a setting a person can make: use connector:<app>/<field> or connector:<app>/connect`;
     if (!fixes.some((known) => settingAddress(known) === settingAddress(fix))) fixes.push(fix);
+  }
+  for (const [address, suggested] of Object.entries(proposals as Record<string, unknown>)) {
+    const index = fixes.findIndex((fix) => settingAddress(fix) === address.trim());
+    const fix = index < 0 ? undefined : connectorReceiptFixesOf({ [CONNECTOR_RECEIPT_FIXES_KEY]: [{ ...fixes[index], proposed: suggested }] })[0];
+    if (!fix?.proposed) return `${address} takes no suggested value: only a plain setting the card asks for does, as one short line`;
+    fixes[index] = fix;
   }
   return fixes;
 }
@@ -82,7 +92,7 @@ export function registerSettingsRequestRoutes(app: Hono<{ Bindings: Env }>, depe
     if (!run) return refuse("An Agent Run asks for settings; a person changes them in Apps", 403);
     const body = await readActionBody(c.req.raw, 8_192, "Settings");
     if (body instanceof Response) return body;
-    const fixes = settingsOf(body.settings);
+    const fixes = settingsOf(body.settings, body.proposals ?? {});
     if (typeof fixes === "string") return refuse(fixes, 400);
     const reason = body.reason === undefined ? undefined
       : typeof body.reason === "string" && body.reason.trim().length <= MAX_REASON ? body.reason.trim() || undefined : null;

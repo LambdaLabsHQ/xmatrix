@@ -596,9 +596,10 @@ async fn cmd_request(
         RequestCommand::Settings {
             settings,
             reason,
+            propose,
             wait,
             json,
-        } => cmd_request_settings(hub_url, &token, settings, reason, wait, json).await,
+        } => cmd_request_settings(hub_url, &token, settings, reason, propose, wait, json).await,
         RequestCommand::SecretAdd {
             secret_ref,
             env,

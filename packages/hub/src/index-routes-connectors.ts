@@ -51,16 +51,21 @@ function credentialPolicy(providerId: string) {
   const generated = [...declared.filter((field) => field.generated && !field.managed).map((field) => field.id),
     ...(manifest.events && manifest.events.ingress !== false && !["googlechat", "wecom", "teams"].includes(providerId) ? [INGRESS_KEY_FIELD] : [])];
   const writable = declared.filter((field) => !field.generated && !field.managed).map((field) => field.id);
+  // Plain values (an account or vendor number) are read back like generated ones; secrets never are.
+  const plain = declared.filter((field) => field.plain && !field.generated && !field.managed).map((field) => field.id);
   if (generated.length === 0 && writable.length === 0) return undefined;
-  return { manifest, generated, writable, allowed: [...writable, ...generated] };
+  return { manifest, generated, writable, plain, allowed: [...writable, ...generated] };
 }
 
 function credentialView(env: Env, request: Request, providerId: string, spaceId: string,
-  generated: Record<string, string>) {
-  const { [INGRESS_KEY_FIELD]: ingressKey, ...secrets } = generated;
+  readable: Record<string, string>, plainFields: readonly string[]) {
+  const { [INGRESS_KEY_FIELD]: ingressKey, ...rest } = readable;
+  const plain = Object.fromEntries(Object.entries(rest).filter(([name]) => plainFields.includes(name)));
+  const generated = Object.fromEntries(Object.entries(rest).filter(([name]) => !plainFields.includes(name)));
   return {
     ...(ingressKey ? { ingressUrl: connectorIngressUrl(connectorHubOrigin(env, request), providerId, spaceId, ingressKey) } : {}),
-    generated: secrets,
+    generated,
+    ...(Object.keys(plain).length ? { plain } : {}),
   };
 }
 
@@ -238,9 +243,9 @@ async function credentialRoute(request: Request, env: Env, spaceId: string, prov
       user,
       policy,
       readGenerated: () => connectorCredentialRepository(env).readGenerated({ requestId: crypto.randomUUID(),
-        spaceId, providerId: policy.manifest.id, actorUserId: user.id, generated: policy.generated }),
-      view: (generated, extra = {}) => Response.json({ ...extra,
-        ...credentialView(env, request, policy.manifest.id, spaceId, generated) },
+        spaceId, providerId: policy.manifest.id, actorUserId: user.id, generated: [...policy.generated, ...policy.plain] }),
+      view: (readable, extra = {}) => Response.json({ ...extra,
+        ...credentialView(env, request, policy.manifest.id, spaceId, readable, policy.plain) },
       { headers: { "cache-control": "private, no-store" } }),
     });
   } catch (error) {

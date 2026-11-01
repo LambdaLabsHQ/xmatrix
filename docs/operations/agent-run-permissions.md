@@ -136,7 +136,11 @@ for the connection itself. The card is drawn from the Hub's
 `xmatrixConnectorFixes`; a Space admin saves each value straight to the
 connection, which is then checked. `--wait` reads
 `GET /api/settings-requests/status` until each setting is in and its connection
-passed a check after the card was posted. The Run never sees a value. A
+passed a check after the card was posted. `--propose <address>=<value>`
+suggests a value for a plain field (one the manifest marks `plain`, such as
+App Store Connect's vendor number); the card offers it and the admin confirms
+it before it is saved. A secret field takes no suggestion. The Run never sees a
+secret value. A
 connector command that stops for the same reason gets the same card under its
 receipt without asking.
 

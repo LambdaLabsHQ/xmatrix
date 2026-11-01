@@ -38,8 +38,10 @@ export function settingsRequestOf(metadata: Record<string, unknown> | undefined)
  * there; the conversation only ever shows the outcome. People who cannot
  * change the connection see who can.
  */
-export function ConnectorSettingsCard({ fix, receiptSentAt, spaceId, token, userId }: {
+export function ConnectorSettingsCard({ fix, receiptSentAt, spaceId, token, userId, suggestedBy }: {
   fix: ConnectorReceiptFix;
+  /** The Agent whose suggested value the card offers for a plain field. */
+  suggestedBy?: string;
   receiptSentAt: string;
   spaceId: string;
   token: string;
@@ -102,7 +104,8 @@ export function ConnectorSettingsCard({ fix, receiptSentAt, spaceId, token, user
   const what = fix.remedy.kind === "reconnect" ? `Connect ${connector.name} again`
     : field?.signIn ? `Sign in to ${connector.name}` : `${connector.name} needs ${field?.label ?? "a credential"}`;
   const address = settingAddress(fix);
-  const state = settled ? "Checked" : busy ? "Checking…" : fix.remedy.kind === "reconnect" ? "Not connected"
+  const current = field?.plain ? credentials.view.data?.plain?.[field.id] : undefined;
+  const state = settled ? current ?? "Checked" : busy ? "Checking…" : fix.remedy.kind === "reconnect" ? "Not connected"
     : field?.signIn ? "Not signed in" : "Missing";
   const spinner = <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />;
   return (
@@ -136,8 +139,16 @@ export function ConnectorSettingsCard({ fix, receiptSentAt, spaceId, token, user
               </button>
             ) : field ? (
               <CredentialValueForm field={field} busy={busy} saving={credentials.save.isPending || check.isPending}
-                submitLabel="Save and check" variant="primary" className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
-                save={(value) => credentials.save.mutateAsync({ fields: { [field.id]: value } })} />
+                submitLabel={fix.proposed ? "Confirm and check" : "Save and check"} variant="primary"
+                className="flex min-w-0 flex-1 flex-wrap items-center gap-2" plain={field.plain}
+                initialValue={fix.proposed ?? current} key={fix.proposed ?? current ?? ""}
+                save={(value) => credentials.save.mutateAsync({ fields: { [field.id]: value } })}>
+                {fix.proposed ? (
+                  <p className="basis-full text-[12px] text-muted-foreground">
+                    Suggested by {suggestedBy || "the Agent"}; it is saved only when you confirm.
+                  </p>
+                ) : null}
+              </CredentialValueForm>
             ) : null}
             {field?.signIn ? (
               <p className="basis-full text-[12px] text-muted-foreground">

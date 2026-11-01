@@ -2679,7 +2679,7 @@ export const MessageRow = memo(function MessageRow({
                 {settingsRequest.fixes.map((fix) => (
                   <ConnectorSettingsCard key={`${fix.providerId}:${fix.remedy.kind}:${"field" in fix.remedy ? fix.remedy.field : ""}`}
                     fix={fix} receiptSentAt={message.sentAt} spaceId={channel.spaceId!} token={token}
-                    userId={currentUserIdentityId.replace(/^user:/, "")} />
+                    userId={currentUserIdentityId.replace(/^user:/, "")} suggestedBy={settingsRequest.agentName} />
                 ))}
               </div>
             ) : secretRequest ? (

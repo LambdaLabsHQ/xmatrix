@@ -78,3 +78,15 @@ test("the Run reads where its settings stand, against when it asked", async () =
   const human = await route({ id: "owner", email: "owner@example.test" }).status(`setting=${encodeURIComponent(WEB)}&since=${asked}`);
   assert.equal(human.status, 403);
 });
+
+test("an Agent suggests a value for a plain setting, never for a secret", async () => {
+  const agent = route(agentUser);
+  const VENDOR = "connector:appstoreconnect/vendorNumber";
+  assert.equal((await agent.post({ settings: [WEB, VENDOR], proposals: { [VENDOR]: " 87654321 " } })).status, 200);
+  assert.deepEqual(connectorReceiptFixesOf(agent.appended[0].append.residual.appMetadata)[1],
+    { providerId: "appstoreconnect", actionId: "settings", remedy: { kind: "credential", field: "vendorNumber" }, proposed: "87654321" });
+  for (const proposals of [{ [WEB]: "myacinfo=guess" }, { "connector:appstoreconnect/issuerId": "x" }, { [VENDOR]: "" },
+    { [VENDOR]: "a\nb" }, { [VENDOR]: "x".repeat(201) }, [VENDOR]]) {
+    assert.equal((await agent.post({ settings: [WEB, VENDOR], proposals })).status, 400, JSON.stringify(proposals));
+  }
+});
