@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: The CLI uses the panic-safe hash buffer patch
+
+The CLI now locks block-buffer 0.12.1, the same-line fix for
+[GHSA-qwgh-2vcv-g2f7](https://github.com/RustCrypto/utils/security/advisories/GHSA-qwgh-2vcv-g2f7).
+The old buffer could retain an invalid cursor after a compression or block
+generation callback panicked and its caller caught the panic and reused it.
+The CLI uses this dependency through SHA-2; no such application callback path
+has been identified. Hash formats, APIs and stored data are unchanged. CLI
+only; recovery is a CI-validated CLI release reverting the lock, which would
+restore the advisory exposure.
+
 ## Unreleased: The phone's loading dock waits until it can navigate
 
 The startup frame drew enabled Pages/Channels/Status/More buttons with inert
