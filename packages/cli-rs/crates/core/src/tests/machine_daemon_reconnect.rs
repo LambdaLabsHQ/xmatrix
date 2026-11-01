@@ -82,6 +82,7 @@ struct HubScript {
     dials: Mutex<VecDeque<Dialed>>,
     /// Sessions the Hub has authenticated so far; also the connection epoch.
     sessions: AtomicUsize,
+    reports: Mutex<Vec<(usize, serde_json::Value)>>,
     /// The live session answers liveness while this is false.
     silent: Arc<AtomicBool>,
 }
@@ -209,7 +210,11 @@ impl MachineDaemonDial for ScriptedHub {
                     Message::Ping(payload) => {
                         let _ = incoming_tx.send(Ok(Message::Pong(payload)));
                     }
-                    Message::Text(_) => {
+                    Message::Text(text) => {
+                        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                        if value["type"] != "ping" {
+                            hub.reports.lock().unwrap().push((epoch, value));
+                        }
                         let _ = incoming_tx
                             .send(Ok(Message::Text(r#"{"type":"pong"}"#.to_string().into())));
                     }
@@ -394,4 +399,88 @@ async fn an_outage_of_any_length_ends_with_the_next_session() {
     assert_eq!(reported, 13);
     assert!(client.is_connected());
     assert_eq!(hub.sessions(), 2);
+}
+
+// The Hub fence is already covered at its port. This exercises the missing
+// sender boundary: an observation queued at epoch 1 must never reach epoch 2,
+// where even an empty full snapshot could terminalize a newly admitted Run.
+#[tokio::test(start_paused = true)]
+async fn reconnect_discards_queued_snapshots_without_rebinding_effect_results() {
+    let hub = ScriptedHub::new(Vec::new(), Vec::new());
+    let (client, mut events) = connected_client(&hub).await;
+    let old_snapshots = [false, true].map(|complete| {
+        client
+            .bind_registry_causality(
+                serde_json::from_value(serde_json::json!({
+                    "type": "machine_run_snapshot", "snapshotComplete": complete, "runs": [],
+                }))
+                .unwrap(),
+            )
+            .unwrap()
+    });
+    let spawn: MachineDaemonReport = serde_json::from_value(serde_json::json!({
+        "type": "machine_spawn_result", "requestId": "spawn-before-reconnect",
+        "machineId": "machine-1", "canonicalCwd": "/workspace", "channelId": "channel-1",
+        "agentName": "agent-1", "ok": true,
+        "registryConnectionEpoch": 1, "registrySequence": 3,
+    }))
+    .unwrap();
+    hub.lose_the_network_path();
+    assert!(disconnected(next_event(&mut events).await).contains("heartbeat timed out"));
+    // The actor is now in backoff. These instructions were already stamped by
+    // their producer; its queue survives the socket that stamped them.
+    for report in old_snapshots {
+        client
+            .instruction_tx
+            .send(ConnectionInstruction::Report(report))
+            .unwrap();
+    }
+    client
+        .instruction_tx
+        .send(ConnectionInstruction::Report(spawn.clone()))
+        .unwrap();
+    assert_reconnected(next_event(&mut events).await);
+    assert_eq!(client.connection_epoch(), Some(2));
+    let fresh = [false, true].map(|complete| {
+        client
+            .bind_registry_causality(
+                serde_json::from_value(serde_json::json!({
+                    "type": "machine_run_snapshot", "snapshotComplete": complete, "runs": [],
+                }))
+                .unwrap(),
+            )
+            .unwrap()
+    });
+    for report in &fresh {
+        client.send_report(report.clone()).unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if hub
+                .0
+                .reports
+                .lock()
+                .unwrap()
+                .last()
+                .is_some_and(|(_, value)| {
+                    value["registryConnectionEpoch"] == 2 && value["snapshotComplete"] == true
+                })
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("current snapshots and the durable spawn result reach the new socket");
+    let reports = hub.0.reports.lock().unwrap().clone();
+    assert_eq!(
+        reports,
+        vec![
+            (2, serde_json::to_value(spawn).unwrap()),
+            (2, serde_json::to_value(&fresh[0]).unwrap()),
+            (2, serde_json::to_value(&fresh[1]).unwrap()),
+        ],
+        "old full and partial snapshots are discarded; current evidence and historical effects are unchanged"
+    );
 }

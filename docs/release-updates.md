@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: A daemon reconnect leaves old snapshots behind
+
+HUB-BF exposed a snapshot queued before disconnect and sent after the next
+connection authenticated. The Hub correctly refused its stale epoch. The CLI
+now discards full and partial snapshots from a replaced connection at the
+socket writer boundary; reconnect captures a fresh full snapshot instead of
+restamping an old observation that could retire a newly admitted Run. Durable
+spawn results keep their original causal fields for reconciliation. CLI only,
+no protocol or schema change; existing daemons need the updated CLI. Recovery
+is a CI-validated CLI release reverting the sender check.
+
 ## Unreleased: The CLI uses the panic-safe hash buffer patch
 
 The CLI now locks block-buffer 0.12.1, the same-line fix for

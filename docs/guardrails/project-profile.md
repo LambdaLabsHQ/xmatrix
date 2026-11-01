@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Daemon reconnect discards queued snapshots captured for the replaced connection
+before writing to the new socket. Fresh full snapshots restore observations;
+successful spawn results retain their original causal evidence for reconciliation.
+See [daemon service model](../daemon-service-model.md#causal-run-snapshots).
+
 Agents upload local Page images and videos with `xmatrix page upload`, then
 insert the returned Markdown through ordinary Page writes. The Hub rechecks
 current Page edit access before binding media, including replays. Page text
