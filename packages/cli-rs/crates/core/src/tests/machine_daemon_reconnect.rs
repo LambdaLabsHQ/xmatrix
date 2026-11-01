@@ -408,16 +408,19 @@ async fn an_outage_of_any_length_ends_with_the_next_session() {
 async fn reconnect_discards_queued_snapshots_without_rebinding_effect_results() {
     let hub = ScriptedHub::new(Vec::new(), Vec::new());
     let (client, mut events) = connected_client(&hub).await;
-    let old_snapshots = [false, true].map(|complete| {
-        client
-            .bind_registry_causality(
-                serde_json::from_value(serde_json::json!({
-                    "type": "machine_run_snapshot", "snapshotComplete": complete, "runs": [],
-                }))
-                .unwrap(),
-            )
-            .unwrap()
-    });
+    let snapshots = || {
+        [false, true].map(|complete| {
+            client
+                .bind_registry_causality(
+                    serde_json::from_value(serde_json::json!({
+                        "type": "machine_run_snapshot", "snapshotComplete": complete, "runs": [],
+                    }))
+                    .unwrap(),
+                )
+                .unwrap()
+        })
+    };
+    let old_snapshots = snapshots();
     let spawn: MachineDaemonReport = serde_json::from_value(serde_json::json!({
         "type": "machine_spawn_result", "requestId": "spawn-before-reconnect",
         "machineId": "machine-1", "canonicalCwd": "/workspace", "channelId": "channel-1",
@@ -441,16 +444,7 @@ async fn reconnect_discards_queued_snapshots_without_rebinding_effect_results() 
         .unwrap();
     assert_reconnected(next_event(&mut events).await);
     assert_eq!(client.connection_epoch(), Some(2));
-    let fresh = [false, true].map(|complete| {
-        client
-            .bind_registry_causality(
-                serde_json::from_value(serde_json::json!({
-                    "type": "machine_run_snapshot", "snapshotComplete": complete, "runs": [],
-                }))
-                .unwrap(),
-            )
-            .unwrap()
-    });
+    let fresh = snapshots();
     for report in &fresh {
         client.send_report(report.clone()).unwrap();
     }
