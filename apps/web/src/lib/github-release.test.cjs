@@ -13,9 +13,16 @@ const {
   selectLatestPublishedGitHubReleaseByTagPrefix,
 } = require("./github-release.ts");
 
-test("update manifests link to the component's release rather than the Web build", () => {
-  const manifest = getLatestReleaseManifest({ tag_name: "cli-v1.1.1-beta.4", assets: [] }, "https://xmatrix.sh", "/api/cli/releases/dev");
+test("update manifests identify the component release and exact publication provenance", () => {
+  const manifest = getLatestReleaseManifest({
+    tag_name: "cli-v1.1.1-beta.4", assets: [],
+    commitSha: "a".repeat(40), runId: "123", publishedAt: "2026-11-01T12:00:00Z",
+  }, "https://xmatrix.sh", "/api/cli/releases/dev");
   assert.equal(manifest.releaseNotesUrl, "https://xmatrix.sh/releases/1.1.1-beta.4");
+  assert.deepEqual(manifest.provenance, {
+    workflow: "production-release.yml", gitSha: "a".repeat(40),
+    runId: "123", publishedAt: "2026-11-01T12:00:00Z",
+  });
 });
 
 test("public notes resolve an exact published tag, excluding drafts, receipts and mismatches", async (t) => {

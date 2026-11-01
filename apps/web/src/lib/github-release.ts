@@ -262,7 +262,7 @@ export function getLatestReleaseManifest(release: GitHubRelease, origin: string,
       sha256: asset.sha256,
     })),
     provenance: release.commitSha && release.runId ? {
-      workflow: "cli-release.yml",
+      workflow: "production-release.yml",
       gitSha: release.commitSha,
       runId: release.runId,
       publishedAt: release.publishedAt,

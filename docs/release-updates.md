@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: Update manifests name their actual publication workflow
+
+Public client update manifests now identify Production Release beside their
+exact commit and run, replacing the retired CLI workflow label shared by all
+client manifests. Beta Web only, no schema or authorization change; recovery
+is a CI-validated Web release reverting the label.
+
 ## Unreleased: CLI releases use the compiler their pull requests checked
 
 Unix release builds used the runner image's default Rust while PR Clippy used
