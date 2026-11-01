@@ -346,9 +346,12 @@ fact is about.
   corner, not on a line of its own.
 - **Table controls** appear only while the cursor is in a table, floating
   above it rather than taking room in the page.
-- **A selection opens a comment box** (decided by Daniel 2026-10-21). A
-  passage selected with the mouse opens the product's own message box, the
-  caret already in it, in the margin level with the passage, as a comment
+- **A selection offers a comment; a click opens it** (decided by Daniel
+  2026-11-01, replacing the 2026-10-21 box that opened on a mouse selection:
+  a selection may be for editing, and the box took the focus from it). Any
+  selection, by mouse, keyboard or touch, keeps the caret in the page and
+  shows the selection menu; its *Comment* opens the product's own message box,
+  the caret then in it, in the margin level with the passage, as a comment
   card stands (under the passage where the page has no margin). It lies on a
   card of paper (`PaperPopover`), as the page's menus do, and the composer in
   it writes on that paper without glass of its own (decided by Daniel
@@ -356,11 +359,8 @@ fact is about.
   passage is marked in the comment colour while it is
   written about. Typing is the comment, Enter sends it, and the caret goes
   back into the page after the passage, so writing and commenting go on
-  side by side. ⌘⌥M (Ctrl+Alt+M) comments on the selection, or on the
-  caret's paragraph. A selection made from the keyboard or by touch is being
-  edited: it shows the selection menu, whose *Comment* opens the same box.
-  Until something is typed, Backspace, copy, cut and the mark shortcuts act
-  on the passage. Escape, or a click anywhere else, closes the box and the
+  side by side. ⌘⌥M (Ctrl+Alt+M) opens the same box on the selection, or on
+  the caret's paragraph. Escape, or a click anywhere else, closes the box and the
   passage is no longer selected; a comment closed unsent comes back when the
   same passage is selected again.
   - A comment continues the existing conversation about the passage when

@@ -9,7 +9,6 @@ import {
   AlarmClock, FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pause, Pilcrow, Play, Quote, Repeat, Table,
 } from "lucide-react";
 import type { Node as DocNode, ResolvedPos } from "prosemirror-model";
-import { toggleMark } from "prosemirror-commands";
 import { EditorState, Selection, TextSelection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey, ySyncPluginKey } from "y-prosemirror";
@@ -473,10 +472,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     draftRef.current = next;
     setCommentDraftState(next);
   }, []);
-  // A selection made with the mouse opens the comment box under it once the clicks settle (a double click
-  // may be the first two of a triple); one made from the keyboard is being edited, and shows the menu.
-  const selectedWithMouse = useRef(false);
-  const commentTimer = useRef(0);
   const anchorsChange = useRef(onAnchorOffsets);
   anchorsChange.current = onAnchorOffsets;
   const presenceOf = useRef<CursorPresence>(cursorPresence ?? (() => "active"));
@@ -578,7 +573,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   useEffect(() => {
     if (!host.current) return;
     const handleKeyDown = (_view: EditorView, event: KeyboardEvent) => {
-      selectedWithMouse.current = false;
       // As in Google Docs: ⌘⌥M comments on the selection, or on the caret's paragraph.
       if (event.code === "KeyM" && event.altKey && (event.metaKey || event.ctrlKey) && openComment(_view, true)) return true;
       const trigger = menu.current.trigger;
@@ -658,21 +652,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         measure();
       },
       handleDOMEvents: {
-        mousedown: (current) => {
-          selectedWithMouse.current = true;
-          window.clearTimeout(commentTimer.current);
-          // A drag often ends past the text's edge, outside the editor; wherever the button comes up, it was made here.
-          current.dom.ownerDocument.addEventListener("mouseup", () => {
-            window.clearTimeout(commentTimer.current);
-            commentTimer.current = window.setTimeout(() => {
-              if (!current.isDestroyed && selectedWithMouse.current && !current.state.selection.empty && current.hasFocus()) {
-                openComment(current, false);
-              }
-            }, 220);
-          }, { once: true, capture: true });
-          return false;
-        },
-        touchstart: () => { selectedWithMouse.current = false; return false; },
         focus: (focused) => { showToolbar(readToolbar(focused)); return false; },
         blur: (blurred, event) => {
           // Leaving for the page's own menus keeps them open.
@@ -707,7 +686,6 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       session.awareness.off("change", measure);
       cancelAnimationFrame(measureFrame.current);
       measureFrame.current = 0;
-      window.clearTimeout(commentTimer.current);
       editor.destroy();
       view.current = null;
       setDrawn(null);
@@ -865,30 +843,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const section = current ? pageDocBlockAt(current.state.doc, current.state.selection.from) : "";
   const selectionActions = Boolean(actions?.discuss || actions?.comment);
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
-    && !commentDraft && !(actions?.comment && selectedWithMouse.current) ? place(current.state.selection.from) : null;
-  // A key meant for the passage, pressed while the box has nothing typed: it acts on the passage as before.
-  const passageKey = (event: { key: string; metaKey: boolean; ctrlKey: boolean }) => {
-    const editor = view.current;
-    if (!editor) return false;
-    const mod = event.metaKey || event.ctrlKey;
-    const key = event.key.toLowerCase();
-    const { from, to } = editor.state.selection;
-    const passage = editor.state.doc.textBetween(from, to, "\n\n");
-    if (mod && key === "c") { void navigator.clipboard?.writeText(passage); return true; }
-    if (event.key === "Backspace" || event.key === "Delete" || (mod && key === "x")) {
-      if (mod) void navigator.clipboard?.writeText(passage);
-      closeComment();
-      editor.dispatch(editor.state.tr.deleteSelection().scrollIntoView());
-      return true;
-    }
-    const mark = mod ? { b: pageSchema.marks.strong, i: pageSchema.marks.em, e: pageSchema.marks.code }[key] : undefined;
-    if (mark) {
-      closeComment();
-      toggleMark(mark)(editor.state, editor.dispatch, editor);
-      return true;
-    }
-    return false;
-  };
+    && !commentDraft ? place(current.state.selection.from) : null;
   const tableAt = toolbar?.inTable && current ? placeTable(current.state.selection.$from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
   const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
@@ -1005,7 +960,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           style={{ left: commentInMargin ? "calc(100% + 1.5rem)" : commentDraft.left, top: commentDraft.top }}>
           <PageCommentBox text={commentDraft.text} taker={actions?.commentTaker?.(commentDraft.blockId)}
             onText={(text) => setCommentDraft({ ...commentDraft, text })}
-            onClose={(away) => closeComment({ away })} onPassageKey={passageKey}
+            onClose={(away) => closeComment({ away })}
             onSend={(text) => {
               actions?.comment?.(commentDraft.blockId, commentDraft.anchor, text);
               closeComment({ collapse: true });

@@ -1,23 +1,23 @@
 "use client";
 
 import { useRef } from "react";
-import type { ComposerField, ComposerKeyEvent } from "@/components/dashboard/composer-editor";
+import type { ComposerField } from "@/components/dashboard/composer-editor";
 import { ComposerInputAuthority } from "@/components/dashboard/composer-input";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 import { WorkingLine } from "./page-margin";
 import type { MarginAgent } from "./page-margin-model";
 
 /**
- * What the passage a reader selected opens (pages-live-document.md §4.2): the product's own message box on a card
+ * What *Comment* on a selected passage opens (pages-live-document.md §4.2): the product's own message box on a card
  * of paper, beside the passage in the margin (under it where the page has no margin), the caret already in it, so
  * it reads at once as somewhere to write. Typing is the comment; Enter or Send sends it with the selected
  * passage. The Agent at work on the page takes it, its Instance card under the box as under a conversation's
  * composer, unless the comment mentions whom it is for. It continues that Agent's conversation, or the passage's
- * editing conversation; with neither there, xMatrix gives it to one in a new discussion. Until something
- * is typed, the keys that act on a selection (Backspace, copy, cut, marks) still act on the passage. Leaving it, by a click anywhere else, closes it as Escape does; what was typed
+ * editing conversation; with neither there, xMatrix gives it to one in a new discussion. Leaving it, by a click
+ * anywhere else, closes it as Escape does; what was typed
  * comes back if the same passage is commented on again.
  */
-export function PageCommentBox({ text, taker, onText, onSend, onClose, onPassageKey }: {
+export function PageCommentBox({ text, taker, onText, onSend, onClose }: {
   /** What is typed so far; it stays with the passage's draft, not with the box. */
   text: string;
   /** The Agent at work on the page that takes the comment, when there is one. */
@@ -26,8 +26,6 @@ export function PageCommentBox({ text, taker, onText, onSend, onClose, onPassage
   onSend: (text: string) => void;
   /** `away`: the reader left it for somewhere else, which keeps the focus it went to. */
   onClose: (away?: boolean) => void;
-  /** A key for the passage itself, pressed while nothing is typed; true when the passage took it. */
-  onPassageKey: (event: ComposerKeyEvent) => boolean;
 }) {
   const field = useRef<ComposerField | null>(null);
   return (
@@ -40,7 +38,6 @@ export function PageCommentBox({ text, taker, onText, onSend, onClose, onPassage
         workspaces={[]} enabled autoFocus fieldRef={field} canSend={Boolean(text.trim())}
         placeholder="Comment, or ask for a change" ariaLabel="Comment" sendTitle="Comment"
         onSend={() => { if (text.trim()) onSend(text.trim()); else onClose(); }} onEscape={() => onClose()}
-        onKeyDownExtra={(event) => { if (!text && onPassageKey(event)) event.preventDefault(); }}
         onFieldBlur={() => onClose(true)} />
       {taker && <WorkingLine agents={[taker]} className="pb-1.5" />}
     </PaperPopover>
