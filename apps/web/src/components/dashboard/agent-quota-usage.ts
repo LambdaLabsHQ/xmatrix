@@ -51,7 +51,7 @@ function accountReadings(account: NonNullable<AgentRegistrationLiveState["quota"
   if (account?.allowed === false) readings.push({ key: "account", label: "Provider", value: "Refusing requests", high: true });
   if (credits?.unlimited) readings.push({ key: "credits", label: "Credits", value: "Unlimited", high: false });
   else if (credits?.balance !== undefined) {
-    readings.push({ key: "credits", label: "Credits", value: `${credits.balance.toLocaleString("en-US")} left`, high: false });
+    readings.push({ key: "credits", label: "Credits", value: `${credits.balance.toLocaleString("en-US", { maximumFractionDigits: 0 })} left`, high: false });
   }
   return readings;
 }
