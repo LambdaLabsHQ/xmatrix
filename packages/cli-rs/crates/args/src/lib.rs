@@ -762,6 +762,8 @@ mod tests {
             "connector:appstoreconnect/vendorNumber",
             "--reason",
             "sales report",
+            "--propose",
+            "connector:appstoreconnect/vendorNumber=87654321",
             "--wait",
         ])
         .expect("request settings should parse");
@@ -770,6 +772,7 @@ mod tests {
                 RequestCommand::Settings {
                     settings,
                     reason,
+                    propose,
                     wait,
                     json,
                 },
@@ -785,6 +788,7 @@ mod tests {
             ]
         );
         assert_eq!(reason.as_deref(), Some("sales report"));
+        assert_eq!(propose, vec!["connector:appstoreconnect/vendorNumber=87654321".to_string()]);
         assert!(wait);
         assert!(!json);
         assert!(Cli::try_parse_from(["xmatrix", "request", "settings"]).is_err());
@@ -1471,6 +1475,9 @@ pub enum RequestCommand {
         /// Why this Agent needs them, shown on the card.
         #[arg(long)]
         reason: Option<String>,
+        /// Suggest a value for a plain setting (not a secret), which a person confirms: `<address>=<value>`.
+        #[arg(long = "propose", value_name = "ADDRESS=VALUE")]
+        propose: Vec<String>,
         /// Wait until every setting is in and its connection passed a check (up to 30 minutes).
         #[arg(long)]
         wait: bool,

@@ -94,6 +94,12 @@ export interface AppConnectorProviderManifest {
      * value stays possible everywhere else.
      */
     signIn?: "appstoreconnect";
+    /**
+     * Not a secret (an account or vendor number): a Space admin reads it back,
+     * it is typed in the open, and an Agent may suggest a value on a settings
+     * card for a person to confirm. Still stored with the other credentials.
+     */
+    plain?: boolean;
   }>;
   /**
    * Inbound events (§3.3). A Channel subscribes with

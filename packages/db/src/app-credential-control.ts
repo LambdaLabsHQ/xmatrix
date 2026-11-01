@@ -432,8 +432,9 @@ export class PostgresAppCredentialRepository {
   }
 
   /**
-   * Values for a Space admin to read back: only the fields the manifest marks
-   * `generated` (the Hub minted them for the admin to paste into the provider).
+   * Values for a Space admin to read back: only the fields named, which the
+   * manifest marks `generated` (the Hub minted them for the admin to paste
+   * into the provider) or `plain` (not secret, such as a vendor number).
    */
   async readGenerated(input: { requestId: string; spaceId: string; providerId: string; actorUserId: string;
     generated: readonly string[] }): Promise<Record<string, string>> {

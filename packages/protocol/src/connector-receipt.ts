@@ -80,12 +80,22 @@ export interface ConnectorReceiptFix {
   /** The execution whose read can run again once the fix is in; none on a card an Agent asked for. */
   executionId?: string;
   remedy: { kind: "credential"; field: string } | { kind: "reconnect" };
+  /** A value the asking Agent suggests for a plain field, which a person confirms before it is saved. */
+  proposed?: string;
 }
 
 /** Metadata key of a receipt's fixes. */
 export const CONNECTOR_RECEIPT_FIXES_KEY = "xmatrixConnectorFixes";
 
 const FIX_ID = /^[A-Za-z0-9._:-]{1,240}$/u;
+
+/** A suggested plain value: one short line of printable text. */
+export function proposedValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  // eslint-disable-next-line no-control-regex
+  return trimmed && trimmed.length <= 200 && !/[\u0000-\u001f\u007f]/u.test(trimmed) ? trimmed : undefined;
+}
 
 /** A receipt's fixes, keeping only well-formed ones for a known App. */
 export function connectorReceiptFixesOf(metadata: Record<string, unknown> | undefined): ConnectorReceiptFix[] {
@@ -102,8 +112,9 @@ export function connectorReceiptFixesOf(metadata: Record<string, unknown> | unde
       ...(typeof fix.executionId === "string" ? { executionId: fix.executionId } : {}) };
     if (remedy.kind === "reconnect") return [{ ...base, remedy: { kind: "reconnect" } }];
     const field = manifest.credentials?.find((candidate) => candidate.id === remedy.field);
-    return remedy.kind === "credential" && field && !field.generated && !field.managed
-      ? [{ ...base, remedy: { kind: "credential", field: field.id } }] : [];
+    if (remedy.kind !== "credential" || !field || field.generated || field.managed) return [];
+    const proposed = field.plain ? proposedValue(fix.proposed) : undefined;
+    return [{ ...base, remedy: { kind: "credential", field: field.id }, ...(proposed ? { proposed } : {}) }];
   });
 }
 

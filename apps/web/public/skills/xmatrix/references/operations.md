@@ -167,6 +167,9 @@ and checked:
 xmatrix request settings connector:<app>/<field> [connector:<app>/connect …] --reason "<why>" [--wait]
 ```
 
+For a plain setting (not a secret) whose value you already know, suggest it
+for the admin to confirm: `--propose connector:<app>/<field>=<value>`.
+
 On Windows PowerShell 5.1, if the command itself uses `powershell -Command`,
 pass the script as one complete argv. Use outer single quotes and doubled
 single quotes for script string literals so `$env:<ENV_NAME>` is not expanded

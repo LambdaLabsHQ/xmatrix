@@ -34,11 +34,12 @@ const FIX = [{ providerId: "appstoreconnect", actionId: "sales", executionId: EX
   remedy: { kind: "credential", field: "webSession" } }];
 const connection = (status: string, lastCheckedAt?: string) => ({ id: `${SPACE}:appstoreconnect`, spaceId: SPACE,
   providerId: "appstoreconnect", providerName: "App Store Connect", status, authMode: "api-token", scopes: [], secretRefs: [],
-  capabilities: [], channelIds: [], credentialFields: ["keyId", "privateKey", ...(lastCheckedAt ? ["webSession"] : [])],
+  capabilities: [], channelIds: [], credentialFields: ["keyId", "privateKey", ...(lastCheckedAt ? ["webSession", "vendorNumber"] : [])],
   createdBy: "e2e-user", createdAt: E2E_NOW, updatedAt: E2E_NOW, ...(lastCheckedAt ? { lastCheckedAt } : {}) });
 const LATER = "2026-07-01T00:05:00.000Z";
 
-async function openReceipt(page: Page, message: unknown, { admin }: { admin: boolean }) {
+async function openReceipt(page: Page, message: unknown, { admin, saved = { credentialFields: ["keyId", "privateKey", "webSession"] } }:
+  { admin: boolean; saved?: Record<string, unknown> }) {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE],
     channels: [{ ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1 }] });
   await fixtureJson(page, "history", "**/api/xmatrix/channels/channel-general/history**", { messages: [message], hasMore: false });
@@ -46,7 +47,7 @@ async function openReceipt(page: Page, message: unknown, { admin }: { admin: boo
     responses: [{ json: { connections: [connection("configured")] } }, { json: { connections: [connection("configured", LATER)] } }] } });
   await fixtureJson(page, "credentials", `${ASC}/credentials`, admin ? { credentialFields: ["keyId", "privateKey"] }
     : { error: "Not found" }, { method: "GET", ...(admin ? {} : { status: 404 }) });
-  await fixtureJson(page, "save", `${ASC}/credentials`, { credentialFields: ["keyId", "privateKey", "webSession"] }, { method: "PUT" });
+  await fixtureJson(page, "save", `${ASC}/credentials`, saved, { method: "PUT" });
   await fixtureJson(page, "check", `${ASC}/check`, { connection: connection("configured", LATER) }, { method: "POST" });
   await fixtureJson(page, "rerun", `**/api/xmatrix/spaces/${SPACE}/app-executions/*/retry`,
     { summary: "App Store sales for Line Jump!: 49 downloads" }, { method: "POST" });
@@ -107,4 +108,28 @@ test("a card an Agent asked for names who asked and why, and is settled the same
   await expect(card).toHaveAttribute("data-settings-card", "settled");
   expect(await fixtureRequests(page, "check")).toHaveLength(1);
   expect(await fixtureRequests(page, "rerun")).toHaveLength(0);
+});
+
+test("an Agent's suggested vendor number is typed in the open, and saved only when an admin confirms it", async ({ page }) => {
+  const VENDOR = { providerId: "appstoreconnect", actionId: "settings", remedy: { kind: "credential", field: "vendorNumber" },
+    proposed: "87654321" };
+  const request = {
+    messageId: "settings-request:vendor", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW,
+    body: "**claude** asks a Space admin for App Store Connect Vendor number (sales reports).",
+    from: { identityId: "user:e2e-user", kind: "user", label: "xMatrix settings request", name: "xMatrix settings request",
+      userId: "e2e-user", email: "e2e@xmatrix.test" },
+    metadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, xmatrixConnectorFixes: [VENDOR],
+      xmatrixSettingsRequest: { agentName: "claude" } },
+  };
+  const card = await openReceipt(page, request, { admin: true,
+    saved: { credentialFields: ["keyId", "privateKey", "vendorNumber"], plain: { vendorNumber: "87654321" } } });
+  const field = card.getByLabel(/Vendor number/u);
+  await expect(field).toHaveAttribute("type", "text");
+  await expect(field).toHaveValue("87654321");
+  await expect(card.getByText("Suggested by claude; it is saved only when you confirm.")).toBeVisible();
+  expect(await fixtureRequests(page, "save")).toHaveLength(0);
+  await card.getByRole("button", { name: "Confirm and check" }).click();
+  await expect(card).toHaveAttribute("data-settings-card", "settled");
+  await expect(card.getByRole("status")).toHaveText("87654321");
+  expect(await fixtureRequestBodies(page, "save")).toEqual([{ fields: { vendorNumber: "87654321" } }]);
 });

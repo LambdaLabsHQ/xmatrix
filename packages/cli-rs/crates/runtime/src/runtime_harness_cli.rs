@@ -380,6 +380,21 @@ fn settings_status_url(hub_url: &str, settings: &[String], since: &str) -> Strin
     url
 }
 
+/// `<address>=<value>` suggestions as the Hub takes them; the value may itself hold `=`.
+fn settings_proposals(propose: &[String]) -> error::Result<serde_json::Map<String, serde_json::Value>> {
+    propose
+        .iter()
+        .map(|item| match item.split_once('=') {
+            Some((address, value)) if !address.trim().is_empty() && !value.trim().is_empty() => {
+                Ok((address.trim().to_string(), serde_json::Value::from(value.trim())))
+            }
+            _ => Err(CliError::Launch(format!(
+                "--propose takes <address>=<value>, such as connector:appstoreconnect/vendorNumber=87654321; got {item}"
+            ))),
+        })
+        .collect()
+}
+
 /// Asks a Space admin, on a card in this Agent's Channel, for connector
 /// settings; with `wait`, returns once each is in and its connection checked.
 async fn cmd_request_settings(
@@ -387,15 +402,17 @@ async fn cmd_request_settings(
     token: &str,
     settings: Vec<String>,
     reason: Option<String>,
+    propose: Vec<String>,
     wait: bool,
     json: bool,
 ) -> error::Result<()> {
     let settings: Vec<String> = settings.iter().map(|setting| setting.trim().to_string()).collect();
+    let proposals = settings_proposals(&propose)?;
     let posted = post_request_card(
         hub_url,
         token,
         xmatrix_cli_core::protocol::HubRoutes::SETTINGS_REQUESTS,
-        serde_json::json!({ "settings": settings }),
+        serde_json::json!({ "settings": settings, "proposals": proposals }),
         reason,
     )
     .await?;
@@ -556,6 +573,19 @@ fn print_harness_inventory(inventory: &serde_json::Value, json: bool) -> error::
 #[cfg(test)]
 mod harness_cli_tests {
     use super::*;
+
+    #[test]
+    fn settings_proposals_split_at_the_first_equals_and_refuse_a_bare_value() {
+        let proposals = settings_proposals(&[
+            "connector:appstoreconnect/vendorNumber=87654321".to_string(),
+            "connector:x/account= a=b ".to_string(),
+        ])
+        .expect("proposals should parse");
+        assert_eq!(proposals["connector:appstoreconnect/vendorNumber"], "87654321");
+        assert_eq!(proposals["connector:x/account"], "a=b");
+        assert!(settings_proposals(&["87654321".to_string()]).is_err());
+        assert!(settings_proposals(&["connector:x/account=".to_string()]).is_err());
+    }
 
     #[test]
     fn settings_status_names_each_setting_and_when_they_were_asked_for() {

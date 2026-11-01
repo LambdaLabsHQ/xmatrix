@@ -27,6 +27,8 @@ interface CredentialView {
   credentialFields?: string[];
   ingressUrl?: string;
   generated?: Record<string, string>;
+  /** Saved values of plain fields (a vendor number), which are not secret. */
+  plain?: Record<string, string>;
 }
 
 const INGRESS_KEY_FIELD = "ingressKey";
@@ -145,8 +147,9 @@ export function ConnectorCredentialForm({ submitLabel = "Save and connect", ...i
       ) : null}
       <ConnectorField label={candidate.label} help={candidate.description} required={candidate.required}
         saved={stored.has(candidate.id)}>
-        <Input type="password" autoComplete="off" value={draft[candidate.id] ?? ""}
-          placeholder={stored.has(candidate.id) ? "Enter a new value to replace it" : ""}
+        <Input type={candidate.plain ? "text" : "password"} autoComplete="off" value={draft[candidate.id] ?? ""}
+          placeholder={candidate.plain && view.data?.plain?.[candidate.id] ? view.data.plain[candidate.id]
+            : stored.has(candidate.id) ? "Enter a new value to replace it" : ""}
           onChange={(event) => setDraft((current) => ({ ...current, [candidate.id]: event.target.value }))} />
       </ConnectorField>
     </div>
@@ -182,7 +185,6 @@ export function ConnectorCredentialRows(input: CredentialStoreInput) {
   const { connector } = input;
   const { view, save, stored } = useCredentialStore(input);
   const [editing, setEditing] = useState<string | null>(null);
-  const [value, setValue] = useState("");
   const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
     userErrorMessage(view.error, "Couldn't load the credentials");
   return (
@@ -190,27 +192,20 @@ export function ConnectorCredentialRows(input: CredentialStoreInput) {
       <ConnectorRows testId="connector-credential-rows">
         {connectorWritableCredentials(connector).map((field) => (
           <ConnectorRow key={field.id} title={field.label}
-            meta={stored.has(field.id) ? "Saved" : field.required ? "Required, not set" : "Not set"}
+            meta={field.plain && view.data?.plain?.[field.id] ? view.data.plain[field.id]
+              : stored.has(field.id) ? "Saved" : field.required ? "Required, not set" : "Not set"}
             trailing={editing === field.id ? null : (
-              <ConnectorAction disabled={save.isPending} onClick={() => { setEditing(field.id); setValue(""); }}>
-                {stored.has(field.id) ? "Replace" : "Add"}
+              <ConnectorAction disabled={save.isPending} onClick={() => setEditing(field.id)}>
+                {stored.has(field.id) ? field.plain ? "Change" : "Replace" : "Add"}
               </ConnectorAction>
             )}>
             {editing === field.id ? (
-              <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={(event) => {
-                event.preventDefault();
-                if (!value.trim()) return;
-                save.mutate({ fields: { [field.id]: value } }, { onSuccess: () => { setEditing(null); setValue(""); } });
-              }}>
-                <Input type="password" autoComplete="off" autoFocus value={value} aria-label={field.label}
-                  className="min-w-0 flex-1 basis-56" onChange={(event) => setValue(event.target.value)} />
-                <button type="submit" disabled={save.isPending || !value.trim()}
-                  className={actionClass({ variant: "secondary", size: "sm" })}>
-                  {save.isPending ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null} Save
-                </button>
+              <CredentialValueForm field={field} busy={save.isPending} saving={save.isPending} submitLabel="Save" autoFocus
+                className="mt-2 flex flex-wrap items-center gap-2" plain={field.plain} initialValue={view.data?.plain?.[field.id]}
+                save={(value) => save.mutateAsync({ fields: { [field.id]: value } }).then(() => setEditing(null))}>
                 <ConnectorAction onClick={() => setEditing(null)}>Cancel</ConnectorAction>
                 {field.description ? <p className="basis-full text-[12px] leading-[1.45] text-muted-foreground">{field.description}</p> : null}
-              </form>
+              </CredentialValueForm>
             ) : null}
           </ConnectorRow>
         ))}
@@ -284,12 +279,15 @@ function SecretRow({ label, value, help }: { label: string; value: string; help?
 
 /**
  * One credential typed in place of a missing or refused one. The value goes
- * straight to the connection's credential store, is never shown back, and
- * the field empties once it is saved.
+ * straight to the connection's credential store; a secret is never shown back
+ * and its field empties once it is saved, while a plain value stays in view.
  */
 export function CredentialValueForm({ field, busy, saving, submitLabel, variant = "secondary", autoFocus = false, className,
-  save, children }: {
+  plain = false, initialValue = "", save, children }: {
   field: { id: string; label: string };
+  /** Not a secret: typed in the open, starting from `initialValue`. */
+  plain?: boolean;
+  initialValue?: string;
   busy: boolean;
   saving: boolean;
   submitLabel: string;
@@ -300,14 +298,14 @@ export function CredentialValueForm({ field, busy, saving, submitLabel, variant 
   save: (value: string) => Promise<unknown>;
   children?: ReactNode;
 }) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(plain ? initialValue : "");
   return (
     <form className={className ?? "flex flex-wrap items-center gap-2"} onSubmit={(event) => {
       event.preventDefault();
       if (!value.trim()) return;
-      void save(value).then(() => setValue(""), () => undefined);
+      void save(value.trim()).then(() => { if (!plain) setValue(""); }, () => undefined);
     }}>
-      <Input type="password" autoComplete="off" autoFocus={autoFocus} value={value} aria-label={field.label} placeholder={field.label}
+      <Input type={plain ? "text" : "password"} autoComplete="off" autoFocus={autoFocus} value={value} aria-label={field.label} placeholder={field.label}
         className="min-w-0 flex-1 basis-56" onChange={(event) => setValue(event.target.value)} />
       <button type="submit" disabled={busy || !value.trim()} className={actionClass({ variant, size: "sm" })}>
         {saving ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null} {submitLabel}

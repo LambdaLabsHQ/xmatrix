@@ -461,7 +461,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         description: "The whole AuthKey_<Key ID>.p8 file Apple let you download once, pasted as text." },
       { id: "webhookSecret", label: "Webhook secret", generated: true,
         description: "xMatrix registers it on the webhook it creates when a channel subscribes to an app; nothing to paste." },
-      { id: "vendorNumber", label: "Vendor number (sales reports)",
+      { id: "vendorNumber", label: "Vendor number (sales reports)", plain: true,
         description: "Only for sales: Payments and Financial Reports shows it at the top left, under the legal entity name. Apple's API never returns it. With the web session saved, sales reads it from the Payments page itself; otherwise the first sales command that names vendor=<number> saves it here." },
       { id: "webSession", label: "Web session (App Review messages, new apps, App Privacy)", signIn: "appstoreconnect",
         description: "Only for what Apple's API cannot do: review_messages, create_app, privacy and set_privacy, and finding the vendor number for sales. In the xMatrix Mac or Windows app, Sign in to App Store Connect saves it: you sign in on Apple's own page and the password never reaches xMatrix. Elsewhere, paste the Cookie header of a signed-in appstoreconnect.apple.com page. Apple keeps it a day to a month; sign in again when review_messages says it lapsed." },
