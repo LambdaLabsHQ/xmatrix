@@ -1724,6 +1724,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
                 >
                   <AnimationActivityScope active={!mobileDockCovered}>
                   <div
+                    ref={dockTabSlide.trackRef}
                     className="app-mobile-dock-track"
                     style={{ "--app-mobile-dock-slot": mobileDockSlot } as CSSProperties}
                   >

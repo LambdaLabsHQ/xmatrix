@@ -421,8 +421,14 @@ test("switching dock tabs moves the bar with the page", async ({ page }) => {
     for (let frame = 0; frame < 60 && slot() === channels; frame++) await new Promise(requestAnimationFrame);
     const bar = document.querySelector(".app-mobile-tab-root-bar:not(.app-dock-tab-slide-outgoing)");
     const leaving = document.querySelector(".app-dock-tab-slide-outgoing");
-    return { bar: bar?.getAnimations().length ?? 0, leaving: leaving?.getAnimations().length ?? 0 };
+    return {
+      track: track?.getAnimations().length ?? 0,
+      bar: bar?.getAnimations().length ?? 0,
+      leaving: leaving?.getAnimations().length ?? 0,
+    };
   });
+  // The track slides by an animation started once the new screen is painted, not a CSS transition.
+  expect(moving.track).toBeGreaterThan(0);
   expect(moving.bar).toBeGreaterThan(0);
   expect(moving.leaving).toBeGreaterThan(0);
   await expect(page.locator(".app-dock-tab-slide-outgoing")).toHaveCount(0);
