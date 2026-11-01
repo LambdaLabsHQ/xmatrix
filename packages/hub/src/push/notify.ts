@@ -1,5 +1,5 @@
-import { PostgresPushDeviceRepository, type PushDevice } from "@xmatrix/db";
-import { sha256Hex } from "@xmatrix/protocol";
+import { PostgresPageRepository, PostgresPushDeviceRepository, type PushDevice } from "@xmatrix/db";
+import { messageReferenceLabels, pageReferencesIn, sha256Hex } from "@xmatrix/protocol";
 
 import { compactMessageBodyPreview } from "../message-body-preview";
 import { createPostgresAuthorityDatabase } from "../postgres-authority-fleet";
@@ -155,11 +155,64 @@ export async function pushToPeople(input: {
   return result;
 }
 
-/** The notification a delivered message becomes: its sender, and its text as a list row would preview it. */
-export function messagePushNotification(channelId: string, payload: Record<string, unknown>): PushNotification | null {
+/**
+ * The notification a delivered message becomes: its sender, and its text as a
+ * list row would preview it, with each page reference drawn as `pageTitle`
+ * names it for this reader ("Page" when it does not).
+ */
+export function messagePushNotification(channelId: string, payload: Record<string, unknown>,
+  pageTitle?: (pageId: string) => string | undefined): PushNotification | null {
   const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
   const from = payload.from && typeof payload.from === "object" ? payload.from as Record<string, unknown> : {};
   const title = typeof from.label === "string" && from.label.trim() ? from.label.trim().slice(0, 120) : "xMatrix";
-  const body = compactMessageBodyPreview(typeof payload.body === "string" ? payload.body : "").slice(0, 300);
+  const body = compactMessageBodyPreview(typeof payload.body === "string" ? payload.body : "",
+    (text) => messageReferenceLabels(text, { page: pageTitle })).slice(0, 300);
   return messageId && body ? { channelId, messageId, title, body } : null;
+}
+
+type PageTitles = Pick<PostgresPageRepository, "spaceOfConversation" | "tree">;
+
+/**
+ * Each reader's notifications, grouped by what they read: a referenced page
+ * is named by its title only for a reader who can open it, as clients draw it.
+ * A message without page references is one notification for everyone.
+ */
+export async function messagePushNotifications(input: {
+  channelId: string;
+  payload: Record<string, unknown>;
+  userIds: readonly string[];
+  pages: () => PageTitles;
+}): Promise<{ userIds: string[]; notification: PushNotification }[]> {
+  const body = typeof input.payload.body === "string" ? input.payload.body : "";
+  const referenced = new Set(pageReferencesIn(body));
+  const pages = referenced.size > 0 ? input.pages() : undefined;
+  const titlesFor = async (userId: string): Promise<Map<string, string>> => {
+    if (!pages) return new Map();
+    try {
+      const principal = { kind: "user" as const, id: userId };
+      const { spaceId } = await pages.spaceOfConversation({ requestId: crypto.randomUUID(),
+        conversationId: input.channelId, principal });
+      const { pages: tree } = await pages.tree({ requestId: crypto.randomUUID(), spaceId, principal });
+      return new Map(tree.filter((page) => referenced.has(page.pageId)).map((page) => [page.pageId, page.title]));
+    } catch {
+      // A reader whose pages cannot be read now still gets the message, its pages unnamed.
+      return new Map();
+    }
+  };
+  const groups = new Map<string, { userIds: string[]; notification: PushNotification }>();
+  const readers = referenced.size === 0 ? [[...input.userIds]] : input.userIds.map((userId) => [userId]);
+  for (const [index, titles] of (await Promise.all(readers.map((group) => titlesFor(group[0]!)))).entries()) {
+    const notification = messagePushNotification(input.channelId, input.payload, (pageId) => titles.get(pageId));
+    if (!notification) return [];
+    const group = groups.get(notification.body) ?? { userIds: [], notification };
+    group.userIds.push(...readers[index]!);
+    groups.set(notification.body, group);
+  }
+  return [...groups.values()];
+}
+
+export function pageTitles(env: Env): PostgresPageRepository {
+  return new PostgresPageRepository(createPostgresAuthorityDatabase(env, {
+    applicationName: "xmatrix-hub-push-pages", ...POSTGRES_AUTHORITY_TIMEOUTS,
+  }));
 }
