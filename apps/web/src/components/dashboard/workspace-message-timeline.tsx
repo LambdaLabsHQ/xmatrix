@@ -31,6 +31,7 @@ import {
 
 import { RealtimeMessageAvatar } from "./realtime-message-avatar";
 import { ConnectorReceiptCard } from "./connector-receipt-card";
+import { ConnectorSettingsCard } from "./connector-settings-card";
 import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
 import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
@@ -218,7 +219,7 @@ import { PageEditCards, useMessagePageEdits } from "@/components/dashboard/page-
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow, PageMessageEdit,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation, parseConnectorReceipt } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation, parseConnectorReceipt, connectorReceiptFixesOf } from "@xmatrix/protocol";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
@@ -2713,6 +2714,10 @@ export const MessageRow = memo(function MessageRow({
                   {...(channel && message.messageId && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string"
                     ? { privateResult: { channelId: channel.id, messageId: message.messageId,
                       ownerUserId: message.metadata.xmatrixPrivateConnectorResultOwner, token } } : {})} />
+                {channel?.spaceId && token && !contextOnly ? connectorReceiptFixesOf(message.metadata).map((fix) => (
+                  <ConnectorSettingsCard key={fix.executionId} fix={fix} receiptSentAt={message.sentAt} spaceId={channel.spaceId!}
+                    token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+                )) : null}
               </div>
             ) : isMachineRunFailureNotice(message) ? (
               <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />

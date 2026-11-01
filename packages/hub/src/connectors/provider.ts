@@ -1,3 +1,4 @@
+import type { ConnectorReceiptFix } from "@xmatrix/protocol";
 import type { AgentRegistrationIdentity } from "./agent-caller";
 import type { Env } from "../types";
 import type { XActionCapability } from "./x-accounts";
@@ -111,6 +112,8 @@ export interface ConnectorCommandInput {
   senderKind?: "user" | "agent";
   /** The Agent Instance when an Agent wrote it. */
   senderId?: string;
+  /** Collects the fixes a person can make for statements that stopped, for the command's receipt. */
+  fixes?: ConnectorReceiptFix[];
 }
 
 export interface ConnectorCommandHandler {

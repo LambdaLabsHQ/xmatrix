@@ -72,6 +72,7 @@ export function connectorCommands(providerId: string,
     run: async (input) => {
       const manifest = getAppConnectorProvider(providerId);
       if (!manifest) return;
+      input = { ...input, fixes: [] };
       const lines: string[] = [];
       if (manifest.events && isConnectorSubscriptionCommand(providerId, input.body)) {
         for (const [index, statement] of connectorSubscriptionStatements(manifest, input.body).entries()) {

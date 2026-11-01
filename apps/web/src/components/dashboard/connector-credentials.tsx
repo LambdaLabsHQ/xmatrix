@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, KeyRound, Loader2, LogIn, RefreshCw } from "lucide-react";
 import { WEB_PROXY_ROUTES, type SerializedAppConnectorConnection } from "@xmatrix/protocol";
@@ -279,5 +279,40 @@ function SecretRow({ label, value, help }: { label: string; value: string; help?
         <ConnectorCopyLine value={value} label={label} display={revealed ? value : "•".repeat(32)} />
       </div>
     </ConnectorRow>
+  );
+}
+
+/**
+ * One credential typed in place of a missing or refused one. The value goes
+ * straight to the connection's credential store, is never shown back, and
+ * the field empties once it is saved.
+ */
+export function CredentialValueForm({ field, busy, saving, submitLabel, variant = "secondary", autoFocus = false, className,
+  save, children }: {
+  field: { id: string; label: string };
+  busy: boolean;
+  saving: boolean;
+  submitLabel: string;
+  variant?: "primary" | "secondary";
+  autoFocus?: boolean;
+  className?: string;
+  /** Saves the value; resolves once it is stored. */
+  save: (value: string) => Promise<unknown>;
+  children?: ReactNode;
+}) {
+  const [value, setValue] = useState("");
+  return (
+    <form className={className ?? "flex flex-wrap items-center gap-2"} onSubmit={(event) => {
+      event.preventDefault();
+      if (!value.trim()) return;
+      void save(value).then(() => setValue(""), () => undefined);
+    }}>
+      <Input type="password" autoComplete="off" autoFocus={autoFocus} value={value} aria-label={field.label} placeholder={field.label}
+        className="min-w-0 flex-1 basis-56" onChange={(event) => setValue(event.target.value)} />
+      <button type="submit" disabled={busy || !value.trim()} className={actionClass({ variant, size: "sm" })}>
+        {saving ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null} {submitLabel}
+      </button>
+      {children}
+    </form>
   );
 }
