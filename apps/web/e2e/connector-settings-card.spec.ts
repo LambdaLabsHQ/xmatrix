@@ -64,6 +64,11 @@ test("a stopped command's setting is fixed on its card: saved, checked, and the 
   // A browser has no sign-in window: the session is pasted, and never shown back.
   const field = card.getByLabel(/Web session/u);
   await expect(field).toHaveAttribute("type", "password");
+  // Paper, not glass: the action is flat ink and the field a hairline, neither casts a shadow.
+  const save = card.getByRole("button", { name: "Save and check" });
+  expect(await save.evaluate((element) => getComputedStyle(element).boxShadow)).toBe("none");
+  expect(await field.evaluate((element) => getComputedStyle(element).boxShadow)).not.toMatch(/\b[1-9]\d*px [1-9]\d*px\b/u);
+  expect(await save.evaluate((element) => getComputedStyle(element).backdropFilter)).toBe("none");
   await field.fill("myacinfo=session");
   await card.getByRole("button", { name: "Save and check" }).click();
 

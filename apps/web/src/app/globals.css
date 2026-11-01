@@ -8469,6 +8469,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   border-top: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 }
 .xmatrix-app .app-settings-card-state { color: var(--app-settings-ink); }
+/* Paper all through (Daniel 2026-11-01: 纸面风格, no shadow): the card is a piece of the paper, so its
+   controls take the paper's flat ink and hairline, and on it even the paper's faint lift is dropped. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-settings-card:is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *),
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-settings-card:is(.app-tool-detail, .app-tool-list, .app-paper-card) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *) {
+  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.16) !important;
+}
 .xmatrix-app .app-settings-card-dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
 
 /* A problem the reader can fix is a sheet of the paper, with the alert ink
