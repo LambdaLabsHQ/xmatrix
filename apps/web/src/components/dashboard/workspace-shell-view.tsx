@@ -31,7 +31,7 @@ import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content"
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useBrowserBackEntry, useSystemBackHandler } from "./use-system-back";
 import { useMobileListTransition } from "./use-mobile-list-transition";
-import { DockTabSlideLayer, MobileListTransitionLayer } from "./mobile-transition-layers";
+import { DockTabSlideLayer, MobileListTransitionLayer, SlidingMobileTabDock } from "./mobile-transition-layers";
 import { useDockTabSlide } from "./use-dock-tab-slide";
 import { closeViewSelection } from "./url-query-state";
 import { ConnectionStatus } from "./connection-status";
@@ -63,7 +63,6 @@ import {
   MessageTimeline,
   MobileChannelChatList,
   CreateFab,
-  MobileTabDock,
   MobileChannelSummaryPlaque,
   TopWorkspaceBar,
   WorkspaceRail,
@@ -620,15 +619,23 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   });
   // Switching dock tabs moves the whole page, its bar and sign with it.
   const dockTabTapped = useRef(false);
-  const changeDockTab = useStableCallback((next: AppView) => {
-    dockTabTapped.current = DOCK_TAB_VIEWS.indexOf(dockTabOf(next)) !== mobileDockSlot;
-    changeAppView(next);
-  });
   const dockTabSlide = useDockTabSlide({
     tabTapped: dockTabTapped,
     slot: mobileDockSlot,
     tabRootShowing: isMobileViewport && mobileDockPager && !mobileDockCovered && !(view === "pages" && selectedPageId) &&
       !agentConfigDialog && DOCK_TAB_VIEWS.includes(view),
+    rootRef: shellRootRef,
+  });
+  // A tab whose screen is already on the track slides there first and renders
+  // once it lands (use-dock-tab-slide); any other renders first and then slides.
+  const changeDockTab = useStableCallback((next: AppView) => {
+    const nextSlot = DOCK_TAB_VIEWS.indexOf(dockTabOf(next));
+    // The new screen's +, as listCreate gives it once that tab renders.
+    const create = (next === "messages" && canCreateChannel) || next === "pages";
+    // It lands a moment later: the shell's actions as they are then, not at the tap.
+    if (dockTabSlide.slideTo(nextSlot, () => changeAppViewRef.current(next), { create })) return;
+    dockTabTapped.current = nextSlot !== mobileDockSlot;
+    changeAppView(next);
   });
   // What the shell holds live about a conversation linked to a page (pages-live-document.md §4.4).
   // A message on its way is its last one already, so a page's card for it shows the comment as it is sent.
@@ -871,14 +878,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     void desktopBridge
       .setMobileTabState({
         visible: nativeMobileTabVisible,
-        activeView: view,
+        // The tab a slide is going to, before it lands: an older one would take the tab bar back.
+        activeView: DOCK_TAB_VIEWS[dockTabSlide.pending.get() ?? -1] ?? view,
         spaceId: currentSpaceId,
         statusLive,
         // Omit identity while auth is unresolved; null explicitly means signed out.
         ...(!loading ? { userId: user?.id ?? null } : {}),
       })
       .catch(() => undefined);
-  }, [desktopBridge, isIOSNativeShell, nativeMobileTabVisible, view, currentSpaceId, statusLive, loading, user?.id]);
+  }, [desktopBridge, dockTabSlide.pending, isIOSNativeShell, nativeMobileTabVisible, view, currentSpaceId, statusLive,
+    loading, user?.id]);
 
   useEffect(() => {
     if (!isIOSNativeShell || !desktopBridge?.onMobileTabChange) return;
@@ -893,10 +902,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       // posted the retired `agents` segment did nothing.
       const resolved = viewForRouteSegment(nextView);
       if (!resolved) return;
-      dockTabTapped.current = DOCK_TAB_VIEWS.indexOf(dockTabOf(resolved)) !== mobileDockSlot;
-      changeAppView(resolved);
+      // Another Space's screens are not on the track yet: they render first.
+      if (spaceId && spaceId !== currentSpaceId) {
+        dockTabTapped.current = DOCK_TAB_VIEWS.indexOf(dockTabOf(resolved)) !== mobileDockSlot;
+        changeAppView(resolved);
+        return;
+      }
+      changeDockTab(resolved);
     });
-  }, [changeAppView, currentSpaceId, desktopBridge, isIOSNativeShell, mobileDockSlot, selectSpace]);
+  }, [changeAppView, changeDockTab, currentSpaceId, desktopBridge, isIOSNativeShell, mobileDockSlot, selectSpace]);
 
   // A phone screen's parent, the same one its bar's chevron goes to. A layer
   // over the screen (a sheet, the new-conversation form) consumes Back first.
@@ -1579,7 +1593,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         />}
         <CreateFab action={mobileCreate} />
         {!isIOSNativeShell && (
-          <MobileTabDock
+          <SlidingMobileTabDock
+            slide={dockTabSlide}
             activeView={view}
             hidden={!nativeMobileTabVisible}
             statusLive={statusLive}

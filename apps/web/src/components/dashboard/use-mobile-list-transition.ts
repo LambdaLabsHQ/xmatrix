@@ -4,6 +4,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { flushSync } from "react-dom";
 
 import { useScreenChangeStore, type ScreenChangeStore } from "./screen-change-store";
+import { SPRING_SAMPLES, springDuration, springOffset } from "./screen-spring";
 import { startAfterPaint } from "./start-after-paint";
 import { systemBackLayerOpen } from "./use-system-back";
 
@@ -58,10 +59,6 @@ declare global {
   }
 }
 
-/** Critically damped: no overshoot, settled in about 0.4 s. */
-const SETTLE_RATE = 22;
-/** Points sampled from the spring for the compositor's keyframes. */
-const SETTLE_SAMPLES = 60;
 /** A prepared change no swipe took up is put away. */
 const PREPARED_FOR_MS = 700;
 /** How fast the bar's glyphs and the controls at the bottom trade places: the
@@ -74,20 +71,6 @@ const POSE_STOPS = [0, 1 - 1 / BAR_FADE, 1 - 1 / BOTTOM_FADE, 1 / BOTTOM_FADE, 1
 
 function reducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-/** How far from its target the spring is `t` s after leaving `offset` px from it at `speed` px/s. */
-function springOffset(offset: number, speed: number, t: number): number {
-  return (offset + (speed + SETTLE_RATE * offset) * t) * Math.exp(-SETTLE_RATE * t);
-}
-
-/** When the spring is within half a pixel of its target for good. */
-function springDuration(offset: number, speed: number): number {
-  let settledAt = 0;
-  for (let t = 0; t <= 1; t += 1 / 240) {
-    if (Math.abs(springOffset(offset, speed, t)) >= 0.5) settledAt = t + 1 / 240;
-  }
-  return Math.max(settledAt, 0.12);
 }
 
 /** The elements that move during the change, found once when it is set up. */
@@ -210,9 +193,9 @@ function tearDown(parts: Parts) {
 function settleOnCompositor(parts: Parts, x: number, target: number, speed: number) {
   const offset = x - target;
   const duration = springDuration(offset, speed);
-  const frames = Array.from({ length: SETTLE_SAMPLES + 1 }, (_, index) => {
-    const t = (duration * index) / SETTLE_SAMPLES;
-    return poses(parts, index === SETTLE_SAMPLES ? target : target + springOffset(offset, speed, t));
+  const frames = Array.from({ length: SPRING_SAMPLES + 1 }, (_, index) => {
+    const t = (duration * index) / SPRING_SAMPLES;
+    return poses(parts, index === SPRING_SAMPLES ? target : target + springOffset(offset, speed, t));
   });
   const animations = frames[0].map(([element], part) => element.animate(
     frames.map((pose) => ({ ...pose[part][1] })),

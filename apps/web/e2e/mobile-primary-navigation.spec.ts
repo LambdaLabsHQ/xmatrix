@@ -409,7 +409,7 @@ test("the page leaves an edge swipe to the app while a layer is open over the co
   await expect(details).toBeVisible();
 });
 
-test("switching dock tabs moves the bar with the page", async ({ page }) => {
+test("a tab not shown yet renders first, then the page and its bar slide to it", async ({ page }) => {
   await openGeneralChannelList(page);
   await expect(generalChannelRow(page)).toBeVisible();
   const moving = await page.evaluate(async () => {
@@ -432,6 +432,76 @@ test("switching dock tabs moves the bar with the page", async ({ page }) => {
   expect(moving.bar).toBeGreaterThan(0);
   expect(moving.leaving).toBeGreaterThan(0);
   await expect(page.locator(".app-dock-tab-slide-outgoing")).toHaveCount(0);
+});
+
+test("a tab already shown slides there at once and renders once it lands", async ({ page }) => {
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  const dock = page.getByRole("navigation", { name: "Primary" });
+  // Status's screen goes on the track the first time it is shown.
+  await dock.getByRole("button", { name: "Status" }).click();
+  await expect(dock.getByRole("button", { name: "Status" })).toHaveAttribute("aria-current", "page");
+  await screenChangeLanded(page);
+  await dock.getByRole("button", { name: "Channels" }).click();
+  await expect(generalChannelRow(page)).toBeVisible();
+  await expect.poll(() => page.evaluate(() =>
+    document.querySelector(".app-mobile-dock-track")?.getAnimations().length ?? -1)).toBe(0);
+
+  const atTap = await page.evaluate(() => {
+    const track = document.querySelector<HTMLElement>(".app-mobile-dock-track")!;
+    const slot = track.style.getPropertyValue("--app-mobile-dock-slot");
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Primary"] button[aria-label="Status"]')?.click();
+    return {
+      // Moving in the same task as the tap, before anything renders.
+      track: track.getAnimations().length,
+      slotBefore: slot,
+      slotNow: track.style.getPropertyValue("--app-mobile-dock-slot"),
+      copies: document.querySelectorAll(".app-dock-tab-slide-incoming").length,
+      bars: document.querySelector(".app-mobile-tab-root-bar:not(.app-dock-tab-slide-incoming)")?.getAnimations().length ?? 0,
+    };
+  });
+  expect(atTap.track).toBeGreaterThan(0);
+  expect(atTap.slotNow).toBe(atTap.slotBefore);
+  expect(atTap.copies).toBe(1);
+  expect(atTap.bars).toBeGreaterThan(0);
+  // The dock marks where the page is going from the start.
+  await expect(dock.getByRole("button", { name: "Status" })).toHaveAttribute("aria-current", "page");
+
+  // Once it lands the shell is on Status, and nothing is left moving or copied.
+  await expect(page).toHaveURL(/\/status$/);
+  await expect.poll(() => page.evaluate(() => {
+    const track = document.querySelector<HTMLElement>(".app-mobile-dock-track")!;
+    return {
+      slot: track.style.getPropertyValue("--app-mobile-dock-slot"),
+      track: track.getAnimations().length,
+      copies: document.querySelectorAll(".app-dock-tab-slide-incoming").length,
+    };
+  })).toEqual({ slot: "2", track: 0, copies: 0 });
+});
+
+test("a second tap while the page slides takes it on from where it is to the newer tab", async ({ page }) => {
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  const dock = page.getByRole("navigation", { name: "Primary" });
+  for (const name of ["Status", "More", "Channels"]) {
+    await dock.getByRole("button", { name }).click();
+    await expect(dock.getByRole("button", { name })).toHaveAttribute("aria-current", "page");
+    await screenChangeLanded(page);
+    await expect.poll(() => page.evaluate(() =>
+      document.querySelector(".app-mobile-dock-track")?.getAnimations().length ?? -1)).toBe(0);
+  }
+  await page.evaluate(async () => {
+    const tap = (name: string) => document.querySelector<HTMLButtonElement>(`nav[aria-label="Primary"] button[aria-label="${name}"]`)?.click();
+    tap("Status");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    tap("More");
+  });
+  await expect(page).toHaveURL(/\/more$/);
+  await expect.poll(() => page.evaluate(() => ({
+    slot: document.querySelector<HTMLElement>(".app-mobile-dock-track")?.style.getPropertyValue("--app-mobile-dock-slot"),
+    copies: document.querySelectorAll(".app-dock-tab-slide-incoming").length,
+  }))).toEqual({ slot: "3", copies: 0 });
+  await expect(dock.getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "page");
 });
 
 test("a conversation opened from a notification goes back to the channel list, not the conversation before it", async ({ page }) => {
