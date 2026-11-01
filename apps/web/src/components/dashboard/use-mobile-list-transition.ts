@@ -4,6 +4,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { flushSync } from "react-dom";
 
 import { useScreenChangeStore, type ScreenChangeStore } from "./screen-change-store";
+import { startAfterPaint } from "./start-after-paint";
 import { systemBackLayerOpen } from "./use-system-back";
 
 /*
@@ -26,6 +27,8 @@ import { systemBackLayerOpen } from "./use-system-back";
  * - Once let go, the rest of the way is handed to the compositor as keyframes
  *   sampled from the spring, so the layers land smoothly whatever the main
  *   thread does. The sign's length, which is laid out, follows on the main thread.
+ * - Opening a conversation renders it first; its push waits for the frame that
+ *   paints it before it starts (start-after-paint.ts).
  * - The iOS app announces a touch at the left edge (`prepare`) before its swipe
  *   is recognized; the change is set up then, invisibly, and the swipe starts
  *   on a page that is ready. A swipe that catches the screen springing back
@@ -215,11 +218,13 @@ function settleOnCompositor(parts: Parts, x: number, target: number, speed: numb
     frames.map((pose) => ({ ...pose[part][1] })),
     { duration: duration * 1000, easing: "linear", fill: "forwards" },
   ));
-  const startedAt = performance.now();
   return {
     animations,
-    /** Where the screen is now, for a swipe that catches it. */
-    position: () => target + springOffset(offset, speed, Math.min(duration, (performance.now() - startedAt) / 1000)),
+    /** Where the screen is now, for a swipe that catches it: by the animations' own time, which a held start does not count. */
+    position: () => {
+      const time = Number(animations[0]?.currentTime ?? 0) / 1000;
+      return target + springOffset(offset, speed, Math.min(duration, time));
+    },
   };
 }
 
@@ -298,12 +303,15 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       if (rootRef.current) delete rootRef.current.dataset.listTransition;
     };
 
-    const land = (target: number, speed: number, then: () => void) => {
+    const land = (target: number, speed: number, then: () => void, afterPaint = false) => {
       const parts = m.parts;
       if (!parts) return;
       for (const animation of m.track) animation.cancel();
       m.track = [];
       const landing = settleOnCompositor(parts, m.x, target, speed);
+      // A conversation just rendered is laid out and painted on the next frame;
+      // started there, the push showed on iOS only its last few points.
+      if (afterPaint) startAfterPaint(landing.animations);
       m.landing = { toList: target > 0, ...landing };
       void Promise.all(landing.animations.map((animation) => animation.finished)).then(() => {
         if (m.landing?.animations !== landing.animations) return;
@@ -335,7 +343,7 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
         if (m.stage === "prepared") close();
         if (m.stage || !state.current.listShowing) return false;
         flushSync(update);
-        if (state.current.conversationOverList && setUpAs("forward")) land(0, 0, () => close());
+        if (state.current.conversationOverList && setUpAs("forward")) land(0, 0, () => close(), true);
         return true;
       },
     };

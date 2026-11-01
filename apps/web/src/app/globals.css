@@ -7010,7 +7010,11 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   flex: 1;
   width: 400%;
   transform: translate3d(calc(var(--app-mobile-dock-slot, 0) * -25%), 0, 0);
-  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* Read by use-dock-tab-slide.ts, which moves the track and the bars: a
+     transition here started on the frame that renders the new tab, and iOS
+     showed only its last few points. */
+  --app-mobile-dock-duration: 260;
+  --app-mobile-dock-easing: cubic-bezier(0.32, 0.72, 0, 1);
   will-change: transform;
 }
 
@@ -7033,7 +7037,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 
 @media (prefers-reduced-motion: reduce) {
   .xmatrix-app .app-mobile-dock-track {
-    transition: none;
+    --app-mobile-dock-duration: 0;
   }
 }
 
