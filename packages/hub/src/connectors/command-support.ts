@@ -1,5 +1,5 @@
 import { ControlError } from "@xmatrix/db";
-import { connectorReceiptBody, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
+import { CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest, AppConnectorRemedy, ConnectorResultVisibility } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
@@ -115,6 +115,9 @@ export async function withExecution(
       : { reason: executionExcerpt(outcome.summary, 500), ...(outcome.remedy ? { remedy: remedyCode(outcome.remedy) } : {}) }),
     principal: scope.principal,
   });
+  if (outcome.status !== "completed" && outcome.remedy) {
+    input.fixes?.push({ providerId: manifest.id, actionId: action.id, executionId, remedy: outcome.remedy });
+  }
   return commandResult(manifest.name, action.id, outcome);
 }
 
@@ -135,6 +138,7 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     principal: { kind: "user", id: input.actorUserId },
     appAuthorId: manifest.id,
     residual: { appMetadata: { xmatrixProvenance: "system_fact",
+      ...(input.fixes?.length ? { [CONNECTOR_RECEIPT_FIXES_KEY]: input.fixes } : {}),
       ...(options.privateResultOwnerUserId ? { xmatrixPrivateConnectorResultOwner: options.privateResultOwnerUserId } : {}),
       ...(options.resumeRequester !== false && input.senderKind === "agent" && input.senderId && input.commandMessageId !== null
         ? { xmatrixConnectorRequesterInstanceId: input.senderId } : {}) },

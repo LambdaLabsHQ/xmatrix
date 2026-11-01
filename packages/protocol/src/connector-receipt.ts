@@ -67,3 +67,41 @@ export function connectorReceiptPreview(preview: string): string | undefined {
   const status = match[2]!;
   return `${receiptSubject(match[1]!)} · ${status[0]!.toUpperCase()}${status.slice(1)}`;
 }
+
+/**
+ * What stopped a statement that a person can fix right under its receipt: the
+ * credential field to save or the connection to make again. The Hub stores
+ * these under a metadata key only it writes (`xmatrixConnectorFixes`), so the
+ * card they draw names the Hub's own fix, never one a message invented.
+ */
+export interface ConnectorReceiptFix {
+  providerId: string;
+  actionId: string;
+  /** The execution whose read can run again once the fix is in. */
+  executionId: string;
+  remedy: { kind: "credential"; field: string } | { kind: "reconnect" };
+}
+
+/** Metadata key of a receipt's fixes. */
+export const CONNECTOR_RECEIPT_FIXES_KEY = "xmatrixConnectorFixes";
+
+const FIX_ID = /^[A-Za-z0-9._:-]{1,240}$/u;
+
+/** A receipt's fixes, keeping only well-formed ones for a known App. */
+export function connectorReceiptFixesOf(metadata: Record<string, unknown> | undefined): ConnectorReceiptFix[] {
+  const value = metadata?.[CONNECTOR_RECEIPT_FIXES_KEY];
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 8).flatMap((item): ConnectorReceiptFix[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const fix = item as Record<string, unknown>;
+    const remedy = fix.remedy && typeof fix.remedy === "object" ? fix.remedy as Record<string, unknown> : undefined;
+    const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === fix.providerId);
+    if (!manifest || typeof fix.actionId !== "string" || !FIX_ID.test(fix.actionId) ||
+      typeof fix.executionId !== "string" || !FIX_ID.test(fix.executionId) || !remedy) return [];
+    const base = { providerId: manifest.id, actionId: fix.actionId, executionId: fix.executionId };
+    if (remedy.kind === "reconnect") return [{ ...base, remedy: { kind: "reconnect" } }];
+    const field = manifest.credentials?.find((candidate) => candidate.id === remedy.field);
+    return remedy.kind === "credential" && field && !field.generated && !field.managed
+      ? [{ ...base, remedy: { kind: "credential", field: field.id } }] : [];
+  });
+}

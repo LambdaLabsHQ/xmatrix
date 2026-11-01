@@ -8450,6 +8450,27 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   background: var(--app-ask-tint);
 }
 
+/* A setting something stopped on (connector-settings-card.tsx): the receipt's own rounded slip of tinted
+   paper, without a rail (Daniel 2026-11-01: 圆角，左边竖条不要), its settings laid flat in it one row each,
+   divided by a hairline rather than nested in a second block. What is missing reads in the alert ink of its
+   dot and words; once the setting is in, both settle to the body's ink and the slip lightens. */
+.xmatrix-app .app-settings-card {
+  --app-settings-ink: var(--m-ink-alert, var(--destructive));
+  padding: 10px 14px 12px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+}
+.xmatrix-app .app-settings-card[data-settings-card="settled"] {
+  --app-settings-ink: var(--foreground);
+  background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
+}
+.xmatrix-app .app-settings-card-row {
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+.xmatrix-app .app-settings-card-state { color: var(--app-settings-ink); }
+.xmatrix-app .app-settings-card-dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+
 /* A problem the reader can fix is a sheet of the paper, with the alert ink
    on its rail and its icon: it says something stopped, and the rest of the
    card is plain instructions. Paper has no rounded corners (user 2026-10-26:
