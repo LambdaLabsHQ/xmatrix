@@ -109,7 +109,7 @@ export function ConnectorSettingsCard({ fix, receiptSentAt, spaceId, token, user
     : field?.signIn ? "Not signed in" : "Missing";
   const spinner = <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />;
   return (
-    <section className="app-settings-card mt-2 w-full max-w-2xl" data-settings-card={settled ? "settled" : "open"}
+    <section className="app-paper-card app-settings-card mt-2 w-full max-w-2xl" data-settings-card={settled ? "settled" : "open"}
       aria-label={what}>
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[14px] font-semibold">{settled ? `${connector.name} is ready` : what}</p>
