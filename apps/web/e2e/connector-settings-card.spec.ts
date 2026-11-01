@@ -86,3 +86,25 @@ test("a fix in a message the Hub did not write draws no card", async ({ page }) 
   await expect(page.getByText(/App Store Connect sales/u).first()).toBeVisible();
   await expect(page.locator("[data-settings-card]")).toHaveCount(0);
 });
+
+test("a card an Agent asked for names who asked and why, and is settled the same way, with nothing to run again", async ({ page }) => {
+  const request = {
+    messageId: "settings-request:abc", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW,
+    body: "**claude** asks a Space admin for sign in to App Store Connect: Line Jump's App Store downloads",
+    from: { identityId: "user:e2e-user", kind: "user", label: "xMatrix settings request", name: "xMatrix settings request",
+      userId: "e2e-user", email: "e2e@xmatrix.test" },
+    metadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
+      xmatrixConnectorFixes: [{ providerId: "appstoreconnect", actionId: "settings", remedy: { kind: "credential", field: "webSession" } }],
+      xmatrixSettingsRequest: { agentName: "claude", reason: "Line Jump's App Store downloads" } },
+  };
+  const card = await openReceipt(page, request, { admin: true });
+  const asked = page.locator("[data-settings-request]");
+  await expect(asked.getByText("asks a Space admin for this setting:")).toBeVisible();
+  await expect(asked.getByText("Line Jump's App Store downloads")).toBeVisible();
+  await expect(card.getByText("Settings", { exact: true })).toBeVisible();
+  await card.getByLabel(/Web session/u).fill("myacinfo=session");
+  await card.getByRole("button", { name: "Save and check" }).click();
+  await expect(card).toHaveAttribute("data-settings-card", "settled");
+  expect(await fixtureRequests(page, "check")).toHaveLength(1);
+  expect(await fixtureRequests(page, "rerun")).toHaveLength(0);
+});

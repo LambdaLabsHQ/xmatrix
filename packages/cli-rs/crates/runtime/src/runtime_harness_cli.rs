@@ -283,6 +283,28 @@ fn owned_machine_id(daemons: &[serde_json::Value], target: &str) -> error::Resul
     }
 }
 
+/// Posts a request card for this Agent's Channel with its reason. A retry of
+/// the same request replays its card; another request is a new one.
+async fn post_request_card(
+    hub_url: &str,
+    token: &str,
+    route: &str,
+    mut body: serde_json::Value,
+    reason: Option<String>,
+) -> error::Result<serde_json::Value> {
+    body["requestId"] = uuid::Uuid::new_v4().to_string().into();
+    if let Some(reason) = reason.map(|reason| reason.trim().to_string()).filter(|reason| !reason.is_empty()) {
+        body["reason"] = reason.into();
+    }
+    xmatrix_cli_core::http::request_json(
+        &xmatrix_cli_core::protocol::with_route(hub_url, route),
+        "POST",
+        Some(token),
+        Some(body),
+    )
+    .await
+}
+
 /// Asks a Machine's owner, on a card in this Agent's Channel, to sign a
 /// harness in there. Only the owner signs in; this returns once it is posted.
 async fn cmd_request_sign_in(
@@ -307,25 +329,16 @@ async fn cmd_request_sign_in(
     {
         eprintln!("This Machine's daemon did not look at its harnesses again ({err}); asking with its last check.");
     }
-    let mut body = serde_json::json!({
-        "harness": harness.trim(),
-        // A retry of this request replays its card; another request is a new one.
-        "requestId": uuid::Uuid::new_v4().to_string(),
-    });
+    let mut body = serde_json::json!({ "harness": harness.trim() });
     if let Some(machine_id) = machine_id {
         body["machineId"] = machine_id.into();
     }
-    if let Some(reason) = reason.map(|reason| reason.trim().to_string()).filter(|reason| !reason.is_empty()) {
-        body["reason"] = reason.into();
-    }
-    let posted: serde_json::Value = xmatrix_cli_core::http::request_json(
-        &xmatrix_cli_core::protocol::with_route(
-            hub_url,
-            xmatrix_cli_core::protocol::HubRoutes::HARNESS_SIGN_IN_REQUESTS,
-        ),
-        "POST",
-        Some(token),
-        Some(body),
+    let posted = post_request_card(
+        hub_url,
+        token,
+        xmatrix_cli_core::protocol::HubRoutes::HARNESS_SIGN_IN_REQUESTS,
+        body,
+        reason,
     )
     .await?;
     if json {
@@ -344,6 +357,91 @@ async fn cmd_request_sign_in(
          `xmatrix harness list --local` on that Machine, or `xmatrix agent list`, shows when it can take work."
     );
     Ok(())
+}
+
+/// How often `request settings --wait` reads where the settings stand, and for how long.
+const SETTINGS_WAIT_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+const SETTINGS_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// The status URL for these settings, asked for at `since`.
+fn settings_status_url(hub_url: &str, settings: &[String], since: &str) -> String {
+    let mut url = xmatrix_cli_core::protocol::with_route(
+        hub_url,
+        xmatrix_cli_core::protocol::HubRoutes::SETTINGS_REQUEST_STATUS,
+    );
+    let query = settings
+        .iter()
+        .map(|setting| format!("setting={}", urlencoding::encode(setting)))
+        .chain(std::iter::once(format!("since={}", urlencoding::encode(since))))
+        .collect::<Vec<_>>()
+        .join("&");
+    url.push('?');
+    url.push_str(&query);
+    url
+}
+
+/// Asks a Space admin, on a card in this Agent's Channel, for connector
+/// settings; with `wait`, returns once each is in and its connection checked.
+async fn cmd_request_settings(
+    hub_url: &str,
+    token: &str,
+    settings: Vec<String>,
+    reason: Option<String>,
+    wait: bool,
+    json: bool,
+) -> error::Result<()> {
+    let settings: Vec<String> = settings.iter().map(|setting| setting.trim().to_string()).collect();
+    let posted = post_request_card(
+        hub_url,
+        token,
+        xmatrix_cli_core::protocol::HubRoutes::SETTINGS_REQUESTS,
+        serde_json::json!({ "settings": settings }),
+        reason,
+    )
+    .await?;
+    let asked: Vec<String> = posted["settings"]
+        .as_array()
+        .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect())
+        .unwrap_or(settings);
+    if !wait {
+        if json {
+            println!("{posted}");
+        } else {
+            println!(
+                "Asked a Space admin, on a card in this Channel, for {}. Run again with --wait to return once they are in.",
+                asked.join(", ")
+            );
+        }
+        return Ok(());
+    }
+    let since = posted["askedAt"].as_str().unwrap_or_default().to_string();
+    let url = settings_status_url(hub_url, &asked, &since);
+    let started = std::time::Instant::now();
+    if !json {
+        eprintln!("Asked a Space admin for {}; waiting for them on the card…", asked.join(", "));
+    }
+    loop {
+        let status: serde_json::Value =
+            xmatrix_cli_core::http::request_json(&url, "GET", Some(token), None).await?;
+        if status["settled"].as_bool() == Some(true) {
+            if json {
+                println!("{status}");
+            } else {
+                println!("Every setting is in and its connection passed a check: {}.", asked.join(", "));
+            }
+            return Ok(());
+        }
+        if started.elapsed() >= SETTINGS_WAIT_LIMIT {
+            if json {
+                println!("{status}");
+            }
+            return Err(CliError::Launch(format!(
+                "No one has made {} yet; the card stays in the Channel. Ask again with --wait to keep waiting.",
+                asked.join(", ")
+            )));
+        }
+        tokio::time::sleep(SETTINGS_WAIT_POLL).await;
+    }
 }
 
 async fn request_harness_cli_action(
@@ -458,6 +556,23 @@ fn print_harness_inventory(inventory: &serde_json::Value, json: bool) -> error::
 #[cfg(test)]
 mod harness_cli_tests {
     use super::*;
+
+    #[test]
+    fn settings_status_names_each_setting_and_when_they_were_asked_for() {
+        let url = settings_status_url(
+            "https://hub.example",
+            &[
+                "connector:appstoreconnect/webSession".to_string(),
+                "connector:googleplay/connect".to_string(),
+            ],
+            "2026-11-01T10:00:00.000Z",
+        );
+        assert_eq!(
+            url,
+            "https://hub.example/api/settings-requests/status?setting=connector%3Aappstoreconnect%2FwebSession\
+             &setting=connector%3Agoogleplay%2Fconnect&since=2026-11-01T10%3A00%3A00.000Z"
+        );
+    }
     #[test]
     fn completed_harness_replays_require_the_exact_preset_and_action() {
         let command: MachineDaemonCommand = serde_json::from_value(serde_json::json!({

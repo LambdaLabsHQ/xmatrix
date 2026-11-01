@@ -422,6 +422,9 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && path === HUB_ROUTES.secret_requests) return true;
   // Ask its owner, on a card in its Channel, to sign a harness in on one of their Machines.
   if (request.method === "POST" && path === HUB_ROUTES.harness_sign_in_requests) return true;
+  // Ask a Space admin, on a card in its Channel, for connector settings, and read where they stand.
+  if (request.method === "POST" && path === HUB_ROUTES.settings_requests) return true;
+  if (request.method === "GET" && path === HUB_ROUTES.settings_request_status) return true;
   // Ask its own Machine to look at its harnesses again; the route refuses any other action.
   if (request.method === "POST" && path === HUB_ROUTES.machine_harness_actions) return true;
   // Its Channel's connected apps and their commands.

@@ -125,6 +125,21 @@ owner signs the harness in on it through the Machine's own harness actions,
 with or without an Agent for that harness in the Space. A harness the Machine
 reports as not installed is refused. The Run never signs anything in.
 
+## Asking a Space admin for connector settings
+
+`xmatrix request settings <address>… [--reason <why>] [--wait]` posts a card in
+the Run's Channel (`POST /api/settings-requests`, message kind
+`xmatrix.system.settings-request`). Each address names a setting only a person
+makes: `connector:<app>/<field>` for a sign-in or credential the App's manifest
+declares (not a Hub-minted or OAuth-managed one), or `connector:<app>/connect`
+for the connection itself. The card is drawn from the Hub's
+`xmatrixConnectorFixes`; a Space admin saves each value straight to the
+connection, which is then checked. `--wait` reads
+`GET /api/settings-requests/status` until each setting is in and its connection
+passed a check after the card was posted. The Run never sees a value. A
+connector command that stops for the same reason gets the same card under its
+receipt without asking.
+
 ## Saving a credential an Agent already holds
 
 A live ordinary Run may add a new secret to its Space with

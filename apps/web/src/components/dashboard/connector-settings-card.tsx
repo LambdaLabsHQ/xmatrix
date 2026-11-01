@@ -3,7 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, LogIn } from "lucide-react";
 import {
-  appViewAddress, WEB_PROXY_ROUTES, type ConnectorReceiptFix, type SerializedAppConnectorConnection,
+  appViewAddress, connectorFixSettled, connectorReceiptFixesOf, SETTINGS_REQUEST_KEY, settingAddress, WEB_PROXY_ROUTES,
+  type ConnectorReceiptFix, type SerializedAppConnectorConnection,
 } from "@xmatrix/protocol";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
@@ -17,15 +18,17 @@ import { CredentialValueForm, useCredentialStore } from "./connector-credentials
 /** While a fix is open, everyone's card notices it being made elsewhere (the Apps page, another card). */
 const OPEN_REFRESH_MS = 30_000;
 
-/**
- * Whether the connection now has what the fix asked for: the Hub checked it
- * after this receipt was written, the check passed, and a missing field is saved.
- */
-export function connectorFixSettled(fix: ConnectorReceiptFix, connection: SerializedAppConnectorConnection | undefined,
-  receiptSentAt: string): boolean {
-  if (!connection || connection.status !== "configured" || !connection.lastCheckedAt) return false;
-  if (Date.parse(connection.lastCheckedAt) <= Date.parse(receiptSentAt)) return false;
-  return fix.remedy.kind !== "credential" || !connection.credentialFields || connection.credentialFields.includes(fix.remedy.field);
+/** A card an Agent posted to ask for settings: who asked, why, and the settings. Read only from the Hub's own metadata. */
+export function settingsRequestOf(metadata: Record<string, unknown> | undefined):
+  { agentName: string; reason?: string; fixes: ConnectorReceiptFix[] } | null {
+  const value = metadata?.[SETTINGS_REQUEST_KEY];
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const fixes = connectorReceiptFixesOf(metadata);
+  if (!fixes.length) return null;
+  const request = value as Record<string, unknown>;
+  const text = (field: unknown, limit: number) => typeof field === "string" && field.trim() ? field.trim().slice(0, limit) : undefined;
+  const reason = text(request.reason, 500);
+  return { agentName: text(request.agentName, 120) ?? "", ...(reason ? { reason } : {}), fixes };
 }
 
 /**
@@ -63,15 +66,20 @@ export function ConnectorSettingsCard({ fix, receiptSentAt, spaceId, token, user
   });
   const rerun = useMutation({
     mutationKey: ["connector-settings-rerun", fix.executionId],
-    mutationFn: () => xmatrixApiRequest<{ summary: string }>({ method: "POST", token,
-      url: WEB_PROXY_ROUTES.space_app_execution_retry(spaceId, fix.executionId) }),
+    mutationFn: (executionId: string) => xmatrixApiRequest<{ summary: string }>({ method: "POST", token,
+      url: WEB_PROXY_ROUTES.space_app_execution_retry(spaceId, executionId) }),
   });
   const credentials = useCredentialStore({ connector: connector!, connection, spaceId, token, userId,
-    beforeSave: async () => {},
+    // An Agent may ask for an App not yet connected: its credentials need the connection's row first.
+    beforeSave: async () => {
+      if (connection) return;
+      await xmatrixApiRequest({ method: "PATCH", token, url: WEB_PROXY_ROUTES.space_app_connection(spaceId, fix.providerId),
+        body: { providerId: fix.providerId, providerName: connector!.name, status: "disconnected" } });
+    },
     afterSave: async () => {
       const checked = await check.mutateAsync();
       // A read runs again by itself once the connection passes; anything else waits for its caller.
-      if (checked.connection?.status === "configured") rerun.mutate();
+      if (checked.connection?.status === "configured" && fix.executionId) rerun.mutate(fix.executionId);
     } });
   const bridge = getDesktopBridge();
   const field = fix.remedy.kind === "credential"
@@ -93,7 +101,7 @@ export function ConnectorSettingsCard({ fix, receiptSentAt, spaceId, token, user
     (check.data?.connection?.status === "error" ? check.data.connection.error ?? `${connector.name} refused it` : null);
   const what = fix.remedy.kind === "reconnect" ? `Connect ${connector.name} again`
     : field?.signIn ? `Sign in to ${connector.name}` : `${connector.name} needs ${field?.label ?? "a credential"}`;
-  const address = `connector:${connector.id}/${fix.remedy.kind === "credential" ? fix.remedy.field : "connect"}`;
+  const address = settingAddress(fix);
   const state = settled ? "Checked" : busy ? "Checking…" : fix.remedy.kind === "reconnect" ? "Not connected"
     : field?.signIn ? "Not signed in" : "Missing";
   const spinner = <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />;
@@ -102,7 +110,7 @@ export function ConnectorSettingsCard({ fix, receiptSentAt, spaceId, token, user
       aria-label={what}>
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[14px] font-semibold">{settled ? `${connector.name} is ready` : what}</p>
-        <span className="text-[12px] text-muted-foreground">Settings · {fix.actionId}</span>
+        <span className="text-[12px] text-muted-foreground">Settings{fix.executionId ? ` · ${fix.actionId}` : ""}</span>
       </div>
       <div className="app-settings-card-row mt-2">
         <div className="flex items-center gap-3">

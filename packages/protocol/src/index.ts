@@ -583,9 +583,10 @@ export {
 export {
   connectorOperationIds, parseConnectorActionCommand, parseConnectorInvocation,
 } from "./connector-command.js";
-export { CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, connectorReceiptFixesOf, connectorReceiptPreview, parseConnectorReceipt,
-  PRIVATE_CONNECTOR_RESULT, type ConnectorReceiptEntry, type ConnectorReceiptFix, type ConnectorReceiptStatus,
-  type ConnectorResultVisibility } from "./connector-receipt.js";
+export { CONNECTOR_RECEIPT_FIXES_KEY, connectorFixSettled, connectorReceiptBody, connectorReceiptFixesOf, connectorReceiptPreview,
+  parseConnectorReceipt, PRIVATE_CONNECTOR_RESULT, SETTINGS_REQUEST_KEY, settingAddress, settingAddressFix,
+  type ConnectorReceiptEntry, type ConnectorReceiptFix, type ConnectorReceiptStatus, type ConnectorResultVisibility,
+  type SettingsConnectionState } from "./connector-receipt.js";
 export type {
   ConnectorInvocation, ParsedConnectorActionCommand,
 } from "./connector-command.js";

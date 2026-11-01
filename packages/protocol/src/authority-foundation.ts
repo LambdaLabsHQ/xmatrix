@@ -228,6 +228,9 @@ export const HUB_ROUTES = {
   secret_request_status: "/api/secret-requests/status",
   /** An Agent Run asks a Machine's owner, on a card in its Channel, to sign a harness in there. */
   harness_sign_in_requests: "/api/harness-sign-in-requests",
+  /** An Agent Run asks, on a card in its Channel, for connector settings only a person can make. */
+  settings_requests: "/api/settings-requests",
+  settings_request_status: "/api/settings-requests/status",
   push_config: "/api/push/config",
   push_devices: "/api/push/devices",
   push_device: (deviceId: string) => `/api/push/devices/${encodeURIComponent(deviceId)}`,

@@ -158,6 +158,15 @@ there. The command returns once the card is posted:
 xmatrix request sign-in <harness> [--machine <machine-name>] --reason "<why>"
 ```
 
+A connected App that needs a sign-in, a credential or a new connection stops
+until a Space admin makes it. Ask on a card in this Channel; the admin makes it
+there and the value never reaches chat. `--wait` returns once each setting is in
+and checked:
+
+```bash
+xmatrix request settings connector:<app>/<field> [connector:<app>/connect …] --reason "<why>" [--wait]
+```
+
 On Windows PowerShell 5.1, if the command itself uses `powershell -Command`,
 pass the script as one complete argv. Use outer single quotes and doubled
 single quotes for script string literals so `$env:<ENV_NAME>` is not expanded
