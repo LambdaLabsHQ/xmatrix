@@ -52,9 +52,9 @@ test("reset countdowns never go negative or show an unknown time", () => {
 
 test("the provider's verdict on the account follows its windows", () => {
   const served = { ...quota([{ label: "1w", usedPercent: 100, resetAt: at(90) }]),
-    account: { allowed: true, credits: { balance: 137.5 } } };
+    account: { allowed: true, credits: { balance: 53079.6061305 } } };
   assert.deepEqual(agentUsageReadings(served, now).slice(1),
-    [{ key: "credits", label: "Credits", value: "137.5 left", high: false }]);
+    [{ key: "credits", label: "Credits", value: "53,080 left", high: false }]);
   const refused = { ...quota([{ label: "5h", usedPercent: 20 }]), account: { allowed: false } };
   assert.deepEqual(agentUsageReadings(refused, now).slice(1),
     [{ key: "account", label: "Provider", value: "Refusing requests", high: true }]);
