@@ -176,6 +176,12 @@ async function selectLine(browser: Page, text: string) {
   await browser.getByTestId("page-editor").getByText(text, { exact: true }).click({ clickCount: 3 });
 }
 
+/** Selects the paragraph and asks to comment on it: the box opens only from the selection menu's *Comment*. */
+async function commentOn(browser: Page, text: string) {
+  await selectLine(browser, text);
+  await browser.getByTestId("page-selection-menu").getByRole("button", { name: "Comment" }).click();
+}
+
 for (const width of [1280, 393]) {
   test(`page rows show only summaries of their current revision at ${width}px`, async ({ page: browser }) => {
     await browser.setViewportSize({ width, height: 852 });
@@ -300,8 +306,8 @@ test("a page is co-edited live and shows an Agent working on a section", async (
   await browser.keyboard.press("End");
   await browser.keyboard.type(" and verified");
   await expect.poll(() => pageMarkdown(server)).toContain("Shipped and verified");
-  // Selecting text offers collaboration on the passage. Formatting is typed, or a shortcut. Selected from the
-  // keyboard, it is being edited: the menu offers a comment rather than opening the box.
+  // Selecting text offers collaboration on the passage. Formatting is typed, or a shortcut. The menu offers a
+  // comment rather than opening the box, which would take the caret from the passage.
   await browser.keyboard.press("Shift+Home");
   const selection = browser.getByTestId("page-selection-menu");
   await expect(selection.getByRole("button", { name: "Comment" })).toBeVisible();
@@ -1196,22 +1202,38 @@ test("an editor that meets a Hub still keeping pages as text waits instead of sh
   expect(sockets, "it never joins the old session").toBe(0);
 });
 
-test("a passage dragged past the text's edge opens the comment box as one dragged within it", async ({ page: browser }) => {
+test("a passage selected with the mouse stays in the page: the menu offers a comment, a click opens it", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   const editor = await openLivePage(browser);
   const line = (await editor.getByText("In progress", { exact: true }).boundingBox())!;
   const text = (await editor.locator(".page-document").boundingBox())!;
-  // The button comes up beyond the editor, to the right of the line's end.
-  await browser.mouse.move(line.x + 1, line.y + line.height / 2);
-  await browser.mouse.down();
-  await browser.mouse.move(text.x + text.width + 12, line.y + line.height / 2, { steps: 8 });
-  expect(await browser.evaluate(([x, y]) => Boolean(document.elementFromPoint(x!, y!)?.closest(".page-document")),
-    [text.x + text.width + 12, line.y + line.height / 2]), "the drag ends outside the editor").toBe(false);
-  await browser.mouse.up();
+  // A drag that ends past the text's edge, outside the editor, selects as one within it.
+  const drag = async () => {
+    await browser.mouse.move(line.x + 1, line.y + line.height / 2);
+    await browser.mouse.down();
+    await browser.mouse.move(text.x + text.width + 12, line.y + line.height / 2, { steps: 8 });
+    await browser.mouse.up();
+  };
+  await drag();
   const box = browser.getByTestId("page-comment-box");
+  const comment = browser.getByTestId("page-selection-menu").getByRole("button", { name: "Comment" });
+  await expect(comment).toBeVisible();
+  // Past the old delay the box still has not opened: the selection may be for editing, and the caret stays put.
+  await browser.waitForTimeout(400);
+  await expect(box).toHaveCount(0);
+  await expect(editor.locator(".page-document")).toBeFocused();
+  await comment.click();
   await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
   await expect(editor.locator(".page-discussion")).toHaveText("In progress");
+  await browser.keyboard.press("Escape");
+  await expect(box).toHaveCount(0);
+  // Selected again, typing edits the passage.
+  await browser.keyboard.press("ArrowRight");
+  await drag();
+  await browser.keyboard.type("Underway");
+  await expect(editor.getByText("Underway", { exact: true })).toBeVisible();
+  await expect(box).toHaveCount(0);
 });
 
 test("a drag that starts in code or bold text selects the passage, its markdown markers held until the button is up", async ({ page: browser }) => {
@@ -1231,6 +1253,7 @@ test("a drag that starts in code or bold text selects the passage, its markdown 
     await expect(editor.locator(".page-md-syntax", { hasText: marker })).toHaveCount(0);
     await browser.mouse.move(line.x + line.width - 2, y, { steps: 8 });
     await browser.mouse.up();
+    await browser.getByTestId("page-selection-menu").getByRole("button", { name: "Comment" }).click();
     await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
     await expect.poll(async () => (await editor.locator(".page-discussion").allTextContents()).join("")).toBe(passage);
     await browser.keyboard.press("Escape");
@@ -1300,7 +1323,7 @@ for (const target of ["live", "mentioned", "edited", "uncatalogued", "edited-unc
         conversationId: E2E_CHANNEL.id, activity: "thinking", blockId: "status", harness: "grok" }] }],
     });
     await openLivePage(browser);
-    await selectLine(browser, "In progress");
+    await commentOn(browser, "In progress");
     const box = browser.getByTestId("page-comment-box");
     await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
     if (!editing && !unloaded) await expect(box).toContainText("grok:1");
@@ -1338,9 +1361,9 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   await fixtureJson(browser, "discuss-message", /\/api\/xmatrix\/channels\/[^/]+\/messages$/u, { message: {} },
     { method: "POST" });
   const editor = await openLivePage(browser);
-  await selectLine(browser, "In progress");
-  // Selected with the mouse, the reply box opens in the margin, level with the passage, with the caret in it, the
-  // passage marked.
+  await commentOn(browser, "In progress");
+  // Its *Comment* opens the reply box in the margin, level with the passage, with the caret in it, the passage
+  // marked.
   const box = browser.getByTestId("page-comment-box");
   await expect(box).toBeVisible();
   const [boxAt, passageAt] = [(await box.boundingBox())!, (await editor.getByText("In progress").boundingBox())!];
@@ -1355,11 +1378,11 @@ test("selecting a passage opens a comment box beside it in the margin; sent, the
   await editor.getByText("none", { exact: true }).click();
   await expect(box).toHaveCount(0);
   await expect(editor.locator(".page-discussion")).toHaveCount(0);
-  await selectLine(browser, "In progress");
+  await commentOn(browser, "In progress");
   await expectDraft(box.getByRole("textbox", { name: "Comment" }), "Is this still accurate?");
   await browser.mouse.click(1100, 700);
   await expect(box).toHaveCount(0);
-  await selectLine(browser, "In progress");
+  await commentOn(browser, "In progress");
   await expectDraft(box.getByRole("textbox", { name: "Comment" }), "Is this still accurate?");
   await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
   await browser.keyboard.press("Enter");
@@ -1750,7 +1773,7 @@ test("paragraph attribution stays in the margin and selecting text leaves only d
   // Selecting text clears attribution and leaves the existing discussion controls available.
   await selectLine(browser, "In progress");
   await expect(line).toHaveCount(0);
-  await expect(browser.getByTestId("page-comment-box")).toBeVisible();
+  await expect(browser.getByTestId("page-selection-menu")).toBeVisible();
   // Wait beyond the old selection-note delay; selecting text must not add another overlay.
   await browser.waitForTimeout(400);
   await expect(browser.getByTestId("page-blame-note")).toHaveCount(0);
@@ -2329,12 +2352,11 @@ test("link text can still be selected and its address edited, and unsafe links n
   await browser.mouse.down();
   await browser.mouse.move(bounds.x + bounds.width - 3, bounds.y + bounds.height / 2, { steps: 8 });
   await browser.mouse.up();
-  await expect(browser.getByRole("textbox", { name: "Comment", exact: true })).toBeFocused();
+  await expect(browser.getByTestId("page-selection-menu")).toBeVisible();
   expect(opened).toHaveLength(0);
-  await browser.keyboard.press("Escape");
 
-  // Closing the comment restores the caret to the selected guide. Move within
-  // that text, rather than counting visual rows from a decorated heading.
+  // The caret stays in the selected guide. Move within that text, rather than
+  // counting visual rows from a decorated heading.
   await expect(editor.locator(".page-document")).toBeFocused();
   await browser.keyboard.press("ArrowLeft");
   await editor.locator('[data-edit-link="https://example.com/guide"]').click();
