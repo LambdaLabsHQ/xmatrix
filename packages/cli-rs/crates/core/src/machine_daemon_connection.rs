@@ -2396,6 +2396,15 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                             });
                         }
                         Some(ConnectionInstruction::Report(report)) => {
+                            // Instructions survive reconnect; observations do not. Never
+                            // restamp an old snapshot as current absence evidence. The
+                            // host takes a fresh full snapshot after Reconnected. Spawn
+                            // results retain their causal tuple for reconciliation.
+                            if matches!(&report, MachineDaemonReport::MachineRunSnapshot {
+                                registry_connection_epoch: Some(captured_epoch), ..
+                            } if *captured_epoch != epoch) {
+                                continue;
+                            }
                             let text = match serde_json::to_string(&report) {
                                 Ok(value) => value,
                                 Err(error) => {

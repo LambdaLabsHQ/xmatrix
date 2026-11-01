@@ -153,6 +153,7 @@ agents.
 
 ### Causal Run snapshots
 
+- Before writing a queued snapshot, the daemon checks its captured connection epoch against the authenticated socket. Snapshots from a replaced connection are discarded without rebinding their causal fields: reconnect captures a fresh full Run snapshot and sends cached harness metadata. A successful spawn result still retains its original causal tuple for effect reconciliation.
 - A daemon advertising `machine_run_snapshot_causal_v1` attaches its active connection epoch and one process-local monotonic registry sequence to every successful spawn result and complete Run snapshot. Snapshot capture advances that sequence while the registry lock is held; daemon wall-clock `capturedAt` is diagnostic and never defines ordering.
 - PostgreSQL stores the last accepted `(connection epoch, registry sequence)` per Machine/host/Channel. A duplicate or older snapshot is a no-op. An absent Run can become terminal only after its successful spawn result established registry ownership at an earlier causal point, or after a newer daemon connection proves that an older-epoch Run is absent.
 - Agent connection and daemon reporting are independent transports. A Run that connected after an earlier snapshot was captured therefore remains live even if that snapshot reaches Runtime authority later. Legacy daemons remain accepted; recently updated legacy Runs receive a bounded settling window instead of being treated as immediate absence evidence.
