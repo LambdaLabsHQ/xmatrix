@@ -1865,6 +1865,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           break;
         case "registration_quota":
           setChannels((current) => patchChannelsRegistrationQuota(current, message.registration, message.usage));
+          // The Agents page shows the same reading: read its catalog again.
+          // That read asks no provider; only opening the page does.
+          void queryClient.invalidateQueries({
+            queryKey: xmatrixQueryKeys.domain({ userId }, "agent-registration-catalog") });
           break;
         case "channel_created":
           setChannels((current) => replaceChannel(current, message.channel));
