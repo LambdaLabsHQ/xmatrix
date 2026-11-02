@@ -39,7 +39,8 @@ may answer the fresh read from their two-minute cache; the summon then starts
 on the next newer reading. Hub release with expand migrations
 (`0236_expand_registration_quota_waiters.sql`,
 `0237_expand_quota_retry_refusal_fence.sql`); recovery is a CI-validated
-revert, and the added tables and columns are unused by older code.
+revert, and the added tables and columns are unused by older code. Deleting
+a Channel or Space erases its quota waits with its other records.
 
 ## Unreleased: Follow-up messages wait for the Agent already being started
 

@@ -31,6 +31,8 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
     .map(table => ({ table, predicate: "conversation_id=$2" })),
   { table: "control.scoped_control_command_replays", predicate:
     `ARRAY[CASE WHEN scope_kind='channel' THEN scope_id END, ${REPLAY_CHANNEL_IDS}] @> ARRAY[$2]` },
+  // A refused summon's wait on quota names only the Channel to wake.
+  { table: "control.registration_quota_waiters", predicate: "channel_id=$2" },
   { table: "data.content_refs", predicate: `space_id=$1 AND ${CONTENT_SCOPE}` },
   { table: "data.blob_upload_intents", predicate: `space_id=$1 AND ${UPLOAD_SCOPE}` },
   ...["data.content_objects", "data.content_gc_candidates"]
