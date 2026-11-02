@@ -228,9 +228,12 @@ export const HUB_ROUTES = {
   secret_request_status: "/api/secret-requests/status",
   /** An Agent Run asks a Machine's owner, on a card in its Channel, to sign a harness in there. */
   harness_sign_in_requests: "/api/harness-sign-in-requests",
-  /** An Agent Run asks, on a card in its Channel, for connector settings only a person can make. */
+  /** An Agent Run asks, on a card in its Channel, for settings only a person can make (docs/design/settings-cards.md). */
   settings_requests: "/api/settings-requests",
   settings_request_status: "/api/settings-requests/status",
+  /** A settings card's settings as its viewer sees them (GET), and one of them made on it (PUT). */
+  channel_settings_card: (channelId: string, messageId: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/settings-cards/${encodeURIComponent(messageId)}`,
   push_config: "/api/push/config",
   push_devices: "/api/push/devices",
   push_device: (deviceId: string) => `/api/push/devices/${encodeURIComponent(deviceId)}`,
@@ -457,6 +460,8 @@ export const WEB_PROXY_ROUTES = {
     secretRef ? `/${encodeURIComponent(secretRef)}` : ""}`,
   secret_request_fulfill: "/api/secret-requests/fulfill",
   secret_request_status: "/api/secret-requests/status",
+  channel_settings_card: (channelId: string, messageId: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/settings-cards/${encodeURIComponent(messageId)}`,
   push_config: "/api/xmatrix/push/config",
   push_devices: "/api/xmatrix/push/devices",
   push_device: (deviceId: string) => `/api/xmatrix/push/devices/${encodeURIComponent(deviceId)}`,

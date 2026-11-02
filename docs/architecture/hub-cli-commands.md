@@ -43,6 +43,14 @@ commands keep working.
   both modes record the invocation and parameters. Private results are masked in shared Channel receipts and execution history; the caller receives the original, and its Human owner sees a protected value in the Web for 30 days. Results are public unless `--private` is given explicitly.
   See [connector delivery](../design/connector-platform.md).
 
+- `settings ask <address>… [--reason] [--propose <address>=<value>] [--json]` and
+  `settings status <address>… [--since] [--json]` (`cli-commands-settings.ts`)
+  are new Hub-defined commands. An Agent asks for settings only a person can make, on a card in
+  its Channel, and reads where they stand. The address forms come from the
+  settings registry ([settings cards](../design/settings-cards.md)). A
+  positional may be `variadic` (it takes every remaining word) and a string
+  option `repeatable`, both collected under `lists`.
+
 Moving another command: add it to the Hub table with the same options and
 output, delete its clap definition and handler from the CLI. Older CLIs keep
 their compiled copy.

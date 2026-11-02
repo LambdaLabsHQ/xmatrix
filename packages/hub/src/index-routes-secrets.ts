@@ -2,10 +2,11 @@ import { ControlError, PostgresSpaceSecretRepository, SpaceSecretError, type Run
 import { HUB_ROUTES, parseSecretAccessRequestCard, parseSecretRequestCard } from "@xmatrix/protocol";
 import type { Context, Hono } from "hono";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
-import { appendChannelMessage, markCardAnswered } from "./channel-messages";
+import { markCardAnswered } from "./channel-messages";
 import { readBoundedRequestBody, requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { secretAccessRequestAppend, secretRequestAppend } from "./secret-request-card";
+import { appendHubCard } from "./settings-card";
 import type { Env } from "./types";
 
 /**
@@ -18,7 +19,8 @@ import type { Env } from "./types";
 
 const NO_STORE = { "cache-control": "private, no-store" };
 
-function repository(env: Env): PostgresSpaceSecretRepository {
+/** The Space secret store, which checks every caller's role itself. */
+export function spaceSecretRepository(env: Env): PostgresSpaceSecretRepository {
   return new PostgresSpaceSecretRepository(createPostgresAuthorityDatabase(env, {
     applicationName: "xmatrix-space-secrets", statementTimeoutMs: 5_000,
     transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
@@ -60,34 +62,34 @@ function route(kind: "human" | "agent", handler: (c: Context<{ Bindings: Env }>,
 export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   const spaceSecrets = "/api/spaces/:spaceId/secrets";
   app.get(spaceSecrets, route("human", (c, user) =>
-    repository(c.env).list({ spaceId: c.req.param("spaceId")!, userId: user.id })));
+    spaceSecretRepository(c.env).list({ spaceId: c.req.param("spaceId")!, userId: user.id })));
   app.put(spaceSecrets, route("human", async (c, user) => {
     const input = await body(c);
-    return repository(c.env).put({ spaceId: c.req.param("spaceId")!, userId: user.id,
+    return spaceSecretRepository(c.env).put({ spaceId: c.req.param("spaceId")!, userId: user.id,
       secretRef: String(input.secretRef ?? ""), ...change(input) });
   }));
   app.delete(`${spaceSecrets}/:secretRef`, route("human", (c, user) =>
-    repository(c.env).remove({ spaceId: c.req.param("spaceId")!, userId: user.id, secretRef: c.req.param("secretRef")! })));
+    spaceSecretRepository(c.env).remove({ spaceId: c.req.param("spaceId")!, userId: user.id, secretRef: c.req.param("secretRef")! })));
 
   // An Agent saves a credential it already holds into its Space.
   app.post(HUB_ROUTES.secrets, route("agent", async (c, _user, run) => {
     const input = await body(c);
-    return repository(c.env).runCreate(caller(run), { secretRef: String(input.secretRef ?? ""), ...change(input) });
+    return spaceSecretRepository(c.env).runCreate(caller(run), { secretRef: String(input.secretRef ?? ""), ...change(input) });
   }));
 
   // The secrets a Run may read now, or their values.
   app.post(HUB_ROUTES.run_secrets, route("agent", async (c, _user, run) => {
     const input = await body(c);
-    return input.valuesOmitted === true ? repository(c.env).runList(caller(run))
-      : repository(c.env).runRead(caller(run), input.secretRefs);
+    return input.valuesOmitted === true ? spaceSecretRepository(c.env).runList(caller(run))
+      : spaceSecretRepository(c.env).runRead(caller(run), input.secretRefs);
   }));
 
   // A Run posts a card in its own Channel for a secret it may not read yet.
   app.post(HUB_ROUTES.secret_requests, route("agent", async (c, user, run) => {
     const input = await body(c);
-    const secrets = repository(c.env);
+    const secrets = spaceSecretRepository(c.env);
     const post = async <T extends { messageId: string }>(append: T) => {
-      await appendChannelMessage(c.env, run.channelId, append).catch((error: unknown) => {
+      await appendHubCard(c.env, run.channelId, append).catch((error: unknown) => {
         if (error instanceof ControlError) {
           throw new SpaceSecretError("secret_request_failed", error.status, error.message, error.retryable);
         }
@@ -127,7 +129,7 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     // The secrets the admin chose on a secret access card become `auto`.
     const access = parseSecretAccessRequestCard(input);
     if (access) {
-      const changed = await repository(c.env).makeAutomatic({ userId: user.id, ...access });
+      const changed = await spaceSecretRepository(c.env).makeAutomatic({ userId: user.id, ...access });
       if (typeof input.messageId === "string" && input.messageId.startsWith("secret-access-request:")) {
         await markCardAnswered(c.env, access.channelId, input.messageId, user.id);
       }
@@ -135,7 +137,7 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     }
     const card = parseSecretRequestCard(input);
     if (!card) throw new SpaceSecretError("invalid_request", 400, "Invalid secret request");
-    const approved = await repository(c.env).approve({ userId: user.id, runId: card.runId, channelId: card.channelId,
+    const approved = await spaceSecretRepository(c.env).approve({ userId: user.id, runId: card.runId, channelId: card.channelId,
       secretRef: card.secretRef, ...change({ ...input, envName: input.envName ?? card.envName }) });
     // The card names its own message; an approval from elsewhere leaves the wait to Done.
     if (typeof input.messageId === "string" && input.messageId.startsWith("secret-request:")) {
@@ -147,10 +149,10 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   app.post(HUB_ROUTES.secret_request_status, route("human", async (c, user) => {
     const input = await body(c);
     const access = parseSecretAccessRequestCard(input);
-    if (access) return repository(c.env).accessStatus({ userId: user.id, ...access });
+    if (access) return spaceSecretRepository(c.env).accessStatus({ userId: user.id, ...access });
     const card = parseSecretRequestCard(input);
     if (!card) throw new SpaceSecretError("invalid_request", 400, "Invalid secret request");
-    return repository(c.env).requestStatus({ userId: user.id, runId: card.runId, channelId: card.channelId,
+    return spaceSecretRepository(c.env).requestStatus({ userId: user.id, runId: card.runId, channelId: card.channelId,
       secretRef: card.secretRef });
   }));
 }

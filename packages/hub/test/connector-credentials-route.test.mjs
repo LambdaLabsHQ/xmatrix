@@ -10,11 +10,14 @@ import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mj
 /** The connector routes over a credential repository double, for a Space admin. */
 async function credentialRoutes(repository) {
   const route = await compileCommonJsSourceModule(new URL("../src/index-routes-connectors.ts", import.meta.url));
+  const policy = await compileCommonJsSourceModule(new URL("../src/connectors/credential-policy.ts", import.meta.url));
   const noop = () => {};
+  const store = { ...credentials, connectorCredentialRepository: () => repository };
   const imports = {
     "@xmatrix/protocol": protocol,
     "./app-connectors": connectors,
-    "./connectors/credentials": { ...credentials, connectorCredentialRepository: () => repository },
+    "./connectors/credentials": store,
+    "./connectors/credential-policy": policy((name) => ({ "../app-connectors": connectors, "./credentials": store })[name]),
     "./index-shared": { ...shared, requireAuth: async () => ({ id: "admin", email: "admin@example.test" }) },
   };
   const app = new Hono();
