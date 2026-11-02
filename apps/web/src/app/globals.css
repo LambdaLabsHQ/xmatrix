@@ -8445,7 +8445,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   background: var(--app-ask-tint);
 }
 
-/* A setting something stopped on (connector-settings-card.tsx): the receipt's own rounded slip of tinted
+/* A setting card (settings-card.tsx), for a stopped command or an Agent: the receipt's own rounded slip of tinted
    paper, without a rail (Daniel 2026-11-01: 圆角，左边竖条不要), its settings laid flat in it one row each,
    divided by a hairline rather than nested in a second block. What is missing reads in the alert ink of its
    dot and words; once the setting is in, both settle to the body's ink and the slip lightens. */

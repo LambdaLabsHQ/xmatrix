@@ -1461,13 +1461,16 @@ pub enum RequestCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Ask a Space admin, on a card in this Channel, for connector settings only a person can make
+    /// Ask, on a card in this Channel, for settings only a person can make
     ///
     /// Name each setting by address: `connector:<app>/<field>` for a sign-in or
-    /// credential (`connector:appstoreconnect/webSession`), or
-    /// `connector:<app>/connect` to connect the App again. A Space admin makes
-    /// it on the card; the value goes to the connection, never into chat. With
-    /// `--wait` the command returns once every setting is in and checked.
+    /// credential (`connector:appstoreconnect/webSession`),
+    /// `connector:<app>/connect` to connect the App again, `secret:<alias>`,
+    /// `secret-access:<alias>`, or `harness:<machine>/<harness>/sign-in`. The
+    /// person who may make it does so on the card; a value goes where the
+    /// setting lives, never into chat. xMatrix answers the card, which wakes
+    /// this Agent, once every setting is in; `--wait` also returns then. The
+    /// Hub's `xmatrix settings ask` does the same without waiting.
     Settings {
         /// Setting addresses, for example `connector:appstoreconnect/webSession`.
         #[arg(required = true, num_args = 1..)]
@@ -1478,7 +1481,7 @@ pub enum RequestCommand {
         /// Suggest a value for a plain setting (not a secret), which a person confirms: `<address>=<value>`.
         #[arg(long = "propose", value_name = "ADDRESS=VALUE")]
         propose: Vec<String>,
-        /// Wait until every setting is in and its connection passed a check (up to 30 minutes).
+        /// Wait until every setting is in (up to 30 minutes).
         #[arg(long)]
         wait: bool,
         /// Print machine-readable JSON.
