@@ -108,7 +108,7 @@ class ReceiptUnsaved extends Error {}
 /** One recorded read: its command message, its execution, a receipt in its
  * Channel (masked when private, the original kept for its Human owner), and
  * the original returned to whoever asked. */
-async function recordedRead(env: Env, call: {
+export async function recordedRead(env: Env, call: {
   channelId: string; spaceId: string; ownerUserId: string; command: string; visibility: ConnectorResultVisibility;
   authorize: () => Promise<void>; sender: { kind: "agent" | "user"; id: string };
   principal: { kind: "agent"; id: string; agentSpaceId: string } | { kind: "user"; id: string };

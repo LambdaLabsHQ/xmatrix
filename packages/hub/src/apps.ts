@@ -157,6 +157,13 @@ export async function appExecutionRetry(env: PostgresAuthorityBindingEnv, input:
   return appRepository(env).executionRetry({ requestId: crypto.randomUUID(), ...input });
 }
 
+/** A Space's most recent connector calls, newest first: one bounded page, never the whole history. */
+export async function recentAppExecutions(env: PostgresAuthorityBindingEnv, input: {
+  spaceId: string; actorUserId: string; limit: number;
+}): Promise<Record<string, unknown>[]> {
+  return (await appRepository(env).listExecutions({ requestId: crypto.randomUUID(), ...input, cursor: null })).executions;
+}
+
 export async function listAppExecutions(env: PostgresAuthorityBindingEnv, input: {
   spaceId: string; actorUserId: string;
 }): Promise<Record<string, unknown>[]> {

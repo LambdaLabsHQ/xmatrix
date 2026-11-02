@@ -21,6 +21,8 @@ export interface SettingsReader {
   userId: string;
   /** When the card asked; without it a setting is satisfied by its state alone. */
   since?: string;
+  /** The card's Channel, where a domain records a check it runs for a setting made there. */
+  channelId?: string;
   /**
    * Who the card asked for, from the Hub's own card: its Run's owner, whose
    * Machines a harness setting names, and the Run a secret is made for.

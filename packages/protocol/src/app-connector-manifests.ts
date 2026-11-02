@@ -100,6 +100,13 @@ export interface AppConnectorProviderManifest {
      * card for a person to confirm. Still stored with the other credentials.
      */
     plain?: boolean;
+    /**
+     * A read action (taking `*`) that proves this field works, for a field the
+     * connection check does not exercise, such as a web session beside an API
+     * key. Its state then follows what calls needing it last did, and a
+     * settings card that saves it runs this read.
+     */
+    verify?: string;
   }>;
   /**
    * Inbound events (§3.3). A Channel subscribes with
