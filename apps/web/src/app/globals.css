@@ -5354,50 +5354,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
    Keep this last: the dashboard has several material/glass generations above,
    and phone ergonomics need a single authoritative layout pass. */
 @media (max-width: 767px) {
-  html[data-xmatrix-mobile-navigation]::view-transition-old(root),
-  html[data-xmatrix-mobile-navigation]::view-transition-new(root) {
-    animation-duration: 320ms;
-    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-    animation-fill-mode: both;
-    mix-blend-mode: normal;
-  }
-
-  html[data-xmatrix-mobile-navigation="forward"]::view-transition-old(root) {
-    animation-name: xmatrix-mobile-route-old-forward;
-  }
-
-  html[data-xmatrix-mobile-navigation="forward"]::view-transition-new(root) {
-    animation-name: xmatrix-mobile-route-new-forward;
-  }
-
-  html[data-xmatrix-mobile-navigation="back"]::view-transition-old(root) {
-    animation-name: xmatrix-mobile-route-old-back;
-  }
-
-  html[data-xmatrix-mobile-navigation="back"]::view-transition-new(root) {
-    animation-name: xmatrix-mobile-route-new-back;
-  }
-
-  @keyframes xmatrix-mobile-route-old-forward {
-    from { transform: translate3d(0, 0, 0); opacity: 1; }
-    to { transform: translate3d(-18%, 0, 0); opacity: 0.72; }
-  }
-
-  @keyframes xmatrix-mobile-route-new-forward {
-    from { transform: translate3d(100%, 0, 0); }
-    to { transform: translate3d(0, 0, 0); }
-  }
-
-  @keyframes xmatrix-mobile-route-old-back {
-    from { transform: translate3d(0, 0, 0); }
-    to { transform: translate3d(100%, 0, 0); }
-  }
-
-  @keyframes xmatrix-mobile-route-new-back {
-    from { transform: translate3d(-18%, 0, 0); opacity: 0.72; }
-    to { transform: translate3d(0, 0, 0); opacity: 1; }
-  }
-
   .xmatrix-app.xmatrix-app-shell {
     /* The phone's one gutter, 16px from the screen's edges as in the system's
        own lists. What floats (the signs' wood, the dock, the +, the composer)
