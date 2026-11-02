@@ -73,3 +73,32 @@ test("a change carries its version and reason, and is refused before sending whe
   assert.deepEqual(await denied.run(["automation", "pause", "a1", "--version", "1"]),
     { stdout: "", stderr: "error: Forbidden (HTTP 403)\n", exitCode: 1 });
 });
+
+// `settings ask` takes any number of addresses and repeated suggestions; the Hub, not the command, decides what each is.
+test("settings ask posts every address and suggestion it is given, and status reads them back", async () => {
+  const { SETTINGS_COMMANDS, SETTINGS_GROUP } = await import("../src/cli-commands-settings.ts");
+  const descriptor = { address: "connector:appstoreconnect/webSession", state: "missing", satisfied: false,
+    scope: "App Store Connect", label: "Web session" };
+  const calls = [];
+  const run = (argv) => runCliCommand(SETTINGS_COMMANDS, SETTINGS_GROUP, argv, async (method, route, body) => {
+    calls.push({ method, route, body });
+    return route.startsWith("/api/settings-requests/status") ? { settled: false, settings: [descriptor] }
+      : { settings: [descriptor.address], descriptors: [descriptor] };
+  });
+  const asked = await run(["settings", "ask", "connector:appstoreconnect/webSession", "secret:token", "--reason", "sales",
+    "--propose", "connector:appstoreconnect/vendorNumber=876=54", "--propose=connector:x/y=1"]);
+  assert.match(asked.stdout, /wakes you/);
+  assert.match(asked.stdout, /connector:appstoreconnect\/webSession\tmissing\tApp Store Connect: Web session/);
+  const [{ body }] = calls;
+  assert.deepEqual(body.settings, ["connector:appstoreconnect/webSession", "secret:token"]);
+  assert.deepEqual(body.proposals, { "connector:appstoreconnect/vendorNumber": "876=54", "connector:x/y": "1" });
+  assert.equal(body.reason, "sales");
+  assert.match(body.requestId, /^[0-9a-f-]{36}$/u, "each ask is a new card; a retry of the same call replays it");
+  assert.equal((await run(["settings", "ask"])).exitCode, 2, "at least one address");
+  assert.match((await run(["settings", "ask", "secret:a", "--propose", "novalue"])).stderr, /--propose takes <address>=<value>/);
+  assert.match((await run(["settings", "ask", "--help"])).stdout, /<SETTING>\.\.\./);
+
+  await run(["settings", "status", "secret:a", "secret:b", "--since", "2026-11-01T10:00:00Z"]);
+  assert.equal(calls.at(-1).route, "/api/settings-requests/status?setting=secret%3Aa&setting=secret%3Ab&since=2026-11-01T10%3A00%3A00Z");
+  assert.match((await run(["settings"])).stdout, /ask\s+Ask, on a card/);
+});

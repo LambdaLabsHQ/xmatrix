@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: Any setting only a person makes goes on one card
+
+An Agent stopped on a sign-in, credential, Space secret, secret access or
+harness login can now ask for it with `xmatrix settings ask <address>…`. This
+is a Hub-defined command, so a CLI needs no update. One settings registry
+turns each address (`connector:`, `secret:`, `secret-access:`, `harness:`)
+into a descriptor from its own store. The card, the Agent's status read and
+the wake use only that descriptor. The Web draws one settings card from it,
+under a stopped connector receipt and on an Agent's request. Once every
+setting is in, xMatrix answers the card, and that answer wakes only the
+Instance that asked. Hub-written request cards (settings, secret, secret
+access, harness sign-in, cross-Space read) now arrive live instead of after a
+reload. Hub and beta Web, plus CLI help text; no schema change. Recovery is a
+CI-validated release reverting this change. See
+[settings cards](design/settings-cards.md).
 ## Unreleased: Machine scope timeouts retain the command holding the lock
 
 HUB-BJ rejected a daemon report at its first SQL statement, waiting on the

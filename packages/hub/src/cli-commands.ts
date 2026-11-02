@@ -14,6 +14,8 @@ export interface CliOption {
   /** A flag takes no value. */
   kind: "string" | "integer" | "flag";
   required?: boolean;
+  /** A string option given more than once, collected in order under `lists`. */
+  repeatable?: boolean;
   help: string;
 }
 
@@ -21,7 +23,8 @@ export interface CliCommand {
   /** Words after `xmatrix`, e.g. ["automation", "list"]. */
   path: string[];
   about: string;
-  positionals?: Array<{ name: string; help: string }>;
+  /** The last one may be `variadic`: it takes every remaining word, at least one, under `lists`. */
+  positionals?: Array<{ name: string; help: string; variadic?: boolean }>;
   options?: CliOption[];
   run(call: CliCall, args: CliArgs): Promise<CliOutput>;
 }
@@ -29,6 +32,8 @@ export interface CliCommand {
 export interface CliArgs {
   positionals: Record<string, string>;
   options: Record<string, string | number | boolean>;
+  /** A variadic positional's words and a repeatable option's values. */
+  lists: Record<string, string[]>;
 }
 
 export interface CliOutput { stdout: string; stderr?: string; exitCode?: number }
@@ -44,7 +49,7 @@ const usageError = (message: string, usage: string): CliOutput =>
   ({ stdout: "", stderr: `error: ${message}\n\n${usage}\n\nFor more information, try '--help'.\n`, exitCode: 2 });
 
 function usageLine(command: CliCommand): string {
-  const positionals = (command.positionals ?? []).map((positional) => `<${positional.name.toUpperCase()}>`);
+  const positionals = (command.positionals ?? []).map((positional) => `<${positional.name.toUpperCase()}>${positional.variadic ? "..." : ""}`);
   const required = (command.options ?? []).filter((option) => option.required)
     .map((option) => `--${option.name} <${option.name.toUpperCase()}>`);
   return `Usage: xmatrix ${command.path.join(" ")} [OPTIONS] ${[...required, ...positionals].join(" ")}`.trimEnd();
@@ -82,7 +87,7 @@ function groupHelp(commands: CliCommand[], prefix: string[], about: string | und
 
 /** Parses `argv` (after the command's words) against `command`; a string is a usage error. */
 function parseArgs(command: CliCommand, argv: string[]): CliArgs | string {
-  const args: CliArgs = { positionals: {}, options: {} };
+  const args: CliArgs = { positionals: {}, options: {}, lists: {} };
   const options = command.options ?? [];
   const positionals = command.positionals ?? [];
   const byName = new Map<string, CliOption>();
@@ -94,7 +99,7 @@ function parseArgs(command: CliCommand, argv: string[]): CliArgs | string {
       const [name, inline] = word.slice(2).split(/=(.*)/su, 2) as [string, string | undefined];
       const option = byName.get(name);
       if (!option) return `unexpected argument '--${name}' found`;
-      if (option.name in args.options) return `the argument '--${option.name}' cannot be used multiple times`;
+      if (option.name in args.options && !option.repeatable) return `the argument '--${option.name}' cannot be used multiple times`;
       if (option.kind === "flag") {
         if (inline !== undefined) return `unexpected value '${inline}' for '--${option.name}' found`;
         args.options[option.name] = true;
@@ -109,15 +114,19 @@ function parseArgs(command: CliCommand, argv: string[]): CliArgs | string {
         args.options[option.name] = Number(value);
       } else {
         args.options[option.name] = value;
+        if (option.repeatable) (args.lists[option.name] ??= []).push(value);
       }
       continue;
     }
-    const positional = positionals[next++];
+    // A variadic positional is last and keeps taking words, so `next` stays on it.
+    const positional = positionals[next];
     if (!positional) return `unexpected argument '${word}' found`;
-    args.positionals[positional.name] = word;
+    if (positional.variadic) (args.lists[positional.name] ??= []).push(word);
+    else { args.positionals[positional.name] = word; next++; }
   }
   const missing = [
-    ...positionals.filter((positional) => !(positional.name in args.positionals)).map((positional) => `<${positional.name.toUpperCase()}>`),
+    ...positionals.filter((positional) => !(positional.name in args.positionals) && !args.lists[positional.name]?.length)
+      .map((positional) => `<${positional.name.toUpperCase()}>${positional.variadic ? "..." : ""}`),
     ...options.filter((option) => option.required && !(option.name in args.options)).map((option) => `--${option.name} <${option.name.toUpperCase()}>`),
   ];
   if (missing.length) return `the following required arguments were not provided:\n  ${missing.join("\n  ")}`;

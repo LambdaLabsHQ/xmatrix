@@ -11,8 +11,8 @@ import { registerDingTalkRoutes } from "./index-routes-dingtalk";
 import type { Hono } from "hono";
 import { connectorPermission, HUB_ROUTES } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "./app-connectors";
-import { connectorPermissionRepository, connectorIngressUrl, connectorCredentialRepository, INGRESS_KEY_FIELD,
-  mintConnectorSecret } from "./connectors/credentials";
+import { connectorPermissionRepository, connectorIngressUrl, INGRESS_KEY_FIELD } from "./connectors/credentials";
+import { credentialPolicy, readConnectorReadback, saveConnectorCredentials, type CredentialPolicy } from "./connectors/credential-policy";
 import { handleAppConnectorDelivery, handleConnectorDelivery } from "./connectors/event-ingress";
 import { handleStripeAppDelivery } from "./connectors/stripe-app-ingress";
 import { handleStripePublisherDelivery } from "./connectors/stripe-publisher-ingress";
@@ -43,19 +43,6 @@ import type { Env } from "./types";
 
 const MAX_CREDENTIAL_REQUEST_BYTES = 32 * 1024;
 
-
-function credentialPolicy(providerId: string) {
-  const manifest = getAppConnectorProvider(providerId);
-  if (!manifest || manifest.status !== "available") return undefined;
-  const declared = manifest.credentials ?? [];
-  const generated = [...declared.filter((field) => field.generated && !field.managed).map((field) => field.id),
-    ...(manifest.events && manifest.events.ingress !== false && !["googlechat", "wecom", "teams"].includes(providerId) ? [INGRESS_KEY_FIELD] : [])];
-  const writable = declared.filter((field) => !field.generated && !field.managed).map((field) => field.id);
-  // Plain values (an account or vendor number) are read back like generated ones; secrets never are.
-  const plain = declared.filter((field) => field.plain && !field.generated && !field.managed).map((field) => field.id);
-  if (generated.length === 0 && writable.length === 0) return undefined;
-  return { manifest, generated, writable, plain, allowed: [...writable, ...generated] };
-}
 
 function credentialView(env: Env, request: Request, providerId: string, spaceId: string,
   readable: Record<string, string>, plainFields: readonly string[]) {
@@ -208,19 +195,12 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
         if (regenerate.some((name) => !policy.generated.includes(name))) {
           return c.json({ error: "regenerate names a field the Hub does not generate" }, 400);
         }
-        const existing = await readGenerated();
-        for (const name of policy.generated) {
-          if (!existing[name] || regenerate.includes(name)) fields[name] = mintConnectorSecret();
-        }
-        if (Object.keys(fields).length === 0) return c.json({ error: "Nothing to write" }, 400);
-        const result = await connectorCredentialRepository(c.env).put({ requestId: crypto.randomUUID(),
-          spaceId: c.req.param("spaceId"), providerId: policy.manifest.id, actorUserId: user.id, fields,
-          policy: { allowed: policy.allowed, generated: policy.generated }, at: new Date().toISOString() });
+        const result = await saveConnectorCredentials(c.env, { spaceId: c.req.param("spaceId"), policy,
+          actorUserId: user.id, fields, regenerate });
+        if (!result) return c.json({ error: "Nothing to write" }, 400);
         return view(await readGenerated(), { credentialFields: result.credentialFields });
       }));
 }
-
-type CredentialPolicy = NonNullable<ReturnType<typeof credentialPolicy>>;
 
 /* A Human (never an Agent Run) asking about a provider that keeps credentials;
    the credential store itself checks the Space owner/admin role. */
@@ -242,8 +222,7 @@ async function credentialRoute(request: Request, env: Env, spaceId: string, prov
     return await handle({
       user,
       policy,
-      readGenerated: () => connectorCredentialRepository(env).readGenerated({ requestId: crypto.randomUUID(),
-        spaceId, providerId: policy.manifest.id, actorUserId: user.id, generated: [...policy.generated, ...policy.plain] }),
+      readGenerated: () => readConnectorReadback(env, { spaceId, policy, actorUserId: user.id }),
       view: (readable, extra = {}) => Response.json({ ...extra,
         ...credentialView(env, request, policy.manifest.id, spaceId, readable, policy.plain) },
       { headers: { "cache-control": "private, no-store" } }),

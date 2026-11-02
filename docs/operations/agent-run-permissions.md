@@ -125,24 +125,45 @@ owner signs the harness in on it through the Machine's own harness actions,
 with or without an Agent for that harness in the Space. A harness the Machine
 reports as not installed is refused. The Run never signs anything in.
 
-## Asking a Space admin for connector settings
+## Asking for settings on a card
 
-`xmatrix request settings <address>… [--reason <why>] [--wait]` posts a card in
-the Run's Channel (`POST /api/settings-requests`, message kind
-`xmatrix.system.settings-request`). Each address names a setting only a person
-makes: `connector:<app>/<field>` for a sign-in or credential the App's manifest
-declares (not a Hub-minted or OAuth-managed one), or `connector:<app>/connect`
-for the connection itself. The card is drawn from the Hub's
-`xmatrixConnectorFixes`; a Space admin saves each value straight to the
-connection, which is then checked. `--wait` reads
-`GET /api/settings-requests/status` until each setting is in and its connection
-passed a check after the card was posted. `--propose <address>=<value>`
-suggests a value for a plain field (one the manifest marks `plain`, such as
-App Store Connect's vendor number); the card offers it and the admin confirms
-it before it is saved. A secret field takes no suggestion. The Run never sees a
-secret value. A
-connector command that stops for the same reason gets the same card under its
-receipt without asking.
+`xmatrix settings ask <address>… [--reason <why>] [--propose <address>=<value>]`
+is a Hub-defined command (`cli-commands-settings.ts`), so every CLI that passes
+unknown words to the Hub has it. It posts a card in the Run's Channel
+(`POST /api/settings-requests`, message kind `xmatrix.system.settings-request`)
+for settings only a person makes. The CLI's `xmatrix request settings … [--wait]`
+posts the same card.
+
+Each address names a setting that one domain of the settings registry owns
+(`docs/design/settings-cards.md`):
+
+- `connector:<app>/<field>`: a sign-in or credential the App's manifest
+  declares (not a Hub-minted or OAuth-managed one). It is saved to the
+  connection, which is then checked.
+- `connector:<app>/connect`: the connection itself.
+- `secret:<alias>`: a Space secret's value. Made on the card, it is approved
+  for the Run that asked.
+- `secret-access:<alias>`: Agents read a saved secret without asking.
+- `harness:<machine>/<harness>/sign-in`: a harness signed in on one of the Run
+  owner's Machines. Only that owner signs in, on the Machine.
+
+The registry decides each setting's control, who may make it (a Space owner or
+admin, or the Machine's owner) and whether it is in. It is in once the domain
+observes it after the card was posted, not when someone clicks. A connector
+field counts once the provider check passes.
+
+`--propose` suggests a value for a plain connector field, such as App Store
+Connect's vendor number. The card offers it, and a person confirms it before it
+is saved. A secret, a sign-in, a grant or a connection takes no suggestion.
+
+`xmatrix settings status <address>…` (`GET /api/settings-requests/status`)
+reads where settings stand without values. When every setting on a card is in,
+xMatrix answers the card once (`xmatrix.system.settings-ready`). That answer
+wakes the Instance that asked, and only that one. The Run never sees a secret
+value.
+
+A connector command that stops for a sign-in or credential gets the same card
+under its receipt without asking.
 
 ## Saving a credential an Agent already holds
 

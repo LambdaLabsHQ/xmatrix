@@ -4,11 +4,11 @@ import {
   type SerializedMachineDaemon,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
-import { appendChannelMessage } from "./channel-messages";
 import { requireAuth } from "./index-shared";
 import { isMachineField, MACHINE_ACTION_DELIVERY, NO_STORE, readActionBody, refuse } from "./machine-action-routes";
 import { privateRouteResponse } from "./private-route-response";
 import { requestCardAppend } from "./secret-request-card";
+import { appendHubCard } from "./settings-card";
 
 /** The card an Agent posts to ask for a harness sign-in. */
 export const HARNESS_SIGN_IN_REQUEST_MESSAGE_KIND = "xmatrix.system.harness-sign-in-request";
@@ -24,7 +24,7 @@ export interface HarnessSignInRequestPort {
 const PORT: HarnessSignInRequestPort = {
   authenticate: requireAuth,
   daemons: MACHINE_ACTION_DELIVERY.daemons,
-  append: appendChannelMessage,
+  append: appendHubCard,
 };
 
 /**

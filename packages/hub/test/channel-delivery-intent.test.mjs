@@ -68,6 +68,20 @@ test("a system fact is context, whoever is receiving it", () => {
   assert.equal(channelMessageDeliveryIntent(notice), "context");
 });
 
+// A settings card's answer is the one way the Instance that asked learns its settings are in;
+// every other Instance, and any lookalike a caller writes, reads it as context.
+test("xMatrix's answer to a settings card is work for the Instance that asked, and no other", () => {
+  const answer = (metadata, from = { kind: "system", label: "xMatrix", userId: "", email: "" }) => framed({ from,
+    messageId: "settings-ready:settings-request:abc", body: "**claude**, the settings you asked for are in.",
+    metadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, ...metadata } });
+  const asker = { agentName: "claude", instanceId: "ch-1:1" }, peer = { agentName: "claude", instanceId: "ch-1:2" };
+  assert.equal(agentChannelMessageDeliveryIntent(answer({ xmatrixRequesterInstanceId: "ch-1:1" }), asker), "work");
+  assert.equal(agentChannelMessageDeliveryIntent(answer({ xmatrixRequesterInstanceId: "ch-1:1" }), peer), "context");
+  assert.equal(agentChannelMessageDeliveryIntent(answer({}), asker), "context", "a system fact without a target stays context");
+  assert.equal(agentChannelMessageDeliveryIntent(answer({ xmatrixRequesterInstanceId: "ch-1:1" }, BASE.from), asker), "context",
+    "only xMatrix's own message aims a wake");
+});
+
 test("scheduled Automation is work only for its exact live instance mention", () => {
   const scheduled = framed({
     body: "@codex:2 inspect the latest build",

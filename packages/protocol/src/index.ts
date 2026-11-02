@@ -583,6 +583,12 @@ export {
 export {
   connectorOperationIds, parseConnectorActionCommand, parseConnectorInvocation,
 } from "./connector-command.js";
+export {
+  connectorAddressFix, MAX_SETTINGS_PER_CARD, parseSettingAddress, proposableValue, SETTING_ADDRESS_FORMS, SETTING_CONTROLS,
+  SETTING_DOMAINS, settingsCardOf, settingsEntriesOf,
+  type ParsedSettingAddress, type SettingControl, type SettingDescriptor, type SettingDomain, type SettingsCard,
+  type SettingsCardEntry, type SettingState, type SettingWriter,
+} from "./settings.js";
 export { CONNECTOR_RECEIPT_FIXES_KEY, connectorFixSettled, connectorReceiptBody, connectorReceiptFixesOf, connectorReceiptPreview,
   parseConnectorReceipt, PRIVATE_CONNECTOR_RESULT, proposedValue, SETTINGS_REQUEST_KEY, settingAddress, settingAddressFix,
   type ConnectorReceiptEntry, type ConnectorReceiptFix, type ConnectorReceiptStatus, type ConnectorResultVisibility,

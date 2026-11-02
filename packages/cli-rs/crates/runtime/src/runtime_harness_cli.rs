@@ -395,8 +395,8 @@ fn settings_proposals(propose: &[String]) -> error::Result<serde_json::Map<Strin
         .collect()
 }
 
-/// Asks a Space admin, on a card in this Agent's Channel, for connector
-/// settings; with `wait`, returns once each is in and its connection checked.
+/// Asks, on a card in this Agent's Channel, for settings only a person can
+/// make; with `wait`, returns once the Hub says each is in.
 async fn cmd_request_settings(
     hub_url: &str,
     token: &str,
@@ -425,7 +425,7 @@ async fn cmd_request_settings(
             println!("{posted}");
         } else {
             println!(
-                "Asked a Space admin, on a card in this Channel, for {}. Run again with --wait to return once they are in.",
+                "Asked on a card in this Channel for {}. xMatrix wakes you once they are in.",
                 asked.join(", ")
             );
         }
@@ -435,7 +435,7 @@ async fn cmd_request_settings(
     let url = settings_status_url(hub_url, &asked, &since);
     let started = std::time::Instant::now();
     if !json {
-        eprintln!("Asked a Space admin for {}; waiting for them on the card…", asked.join(", "));
+        eprintln!("Asked on a card for {}; waiting for them…", asked.join(", "));
     }
     loop {
         let status: serde_json::Value =
@@ -444,7 +444,7 @@ async fn cmd_request_settings(
             if json {
                 println!("{status}");
             } else {
-                println!("Every setting is in and its connection passed a check: {}.", asked.join(", "));
+                println!("Every setting is in: {}.", asked.join(", "));
             }
             return Ok(());
         }

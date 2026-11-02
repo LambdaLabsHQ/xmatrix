@@ -159,16 +159,21 @@ xmatrix request sign-in <harness> [--machine <machine-name>] --reason "<why>"
 ```
 
 A connected App that needs a sign-in, a credential or a new connection stops
-until a Space admin makes it. Ask on a card in this Channel; the admin makes it
-there and the value never reaches chat. `--wait` returns once each setting is in
-and checked:
+until a Space admin makes it. Its receipt already carries a card for that, so
+name who it waits on instead of asking again. To ask for a setting yourself,
+post a card in this Channel. The person makes it there, and the value never
+reaches chat. xMatrix wakes you once every setting on the card is in:
 
 ```bash
-xmatrix request settings connector:<app>/<field> [connector:<app>/connect …] --reason "<why>" [--wait]
+xmatrix settings ask <address>... --reason "<why>"
 ```
 
-For a plain setting (not a secret) whose value you already know, suggest it
-for the admin to confirm: `--propose connector:<app>/<field>=<value>`.
+Addresses: `connector:<app>/<field>`, `connector:<app>/connect`,
+`secret:<alias>`, `secret-access:<alias>` and
+`harness:<machine>/<harness>/sign-in`. `xmatrix settings status <address>...`
+shows where they stand. For a plain setting (not a secret) whose value you
+already know, suggest it for the person to confirm:
+`--propose connector:<app>/<field>=<value>`.
 
 On Windows PowerShell 5.1, if the command itself uses `powershell -Command`,
 pass the script as one complete argv. Use outer single quotes and doubled

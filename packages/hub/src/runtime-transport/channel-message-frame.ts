@@ -80,8 +80,8 @@ export function agentChannelMessageDeliveryIntent(
   message: ChannelMessage,
   recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
 ): "work" | "context" {
-  if (message.from.kind === "app") {
-    const target = connectorMessageWakeTarget(message);
+  const target = connectorMessageWakeTarget(message);
+  if (message.from.kind === "app" || target) {
     return target && (!target.instanceId || target.instanceId === recipient.instanceId) ? "work" : "context";
   }
   const baseIntent = channelMessageDeliveryIntent(message);

@@ -4,6 +4,7 @@ import { requireAuth, requestErrorResponse } from "./index-shared";
 import { CliRouteError, commandsListing, runCliCommand, type CliCommand } from "./cli-commands";
 import { AUTOMATION_COMMANDS, AUTOMATION_GROUP } from "./cli-commands-automation";
 import { CONNECTOR_CALL_COMMAND } from "./cli-commands-call";
+import { SETTINGS_COMMANDS, SETTINGS_GROUP } from "./cli-commands-settings";
 
 const COMMANDS: CliCommand[] = [
   {
@@ -12,8 +13,9 @@ const COMMANDS: CliCommand[] = [
   },
   ...AUTOMATION_COMMANDS,
   CONNECTOR_CALL_COMMAND,
+  ...SETTINGS_COMMANDS,
 ];
-const GROUPS: Record<string, string> = { ...AUTOMATION_GROUP };
+const GROUPS: Record<string, string> = { ...AUTOMATION_GROUP, ...SETTINGS_GROUP };
 
 const MAX_ARGV = 64;
 const MAX_WORD = 16 * 1024;
