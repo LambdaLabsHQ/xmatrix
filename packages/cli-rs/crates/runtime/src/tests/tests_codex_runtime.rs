@@ -2432,6 +2432,44 @@ async fn generic_acp_refused_credentials_read_as_signed_out() {
     assert!(detail.contains("Missing API key for openai auth"), "{detail}");
 }
 
+/// CodeBuddy without a sign-in answers authRequired, and its advertised method
+/// opens a browser login that answers only when someone finishes it: the start
+/// fails as a sign-in problem instead of hanging.
+#[tokio::test]
+async fn generic_acp_auth_waiting_for_a_person_reads_as_signed_out() {
+    require_node_fixture_runtime();
+    let mut session = spawn_generic_acp_fixture("acp-browser-login", "codebuddy").await;
+    let refused = tokio::time::timeout(
+        Duration::from_secs(10),
+        session.initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false, None),
+    )
+    .await
+    .expect("browser-login ACP fixture should not hang")
+    .expect_err("no sign-in means no session");
+    session.shutdown().await;
+    let detail = refused.to_string();
+    assert!(crate::harness_signed_out_error(&detail), "{detail}");
+}
+
+/// A harness that quits before its session opens fails every launch alike, so
+/// the readiness check reports it as unable to take work, in its own stderr.
+#[tokio::test]
+async fn generic_acp_quitting_before_a_session_cannot_take_work() {
+    require_node_fixture_runtime();
+    let mut session = spawn_generic_acp_fixture("acp-quits", "codebuddy").await;
+    let opened = tokio::time::timeout(
+        Duration::from_secs(10),
+        session.initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false, None),
+    )
+    .await
+    .expect("quitting ACP fixture should not hang");
+    session.shutdown().await;
+    let reason = crate::readiness_verdict(opened)
+        .expect("a quit is an answer")
+        .expect_err("a quit cannot take work");
+    assert!(reason.contains("subscription-gate"), "{reason}");
+}
+
 #[test]
 fn acp_retry_auth_method_prefers_login_then_the_advertised_one() {
     let ids = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
