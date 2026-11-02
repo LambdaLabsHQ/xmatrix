@@ -7,6 +7,7 @@ import {
   E2E_SPACE,
   fixtureJson,
   openWorkspaceWithStubs,
+  screenChangeLanded,
 } from "./workspace-fixtures";
 
 test.use(E2E_MOBILE_CONTEXT);
@@ -55,6 +56,7 @@ const DAEMON = {
 
 /** Every element inside the active tool surface that renders past its clipped right edge. */
 async function contentPastRightEdge(page: Page) {
+  await screenChangeLanded(page);
   // The dock keeps a pane per tab, so offscreen tabs can hold a tool surface
   // too; only the visible pane is the one under test.
   // Settings reads as a list beside a section; the section open on the phone is the surface.

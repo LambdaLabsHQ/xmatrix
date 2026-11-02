@@ -405,6 +405,10 @@ export async function openGeneralChannelWithHistory(
    its page. Layout read during either is a frame of the motion. */
 export async function screenChangeLanded(page: Page): Promise<void> {
   await expect(page.locator("[data-list-transition], .app-dock-tab-slide-outgoing, .app-dock-tab-slide-incoming")).toHaveCount(0);
+  // More's child views have no sliding bar copy; their track still moves.
+  await expect.poll(() => page.locator(".app-mobile-dock-track").evaluateAll(tracks =>
+    tracks.every(track => track.getAnimations().every(animation => !animation.pending && animation.playState !== "running"))))
+    .toBe(true);
 }
 
 /* A conversation opens on a plain tail of its rows and the virtual list takes
