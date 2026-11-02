@@ -6,8 +6,9 @@ line of that section, written as Obsidian Tasks writes a recurring or
 scheduled task, and changed with `xmatrix page edit` like any text. Each
 occurrence runs in a fresh conversation linked to the section, as whoever last
 changed the line (an Agent as its owner), so it keeps running after the Run
-ends. What one occurrence leaves for the next belongs on the page, not in its
-conversation.
+ends. Its Agent starts with the page in its launch context, so the line says
+what to do, not "read this page first". What one occurrence leaves for the
+next belongs on the page, not in its conversation.
 
 ```markdown
 ## Architecture

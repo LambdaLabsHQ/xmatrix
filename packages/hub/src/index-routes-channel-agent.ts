@@ -20,6 +20,8 @@ import {
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { readLaunchContext } from "./agent-launch-context";
+import { linkedPages } from "./index-routes-pages";
+import { runPrincipalOf } from "./run-principal";
 import { authorizeMachineDaemonAgentRun } from "./machine-daemon-agent-run-authorization";
 import { crossSpaceRetryOwner, retryDeniedAgentReadAcrossSpaces } from "./cross-space-read";
 import { loadLiveHumanPresenceFromRuntime, overlayChannelsWithLiveHumanPresence } from "./runtime-transport/human-presence-fanout";
@@ -531,6 +533,9 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
           const { channel } = await getChannel(c.env, { channelId, principal, purpose: "launch-context" });
           return channel as { summary?: string; summarySource?: ChannelSummarySource };
         },
+        // As the caller itself; a Run's read through its owner's cross-Space grant goes without pages.
+        pages: async () => run && principal.kind !== "agent" ? []
+          : (await linkedPages(c.env, channelId, runPrincipalOf(authUser))).pages,
       }) }));
     let response = await read(run
       ? { kind: "agent", id: run.agentId, agentSpaceId: run.spaceId }

@@ -1,4 +1,5 @@
-import { channelActivityOf, channelActivityLine, type ChannelMessage, type ChannelSummarySource } from "@xmatrix/protocol";
+import { channelActivityOf, channelActivityLine, type ChannelMessage, type ChannelSummarySource,
+  type PageDocument } from "@xmatrix/protocol";
 import { renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-message";
 
 /**
@@ -15,6 +16,10 @@ import { renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-messa
 /** Ceiling on the transcript. A 400-message channel renders to about 80k characters, so ordinary
  * conversations are read whole and never cut. */
 const LAUNCH_HISTORY_MAX_CHARS = 200_000;
+
+/** Ceiling on the linked pages put in front of the transcript. A page that does not fit whole is
+ * named with the read that gets it, never cut: a part of a page would be edited as if it were all. */
+const LAUNCH_PAGES_MAX_CHARS = 120_000;
 
 interface LaunchCoWrite { version: 1; spaceId: string; pageId: string; active: boolean }
 
@@ -104,6 +109,36 @@ function renderAbout(about: { summary?: string; summarySource?: ChannelSummarySo
 }
 
 /**
+ * The pages the conversation is linked to, whole, at the revision read here, so a Run (a schedule's
+ * occurrence above all, whose conversation holds only its line) starts from its page instead of
+ * spending its first step reading it. Each names the revision an edit is based on.
+ */
+export function renderLinkedPages(pages: readonly Pick<PageDocument, "pageId" | "title" | "headRevision" | "body">[],
+  maxChars = LAUNCH_PAGES_MAX_CHARS): string | undefined {
+  if (!pages.length) return undefined;
+  const whole: string[] = [];
+  const left: string[] = [];
+  let used = 0;
+  for (const page of pages) {
+    const title = page.title.replace(/\s+/gu, " ").trim() || "Untitled";
+    const entry = `### ${title} (page ${page.pageId} · r${page.headRevision})\n\n${page.body.trimEnd()}\n\n` +
+      `End of page ${page.pageId}.\n`;
+    const length = [...entry].length;
+    if (used + length > maxChars) {
+      left.push(`- ${title}: \`xmatrix page read ${page.pageId}\``);
+      continue;
+    }
+    used += length;
+    whole.push(entry);
+  }
+  let out = "## Pages linked to this conversation (read at launch)\n\n" +
+    "Each is whole, at the revision named; edit one with `xmatrix page edit <page-id> --base <revision>`, " +
+    "and reread it with `xmatrix page read <page-id>` when its current state matters.\n\n" + whole.join("\n");
+  if (left.length) out += `\nLeft out to fit; read them when needed:\n${left.join("\n")}\n`;
+  return out;
+}
+
+/**
  * Renders what a launch reads. `messages` is the newest part of the Channel, any order; `complete`
  * says it reaches the Channel's first message. It states what the Channel holds and says nothing
  * about how to read it: what is open, done or meant for someone else is in the messages.
@@ -176,7 +211,10 @@ export async function readLaunchContext(input: {
   readAt: string;
   history: (page: { beforeSequence?: number; limit: number }) => Promise<{ messages: ChannelMessage[]; hasMore: boolean }>;
   about: () => Promise<{ summary?: string; summarySource?: ChannelSummarySource } | null>;
+  /** The conversation's linked pages as the reader may open them; a failed read leaves them out. */
+  pages?: () => Promise<PageDocument[]>;
 }): Promise<LaunchContext> {
+  const pages = input.pages?.().catch(() => [] as PageDocument[]);
   const messages: ChannelMessage[] = [];
   let beforeSequence: number | undefined;
   let complete = false;
@@ -200,9 +238,11 @@ export async function readLaunchContext(input: {
     return { cut, context };
   };
   const rendered = render();
-  if (!rendered.cut) return rendered.context;
   // The About is derived from the transcript; it is worth its read only when part of it was left out.
-  return render(await input.about().catch(() => null)).context;
+  const context = rendered.cut ? render(await input.about().catch(() => null)).context : rendered.context;
+  const linked = renderLinkedPages(await pages ?? []);
+  if (linked) context.text = context.text ? `${linked}\n${context.text}` : linked;
+  return context;
 }
 
 const LAUNCH_HISTORY_PAGE = 200;
