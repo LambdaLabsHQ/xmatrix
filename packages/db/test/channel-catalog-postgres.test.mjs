@@ -9,6 +9,7 @@ import {
   PostgresChannelCatalogRepository,
   PostgresSpaceControlRepository,
 } from "../dist/index.js";
+import { planNodes, recordedStatements } from "./recording-database.fixture.mjs";
 
 const connectionString = process.env.XMATRIX_TEST_POSTGRES_URL;
 const postgresRequired = process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true";
@@ -939,15 +940,7 @@ integration("catalog counts probe each Channel's attention instead of joining an
   const client = new Client({ connectionString });
   await client.connect();
   const database = createAuthorityDatabase({ connectionString, shardId: "shard-0" });
-  const statements = [];
-  const recording = {
-    cacheMode: "disabled",
-    openSession: () => recording,
-    close: async () => {},
-    transaction: (context, callback) => database.transaction(context, (transaction) => callback({
-      query: (query) => { statements.push(query); return transaction.query(query); },
-    })),
-  };
+  const recording = recordedStatements(database);
   try {
     await client.query(`INSERT INTO data.message_attention
       (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
@@ -960,13 +953,12 @@ integration("catalog counts probe each Channel's attention instead of joining an
       view: "flat", filter: "all", countsOnly: true });
     // The seed already holds a mention in one more Channel.
     assert.deepEqual(page.counts, { active: 60, unread: 56, mentions: 56 });
-    const counts = statements.find((query) => query.name.startsWith("channel_catalog_counts_"));
-    const nodes = function* (node) { yield node; for (const child of node.Plans ?? []) yield* nodes(child); };
+    const counts = recording.statements.find((query) => query.name.startsWith("channel_catalog_counts_"));
     for (const planner of ["RESET ALL", "SET enable_hashjoin = off; SET enable_mergejoin = off"]) {
       await client.query(planner);
       const plan = (await client.query(`EXPLAIN (ANALYZE, FORMAT JSON) ${counts.text}`, counts.values))
         .rows[0]["QUERY PLAN"][0].Plan;
-      const compared = [...nodes(plan)].reduce((total, node) =>
+      const compared = [...planNodes(plan)].reduce((total, node) =>
         total + (node["Rows Removed by Join Filter"] ?? 0), 0);
       assert.ok(compared <= 60, `${planner}: counting 60 Channels discarded ${compared} joined rows`);
     }
