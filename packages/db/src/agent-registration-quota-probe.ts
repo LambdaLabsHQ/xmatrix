@@ -181,12 +181,13 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
  * the completion's own transaction: nobody has to be waiting for the result.
  * Each reading lands only in the pool of the registration it was issued for,
  * and only while that registration is still at the version the probe was
- * issued against; a changed or removed registration writes nothing. */
+ * issued against; a changed or removed registration writes nothing.
+ * `available` counts the readings that leave headroom. */
 export async function recordRegistrationQuotaProbeResult(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; hostId: string; issued: RoutingQuotaProbeRequest; result: unknown; now: number;
-}): Promise<number> {
+}): Promise<{ recorded: number; available: number }> {
   const readings = routingQuotaProbeObservations(input.result, input.issued, input.now);
-  let recorded = 0;
+  let recorded = 0, available = 0;
   for (const reading of readings) {
     if (!reading.targetId.startsWith(REGISTRATION_QUOTA_PROBE_TARGET_PREFIX)) continue;
     const harness = reading.targetId.slice(REGISTRATION_QUOTA_PROBE_TARGET_PREFIX.length);
@@ -205,8 +206,9 @@ export async function recordRegistrationQuotaProbeResult(tx: DatabaseTransaction
       expiresAt: reading.observation.expiresAt, source: "provider", windows: reading.windows,
       ...(reading.account ? { account: reading.account } : {}) });
     recorded++;
+    if (reading.observation.value > 0) available++;
   }
-  return recorded;
+  return { recorded, available };
 }
 
 /** The longest a reported usage limit keeps a registration out of routing

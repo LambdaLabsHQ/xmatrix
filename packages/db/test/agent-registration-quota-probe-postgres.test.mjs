@@ -76,7 +76,7 @@ integration("registration quota probe targets are the Space's authorized, singly
         results: issued.targets.map(target => ({ ...target, status: "observed", quotaSource: "provider_api",
           quotaObservedAt: new Date(Date.now() - 1000).toISOString(),
           quotaUsages: [{ percent: target.targetId === "registration:claude" ? 100 : 40, resetAt, label: "5h" }] })) } }));
-    assert.equal(recorded, 2);
+    assert.deepEqual(recorded, { recorded: 2, available: 1 }, "one reading leaves headroom");
     const facts = await sql(`SELECT quota_pool_id,remaining,windows_json FROM control.registration_quota_observations
       WHERE owner_user_id='owner' ORDER BY quota_pool_id`);
     assert.deepEqual(facts.rows.map(row => [row.quota_pool_id, Number(row.remaining)]),

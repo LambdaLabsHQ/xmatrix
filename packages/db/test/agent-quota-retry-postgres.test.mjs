@@ -49,6 +49,22 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
       await assert.rejects(admission("explicit", a), error => error.code === "quota_retry_cancelled");
       await assert.rejects(choose("explicit", id), error => error.code === "quota_retry_cancelled");
     });
+    await t.test("a reading the refusal asked for makes its fresh summon due; an old unanswered offer stays explicit", async () => {
+      const fresh = await source("expedite");
+      assert.deepEqual(await repository.due("expedite"), [], "an offer alone schedules nothing");
+      assert.deepEqual((await repository.wakeable("expedite")).map(row => row.retry_id), [fresh]);
+      assert.equal(await repository.expedite("expedite", []), 0, "nothing the readings clear, nothing due");
+      assert.equal((await read("expedite", fresh)).state, "offered");
+      assert.equal(await repository.expedite("expedite", [fresh]), 1);
+      assert.equal((await read("expedite", fresh)).state, "waiting");
+      assert.equal((await repository.due("expedite")).length, 1, "due at once, admission still runs at dispatch");
+      const stale = await source("expedite-stale");
+      await f.run(`UPDATE data.agent_quota_retries SET created_at=now()-interval '11 minutes' WHERE retry_id=$1`, [stale]);
+      assert.deepEqual(await repository.wakeable("expedite-stale"), []);
+      assert.equal(await repository.expedite("expedite-stale", [stale]), 0);
+      assert.equal((await read("expedite-stale", stale)).state, "offered");
+      assert.deepEqual(await repository.wakeable("seed"), [], "a Channel without refusals wakes nothing");
+    });
     await t.test("a Channel stop cancels waiting even before any Run exists", async () => {
       const id = await source("stopped");
       await choose("stopped", id);

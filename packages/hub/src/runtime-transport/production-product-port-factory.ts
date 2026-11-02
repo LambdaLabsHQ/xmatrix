@@ -12,6 +12,7 @@ import type {
 } from "@xmatrix/protocol";
 import { channelInstanceQuota } from "../registration-quota-presentation";
 import { runtimeDirectory } from "../runtime";
+import { wakeQuotaRetriesAfterReading } from "../agent-quota-retry";
 import type { AgentInstanceServerMessage } from "@xmatrix/protocol/connections/agent-instance";
 import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
 import type { Env } from "../types";
@@ -108,6 +109,8 @@ export function createProductionRelayRuntimeProductPortFactory(
     runtimeSelf?: { cellName: () => string; fetch(request: Request): Promise<Response> };
     /** This Runtime cell's own storage, which outlives its hibernation. */
     storage?: PresenceStorage;
+    /** Start the summons a Channel's refused-for-quota retries hold; PostgreSQL by default. */
+    wakeQuotaRetries?: (env: Env, channelId: string) => Promise<void>;
   } = {},
 ): RelayRuntimeProductPortFactory {
   const analytics = options.analytics ?? analyticsSinkFromEnv(env);
@@ -224,7 +227,12 @@ export function createProductionRelayRuntimeProductPortFactory(
       ...(options.runtimeSelf ? { runtimeSelf: options.runtimeSelf } : {}),
       ...(options.runtime ? { runtime: options.runtime } : {}),
     })),
-    onRegistrationQuotaChange: async ({ ownerUserId, deliver }) => {
+    onRegistrationQuotaChange: async ({ ownerUserId, wakeChannelId, deliver }) => {
+      // The reading a refused summon asked for came back with headroom: start it now.
+      if (wakeChannelId) await (options.wakeQuotaRetries ?? wakeQuotaRetriesAfterReading)(env, wakeChannelId)
+        .catch((error: unknown) => console.warn("Quota retry wake after a probe failed", {
+          errorCode: error instanceof Error ? error.name : "unknown",
+        }));
       // A probe of one machine can move a pool the owner's other machines share.
       const readings = await readOwnerQuota(ownerUserId).catch((error: unknown) => {
         console.warn("Registration quota read after a probe failed", {

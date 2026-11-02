@@ -652,6 +652,7 @@ export class PostgresMachineControlRepository {
         ...(runLifecycleChannelId ? { runLifecycleChannelId } : {}),
         ...(runLifecycleChannelIds.length ? { runLifecycleChannelIds } : {}),
         ...(terminalEvent ? { runTerminalReportRecorded: true } : {}),
+        ...(completion?.quotaWakeChannelId ? { quotaWakeChannelId: completion.quotaWakeChannelId } : {}),
         ...(completion?.stopPurpose
           ? { runLifecycleStopPurpose: completion.stopPurpose }
           : {}) };
@@ -1032,7 +1033,9 @@ export class PostgresMachineControlRepository {
       try {
         const probe = parseRoutingQuotaProbeRequest(payload.probe);
         if (payload.type !== "machine_quota_probe" || probe.requestId !== controlId ||
-            Object.keys(payload).some(key => !["type", "requestId", "probe"].includes(key))) {
+            Object.keys(payload).some(key => !["type", "requestId", "probe", "wakeChannelId"].includes(key)) ||
+            payload.wakeChannelId !== undefined && !(typeof payload.wakeChannelId === "string" &&
+              /^[A-Za-z0-9_-]{1,180}$/u.test(payload.wakeChannelId))) {
           throw new Error("Invalid quota probe envelope");
         }
         const current = await tx.query({ name: "machine_quota_probe_epoch_v3", text: `SELECT 1
@@ -1492,9 +1495,13 @@ export class PostgresMachineControlRepository {
     if (!rows[0]) throw new MachineStaleLeaseError("Machine completion lost its compare-and-swap race",
       "complete.race", String(exact.command.command_type));
     const issued = exact.command.payload_json as Record<string, unknown>;
+    // A probe a refused summon issued names its Channel; a reading with
+    // headroom is the event that lets that summon start.
+    let quotaWakeChannelId: string | undefined;
     if (exact.command.command_type === "quota_probe" && status === "completed") {
-      await recordRegistrationQuotaProbeResult(tx, { ownerUserId, machineId, hostId,
+      const { available } = await recordRegistrationQuotaProbeResult(tx, { ownerUserId, machineId, hostId,
         issued: parseRoutingQuotaProbeRequest(issued.probe), result: payload.probe, now: Date.now() });
+      if (available > 0 && typeof issued.wakeChannelId === "string") quotaWakeChannelId = issued.wakeChannelId;
     }
     if (exact.command.command_type === "harness_action" && status === "completed") {
       await recordHarnessActionInventory(tx, { ownerUserId, machineId, hostId,
@@ -1505,7 +1512,8 @@ export class PostgresMachineControlRepository {
       await tx.query({ name: "machine_harness_login_code_drop_v1", text: `UPDATE data.machine_daemon_commands
         SET payload_json=payload_json-'code' WHERE command_id=$1`, values: [exact.controlId], maxRows: 0 });
     }
-    return { reused: false, ...completionFacts(String(exact.command.command_type), issued, payload) };
+    return { reused: false, ...completionFacts(String(exact.command.command_type), issued, payload),
+      ...(quotaWakeChannelId ? { quotaWakeChannelId } : {}) };
   }
 
   private async retry(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,

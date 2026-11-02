@@ -10,7 +10,9 @@ import type { Env } from "./types";
  * pool or owner to write. This only asks each daemon to read its quota; the
  * daemon's completed probe records the readings (see
  * `recordRegistrationQuotaProbeResult`), however long the provider takes, so
- * nothing here waits for them. Selection reads those persisted facts. */
+ * nothing here waits for them. Selection reads those persisted facts, and a
+ * reading with headroom wakes this Channel's summons refused for used-up quota
+ * (`wakeQuotaRetriesAfterReading`). */
 export async function refreshAgentRoutingQuota(input: {
   env: Env; directory: AuthorityDatabase; runtime: PostgresRuntimeRepository;
   channelId: string; actorUserId: string;
@@ -19,7 +21,7 @@ export async function refreshAgentRoutingQuota(input: {
   const { spaceId } = await input.runtime.launchChannelSpace({ requestId: crypto.randomUUID(),
     channelId: input.channelId, actorUserId: input.actorUserId });
   return issueRegistrationQuotaProbes({ env: input.env, directory: input.directory,
-    entries: await input.registrationTargets(spaceId) }, dependencies);
+    entries: await input.registrationTargets(spaceId), wakeChannelId: input.channelId }, dependencies);
 }
 
 export type QuotaProbeIssueDependencies = { issue?: (command: Record<string, unknown>) => Promise<unknown>;
@@ -29,6 +31,8 @@ export type QuotaProbeIssueDependencies = { issue?: (command: Record<string, unk
  * most 32 targets each. Targets come only from the server's registration read. */
 export async function issueRegistrationQuotaProbes(input: {
   env: Env; directory: AuthorityDatabase; entries: readonly RegistrationQuotaProbeTarget[];
+  /** The Channel whose summon asked; a reading with headroom wakes its refused summons. */
+  wakeChannelId?: string;
 }, dependencies: QuotaProbeIssueDependencies = {}): Promise<{ issued: number }> {
   const { entries } = input;
   const groups = new Map<string, RegistrationQuotaProbeTarget[]>();
@@ -62,7 +66,8 @@ export async function issueRegistrationQuotaProbes(input: {
           ...route, ownerEmail: daemon.email, daemonId: daemon.id,
           commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "quota_probe",
           principal: { kind: "user", id: route.ownerUserId },
-          payload: { type: "machine_quota_probe", requestId, probe },
+          payload: { type: "machine_quota_probe", requestId, probe,
+            ...(input.wakeChannelId ? { wakeChannelId: input.wakeChannelId } : {}) },
         });
         issued++;
       } catch (error) {

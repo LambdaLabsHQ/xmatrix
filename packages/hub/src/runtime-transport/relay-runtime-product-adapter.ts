@@ -49,13 +49,14 @@ export interface RelayRuntimeProductPortFactory {
   human(): HumanSocketBackend;
   agentInstance(): AgentInstanceSocketBackend;
   machineDaemon(terminateInstance?: (instanceId: string) => void,
-    quotaChanged?: (route: { ownerUserId: string; machineId: string }) => Promise<void>): MachineDaemonSocketBackend;
+    quotaChanged?: (route: { ownerUserId: string; machineId: string; wakeChannelId?: string }) => Promise<void>): MachineDaemonSocketBackend;
   /** Who may see a Channel of this Space may have changed. */
   onChannelCatalogChanged?: (spaceId: string) => void;
   /** A person opened a Channel on one socket (human-port.ts). */
   onChannelFocus?: HumanChannelFocusHandler;
-  /** A daemon read its machine's quota again: the owner's Agents show the new reading. */
-  onRegistrationQuotaChange?: (input: { ownerUserId: string;
+  /** A daemon read its machine's quota again: the owner's Agents show the new
+   * reading, and a summon refused in `wakeChannelId` may start now. */
+  onRegistrationQuotaChange?: (input: { ownerUserId: string; wakeChannelId?: string;
     deliver: (userId: string, message: import("@xmatrix/protocol/connections/human").HumanServerMessage) => boolean;
   }) => Promise<void>;
   onAgentPresenceChange?: (input: {
@@ -164,6 +165,7 @@ export function createRelayRuntimeProductAdapter(
       agentInstance.terminateTraceSession(instanceId, "Agent run ended on its authenticated host");
     }, async route => {
       await factory.onRegistrationQuotaChange?.({ ownerUserId: route.ownerUserId,
+        ...(route.wakeChannelId ? { wakeChannelId: route.wakeChannelId } : {}),
         deliver: (userId, message) => human.deliverToUser(userId, message) });
     }),
     options.allowLegacyProtocol === true,

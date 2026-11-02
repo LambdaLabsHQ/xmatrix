@@ -87,6 +87,10 @@ export async function assertQuotaRetryAdmission(
   });
   if (!rows.length) throw new RegistrationAccessError("quota_retry_cancelled", 409);
 }
+/** A refused summon a fresh reading may start: one waiting for quota, or one
+ * refused within ten minutes that nobody answered (it still asks to start). */
+const WAKEABLE_SQL = `expires_at>clock_timestamp() AND (state='waiting'
+  OR state='offered' AND created_at>clock_timestamp()-interval '10 minutes')`;
 export class PostgresQuotaRetryRepository {
   constructor(
     private readonly database: AuthorityDatabase,
@@ -262,6 +266,26 @@ export class PostgresQuotaRetryRepository {
         maxRows: 0,
       });
     });
+  }
+  /** The refused summons of this Channel a fresh provider reading may
+   * clear: the waiting ones, and those refused within the last few minutes
+   * that nobody answered yet. */
+  async wakeable(channelId: string): Promise<readonly QuotaRetryWork[]> {
+    return this.database.transaction({ requestId: crypto.randomUUID(), operation: "quota-retry.wakeable",
+      placement: this.placement }, tx => tx.query<QuotaRetryWork>({ name: "quota_retry_wakeable_v1",
+      text: `SELECT * FROM data.agent_quota_retries WHERE space_id=$2 AND channel_id=$1 AND ${WAKEABLE_SQL}
+        ORDER BY created_at DESC LIMIT 20`, values: [channelId, this.placement.spaceId], maxRows: 20 }));
+  }
+  /** Make these refused summons due now; admission still runs in full at
+   * dispatch. Returns how many became due. */
+  async expedite(channelId: string, retryIds: readonly string[]): Promise<number> {
+    if (!retryIds.length) return 0;
+    const rows = await this.database.transaction({ requestId: crypto.randomUUID(), operation: "quota-retry.expedite",
+      placement: this.placement }, tx => tx.query({ name: "quota_retry_expedite_v2",
+      text: `UPDATE data.agent_quota_retries SET state='waiting',next_check_at=clock_timestamp(),updated_at=clock_timestamp()
+        WHERE space_id=$2 AND channel_id=$1 AND retry_id=ANY($3::text[]) AND ${WAKEABLE_SQL}
+        RETURNING retry_id`, values: [channelId, this.placement.spaceId, [...retryIds]], maxRows: 20 }));
+    return rows.length;
   }
   async due(channelId: string): Promise<QuotaRetryWork[]> {
     return this.database.transaction(

@@ -206,6 +206,18 @@ async function retryLaunch(
     throw new RegistrationAccessError(result.rejected[0]?.code ?? "registration_source_changed", 409);
   await wakeAgentLaunchCoordinator(env, channelId, ["launch"]);
 }
+/** A provider reading with headroom answered a probe this Channel's summon
+ * issued: each refused summon whose own pool the readings now clear is due
+ * now rather than at its reset, and the coordinator starts it. A summon whose
+ * pool is still used up is left as it was. */
+export async function wakeQuotaRetriesAfterReading(env: Env, channelId: string): Promise<void> {
+  const { repository, directory } = await quotaRetryRepository(env, channelId);
+  const ready: string[] = [];
+  for (const row of await repository.wakeable(channelId)) {
+    if ((await quotaRetryReadiness(directory, row)).ready) ready.push(row.retry_id);
+  }
+  if (await repository.expedite(channelId, ready)) await wakeAgentLaunchCoordinator(env, channelId, ["launch"]);
+}
 export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabase, channelId: string): Promise<void> {
   const { repository, directory } = await quotaRetryRepository(env, channelId, database);
   for (const row of await repository.due(channelId)) {

@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: A quota reading with headroom starts the summon it refused
+
+A summon refused because a stored reading said its pool was used up stayed
+refused after a provider reset or top-up until someone summoned again. The
+quota read every dispatch already issues, after the launch and never before
+it, now names its Channel; when the daemon's reading leaves headroom in a
+refused summon's own pool, that summon becomes due at once and the launch
+coordinator starts it under full admission. No timer or polling. A refusal
+nobody answered for ten minutes stays an explicit choice. Hub only, no schema
+or authorization change; recovery is a CI-validated revert.
 ## Unreleased: Follow-up messages wait for the Agent already being started
 
 Before a chosen Agent had a Run, a second message could offer another picker

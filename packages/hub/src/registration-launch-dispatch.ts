@@ -509,7 +509,9 @@ export async function dispatchRegistrationLaunchesAfterMessage(input: {
   const result = await dispatchFromMessage({ ...input, commandId: `registration-launch:${input.messageId}` }, dependencies);
   if (result.selectionCount > 0) {
     // Jev chose from persisted quota facts; refresh them (including the
-    // Space's registrations) for the next choice without delaying this one.
+    // Space's registrations) after this launch was dispatched, never before
+    // it. A reading with headroom also starts this Channel's summons refused
+    // for used-up quota.
     scheduleAgentRoutingQuotaRefresh(() => (dependencies.refreshQuota ?? (({ env, ...channel }) =>
       refreshChannelRoutingQuota(env, channel)))({
       env: input.env, channelId: input.channelId, actorUserId: input.actorUserId,

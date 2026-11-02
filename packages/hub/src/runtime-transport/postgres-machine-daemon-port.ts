@@ -107,7 +107,9 @@ export interface PostgresMachineDaemonPortDependencies {
   wakeCoordinator?(channelId: string, work: readonly ScheduledStep[]): Promise<void>;
   /** Retain work that outlives the frame that started it. */
   keepAlive?(task: Promise<unknown>): void;
-  quotaChanged?(route: { ownerUserId: string; machineId: string }): Promise<void>;
+  /** A probe was answered; `wakeChannelId` names the Channel whose refused
+   * summon asked for it when a reading came back with headroom. */
+  quotaChanged?(route: { ownerUserId: string; machineId: string; wakeChannelId?: string }): Promise<void>;
   /** A Machine of `ownerUserId` answered a text task; whoever issued it decides what the answer is for. */
   textTaskAnswered?(task: { requestId: string; result: TextTaskResult; ownerUserId: string }): Promise<void>;
   /** The daemon connected: wake the Channels whose work waits on this Machine. */
@@ -304,7 +306,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     }
     const result = await this.dependencies.daemonCommand(machineControlInput);
     if (message.type === "machine_quota_probe_result") {
-      await this.dependencies.quotaChanged?.({ ownerUserId: session.principal.ownerUserId, machineId: session.principal.machineId });
+      await this.dependencies.quotaChanged?.({ ownerUserId: session.principal.ownerUserId,
+        machineId: session.principal.machineId,
+        ...(typeof result.quotaWakeChannelId === "string" ? { wakeChannelId: result.quotaWakeChannelId } : {}) });
     }
     if (message.type === "machine_text_task_result") {
       // The command is complete either way; what the answer is for must not fail the Machine's report.
@@ -919,7 +923,7 @@ function claimedCommand(value: unknown, capabilities: readonly string[]): Machin
   if (type === "machine_quota_probe") {
     const probe = parseRoutingQuotaProbeRequest(payload.probe);
     if (probe.requestId !== requestId || Object.keys(payload).some(key =>
-        !["type", "requestId", "probe", "relayLease"].includes(key))) {
+        !["type", "requestId", "probe", "relayLease", "wakeChannelId"].includes(key))) {
       throw new Error("PostgreSQL returned an invalid quota probe command");
     }
     return { type, requestId, probe };
