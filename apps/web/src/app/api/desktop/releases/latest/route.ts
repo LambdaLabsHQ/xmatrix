@@ -4,7 +4,7 @@ export async function GET(request: Request) {
   return releaseManifestResponse(
     request,
     fetchLatestStableDesktopMacRelease,
-    "/api/desktop/releases",
+    "/api/desktop/releases/stable",
     "xMatrix desktop releases are unavailable right now."
   );
 }

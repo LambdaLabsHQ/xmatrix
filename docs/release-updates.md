@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Stable Desktop manifest URLs keep their channel
+
+The dedicated and aggregate stable manifests now link every Desktop asset
+through the existing explicit stable download route. Their YAML metadata used
+the legacy unversioned route, which intentionally reads dev, so downloading it
+returned beta bytes beside a stable version and checksum. Native stable updater
+feeds were already explicit and remain unchanged; legacy URLs retain their dev
+meaning. Web only, no schema, signing, artifact or pointer change. Consumers
+follow the corrected URLs without migration. Recovery is a CI-validated forward
+Web release correcting the mapping; published releases stay immutable.
+
 ## Unreleased: Settings guidance fits the CLI launch budget
 
 The settings-card guidance pushed the CLI's compiled fallback launch text past
