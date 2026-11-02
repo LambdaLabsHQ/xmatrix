@@ -19,22 +19,34 @@ const MAX_NAMED = 20;
 /* The state Apple must report before a subscription can be submitted. */
 const READY = "READY_TO_SUBMIT";
 /* Only a version Apple has finished with needs a new one; any other is still in flight and is reused. */
-const FINISHED: ReadonlySet<string> = new Set(["APPROVED", "REPLACED_WITH_NEW_VERSION"]);
+const FINISHED: ReadonlySet<string> = new Set(["APPROVED", "ACCEPTED", "REPLACED_WITH_NEW_VERSION"]);
 /* Apple names the version in flight when it refuses another, which the version list may not show. */
 const IN_FLIGHT = /already an inflight version with id '([A-Za-z0-9-]{1,64})'/u;
 
 /**
- * The version of a subscription or group still in flight, created when there is none. A group Apple
+ * What Apple reviews through a version (API 4.4.1): where its versions are
+ * listed, the version's type, how a new one names its parent, and the review
+ * submission item that carries it.
+ */
+const VERSIONED = {
+  subscriptions: { list: "/v1/subscriptions", versionType: "subscriptionVersions", parent: "subscription", item: "subscriptionVersion" },
+  subscriptionGroups: { list: "/v1/subscriptionGroups", versionType: "subscriptionGroupVersions", parent: "subscriptionGroup", item: "subscriptionGroupVersion" },
+  inAppPurchases: { list: "/v2/inAppPurchases", versionType: "inAppPurchaseVersions", parent: "inAppPurchase", item: "inAppPurchaseVersion" },
+} as const;
+export type VersionedKind = keyof typeof VERSIONED;
+
+/**
+ * The version of a product still in flight, created when there is none. A group Apple
  * already approved has nothing to review unless it was changed, which leaves a version of its own.
  */
-async function pendingVersion(api: AppStoreConnectApi, kind: "subscriptions" | "subscriptionGroups", id: string): Promise<AppleResource | undefined> {
-  const versionType = kind === "subscriptions" ? "subscriptionVersions" : "subscriptionGroupVersions";
-  const { rows } = await api.list(`/v1/${kind}/${encodeURIComponent(id)}/versions`, { [`fields[${versionType}]`]: "state", limit: "50" }, 1);
+async function pendingVersion(api: AppStoreConnectApi, kind: VersionedKind, id: string): Promise<AppleResource | undefined> {
+  const { list, versionType, parent } = VERSIONED[kind];
+  const { rows } = await api.list(`${list}/${encodeURIComponent(id)}/versions`, { [`fields[${versionType}]`]: "state", limit: "50" }, 1);
   const pending = rows.find(row => !FINISHED.has(text(row.attributes.state)));
   if (pending) return pending;
   if (kind === "subscriptionGroups" && rows.some(row => text(row.attributes.state) === "APPROVED")) return undefined;
   const created = await api.request(`/v1/${versionType}`, { method: "POST", data: { type: versionType,
-    relationships: { [kind === "subscriptions" ? "subscription" : "subscriptionGroup"]: relation(kind, id) } } })
+    relationships: { [parent]: relation(kind, id) } } })
     .then(response => appleResource(response.data), (error: unknown) => {
       const inFlight = error instanceof ProviderRequestError && error.status === 409 ? IN_FLIGHT.exec(error.message)?.[1] : undefined;
       if (!inFlight) throw error;
@@ -42,6 +54,24 @@ async function pendingVersion(api: AppStoreConnectApi, kind: "subscriptions" | "
     });
   if (!created) throw new ProviderRequestError(502, "App Store Connect did not return the new version");
   return created;
+}
+
+/**
+ * Puts each product's pending version in the app's draft review submission once; the next
+ * `submit` of an app version sends them to App Review with it.
+ */
+export async function addVersionsToDraft(api: AppStoreConnectApi, appId: string, products: ReadonlyArray<{ kind: VersionedKind; id: string }>) {
+  const draft = await draftSubmission(api, appId);
+  const keys = Object.values(VERSIONED).map(entry => entry.item);
+  const items = (await api.list(`/v1/reviewSubmissions/${encodeURIComponent(draft.id)}/items`,
+    { "fields[reviewSubmissionItems]": keys.join(","), limit: "200" }, 1)).rows;
+  const present = new Set(items.flatMap(item => keys.map(key => relatedId(item, key))).filter((id): id is string => Boolean(id)));
+  const versions = await Promise.all(products.map(async ({ kind, id }) => ({ ...VERSIONED[kind], version: await pendingVersion(api, kind, id) })));
+  for (const { item, versionType, version } of versions) {
+    if (!version || present.has(version.id)) continue;
+    await api.request("/v1/reviewSubmissionItems", { method: "POST", data: { type: "reviewSubmissionItems", relationships: {
+      reviewSubmission: relation("reviewSubmissions", draft.id), [item]: relation(versionType, version.id) } } });
+  }
 }
 
 /** The app's draft review submission on iOS, opened when there is none; one already sent is not changed. */
@@ -94,21 +124,8 @@ export const APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS: Record<string, ConnectorAct
         blocked.map(row => `${row.productId} is ${row.state}`).join(", "));
     }
     if (!chosen.length) return `No subscription of ${input.app} is ${READY}; nothing was submitted.`;
-    const draft = await draftSubmission(api, app.id);
-    const items = (await api.list(`/v1/reviewSubmissions/${encodeURIComponent(draft.id)}/items`,
-      { "fields[reviewSubmissionItems]": "subscriptionVersion,subscriptionGroupVersion", limit: "200" }, 1)).rows;
-    const present = new Set(items.flatMap(item => [relatedId(item, "subscriptionVersion"), relatedId(item, "subscriptionGroupVersion")])
-      .filter((id): id is string => Boolean(id)));
-    const versions = [
-      ...await Promise.all([...new Set(chosen.map(row => row.groupId))].map(async id =>
-        ({ key: "subscriptionGroupVersion", type: "subscriptionGroupVersions", version: await pendingVersion(api, "subscriptionGroups", id) }))),
-      ...await Promise.all(chosen.map(async row =>
-        ({ key: "subscriptionVersion", type: "subscriptionVersions", version: await pendingVersion(api, "subscriptions", row.id) }))),
-    ];
-    for (const { key, type, version } of versions.flatMap(entry => entry.version && !present.has(entry.version.id) ? [{ ...entry, version: entry.version }] : [])) {
-      await api.request("/v1/reviewSubmissionItems", { method: "POST", data: { type: "reviewSubmissionItems", relationships: {
-        reviewSubmission: relation("reviewSubmissions", draft.id), [key]: relation(type, version.id) } } });
-    }
+    await addVersionsToDraft(api, app.id, [...[...new Set(chosen.map(row => row.groupId))].map(id => ({ kind: "subscriptionGroups" as const, id })),
+      ...chosen.map(row => ({ kind: "subscriptions" as const, id: row.id }))]);
     return `Added ${chosen.map(row => row.productId).join(", ")} of ${input.app} to the draft review submission. ` +
       "Run submit for the app version to send them to App Review with it.";
   }),

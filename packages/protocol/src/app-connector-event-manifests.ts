@@ -505,7 +505,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       readAction("subscriptions", "List subscriptions", "The app's auto-renewable subscriptions by group, with product id, period, level and review state.", "<com.example.app>"),
       writeAction("submit_subscriptions", "Submit subscriptions", "Put subscriptions in the app's draft review submission: the named product ids, or every one ready to submit. The next submit sends them with the app version.", "<com.example.app> [<product id> …]"),
       readAction("in_app_purchases", "List In-App Purchases", "The app's one-time In-App Purchases (consumable, non-consumable, non-renewing) with product id, type and review state.", "<com.example.app>"),
-      writeAction("submit_in_app_purchases", "Submit In-App Purchases", "Submit one-time In-App Purchases for review: the named product ids, or every one ready to submit. An app's first ones are reviewed with its next submitted version.", "<com.example.app> [<product id> …]"),
+      writeAction("submit_in_app_purchases", "Submit In-App Purchases", "Put one-time In-App Purchases in the app's draft review submission: the named product ids, or every one ready to submit. The next submit sends them with the app version.", "<com.example.app> [<product id> …]"),
       readAction("testflight", "TestFlight status", "The app's tester groups and the internal and external testing state of its newest builds.", "<com.example.app>"),
       readAction("feedback", "Tester feedback", "The 10 newest TestFlight screenshot comments, or crash reports, with device, OS and build.", "<com.example.app> [crashes]"),
       readAction("crash_log", "Crash log", "The crash log behind one TestFlight crash report.", "<feedback id>"),

@@ -1,18 +1,19 @@
-import { relation, type AppStoreConnectApi } from "../app-store-connect-api";
+import type { AppStoreConnectApi } from "../app-store-connect-api";
 import { text } from "../event-format";
 import { ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { appAction, bundleId } from "./app-store-connect";
-import { productsStatement } from "./app-store-connect-subscriptions";
+import { addVersionsToDraft, productsStatement } from "./app-store-connect-subscriptions";
 import { quoteRetrievedText } from "./common";
 import { cell } from "./google-report";
 
 /*
  * One-time In-App Purchases: consumables, non-consumables and non-renewing
- * subscriptions (API 4.4.1, inAppPurchasesV2). Auto-renewable subscriptions
- * are app-store-connect-subscriptions.ts. Apple reviews a purchase once it is
- * submitted; an app's first purchases are reviewed with its next app version,
- * so `submit` for that version follows.
+ * subscriptions (inAppPurchasesV2). Auto-renewable subscriptions are
+ * app-store-connect-subscriptions.ts. As there, Apple reviews a purchase
+ * through a version (API 4.4.1) that joins the app's draft review submission,
+ * and `submit` then sends it with the app version; the older direct
+ * inAppPurchaseSubmissions answers "no pending version" for a first purchase.
  */
 
 /* The state Apple must report before a purchase can be submitted. */
@@ -47,11 +48,8 @@ export const APP_STORE_CONNECT_IN_APP_PURCHASE_ACTIONS: Record<string, Connector
         blocked.map(row => `${row.productId} is ${row.state}`).join(", "));
     }
     if (!chosen.length) return `No In-App Purchase of ${input.app} is ${READY}; nothing was submitted.`;
-    for (const row of chosen) {
-      await api.request("/v1/inAppPurchaseSubmissions", { method: "POST", data: { type: "inAppPurchaseSubmissions",
-        relationships: { inAppPurchaseV2: relation("inAppPurchases", row.id) } } });
-    }
-    return `Submitted ${chosen.map(row => row.productId).join(", ")} of ${input.app} for review. ` +
-      "An app's first In-App Purchases are reviewed with its next app version: run submit for that version.";
+    await addVersionsToDraft(api, app.id, chosen.map(row => ({ kind: "inAppPurchases" as const, id: row.id })));
+    return `Added ${chosen.map(row => row.productId).join(", ")} of ${input.app} to the draft review submission. ` +
+      "Run submit for the app version to send them to App Review with it.";
   }),
 };
