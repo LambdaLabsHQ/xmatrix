@@ -58,6 +58,11 @@ function repository(env: Env): PostgresPageRepository {
   return new PostgresPageRepository(database(env), { creditsWaivedSpaceId: platformAdminSpaceId(env) });
 }
 
+/** The pages a conversation is linked to, whole, as `reader` may open them. A new Run reads them at launch. */
+export function linkedPages(env: Env, conversationId: string, reader: PagePrincipal) {
+  return repository(env).conversationPages({ requestId: crypto.randomUUID(), conversationId, principal: reader });
+}
+
 /** A private media ref may only be bound by a writer of its target Page. */
 export async function authorizePageMediaCommit(env: Env, authUser: AuthUser, value: Record<string, unknown>): Promise<void> {
   if (value.ownerKind !== "page_media") return;
@@ -841,10 +846,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     linkId: c.req.param("linkId"),
   })));
 
-  // The pages a conversation is linked to, whole, for the mirror a Run reads:
-  // as the caller, or through the Machine Daemon as the Machine's owner.
-  const linkedPages = (env: Env, conversationId: string, reader: PagePrincipal) =>
-    repository(env).conversationPages({ requestId: crypto.randomUUID(), conversationId, principal: reader });
+  // The pages a conversation is linked to, whole: as the caller, or through the
+  // Machine Daemon as the Machine's owner.
 
   app.get("/api/channels/:channelId/pages", async (c) => run(c, async () =>
     linkedPages(c.env, c.req.param("channelId"), await principal(c))));

@@ -2244,7 +2244,8 @@ pub enum PageCommand {
     /// `- [ ] <what to do> ⏳ 2026-11-03 09:00 +08:00` runs once, as a reminder that waits on its author.
     /// `[-]` pauses one and `[x]` marks one done. Write and change them with `page edit` in the section
     /// they keep true; each runs as whoever last changed its line (an Agent as its owner), in a fresh
-    /// conversation. Use `@auto repo:<owner/repo>` in what to do to address an Agent each time.
+    /// conversation whose Agent starts with the page, so the line says what to do, not "read this
+    /// page first". Use `@auto repo:<owner/repo>` in what to do to address an Agent each time.
     /// Any other live Agents receive context only. Without an Agent mention an occurrence only posts its text.
     #[command(alias = "automations")]
     Automation {
