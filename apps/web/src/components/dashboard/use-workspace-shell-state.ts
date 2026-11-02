@@ -502,9 +502,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   /* A phone has no navigation stack: the one change that moves is a
      conversation and its channel list trading places, drawn in the page
-     (use-mobile-list-transition). Every other screen change (a notification,
-     a search result, a link to another conversation) lands in place, with no
-     page sliding in over the last. */
+     (use-mobile-list-transition); the dock tabs slide on their own
+     (use-dock-tab-slide). Every other screen change (a search result, a link
+     from one conversation to another) lands in place, with no page sliding in
+     over the last. */
   const runMobileScreenTransition = useCallback((
     direction: "forward" | "back",
     update: () => void

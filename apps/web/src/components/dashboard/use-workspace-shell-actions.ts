@@ -364,14 +364,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     sendQuestionnaireAnswer(message, answer));
 
   const handleTimelineOpenInternalAppLink = useStableCallback((href: string) => openInternalAppLink(href));
-  const handleNativeOpenAppLink = useStableCallback((href: string) => openInternalAppLink(href, { inPlace: true }));
 
   // A notification tapped in the app opens its conversation in the page that
-  // is already here, rather than loading the app again. It replaces whatever
-  // screen is showing: nothing slides in, and Back goes to the channel list.
+  // is already here, rather than loading the app again. Over the channel list
+  // it slides in as a tapped row does; Back goes to the channel list.
   useEffect(
-    () => s.desktopBridge?.onOpenAppLink?.(handleNativeOpenAppLink),
-    [handleNativeOpenAppLink, s.desktopBridge]
+    () => s.desktopBridge?.onOpenAppLink?.(handleTimelineOpenInternalAppLink),
+    [handleTimelineOpenInternalAppLink, s.desktopBridge]
   );
 
   // The in-memory cache holds only this user's reads; it renders once the
@@ -1374,8 +1373,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     runMobileScreenTransition,
   });
 
-  /** `inPlace`: the conversation replaces the screen without the list sliding (a notification the app opens). */
-  function navigateToChannel(channelId: string, messageId?: string, sequence?: number, { inPlace = false } = {}) {
+  function navigateToChannel(channelId: string, messageId?: string, sequence?: number) {
     const channelInState = s.realtimeChannels.get(channelId);
     const channel = channelInState || s.channelsRef.current.find((current) => current.id === channelId);
     if (!channel) return;
@@ -1418,7 +1416,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       pushBrowserPath(nextPath, {});
       setBrowserPath(nextPath);
     };
-    if (!inPlace && s.selectedChannelIdRef.current !== channelId) {
+    if (s.selectedChannelIdRef.current !== channelId) {
       runMobileScreenTransition("forward", commitNavigation);
     } else {
       commitNavigation();
@@ -1555,7 +1553,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void discussMessagePassage(message, quote);
   });
 
-  function openInternalAppLink(href: string, motion: { inPlace?: boolean } = {}): boolean {
+  function openInternalAppLink(href: string): boolean {
     const pageLink = internalPageLink(href, window.location.href);
     if (pageLink) {
       openPage(pageLink);
@@ -1563,7 +1561,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
     const internalLink = parseInternalChannelLink(href, window.location.href);
     if (internalLink) {
-      void openInternalChannelLink(internalLink, motion);
+      void openInternalChannelLink(internalLink);
       return true;
     }
     return false;
@@ -1573,14 +1571,14 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     spaceKey: string | null;
     channelKey: string;
     messageId?: string;
-  }, motion: { inPlace?: boolean } = {}): Promise<void> {
+  }): Promise<void> {
     const currentSpaces = s.spacesRef.current;
     const currentChannels = s.channelsRef.current;
     const currentSpaceId = resolveSpaceRouteKey(currentSpaces, link.spaceKey);
     const currentChannel = resolveChannelRouteKey(currentChannels, link.channelKey, currentSpaceId);
     if (currentChannel) {
       setHistoryError(null);
-      navigateToChannel(currentChannel.id, link.messageId, undefined, motion);
+      navigateToChannel(currentChannel.id, link.messageId);
       return;
     }
 
@@ -1606,7 +1604,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setSpaces(s.spacesRef.current);
       s.channelsRef.current = nextChannels;
       setHistoryError(null);
-      navigateToChannel(nextChannel.id, link.messageId, undefined, motion);
+      navigateToChannel(nextChannel.id, link.messageId);
     } catch (error) {
       setHistoryError(userErrorMessage(error, "Couldn't open this channel link"));
     }

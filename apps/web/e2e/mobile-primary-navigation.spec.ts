@@ -274,8 +274,9 @@ test("the iOS app's edge swipe goes Back in the page, and a notification opens w
   await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
   await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
   expect(await page.evaluate(() => (window as typeof window & { __samePage?: boolean }).__samePage)).toBe(true);
-  // The notification's conversation replaces the list in place: nothing slides in.
-  expect(await moves()).toEqual([]);
+  // Over the channel list it slides in as a tapped row does, and only the lists move.
+  expect(await moves()).toContain("list:forward");
+  expect(await moves()).not.toContain("view-transition");
 
   // UIKit is already sliding a snapshot of the conversation away. Its Back
   // must commit the parent before answering, without a second Web animation
