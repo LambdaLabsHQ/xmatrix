@@ -846,6 +846,10 @@ pub struct MachineQuotaProbeRequest {
     /// The Hub accepts a result's `quotaAccount` only when it sets this.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub quota_account: bool,
+    /// The probe checks a refusal: read the provider now rather than answer
+    /// from a recent cached reading, which could only repeat what refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fresh: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

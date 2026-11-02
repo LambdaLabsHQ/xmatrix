@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Agents start without waiting on a quota read, and idle ones stop polling it
+
+A Codex, Grok, Cursor or OpenCode Instance read its provider quota over the
+network before its first turn, and a Claude Instance before announcing itself
+ready, so every start waited on that request (seconds on a slow link, up to a
+ten-second timeout). The read now runs beside the start and its reading
+follows when it lands. An idle Codex Instance no longer asks for its quota
+every minute; it reads it when a turn ends. A daemon answers a Hub probe that
+checks a refused summon (`fresh`) from the provider rather than its
+two-minute cache, so a reset or top-up is seen at once. CLI only; recovery is
+a CI-validated forward release.
+
 ## Unreleased: A refused summon starts once its quota is back
 
 A summon refused because a stored reading said its provider quota was used up
