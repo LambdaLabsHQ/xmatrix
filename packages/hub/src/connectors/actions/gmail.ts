@@ -103,9 +103,22 @@ export function gmailBodies(payload: Record<string, unknown>): { plain?: string;
       }
       if (seen >= MAX_PARTS && index < part.parts.length - 1) { bodies.incomplete = true; break; }
     }
+    if (mime !== "multipart/mixed" && bodies.plain && bodies.html && plainStandsInForHtml(bodies.plain, bodies.html)) delete bodies.plain;
     return bodies;
   };
   return visit(payload);
+}
+
+/*
+ * A plain alternative that only tells the reader to open the HTML one ("Please
+ * view this email in an HTML capable client") stands in for no body: short,
+ * names HTML, and shorter than the HTML sibling's own text. The reader then gets
+ * that HTML's text; a real plain alternative still wins.
+ */
+const STAND_IN_MAX = 300;
+function plainStandsInForHtml(plain: string, html: string): boolean {
+  const text = plain.trim();
+  return text.length <= STAND_IN_MAX && /\bHTML\b/iu.test(text) && htmlText(html).length > text.length;
 }
 
 /** Readable text of an HTML body: no styles, scripts or tags, block ends as line breaks. */
