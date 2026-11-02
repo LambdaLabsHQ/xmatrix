@@ -149,6 +149,26 @@ test("read preserves ordered mixed body segments without duplicating alternative
   assert.equal(calls.length, 1);
 });
 
+test("read gives the HTML text when the plain alternative only points to the HTML one", async () => {
+  const text = (mimeType, value) => ({ mimeType, body: { data: base64url(value) } });
+  const html = "<html><head><style>p{}</style></head><body><p>Your application was received.</p><p>It is under review.</p>"
+    + "<img src='https://tracker.example.test/pixel.gif'></body></html>";
+  const read = async payload => (await fetched([gmail({ payload })], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }))).result.summary;
+  const standIn = await read({ mimeType: "multipart/alternative",
+    parts: [text("text/plain", "Please view this email in an HTML capable client."), text("text/html", html)] });
+  assert.match(standIn, /Your application was received\.\n+It is under review\./u);
+  assert.doesNotMatch(standIn, /HTML capable client|pixel\.gif/u);
+  const nested = await read({ mimeType: "multipart/mixed", parts: [
+    { mimeType: "multipart/alternative", parts: [text("text/plain", "  "), { mimeType: "multipart/related", parts: [text("text/html", html)] }] },
+    { mimeType: "application/pdf", filename: "receipt.pdf", body: { attachmentId: "a1", size: 10 } },
+  ] });
+  assert.match(nested, /Your application was received\./u);
+  const realPlain = await read({ mimeType: "multipart/alternative",
+    parts: [text("text/plain", "Plain text version of the receipt."), text("text/html", html)] });
+  assert.match(realPlain, /Plain text version of the receipt\./u);
+  assert.doesNotMatch(realPlain, /under review/u);
+});
+
 test("read keeps all HTML body segments and marks the existing body preview limit", async () => {
   const payload = { mimeType: "multipart/mixed", parts: [
     { mimeType: "text/html", body: { data: base64url("<p>First paragraph</p>") } },
