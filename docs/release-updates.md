@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Gmail reads the HTML body behind a "view in HTML" stub
+
+Some senders put only "Please view this email in an HTML capable client" in
+the plain-text alternative and the real message in the HTML one. Gmail reads
+and the automatic read receipt returned that stub. A short plain alternative
+that names HTML and is shorter than its HTML sibling's text now yields the
+HTML's readable text (no images, scripts or remote loads); a real plain
+alternative still wins, and mixed segments and attachments are unchanged.
+Hub only, no schema change; recovery is a CI-validated Hub release reverting
+this change.
+
 ## Unreleased: Page headings with leading separators can commit
 
 HUB-BK exposed a mismatch between generated heading slugs and the page
