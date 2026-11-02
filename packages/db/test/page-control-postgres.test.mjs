@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { Client } from "pg";
+import { pageChangedBlocks } from "@xmatrix/protocol";
 import { createAuthorityDatabase } from "../dist/index.js";
 
 import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
@@ -131,6 +132,43 @@ const code = (expected) => (error) => {
   assert.equal(error.code, expected, error.message);
   return true;
 };
+
+integration("pages: commits and discussion links accept generated slugs starting with separators", async () => {
+  const { client, ids, pages, owner } = await pageTest("page-heading-slugs");
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, principal: owner,
+      ...input, requestId: crypto.randomUUID() });
+    const before = "# Plan\n";
+    const { page } = await call("create", { body: before });
+    const body = `${before}\n## 🚀 Launch\n\nReady\n\n## _Private\n\nNotes\n\n## ---\n\nRule\n\n## 🚀 Launch\n\nAgain\n`;
+    const blockIds = pageChangedBlocks(before, body);
+    assert.deepEqual(blockIds, ["plan", "-launch", "_private", "---", "-launch-1"]);
+    const result = await call("edit", { pageId: page.pageId, baseRevision: 1, body,
+      blockIds, conversationIds: [ids.open] });
+    assert.equal(result.page.headRevision, 2);
+    const saved = await call("read", { pageId: page.pageId });
+    assert.equal(saved.page.body, body);
+    const links = (await call("links", { pageId: page.pageId })).links;
+    assert.deepEqual(links.map((link) => link.blockId).sort(), [...blockIds].sort());
+    const read = await call("read", { pageId: page.pageId, conversationId: ids.open, blockId: "-launch" });
+    assert.equal(read.page.headRevision, 2);
+    const linked = await call("link", { pageId: page.pageId, conversationId: ids.open,
+      blockId: "_private", source: "manual" });
+    assert.equal(linked.link.blockId, "_private");
+
+    for (const blockId of ["with space", "a/b", "a?b", "a#b", "🚀", "-".repeat(201)]) {
+      await assert.rejects(call("edit", { pageId: page.pageId, baseRevision: 2, body: `${body}\nRejected\n`,
+        blockIds: [blockId] }), code("invalid_block_id"));
+      await assert.rejects(call("link", { pageId: page.pageId, conversationId: ids.open,
+        blockId, source: "manual" }), code("invalid_block_id"));
+    }
+    assert.equal((await call("read", { pageId: page.pageId })).page.headRevision, 2,
+      "invalid block ids cannot write a revision");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
 
 test("sibling positions always sort strictly between their neighbours", () => {
   let before = null;
