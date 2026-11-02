@@ -78,6 +78,62 @@ integration("unaddressed publications require one current author choice and neve
       assert.deepEqual(await read("uncertified"), []);
       await assert.rejects(pick("uncertified"), error => error.code === "message_ask_unavailable");
     });
+    await t.test("follow-up speech cannot pick a second Agent while the Channel's first choice is still starting", async () => {
+      await channel("followup", { sequence: 1, metadata: { autoName: true } });
+      await f.run(`INSERT INTO data.messages SELECT
+        (jsonb_populate_record(NULL::data.messages, to_jsonb(m) ||
+          '{"message_id":"supplement","timeline_sequence":2,"search_rank_sequence":"supplement"}')).*
+        FROM data.messages m WHERE m.message_id='followup'`);
+      await observe("followup", { messageId: "supplement" });
+      const readFollowup = () => tx(transaction => readMessageAsks(transaction, "followup", ["supplement"], "owner"));
+      const pickFollowup = () => pick("followup", "claude", { messageId: "supplement" });
+      // The first-message reader has not persisted its row yet.
+      assert.equal((await readFollowup())[0].canAsk, false);
+      await choices.open({ requestId: "followup-open", channelId: "followup", messageId: "followup", authorUserId: "owner" });
+      assert.equal((await readFollowup())[0].canAsk, false);
+      await choices.claim({ ...request("followup"), by: "author", harness: "codex" });
+      assert.equal((await readFollowup())[0].canAsk, false);
+      await assert.rejects(pickFollowup(), error => error.code === "message_ask_unavailable");
+      // A failed dispatch with no receiver must still allow an explicit recovery.
+      await choices.summoned({ requestId: "followup-summoned", channelId: "followup", messageId: "followup" });
+      assert.equal((await readFollowup())[0].canAsk, true);
+      await pickFollowup();
+    });
+    await t.test("a declined, failed, stale or expired startup leaves follow-up speech explicitly recoverable", async () => {
+      for (const state of ["none", "failed", "stale", "expired"]) {
+        const id = `recover-${state}`, messageId = `${id}-followup`;
+        await channel(id, { sequence: 1, metadata: { autoName: true } });
+        await choices.open({ requestId: `${id}-open`, channelId: id, messageId: id, authorUserId: "owner" });
+        await f.run(`INSERT INTO data.messages SELECT
+          (jsonb_populate_record(NULL::data.messages, to_jsonb(m) || $2::jsonb)).*
+          FROM data.messages m WHERE m.message_id=$1`,
+        [id, JSON.stringify({ message_id: messageId, timeline_sequence: 2, search_rank_sequence: messageId })]);
+        await observe(id, { messageId });
+        if (state === "none") await choices.claim({ ...request(id), by: "author" });
+        if (state === "failed") await choices.fail({ requestId: `${id}-fail`, channelId: id, messageId: id, failureCode: "registration_not_found" });
+        if (state === "stale") await f.run("UPDATE data.messages SET recalled_at=now() WHERE message_id=$1", [id]);
+        if (state === "expired") await f.run("UPDATE data.first_message_launch_choices SET created_at=now()-interval '16 minutes' WHERE message_id=$1", [id]);
+        assert.equal((await tx(transaction => readMessageAsks(transaction, id, [messageId], "owner")))[0].canAsk, true, state);
+        await pick(id, "codex", { messageId });
+      }
+    });
+    await t.test("concurrent choices on different publications share the Channel's pending launch", async () => {
+      await channel("two-asks"); await observe("two-asks");
+      await f.run(`INSERT INTO data.messages SELECT
+        (jsonb_populate_record(NULL::data.messages, to_jsonb(m) ||
+          '{"message_id":"other-ask","timeline_sequence":3,"search_rank_sequence":"other-ask"}')).*
+        FROM data.messages m WHERE m.message_id='two-asks'`);
+      await observe("two-asks", { messageId: "other-ask" });
+      const results = await Promise.allSettled([pick("two-asks"), pick("two-asks", "claude", { messageId: "other-ask" })]);
+      assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+      const [winner] = await f.run("SELECT message_id,chosen_harness FROM data.first_message_launch_choices WHERE channel_id='two-asks'");
+      await pick("two-asks", winner.chosen_harness, { messageId: winner.message_id });
+      const other = winner.message_id === "two-asks" ? "other-ask" : "two-asks";
+      assert.equal((await tx(transaction => readMessageAsks(transaction, "two-asks", [other], "owner")))[0].canAsk, false);
+      await tx(transaction => fenceChannelRunsForStop(transaction, { spaceId: "space", channelId: "two-asks", actorUserId: "owner",
+        sourceMessageId: "stop", at: new Date().toISOString(), scope: { kind: "channel" } }));
+      assert.equal((await tx(transaction => readMessageAsks(transaction, "two-asks", [other], "owner")))[0].canAsk, true);
+    });
     await t.test("a delayed first-message reader and the explicit action share one atomic decision", async () => {
       await channel("race", { sequence: 1 }); await observe("race");
       await choices.open({ requestId: "late-open", channelId: "race", messageId: "race", authorUserId: "owner" });
