@@ -77,3 +77,10 @@ test("an occurrence runs only while its line is still running on its page", asyn
     assert.equal(f.appended.length, 0);
   }
 });
+
+test("an occurrence's conversation is named by its line only until its About names it", async () => {
+  const f = fixture();
+  await f.dispatch();
+  assert.equal(f.opened[0].name, "Audit · 10-17 00:00 UTC");
+  assert.equal(f.opened[0].metadata.autoName, true);
+});
