@@ -22,7 +22,7 @@ const ASKED = "2026-11-01T10:00:00.000Z";
  * and the owner's Machines.
  */
 function hub(user, state = {}) {
-  const world = { connections: [], readable: { owner: {} }, secrets: [], canManage: true, daemons: [], ...state };
+  const world = { connections: [], readable: { owner: {} }, secrets: [], canManage: true, daemons: [], executions: [], ...state };
   const appended = [], writes = [], answered = [];
   const domains = {
     connector: connectorSettingsDomain({
@@ -32,9 +32,18 @@ function hub(user, state = {}) {
       // The provider passes the check, which now names every field the connection holds.
       check: async (_reader, providerId) => {
         const held = world.connections.find((connection) => connection.providerId === providerId)?.credentialFields ?? [];
-        const saved = writes.filter((write) => write.providerId === providerId).flatMap((write) => Object.keys(write.fields));
+        const saved = writes.filter((write) => write.domain === "connector" && write.providerId === providerId)
+          .flatMap((write) => Object.keys(write.fields));
         world.connections = [{ providerId, status: "configured", lastCheckedAt: "2026-11-01T10:05:00.000Z",
           credentialFields: [...new Set(["keyId", ...held, ...saved])] }];
+      },
+      executions: async () => world.executions,
+      // App Store Connect answers the verify read: it works with a session Apple signed.
+      verify: async (reader, providerId, actionId) => {
+        const saved = writes.filter((write) => write.domain === "connector" && write.providerId === providerId).at(-1)?.fields.webSession ?? "";
+        writes.push({ domain: "verify", providerId, actionId, channelId: reader.channelId });
+        world.executions = [call(actionId, saved.startsWith("myacinfo=") ? "completed" : "failed",
+          "2026-11-01T10:05:30.000Z"), ...world.executions];
       },
     }),
     secret: secretSettingsDomain(secretPort(world, writes)),
@@ -73,6 +82,11 @@ function secretPort(world, writes) {
     },
   };
 }
+
+/** A recorded App Store Connect call, as the Space's execution history keeps it. */
+const call = (actionId, status, updatedAt) => ({ id: `${actionId}:${updatedAt}`, providerId: "appstoreconnect", actionId, status,
+  updatedAt, createdAt: updatedAt, ...(status === "completed" ? {} : { reason: "The App Store Connect web session is missing or has expired",
+    remedy: { kind: "credential", field: "webSession" } }) });
 
 const daemon = (login, observedAt = "2026-11-01T10:07:00.000Z") => ({ machineId: "machine:a", machineName: "Laptop",
   metadata: { harnesses: { schemaVersion: 1, capturedAt: "2026-11-01T09:00:00.000Z",
@@ -134,27 +148,47 @@ test("an Agent suggests a value for a plain setting, never for a secret, a sign-
 });
 
 test("the Run reads where its settings stand, against when it asked", async () => {
-  const read = async (state, query = `setting=${encodeURIComponent(WEB)}&since=${ASKED}`) => {
+  const read = async (state, query = `setting=${encodeURIComponent(VENDOR)}&since=${ASKED}`) => {
     const response = await hub(agentUser, state).status(query);
     return { status: response.status, body: response.status === 200 ? await response.json() : undefined };
   };
   const connection = (status, lastCheckedAt, credentialFields) => ({ connections: [{ providerId: "appstoreconnect", status,
-    lastCheckedAt, credentialFields, error: status === "error" ? "Apple refused the session" : undefined }] });
+    lastCheckedAt, credentialFields, error: status === "error" ? "Apple refused the key" : undefined }] });
   const missing = (await read({})).body;
   assert.equal(missing.settled, false);
-  assert.deepEqual([missing.settings[0].setting, missing.settings[0].state, missing.settings[0].control], [WEB, "missing", "sign-in"]);
-  assert.equal((await read(connection("configured", "2026-11-01T09:00:00.000Z", ["webSession"]))).body.settled, false,
+  assert.deepEqual([missing.settings[0].setting, missing.settings[0].state, missing.settings[0].control], [VENDOR, "missing", "text"]);
+  assert.equal((await read(connection("configured", "2026-11-01T09:00:00.000Z", ["vendorNumber"]))).body.settled, false,
     "a check from before the request proves nothing");
   assert.equal((await read(connection("configured", "2026-11-01T10:05:00.000Z", ["keyId"]))).body.settled, false);
-  const refused = (await read(connection("error", "2026-11-01T10:05:00.000Z", ["webSession"]))).body.settings[0];
-  assert.deepEqual([refused.state, refused.problem], ["invalid", "Apple refused the session"]);
-  const done = (await read(connection("configured", "2026-11-01T10:05:00.000Z", ["webSession"]))).body;
+  const refused = (await read(connection("error", "2026-11-01T10:05:00.000Z", ["vendorNumber"]))).body.settings[0];
+  assert.deepEqual([refused.state, refused.problem], ["invalid", "Apple refused the key"]);
+  const done = (await read(connection("configured", "2026-11-01T10:05:00.000Z", ["vendorNumber"]))).body;
   assert.deepEqual([done.settled, done.settings[0].settled, done.settings[0].state], [true, true, "verified"]);
   assert.equal((await read({}, `setting=${encodeURIComponent(WEB)}&since=yesterday`)).status, 400);
   assert.equal((await read({}, `since=${ASKED}`)).status, 400);
-  const vendor = (await read({ readable: { owner: { vendorNumber: "87654321" } } }, `setting=${encodeURIComponent(VENDOR)}`)).body;
+  const vendor = (await read({ ...connection("configured", "2026-11-01T10:05:00.000Z", ["vendorNumber"]),
+    readable: { owner: { vendorNumber: "87654321" } } }, `setting=${encodeURIComponent(VENDOR)}`)).body;
   assert.equal(vendor.settings[0].value, undefined, "an Agent never reads a value back, not even a plain one");
   assert.equal((await hub(owner).status(`setting=${encodeURIComponent(WEB)}`)).status, 403);
+});
+
+// The production failure: App Store Connect's check signs with the API key, so an expired web session
+// beside it still read as checked, and a card for it settled with nothing proven.
+test("a field the connection check never exercises follows what calls needing it last did", async () => {
+  const read = async (executions, since = ASKED) => (await (await hub(agentUser, { executions, connections: [{ providerId: "appstoreconnect",
+    status: "configured", lastCheckedAt: "2026-11-01T10:05:00.000Z", credentialFields: ["keyId", "webSession"] }] })
+    .status(`setting=${encodeURIComponent(WEB)}&since=${since}`)).json()).settings[0];
+  const unproven = await read([]);
+  assert.deepEqual([unproven.state, unproven.satisfied], ["set", false], "a passing key check says nothing about the session");
+  const lapsed = await read([call("review_messages", "failed", "2026-11-01T10:06:00.000Z"),
+    call("review_messages", "completed", "2026-10-30T10:00:00.000Z")]);
+  assert.deepEqual([lapsed.state, lapsed.satisfied, lapsed.problem],
+    ["invalid", false, "The App Store Connect web session is missing or has expired"]);
+  const works = await read([call("review_messages", "completed", "2026-11-01T10:07:00.000Z"),
+    call("sales", "completed", "2026-11-01T10:08:00.000Z"), call("review_messages", "failed", "2026-11-01T10:06:00.000Z")]);
+  assert.deepEqual([works.state, works.satisfied], ["verified", true], "a call that needed the session and ran proves it");
+  assert.equal((await read([call("web_session", "completed", "2026-11-01T09:00:00.000Z")])).satisfied, false,
+    "only a call after the card asked counts");
 });
 
 test("a person makes a setting on the card; once every one is in, the card is answered for the Instance that asked", async () => {
@@ -181,9 +215,16 @@ test("a person makes a setting on the card; once every one is in, the card is an
   assert.equal(JSON.stringify(saved).includes("s3cret"), false, "a secret value never comes back");
   assert.deepEqual(admin.answered, []);
 
+  const pasted = await (await admin.make(card.messageId, { address: WEB, value: "garbage" })).json();
+  const refused = pasted.settings.find((setting) => setting.address === WEB);
+  assert.deepEqual([refused.state, refused.satisfied], ["invalid", false], "a saved session Apple refuses is not in");
+  assert.deepEqual(admin.answered, []);
   const answer = await (await admin.make(card.messageId, { address: WEB, value: "myacinfo=1" })).json();
-  assert.deepEqual(admin.writes[1], { domain: "connector", userId: "owner", providerId: "appstoreconnect", fields: { webSession: "myacinfo=1" } });
-  assert.equal(answer.satisfied, true, "a saved field counts once the check after it passes");
+  assert.deepEqual(admin.writes.slice(-2), [
+    { domain: "connector", userId: "owner", providerId: "appstoreconnect", fields: { webSession: "myacinfo=1" } },
+    { domain: "verify", providerId: "appstoreconnect", actionId: "web_session", channelId: "channel" }],
+  "saving the session runs the read that proves it, recorded in the card's Channel");
+  assert.equal(answer.satisfied, true, "the session counts once the read after it worked");
   assert.equal(answer.answeredMessageId, "settings-ready:settings-request:abc");
   assert.deepEqual(admin.answered, [card.messageId]);
   assert.equal((await hub(agentUser, { card }).card(card.messageId)).status, 401, "an Agent Run reads its card through status");

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: A web session counts only once a call needing it works
+
+App Store Connect's connection check signs with its API key, so an expired web
+session beside the key still read as checked. `xmatrix settings status` said
+`in`, and a settings card for it could settle with nothing proven. A credential
+field may now name a `verify` read in its manifest. App Store Connect's web
+session names `web_session`. The field's state follows the Space's recent calls
+that needed it: the latest one that ran makes it verified, and the latest one
+that stopped on it makes it invalid, in that call's words. Saving it on a card
+runs that read in the card's Channel. Asking for a setting now reads it as of
+the request. Hub only, no schema change; recovery is a CI-validated release
+reverting this change.
+
 ## Unreleased: The Agents page asks for quota when you look, not every 15 seconds
 
 While the Agents page was open, every 15-second refresh asked the Hub to read

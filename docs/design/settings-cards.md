@@ -41,6 +41,16 @@ each other:
   provider check after the card; a secret must be saved after it; a harness
   must be observed signed in after it.
 
+Some connector fields are never exercised by the connection check, for
+example App Store Connect's web session beside its API key. Such a field names
+a `verify` read in its manifest (`webSession` → `web_session`). Its state then
+comes from the Space's recent recorded calls, never from the check. A call that
+needed the field and completed makes it `verified`. A call that stopped with
+this field as its remedy makes it `invalid`, in that call's words. It is
+satisfied only by a completed call after the card asked. Saving such a field
+on a card runs its verify read, recorded in the card's Channel, so the card
+settles on Apple's answer and not on the save.
+
 ## Hub
 
 - `settings-registry.ts` parses addresses, routes each to its domain, keeps

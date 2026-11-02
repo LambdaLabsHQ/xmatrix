@@ -46,6 +46,13 @@ test("every manifest write action has an executor that declares it, and every ex
       }
     }
     assert.ok(!manifest.actions.some(action => action.id === "policy"), "retired per-action policy commands must not reappear");
+    // A settings card that saves such a field runs this read as `@<app>:<verify>:*`, and the field's calls prove it.
+    for (const credential of (manifest.credentials ?? []).filter((candidate) => candidate.verify)) {
+      const verify = provider.actions[credential.verify];
+      assert.equal(verify?.effect, "read", `${manifest.id}.${credential.id} is verified by a read`);
+      assert.ok(verify.requires.includes(credential.id), `${manifest.id}.${credential.verify} needs ${credential.id}`);
+      assert.equal(typeof verify.parse({ target: "*", text: "" }), "object", `${manifest.id}.${credential.verify} takes *`);
+    }
   }
 });
 

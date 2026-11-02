@@ -463,7 +463,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         description: "xMatrix registers it on the webhook it creates when a channel subscribes to an app; nothing to paste." },
       { id: "vendorNumber", label: "Vendor number (sales reports)", plain: true,
         description: "Only for sales: Payments and Financial Reports shows it at the top left, under the legal entity name. Apple's API never returns it. With the web session saved, sales reads it from the Payments page itself; otherwise the first sales command that names vendor=<number> saves it here." },
-      { id: "webSession", label: "Web session (App Review messages, new apps, App Privacy)", signIn: "appstoreconnect",
+      { id: "webSession", label: "Web session (App Review messages, new apps, App Privacy)", signIn: "appstoreconnect", verify: "web_session",
         description: "Only for what Apple's API cannot do: review_messages, create_app, privacy and set_privacy, and finding the vendor number for sales. In the xMatrix Mac or Windows app, Sign in to App Store Connect saves it: you sign in on Apple's own page and the password never reaches xMatrix. Elsewhere, paste the Cookie header of a signed-in appstoreconnect.apple.com page. Apple keeps it a day to a month; sign in again when review_messages says it lapsed." },
     ],
     source: { label: "App", placeholder: "com.example.app", pattern: "^[a-z0-9][a-z0-9.-]{0,154}$",

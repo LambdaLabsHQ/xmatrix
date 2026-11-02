@@ -100,7 +100,9 @@ export function registerSettingsRequestRoutes(app: Hono<{ Bindings: Env }>, depe
     const asker = { userId: run.ownerUserId, runId: run.runId, channelId: run.channelId, agentName: run.agentName,
       ...(run.instanceId ? { instanceId: run.instanceId } : {}) };
     const spaceId = await port.channelSpace(c.env, run.channelId, run.ownerUserId);
-    const descriptors = await describe({ env: c.env, spaceId, userId: run.ownerUserId, asker }, parsed);
+    // Read as of this request: a setting the card asks for is not in until it is made again.
+    const descriptors = await describe({ env: c.env, spaceId, userId: run.ownerUserId, since: askedAt, channelId: run.channelId,
+      asker }, parsed);
     if (typeof descriptors === "string") return refuse(descriptors, 400);
     // The domain's canonical address (a Machine's id for its name) is the one the card keeps.
     const entries: SettingsCardEntry[] = descriptors.map((descriptor, index) => {
@@ -128,7 +130,7 @@ export function registerSettingsRequestRoutes(app: Hono<{ Bindings: Env }>, depe
     if (since !== undefined && !Number.isFinite(Date.parse(since))) return refuse("since is an ISO time: when the settings were asked for", 400);
     const spaceId = await port.channelSpace(c.env, run.channelId, run.ownerUserId);
     const descriptors = await describe({ env: c.env, spaceId, userId: run.ownerUserId, ...(since ? { since } : {}),
-      asker: { userId: run.ownerUserId, runId: run.runId, channelId: run.channelId } }, parsed);
+      channelId: run.channelId, asker: { userId: run.ownerUserId, runId: run.runId, channelId: run.channelId } }, parsed);
     if (typeof descriptors === "string") return refuse(descriptors, 400);
     return Response.json({ settled: descriptors.every((descriptor) => descriptor.satisfied), settings: descriptors.map(agentView) },
       { headers: NO_STORE });
@@ -139,8 +141,8 @@ export function registerSettingsRequestRoutes(app: Hono<{ Bindings: Env }>, depe
     const spaceId = await port.channelSpace(env, card.channelId, userId);
     const parsed = parseSettingAddresses(card.entries.map((entry) => entry.address));
     if (typeof parsed === "string") throw new SettingWriteRefused(parsed);
-    const descriptors = await describe({ env, spaceId, userId, since: card.sentAt, ...(card.asker ? { asker: card.asker } : {}) },
-      parsed);
+    const descriptors = await describe({ env, spaceId, userId, since: card.sentAt, channelId: card.channelId,
+      ...(card.asker ? { asker: card.asker } : {}) }, parsed);
     if (typeof descriptors === "string") throw new SettingWriteRefused(descriptors, 409);
     const proposed = new Map(card.entries.flatMap((entry) => entry.proposed ? [[entry.address, entry.proposed] as const] : []));
     const answered = await port.answer(env, card, descriptors);
@@ -177,8 +179,8 @@ export function registerSettingsRequestRoutes(app: Hono<{ Bindings: Env }>, depe
     }
     if (body.value !== null && typeof body.value !== "string") return refuse("value is a string, or null to clear it", 400);
     const spaceId = await port.channelSpace(c.env, card.channelId, user.id);
-    await writeSetting({ env: c.env, spaceId, userId: user.id, since: card.sentAt, ...(card.asker ? { asker: card.asker } : {}) },
-      address, body.value as string | null, port.domains);
+    await writeSetting({ env: c.env, spaceId, userId: user.id, since: card.sentAt, channelId: card.channelId,
+      ...(card.asker ? { asker: card.asker } : {}) }, address, body.value as string | null, port.domains);
     return Response.json(await cardSettings(c.env, card, user.id), { headers: NO_STORE });
   }));
 }
