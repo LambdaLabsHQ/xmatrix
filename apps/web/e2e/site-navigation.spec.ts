@@ -1,5 +1,27 @@
 import { expect, test } from "@playwright/test";
 
+test("public HTML declares its language and each shared URL before scripts run", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, javaScriptEnabled: false });
+  const page = await context.newPage();
+  try {
+    for (const path of ["/zh", "/", "/download", "/terms", "/privacy", "/subprocessors", "/cookies", "/releases/3.0.0"]) {
+      await page.goto(path, { waitUntil: "domcontentloaded" });
+      await expect(page.locator("html")).toHaveAttribute("lang", path === "/zh" ? "zh-CN" : "en");
+      const canonical = (await page.locator('head link[rel="canonical"]').getAttribute("href"))!;
+      expect(new URL(canonical).pathname).toBe(path);
+      await expect(page.locator('head meta[property="og:url"]')).toHaveAttribute("content", canonical);
+      const image = (await page.locator('head meta[property="og:image"]').getAttribute("content"))!;
+      expect(new URL(image).origin).toBe(new URL(canonical).origin);
+      if (path === "/" || path === "/zh") {
+        await expect(page.locator(`head link[hreflang="${path === "/zh" ? "zh-CN" : "en"}"]`))
+          .toHaveAttribute("href", canonical);
+      }
+    }
+  } finally {
+    await context.close();
+  }
+});
+
 test("the home page shows connectors with loaded icons and no nested glass", async ({ page }) => {
   await page.goto("/");
   const list = page.getByRole("list", { name: "Connectors", exact: true });

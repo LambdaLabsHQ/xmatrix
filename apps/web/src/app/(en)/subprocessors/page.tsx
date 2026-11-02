@@ -1,13 +1,13 @@
-import type { Metadata } from "next";
+import { sitePageMetadata } from "@/lib/site-metadata";
 
 import { LegalDocument } from "@/components/legal/legal-document";
 import { SubprocessorsContent } from "@/content/legal/subprocessors";
 
-export const metadata: Metadata = {
-  title: "Subprocessors — xMatrix",
-  description: "Service providers MadeByRobot uses to process xMatrix Customer Data.",
-  alternates: { canonical: "/subprocessors" },
-};
+export const metadata = sitePageMetadata(
+  "/subprocessors",
+  "Subprocessors — xMatrix",
+  "Service providers MadeByRobot uses to process xMatrix Customer Data.",
+);
 
 export default function SubprocessorsPage() {
   return (

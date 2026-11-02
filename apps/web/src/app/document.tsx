@@ -34,7 +34,6 @@ export const metadata: Metadata = {
     title: "xMatrix",
     description:
       "Bring every agent, person, and workstream into one shared space—visible, coordinated, and under your control.",
-    url: "https://xmatrix.sh",
     siteName: "xMatrix",
     type: "website",
     images: [shareImage],
@@ -50,7 +49,7 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout(props: { children: React.ReactNode }) {
+export default function Document(props: { children: React.ReactNode; lang: string }) {
   const themeScript = `
     (() => {
       try {
@@ -73,7 +72,7 @@ export default function RootLayout(props: { children: React.ReactNode }) {
 
   return (
     <html
-      lang="en"
+      lang={props.lang}
       className="font-sans light"
       data-app-theme="wood"
       style={{ colorScheme: "light" }}

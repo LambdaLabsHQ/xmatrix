@@ -1,13 +1,13 @@
-import type { Metadata } from "next";
+import { sitePageMetadata } from "@/lib/site-metadata";
 
 import { LegalDocument } from "@/components/legal/legal-document";
 import { CookieNoticeContent } from "@/content/legal/cookie-notice";
 
-export const metadata: Metadata = {
-  title: "Cookie and Local Storage Notice — xMatrix",
-  description: "How xMatrix uses cookies, local storage, offline replicas, and device permissions.",
-  alternates: { canonical: "/cookies" },
-};
+export const metadata = sitePageMetadata(
+  "/cookies",
+  "Cookie and Local Storage Notice — xMatrix",
+  "How xMatrix uses cookies, local storage, offline replicas, and device permissions.",
+);
 
 export default function CookieNoticePage() {
   return (

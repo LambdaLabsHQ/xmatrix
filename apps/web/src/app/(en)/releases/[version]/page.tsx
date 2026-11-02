@@ -7,14 +7,17 @@ import { Footer } from "@/components/landing/footer";
 import { Navbar } from "@/components/shared/navbar";
 import { fetchPublishedReleaseNotes } from "@/lib/github-release";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
+import { sitePageMetadata } from "@/lib/site-metadata";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 type Props = { params: Promise<{ version: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { version } = await params;
-  if (!releaseNotesPath(version)) return {};
-  return { title: `xMatrix ${version} release notes`, alternates: { canonical: releaseNotesPath(version) } };
+  const path = releaseNotesPath(version);
+  if (!path) return {};
+  return sitePageMetadata(path, `xMatrix ${version} release notes`,
+    `Changes and fixes in xMatrix ${version} for the Web, Hub and published clients.`);
 }
 
 export default async function ReleaseNotesPage({ params }: Props) {

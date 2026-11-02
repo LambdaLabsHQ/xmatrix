@@ -9,7 +9,6 @@ import { Faq } from "@/components/landing/faq";
 import { Connectors } from "@/components/landing/connectors";
 import { Pricing } from "@/components/landing/pricing";
 import { Footer, X_ACCOUNT_URL } from "@/components/landing/footer";
-import { DocumentLanguage } from "@/components/landing/document-language";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 import { shareImage, siteUrl } from "@/lib/site-url";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
@@ -63,7 +62,6 @@ export function Home({ locale }: { locale: Locale }) {
   return (
     <div className="site-page">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: homeStructuredData(locale) }} />
-      <DocumentLanguage lang={landingCopy[locale].lang} />
       <Navbar locale={locale} />
       <Hero locale={locale} />
       <AgentStrip locale={locale} />

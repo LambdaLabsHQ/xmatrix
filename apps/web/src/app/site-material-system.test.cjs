@@ -5,7 +5,7 @@ const test = require("node:test");
 
 const appRoot = __dirname;
 const source = (relativePath) => fs.readFileSync(path.join(appRoot, relativePath), "utf8");
-const layoutSource = source("layout.tsx");
+const layoutSource = source("document.tsx");
 const siteCss = source("themes/site.css");
 const tokensCss = source("tokens.css");
 const navbarSource = source("../components/shared/navbar.tsx");
@@ -20,10 +20,10 @@ test("public routes share one warm material layer", () => {
 
   for (const route of [
     "../components/landing/home.tsx",
-    "download/page.tsx",
+    "(en)/download/page.tsx",
     "../components/auth/auth-shell.tsx",
-    "billing/page.tsx",
-    "console/page.tsx",
+    "(en)/billing/page.tsx",
+    "(en)/console/page.tsx",
   ]) {
     assert.match(source(route), /site-page/, `${route} must opt into the shared public material layer`);
   }
