@@ -7,7 +7,9 @@ import {
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
   AlarmClock, FileText, Hash, List, ListChecks, ListOrdered, MessageSquare, Minus, Pause, Pilcrow, Play, Quote, Repeat, Table,
+  Bold, Italic, Strikethrough,
 } from "lucide-react";
+import { toggleMark } from "prosemirror-commands";
 import type { Node as DocNode, ResolvedPos } from "prosemirror-model";
 import { EditorState, Selection, TextSelection, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
@@ -102,11 +104,18 @@ interface Toolbar {
   /** The selection is in a table, which shows its row and column controls. */
   inTable: boolean;
   trigger: PageTrigger | null;
+  /** The marks the selection carries anywhere, which its button then takes off, as the shortcut does. */
+  marks: Record<FormatMark, boolean>;
 }
+
+type FormatMark = "strong" | "em" | "code" | "strike";
 
 function readToolbar(view: EditorView): Toolbar {
   const { state } = view;
+  const { from, to } = state.selection;
+  const has = (mark: FormatMark) => state.doc.rangeHasMark(from, to, pageSchema.marks[mark]);
   return {
+    marks: { strong: has("strong"), em: has("em"), code: has("code"), strike: has("strike") },
     kind: blockKind(state),
     link: linkAt(state),
     empty: state.selection.empty,
@@ -315,7 +324,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
       // Keep the editor's selection: the button acts on it.
       onMouseDown={(event) => event.preventDefault()} onClick={onRun}
       className={`flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors
-        hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "text-foreground" : ""}`}>
+        hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "bg-muted text-foreground" : ""}`}>
       {children}
     </button>
   );
@@ -842,8 +851,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   };
   const section = current ? pageDocBlockAt(current.state.doc, current.state.selection.from) : "";
   const selectionActions = Boolean(actions?.discuss || actions?.comment);
-  const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
-    && !commentDraft ? place(current.state.selection.from) : null;
+  const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code"
+    && (selectionActions || canEdit) && !commentDraft ? place(current.state.selection.from) : null;
   const tableAt = toolbar?.inTable && current ? placeTable(current.state.selection.$from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
   const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
@@ -937,7 +946,23 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         <div className="absolute z-20 -translate-y-full"
           style={{ left: Math.max(0, selectionMenu.left - 8), top: selectionMenu.top - 6 }}>
         <PaperPopover role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
-          className="flex items-center p-1">
+          className="flex items-center gap-0.5 p-1">
+          {/* Formatting, for whoever may edit: each mark's button sets it on the selection, or takes it off. */}
+          {canEdit && toolbar && (
+            <>
+              {([["strong", "Bold", <Bold key="b" />], ["em", "Italic", <Italic key="i" />], ["code", "Code", <Code2 key="c" />]] as const)
+                .map(([mark, label, icon]) => (
+                  <ToolButton key={mark} label={label} active={toolbar.marks[mark]}
+                    onRun={() => run(toggleMark(pageSchema.marks[mark]))}>{icon}</ToolButton>
+                ))}
+              <ToolButton label="Link" active={Boolean(toolbar.link)} onRun={() => setLinkDraft(toolbar.link ?? "")}>
+                <Link2 />
+              </ToolButton>
+              <ToolButton label="Strikethrough" active={toolbar.marks.strike}
+                onRun={() => run(toggleMark(pageSchema.marks.strike))}><Strikethrough /></ToolButton>
+              {selectionActions && <span aria-hidden className="mx-1 h-5 w-px bg-border" />}
+            </>
+          )}
           {actions?.comment ? (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => { if (current) openComment(current, false); }}

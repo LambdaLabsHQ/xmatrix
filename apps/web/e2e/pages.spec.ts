@@ -306,20 +306,32 @@ test("a page is co-edited live and shows an Agent working on a section", async (
   await browser.keyboard.press("End");
   await browser.keyboard.type(" and verified");
   await expect.poll(() => pageMarkdown(server)).toContain("Shipped and verified");
-  // Selecting text offers collaboration on the passage. Formatting is typed, or a shortcut. The menu offers a
-  // comment rather than opening the box, which would take the caret from the passage.
+  // Selecting text offers formatting and a comment on the passage. The menu offers a comment rather than opening
+  // the box, which would take the caret from the passage; what acts on the whole section is the heading's.
   await browser.keyboard.press("Shift+Home");
   const selection = browser.getByTestId("page-selection-menu");
   await expect(selection.getByRole("button", { name: "Comment" })).toBeVisible();
-  // A comment is all a passage offers: asking an Agent is commenting, and what acts on the whole section is the
-  // heading's.
-  await expect(selection.getByRole("button")).toHaveText(["Comment"]);
+  expect(await selection.getByRole("button").evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent?.trim())))
+    .toEqual(["Bold", "Italic", "Code", "Link", "Strikethrough", "Comment"]);
   await expect(browser.getByTestId("page-comment-box")).toHaveCount(0);
-  await expect(browser.getByRole("button", { name: "Bold" })).toHaveCount(0);
   await expect(browser.getByTestId("page-toolbar")).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-selection-menu.png") });
-  await browser.keyboard.press("ControlOrMeta+b");
+  // Each mark's button sets it on the selection and shows it is on; pressed again, it comes off. Shortcuts still work.
+  const bold = selection.getByRole("button", { name: "Bold" });
+  await bold.click();
   await expect.poll(() => pageMarkdown(server)).toContain("**Shipped and verified**");
+  await expect(bold).toHaveAttribute("aria-pressed", "true");
+  await selection.getByRole("button", { name: "Strikethrough" }).click();
+  await expect.poll(() => pageMarkdown(server)).toContain("~~");
+  await browser.keyboard.press("ControlOrMeta+Shift+x");
+  await expect.poll(() => pageMarkdown(server)).not.toContain("~~");
+  await expect(editor.locator(".page-document")).toBeFocused();
+  // Link asks for the address and sets it on the selection.
+  await selection.getByRole("button", { name: "Link" }).click();
+  await browser.getByRole("textbox", { name: "Link address" }).fill("https://example.com/verified");
+  await browser.keyboard.press("Enter");
+  await expect.poll(() => pageMarkdown(server)).toContain("](https://example.com/verified)");
   expect(clientUpdates.length).toBeGreaterThan(0);
   expect(connections, "the page keeps one live session while it is open").toBe(1);
   await browser.screenshot({ path: test.info().outputPath("pages-live.png") });
