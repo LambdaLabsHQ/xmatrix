@@ -1,6 +1,7 @@
 import { automationName } from "@xmatrix/db";
 import { openOccurrenceConversation } from "./automation-occurrence-conversation";
 import { appendChannelMessage } from "./channel-messages";
+import { startChannelAbout } from "./channel-about";
 import { PostgresScheduleOccurrenceLifecycle } from "./postgres-automation-authority";
 import { PostgresScheduledRunCleanup } from "./postgres-scheduled-run-cleanup";
 import { dispatchProductMessagePostCommit } from "./product-message-post-commit";
@@ -37,9 +38,16 @@ export async function runSpaceAutomationAlarm(env: Env, spaceId: string, ports: 
       dispatchScheduledMessageOccurrence({
         appendMessage: (command) => appendChannelMessage(env, command.channelId,
           command as unknown as Record<string, unknown>),
-        schedulePostCommit: (input) => ports.waitUntil(dispatchProductMessagePostCommit({
-          env, ...input, scheduleBackground: (task) => ports.waitUntil(task),
-        })),
+        schedulePostCommit: (input) => {
+          ports.waitUntil(dispatchProductMessagePostCommit({
+            env, ...input, scheduleBackground: (task) => ports.waitUntil(task),
+          }));
+          // The line opens its own conversation, so its message is that conversation's first: the About
+          // names it now, as it names any new conversation, rather than after the fifth message.
+          ports.waitUntil(startChannelAbout(env, { channelId: input.channelId, spaceId, unnamedOnly: true })
+            .catch((error) => console.error("Occurrence About could not start", { channelId: input.channelId,
+              error: error instanceof Error ? error.message : String(error) })));
+        },
         openConversation: ({ occurrence, automation, storedName, source, body, userId, privateEvents }) => {
           if (!automation.page_id) throw new Error("Automation has no page to run its occurrence from");
           return openOccurrenceConversation(env, { spaceId, pageId: String(automation.page_id),
