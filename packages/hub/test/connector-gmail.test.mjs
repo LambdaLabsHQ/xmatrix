@@ -175,6 +175,15 @@ test("read gives the HTML text when the plain alternative only points to the HTM
     parts: [text("text/plain", "Your report is ready."), text("text/html", "<h1>Weekly report</h1><p>Visits rose 4% week over week.</p>")] });
   assert.match(summary, /Your report is ready\./u);
   assert.doesNotMatch(summary, /Weekly report/u);
+  const namesHtml = await read({ mimeType: "multipart/alternative",
+    parts: [text("text/plain", "Your HTML report is ready."), text("text/html", "<h1>Weekly report</h1><p>Visits rose 4% week over week.</p>")] });
+  assert.match(namesHtml, /Your HTML report is ready\./u);
+  assert.doesNotMatch(namesHtml, /Weekly report/u);
+  for (const prompt of ["Your email client does not support HTML messages.", "To read this message, open it in an HTML-compatible viewer."]) {
+    const prompted = await read({ mimeType: "multipart/alternative", parts: [text("text/plain", prompt),
+      text("text/html", html.replace("</body>", "<p>We will email you when the review is complete.</p></body>"))] });
+    assert.match(prompted, /Your application was received\./u);
+  }
 });
 
 test("read keeps all HTML body segments and marks the existing body preview limit", async () => {
