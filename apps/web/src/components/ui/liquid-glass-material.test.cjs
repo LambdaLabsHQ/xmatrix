@@ -12,7 +12,7 @@ const rail = read("..", "dashboard", "workspace-shell-chrome.tsx");
 const details = read("..", "dashboard", "workspace-composer-dialogs.tsx");
 const billing = read("..", "dashboard", "settings-billing.tsx");
 const materialsCss = read("..", "..", "app", "themes", "materials.css");
-const labPage = read("..", "..", "app", "dev", "glass-lab", "page.tsx");
+const labPage = read("..", "..", "app", "(en)", "dev", "glass-lab", "page.tsx");
 
 test("every material parameter drives a custom property the recipe reads", () => {
   for (const token of [
