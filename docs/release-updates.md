@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Public pages declare their own language and sharing URL
+
+The Chinese homepage declared English until browser scripts ran. Separate
+static language roots now send `zh-CN` in its initial HTML, matching its
+hreflang, while sharing one document shell. English routes keep their URLs
+and static rendering. Downloads, legal pages and versioned release notes now
+name their own canonical URL in Open Graph metadata, instead of inheriting
+the old domain's homepage. The Calendar guide link opens its repository
+document directly. Web only; no schema or client change. Dual hosting, App
+redirects and robots policy remain as configured. Recovery is a CI-validated
+Web release reverting this change.
+
 ## Unreleased: No page slides in over another on a phone
 
 A phone slid whole pages in and out as a stack (a View Transition) whenever

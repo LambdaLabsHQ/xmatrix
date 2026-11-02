@@ -1,13 +1,13 @@
-import type { Metadata } from "next";
+import { sitePageMetadata } from "@/lib/site-metadata";
 
 import { LegalDocument } from "@/components/legal/legal-document";
 import { PrivacyPolicyContent } from "@/content/legal/privacy-policy";
 
-export const metadata: Metadata = {
-  title: "Privacy Policy — xMatrix",
-  description: "How MadeByRobot, LLC processes Customer Data, Agent data, and personal information in xMatrix.",
-  alternates: { canonical: "/privacy" },
-};
+export const metadata = sitePageMetadata(
+  "/privacy",
+  "Privacy Policy — xMatrix",
+  "How MadeByRobot, LLC processes Customer Data, Agent data, and personal information in xMatrix.",
+);
 
 export default function PrivacyPolicyPage() {
   return (

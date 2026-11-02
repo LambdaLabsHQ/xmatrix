@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import "./globals.css";
-import "./themes/materials.css";
-import "./themes/wood.css";
-import "./themes/site.css";
+import "@/app/globals.css";
+import "@/app/themes/materials.css";
+import "@/app/themes/wood.css";
+import "@/app/themes/site.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
@@ -34,7 +34,6 @@ export const metadata: Metadata = {
     title: "xMatrix",
     description:
       "Bring every agent, person, and workstream into one shared space—visible, coordinated, and under your control.",
-    url: "https://xmatrix.sh",
     siteName: "xMatrix",
     type: "website",
     images: [shareImage],
@@ -50,7 +49,7 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout(props: { children: React.ReactNode }) {
+export default function Document(props: { children: React.ReactNode; lang: string }) {
   const themeScript = `
     (() => {
       try {
@@ -73,12 +72,14 @@ export default function RootLayout(props: { children: React.ReactNode }) {
 
   return (
     <html
-      lang="en"
+      lang={props.lang}
       className="font-sans light"
       data-app-theme="wood"
       style={{ colorScheme: "light" }}
       suppressHydrationWarning
     >
+      {/* Shared by the App Router root layouts; this is their document head. */}
+      {/* eslint-disable-next-line @next/next/no-head-element */}
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <script dangerouslySetInnerHTML={{ __html: browserBackEntryScript }} />
