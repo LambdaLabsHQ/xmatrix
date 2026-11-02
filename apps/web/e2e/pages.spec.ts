@@ -1218,10 +1218,14 @@ test("a passage selected with the mouse stays in the page: the menu offers a com
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   const editor = await openLivePage(browser);
-  const line = (await editor.getByText("In progress", { exact: true }).boundingBox())!;
-  const text = (await editor.locator(".page-document").boundingBox())!;
   // A drag that ends past the text's edge, outside the editor, selects as one within it.
   const drag = async () => {
+    const passage = editor.getByText("In progress", { exact: true });
+    // Raw mouse coordinates do not get locator actionability checks. Let the
+    // target land before measuring, including after the comment box closes.
+    await passage.hover();
+    const line = (await passage.boundingBox())!;
+    const text = (await editor.locator(".page-document").boundingBox())!;
     await browser.mouse.move(line.x + 1, line.y + line.height / 2);
     await browser.mouse.down();
     await browser.mouse.move(text.x + text.width + 12, line.y + line.height / 2, { steps: 8 });
