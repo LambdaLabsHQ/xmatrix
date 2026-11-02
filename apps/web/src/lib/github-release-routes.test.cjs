@@ -18,8 +18,8 @@ function pointer(component, channel, version, files) {
     commitSha: "a".repeat(40), runId: "123", publishedAt: "2026-11-02T13:00:00Z",
   }));
 }
-pointer("desktop", "stable", "3.1.0", [["latest-mac.yml", "version: 3.1.0\n"], ["latest.yml", "version: 3.1.0\n"]]);
-pointer("desktop", "dev", "3.1.1-beta.1", [["latest-mac.yml", "version: 3.1.1-beta.1\n"], ["latest.yml", "version: 3.1.1-beta.1\n"]]);
+pointer("desktop", "stable", "3.1.0", [["latest-mac.yml", "version: 3.1.0\n"], ["latest.yml", "version: 3.1.0\n"], ["xMatrix-3.1.0-arm64.zip", "stable installer"]]);
+pointer("desktop", "dev", "3.1.1-beta.1", [["latest-mac.yml", "version: 3.1.1-beta.1\n"], ["latest.yml", "version: 3.1.1-beta.1\n"], ["xMatrix-3.1.1-beta.1-arm64.zip", "beta installer"], ["xMatrix-3.1.1-beta.1-arm64.zip.blockmap", "beta blockmap"], ["xMatrix-3.1.1-beta.1-x64.exe", "beta installer"]]);
 pointer("cli", "stable", "3.1.0", [["xmatrix-linux-x64", "cli"]]);
 pointer("android", "stable", "1.2.0", [["xmatrix.apk", "android"]]);
 const load = Module._load;
@@ -57,7 +57,7 @@ test("stable Desktop manifests link to the exact bytes they advertise, while leg
         const fetched = await download(asset.browser_download_url);
         assert.equal(fetched.status, 200);
         const bytes = Buffer.from(await fetched.arrayBuffer());
-        assert.equal(bytes.toString(), "version: 3.1.0\n");
+        if (asset.name.endsWith(".yml")) assert.equal(bytes.toString(), "version: 3.1.0\n");
         assert.equal(bytes.length, asset.size);
         assert.equal(createHash("sha256").update(bytes).digest("hex"), asset.sha256);
       }
@@ -65,4 +65,18 @@ test("stable Desktop manifests link to the exact bytes they advertise, while leg
   }
   const oldFeed = await download("https://xmatrix.sh/api/desktop/releases/latest-mac.yml");
   assert.equal(await oldFeed.text(), "version: 3.1.1-beta.1\n");
+});
+
+
+test("legacy metadata can download its beta files, while versioned stable files stay stable", async () => {
+  for (const [name, expected] of [
+    ["xMatrix-3.1.1-beta.1-arm64.zip", "beta installer"],
+    ["xMatrix-3.1.1-beta.1-arm64.zip.blockmap", "beta blockmap"],
+    ["xMatrix-3.1.1-beta.1-x64.exe", "beta installer"],
+    ["xMatrix-3.1.0-arm64.zip", "stable installer"],
+  ]) {
+    const response = await download(`https://xmatrix.sh/api/desktop/releases/${name}`);
+    assert.equal(response.status, 200, name);
+    assert.equal(await response.text(), expected, name);
+  }
 });

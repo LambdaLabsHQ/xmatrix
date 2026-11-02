@@ -12,14 +12,15 @@ export async function GET(request: Request, context: ReleaseAssetRouteContext) {
 
 async function resolveRelease(context: ReleaseAssetRouteContext) {
   const { asset } = await context.params;
-  if (!isVersionedDesktopAsset(asset)) return fetchDevRelease("desktop");
+  if (!isStableVersionedDesktopAsset(asset)) return fetchDevRelease("desktop");
   return isWindowsDesktopAsset(asset)
     ? fetchLatestStableDesktopWindowsRelease()
     : fetchLatestStableDesktopMacRelease();
 }
 
-function isVersionedDesktopAsset(assetName: string) {
-  return /^xMatrix-\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?-/.test(assetName);
+function isStableVersionedDesktopAsset(assetName: string) {
+  const version = /^xMatrix-(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)-(?:arm64|x64)\./.exec(assetName)?.[1];
+  return Boolean(version && !version.split("+", 1)[0].includes("-"));
 }
 
 function isWindowsDesktopAsset(assetName: string) {

@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Legacy Desktop feeds can fetch their beta installers
+
+The legacy metadata route still serves dev, but versioned file requests treated
+beta filenames as stable and returned 404. The filename's version now selects
+its channel: beta files read dev, stable files read stable, and unversioned
+metadata keeps dev. Reads remain confined to that channel's published asset
+catalog. Explicit native feeds, signing and stored artifacts are unchanged.
+Web only; no client setting or schema migration. Recovery uses a new validated
+Web release correcting the mapping, never a moved tag or changed artifact.
+
 ## Unreleased: Stable Desktop manifest URLs keep their channel
 
 The dedicated and aggregate stable manifests now link every Desktop asset
