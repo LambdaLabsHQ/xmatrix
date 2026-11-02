@@ -2,8 +2,7 @@ import { createJevClient } from "@xmatrix/decision-model";
 import { observeRegistrationQuota, PostgresRuntimeRepository, type AuthorityDatabase } from "@xmatrix/db";
 
 import type { AppConnectorEnv } from "./app-connectors";
-import { refreshAgentRoutingQuota, registrationQuotaProbeTargetReader,
-  reprobeExhaustedRegistrationQuota } from "./agent-routing-quota-refresh";
+import { refreshAgentRoutingQuota, registrationQuotaProbeTargetReader } from "./agent-routing-quota-refresh";
 import {
   createPostgresAuthorityDatabase,
   createPostgresAuthorityFleet,
@@ -90,14 +89,6 @@ export async function recordInstancePresentation(env: RuntimeEnv, input: {
     await observeRegistrationQuota(runtimeDirectory(env), result.registration, input.presentation?.usage, input.commandId);
   }
   return { instanceId: result.instanceId, recorded: result.recorded };
-}
-
-/** The scheduled re-read of every pool held used up (see `reprobeExhaustedRegistrationQuota`). */
-export function reprobeExhaustedQuotaOnSchedule(env: Env) {
-  const directory = createPostgresAuthorityFleet(env, {
-    applicationName: "xmatrix-hub-quota-probe", ...POSTGRES_AUTHORITY_TIMEOUTS,
-  }).directoryDatabase;
-  return reprobeExhaustedRegistrationQuota({ env, directory });
 }
 
 /** Asks the daemons behind a Channel's Space's registrations to read their quota again. */
