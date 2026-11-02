@@ -69,8 +69,9 @@ bounded database evidence, rather than relying on console serialization.
 Text-task answer application failures retain the original exception and bounded
 database evidence while still acknowledging the completed Machine command.
 Slow execution-report owner, Channel metadata root/control-head, runtime and
-machine-lifecycle control-head updates, and lifecycle admission locks sample the
-live wait edge before a lock timeout or deadlock removes it: only fixed waiter/blocker
+machine-lifecycle control-head updates, Machine command advisory scopes, and
+lifecycle admission locks sample the live wait edge before a lock timeout or
+deadlock removes it: only fixed waiter/blocker
 owner categories, state, wait type and capped transaction age are retained.
 Catalog writers have their own fixed owner category. All paths share one
 additional diagnostic connection per isolate, with 250 ms connection/query
@@ -79,6 +80,10 @@ busy sampler preserves the original error and existing recovery rules.
 For a runtime head deadlock (HUB-BH), compare the failing operation with the
 blocker's `op:<operation>`, state and wait type to locate the other code path
 before changing lock order; an unavailable sample does not establish a cause.
+For a Machine scope timeout (HUB-BJ), compare `machine-control.report` with
+the blocker's `op:<operation>`, state, wait type and age to identify which
+command held the scope. The scope preserves Machine epoch and command ordering;
+an answered `55P03` is not a lost response and does not authorize replay.
 
 Hyperdrive pools in transaction mode. Session state does not survive between
 transactions: use transaction-local settings (`set_config(..., true)` or
