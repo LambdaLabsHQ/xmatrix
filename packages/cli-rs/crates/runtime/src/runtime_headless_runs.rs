@@ -458,18 +458,24 @@ pub(crate) async fn run_claude_print_external(run: ExternalRun<'_>) -> error::Re
     if let Some(model) = startup.current_model.as_deref() {
         write_current_run_model(Some(model));
     }
-    // Quota is a property of the account, not of any turn — read it here so
-    // the instance carries its 5h/1w meters from the moment it appears.
-    // Without this the windows only arrive once a first turn *finishes*, so
-    // a freshly summoned agent shows an empty card until someone talks to it.
-    let startup_usage = read_claude_oauth_rate_limit_usage(false).await;
     send_presence(
         &relay,
         Some("idle"),
-        PresencePatch::presentation(session.presentation().snapshot(startup_usage.clone()))
+        PresencePatch::presentation(session.presentation().snapshot(None))
             .goal(startup.goal.clone())
             .runtime_state(None),
     );
+    // Quota is a property of the account, not of any turn: read it beside the
+    // first turn, never ahead of it, so the instance carries its 5h/1w meters
+    // without its start waiting on the provider. Without this the windows only
+    // arrive once a first turn *finishes*, so a freshly summoned agent would
+    // show an empty card until someone talks to it.
+    let quota_relay = relay.clone();
+    tokio::spawn(async move {
+        if let Some(usage) = read_claude_oauth_rate_limit_usage(false).await {
+            send_presence(&quota_relay, None, PresencePatch::usage(Some(usage)));
+        }
+    });
 
     let mut events = RunLoopEvents::new(event_rx, &relay, auto_join_channel_id.as_deref(), &agent)
         .without_termination();

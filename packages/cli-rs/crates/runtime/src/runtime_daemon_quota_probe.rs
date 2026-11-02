@@ -40,7 +40,7 @@ pub(crate) async fn execute_machine_quota_probe(
     let deadline = Instant::now() + PROBE_TOTAL_BUDGET;
     let mut results = Vec::with_capacity(probe.targets.len().min(MAX_PROBE_TARGETS));
     for target in probe.targets.iter().take(MAX_PROBE_TARGETS) {
-        results.push(probe_one_target(target, deadline).await);
+        results.push(probe_one_target(target, deadline, probe.fresh).await);
     }
     if !probe.window_labels {
         strip_window_labels(&mut results);
@@ -258,9 +258,11 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
     }
 }
 
-async fn read_account(account: QuotaAccount) -> Option<LlmUsage> {
+async fn read_account(account: QuotaAccount, fresh: bool) -> Option<LlmUsage> {
     // Respect each reader's short success TTL: a probe is not a reason to
     // hammer the provider, and a cached reading keeps its observation time.
+    // A fresh probe checks a refusal, which only a newer reading can answer;
+    // the Hub sends one per target and joins concurrent askers to it.
     let (provider, account) = match account {
         QuotaAccount::Codex(home) => (Provider::Codex, Account::Home(home)),
         QuotaAccount::Grok(home) => (Provider::Grok, Account::Home(home)),
@@ -271,7 +273,7 @@ async fn read_account(account: QuotaAccount) -> Option<LlmUsage> {
         provider,
         ReadOptions {
             account,
-            force: false,
+            force: fresh,
         },
     )
     .await
@@ -280,8 +282,12 @@ async fn read_account(account: QuotaAccount) -> Option<LlmUsage> {
 async fn probe_one_target(
     target: &MachineQuotaProbeTarget,
     deadline: Instant,
+    fresh: bool,
 ) -> MachineQuotaProbeTargetResult {
-    probe_one_target_with(target, deadline, resolve_target, read_account).await
+    probe_one_target_with(target, deadline, resolve_target, |account| {
+        read_account(account, fresh)
+    })
+    .await
 }
 
 async fn probe_one_target_with<R, F, Fut>(
@@ -424,6 +430,7 @@ mod tests {
                 .collect(),
             window_labels: false,
             quota_account: false,
+            fresh: false,
         };
         let report = execute_machine_quota_probe("cmd-1".to_string(), probe, None).await;
         let MachineDaemonReport::MachineQuotaProbeResult {
@@ -564,6 +571,13 @@ mod tests {
         }))
         .expect("probe");
         assert!(probe.window_labels);
+        assert!(!probe.fresh, "a probe that does not ask may answer from the cache");
+        let probe: MachineQuotaProbeRequest = serde_json::from_value(serde_json::json!({
+            "requestId": "quota:1", "connectionEpoch": 3, "fresh": true,
+            "targets": [{ "targetId": "registration:claude", "configurationDigest": "d" }],
+        }))
+        .expect("probe");
+        assert!(probe.fresh, "a probe that checks a refusal reads the provider now");
     }
 
     #[test]
