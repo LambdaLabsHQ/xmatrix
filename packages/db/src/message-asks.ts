@@ -1,10 +1,10 @@
-import { digestCanonicalCloneCborV1, parseConnectorInvocation, parseMessageInteraction, type SerializedMessageAsk } from "@xmatrix/protocol";
+import { FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS, digestCanonicalCloneCborV1, parseConnectorInvocation, parseMessageInteraction, type SerializedMessageAsk } from "@xmatrix/protocol";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
 import { ControlError } from "./control-error.js";
-import { requireRoutableHarness } from "./first-message-launch-choice.js";
+import { FIRST_MESSAGE_SUMMON_PENDING_SQL, requireRoutableHarness } from "./first-message-launch-choice.js";
 import type { QueryResultRow } from "pg";
 
 /** Conservative receipt: a message with a recipient or an interpretation owner
@@ -27,15 +27,35 @@ const RECEIVER_SQL = `EXISTS (SELECT 1 FROM data.instances i WHERE i.channel_id=
 // The first-message decision owns a new unnamed conversation from append,
 // including the gap before its row is inserted. A failed undecided reading
 // may be explicitly claimed; a decision of none is never reopened.
+const FIRST_MESSAGE_CHANNEL_SQL = `c.metadata_json->>'welcome' IS DISTINCT FROM 'true'
+  AND (c.metadata_json->>'autoName' IS NOT DISTINCT FROM 'true'
+    OR COALESCE(c.metadata_json->>'fromPageId','')<>''
+    OR (COALESCE(c.metadata_json->>'fromChannelId','')<>'' AND COALESCE(c.metadata_json->>'fromMessageId','')<>''))`;
 const DECISION_OWNS_SQL = `EXISTS (SELECT 1 FROM data.first_message_launch_choices choice
     WHERE choice.channel_id=m.channel_id AND choice.message_id=m.message_id
       AND (choice.choice IS NOT NULL OR choice.failure_code IS NULL))
-  OR (m.timeline_sequence=1 AND c.metadata_json->>'welcome' IS DISTINCT FROM 'true'
-    AND (c.metadata_json->>'autoName' IS NOT DISTINCT FROM 'true'
-      OR COALESCE(c.metadata_json->>'fromPageId','')<>''
-      OR (COALESCE(c.metadata_json->>'fromChannelId','')<>'' AND COALESCE(c.metadata_json->>'fromMessageId','')<>''))
+  OR (m.timeline_sequence=1 AND ${FIRST_MESSAGE_CHANNEL_SQL}
     AND NOT EXISTS (SELECT 1 FROM data.first_message_launch_choices failed
       WHERE failed.channel_id=m.channel_id AND failed.message_id=m.message_id AND failed.failure_code IS NOT NULL))`;
+
+// A pending summon already owns the Channel's startup, before a Run exists.
+// Keep the append witness: if that startup fails, a later explicit Ask is
+// still possible. Only current choices and their admission are suppressed.
+const OTHER_STARTUP_SQL = `EXISTS (SELECT 1 FROM data.first_message_launch_choices choice
+    JOIN data.messages source USING (space_id,channel_id,message_id)
+    WHERE choice.space_id=m.space_id AND choice.channel_id=m.channel_id AND choice.message_id<>m.message_id
+      AND ${FIRST_MESSAGE_SUMMON_PENDING_SQL}
+      AND source.edited_at IS NULL AND source.recalled_at IS NULL AND source.deleted_at IS NULL
+      AND (choice.source_input_version IS NULL OR (choice.source_input_version=COALESCE(source.invocation_input_version,source.entity_version)
+        AND choice.source_body_hash=source.body_hash)))
+  OR (${FIRST_MESSAGE_CHANNEL_SQL} AND EXISTS (SELECT 1 FROM data.messages first
+    WHERE first.space_id=m.space_id AND first.channel_id=m.channel_id AND first.timeline_sequence=1 AND first.message_id<>m.message_id
+      AND first.author_kind IN ('user','agent') AND first.message_kind='xmatrix.message.text'
+      AND first.edited_at IS NULL AND first.recalled_at IS NULL AND first.deleted_at IS NULL
+      AND first.sent_at>clock_timestamp()-make_interval(secs => ${FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS / 1000})
+      AND NOT EXISTS (SELECT 1 FROM data.automation_occurrences occurrence WHERE occurrence.message_id=first.message_id)
+      AND NOT EXISTS (SELECT 1 FROM data.first_message_launch_choices choice
+        WHERE choice.channel_id=first.channel_id AND choice.message_id=first.message_id)))`;
 
 /** Caller owns the canonical Human append and Channel lock in this transaction.
  * Evidence commits atomically with the publication; post-commit cannot invent it.
@@ -82,14 +102,14 @@ export class PostgresMessageAskRepository {
     if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(input.harness)) throw new RegistrationAccessError("invalid_launch_choice", 400);
     const hash = await digestCanonicalCloneCborV1(input.body);
     await this.transaction(input.requestId, "message-ask.claim", input.channelId, input.actorUserId, async tx => {
-      const [source] = await tx.query<QueryResultRow>({ name: "message_ask_claim_source_v2", text: `SELECT ask.input_version
+      const [source] = await tx.query<QueryResultRow>({ name: "message_ask_claim_source_v3", text: `SELECT ask.input_version
         FROM data.message_asks ask JOIN data.messages m USING (space_id,channel_id,message_id)
         JOIN data.channels c USING (space_id,channel_id)
         WHERE ask.space_id=$1 AND ask.channel_id=$2 AND ask.message_id=$3 AND ask.author_user_id=$4 AND ask.commit_certified IS TRUE
           AND m.author_kind='user' AND m.author_id=$4 AND m.body_hash=$5 AND ask.body_hash=m.body_hash
           AND ask.input_version=COALESCE(m.invocation_input_version,m.entity_version)
           AND m.recalled_at IS NULL AND m.deleted_at IS NULL AND m.edited_at IS NULL
-          AND NOT (${RECEIVER_SQL}) FOR SHARE OF m`,
+          AND NOT (${RECEIVER_SQL}) AND NOT (${OTHER_STARTUP_SQL}) FOR SHARE OF m`,
       values: [this.placement.spaceId, input.channelId, input.messageId, input.actorUserId, hash], maxRows: 1 });
       // A replay may happen after admission made a receiver. Its exact choice
       // is reconciled below, but a stale/withdrawn source still fails closed.
@@ -131,8 +151,8 @@ export class PostgresMessageAskRepository {
  * an action, and a later recipient or settled decision removes it. */
 export async function readMessageAsks(tx: DatabaseTransaction, channelId: string, messageIds: readonly string[], actorUserId: string): Promise<SerializedMessageAsk[]> {
   if (!messageIds.length) return [];
-  const rows = await tx.query<QueryResultRow>({ name: "message_ask_read_v2", text: `SELECT ask.message_id,
-      NOT (${RECEIVER_SQL}) AND NOT (${DECISION_OWNS_SQL}) AND
+  const rows = await tx.query<QueryResultRow>({ name: "message_ask_read_v3", text: `SELECT ask.message_id,
+      NOT (${RECEIVER_SQL}) AND NOT (${DECISION_OWNS_SQL}) AND NOT (${OTHER_STARTUP_SQL}) AND
       ${channelCapabilityPredicate({ capability: "runtime_new_work", channelAlias: "c", principalKindSql: "'user'", principalIdSql: "$3" })}
       AS can_ask FROM data.message_asks ask
     JOIN data.messages m USING (space_id,channel_id,message_id) JOIN data.channels c USING (space_id,channel_id)

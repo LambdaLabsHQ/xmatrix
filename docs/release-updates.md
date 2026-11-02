@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Follow-up messages wait for the Agent already being started
+
+Before a chosen Agent had a Run, a second message could offer another picker
+and two concurrent picks could both succeed. The Hub now treats the Channel's
+pending launch decision as startup ownership in both the Ask projection and
+its locked claim. Follow-up evidence stays available for explicit recovery
+after a failed, cancelled or expired startup; exact retries keep the original
+decision. Hub only, no schema or client change; recovery is a CI-validated
+Hub release reverting this pending-startup check.
+
 ## Unreleased: Runtime control-head deadlocks retain the live blocker
 
 HUB-BH aborted a registration launch while advancing its Space control head.

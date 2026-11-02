@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+While a Channel's launch choice is still starting, follow-up messages cannot
+offer or claim a second Agent choice. Their append evidence stays available
+for explicit recovery after a failed or cancelled startup. See
+[message ownership](../architecture/message-asks.md).
+
 Daemon reconnect discards queued snapshots captured for the replaced connection
 before writing to the new socket. Fresh full snapshots restore observations;
 successful spawn results retain their original causal evidence for reconciliation.
