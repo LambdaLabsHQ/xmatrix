@@ -8,6 +8,16 @@ provider again, so a manual reset or top-up kept refusing summons. The Hub's
 minute clock now asks each online daemon to re-read every pool held used up,
 at most once per daemon per 55 seconds. Hub only, no schema or authorization
 change; recovery is a CI-validated revert of the scheduled step.
+## Unreleased: An agent that quits or waits for a sign-in is not chosen
+
+The daemon's can-it-take-work check counted only credential errors, so an ACP
+agent that quit before opening a session (a WorkBuddy-bundled CodeBuddy on
+Windows) stayed "unknown" and routing kept choosing it. Any failure before a
+session opens now reads as unable to take work, in the agent's own words, with
+the existing Check again. A credential retry that waits on a browser login
+(CodeBuddy Code without a sign-in) fails as signed out after 20 seconds instead
+of hanging the start. CLI only, no protocol or schema change; recovery is a
+CI-validated CLI release reverting `runtime_acp_session.rs`.
 
 ## Unreleased: Daily PostgreSQL maintenance waits for a release to finish
 
