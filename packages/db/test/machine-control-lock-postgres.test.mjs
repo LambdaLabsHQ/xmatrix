@@ -1,24 +1,17 @@
 import assert from "node:assert/strict";
-import { Client } from "pg";
 import { createAuthorityDatabase, databaseFailureEvidence, PostgresMachineControlRepository } from "../dist/index.js";
-import { integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
+import { integration, isolatedPostgres, postgresDiagnosticClients } from "./postgres-database.fixture.mjs";
 
 // HUB-BJ waits on the Machine advisory scope before any row query. Existing
 // Channel/head lock tests cannot retain the holder of this command boundary.
 integration("a blocked Machine report retains its scope holder without changing rejection or replay", async () => {
   const fixture = await isolatedPostgres("machine_scope_lock");
   const holder = fixture.client;
-  let samples = 0, unavailable = false;
+  const diagnostics = postgresDiagnosticClients();
   const observations = [];
   const database = createAuthorityDatabase({ connectionString: fixture.url.toString(), shardId: "shard-0",
     applicationName: "xmatrix-hub-machine-control", lockTimeoutMs: 1500,
-    sessionObserver: point => observations.push(point), clientFactory: config => {
-      if (config.application_name === "xmatrix-lock-diagnostic") {
-        samples++;
-        if (unavailable) throw new Error("private-diagnostic-failure");
-      }
-      return new Client(config);
-    } });
+    sessionObserver: point => observations.push(point), clientFactory: diagnostics.clientFactory });
   const controls = new PostgresMachineControlRepository(database);
   const route = { ownerUserId: "private-owner", ownerEmail: "private@example.test",
     machineId: `machine:${"a".repeat(64)}`, hostId: "private-host", daemonId: "private-daemon" };
@@ -35,7 +28,7 @@ integration("a blocked Machine report retains its scope holder without changing 
       capabilities: [], payload: {}, principal });
     const before = (await holder.query("SELECT to_jsonb(d) AS value FROM data.machine_daemons d")).rows;
     for (const sequence of [1, 2]) {
-      unavailable = sequence === 2;
+      diagnostics.unavailable = sequence === 2;
       await holder.query("BEGIN; SET LOCAL application_name='xmatrix-hub-machine-control machine-control.claim'");
       await holder.query("SELECT pg_advisory_xact_lock(hashtextextended('machine-control:'||$1||':'||$2,0))",
         [route.ownerUserId, route.machineId]);
@@ -44,8 +37,8 @@ integration("a blocked Machine report retains its scope holder without changing 
         const [evidence] = databaseFailureEvidence(error);
         assert.equal(evidence.operation, "machine-control.report");
         assert.equal(evidence.queryName, "machine_control_scope_lock_v2");
-        assert.equal(evidence.lockWait?.status, unavailable ? "unavailable" : "sampled");
-        if (!unavailable) {
+        assert.equal(evidence.lockWait?.status, diagnostics.unavailable ? "unavailable" : "sampled");
+        if (!diagnostics.unavailable) {
           assert.equal(evidence.lockWait.waiter.owner, "op:machine-control.report");
           assert.equal(evidence.lockWait.waiter.wait, "Lock");
           assert.equal(evidence.lockWait.blockers.length, 1);
@@ -63,10 +56,10 @@ integration("a blocked Machine report retains its scope holder without changing 
     }
     assert.equal(observations.filter(point => point.operation === "machine-control.report").length, 2,
       "each rejected command runs once");
-    assert.equal(samples, 2, "one bounded diagnostic attempt per blocked command");
-    unavailable = false;
+    assert.equal(diagnostics.attempts, 2, "one bounded diagnostic attempt per blocked command");
+    diagnostics.unavailable = false;
     assert.equal((await report(3)).connectionEpoch, 1, "the released scope accepts the next report");
-    assert.equal(samples, 2, "uncontended commands open no diagnostic connection");
+    assert.equal(diagnostics.attempts, 2, "uncontended commands open no diagnostic connection");
   } finally {
     await holder.query("ROLLBACK").catch(() => {});
     await fixture.close();

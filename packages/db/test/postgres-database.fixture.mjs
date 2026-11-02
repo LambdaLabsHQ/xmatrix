@@ -12,6 +12,18 @@ export const connectionString = process.env.XMATRIX_TEST_POSTGRES_URL;
 export const integration = connectionString || process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true"
   ? test : test.skip;
 
+/** Real command clients, with a countable diagnostic checkout that can fail independently. */
+export function postgresDiagnosticClients() {
+  const diagnostics = { attempts: 0, unavailable: false, clientFactory: config => {
+    if (config.application_name === "xmatrix-lock-diagnostic") {
+      diagnostics.attempts++;
+      if (diagnostics.unavailable) throw new Error("private-diagnostic-failure");
+    }
+    return new Client(config);
+  } };
+  return diagnostics;
+}
+
 /** Independent bounded commands plus a direct connection for connector fixture setup. */
 export async function connectorDatabase(applicationName) {
   assert.ok(connectionString, "XMATRIX_TEST_POSTGRES_URL is required for connector tests");
