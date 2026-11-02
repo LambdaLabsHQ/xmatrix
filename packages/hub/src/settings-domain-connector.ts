@@ -4,7 +4,7 @@ import {
 } from "@xmatrix/protocol";
 import { checkAppConnection } from "./app-connection-check";
 import { getAppConnectorProvider } from "./app-connectors";
-import { listAppConnections, upsertAppConnection } from "./apps";
+import { connectionUseRefused, listAppConnections, upsertAppConnection } from "./apps";
 import { credentialPolicy, readConnectorReadback, saveConnectorCredentials } from "./connectors/credential-policy";
 import { SettingWriteRefused, type SettingDomainResolver, type SettingsReader } from "./settings-registry";
 
@@ -19,7 +19,11 @@ export interface ConnectorSettingsPort {
 }
 
 const PORT: ConnectorSettingsPort = {
-  connections: (reader) => listAppConnections(reader.env, { spaceId: reader.spaceId, actorUserId: reader.userId }),
+  async connections(reader) {
+    try { return await listAppConnections(reader.env, { spaceId: reader.spaceId, actorUserId: reader.userId }); }
+    // Someone who reads the Channel but not the Space's connections sees that a setting is asked for, not its state.
+    catch (error) { if (connectionUseRefused(error)) return []; throw error; }
+  },
   async readback(reader, providerId) {
     const policy = credentialPolicy(providerId);
     if (!policy) return undefined;
