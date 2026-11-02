@@ -10,11 +10,12 @@ export interface RegistrationQuotaKey { ownerUserId: string; machineId: string; 
 export const registrationQuotaKey = (key: RegistrationQuotaKey): string =>
   JSON.stringify([key.ownerUserId, key.machineId, key.harness]);
 
-/** Instance observations and daemon probes share this directory-owned record. */
+/** Instance observations and daemon probes share this directory-owned record.
+ * True when the reading left one of the owner's refused summons ready to wake. */
 export async function observeRegistrationQuota(database: AuthorityDatabase, key: RegistrationQuotaKey,
-  usage: unknown, requestId: string): Promise<void> {
+  usage: unknown, requestId: string): Promise<boolean> {
   const observation = routingQuotaObservation(usage, Date.now());
-  if (!observation) return;
+  if (!observation) return false;
   const windows = currentRoutingQuotaWindows(((usage as LlmUsage).quotaUsages ?? []).flatMap(window => {
     if (typeof window.percent !== "number") return [];
     const reset = routingQuotaResetTime(window.resetAt);
@@ -22,17 +23,37 @@ export async function observeRegistrationQuota(database: AuthorityDatabase, key:
       ...(Number.isFinite(reset) ? { resetAt: new Date(reset).toISOString() } : {}) }];
   }), Date.now());
   const account = parseLlmQuotaAccount((usage as LlmUsage).quotaAccount);
-  await database.transaction({ requestId, operation: "registration.quota.observe-instance" }, async tx => {
+  return database.transaction({ requestId, operation: "registration.quota.observe-instance" }, async tx => {
     const rows = await tx.query<QueryResultRow>({ name: "registration_quota_instance_pool_v1",
       text: `SELECT ${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id FROM control.agent_registration_environments e
         WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
       values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 });
-    if (!rows[0]) return;
-    await upsertRegistrationQuotaObservation(tx, { ownerUserId: key.ownerUserId,
+    if (!rows[0]) return false;
+    return upsertRegistrationQuotaObservation(tx, { ownerUserId: key.ownerUserId,
       quotaPoolId: String(rows[0].quota_pool_id), remaining: observation.value,
       observedAt: observation.observedAt, expiresAt: observation.expiresAt, source: "provider", windows,
       ...(account ? { account } : {}) });
   });
+}
+
+/** When each registration's current reading stops counting (a hold ends,
+ * a reading expires), for readings that have one. */
+export async function readRegistrationQuotaExpiries(database: AuthorityDatabase,
+  keys: readonly RegistrationQuotaKey[], requestId: string): Promise<Map<string, string>> {
+  const unique = [...new Map(keys.map(key => [registrationQuotaKey(key), key])).values()].slice(0, 512);
+  if (!unique.length) return new Map();
+  const rows = await database.transaction({ requestId, operation: "registration.quota.expiries", statement: "single_read" },
+    tx => tx.query<QueryResultRow>({ name: "registration_quota_expiries_v1", text: `SELECT e.owner_user_id,e.machine_id,
+        e.harness,to_json(quota.expires_at)#>>'{}' AS expires_at
+      FROM jsonb_to_recordset($1::jsonb) requested("ownerUserId" text,"machineId" text,harness text)
+      JOIN control.agent_registration_environments e ON e.owner_user_id=requested."ownerUserId"
+        AND e.machine_id=requested."machineId" AND e.harness=requested.harness
+      ${REGISTRATION_QUOTA_STATE_JOIN}
+      WHERE quota.observed_at<=statement_timestamp() AND quota.expires_at>statement_timestamp()`,
+    values: [JSON.stringify(unique.map(({ ownerUserId, machineId, harness }) => ({ ownerUserId, machineId, harness })))],
+    maxRows: 512 }));
+  return new Map(rows.map(row => [registrationQuotaKey({ ownerUserId: String(row.owner_user_id),
+    machineId: String(row.machine_id), harness: String(row.harness) }), String(row.expires_at)]));
 }
 
 /** A registration and its pool's reading, as both readers select them. */

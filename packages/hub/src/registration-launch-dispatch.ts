@@ -17,6 +17,7 @@ import { dispatchPreparedAgentLaunchWake } from "./product-agent-mention-authori
 import { scheduleAgentRoutingQuotaRefresh } from "./agent-routing-quota-refresh";
 import { jevEvaluator, refreshChannelRoutingQuota, runtimePlacement } from "./runtime";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
+import { QUOTA_VERIFY_WINDOW_MS, waitAfterQuotaRefusal } from "./quota-waits";
 import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 
@@ -67,16 +68,31 @@ export async function executeRegistrationLaunchDispatch(input: {
   // A recorded refusal answers its summon now; accepted launches answer as the coordinator publishes them.
   if (result.rejected.length && input.env) await publishChannelInvocationsChanged(input.env as Env, input.channelId);
   const rejected = [];
+  /** Used-up refusals with what they rested on, for a quota retry's own re-check. */
+  const quotaRefusals: Array<{ selectionIndex: number; registrations: SpaceAgentRegistrationKey[]; refusedThrough: string }> = [];
   for (const item of result.rejected) {
-    const { quotaTargets, ...publicItem } = item;
+    const { quotaTargets, quotaRefusedThrough, ...publicItem } = item;
+    // A refusal for used-up quota rests on a reading that may already be out
+    // of date (a reset, a top-up): it waits for a newer reading, asks for one
+    // now, and starts on its own when one clears it within the window.
+    const refusedThrough = quotaRefusedThrough ?? new Date().toISOString();
+    if (item.code === "registration_quota_exhausted" && quotaTargets?.length) {
+      quotaRefusals.push({ selectionIndex: item.selectionIndex, registrations: quotaTargets, refusedThrough });
+    }
     const quotaRetryId = !input.quotaRetry && item.code === "registration_quota_exhausted" && quotaTargets?.length
       ? await new PostgresQuotaRetryRepository(input.database, placement).offer({ channelId: input.channelId,
         actorUserId: input.actorUserId, sourceMessageId: input.sourceMessageId, sourceMention: item.sourceMention,
         sourceBodyHash: await digestCanonicalCloneCborV1(input.body),
-        selectionIndex: item.selectionIndex, registrations: quotaTargets }) : undefined;
+        selectionIndex: item.selectionIndex, registrations: quotaTargets, refusedThrough,
+        verifyForMs: QUOTA_VERIFY_WINDOW_MS }) : undefined;
+    if (quotaRetryId && quotaTargets?.length && input.env) {
+      await waitAfterQuotaRefusal(input.env as Env, { channelId: input.channelId, registrations: quotaTargets,
+        refusedThrough, verify: true }).catch((error: unknown) => console.warn("Quota wait after a refusal failed", {
+        error: error instanceof Error ? error.message : String(error) }));
+    }
     rejected.push({ ...publicItem, ...(quotaRetryId ? { quotaRetryId } : {}) });
   }
-  return { ...result, rejected, shardId: placement.shardId, channelId: input.channelId };
+  return { ...result, rejected, quotaRefusals, shardId: placement.shardId, channelId: input.channelId };
 }
 
 interface RegistrationInputLaunch {

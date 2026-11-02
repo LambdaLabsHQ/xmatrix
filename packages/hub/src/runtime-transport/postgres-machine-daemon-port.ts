@@ -48,6 +48,7 @@ import { isRecoverableLaunchFailure } from "../live-run-admission";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { wakeMachineChannels } from "../registration-authority-wake";
 import { wakeInstancesAwaitingMachine } from "../registration-launch-dispatch";
+import { verifyWaitedQuotaOnMachine } from "../quota-waits";
 import { pageSummaryAnswered } from "../page-summary-answer";
 import type { ScheduledStep } from "../postgres-agent-launch-schedule";
 import { machineDaemonCommand } from "../machines";
@@ -107,9 +108,7 @@ export interface PostgresMachineDaemonPortDependencies {
   wakeCoordinator?(channelId: string, work: readonly ScheduledStep[]): Promise<void>;
   /** Retain work that outlives the frame that started it. */
   keepAlive?(task: Promise<unknown>): void;
-  /** A probe was answered; `wakeChannelId` names the Channel whose refused
-   * summon asked for it when a reading came back with headroom. */
-  quotaChanged?(route: { ownerUserId: string; machineId: string; wakeChannelId?: string }): Promise<void>;
+  quotaChanged?(route: { ownerUserId: string; machineId: string }): Promise<void>;
   /** A Machine of `ownerUserId` answered a text task; whoever issued it decides what the answer is for. */
   textTaskAnswered?(task: { requestId: string; result: TextTaskResult; ownerUserId: string }): Promise<void>;
   /** The daemon connected: wake the Channels whose work waits on this Machine. */
@@ -133,9 +132,10 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       daemonCommand: (command) => machineDaemonCommand(input.env, command),
       runLifecycleReport: (report) => machineRunLifecycleReport(input.env, report),
       launchUpdate: (update) => updateAgentLaunch(input.env, update),
-      // Work queued for the machine moves, and Instances a message could not wake while it was away wake.
+      // Work queued for the machine moves, Instances a message could not wake while it was away wake,
+      // and quota a refused summon waits on there is read again.
       machineConnected: (route) => Promise.all([wakeMachineChannels(input.env, route),
-        wakeInstancesAwaitingMachine(input.env, route)]),
+        wakeInstancesAwaitingMachine(input.env, route), verifyWaitedQuotaOnMachine(input.env, route)]),
       textTaskAnswered: (task) => channelAboutRequest(task.requestId)
         ? channelAboutAnswered(input.env, task, input.runtimeSelf ? { runtimeSelf: {
           cellName: input.runtimeSelf.cellName(), fetch: request => input.runtimeSelf!.fetch(request),
@@ -306,9 +306,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     }
     const result = await this.dependencies.daemonCommand(machineControlInput);
     if (message.type === "machine_quota_probe_result") {
-      await this.dependencies.quotaChanged?.({ ownerUserId: session.principal.ownerUserId,
-        machineId: session.principal.machineId,
-        ...(typeof result.quotaWakeChannelId === "string" ? { wakeChannelId: result.quotaWakeChannelId } : {}) });
+      await this.dependencies.quotaChanged?.({ ownerUserId: session.principal.ownerUserId, machineId: session.principal.machineId });
     }
     if (message.type === "machine_text_task_result") {
       // The command is complete either way; what the answer is for must not fail the Machine's report.
@@ -923,7 +921,7 @@ function claimedCommand(value: unknown, capabilities: readonly string[]): Machin
   if (type === "machine_quota_probe") {
     const probe = parseRoutingQuotaProbeRequest(payload.probe);
     if (probe.requestId !== requestId || Object.keys(payload).some(key =>
-        !["type", "requestId", "probe", "relayLease", "wakeChannelId"].includes(key))) {
+        !["type", "requestId", "probe", "relayLease", "readAfter"].includes(key))) {
       throw new Error("PostgreSQL returned an invalid quota probe command");
     }
     return { type, requestId, probe };

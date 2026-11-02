@@ -130,30 +130,6 @@ test("quota probes are capability gated and complete through the existing lease"
   assert.equal(calls.length, before, "rejected responses never reach the authority");
 });
 
-test("a probe a refused summon issued wakes its Channel only when the reading has headroom", async () => {
-  const probe = { requestId: "probe-2", connectionEpoch: 7,
-    targets: [{ targetId: "registration:codex", configurationDigest: "a".repeat(64) }] };
-  const lease = { leaseOwner: "machine-lease", leaseGeneration: 1, entityVersion: 2, daemonEpoch: 7 };
-  for (const [completion, expected] of [[{ quotaWakeChannelId: "channel-1" }, "channel-1"], [{}, undefined]]) {
-    const changed = [];
-    const port = authorityPort({
-      commands: recordingCommands([], (_name, input) => (input.action === "claim"
-        ? { commands: [{ ...lease, payload: { type: "machine_quota_probe", requestId: probe.requestId, probe,
-          wakeChannelId: "channel-1" } }] }
-        : input.action === "complete" ? completion : {})),
-      quotaChanged: async route => { changed.push(route); },
-    });
-    const capable = { ...session, capabilities: ["machine_quota_probe_v2"] };
-    const [command] = await port.claimCommands(capable);
-    assert.equal(command.wakeChannelId, undefined, "the daemon never sees which Channel asked");
-    await port.execute(capable, { type: "machine_quota_probe_result", requestId: probe.requestId,
-      probe: { requestId: probe.requestId, connectionEpoch: 7,
-        results: [{ ...probe.targets[0], status: "unavailable", reason: "provider_unavailable" }] } });
-    assert.equal(changed.length, 1);
-    assert.equal(changed[0].wakeChannelId, expected);
-  }
-});
-
 /**
  * A command type only a capable daemon claims: an older daemon is never sent
  * it, an invalid stored command is refused, and its result completes through

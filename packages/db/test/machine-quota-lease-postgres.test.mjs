@@ -15,12 +15,12 @@ integration("quota probes get a bounded execution window at claim without admitt
     const connected = await controls.command({ ...machine, commandId: randomUUID(), action: "connect",
       principal, capabilities: ["machine_quota_probe_v2"], payload: {}, metadata: {} });
     const target = { targetId: "registration:codex", configurationDigest: "a".repeat(64) };
-    const issue = async (extra = {}) => {
+    const issue = async () => {
       const requestId = `quota:${randomUUID()}`;
       await controls.command({ ...machine, commandId: randomUUID(), action: "issue",
         principal: { kind: "user", id: "owner" }, controlId: requestId, commandType: "quota_probe",
         payload: { type: "machine_quota_probe", requestId,
-          probe: { requestId, connectionEpoch: connected.connectionEpoch, targets: [target] }, ...extra } });
+          probe: { requestId, connectionEpoch: connected.connectionEpoch, targets: [target] } } });
       return requestId;
     };
     const claim = () => controls.command({ ...machine, commandId: randomUUID(), action: "claim",
@@ -46,12 +46,6 @@ integration("quota probes get a bounded execution window at claim without admitt
       "admission must leave the full ten-second daemon probe budget plus result delivery time");
     await complete(claimed.commands[0]);
     assert.equal((await client.query("SELECT status FROM data.machine_daemon_commands WHERE command_id=$1", [delayedId])).rows[0].status, "completed");
-
-    // A refused summon's probe names its Channel; only a reading with headroom hands it back.
-    await assert.rejects(issue({ wakeChannelId: "not a channel" }), error => error.code === "invalid_quota_probe");
-    await issue({ wakeChannelId: "channel-1" });
-    const asked = (await claim()).commands[0];
-    assert.equal((await complete(asked)).quotaWakeChannelId, undefined, "an unavailable reading wakes nothing");
 
     const lateId = await issue();
     const late = (await claim()).commands[0];

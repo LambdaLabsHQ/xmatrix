@@ -5,18 +5,17 @@ import {
   type SpaceAgentRegistrationKey,
 } from "@xmatrix/protocol";
 import {
-  PostgresChannelSpaceDirectory,
-  PostgresSpacePlacementDirectory,
-  PostgresQuotaRetryRepository,
   PostgresMessageRepository,
   RegistrationAccessError,
   ControlError,
+  readRegistrationQuotaExpiries,
   readRegistrationQuotaState,
   registrationQuotaKey,
   type AuthorityDatabase,
   type QuotaRetryWork,
 } from "@xmatrix/db";
-import { runtimePlacement, runtimeRepository, jevEvaluator, refreshChannelRoutingQuota } from "./runtime";
+import { runtimeRepository, jevEvaluator } from "./runtime";
+import { quotaRetryRepository, verifyRegistrationQuota, waitAfterQuotaRefusal } from "./quota-waits";
 import {
   dispatchProductAgentSystemNotice,
   productAgentSystemNoticeId,
@@ -46,24 +45,7 @@ async function quotaSourceMessage(input: {
   });
   return page.messages.map(postgresProductMessage).find(message => message.messageId === input.messageId);
 }
-export async function quotaRetryRepository(env: Env, channelId: string, database?: AuthorityDatabase) {
-  const authorities = runtimePlacement(env);
-  const route = await new PostgresChannelSpaceDirectory(authorities.directory).resolve(
-    { requestId: crypto.randomUUID(), operation: "quota-retry.locate" },
-    channelId,
-  );
-  if (!route) throw new RegistrationAccessError("channel_not_found", 404);
-  const placement = await new PostgresSpacePlacementDirectory(authorities.directory).resolve(
-    { requestId: crypto.randomUUID(), operation: "quota-retry.placement" },
-    route.spaceId,
-  );
-  if (placement.state !== "active") throw new RegistrationAccessError("registration_placement_unavailable", 503);
-  return {
-    repository: new PostgresQuotaRetryRepository(database ?? authorities.database, placement),
-    placement,
-    ...authorities,
-  };
-}
+export { quotaRetryRepository };
 /** A failed handoff may offer waiting, but never schedules it. The stopped
  * source keeps its own session; a successful successor suppresses this offer. */
 export async function offerUsageLimitRecovery(env: Env, input: HandoffSuccessor): Promise<void> {
@@ -107,6 +89,8 @@ export async function offerUsageLimitRecovery(env: Env, input: HandoffSuccessor)
     registrationQuotaKey(key),
   );
   if (!quota || (quota.quotaState !== "exhausted" && !quota.quotaUsages?.some((w) => (w.percent ?? 0) >= 100))) return;
+  // The hold or reading that stopped the Instance: only a newer reading is news.
+  const refusedThrough = quota.quotaObservedAt ?? new Date().toISOString();
   const id = await repository.offer({
     channelId: input.channelId,
     actorUserId: input.actorUserId,
@@ -118,7 +102,13 @@ export async function offerUsageLimitRecovery(env: Env, input: HandoffSuccessor)
       instanceId: input.sourceInstanceId,
       runId: input.sourceRunId,
     },
+    refusedThrough,
   });
+  // Recovering a stopped Instance stays its author's choice: the wait only
+  // wakes the retry once they chose it, and asks no read of its own.
+  await waitAfterQuotaRefusal(env, { channelId: input.channelId, registrations: [key], refusedThrough, verify: false })
+    .catch((error: unknown) => console.warn("Quota wait after a usage limit failed", {
+      error: error instanceof Error ? error.message : String(error) }));
   const source = { database,spaceId:placement.spaceId,channelId:input.channelId,actorUserId:input.actorUserId };
   const handoff = await quotaSourceMessage({ ...source,messageId:input.sourceMessageId });
   const metadata = handoff?.metadata as Record<string,unknown> | undefined;
@@ -138,31 +128,46 @@ export async function offerUsageLimitRecovery(env: Env, input: HandoffSuccessor)
     metadata: { kind: AGENT_QUOTA_RETRY_NOTICE_KIND, xmatrixQuotaRetryId: id },
   });
 }
-/** Readiness is a provider observation newer than the refusal. The expiry of a
- * routing hold, an offline daemon or an unavailable probe never proves quota. */
+/** Readiness is a provider observation newer than the reading that refused
+ * (or, for a retry from before that was recorded, than the refusal). The
+ * expiry of a routing hold, an offline daemon or an unavailable probe never
+ * proves quota. A retry not ready is checked next when its blocking windows
+ * reset, or when the hold it waits behind ends; with neither known it waits
+ * for an event (a reading, a reconnect) rather than a time. */
 async function quotaRetryReadiness(
   directory: AuthorityDatabase,
   row: QuotaRetryWork,
-): Promise<{ ready: boolean; nextCheckAt: number }> {
-  const quotas = await readRegistrationQuotaState(directory, row.registrations_json, crypto.randomUUID());
+): Promise<{ ready: boolean; nextCheckAt: number | null; fence: string }> {
+  const keys = row.registrations_json;
+  const [quotas, expiries] = await Promise.all([
+    readRegistrationQuotaState(directory, keys, crypto.randomUUID()),
+    readRegistrationQuotaExpiries(directory, keys, crypto.randomUUID()),
+  ]);
   const now = Date.now();
-  const candidates = row.registrations_json.map((key) => {
+  const fence = row.refused_through ? new Date(row.refused_through) : new Date(row.created_at);
+  const newer = (observedAt: string) => row.refused_through
+    ? Date.parse(observedAt) > fence.getTime() : Date.parse(observedAt) >= fence.getTime();
+  const candidates = keys.map((key) => {
     const q = quotas.get(registrationQuotaKey(key));
     const ready =
       q?.quotaState === "observed" &&
       q.quotaObservedAt !== undefined &&
-      Date.parse(q.quotaObservedAt) >= Date.parse(String(row.created_at)) &&
+      newer(q.quotaObservedAt) &&
       (routingQuotaObservation(q, now)?.value ?? 0) > 0;
-    // All blocking windows must have provider timestamps. Routing hold expiry
-    // is deliberately absent from this calculation.
+    // All blocking windows must have provider timestamps; a hold names none,
+    // so its end is when it is read again.
     const blockers = q?.quotaUsages?.filter((window) => (window.percent ?? 0) >= 100) ?? [];
     const resets = blockers.map((window) => routingQuotaResetTime(window.resetAt));
     const known = resets.length > 0 && resets.every((time) => Number.isFinite(time) && time > now);
-    return { ready, nextCheckAt: known ? Math.min(Math.max(...resets) + 1_000, now + 15 * 60_000) : now + 5 * 60_000 };
+    const holdEnds = Date.parse(expiries.get(registrationQuotaKey(key)) ?? "");
+    return { ready, nextCheckAt: known ? Math.max(...resets) + 1_000
+      : q?.quotaState === "exhausted" && Number.isFinite(holdEnds) && holdEnds > now ? holdEnds + 1_000 : null };
   });
+  const times = candidates.flatMap((candidate) => candidate.nextCheckAt === null ? [] : [candidate.nextCheckAt]);
   return {
     ready: candidates.some((candidate) => candidate.ready),
-    nextCheckAt: Math.min(Date.parse(String(row.expires_at)), ...candidates.map((candidate) => candidate.nextCheckAt)),
+    nextCheckAt: times.length ? Math.min(Date.parse(String(row.expires_at)), ...times) : null,
+    fence: fence.toISOString(),
   };
 }
 async function retryLaunch(
@@ -202,21 +207,12 @@ async function retryLaunch(
     onlySelectionIndex: row.selection_index,
     quotaRetry: admission,
   });
-  if (!result.prepared.length)
-    throw new RegistrationAccessError(result.rejected[0]?.code ?? "registration_source_changed", 409);
-  await wakeAgentLaunchCoordinator(env, channelId, ["launch"]);
-}
-/** A provider reading with headroom answered a probe this Channel's summon
- * issued: each refused summon whose own pool the readings now clear is due
- * now rather than at its reset, and the coordinator starts it. A summon whose
- * pool is still used up is left as it was. */
-export async function wakeQuotaRetriesAfterReading(env: Env, channelId: string): Promise<void> {
-  const { repository, directory } = await quotaRetryRepository(env, channelId);
-  const ready: string[] = [];
-  for (const row of await repository.wakeable(channelId)) {
-    if ((await quotaRetryReadiness(directory, row)).ready) ready.push(row.retry_id);
+  if (!result.prepared.length) {
+    const refusal = result.quotaRefusals[0];
+    throw new RegistrationAccessError(result.rejected[0]?.code ?? "registration_source_changed", 409,
+      undefined, undefined, undefined, refusal?.registrations, refusal?.refusedThrough);
   }
-  if (await repository.expedite(channelId, ready)) await wakeAgentLaunchCoordinator(env, channelId, ["launch"]);
+  await wakeAgentLaunchCoordinator(env, channelId, ["launch"]);
 }
 export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabase, channelId: string): Promise<void> {
   const { repository, directory } = await quotaRetryRepository(env, channelId, database);
@@ -249,11 +245,13 @@ export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabas
           ? { ready: true, nextCheckAt: Date.now() }
           : await quotaRetryReadiness(directory, row);
       if (!readiness.ready) {
-        // Command issuance is durable; a later coordinator pass reads its result.
-        await refreshChannelRoutingQuota(env, {
-          channelId,
-          actorUserId: row.actor_user_id,
-        });
+        // Not ready at its time: ask for one fresh read of its own pools,
+        // newer than what refused it. The reading wakes it through its wait.
+        if ("fence" in readiness) {
+          await verifyRegistrationQuota(env, { registrations: row.registrations_json, readAfter: readiness.fence })
+            .catch((error: unknown) => console.warn("Quota retry verification failed", {
+              error: error instanceof Error ? error.message : String(error) }));
+        }
         await repository.settle(channelId, row, "waiting", readiness.nextCheckAt);
         continue;
       }
@@ -283,14 +281,24 @@ export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabas
       await repository.settle(channelId, row, "dispatched");
     } catch (error) {
       if (!(error instanceof ControlError) || error.status >= 500) throw error;
+      const waits = error.code === "registration_quota_exhausted" || error.code === "registration_daemon_offline";
+      // Refused again: it waits for news it has not seen. For used-up quota
+      // that is a reading newer than the one the launch just rested on (a
+      // model's own pool may be used up while the account's is not); for an
+      // offline daemon, a reading taken after it reconnects.
+      const refusedThrough = error instanceof RegistrationAccessError && error.code === "registration_quota_exhausted"
+        ? error.quotaRefusedThrough ?? new Date().toISOString() : new Date().toISOString();
       await repository.settle(
         channelId,
         row,
-        error.code === "registration_quota_exhausted" || error.code === "registration_daemon_offline"
-          ? "waiting"
-          : error.code === "quota_retry_cancelled" ? "cancelled" : "failed",
-        undefined,error.code,
+        waits ? "waiting" : error.code === "quota_retry_cancelled" ? "cancelled" : "failed",
+        null, error.code, waits ? refusedThrough : undefined,
       );
+      if (waits) {
+        await waitAfterQuotaRefusal(env, { channelId, registrations: row.registrations_json, refusedThrough, verify: false })
+          .catch((waitError: unknown) => console.warn("Quota retry wait failed", {
+            error: waitError instanceof Error ? waitError.message : String(waitError) }));
+      }
     }
   }
 }

@@ -10,9 +10,7 @@ import type { Env } from "./types";
  * pool or owner to write. This only asks each daemon to read its quota; the
  * daemon's completed probe records the readings (see
  * `recordRegistrationQuotaProbeResult`), however long the provider takes, so
- * nothing here waits for them. Selection reads those persisted facts, and a
- * reading with headroom wakes this Channel's summons refused for used-up quota
- * (`wakeQuotaRetriesAfterReading`). */
+ * nothing here waits for them. Selection reads those persisted facts. */
 export async function refreshAgentRoutingQuota(input: {
   env: Env; directory: AuthorityDatabase; runtime: PostgresRuntimeRepository;
   channelId: string; actorUserId: string;
@@ -21,23 +19,26 @@ export async function refreshAgentRoutingQuota(input: {
   const { spaceId } = await input.runtime.launchChannelSpace({ requestId: crypto.randomUUID(),
     channelId: input.channelId, actorUserId: input.actorUserId });
   return issueRegistrationQuotaProbes({ env: input.env, directory: input.directory,
-    entries: await input.registrationTargets(spaceId), wakeChannelId: input.channelId }, dependencies);
+    entries: await input.registrationTargets(spaceId) }, dependencies);
 }
 
 export type QuotaProbeIssueDependencies = { issue?: (command: Record<string, unknown>) => Promise<unknown>;
   machines?: Pick<PostgresMachineControlRepository, "getDaemon"> };
 
 /** Ask each target's daemon to read its quota, one probe per daemon and at
- * most 32 targets each. Targets come only from the server's registration read. */
+ * most 32 targets each. Targets come only from the server's registration read.
+ * A `fresh` read checks a refusal: one probe per target, read from the
+ * provider now and newer than `readAfter`, joining a read of the same target
+ * already under way (see machine control). */
 export async function issueRegistrationQuotaProbes(input: {
   env: Env; directory: AuthorityDatabase; entries: readonly RegistrationQuotaProbeTarget[];
-  /** The Channel whose summon asked; a reading with headroom wakes its refused summons. */
-  wakeChannelId?: string;
+  fresh?: { readAfter: string };
 }, dependencies: QuotaProbeIssueDependencies = {}): Promise<{ issued: number }> {
   const { entries } = input;
   const groups = new Map<string, RegistrationQuotaProbeTarget[]>();
   for (const entry of entries) {
-    const key = JSON.stringify([entry.ownerUserId, entry.machineId, entry.hostId, entry.connectionEpoch]);
+    const key = JSON.stringify([entry.ownerUserId, entry.machineId, entry.hostId, entry.connectionEpoch,
+      ...(input.fresh ? [entry.targetId] : [])]);
     const group = groups.get(key) ?? [];
     // A daemon answers each target id once per probe.
     if (!group.some(item => item.targetId === entry.targetId)) group.push(entry);
@@ -57,7 +58,7 @@ export async function issueRegistrationQuotaProbes(input: {
       const requestId = `quota:${crypto.randomUUID()}`;
       const probe: RoutingQuotaProbeRequest = { requestId, connectionEpoch: first.connectionEpoch,
         targets: batch.map(entry => ({ targetId: entry.targetId, configurationDigest: entry.configurationDigest })),
-        windowLabels: true, quotaAccount: true };
+        windowLabels: true, quotaAccount: true, ...(input.fresh ? { fresh: true as const } : {}) };
       const route = { ownerUserId: first.ownerUserId, machineId: first.machineId, hostId: first.hostId };
       try {
         const { daemon } = await machines.getDaemon({ requestId, ...route });
@@ -67,7 +68,7 @@ export async function issueRegistrationQuotaProbes(input: {
           commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "quota_probe",
           principal: { kind: "user", id: route.ownerUserId },
           payload: { type: "machine_quota_probe", requestId, probe,
-            ...(input.wakeChannelId ? { wakeChannelId: input.wakeChannelId } : {}) },
+            ...(input.fresh ? { readAfter: new Date(input.fresh.readAfter).toISOString() } : {}) },
         });
         issued++;
       } catch (error) {
@@ -82,14 +83,15 @@ export async function issueRegistrationQuotaProbes(input: {
 
 /** Registration targets of a Space at its active placement; an inactive or
  * moved placement probes nothing rather than guessing. */
-export function registrationQuotaProbeTargetReader(database: AuthorityDatabase, directory: AuthorityDatabase) {
+export function registrationQuotaProbeTargetReader(database: AuthorityDatabase, directory: AuthorityDatabase,
+  options: { probedWithinMs?: number; onlyUnread?: boolean } = {}) {
   return async (spaceId: string): Promise<RegistrationQuotaProbeTarget[]> => {
     const requestId = `quota-registrations:${crypto.randomUUID()}`;
     const placement = await new PostgresSpacePlacementDirectory(directory).resolve(
       { requestId, operation: "registration.quota-probe.placement" }, spaceId);
     if (placement.state !== "active" || placement.spaceId !== spaceId) return [];
     return readRegistrationQuotaProbeTargets({ database, directory, requestId, placement: {
-      spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } });
+      spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch }, ...options });
   };
 }
 

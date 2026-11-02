@@ -30,6 +30,14 @@ export interface QuotaRetryWork extends QueryResultRow {
   state: AgentQuotaRetry["state"];
   created_at: Date;
   expires_at: Date;
+  /** The reading that refused: only a newer one can start the retry. */
+  refused_through: Date | null;
+  /** An original summon still being checked, and so started by a reading
+   * that clears it, until this instant. Never set on a continuation. */
+  verify_until: Date | null;
+  /** Moves with every wake; a check that read an older one cannot put the
+   * retry back to sleep. NULL is no wake yet. */
+  wake_revision: string | number | null;
 }
 // A source publication and, for continuation, its exact stopped Instance still
 // own the work. A later successful handoff or reborn retires the old offer.
@@ -87,10 +95,11 @@ export async function assertQuotaRetryAdmission(
   });
   if (!rows.length) throw new RegistrationAccessError("quota_retry_cancelled", 409);
 }
-/** A refused summon a fresh reading may start: one waiting for quota, or one
- * refused within ten minutes that nobody answered (it still asks to start). */
-const WAKEABLE_SQL = `expires_at>clock_timestamp() AND (state='waiting'
-  OR state='offered' AND created_at>clock_timestamp()-interval '10 minutes')`;
+/** An original summon whose refusal is still being checked: it is processed
+ * like a waiting retry without its author choosing to wait. */
+const VERIFYING_SQL = `(q.state='offered' AND q.kind='launch' AND q.verify_until>clock_timestamp())`;
+/** A retry a reading may start: one waiting for quota, or one still verifying. */
+const WAKEABLE_SQL = `q.expires_at>clock_timestamp() AND (q.state='waiting' OR ${VERIFYING_SQL})`;
 export class PostgresQuotaRetryRepository {
   constructor(
     private readonly database: AuthorityDatabase,
@@ -132,6 +141,11 @@ export class PostgresQuotaRetryRepository {
       instanceId: string;
       runId: string;
     };
+    /** The reading that refused: only a newer one can start the retry. */
+    refusedThrough?: string;
+    /** An original summon is checked this long: a reading that clears it
+     * within the window starts it without its author choosing to wait. */
+    verifyForMs?: number;
   }): Promise<string> {
     if (
       !input.registrations.length ||
@@ -174,8 +188,11 @@ export class PostgresQuotaRetryRepository {
         name: "quota_retry_offer_v1",
         text: `INSERT INTO data.agent_quota_retries
         (space_id,channel_id,retry_id,actor_user_id,source_message_id,source_input_version,source_body_hash,source_sequence,
-         source_mention,selection_index,kind,source_instance_id,source_run_id,registrations_json,expires_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,clock_timestamp()+interval '35 days')
+         source_mention,selection_index,kind,source_instance_id,source_run_id,registrations_json,expires_at,
+         refused_through,verify_until)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,clock_timestamp()+interval '35 days',
+          $15::timestamptz,CASE WHEN $11='launch' AND $16::integer>0
+            THEN clock_timestamp()+make_interval(secs=>$16::integer/1000.0) END)
         ON CONFLICT (channel_id,retry_id) DO NOTHING`,
         values: [
           this.placement.spaceId,
@@ -192,6 +209,9 @@ export class PostgresQuotaRetryRepository {
           input.continuation?.instanceId ?? null,
           input.continuation?.runId ?? null,
           JSON.stringify(input.registrations),
+          input.refusedThrough && Number.isFinite(Date.parse(input.refusedThrough))
+            ? new Date(input.refusedThrough).toISOString() : null,
+          Math.max(0, Math.min(Math.trunc(input.verifyForMs ?? 0), 600_000)),
         ],
         maxRows: 0,
       });
@@ -258,8 +278,8 @@ export class PostgresQuotaRetryRepository {
       if (input.action === "wait" && row.state !== "offered" && row.state !== "waiting")
         throw new RegistrationAccessError("quota_retry_cancelled", 409);
       await tx.query({
-        name: "quota_retry_choice_v1",
-        text: `UPDATE data.agent_quota_retries SET state=$4,
+        name: "quota_retry_choice_v2",
+        text: `UPDATE data.agent_quota_retries SET state=$4,verify_until=NULL,
         next_check_at=CASE WHEN $4='waiting' THEN COALESCE(next_check_at,clock_timestamp()) END,updated_at=clock_timestamp()
         WHERE channel_id=$1 AND retry_id=$2 AND actor_user_id=$3`,
         values: [input.channelId, input.id, input.actorUserId, input.action === "wait" ? "waiting" : "cancelled"],
@@ -267,24 +287,17 @@ export class PostgresQuotaRetryRepository {
       });
     });
   }
-  /** The refused summons of this Channel a fresh provider reading may
-   * clear: the waiting ones, and those refused within the last few minutes
-   * that nobody answered yet. */
-  async wakeable(channelId: string): Promise<readonly QuotaRetryWork[]> {
-    return this.database.transaction({ requestId: crypto.randomUUID(), operation: "quota-retry.wakeable",
-      placement: this.placement }, tx => tx.query<QuotaRetryWork>({ name: "quota_retry_wakeable_v1",
-      text: `SELECT * FROM data.agent_quota_retries WHERE space_id=$2 AND channel_id=$1 AND ${WAKEABLE_SQL}
-        ORDER BY created_at DESC LIMIT 20`, values: [channelId, this.placement.spaceId], maxRows: 20 }));
-  }
-  /** Make these refused summons due now; admission still runs in full at
-   * dispatch. Returns how many became due. */
-  async expedite(channelId: string, retryIds: readonly string[]): Promise<number> {
-    if (!retryIds.length) return 0;
-    const rows = await this.database.transaction({ requestId: crypto.randomUUID(), operation: "quota-retry.expedite",
-      placement: this.placement }, tx => tx.query({ name: "quota_retry_expedite_v2",
-      text: `UPDATE data.agent_quota_retries SET state='waiting',next_check_at=clock_timestamp(),updated_at=clock_timestamp()
-        WHERE space_id=$2 AND channel_id=$1 AND retry_id=ANY($3::text[]) AND ${WAKEABLE_SQL}
-        RETURNING retry_id`, values: [channelId, this.placement.spaceId, [...retryIds]], maxRows: 20 }));
+  /** A provider reading may have cleared this Channel's refused summons:
+   * every retry still waiting or verifying is due now. Only the due time
+   * moves; its state, generation and admission are untouched, and the full
+   * launch admission decides. Returns how many became due. */
+  async wake(channelId: string): Promise<number> {
+    const rows = await this.database.transaction({ requestId: crypto.randomUUID(), operation: "quota-retry.wake",
+      placement: this.placement }, tx => tx.query({ name: "quota_retry_wake_v1",
+      text: `UPDATE data.agent_quota_retries q SET next_check_at=LEAST(q.next_check_at,clock_timestamp()),
+          wake_revision=COALESCE(q.wake_revision,0)+1,updated_at=clock_timestamp()
+        WHERE q.space_id=$2 AND q.channel_id=$1 AND ${WAKEABLE_SQL}
+        RETURNING q.retry_id`, values: [channelId, this.placement.spaceId], maxRows: 1000 }));
     return rows.length;
   }
   async due(channelId: string): Promise<QuotaRetryWork[]> {
@@ -303,10 +316,11 @@ export class PostgresQuotaRetryRepository {
           QuotaRetryWork & {
             current: boolean;
             authorized: boolean;
+            verifying: boolean;
           }
         >({
-          name: "quota_retry_due_v1",
-          text: `SELECT q.*,${CURRENT_SQL} AS current,
+          name: "quota_retry_due_v2",
+          text: `SELECT q.*,${CURRENT_SQL} AS current,${VERIFYING_SQL} AS verifying,
         ${channelCapabilityPredicate({ capability: "runtime_new_work", channelAlias: "c", principalKindSql: "'user'", principalIdSql: "q.actor_user_id" })} AS authorized
         FROM data.agent_quota_retries q JOIN data.channels c USING (space_id,channel_id)
         WHERE q.space_id=$2 AND q.channel_id=$1 AND q.next_check_at<=clock_timestamp()
@@ -322,15 +336,18 @@ export class PostgresQuotaRetryRepository {
               : Date.parse(String(row.expires_at)) <= Date.now()
                 ? "expired"
                 : row.state;
+          // A verifying summon is worked like a waiting one; it stays offered
+          // so its author can still choose, and the card does not claim a wait.
+          const worked = state === "waiting" || state === "dispatching" || (state === "offered" && row.verifying === true);
           await tx.query({
-            name: "quota_retry_due_settle_v1",
+            name: "quota_retry_due_settle_v2",
             text: `UPDATE data.agent_quota_retries SET state=$3,
-          next_check_at=CASE WHEN $3 IN ('waiting','dispatching') THEN clock_timestamp()+interval '1 minute' END,
+          next_check_at=CASE WHEN $4 THEN clock_timestamp()+interval '1 minute' END,
           updated_at=clock_timestamp() WHERE channel_id=$1 AND retry_id=$2`,
-            values: [channelId, row.retry_id, state],
+            values: [channelId, row.retry_id, state, worked],
             maxRows: 0,
           });
-          if (state === "waiting" || state === "dispatching") ready.push(row);
+          if (worked) ready.push(row);
         }
         return ready;
       },
@@ -339,10 +356,11 @@ export class PostgresQuotaRetryRepository {
   async dispatch(input: { channelId: string; row: QuotaRetryWork }): Promise<AgentQuotaRetryAdmission> {
     return this.transaction(input.channelId, input.row.actor_user_id, "dispatch", async (tx) => {
       const [row] = await tx.query<QueryResultRow>({
-        name: "quota_retry_dispatch_v1",
+        name: "quota_retry_dispatch_v2",
         text: `UPDATE data.agent_quota_retries q
         SET state='dispatching',updated_at=clock_timestamp() WHERE q.channel_id=$1 AND q.retry_id=$2
-          AND q.state IN ('waiting','dispatching') AND q.generation=$3 AND q.expires_at>clock_timestamp() AND ${CURRENT_SQL} RETURNING generation`,
+          AND (q.state IN ('waiting','dispatching') OR ${VERIFYING_SQL})
+          AND q.generation=$3 AND q.expires_at>clock_timestamp() AND ${CURRENT_SQL} RETURNING generation`,
         values: [input.channelId, input.row.retry_id, input.row.generation],
         maxRows: 1,
       });
@@ -350,12 +368,18 @@ export class PostgresQuotaRetryRepository {
       return { id: input.row.retry_id, generation: Number(row.generation) };
     });
   }
+  /** `waiting` with no `nextCheck` waits for an event (a reading, a reconnect)
+   * rather than a time. A summon still verifying that is not started returns
+   * to its offer: only its author's choice makes it wait. */
   async settle(
     channelId: string,
     row: QuotaRetryWork,
     result: "dispatched" | "waiting" | "cancelled" | "failed",
-    nextCheck?: number,
+    nextCheck?: number | null,
     errorCode?: string,
+    /** A launch refused again for used-up quota rested on this reading:
+     * only a newer one starts the retry now. */
+    refusedThrough?: string,
   ): Promise<void> {
     await this.database.transaction(
       {
@@ -365,18 +389,27 @@ export class PostgresQuotaRetryRepository {
       },
       (tx) =>
         tx.query({
-          name: "quota_retry_settle_v1",
-          text: `UPDATE data.agent_quota_retries SET state=$4,
+          name: "quota_retry_settle_v2",
+          text: `UPDATE data.agent_quota_retries SET
+        state=CASE WHEN $4='waiting' AND verify_until IS NOT NULL THEN 'offered' ELSE $4 END,
         generation=generation+CASE WHEN $4='waiting' AND state='dispatching' THEN 1 ELSE 0 END,
-        next_check_at=$5::timestamptz,last_error_code=$6,updated_at=clock_timestamp()
-        WHERE channel_id=$1 AND retry_id=$2 AND generation=$3 AND state IN ('waiting','dispatching')`,
+        -- A wake since this check read the row stays due: it is news this check never saw.
+        next_check_at=CASE WHEN $4='waiting' AND COALESCE(wake_revision,0)<>$7::bigint THEN clock_timestamp()
+          ELSE $5::timestamptz END,
+        last_error_code=$6,updated_at=clock_timestamp(),
+        refused_through=CASE WHEN $8::timestamptz IS NULL THEN refused_through
+          ELSE GREATEST(COALESCE(refused_through,$8::timestamptz),$8::timestamptz) END
+        WHERE channel_id=$1 AND retry_id=$2 AND generation=$3
+          AND (state IN ('waiting','dispatching') OR (state='offered' AND kind='launch' AND verify_until IS NOT NULL))`,
           values: [
             channelId,
             row.retry_id,
             row.generation,
             result,
-            result === "waiting" ? new Date(nextCheck ?? Date.now() + 60000).toISOString() : null,
+            result === "waiting" && nextCheck != null ? new Date(nextCheck).toISOString() : null,
             errorCode && /^[a-z][a-z0-9_]{1,119}$/u.test(errorCode) ? errorCode : null,
+            String(row.wake_revision ?? 0),
+            refusedThrough && Number.isFinite(Date.parse(refusedThrough)) ? new Date(refusedThrough).toISOString() : null,
           ],
           maxRows: 0,
         }),
