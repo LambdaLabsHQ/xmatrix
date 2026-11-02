@@ -94,7 +94,9 @@ export function watchPostgresLockWait(queryName: string, backendPid: number | un
   options: { connectionString: string; lockTimeoutMs: number; clientFactory: (config: ClientConfig) => DiagnosticClient },
 ): (() => Promise<PostgresLockWait | undefined>) | undefined {
   if (!(["runtime_execution_report_owner_v4", "message_append_preflight_v4", "channel_mutation_root_lock_v2",
-    "channel_mutation_head_advance_v1"].includes(queryName) ||
+    "channel_mutation_head_advance_v1",
+    // HUB-BH: runtime commits also contend on the shared Space control head.
+    "runtime_control_head_advance_v1", "machine_lifecycle_head_advance_v1"].includes(queryName) ||
       // Every Channel capability check and lifecycle lock waits on the same Channel row (HUB-AZ, HUB-BA).
       /^channel_(capability|lifecycle_lock)_[a-z_]+_v[0-9]+$/u.test(queryName)) || !backendPid) return;
   return watch(backendPid, Math.min(500, Math.max(1, Math.floor(options.lockTimeoutMs / 2))), options);
