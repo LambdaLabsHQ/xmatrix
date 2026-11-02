@@ -20,6 +20,17 @@ after a failed, cancelled or expired startup; exact retries keep the original
 decision. Hub only, no schema or client change; recovery is a CI-validated
 Hub release reverting this pending-startup check.
 
+## Unreleased: Runtime control-head deadlocks retain the live blocker
+
+HUB-BH aborted a registration launch while advancing its Space control head.
+The original event names the failed query but cannot identify the other
+transaction in the cycle. Runtime and machine lifecycle head updates now use
+the existing bounded lock-wait sampler before PostgreSQL removes the wait
+edge, retaining only the other operation, state, wait type and transaction age.
+The original rejection, rollback and replay boundaries are unchanged; no
+underlying lock-order cause is claimed. Hub only, no schema or authorization
+change; recovery is a CI-validated release reverting the sampler selection.
+
 ## Unreleased: Used-up quota pools are no longer re-read on a clock
 
 The minute re-read of pools held used up (#1321) is withdrawn: quota is read
