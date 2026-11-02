@@ -337,6 +337,9 @@ export async function markFirstMessageSummoned(env: Env, input: { channelId: str
   const { placement } = await channelLaunchRepository({ database, directory, commandId, channelId: input.channelId });
   await new PostgresFirstMessageLaunchChoiceRepository(database, { spaceId: placement.spaceId, shardId: placement.shardId,
     placementEpoch: placement.placementEpoch }).summoned({ requestId: commandId, ...input });
+  // A finished dispatch without a receiver releases other publications' Ask
+  // actions. Tell connected readers after clearing the pending summon.
+  await publishChannelInvocationsChanged(env, input.channelId);
 }
 
 /** The body of a Channel's first message, read as its author. */
