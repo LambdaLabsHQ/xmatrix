@@ -929,3 +929,46 @@ integration("catalog counts keep older declared waits without multiplying or wid
     assert.deepEqual((await read()).counts, { active: 60, unread: 1, mentions: 1 });
   } finally { await client.end(); }
 });
+
+// Production nested-looped every readable Channel against an aggregate of the
+// principal's attention (both estimated at a handful of rows): a Space of
+// 2,920 Channels compared 2.7 million pairs, a 2.1 s count. Whichever join the
+// planner picks, the count probes each Channel's attention by index instead.
+integration("catalog counts probe each Channel's attention instead of joining an aggregate of it", async () => {
+  await seed();
+  const client = new Client({ connectionString });
+  await client.connect();
+  const database = createAuthorityDatabase({ connectionString, shardId: "shard-0" });
+  const statements = [];
+  const recording = {
+    cacheMode: "disabled",
+    openSession: () => recording,
+    close: async () => {},
+    transaction: (context, callback) => database.transaction(context, (transaction) => callback({
+      query: (query) => { statements.push(query); return transaction.query(query); },
+    })),
+  };
+  try {
+    await client.query(`INSERT INTO data.message_attention
+      (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
+      SELECT 'space-catalog','user:user-1','root-'||LPAD(c::text,2,'0'),
+        'attended-'||c||'-'||s,'mention',s,$1,FALSE
+      FROM generate_series(0,54) c, generate_series(1,3) s`, [now]);
+    await client.query("ANALYZE data.message_attention");
+    const page = await new PostgresChannelCatalogRepository(recording).page({ requestId: "counts-plan",
+      spaceId: "space-catalog", principal: { kind: "user", id: "user-1" },
+      view: "flat", filter: "all", countsOnly: true });
+    // The seed already holds a mention in one more Channel.
+    assert.deepEqual(page.counts, { active: 60, unread: 56, mentions: 56 });
+    const counts = statements.find((query) => query.name.startsWith("channel_catalog_counts_"));
+    const nodes = function* (node) { yield node; for (const child of node.Plans ?? []) yield* nodes(child); };
+    for (const planner of ["RESET ALL", "SET enable_hashjoin = off; SET enable_mergejoin = off"]) {
+      await client.query(planner);
+      const plan = (await client.query(`EXPLAIN (ANALYZE, FORMAT JSON) ${counts.text}`, counts.values))
+        .rows[0]["QUERY PLAN"][0].Plan;
+      const compared = [...nodes(plan)].reduce((total, node) =>
+        total + (node["Rows Removed by Join Filter"] ?? 0), 0);
+      assert.ok(compared <= 60, `${planner}: counting 60 Channels discarded ${compared} joined rows`);
+    }
+  } finally { await client.query("RESET ALL"); await client.end(); }
+});
