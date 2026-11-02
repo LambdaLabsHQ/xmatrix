@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import "./globals.css";
-import "./themes/materials.css";
-import "./themes/wood.css";
-import "./themes/site.css";
+import "@/app/globals.css";
+import "@/app/themes/materials.css";
+import "@/app/themes/wood.css";
+import "@/app/themes/site.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";

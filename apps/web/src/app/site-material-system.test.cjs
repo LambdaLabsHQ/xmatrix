@@ -5,14 +5,14 @@ const test = require("node:test");
 
 const appRoot = __dirname;
 const source = (relativePath) => fs.readFileSync(path.join(appRoot, relativePath), "utf8");
-const layoutSource = source("document.tsx");
+const layoutSource = source("../components/site-document.tsx");
 const siteCss = source("themes/site.css");
 const tokensCss = source("tokens.css");
 const navbarSource = source("../components/shared/navbar.tsx");
 const heroSource = source("../components/landing/hero.tsx");
 
 test("public routes share one warm material layer", () => {
-  assert.match(layoutSource, /import "\.\/themes\/wood\.css";\s*import "\.\/themes\/site\.css";/);
+  assert.match(layoutSource, /import "@\/app\/themes\/wood\.css";\s*import "@\/app\/themes\/site\.css";/);
   assert.match(layoutSource, /<body className="site-canvas antialiased">/);
   assert.match(tokensCss, /--site-wood:/);
   assert.match(tokensCss, /--site-paper:/);
