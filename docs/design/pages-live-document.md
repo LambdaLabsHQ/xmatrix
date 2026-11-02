@@ -41,7 +41,8 @@ designed for both.
    restore, an outline, a share dialog, offline merge, and paste of rich
    text and images. There is no formatting toolbar. People type markdown,
    and the caret's block and marks show their markers locally (`#`, `**`,
-   `](url)`). A selection offers collaboration, not formatting.
+   `](url)`). A selection offers its inline marks and a comment (decided by
+   Daniel 2026-11-02); block formatting stays typed.
 2. **Collaboration is live, the document is concise.** Editing mode is the
    default for people and Agents; suggestion mode is a per-page option for
    sensitive pages. Discussions, AI answers and annotations never enter the
@@ -334,6 +335,12 @@ fact is about.
   removes it: one heading level at a time, then the quote, and a mark's
   delimiter drops that mark. Shortcuts still apply marks. A typed URL followed
   by a space becomes a link.
+- **A selection's menu formats it** (decided by Daniel 2026-11-02). For whoever
+  may edit, the selection menu leads with Bold, Italic, Code, Link and
+  Strikethrough, the same marks the shortcuts apply; a mark the selection
+  carries shows pressed and its button takes it off. Link asks for the address.
+  *Comment* follows; commenting and asking for a change are the same box, so
+  there is no separate AI action.
   Clicking or tapping a link's label opens it in a new tab, including bare
   URLs and Markdown links, while the page remains editable. Dragging across
   a link selects its text without opening it. Web, email and telephone links
