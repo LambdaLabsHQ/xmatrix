@@ -163,10 +163,18 @@ test("read gives the HTML text when the plain alternative only points to the HTM
     { mimeType: "application/pdf", filename: "receipt.pdf", body: { attachmentId: "a1", size: 10 } },
   ] });
   assert.match(nested, /Your application was received\./u);
+  const artifact = await read({ mimeType: "multipart/alternative",
+    parts: [text("text/plain", "None"), text("text/html", "<p>New sign-in to your account.</p><p>If this was not you, reset your password.</p>")] });
+  assert.match(artifact, /New sign-in to your account\./u);
+  assert.doesNotMatch(artifact, /\nNone\n/u);
   const realPlain = await read({ mimeType: "multipart/alternative",
     parts: [text("text/plain", "Plain text version of the receipt."), text("text/html", html)] });
   assert.match(realPlain, /Plain text version of the receipt\./u);
   assert.doesNotMatch(realPlain, /under review/u);
+  const summary = await read({ mimeType: "multipart/alternative",
+    parts: [text("text/plain", "Your report is ready."), text("text/html", "<h1>Weekly report</h1><p>Visits rose 4% week over week.</p>")] });
+  assert.match(summary, /Your report is ready\./u);
+  assert.doesNotMatch(summary, /Weekly report/u);
 });
 
 test("read keeps all HTML body segments and marks the existing body preview limit", async () => {
