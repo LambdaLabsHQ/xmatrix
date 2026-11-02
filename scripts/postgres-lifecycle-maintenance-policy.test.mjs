@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -90,15 +89,6 @@ test("a release that succeeds while the history list is in flight replaces that 
   assert.equal(resolveMaintenanceRelease({
     history, recent, openRuns: [{ ...newer, status: "completed", conclusion: "failure" }],
   }).wait, false);
-});
-
-test("the daily broker re-reads recent successes before it dispatches", () => {
-  const source = readFileSync(new URL(
-    "../.github/workflows/production-postgres-lifecycle-maintenance-request.yml",
-    import.meta.url,
-  ), "utf8");
-  assert.match(source, /resolveMaintenanceRelease/u);
-  assert.match(source, /created: `>=\$\{day\}`/u);
 });
 
 test("maintenance runs from the newest beta, never from a stable that rebuilt an older source", () => {

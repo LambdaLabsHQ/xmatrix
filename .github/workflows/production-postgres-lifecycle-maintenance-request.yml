@@ -55,26 +55,25 @@ jobs:
             // Self-hosted runners have been served run lists days out of date
             // (they dispatched 0.16.316 and 0.16.336 after 0.16.347 shipped).
             // Ask for an uncached list and log what was seen.
-            const listReleases = (params) => github.paginate(github.rest.actions.listWorkflowRuns, {
+            // Event/status/date filters cap GitHub's result at 1,000 runs.
+            // The policy filters events after the complete workflow listing.
+            const listReleases = () => github.paginate(github.rest.actions.listWorkflowRuns, {
               ...context.repo, workflow_id: "production-release.yml",
-              event: "workflow_dispatch", per_page: 100, ...params,
+              per_page: 100,
               uncached: `${context.runId}-${Date.now()}`, headers: { "cache-control": "no-cache" },
             });
-            const history = await listReleases({ status: "success" });
-            const day = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
             // A release normally takes 9 minutes (p90 26 minutes). Waiting only
             // six short polls skipped the daily pass whenever a train overlapped.
             // Keep the wait bounded and leave job time for API/tag verification.
             const deadline = Date.now() + 45 * 60 * 1000;
             let production;
             while (Date.now() < deadline) {
-              const recent = await listReleases({ status: "success", created: `>=${day}` });
-              const open = [
-                ...await listReleases({ status: "in_progress" }),
-                ...await listReleases({ status: "queued" }),
-              ];
-              const decision = resolveMaintenanceRelease({ history, recent, openRuns: open });
-              core.info(`Saw ${history.length} successful releases and ${recent.length} since ${day}; choice ${decision.release?.head_branch ?? "none"} (run ${decision.release?.id ?? "none"}), wait ${decision.wait}`);
+              // Separate status lists can both omit a queued run that starts
+              // between reads. One unfiltered snapshot includes every status,
+              // plus older stuck trains, and sees completions on the next pass.
+              const runs = await listReleases();
+              const decision = resolveMaintenanceRelease({ history: runs, openRuns: runs });
+              core.info(`Saw ${runs.length} production runs; choice ${decision.release?.head_branch ?? "none"} (run ${decision.release?.id ?? "none"}), wait ${decision.wait}`);
               if (!decision.release) throw new Error("no successful production release tag is available");
               if (!decision.wait) { production = decision.release; break; }
               const remaining = deadline - Date.now();

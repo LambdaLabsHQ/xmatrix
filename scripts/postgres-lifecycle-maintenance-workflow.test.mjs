@@ -37,18 +37,25 @@ test("both maintenance jobs restore the full tagged tree before any local action
 
 // Runs the broker's own script against a fake GitHub that lists `runs` and
 // returns what it dispatched.
-async function broker(runs, { releaseAfterMs = 0, tagType = "tag", tagSha, dispatched = [], elapsed = { ms: 0 } } = {}) {
+async function broker(runs, { releaseAfterMs = 0, releaseStatus = "in_progress", tagType = "tag", tagSha,
+  dispatched = [], elapsed = { ms: 0 } } = {}) {
   const step = parse(request).jobs.dispatch.steps.find((item) => item.name === "Dispatch from the latest successful production tag");
   const script = new (Object.getPrototypeOf(async function () {}).constructor)("github", "context", "core", "process", "Date", "setTimeout", step.with.script);
   const shaOf = (tag) => runs.find((run) => run.head_branch === tag).head_sha;
-  const newer = { id: 500, head_branch: "xmatrix-v0.17.1-beta.1", head_sha: "b".repeat(40), event: "workflow_dispatch" };
+  // Older stuck trains must remain visible too, outside any recent-date filter.
+  const newer = { id: 500, head_branch: "xmatrix-v0.17.1-beta.1", head_sha: "b".repeat(40),
+    event: "workflow_dispatch", created_at: "2020-01-01T00:00:00Z" };
   const github = {
     paginate: async (_method, params) => {
       const active = elapsed.ms < releaseAfterMs;
-      if (params.status === "in_progress" || params.status === "queued") {
-        return active && params.status === "in_progress" ? [{ ...newer, status: "in_progress" }] : [];
-      }
-      return releaseAfterMs && !active ? [...runs, { ...newer, conclusion: "success" }] : runs;
+      const rows = [...runs, ...(releaseAfterMs ? [{ ...newer, status: active ? releaseStatus : "completed",
+        conclusion: active ? null : "success" }] : [])];
+      const result = rows.filter((run) => !params.status || (params.status === "success"
+        ? run.conclusion === "success" : run.status === params.status))
+        .filter((run) => !params.created || run.created_at >= params.created.slice(2));
+      // A queued release starts just after the in_progress list was read.
+      if (params.status === "in_progress" && releaseStatus === "queued") releaseStatus = "in_progress";
+      return result;
     },
     rest: {
       actions: {
@@ -88,7 +95,17 @@ test("the broker dispatches the release the executor accepts, whatever order Git
   // Both sides ask for an uncached run list and the broker logs what it saw.
   assert.match(request, /uncached: `\$\{context\.runId\}-\$\{Date\.now\(\)\}`, headers: \{ "cache-control": "no-cache" \}/u);
   assert.match(workflow, /uncached: String\(context\.runId\), headers: \{ "cache-control": "no-cache" \}/u);
-  assert.match(request, /core\.info\(`Saw \$\{history\.length\} successful releases and \$\{recent\.length\} since \$\{day\}/u);
+});
+
+test("the broker waits across open release statuses and the queued-to-running read race", async () => {
+  const runs = [{ id: 400, head_branch: "xmatrix-v0.17.0-beta.1", head_sha: "a".repeat(40),
+    conclusion: "success", event: "workflow_dispatch" }];
+  for (const releaseStatus of ["queued", "in_progress", "waiting", "requested", "pending"]) {
+    const elapsed = { ms: 0 };
+    assert.deepEqual(await broker(runs, { releaseAfterMs: 30_000, releaseStatus, elapsed }),
+      [{ workflow_id: "production-postgres-lifecycle-maintenance.yml", ref: "xmatrix-v0.17.1-beta.1" }], releaseStatus);
+    assert.equal(elapsed.ms, 30_000, `must wait for ${releaseStatus}`);
+  }
 });
 
 // The policy's selection tests do not exercise the workflow's wait budget.

@@ -5,7 +5,10 @@ existing bounded executor from the latest successful immutable production tag
 of the line that deploys the Hub: the newest beta (a stable rebuilds an older
 beta's source and never deploys the Hub, so it is never the target).
 If a newer Hub release is still running, the broker waits up to 45 minutes,
-refreshing recent successes and active runs every 30 seconds. The 60-minute
+refreshing one unfiltered, paginated release-run list every 30 seconds. A run
+moving from queued to running cannot disappear between separate status reads;
+waiting, requested and pending runs and older stuck trains also delay dispatch.
+Success and active status come from the same pass. The 60-minute
 job budget leaves room for GitHub API calls and annotated-tag verification.
 An exhausted wait fails without dispatching an older tag; inspect the failed
 request and retry the broker once the release finishes.
