@@ -108,6 +108,9 @@ try {
     "packages/db/test/automation-run-links-postgres.test.mjs",
     "packages/db/test/postgres-fixture-lifecycle.test.mjs",
     "packages/db/test/client-postgres.test.mjs",
+    // Machine advisory scopes and runtime heads need real live lock-wait evidence.
+    "packages/db/test/machine-control-lock-postgres.test.mjs",
+    "packages/db/test/runtime-head-deadlock-postgres.test.mjs",
     // Lost-response regressions must execute their actual authorization SQL.
     "packages/db/test/catalog-read-recovery-postgres.test.mjs",
     "packages/db/test/content-ref-commit-postgres.test.mjs",
