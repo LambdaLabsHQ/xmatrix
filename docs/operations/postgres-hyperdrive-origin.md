@@ -343,14 +343,16 @@ blocked placement still answers retryable `space_placement_unavailable` (503).
 Malformed placement rows and database failures remain unexpected failures;
 a missing caller-selected Space is not a storage contract violation.
 
-Catalogue counters aggregate the selected principal's attention once per Space,
-then join the per-Channel result to the freshly authorized Channel set and read
-cursors. A Channel needs attention when any declared wait still stands or its
-maximum attention sequence exceeds the cursor. Keep `BOOL_OR` over all waits:
-the newest attention row alone can hide an older acknowledged question.
-Unread speech retains its separate message predicate, so activity-only entries
-do not make a Channel unread. Grouping does not grant access to hidden Channels
-or another principal's attention, and each Channel counts once.
+Catalogue counters probe each freshly authorized Channel's read cursor and the
+selected principal's attention by index, never by joining the Channel set to a
+per-Space aggregate of attention: PostgreSQL estimates both sides at a few rows
+and nested-loops them, which in a Space of 2,920 Channels compared 2.7 million
+pairs per count (p99 about 2.8 s in production, 2026-11). A Channel needs
+attention when an attention row lies past the cursor or any declared wait still
+stands; the second probe checks every waiting row, so an older acknowledged
+question still counts. Unread speech retains its separate message predicate, so
+activity-only entries do not make a Channel unread. Probes are bounded to
+readable Channels and the principal's own subject, and each Channel counts once.
 
 For query-cost work, compare old and new SQL inside a read-only repeatable-read
 snapshot. Check identical counter results, then inspect repeated

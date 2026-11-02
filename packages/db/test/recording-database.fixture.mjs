@@ -93,3 +93,29 @@ export function publicationPlacement(query) {
   if (query.name === "entity_space_route_placement_fence_v1") return [{ shard_id: "shard-0", placement_epoch: 1 }];
   return undefined;
 }
+
+/**
+ * Wraps a real AuthorityDatabase so a test can EXPLAIN the statements an
+ * authority ran: `statements` collects each caller query, unwrapped by the
+ * placement fence, in order.
+ */
+export function recordedStatements(database) {
+  const statements = [];
+  const recording = {
+    statements,
+    cacheMode: "disabled",
+    openSession: () => recording,
+    close: async () => {},
+    health: (context) => database.health(context),
+    transaction: (context, callback) => database.transaction(context, (transaction) => callback({
+      query: (query) => { statements.push(query); return transaction.query(query); },
+    })),
+  };
+  return recording;
+}
+
+/** Every node of an `EXPLAIN (FORMAT JSON)` plan, root first. */
+export function* planNodes(node) {
+  yield node;
+  for (const child of node.Plans ?? []) yield* planNodes(child);
+}
