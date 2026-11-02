@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Settings guidance fits the CLI launch budget
+
+The settings-card guidance pushed the CLI's compiled fallback launch text past
+its existing 9,000-byte budget. Concise wording brings the default launch back
+under that bound while retaining settings cards, commands, Page scheduling,
+authority boundaries and the Channel contract. Hub-provided templates still
+replace the fallback as before. Hub and CLI, no schema or API change; recovery
+is a CI-validated forward release revising the wording. The existing bootstrap
+owner test continues to enforce the unchanged budget.
+
 ## Unreleased: A web session counts only once a call needing it works
 
 App Store Connect's connection check signs with its API key, so an expired web
