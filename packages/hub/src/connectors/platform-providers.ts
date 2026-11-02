@@ -5,6 +5,7 @@ import { APP_STORE_CONNECT_LISTING_ACTIONS } from "./actions/app-store-connect-l
 import { APP_STORE_CONNECT_MEDIA_ACTIONS } from "./actions/app-store-connect-media";
 import { APP_STORE_CONNECT_RELEASE_ACTIONS } from "./actions/app-store-connect-release";
 import { APP_STORE_CONNECT_SALES_ACTIONS } from "./actions/app-store-connect-sales";
+import { APP_STORE_CONNECT_IN_APP_PURCHASE_ACTIONS } from "./actions/app-store-connect-in-app-purchases";
 import { APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS } from "./actions/app-store-connect-subscriptions";
 import { APP_STORE_CONNECT_SIGNING_ACTIONS } from "./actions/app-store-connect-signing";
 import { APP_STORE_CONNECT_TESTFLIGHT_ACTIONS } from "./actions/app-store-connect-testflight";
@@ -81,7 +82,7 @@ const PROVIDERS: Record<string, {
     subscriptions: CLOUDFLARE_SUBSCRIPTIONS },
   gcp: { receive: receiveGcpDelivery, actions: GCP_ACTIONS, verify: verifyGcp },
   appstoreconnect: { receive: (delivery) => receiveAppStoreConnectDelivery(delivery),
-    actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS, ...APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS,
+    actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS, ...APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS, ...APP_STORE_CONNECT_IN_APP_PURCHASE_ACTIONS,
       ...APP_STORE_CONNECT_UPLOAD_ACTIONS, ...APP_STORE_CONNECT_MEDIA_ACTIONS, ...APP_STORE_CONNECT_SIGNING_ACTIONS,
       ...APP_STORE_CONNECT_TESTFLIGHT_ACTIONS, ...APP_STORE_CONNECT_SALES_ACTIONS, ...APP_STORE_CONNECT_WEB_ACTIONS, ...APP_STORE_CONNECT_WEB_RECORD_ACTIONS },
     verify: verifyAppStoreConnect, subscriptions: APP_STORE_CONNECT_SUBSCRIPTIONS },

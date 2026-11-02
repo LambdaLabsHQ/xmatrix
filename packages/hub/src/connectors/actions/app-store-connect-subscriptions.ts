@@ -56,6 +56,13 @@ async function draftSubmission(api: AppStoreConnectApi, appId: string): Promise<
   return draft;
 }
 
+/** An app and, optionally, the product ids to submit: what each submit_* action takes. */
+export function productsStatement(statement: { target: string; text: string }): Record<string, string> | string {
+  const app = bundleId(statement.target), named = statement.text.trim().split(/\s+/u).filter(Boolean);
+  return app && named.length <= MAX_NAMED && named.every(id => PRODUCT_ID.test(id)) ? { app, products: named.join(" ") }
+    : "name an app and, optionally, the product ids to submit (default: every one ready to submit): <com.example.app> [<product id> …]";
+}
+
 async function subscriptions(api: AppStoreConnectApi, appId: string) {
   const groups = (await api.list(`/v1/apps/${encodeURIComponent(appId)}/subscriptionGroups`,
     { "fields[subscriptionGroups]": "referenceName", limit: "50" }, 1)).rows;
@@ -75,11 +82,7 @@ export const APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS: Record<string, ConnectorAct
       return `Subscriptions of ${input.app}:\n` + quoteRetrievedText(lines.length
         ? ["group\tproduct id\tname\tperiod\tlevel\tstate", ...lines].join("\n") : "(none)");
     }),
-  submit_subscriptions: appAction("write", statement => {
-    const app = bundleId(statement.target), named = statement.text.trim().split(/\s+/u).filter(Boolean);
-    return app && named.length <= MAX_NAMED && named.every(id => PRODUCT_ID.test(id)) ? { app, products: named.join(" ") }
-      : "name an app and, optionally, the product ids to submit (default: every one ready to submit): <com.example.app> [<product id> …]";
-  }, async ({ api, app, input }) => {
+  submit_subscriptions: appAction("write", productsStatement, async ({ api, app, input }) => {
     const rows = await subscriptions(api, app.id);
     const named = input.products ? input.products.split(" ") : [];
     const missing = named.filter(id => !rows.some(row => row.productId === id));

@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: App Store Connect reads and submits one-time In-App Purchases
+
+The App Store Connect connector listed and submitted only auto-renewable
+subscriptions, so an app's consumables (credit packs), non-consumables and
+non-renewing subscriptions could not be checked before a review or included
+in one. `in_app_purchases` lists them with type and review state;
+`submit_in_app_purchases` submits the ready ones (or those named). Hub only,
+no schema change; recovery is a CI-validated release reverting this change.
+
 ## Unreleased: Legacy Desktop feeds can fetch their beta installers
 
 The legacy metadata route still serves dev, but versioned file requests treated
