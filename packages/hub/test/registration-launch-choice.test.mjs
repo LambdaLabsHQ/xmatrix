@@ -245,12 +245,12 @@ test('an environment whose measured quota is exhausted until its reset is never 
     candidates: candidates.map(candidate => ({ ...candidate, observations: exhausted })) }),
   error => error.code === 'registration_quota_exhausted');
   // The refusal names the earliest reading it rested on: only a newer one can start the summon.
-  const observedAt = index => new Date(Date.now() - (index + 1) * 60_000).toISOString();
+  const observedAt = candidates.map((_, index) => new Date(Date.now() - (index + 1) * 60_000).toISOString());
   await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
     candidates: candidates.map((candidate, index) => ({ ...candidate,
-      observations: { quota: { ...exhausted.quota, observedAt: observedAt(index) } } })) }),
+      observations: { quota: { ...exhausted.quota, observedAt: observedAt[index] } } })) }),
   error => error.code === 'registration_quota_exhausted'
-    && error.quotaRefusedThrough === observedAt(candidates.length - 1)
+    && error.quotaRefusedThrough === observedAt.at(-1)
     && error.quotaTargets.length === candidates.length);
 
   // A passed reset or an assumed default is not an exhaustion fact.

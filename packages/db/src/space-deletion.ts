@@ -279,6 +279,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.trace_access_grants",
   ].map((table) => ({ table, predicate: `channel_id IN ${SPACE_CHANNELS}` })),
   { table: "control.scoped_control_command_replays", predicate: "scope_kind='space' AND scope_id=$1" },
+  { table: "control.registration_quota_waiters", predicate: `channel_id IN ${SPACE_CHANNELS}` },
   { table: "data.cross_space_read_grants", predicate: "space_id=$1 OR source_space_id=$1" },
   { table: "data.channel_transfer_proposals", predicate: "space_id=$1 OR target_space_id=$1" },
   ...[
