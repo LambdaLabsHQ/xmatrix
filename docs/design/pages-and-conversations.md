@@ -266,6 +266,10 @@ it belongs in the repository.**
   old messages. A reference grants nothing: a channel the reader cannot see
   renders as "private channel", and a page they cannot read does not load.
   A page reference also links the page to the conversation.
+  Section IDs preserve the shared Markdown parser's heading slugs, including
+  leading hyphens or underscores (for example, `🚀 Launch` is `-launch`). Page
+  commits, reads and discussion links accept those IDs with the same 200-character
+  bound; whitespace, URL delimiters and other non-slug characters are refused.
   Compact previews (conversation rows, page margin cards and hover previews)
   resolve references against the reader's current Space catalog, rendering
   plain titles inside the surrounding clickable surface. Unavailable references,

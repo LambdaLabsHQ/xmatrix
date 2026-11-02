@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Page headings with leading separators can commit
+
+HUB-BK exposed a mismatch between generated heading slugs and the page
+repository's validator: `🚀 Launch` becomes `-launch`, which the repository
+refused because it started with a separator. Live edits then stayed pending.
+Commits, reads and discussion links now accept leading hyphens and underscores,
+preserving existing anchors, the 200-character bound and other character checks.
+Retained edits can commit through the session's existing alarm. Hub only, no
+schema or client migration; recovery is a CI-validated Hub release reverting
+the validation change.
+
 ## Unreleased: Public pages declare their own language and sharing URL
 
 The Chinese homepage declared English until browser scripts ran. Separate
