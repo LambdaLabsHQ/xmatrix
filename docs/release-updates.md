@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: The Agents page asks for quota when you look, not every 15 seconds
+
+While the Agents page was open, every 15-second refresh asked the Hub to read
+provider quota again, a daemon request a minute for as long as the tab stayed
+open. It now asks when the page opens or comes back into view; a reading that
+lands meanwhile (an Agent's turn, a refused summon's check) is pushed and
+shown at once. Web only, no visual change; recovery is a CI-validated revert.
+
 ## Unreleased: Any setting only a person makes goes on one card
 
 An Agent stopped on a sign-in, credential, Space secret, secret access or
