@@ -15,7 +15,7 @@ import {
   type QuotaRetryWork,
 } from "@xmatrix/db";
 import { runtimeRepository, jevEvaluator } from "./runtime";
-import { quotaRetryRepository, verifyRegistrationQuota, waitAfterQuotaRefusal } from "./quota-waits";
+import { quotaRetryRepository, waitAfterQuotaRefusal } from "./quota-waits";
 import {
   dispatchProductAgentSystemNotice,
   productAgentSystemNoticeId,
@@ -245,10 +245,12 @@ export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabas
           ? { ready: true, nextCheckAt: Date.now() }
           : await quotaRetryReadiness(directory, row);
       if (!readiness.ready) {
-        // Not ready at its time: ask for one fresh read of its own pools,
-        // newer than what refused it. The reading wakes it through its wait.
+        // Not ready at its time: keep its wait (a delivery that found nothing
+        // to start may have spent it) and ask for one fresh read of its own
+        // pools, newer than what refused it. That reading wakes it.
         if ("fence" in readiness) {
-          await verifyRegistrationQuota(env, { registrations: row.registrations_json, readAfter: readiness.fence })
+          await waitAfterQuotaRefusal(env, { channelId, registrations: row.registrations_json,
+            refusedThrough: readiness.fence, verify: true })
             .catch((error: unknown) => console.warn("Quota retry verification failed", {
               error: error instanceof Error ? error.message : String(error) }));
         }
