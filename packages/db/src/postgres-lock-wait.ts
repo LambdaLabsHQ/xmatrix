@@ -95,6 +95,8 @@ export function watchPostgresLockWait(queryName: string, backendPid: number | un
 ): (() => Promise<PostgresLockWait | undefined>) | undefined {
   if (!(["runtime_execution_report_owner_v4", "message_append_preflight_v4", "channel_mutation_root_lock_v2",
     "channel_mutation_head_advance_v1",
+    // HUB-BJ: every daemon command first waits on its Machine's advisory scope.
+    "machine_control_scope_lock_v2",
     // HUB-BH: runtime commits also contend on the shared Space control head.
     "runtime_control_head_advance_v1", "machine_lifecycle_head_advance_v1"].includes(queryName) ||
       // Every Channel capability check and lifecycle lock waits on the same Channel row (HUB-AZ, HUB-BA).
