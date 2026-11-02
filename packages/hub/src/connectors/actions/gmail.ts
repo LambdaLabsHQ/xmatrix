@@ -110,15 +110,25 @@ export function gmailBodies(payload: Record<string, unknown>): { plain?: string;
 }
 
 /*
- * A plain alternative that only tells the reader to open the HTML one ("Please
- * view this email in an HTML capable client") stands in for no body: short,
- * names HTML, and shorter than the HTML sibling's own text. The reader then gets
- * that HTML's text; a real plain alternative still wins.
+ * A plain alternative stands in for no body only on clear evidence: it is a
+ * prompt to read the HTML instead ("Please view this email in an HTML capable
+ * client", "your email client does not support HTML") or a template's empty
+ * value rendered as text (`None`, `null`). Then, when the HTML sibling says
+ * more, the reader gets that HTML's text. Any other plain alternative wins,
+ * even a short one worded differently from the HTML or one that mentions HTML
+ * ("Your HTML report is ready.").
  */
 const STAND_IN_MAX = 300;
+const EMPTY_VALUE = /^(?:none|null|undefined|nil|nan)$/u;
+const HTML_READING_PROMPT = new RegExp([
+  String.raw`\bhtml[- ](?:capable|compatible|enabled|aware)\b`,
+  String.raw`\b(?:view|read|display|open|see)\b[^.]{0,60}\b(?:in|with|using)\b[^.]{0,40}\bhtml\b`,
+  String.raw`\b(?:does not|doesn't|do not|don't|cannot|can't|unable to)\b[^.]{0,40}\b(?:support|display|show|render|read)\b[^.]{0,20}\bhtml\b`,
+].join("|"), "u");
 function plainStandsInForHtml(plain: string, html: string): boolean {
-  const text = plain.trim();
-  return text.length <= STAND_IN_MAX && /\bHTML\b/iu.test(text) && htmlText(html).length > text.length;
+  const text = plain.replace(/\s+/gu, " ").trim().toLowerCase();
+  return text.length <= STAND_IN_MAX && (HTML_READING_PROMPT.test(text) || EMPTY_VALUE.test(text))
+    && htmlText(html).length > text.length;
 }
 
 /** Readable text of an HTML body: no styles, scripts or tags, block ends as line breaks. */
