@@ -47,7 +47,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { AUTH_TOKEN_REJECTED_EVENT, useAuth } from "@/lib/auth-context";
@@ -288,8 +287,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const historyChannelIdRef = useRef<string | null>(null);
 
-  const mobileViewTransitionTokenRef = useRef(0);
-
   const viewRef = useRef<AppView>("messages");
 
   const historyRef = useRef<ChannelMessage[]>([]);
@@ -503,6 +500,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   /** A conversation and its channel list trade places in the shell's own motion (use-mobile-list-transition). */
   const mobileListTransitionRef = useRef<MobileListTransitionDriver | null>(null);
 
+  /* A phone has no navigation stack: the one change that moves is a
+     conversation and its channel list trading places, drawn in the page
+     (use-mobile-list-transition). Every other screen change (a notification,
+     a search result, a link to another conversation) lands in place, with no
+     page sliding in over the last. */
   const runMobileScreenTransition = useCallback((
     direction: "forward" | "back",
     update: () => void
@@ -512,37 +514,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       return;
     }
     if (mobileListTransitionRef.current?.run(direction, update)) return;
-    const transitionDocument = document as Document & {
-      startViewTransition?: (callback: () => void) => { ready: Promise<void>; finished: Promise<void> };
-    };
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!isMobileViewportRef.current || reduceMotion || !transitionDocument.startViewTransition) {
-      update();
-      return;
-    }
-
-    const token = mobileViewTransitionTokenRef.current + 1;
-    mobileViewTransitionTokenRef.current = token;
-    document.documentElement.dataset.xmatrixMobileNavigation = direction;
-    try {
-      const transition = transitionDocument.startViewTransition(() => {
-        flushSync(update);
-      });
-      // Superseding an animation rejects ready even when its DOM update
-      // succeeds. Observe that promise separately from finished; update
-      // failures still surface through the native updateCallbackDone promise.
-      void transition.ready.catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
-      });
-      void transition.finished.finally(() => {
-        if (mobileViewTransitionTokenRef.current === token) {
-          delete document.documentElement.dataset.xmatrixMobileNavigation;
-        }
-      });
-    } catch {
-      delete document.documentElement.dataset.xmatrixMobileNavigation;
-      update();
-    }
+    update();
   }, []);
 
   /* working workspace (last space the user was in): seeded synchronously from

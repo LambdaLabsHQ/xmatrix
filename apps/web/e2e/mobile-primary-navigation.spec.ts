@@ -57,6 +57,27 @@ async function openAppLinkForTest(page: Page, href: string) {
   ).__openAppLinkForTest?.(link), href);
 }
 
+/** Every screen change that moved from now on: the lists trading places, or a whole-page view transition. */
+async function watchScreenMoves(page: Page) {
+  await page.evaluate(() => {
+    const moves: string[] = [];
+    (window as typeof window & { __screenMoves?: string[] }).__screenMoves = moves;
+    new MutationObserver(() => {
+      for (const element of document.querySelectorAll<HTMLElement>("[data-list-transition]")) {
+        moves.push(`list:${element.dataset.listTransition}`);
+      }
+    }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ["data-list-transition"] });
+    const start = document.startViewTransition?.bind(document);
+    if (start) {
+      document.startViewTransition = ((...args: Parameters<typeof start>) => {
+        moves.push("view-transition");
+        return start(...args);
+      }) as typeof document.startViewTransition;
+    }
+  });
+  return () => page.evaluate(() => (window as typeof window & { __screenMoves?: string[] }).__screenMoves ?? []);
+}
+
 async function installNativeBridge(page: Page, client: "android" | "ios") {
   await page.addInitScript((client) => {
     const appLinkListeners = new Set<(href: string) => boolean>();
@@ -243,10 +264,13 @@ test("the iOS app's edge swipe goes Back in the page, and a notification opens w
   await page.evaluate(() => { (window as typeof window & { __samePage?: boolean }).__samePage = true; });
   const entries = await historyLength(page);
 
+  const moves = await watchScreenMoves(page);
   expect(await openAppLinkForTest(page, `${new URL(page.url()).origin}/app?channel=channel-ops`)).toBe(true);
   await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
   await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
   expect(await page.evaluate(() => (window as typeof window & { __samePage?: boolean }).__samePage)).toBe(true);
+  // The notification's conversation replaces the list in place: nothing slides in.
+  expect(await moves()).toEqual([]);
 
   // UIKit is already sliding a snapshot of the conversation away. Its Back
   // must commit the parent before answering, without a second Web animation
@@ -524,6 +548,33 @@ test("a conversation opened from a notification goes back to the channel list, n
   await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
   await page.getByRole("button", { name: "Back to channels" }).tap();
   await expectChannelListVisible(page);
+});
+
+test("a notification tapped in a conversation replaces it in place, and Back goes to the channel list", async ({ page }) => {
+  await installNativeBridge(page, "ios");
+  const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
+  await page.goto("/app/personal-sspaceperso/channels");
+  await generalChannelRow(page).tap();
+  await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+  await expect(page.locator("[data-list-transition]")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __appLinkListenerCountForTest?: () => number }
+  ).__appLinkListenerCountForTest?.() ?? 0)).toBeGreaterThan(0);
+  const entries = await historyLength(page);
+
+  // One conversation to another had the whole page slide in over the last, a stack.
+  const moves = await watchScreenMoves(page);
+  expect(await openAppLinkForTest(page, `${new URL(page.url()).origin}/app?channel=channel-ops`)).toBe(true);
+  await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
+  await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
+  expect(await moves()).toEqual([]);
+
+  // Back goes to the list, not to the conversation that was open before.
+  await page.getByRole("button", { name: "Back to channels" }).tap();
+  await expectChannelListVisible(page);
+  expect(await moves()).not.toContain("view-transition");
+  expect(await historyLength(page)).toBe(entries);
 });
 
 test("back from a conversation shows the channel list that was already painted", async ({ page }) => {
