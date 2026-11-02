@@ -651,10 +651,26 @@ function handleAcp(message) {
           data: { details: "Missing API key for openai auth. Provide an API key via settings, or set OPENAI_API_KEY." } } });
         break;
       }
+      // CodeBuddy Code without a sign-in starts a browser login and answers
+      // only once someone finishes it.
+      if (provider === "acp-browser-login") {
+        send({ jsonrpc: "2.0", method: "_codebuddy.ai/authUrl",
+          params: { authUrl: "https://example.invalid/login", provider: "external" } });
+        break;
+      }
       acpState.authenticateSeen = true;
       response(message, {});
       break;
     case "session/new":
+      // A WorkBuddy-bundled CodeBuddy prints one line about its mods and quits.
+      if (provider === "acp-quits") {
+        process.stderr.write('mods: loaded mod "subscription-gate" from .codebuddy-plugin (tier user, hooks: prompt.submit)\n');
+        process.exit(1);
+      }
+      if (provider === "acp-browser-login" && !acpState.authenticateSeen) {
+        send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "Authentication required", data: { category: "auth" } } });
+        break;
+      }
       if ((provider === "acp-cursor-login" || provider === "acp-missing-key") && !acpState.authenticateSeen) {
         send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "Authentication required" } });
         break;
@@ -759,6 +775,8 @@ const handlers = {
   acp: handleAcp,
   "acp-cursor-login": handleAcp,
   "acp-missing-key": handleAcp,
+  "acp-quits": handleAcp,
+  "acp-browser-login": handleAcp,
   "acp-live-canary": handleAcp,
 };
 

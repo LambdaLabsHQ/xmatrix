@@ -197,17 +197,28 @@ impl AcpSession {
                 let method_id = acp_retry_auth_method(&self.auth_method_ids);
                 // The agent itself said it needs credentials and refused the
                 // ones it has: whatever its wording, that is a sign-in problem.
-                self.request(
-                    "authenticate",
-                    Some(serde_json::json!({ "methodId": method_id })),
+                // A method that answers only after someone signs in somewhere
+                // (CodeBuddy's opens a browser login and waits) is one too.
+                let display_name = self.config.display_name.clone();
+                match tokio::time::timeout(
+                    ACP_AUTH_RETRY_TIMEOUT,
+                    self.request(
+                        "authenticate",
+                        Some(serde_json::json!({ "methodId": method_id })),
+                    ),
                 )
                 .await
-                .map_err(|err| {
-                    CliError::Launch(format!(
-                        "{} authentication required: {err}",
-                        self.config.display_name
-                    ))
-                })?;
+                {
+                    Ok(answer) => answer.map(|_| ()).map_err(|err| {
+                        CliError::Launch(format!("{display_name} authentication required: {err}"))
+                    })?,
+                    Err(_) => {
+                        return Err(CliError::Launch(format!(
+                            "{display_name} authentication required: it waits for a sign-in \
+                             (authenticate {method_id} did not answer)"
+                        )));
+                    }
+                }
                 self.request(method, Some(params)).await
             }
             Err(err) => Err(CliError::Launch(err.detail)),
@@ -1242,13 +1253,22 @@ fn acp_retry_auth_method(advertised: &[String]) -> String {
 /// How long a readiness check may take, from spawn to an open session.
 const ACP_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How long the credential retry waits for `authenticate`. Credentials the
+/// agent already holds answer in seconds; a method still waiting after this is
+/// waiting for a person to sign in.
+const ACP_AUTH_RETRY_TIMEOUT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_secs(2)
+} else {
+    std::time::Duration::from_secs(20)
+};
+
 /// Whether an ACP harness can take work on this machine, asked the way a
 /// launch asks it: the same spawn, `initialize`, credential retry and
 /// `session/new`, then closed before any prompt, so no model is called. A
 /// vendor's status command can be missing or wrong (an expired sign-in still
 /// reads signed in); this cannot. `Some(Err(reason))` is the harness's own
-/// account of why it refused; `None` is no answer (no start, a timeout, or a
-/// failure that is not about credentials).
+/// account of why it cannot (refused credentials, or it quit before a session
+/// opened); `None` is no answer (no start, or a timeout).
 pub(crate) async fn acp_harness_readiness(
     preset: &xmatrix_cli_agent::AgentPreset,
     launcher: &std::path::Path,
@@ -1273,11 +1293,15 @@ pub(crate) async fn acp_harness_readiness(
     )
     .await;
     app.shutdown().await;
-    match opened.ok()? {
+    readiness_verdict(opened.ok()?)
+}
+
+/// A harness that quits or errors before a session opens fails every launch
+/// the same way (a WorkBuddy-bundled CodeBuddy exits right after loading its
+/// mods), so routing must skip it as surely as one that refused credentials.
+fn readiness_verdict<T>(opened: error::Result<T>) -> Option<Result<(), String>> {
+    match opened {
         Ok(_) => Some(Ok(())),
-        Err(err) => {
-            let detail = err.to_string();
-            harness_signed_out_error(&detail).then_some(Err(detail))
-        }
+        Err(err) => Some(Err(err.to_string())),
     }
 }
