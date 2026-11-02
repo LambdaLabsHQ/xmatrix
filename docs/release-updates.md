@@ -15,6 +15,17 @@ access, harness sign-in, cross-Space read) now arrive live instead of after a
 reload. Hub and beta Web, plus CLI help text; no schema change. Recovery is a
 CI-validated release reverting this change. See
 [settings cards](design/settings-cards.md).
+## Unreleased: Machine scope timeouts retain the command holding the lock
+
+HUB-BJ rejected a daemon report at its first SQL statement, waiting on the
+Machine's advisory scope. The event could not identify the holder because
+this lock was absent from the existing bounded wait sampler. A slow scope
+wait now retains the holder's operation, state, wait type and capped age
+before PostgreSQL removes the wait edge. The original lock rejection and
+rollback still propagate without replay; the holder's underlying cause is
+not established. Hub only, no schema or authorization change; recovery is a
+CI-validated release reverting the sampler selection.
+
 ## Unreleased: Agents start without waiting on a quota read, and idle ones stop polling it
 
 A Codex, Grok, Cursor or OpenCode Instance read its provider quota over the
@@ -43,7 +54,8 @@ may answer the fresh read from their two-minute cache; the summon then starts
 on the next newer reading. Hub release with expand migrations
 (`0236_expand_registration_quota_waiters.sql`,
 `0237_expand_quota_retry_refusal_fence.sql`); recovery is a CI-validated
-revert, and the added tables and columns are unused by older code.
+revert, and the added tables and columns are unused by older code. Deleting
+a Channel or Space erases its quota waits with its other records.
 
 ## Unreleased: Follow-up messages wait for the Agent already being started
 
