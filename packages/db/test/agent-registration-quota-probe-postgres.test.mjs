@@ -1,7 +1,6 @@
 import { connectionString as url, integration, postgresConnections } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { Client } from "pg";
+import { registrationQuotaSchema } from "./registration-quota.fixture.mjs";
 import { readRegistrationQuotaProbeTargets, recordRegistrationQuotaProbeResult, recordRegistrationUsageLimit,
   registrationQuotaReading, REGISTRATION_QUOTA_POOL_SQL } from "../dist/agent-registration-quota-probe.js";
 
@@ -10,22 +9,9 @@ import { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistra
 
 integration("registration quota probe targets are the Space's authorized, singly-hosted registrations", async () => {
   assert.ok(url);
-  const schema = `registration_quota_probe_${process.pid}`;
-  const setup = new Client({ connectionString: url }); await setup.connect();
-  const rewrite = text => text.replaceAll("data.", `${schema}.`).replaceAll("control.", `${schema}.`);
-  const sql = (text, values) => setup.query(rewrite(text), values);
+  const { sql, rewrite, close } = await registrationQuotaSchema("registration_quota_probe");
   try {
-    await setup.query(`CREATE SCHEMA ${schema}`);
-    for (const file of ["0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql",
-      "0063_expand_registration_authority.sql", "0065_expand_registration_environment.sql",
-      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql"]) {
-      await sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
-    }
-    await sql(`CREATE TABLE data.space_members (space_id text,user_id text,role text);
-      CREATE TABLE data.machine_daemons (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,
-        capabilities_json jsonb,connection_epoch bigint);
-      CREATE TABLE data.machine_daemon_commands (command_id text,owner_user_id text,machine_id text,hostname text,
-        command_type text,created_at timestamptz)`);
+    await sql(`CREATE TABLE data.space_members (space_id text,user_id text,role text)`);
     const probe = '["machine_quota_probe_v2"]';
     // owner/m1: grok (default pool), claude (declared pool), codex (revoked grant), kimi (paused policy).
     // owner/m2: two online hosts. owner/m3: daemon without the probe capability. owner/m4: offline.
@@ -229,8 +215,5 @@ integration("registration quota probe targets are the Space's authorized, singly
       "a far reset is held for at most a week");
     assert.ok(near((await limit({ harness: "grok", resetsAt: "not a time" })).limitedUntil, hours(1)));
     assert.equal(await limit({ harness: "unregistered" }), undefined, "no environment, no reading");
-  } finally {
-    await setup.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    await setup.end();
-  }
+  } finally { await close(); }
 });

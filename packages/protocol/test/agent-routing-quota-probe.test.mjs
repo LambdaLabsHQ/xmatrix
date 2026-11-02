@@ -16,6 +16,12 @@ test('quota probe preserves original provider time without making stale observat
   assert.deepEqual(parse(response(observed)), response(observed));
 });
 
+test('a probe checking a refusal may ask for a fresh read, and only as true', () => {
+  assert.deepEqual(parseRoutingQuotaProbeRequest({ ...request, fresh: true }), { ...request, fresh: true });
+  assert.throws(() => parseRoutingQuotaProbeRequest({ ...request, fresh: false }));
+  assert.deepEqual(parseRoutingQuotaProbeResponse(response(observed), { ...request, fresh: true }, now), response(observed));
+});
+
 test('unavailable is explicit and cannot carry an invented balance', () => {
   const unavailable = { ...target, status: 'unavailable', reason: 'timeout' };
   assert.deepEqual(parse(response(unavailable)).results, [unavailable]);

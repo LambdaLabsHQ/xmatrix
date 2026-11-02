@@ -570,7 +570,37 @@ code overrides without logging private request payloads.
 Auto and bare harness shouts select from the persisted quota observation.
 The quota probe runs after that read and writes the observation the next
 selection will see; it does not delay this decision. Refresh targets come only
-from an authorized Channel query.
+from an authorized Channel query, and only for pools no current reading covers
+(an Instance's own reports or an earlier read keep the rest current), at most
+once a minute per Daemon.
+
+A summon refused because a reading said its pool was used up does not stay
+refused when that reading is out of date (a provider reset, a top-up, a plan
+change). Quota waits (`packages/hub/src/quota-waits.ts`) carry it:
+
+- The refusal names the reading it rested on (`refused_through`). Its quota
+  retry stays an offer, still verifying for a minute, and a wait on each
+  refused pool is recorded in the directory with that fence.
+- It asks each refused registration's Daemon for one `fresh` read (one probe
+  per target, the fence kept beside the probe and never sent). Machine control
+  joins a fresh read of the same target already under way on the same live
+  connection and issued after the fence, in the issuing transaction, so many
+  refusals of one pool cause one provider request.
+- The transaction that records any reading newer than the fence with headroom
+  (that probe, an Instance's own report, any other read) marks the wait ready
+  with a new token, so the event cannot be lost; recording the wait re-checks
+  the current reading the same way. Delivery makes the Channel's waiting and
+  verifying retries due and wakes its launch coordinator, whose full admission
+  decides; the wait is deleted by its token only once the Channel was told.
+  A ready wait not delivered within 30 seconds is delivered again by the
+  minute's maintenance, which reads the database only and never asks a Daemon
+  or provider. A Daemon that connects is asked again for the quota waited on
+  there.
+- A retry not ready is checked next at its windows' reset or when the hold it
+  waits behind ends; with neither known it waits for an event. A wake carries a
+  revision, so a check that began before it cannot put the retry back to
+  sleep. Recovering a stopped Instance (`continuation`) still starts only after
+  its author chose to wait.
 The owning machine command authority issues a `quota_probe` to the exact online
 Daemon epoch advertising `machine_quota_probe_v2`; older Daemons never claim it.
 Each command contains at most 32 authorized registration/configuration bindings

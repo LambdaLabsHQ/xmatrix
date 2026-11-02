@@ -228,7 +228,7 @@ export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationC
 export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, readDueFirstMessageSummons,
   FIRST_MESSAGE_SUMMON_PENDING_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL, type PendingFirstMessageSummon,
   type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
-export { readRegistrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
+export { readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
   type RegistrationQuotaProbeTarget } from "./agent-registration-quota-probe.js";
 
 export {
@@ -272,8 +272,11 @@ export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessAc
 export { readLatestWorktreeListing, readWorktreeActionStatus } from "./machine-worktree-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
-export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaState, registrationQuotaKey,
+export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaExpiries,
+  readRegistrationQuotaState, registrationQuotaKey,
   type RegistrationQuotaKey, type RegistrationQuotaReading } from "./registration-quota-state.js";
+export { owedRegistrationQuotaWaitOwners, readyRegistrationQuotaWaits, settleRegistrationQuotaWaits,
+  waitForRegistrationQuota, waitedRegistrationsOnMachine, type ReadyRegistrationQuotaWait } from "./registration-quota-waiters.js";
 
 export { PostgresDiscordLifecycleRepository } from "./discord-installation-lifecycle.js";
 export { PostgresSentryEventRepository, validateSentryEventIdentity, type SentryEventIdentity, type SentryEventKey, type SentryEventJob } from "./sentry-event-control.js";

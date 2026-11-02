@@ -740,7 +740,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
     const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld;
       signedOut?: HarnessSignedOut; offline?: OfflineMachine[]; machineAgents?: MachineAgents;
-      quotaTargets?: SpaceAgentRegistrationKey[] }> = [];
+      quotaTargets?: SpaceAgentRegistrationKey[]; quotaRefusedThrough?: string }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
     const summonText = (selection: { start: number; end: number; text: string }) =>
@@ -758,7 +758,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       const machineAgents = machine ? await this.machineAgents(machine).catch(() => undefined) : undefined;
       rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}),
         ...(signedOut ? { signedOut } : {}), ...(offline?.length ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}),
-        ...(error instanceof RegistrationAccessError && error.quotaTargets ? { quotaTargets: error.quotaTargets } : {}) });
+        ...(error instanceof RegistrationAccessError && error.quotaTargets ? { quotaTargets: error.quotaTargets } : {}),
+        ...(error instanceof RegistrationAccessError && error.quotaRefusedThrough
+          ? { quotaRefusedThrough: error.quotaRefusedThrough } : {}) });
     };
     for (const [selectionIndex, selection] of source.selections.entries()) {
       if (input.onlySelectionIndex !== undefined && input.onlySelectionIndex !== selectionIndex) continue;

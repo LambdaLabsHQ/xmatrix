@@ -8,7 +8,9 @@ export class RegistrationAccessError extends ControlError {
    * `signedOut`: what a `registration_harness_signed_out` refusal says to sign in;
    * `offline`: the machines a `registration_daemon_offline` refusal waits for. */
   constructor(code: string, status: number, readonly tooOld?: HarnessTooOld, readonly signedOut?: HarnessSignedOut,
-    readonly offline?: OfflineMachine[], readonly quotaTargets?: SpaceAgentRegistrationKey[]) {
+    readonly offline?: OfflineMachine[], readonly quotaTargets?: SpaceAgentRegistrationKey[],
+    /** For a used-up refusal: the reading it rested on, so only a newer one is news. */
+    readonly quotaRefusedThrough?: string) {
     super(code, status, code, status >= 500);
   }
 

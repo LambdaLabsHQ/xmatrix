@@ -16,7 +16,8 @@ integration("parallel allocations across Spaces are unrestricted and terminal ev
     await setup.query(`CREATE SCHEMA ${schema}`);
     for (const file of ["0059_expand_agent_registration_keys.sql", "0065_expand_registration_environment.sql",
       "0066_expand_registration_allocations.sql", "0070_expand_registration_launch_intents.sql",
-      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql"]) await setup.query(rewrite(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
+      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql",
+      "0236_expand_registration_quota_waiters.sql"]) await setup.query(rewrite(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
     await setup.query(`CREATE TABLE ${schema}.machine_daemons
       (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,connection_epoch bigint)`);
     await setup.query(`CREATE TABLE ${schema}.machine_run_routes (run_id text,owner_user_id text,machine_id text,terminal_at timestamptz)`);

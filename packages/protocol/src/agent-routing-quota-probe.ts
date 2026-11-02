@@ -22,6 +22,11 @@ export interface RoutingQuotaProbeRequest {
    * credits). A daemon that predates it ignores the field; a result carrying
    * it is accepted only when the probe asked. */
   quotaAccount?: true;
+  /** Asks the daemon to read the provider now rather than answer from its
+   * own recent reading: the probe checks a refusal, so only a reading newer
+   * than the one that refused can change anything. A daemon that predates it
+   * ignores the field and may answer from its cache. */
+  fresh?: true;
 }
 
 export interface RoutingQuotaProbeWindow {
@@ -165,9 +170,10 @@ function target(row: Record<string, unknown>): RoutingQuotaProbeTarget {
 }
 
 export function parseRoutingQuotaProbeRequest(value: unknown): RoutingQuotaProbeRequest {
-  const row = record(value, ["requestId", "connectionEpoch", "targets", "windowLabels", "quotaAccount"]);
+  const row = record(value, ["requestId", "connectionEpoch", "targets", "windowLabels", "quotaAccount", "fresh"]);
   if (row.windowLabels !== undefined && row.windowLabels !== true) throw new Error("Invalid quota probe window labels");
   if (row.quotaAccount !== undefined && row.quotaAccount !== true) throw new Error("Invalid quota probe account request");
+  if (row.fresh !== undefined && row.fresh !== true) throw new Error("Invalid quota probe freshness");
   const requestId = text(row.requestId, 200);
   if (!Number.isSafeInteger(row.connectionEpoch) || Number(row.connectionEpoch) < 1) {
     throw new Error("Invalid quota probe epoch");
@@ -179,7 +185,8 @@ export function parseRoutingQuotaProbeRequest(value: unknown): RoutingQuotaProbe
   if (new Set(targets.map(item => item.targetId)).size !== targets.length) throw new Error("Duplicate quota probe target");
   return { requestId, connectionEpoch: Number(row.connectionEpoch), targets,
     ...(row.windowLabels === true ? { windowLabels: true as const } : {}),
-    ...(row.quotaAccount === true ? { quotaAccount: true as const } : {}) };
+    ...(row.quotaAccount === true ? { quotaAccount: true as const } : {}),
+    ...(row.fresh === true ? { fresh: true as const } : {}) };
 }
 
 /** Validate at the authenticated daemon boundary; no caller-supplied owner or account identity is accepted. */

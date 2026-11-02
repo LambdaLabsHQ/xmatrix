@@ -85,18 +85,28 @@ export async function recordInstancePresentation(env: RuntimeEnv, input: {
     instanceId: input.instanceId, presentation: input.presentation,
     ...(input.status ? { status: input.status } : {}), at: input.at,
   });
-  if (result.registration) {
-    await observeRegistrationQuota(runtimeDirectory(env), result.registration, input.presentation?.usage, input.commandId);
-  }
-  return { instanceId: result.instanceId, recorded: result.recorded };
+  // A reading with headroom may leave a refused summon's wait ready; the
+  // caller delivers it without holding up this report.
+  const quotaWaitsReady = result.registration
+    ? await observeRegistrationQuota(runtimeDirectory(env), result.registration, input.presentation?.usage, input.commandId)
+    : false;
+  return { instanceId: result.instanceId, recorded: result.recorded,
+    ...(quotaWaitsReady && result.registration ? { quotaWaitsReadyFor: result.registration.ownerUserId } : {}) };
 }
 
-/** Asks the daemons behind a Channel's Space's registrations to read their quota again. */
+/** How often one daemon is asked to read quota no reading covers, however
+ * many summons there are. */
+const UNREAD_QUOTA_REFRESH_INTERVAL_MS = 60_000;
+
+/** Asks the daemons behind a Channel's Space's registrations to read the
+ * quota no current reading covers. A pool an Instance or an earlier read keeps
+ * current needs no request, and each daemon is asked at most once a minute. */
 export async function refreshChannelRoutingQuota(env: Env, input: { channelId: string; actorUserId: string }) {
   const database = runtimeDatabase(env);
   const directory = createPostgresAuthorityFleet(env, {
     applicationName: "xmatrix-hub-quota-probe", ...POSTGRES_AUTHORITY_TIMEOUTS,
   }).directoryDatabase;
   return refreshAgentRoutingQuota({ env, directory, runtime: runtimeRepository(env, database), ...input,
-    registrationTargets: registrationQuotaProbeTargetReader(database, directory) });
+    registrationTargets: registrationQuotaProbeTargetReader(database, directory,
+      { onlyUnread: true, probedWithinMs: UNREAD_QUOTA_REFRESH_INTERVAL_MS }) });
 }

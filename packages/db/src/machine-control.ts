@@ -533,7 +533,8 @@ export class PostgresMachineControlRepository {
       }
       if (action === "claim") return this.claim(tx, input, current!, connectionEpoch!, at);
       if (action === "renew") return this.renew(tx, input, current!, connectionEpoch!, at);
-      if (action === "issue") await this.issue(tx, input, ownerUserId, machineId, hostId, payload, at);
+      const issued = action === "issue"
+        ? await this.issue(tx, input, ownerUserId, machineId, hostId, payload, at) : undefined;
       const batchIssue = action === "issue_batch"
         ? await this.issueBatch(tx, input, ownerUserId, machineId, hostId, at) : undefined;
       // An older daemon still asks its owner to approve host commands. Nothing
@@ -649,6 +650,7 @@ export class PostgresMachineControlRepository {
         audit: { commandId, action, eventType: input.eventType ?? input.commandType, at,
           persisted: action === "enroll" }, ...(input.controlId ? { controlId: input.controlId } : {}),
         ...(batchIssue ? { commands: batchIssue } : {}),
+        ...(issued?.coalescedInto ? { coalescedInto: issued.coalescedInto } : {}),
         ...(runLifecycleChannelId ? { runLifecycleChannelId } : {}),
         ...(runLifecycleChannelIds.length ? { runLifecycleChannelIds } : {}),
         ...(terminalEvent ? { runTerminalReportRecorded: true } : {}),
@@ -1022,27 +1024,50 @@ export class PostgresMachineControlRepository {
     return rows[0]!;
   }
 
+  /** Stores one command for a daemon. A fresh quota read of one target that a
+   * read already under way on the same live connection will answer after its
+   * `readAfter` is not stored again: the caller joins that read. */
   private async issue(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
-    machineId: string, hostId: string, payload: Record<string, unknown>, at: string) {
+    machineId: string, hostId: string, payload: Record<string, unknown>, at: string): Promise<{ coalescedInto?: string }> {
     const controlId = text(input.controlId, "controlId", 200);
     const commandType = text(input.commandType, "commandType", 32);
     if (!COMMAND_TYPES.has(commandType) || payload.requestId !== controlId) throw new MachineControlError(
       "invalid_machine_command", 400, "Machine command payload does not match its control id");
     if (commandType === "quota_probe") {
+      let probe: ReturnType<typeof parseRoutingQuotaProbeRequest>;
+      // A read that checks a refusal names the reading it must be newer than;
+      // the Hub keeps it beside the probe and never sends it to the daemon.
+      const readAfter = typeof payload.readAfter === "string" ? Date.parse(payload.readAfter) : NaN;
       try {
-        const probe = parseRoutingQuotaProbeRequest(payload.probe);
+        probe = parseRoutingQuotaProbeRequest(payload.probe);
         if (payload.type !== "machine_quota_probe" || probe.requestId !== controlId ||
-            Object.keys(payload).some(key => !["type", "requestId", "probe"].includes(key))) {
+            Object.keys(payload).some(key => !["type", "requestId", "probe", "readAfter"].includes(key)) ||
+            payload.readAfter !== undefined && (probe.fresh !== true || !Number.isFinite(readAfter))) {
           throw new Error("Invalid quota probe envelope");
         }
-        const current = await tx.query({ name: "machine_quota_probe_epoch_v3", text: `SELECT 1
+        // A fresh read locks the daemon so concurrent askers of one target
+        // either join one read or store one; a plain read only shares.
+        const current = await tx.query({ name: probe.fresh ? "machine_quota_probe_epoch_lock_v1"
+          : "machine_quota_probe_epoch_v3", text: `SELECT 1
           FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
             AND status='online' AND connection_epoch=$3
-            AND capabilities_json ? 'machine_quota_probe_v2' FOR SHARE`,
+            AND capabilities_json ? 'machine_quota_probe_v2' ${probe.fresh ? "FOR UPDATE" : "FOR SHARE"}`,
         values: [ownerUserId, machineId, probe.connectionEpoch], maxRows: 1 });
         if (!current[0]) throw new Error("Quota probe daemon unavailable");
       } catch {
         throw new MachineControlError("invalid_quota_probe", 409, "Quota probe requires the exact capable online daemon");
+      }
+      if (probe.fresh && probe.targets.length === 1 && Number.isFinite(readAfter)) {
+        const [joined] = await tx.query<QueryResultRow>({ name: "machine_quota_probe_join_v1", text: `SELECT command_id
+          FROM data.machine_daemon_commands WHERE owner_user_id=$1 AND machine_id=$2 AND hostname=$3
+            AND command_type='quota_probe' AND status IN ('pending','leased') AND expires_at>$4::timestamptz
+            AND created_at>$5::timestamptz AND payload_json->'probe'->>'fresh'='true'
+            AND payload_json->'probe'->>'connectionEpoch'=$6
+            AND payload_json->'probe'->'targets' @> jsonb_build_array(jsonb_build_object('targetId',$7::text))
+          ORDER BY created_at DESC LIMIT 1`,
+        values: [ownerUserId, machineId, hostId, at, new Date(readAfter).toISOString(), String(probe.connectionEpoch),
+          probe.targets[0]!.targetId], maxRows: 1 });
+        if (joined) return { coalescedInto: String(joined.command_id) };
       }
     }
     if (commandType === "harness_action") {
@@ -1195,6 +1220,7 @@ export class PostgresMachineControlRepository {
       if (!routes[0]) throw new MachineControlError("run_route_conflict", 409,
         "Run route is already bound to another Machine target");
     }
+    return {};
   }
 
   private async issueBatch(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,

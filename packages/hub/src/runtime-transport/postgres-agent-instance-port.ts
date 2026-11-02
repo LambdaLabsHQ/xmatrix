@@ -81,6 +81,7 @@ import {
   usageLimitHandoffIds,
 } from "./agent-usage-limit-handoff";
 import { recordInstancePresentation, runtimeRepository } from "../runtime";
+import { deliverQuotaWakes } from "../quota-waits";
 import { holdRegistrationUsageLimit } from "../registration-launch-dispatch";
 
 type Message<Type extends AgentInstanceClientMessage["type"]> = Extract<
@@ -190,7 +191,16 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
             spaceId: String(command.spaceId), instanceId: String(command.instanceId),
             presentation: (command.presentation ?? null) as Record<string, unknown> | null,
             ...(typeof command.status === "string" ? { status: command.status } : {}),
-            at: String(command.at) })
+            at: String(command.at) }).then(({ quotaWaitsReadyFor, ...recorded }) => {
+            // The Instance's own reading cleared a refused summon's wait.
+            if (quotaWaitsReadyFor) {
+              const delivery = deliverQuotaWakes(input.env, quotaWaitsReadyFor).catch((error: unknown) =>
+                console.warn("Quota wait delivery after an Instance reading failed", {
+                  error: error instanceof Error ? error.message : String(error) }));
+              input.scheduleBackground?.(delivery);
+            }
+            return recorded;
+          })
           : runtimeRepository(input.env).mutate(command),
         holdUsageLimit: (hold) => holdRegistrationUsageLimit(input.env, hold),
         markResting: async ({ runId, channelId, ownerUserId, resting }) => {
