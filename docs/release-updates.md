@@ -15,6 +15,35 @@ access, harness sign-in, cross-Space read) now arrive live instead of after a
 reload. Hub and beta Web, plus CLI help text; no schema change. Recovery is a
 CI-validated release reverting this change. See
 [settings cards](design/settings-cards.md).
+## Unreleased: Agents start without waiting on a quota read, and idle ones stop polling it
+
+A Codex, Grok, Cursor or OpenCode Instance read its provider quota over the
+network before its first turn, and a Claude Instance before announcing itself
+ready, so every start waited on that request (seconds on a slow link, up to a
+ten-second timeout). The read now runs beside the start and its reading
+follows when it lands. An idle Codex Instance no longer asks for its quota
+every minute; it reads it when a turn ends. A daemon answers a Hub probe that
+checks a refused summon (`fresh`) from the provider rather than its
+two-minute cache, so a reset or top-up is seen at once. CLI only; recovery is
+a CI-validated forward release.
+
+## Unreleased: A refused summon starts once its quota is back
+
+A summon refused because a stored reading said its provider quota was used up
+stayed refused after a reset or top-up until someone summoned again. Now the
+refusal records what it rested on and asks that pool's daemon for one fresh
+read. The reading that shows headroom, from that read or an Instance's own
+report, marks the wait in the same transaction that records it; the Hub then
+wakes the summon and the launch coordinator starts it under full admission. Many refusals of one pool
+share one read. A summon's ordinary refresh reads only quota no current
+reading covers, at most once a minute per daemon, and a waiting retry is
+checked at its reset rather than every few minutes. Recovering a stopped
+Instance still waits for its author's choice. Daemons from before this release
+may answer the fresh read from their two-minute cache; the summon then starts
+on the next newer reading. Hub release with expand migrations
+(`0236_expand_registration_quota_waiters.sql`,
+`0237_expand_quota_retry_refusal_fence.sql`); recovery is a CI-validated
+revert, and the added tables and columns are unused by older code.
 
 ## Unreleased: Follow-up messages wait for the Agent already being started
 

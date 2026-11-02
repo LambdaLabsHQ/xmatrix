@@ -78,13 +78,15 @@ test("multi-account refresh batches stay owner-scoped", async () => {
 test("a composite registration dispatch schedules a quota refresh; a legacy one does not", async () => {
   for (const [mode, selectionCount, expected] of [["composite", 1, true], ["legacy", 0, false], ["composite", 0, false]]) {
     const refreshed = [], tasks = [];
+    let launched = false;
     await dispatchRegistrationLaunchesAfterMessage({ env: {}, channelId: "channel", messageId: "message",
       body: "@grok hi", actorUserId: "caller", scheduleBackground: task => tasks.push(task) }, {
       refreshQuota: async ({ channelId, actorUserId }) => {
+        assert.equal(launched, true, "the reading never delays the launch");
         refreshed.push({ channelId, actorUserId });
         return { issued: 0 };
       },
-      launch: async () => ({ mode, selectionCount, prepared: [] }),
+      launch: async () => { launched = true; return { mode, selectionCount, prepared: [] }; },
     });
     await Promise.all(tasks);
     assert.equal(refreshed.length > 0, expected, `${mode}/${selectionCount}`);

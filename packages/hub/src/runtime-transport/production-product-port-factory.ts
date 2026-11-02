@@ -12,6 +12,7 @@ import type {
 } from "@xmatrix/protocol";
 import { channelInstanceQuota } from "../registration-quota-presentation";
 import { runtimeDirectory } from "../runtime";
+import { deliverQuotaWakes } from "../quota-waits";
 import type { AgentInstanceServerMessage } from "@xmatrix/protocol/connections/agent-instance";
 import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
 import type { Env } from "../types";
@@ -108,6 +109,8 @@ export function createProductionRelayRuntimeProductPortFactory(
     runtimeSelf?: { cellName: () => string; fetch(request: Request): Promise<Response> };
     /** This Runtime cell's own storage, which outlives its hibernation. */
     storage?: PresenceStorage;
+    /** Deliver an owner's quota waits a reading made ready; PostgreSQL by default. */
+    deliverQuotaWakes?: (env: Env, ownerUserId: string) => Promise<unknown>;
   } = {},
 ): RelayRuntimeProductPortFactory {
   const analytics = options.analytics ?? analyticsSinkFromEnv(env);
@@ -225,6 +228,13 @@ export function createProductionRelayRuntimeProductPortFactory(
       ...(options.runtime ? { runtime: options.runtime } : {}),
     })),
     onRegistrationQuotaChange: async ({ ownerUserId, deliver }) => {
+      // A reading with headroom may have made a refused summon's wait ready:
+      // deliver it beside the report, never holding up the daemon's answer.
+      const delivery = Promise.resolve().then(() => (options.deliverQuotaWakes ?? deliverQuotaWakes)(env, ownerUserId))
+        .catch((error: unknown) => console.warn("Quota wait delivery after a probe failed", {
+          errorCode: error instanceof Error ? error.name : "unknown",
+        }));
+      if (options.scheduleBackground) options.scheduleBackground(delivery);
       // A probe of one machine can move a pool the owner's other machines share.
       const readings = await readOwnerQuota(ownerUserId).catch((error: unknown) => {
         console.warn("Registration quota read after a probe failed", {

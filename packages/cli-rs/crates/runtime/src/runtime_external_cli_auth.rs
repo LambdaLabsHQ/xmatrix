@@ -2033,17 +2033,12 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
         read_initial_spawn_context_from_env().and_then(|ctx| ctx.goal);
 
     write_current_run_status(&format!("{run_phase_prefix}_app_starting"), false, None);
-    // Seed monthly credit quota from the vendor billing hook so the channel
-    // Agents panel can show remaining allowance (1mo). Turn token usage alone
-    // rarely includes subscription windows. Read before the first presence
-    // publish. Generic ACP vendors have no quota hook and simply skip this.
-    let mut latest_usage = config.read_quota_usage(false, None).await;
     let mut initial_runtime_turn = runtime_state.begin_initial_message_turn(
         &relay,
         initial_message.is_some(),
         auto_join_channel_id.as_deref(),
         None,
-        latest_usage.clone(),
+        None,
         latest_goal.clone(),
     );
 
@@ -2056,15 +2051,25 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     } else {
         None
     };
-    let mut app = AcpSession::spawn(cmd, cmd_args, cwd, config.clone()).await?;
-    let initial_presentation = app
-        .initialize(
-            cwd,
-            resume_session_key.as_deref(),
-            resume_requested && !role_active,
-            trusted_rules.as_deref(),
-        )
-        .await?;
+    // Seed monthly credit quota from the vendor billing hook so the channel
+    // Agents panel can show remaining allowance (1mo). Turn token usage alone
+    // rarely includes subscription windows. It is read beside the session's
+    // start, never ahead of it, and reaches the first full presence below.
+    // Generic ACP vendors have no quota hook and simply skip this.
+    let (seed_usage, started) = tokio::join!(config.read_quota_usage(false, None), async {
+        let mut app = AcpSession::spawn(cmd, cmd_args, cwd, config.clone()).await?;
+        let presentation = app
+            .initialize(
+                cwd,
+                resume_session_key.as_deref(),
+                resume_requested && !role_active,
+                trusted_rules.as_deref(),
+            )
+            .await?;
+        error::Result::Ok((app, presentation))
+    });
+    let (mut app, initial_presentation) = started?;
+    let mut latest_usage = seed_usage;
     // Keep bootstrap/history in ordinary user content even when the vendor
     // accepted separate trusted rules. History must never become system text.
     latest_goal = app.loaded_goal.take().or(latest_goal);

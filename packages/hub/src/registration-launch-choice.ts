@@ -270,8 +270,13 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     // is a fact about the environment, not an observation for Jev to weigh.
     const now = Date.now();
     if (eligible.every(candidate => providerQuotaExhausted(candidate, now))) {
+      // The earliest reading this refusal rested on: any reading of these
+      // pools newer than it is one the refusal never saw.
+      const observed = eligible.map(candidate => Date.parse(candidate.observations?.quota?.observedAt ?? ""))
+        .filter(Number.isFinite);
       throw new RegistrationAccessError("registration_quota_exhausted", 409, undefined, undefined, undefined,
-        eligible.map(candidate => candidate.key));
+        eligible.map(candidate => candidate.key),
+        observed.length ? new Date(Math.min(...observed)).toISOString() : new Date(now).toISOString());
     }
     narrow("registration_quota_exhausted", candidate => !providerQuotaExhausted(candidate, now));
     if (eligible.length > 100) throw new RegistrationAccessError("registration_candidates_limit", 409);

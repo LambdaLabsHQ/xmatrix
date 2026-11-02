@@ -93,6 +93,9 @@ export async function readRegistrationQuotaProbeTargets(input: {
   /** Skip a daemon that was already asked for its quota this recently, so
    * readers watching the Agents page share one reading per daemon. */
   probedWithinMs?: number;
+  /** Only registrations whose pool has no current reading: a pool an
+   * Instance or an earlier read keeps current needs no request. */
+  onlyUnread?: boolean;
 }): Promise<RegistrationQuotaProbeTarget[]> {
   const registrations = await input.database.transaction({ requestId: input.requestId,
     operation: "registration.quota-probe.registrations", placement: input.placement }, async tx => {
@@ -105,10 +108,25 @@ export async function readRegistrationQuotaProbeTargets(input: {
         ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT 100`,
     values: [input.placement.spaceId], maxRows: 100 });
   });
+  return registrationQuotaProbeTargets(input.directory, { requestId: input.requestId,
+    registrations: registrations.map(row => ({ ownerUserId: String(row.owner_user_id), machineId: String(row.machine_id),
+      harness: String(row.harness) })),
+    ...(input.probedWithinMs !== undefined ? { probedWithinMs: input.probedWithinMs } : {}),
+    ...(input.onlyUnread ? { onlyUnread: true } : {}) });
+}
+
+/** Probe targets for these registrations whose single online daemon can read
+ * their quota (see `readRegistrationQuotaProbeTargets`). The caller has
+ * authorized the registrations: a Space's, or those a refused summon names. */
+export async function registrationQuotaProbeTargets(directory: AuthorityDatabase, input: {
+  requestId: string; registrations: ReadonlyArray<{ ownerUserId: string; machineId: string; harness: string }>;
+  probedWithinMs?: number; onlyUnread?: boolean;
+}): Promise<RegistrationQuotaProbeTarget[]> {
+  const registrations = input.registrations.slice(0, 100);
   if (!registrations.length) return [];
-  const rows = await input.directory.transaction({ requestId: input.requestId,
+  const rows = await directory.transaction({ requestId: input.requestId,
     operation: "registration.quota-probe.daemons" }, tx => tx.query<QueryResultRow>({
-    name: "registration_quota_probe_daemons_v5", text: `SELECT requested.owner,requested.machine,requested.harness,
+    name: "registration_quota_probe_daemons_v6", text: `SELECT requested.owner,requested.machine,requested.harness,
         e.version AS environment_version,${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id,
         d.hostname,d.connection_epoch,
         $2::integer IS NOT NULL AND EXISTS (SELECT 1 FROM data.machine_daemon_commands probe
@@ -119,13 +137,16 @@ export async function readRegistrationQuotaProbeTargets(input: {
       -- A disabled Agent takes no work, so its quota is not worth reading.
       JOIN control.agent_registration_environments e ON e.owner_user_id=requested.owner
         AND e.machine_id=requested.machine AND e.harness=requested.harness AND e.declaration_json->'enabled'='true'::jsonb
+        AND ($3::boolean IS NOT TRUE OR NOT EXISTS (SELECT 1 FROM control.registration_quota_observations q
+          WHERE q.owner_user_id=e.owner_user_id AND q.quota_pool_id=${REGISTRATION_QUOTA_POOL_SQL}
+            AND q.observed_at<=statement_timestamp() AND q.expires_at>statement_timestamp()))
       JOIN LATERAL (SELECT daemon.hostname,daemon.connection_epoch FROM data.machine_daemons daemon
         WHERE daemon.owner_user_id=requested.owner AND daemon.machine_id=requested.machine
           AND daemon.status='online' AND daemon.capabilities_json ? 'machine_quota_probe_v2'
         ORDER BY daemon.hostname LIMIT 2) d ON TRUE
       ORDER BY requested.owner,requested.machine,requested.harness,d.hostname LIMIT 200`,
-    values: [JSON.stringify(registrations.map(row => ({ owner: String(row.owner_user_id),
-      machine: String(row.machine_id), harness: String(row.harness) }))), input.probedWithinMs ?? null], maxRows: 200 }));
+    values: [JSON.stringify(registrations.map(row => ({ owner: row.ownerUserId, machine: row.machineId,
+      harness: row.harness }))), input.probedWithinMs ?? null, input.onlyUnread === true], maxRows: 200 }));
   const hosts = new Map<string, number>();
   for (const row of rows) {
     const key = JSON.stringify([row.owner, row.machine, row.harness]);
@@ -163,7 +184,7 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
   windows?: readonly RoutingQuotaWindow[];
   /** The provider's verdict on the account from the same read. */
   account?: LlmQuotaAccount;
-}): Promise<void> {
+}): Promise<boolean> {
   await tx.query({ name: "registration_quota_observe_v4", text: `INSERT INTO control.registration_quota_observations
       (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,windows_json,account_json)
       SELECT $1,$2,$3,$4::timestamptz,$5::timestamptz,$6,$7::jsonb,$8::jsonb
@@ -175,6 +196,45 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
     values: [input.ownerUserId, input.quotaPoolId, input.remaining, input.observedAt, input.expiresAt, input.source,
       input.windows?.length ? JSON.stringify(input.windows) : null, input.account ? JSON.stringify(input.account) : null],
     maxRows: 0 });
+  // A reading with headroom may end a refused summon's wait. Marking it here,
+  // in the reading's own transaction, means the event cannot be lost. True
+  // when one of the owner's waits is ready to deliver.
+  return input.remaining > 0 && await markRegistrationQuotaWaitersReady(tx, input.ownerUserId);
+}
+
+/** How many of one owner's waits one reading looks at. */
+const QUOTA_WAITERS_PER_OWNER = 128;
+
+/**
+ * Inside a transaction that recorded a reading of `ownerUserId`'s quota or a
+ * wait: every wait of the owner's whose pool now has a current reading newer
+ * than the one that refused it, with headroom, becomes ready. Headroom is the
+ * routing reading (`registrationQuotaReading`), the one a launch reads.
+ * True when any wait of the owner is ready.
+ */
+export async function markRegistrationQuotaWaitersReady(tx: DatabaseTransaction, ownerUserId: string): Promise<boolean> {
+  const waits = await tx.query<QueryResultRow>({ name: "registration_quota_waiters_pending_v1", text: `SELECT
+      w.quota_pool_id,w.channel_id,w.ready_at IS NOT NULL AS ready,q.source,q.remaining,
+      to_json(q.observed_at)#>>'{}' AS observed_at,to_json(q.expires_at)#>>'{}' AS expires_at,
+      q.windows_json,q.account_json
+    FROM control.registration_quota_waiters w
+    LEFT JOIN control.registration_quota_observations q ON q.owner_user_id=w.owner_user_id
+      AND q.quota_pool_id=w.quota_pool_id AND q.observed_at>w.refused_through
+      AND q.observed_at<=statement_timestamp() AND q.expires_at>statement_timestamp()
+    WHERE w.owner_user_id=$1 AND w.expires_at>statement_timestamp()
+    ORDER BY w.quota_pool_id,w.channel_id LIMIT ${QUOTA_WAITERS_PER_OWNER}`,
+  values: [ownerUserId], maxRows: QUOTA_WAITERS_PER_OWNER });
+  const ready = waits.filter(row => row.ready !== true && typeof row.observed_at === "string"
+    && (registrationQuotaReading(row)?.remainingPercent ?? 0) > 0);
+  if (ready.length) {
+    await tx.query({ name: "registration_quota_waiters_ready_v1", text: `UPDATE control.registration_quota_waiters w
+        SET ready_at=clock_timestamp(),ready_token=gen_random_uuid()
+        FROM jsonb_to_recordset($2::jsonb) AS woken(pool text,channel text)
+      WHERE w.owner_user_id=$1 AND w.quota_pool_id=woken.pool AND w.channel_id=woken.channel AND w.ready_at IS NULL`,
+    values: [ownerUserId, JSON.stringify(ready.map(row => ({ pool: String(row.quota_pool_id),
+      channel: String(row.channel_id) })))], maxRows: 0 });
+  }
+  return ready.length > 0 || waits.some(row => row.ready === true);
 }
 
 /** The daemon's completed quota probe is where its readings become facts, in
