@@ -68,13 +68,17 @@ Message authority failures also explicitly report the original exception and
 bounded database evidence, rather than relying on console serialization.
 Text-task answer application failures retain the original exception and bounded
 database evidence while still acknowledging the completed Machine command.
-Slow execution-report owner, Channel metadata root/control-head and lifecycle
-admission locks sample the live wait edge before a lock timeout removes it: only fixed waiter/blocker
+Slow execution-report owner, Channel metadata root/control-head, runtime and
+machine-lifecycle control-head updates, and lifecycle admission locks sample the
+live wait edge before a lock timeout or deadlock removes it: only fixed waiter/blocker
 owner categories, state, wait type and capped transaction age are retained.
 Catalog writers have their own fixed owner category. All paths share one
 additional diagnostic connection per isolate, with 250 ms connection/query
 deadlines; fast locks open none. An unavailable or
 busy sampler preserves the original error and existing recovery rules.
+For a runtime head deadlock (HUB-BH), compare the failing operation with the
+blocker's `op:<operation>`, state and wait type to locate the other code path
+before changing lock order; an unavailable sample does not establish a cause.
 
 Hyperdrive pools in transaction mode. Session state does not survive between
 transactions: use transaction-local settings (`set_config(..., true)` or

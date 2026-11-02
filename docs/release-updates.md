@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Runtime control-head deadlocks retain the live blocker
+
+HUB-BH aborted a registration launch while advancing its Space control head.
+The original event names the failed query but cannot identify the other
+transaction in the cycle. Runtime and machine lifecycle head updates now use
+the existing bounded lock-wait sampler before PostgreSQL removes the wait
+edge, retaining only the other operation, state, wait type and transaction age.
+The original rejection, rollback and replay boundaries are unchanged; no
+underlying lock-order cause is claimed. Hub only, no schema or authorization
+change; recovery is a CI-validated release reverting the sampler selection.
+
 ## Unreleased: A provider reset ends a used-up quota hold within minutes
 
 A usage-limit report held a pool at 0% until the provider's reset, up to a
