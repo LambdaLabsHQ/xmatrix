@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: A provider reset ends a used-up quota hold within minutes
+
+A usage-limit report held a pool at 0% until the provider's reset, up to a
+week. Only a summon (already refused by then) or an open Agents page read the
+provider again, so a manual reset or top-up kept refusing summons. The Hub's
+minute clock now asks each online daemon to re-read every pool held used up,
+at most once per daemon per 55 seconds. Hub only, no schema or authorization
+change; recovery is a CI-validated revert of the scheduled step.
 ## Unreleased: An agent that quits or waits for a sign-in is not chosen
 
 The daemon's can-it-take-work check counted only credential errors, so an ACP
