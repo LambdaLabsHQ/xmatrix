@@ -78,6 +78,8 @@ export default function Document(props: { children: React.ReactNode; lang: strin
       style={{ colorScheme: "light" }}
       suppressHydrationWarning
     >
+      {/* Shared by the App Router root layouts; this is their document head. */}
+      {/* eslint-disable-next-line @next/next/no-head-element */}
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <script dangerouslySetInnerHTML={{ __html: browserBackEntryScript }} />
