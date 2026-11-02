@@ -1,15 +1,23 @@
 # Release Updates
 
-## Unreleased: A quota reading with headroom starts the summon it refused
+## Unreleased: A refused summon starts once its quota is back
 
-A summon refused because a stored reading said its pool was used up stayed
-refused after a provider reset or top-up until someone summoned again. The
-quota read every dispatch already issues, after the launch and never before
-it, now names its Channel; when the daemon's reading leaves headroom in a
-refused summon's own pool, that summon becomes due at once and the launch
-coordinator starts it under full admission. No timer or polling. A refusal
-nobody answered for ten minutes stays an explicit choice. Hub only, no schema
-or authorization change; recovery is a CI-validated revert.
+A summon refused because a stored reading said its provider quota was used up
+stayed refused after a reset or top-up until someone summoned again. Now the
+refusal records what it rested on and asks that pool's daemon for one fresh
+read. The reading that shows headroom, from that read or an Instance's own
+report, marks the wait in the same transaction that records it; the Hub then
+wakes the summon and the launch coordinator starts it under full admission. Many refusals of one pool
+share one read. A summon's ordinary refresh reads only quota no current
+reading covers, at most once a minute per daemon, and a waiting retry is
+checked at its reset rather than every few minutes. Recovering a stopped
+Instance still waits for its author's choice. Daemons from before this release
+may answer the fresh read from their two-minute cache; the summon then starts
+on the next newer reading. Hub release with expand migrations
+(`0236_expand_registration_quota_waiters.sql`,
+`0237_expand_quota_retry_refusal_fence.sql`); recovery is a CI-validated
+revert, and the added tables and columns are unused by older code.
+
 ## Unreleased: Follow-up messages wait for the Agent already being started
 
 Before a chosen Agent had a Run, a second message could offer another picker

@@ -30,7 +30,6 @@ test("quota refresh issues probes and never waits for or writes a reading itself
     { targetId: "registration:grok", configurationDigest: "a".repeat(64) },
     { targetId: "registration:claude", configurationDigest: "a".repeat(64) },
   ], "the probe names harnesses and digests only; pools stay server-bound");
-  assert.equal(commands[0].payload.wakeChannelId, "channel", "the reading wakes the Channel whose summon asked");
 });
 
 test("a daemon without the probe capability is not asked", async () => {

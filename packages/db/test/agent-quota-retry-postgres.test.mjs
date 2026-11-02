@@ -14,7 +14,7 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
   const repository = new PostgresQuotaRetryRepository(database, placement);
   const key = { spaceId: "space", ownerUserId: "owner", machineId: "machine", harness: "claude" };
   const tx = callback => database.transaction({ requestId: crypto.randomUUID(), operation: "quota.test", placement }, callback);
-  const source = async channelId => {
+  const source = async (channelId, extra = {}) => {
     await f.run(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,created_at,updated_at)
       VALUES($1,'space',$1,$1,'open',$1,1,now(),now())`, [channelId]);
     await f.run(`INSERT INTO data.messages(space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,
@@ -22,7 +22,7 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
       VALUES('space',$1,$1,1,1,'user','owner','xmatrix.message.text','hash','inline','ref',now(),now(),now(),$1,$2)`,
     [channelId, await digestCanonicalCloneCborV1("@claude Finish the pending task")]);
     return repository.offer({ channelId, actorUserId: "owner", sourceMessageId: channelId,
-      sourceMention: "@claude", selectionIndex: 0, registrations: [key] });
+      sourceMention: "@claude", selectionIndex: 0, registrations: [key], ...extra });
   };
   const read = (channelId, id, actorUserId = "owner") => repository.read({ channelId, id, actorUserId });
   const choose = (channelId, id, action = "wait", actorUserId = "owner") => repository.choose({ channelId, id, action, actorUserId });
@@ -49,21 +49,54 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
       await assert.rejects(admission("explicit", a), error => error.code === "quota_retry_cancelled");
       await assert.rejects(choose("explicit", id), error => error.code === "quota_retry_cancelled");
     });
-    await t.test("a reading the refusal asked for makes its fresh summon due; an old unanswered offer stays explicit", async () => {
-      const fresh = await source("expedite");
-      assert.deepEqual(await repository.due("expedite"), [], "an offer alone schedules nothing");
-      assert.deepEqual((await repository.wakeable("expedite")).map(row => row.retry_id), [fresh]);
-      assert.equal(await repository.expedite("expedite", []), 0, "nothing the readings clear, nothing due");
-      assert.equal((await read("expedite", fresh)).state, "offered");
-      assert.equal(await repository.expedite("expedite", [fresh]), 1);
-      assert.equal((await read("expedite", fresh)).state, "waiting");
-      assert.equal((await repository.due("expedite")).length, 1, "due at once, admission still runs at dispatch");
-      const stale = await source("expedite-stale");
-      await f.run(`UPDATE data.agent_quota_retries SET created_at=now()-interval '11 minutes' WHERE retry_id=$1`, [stale]);
-      assert.deepEqual(await repository.wakeable("expedite-stale"), []);
-      assert.equal(await repository.expedite("expedite-stale", [stale]), 0);
-      assert.equal((await read("expedite-stale", stale)).state, "offered");
-      assert.deepEqual(await repository.wakeable("seed"), [], "a Channel without refusals wakes nothing");
+    await t.test("a summon still verifying starts on a wake without a choice, and returns to its offer when not cleared", async () => {
+      const refusedThrough = new Date(Date.now() - 60_000).toISOString();
+      const id = await source("verifying", { refusedThrough, verifyForMs: 60_000 });
+      assert.deepEqual(await repository.due("verifying"), [], "an offer alone schedules nothing");
+      assert.equal(await repository.wake("verifying"), 1);
+      const [row] = await repository.due("verifying");
+      assert.equal(row.retry_id, id);
+      assert.equal(new Date(row.refused_through).toISOString(), refusedThrough, "the retry keeps the reading that refused");
+      assert.equal((await read("verifying", id)).state, "offered", "the card does not claim a wait nobody chose");
+      // Not cleared after all (a model's own pool): back to its offer, fenced by the newer refusal.
+      const permit = await repository.dispatch({ channelId: "verifying", row });
+      const newer = new Date().toISOString();
+      await repository.settle("verifying", row, "waiting", null, "registration_quota_exhausted", newer);
+      const after = (await f.client.query(`SELECT state,next_check_at,refused_through,generation FROM data.agent_quota_retries
+        WHERE retry_id=$1`, [id])).rows[0];
+      assert.equal(after.state, "offered");
+      assert.equal(after.next_check_at, null, "it waits for news, not a time");
+      assert.equal(new Date(after.refused_through).toISOString(), newer);
+      assert.equal(Number(after.generation), permit.generation + 1, "the refused attempt's permit is spent");
+      // A wake still starts it while it is verifying; once its author chose, it waits as chosen.
+      assert.equal(await repository.wake("verifying"), 1);
+      await choose("verifying", id);
+      assert.equal((await f.client.query("SELECT verify_until FROM data.agent_quota_retries WHERE retry_id=$1", [id])).rows[0]
+        .verify_until, null, "choosing to wait ends verification");
+      const lapsed = await source("verify-lapsed", { refusedThrough, verifyForMs: 60_000 });
+      await f.run("UPDATE data.agent_quota_retries SET verify_until=now()-interval '1 second' WHERE retry_id=$1", [lapsed]);
+      assert.equal(await repository.wake("verify-lapsed"), 0, "after the window an offer needs its author's choice");
+      assert.equal((await read("verify-lapsed", lapsed)).state, "offered");
+    });
+    await t.test("a stopped Instance's recovery never starts without its author's choice", async () => {
+      await source("continuation");
+      const id = await repository.offer({ channelId: "continuation", actorUserId: "owner", sourceMessageId: "continuation",
+        sourceMention: "@claude", selectionIndex: 1, registrations: [key], continuation: { instanceId: "i", runId: "r" },
+        refusedThrough: new Date().toISOString(), verifyForMs: 60_000 });
+      assert.equal((await f.client.query("SELECT verify_until FROM data.agent_quota_retries WHERE retry_id=$1", [id])).rows[0]
+        .verify_until, null, "a continuation is never verified on its own");
+      assert.equal(await repository.wake("continuation"), 0);
+    });
+    await t.test("a wake that lands while a check is under way is not put back to sleep", async () => {
+      const id = await source("racing"); await choose("racing", id);
+      const [row] = await repository.due("racing");
+      // The check reads its row, then a reading wakes the retry before the check settles it.
+      assert.equal(await repository.wake("racing"), 1);
+      await repository.settle("racing", row, "waiting", Date.now() + 86_400_000);
+      const [due] = await repository.due("racing");
+      assert.equal(due?.retry_id, id, "the wake the check never saw keeps it due");
+      await repository.settle("racing", due, "waiting", Date.now() + 86_400_000);
+      assert.deepEqual(await repository.due("racing"), [], "with no new wake it sleeps until its time");
     });
     await t.test("a Channel stop cancels waiting even before any Run exists", async () => {
       const id = await source("stopped");

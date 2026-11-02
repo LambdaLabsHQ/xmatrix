@@ -85,7 +85,25 @@ export type QuotaWaitDependencies = QuotaProbeIssueDependencies & {
   wakeCoordinator?: (channelId: string) => Promise<void>;
   /** The quota retries of a Channel's Space; PostgreSQL by default. */
   retries?: (channelId: string) => Promise<Pick<PostgresQuotaRetryRepository, "wake">>;
+  /** Ready waits and their settlement; the directory database by default. */
+  waits?: {
+    ready(ownerUserId: string): Promise<ReadyRegistrationQuotaWait[]>;
+    settle(waits: readonly ReadyRegistrationQuotaWait[]): Promise<void>;
+    owedOwners(): Promise<string[]>;
+  };
 };
+
+function quotaWaitStore(env: Env, dependencies: QuotaWaitDependencies) {
+  if (dependencies.waits) return dependencies.waits;
+  const { directory } = runtimePlacement(env);
+  return {
+    ready: (ownerUserId: string) => readyRegistrationQuotaWaits(directory, { ownerUserId, requestId: crypto.randomUUID() }),
+    settle: (waits: readonly ReadyRegistrationQuotaWait[]) =>
+      settleRegistrationQuotaWaits(directory, { waits, requestId: crypto.randomUUID() }),
+    owedOwners: () => owedRegistrationQuotaWaitOwners(directory, { olderThanMs: QUOTA_WAIT_REDELIVERY_MS,
+      limit: 50, requestId: crypto.randomUUID() }),
+  };
+}
 
 /**
  * Ask the daemon of each registration for one fresh read of its quota that
@@ -110,8 +128,8 @@ export async function verifyRegistrationQuota(env: Env, input: {
  */
 export async function deliverQuotaWakes(env: Env, ownerUserId: string,
   dependencies: QuotaWaitDependencies = {}): Promise<{ delivered: number }> {
-  const { directory } = runtimePlacement(env);
-  const waits = await readyRegistrationQuotaWaits(directory, { ownerUserId, requestId: crypto.randomUUID() });
+  const store = quotaWaitStore(env, dependencies);
+  const waits = await store.ready(ownerUserId);
   const byChannel = new Map<string, ReadyRegistrationQuotaWait[]>();
   for (const wait of waits) byChannel.set(wait.channelId, [...byChannel.get(wait.channelId) ?? [], wait]);
   const channels = [...byChannel.entries()];
@@ -130,7 +148,7 @@ export async function deliverQuotaWakes(env: Env, ownerUserId: string,
           continue;
         }
       }
-      await settleRegistrationQuotaWaits(directory, { waits: channelWaits, requestId: crypto.randomUUID() });
+      await store.settle(channelWaits);
       delivered += channelWaits.length;
     }
   }
@@ -141,9 +159,7 @@ export async function deliverQuotaWakes(env: Env, ownerUserId: string,
 /** Deliver again what a reading's own delivery missed. Reads and writes the
  * database only: it never asks a daemon or a provider. */
 export async function redeliverOwedQuotaWakes(env: Env, dependencies: QuotaWaitDependencies = {}): Promise<void> {
-  const { directory } = runtimePlacement(env);
-  for (const owner of await owedRegistrationQuotaWaitOwners(directory, { olderThanMs: QUOTA_WAIT_REDELIVERY_MS,
-    limit: 50, requestId: crypto.randomUUID() })) {
+  for (const owner of await quotaWaitStore(env, dependencies).owedOwners()) {
     await deliverQuotaWakes(env, owner, dependencies);
   }
 }

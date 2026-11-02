@@ -149,7 +149,7 @@ function refreshDatabase({ role = "member", daemons }) {
       if (name === "registration_control_member_v1") return role ? [{ role }] : [];
       if (name === "registration_quota_probe_registrations_v1") return [{ owner_user_id: "owner",
         machine_id: "machine", harness: "claude" }];
-      if (name === "registration_quota_probe_daemons_v5") return daemons;
+      if (name === "registration_quota_probe_daemons_v6") return daemons;
       assert.fail(name);
     } }) };
   return { database, seen };
@@ -170,7 +170,7 @@ test("a Space member's quota refresh probes each daemon at most once a minute, a
   assert.deepEqual(await refresh("member", database, quotaProbes(issued)), { issued: 1 });
   assert.equal(issued[0].payload.probe.windowLabels, true);
   assert.deepEqual(issued[0].payload.probe.targets.map(target => target.targetId), ["registration:claude"]);
-  assert.equal(seen.find(query => query.name === "registration_quota_probe_daemons_v5").values[1], 60_000);
+  assert.equal(seen.find(query => query.name === "registration_quota_probe_daemons_v6").values[1], 60_000);
 
   const again = [];
   const recent = refreshDatabase({ daemons: [daemonRow({ recently_probed: true })] });
