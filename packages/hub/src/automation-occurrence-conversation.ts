@@ -61,8 +61,9 @@ export async function openOccurrenceConversation(env: Env, input: {
   }
   await openConversation(env, { spaceId: input.spaceId, channelId, userId: input.userId,
     name: occurrenceConversationName(input.name, input.scheduledFor), mode: restricted || input.privateEvents ? "closed" : "open",
+    // The line and its time only hold the place: nobody named it, so its About names it by what happened.
     metadata: { createdBy: "page-automation", fromPageId: input.pageId, automationId: input.automationId,
-      automationOccurrenceId: input.occurrenceId } });
+      automationOccurrenceId: input.occurrenceId, autoName: true } });
   if (input.privateEvents) {
     // A retry can find a conversation the old Hub opened before marking the
     // occurrence prepared. Refuse it instead of appending private data there.
