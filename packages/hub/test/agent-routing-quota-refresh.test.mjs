@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  EXHAUSTED_QUOTA_REPROBE_INTERVAL_MS, refreshAgentRoutingQuota, reprobeExhaustedRegistrationQuota,
+  refreshAgentRoutingQuota,
 } from "../src/agent-routing-quota-refresh.ts";
 import { dispatchRegistrationLaunchesAfterMessage } from "../src/registration-launch-dispatch.ts";
 
@@ -90,24 +90,4 @@ test("a composite registration dispatch schedules a quota refresh; a legacy one 
     assert.equal(refreshed.length > 0, expected, `${mode}/${selectionCount}`);
     if (expected) assert.deepEqual(refreshed, [{ channelId: "channel", actorUserId: "caller" }]);
   }
-});
-
-test("the scheduled re-read probes exactly the pools held used up", async () => {
-  const commands = [];
-  const held = [{ ownerUserId: "owner", machineId: "machine", hostId: "host", harness: "codex", connectionEpoch: 2,
-    quotaPoolId: "registration:machine:codex", configurationDigest: "b".repeat(64), targetId: "registration:codex" }];
-  const directory = { transaction: async (_context, work) => work({ query: async ({ name, values }) => {
-    if (name === "registration_quota_probe_exhausted_v1") {
-      return [{ owner_user_id: "owner", machine_id: "machine", harness: "codex" }];
-    }
-    assert.equal(name, "registration_quota_probe_daemons_v5");
-    assert.deepEqual(JSON.parse(values[0]), [{ owner: "owner", machine: "machine", harness: "codex" }]);
-    assert.equal(values[1], EXHAUSTED_QUOTA_REPROBE_INTERVAL_MS, "the clock shares the daemon throttle");
-    return [{ owner: "owner", machine: "machine", harness: "codex", environment_version: 1,
-      quota_pool_id: held[0].quotaPoolId, hostname: "host", connection_epoch: 2, recently_probed: false }];
-  } }) };
-  const result = await reprobeExhaustedRegistrationQuota({ env: {}, directory },
-    { machines: machines(), issue: async command => { commands.push(command); return {}; } });
-  assert.deepEqual(result, { issued: 1 });
-  assert.deepEqual(commands[0].payload.probe.targets.map(target => target.targetId), ["registration:codex"]);
 });

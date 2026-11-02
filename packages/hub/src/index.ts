@@ -18,7 +18,6 @@ import { registerWorktreeActionRoutes } from "./index-routes-worktree-actions";
 import { registerCliUpdateCheckRoutes } from "./index-routes-cli-update-check";
 import { maintainMachineResourceHistoryOnSchedule, registerMachineResourceRoutes } from "./index-routes-machine-resources";
 import { rollUpAdminActivityOnSchedule } from "./postgres-admin-activity-rollup";
-import { reprobeExhaustedQuotaOnSchedule } from "./runtime";
 import { registerSetupIntentRoutes } from "./index-routes-setup-intents";
 import { registerWelcomeRoutes } from "./index-routes-welcome";
 import { registerOnboardingFunnelRoutes } from "./index-routes-onboarding-funnel";
@@ -181,7 +180,6 @@ export default {
     run("CLI release notice", () => noticeCliReleases(env));
     run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
     run("Admin activity rollup", () => rollUpAdminActivityOnSchedule(env, event.scheduledTime));
-    run("Exhausted quota re-read", () => reprobeExhaustedQuotaOnSchedule(env));
     for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
       run(`${provider} lifecycle maintenance`, () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }));
     }

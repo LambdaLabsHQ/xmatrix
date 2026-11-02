@@ -105,38 +105,8 @@ export async function readRegistrationQuotaProbeTargets(input: {
         ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT 100`,
     values: [input.placement.spaceId], maxRows: 100 });
   });
-  return registrationProbeTargets(input.directory, input.requestId, registrations, input.probedWithinMs);
-}
-
-/** The pools held used up right now (a reported usage limit, or a provider
- * reading of none left) whose daemon can read them again. A reset, a top-up
- * or a plan change is invisible until something reads the provider; these are
- * the only pools where a stale reading refuses work, so the Hub re-reads them
- * on a clock instead of waiting for a summon to be refused first. */
-export async function readExhaustedRegistrationQuotaProbeTargets(input: {
-  directory: AuthorityDatabase; requestId: string; probedWithinMs: number;
-}): Promise<RegistrationQuotaProbeTarget[]> {
-  const exhausted = await input.directory.transaction({ requestId: input.requestId,
-    operation: "registration.quota-probe.exhausted" }, tx => tx.query<QueryResultRow>({
-    name: "registration_quota_probe_exhausted_v1", text: `SELECT e.owner_user_id,e.machine_id,e.harness
-      FROM control.agent_registration_environments e
-      JOIN control.registration_quota_observations q ON q.owner_user_id=e.owner_user_id
-        AND q.quota_pool_id=${REGISTRATION_QUOTA_POOL_SQL}
-        AND q.observed_at<=statement_timestamp() AND q.expires_at>statement_timestamp()
-      WHERE q.remaining<=0 AND e.declaration_json->'enabled'='true'::jsonb
-      ORDER BY q.observed_at,e.owner_user_id,e.machine_id,e.harness LIMIT 100`, values: [], maxRows: 100 }));
-  return registrationProbeTargets(input.directory, input.requestId, exhausted, input.probedWithinMs);
-}
-
-/** Probe targets for the registration rows (`owner_user_id`, `machine_id`,
- * `harness`) whose single online daemon can read their quota, skipping a
- * daemon asked within `probedWithinMs`. */
-async function registrationProbeTargets(directory: AuthorityDatabase, requestId: string,
-  registrations: readonly QueryResultRow[], probedWithinMs: number | undefined): Promise<RegistrationQuotaProbeTarget[]> {
   if (!registrations.length) return [];
-  const requested = registrations.map(row => ({ owner: String(row.owner_user_id),
-    machine: String(row.machine_id), harness: String(row.harness) }));
-  const rows = await directory.transaction({ requestId,
+  const rows = await input.directory.transaction({ requestId: input.requestId,
     operation: "registration.quota-probe.daemons" }, tx => tx.query<QueryResultRow>({
     name: "registration_quota_probe_daemons_v5", text: `SELECT requested.owner,requested.machine,requested.harness,
         e.version AS environment_version,${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id,
@@ -154,7 +124,8 @@ async function registrationProbeTargets(directory: AuthorityDatabase, requestId:
           AND daemon.status='online' AND daemon.capabilities_json ? 'machine_quota_probe_v2'
         ORDER BY daemon.hostname LIMIT 2) d ON TRUE
       ORDER BY requested.owner,requested.machine,requested.harness,d.hostname LIMIT 200`,
-    values: [JSON.stringify(requested), probedWithinMs ?? null], maxRows: 200 }));
+    values: [JSON.stringify(registrations.map(row => ({ owner: String(row.owner_user_id),
+      machine: String(row.machine_id), harness: String(row.harness) }))), input.probedWithinMs ?? null], maxRows: 200 }));
   const hosts = new Map<string, number>();
   for (const row of rows) {
     const key = JSON.stringify([row.owner, row.machine, row.harness]);

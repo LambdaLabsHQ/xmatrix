@@ -10,14 +10,12 @@ after a failed, cancelled or expired startup; exact retries keep the original
 decision. Hub only, no schema or client change; recovery is a CI-validated
 Hub release reverting this pending-startup check.
 
-## Unreleased: A provider reset ends a used-up quota hold within minutes
+## Unreleased: Used-up quota pools are no longer re-read on a clock
 
-A usage-limit report held a pool at 0% until the provider's reset, up to a
-week. Only a summon (already refused by then) or an open Agents page read the
-provider again, so a manual reset or top-up kept refusing summons. The Hub's
-minute clock now asks each online daemon to re-read every pool held used up,
-at most once per daemon per 55 seconds. Hub only, no schema or authorization
-change; recovery is a CI-validated revert of the scheduled step.
+The minute re-read of pools held used up (#1321) is withdrawn: quota is read
+when work needs it, never on a timer. Hub only, no schema or authorization
+change; recovery is a CI-validated revert of this change.
+
 ## Unreleased: An agent that quits or waits for a sign-in is not chosen
 
 The daemon's can-it-take-work check counted only credential errors, so an ACP

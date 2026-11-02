@@ -2,7 +2,7 @@ import { connectionString as url, integration, postgresConnections } from "./pos
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { Client } from "pg";
-import { readExhaustedRegistrationQuotaProbeTargets, readRegistrationQuotaProbeTargets, recordRegistrationQuotaProbeResult, recordRegistrationUsageLimit,
+import { readRegistrationQuotaProbeTargets, recordRegistrationQuotaProbeResult, recordRegistrationUsageLimit,
   registrationQuotaReading, REGISTRATION_QUOTA_POOL_SQL } from "../dist/agent-registration-quota-probe.js";
 
 import { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaState,
@@ -229,22 +229,6 @@ integration("registration quota probe targets are the Space's authorized, singly
       "a far reset is held for at most a week");
     assert.ok(near((await limit({ harness: "grok", resetsAt: "not a time" })).limitedUntil, hours(1)));
     assert.equal(await limit({ harness: "unregistered" }), undefined, "no environment, no reading");
-
-    // The Hub's clock re-reads only pools held used up, so a reset ends the hold without a refused summon.
-    await sql(`DELETE FROM data.machine_daemons WHERE daemon_id='d1b'`);
-    const exhausted = () => readExhaustedRegistrationQuotaProbeTargets({ directory: database, requestId: "exhausted",
-      probedWithinMs: 55_000 });
-    assert.deepEqual((await exhausted()).map(target => [target.harness, target.quotaPoolId]),
-      [["claude", "shared-claude"], ["grok", "registration:m1:grok"]], "both held pools on the reachable machine");
-    await sql(`UPDATE control.registration_quota_observations SET remaining=40,source='provider'
-      WHERE owner_user_id='owner' AND quota_pool_id='registration:m1:grok'`);
-    assert.deepEqual((await exhausted()).map(target => target.harness), ["claude"], "a pool with headroom is left alone");
-    await sql(`INSERT INTO data.machine_daemon_commands VALUES ('c2','owner','m1','h1','quota_probe',now()-interval '10 seconds')`);
-    assert.deepEqual(await exhausted(), [], "a daemon asked within the interval is not asked again");
-    await sql(`UPDATE control.registration_quota_observations SET observed_at=now()-interval '2 seconds',
-      expires_at=now()-interval '1 second' WHERE quota_pool_id='shared-claude'`);
-    await sql(`DELETE FROM data.machine_daemon_commands`);
-    assert.deepEqual(await exhausted(), [], "an expired hold no longer refuses, so it is not re-read");
   } finally {
     await setup.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     await setup.end();

@@ -1,6 +1,6 @@
 import type { RoutingQuotaProbeRequest } from "@xmatrix/protocol";
 import { PostgresMachineControlRepository, PostgresSpacePlacementDirectory,
-  readExhaustedRegistrationQuotaProbeTargets, readRegistrationQuotaProbeTargets, type AuthorityDatabase, type PostgresRuntimeRepository,
+  readRegistrationQuotaProbeTargets, type AuthorityDatabase, type PostgresRuntimeRepository,
   type RegistrationQuotaProbeTarget } from "@xmatrix/db";
 import { machineDaemonCommand } from "./machines";
 import type { Env } from "./types";
@@ -73,20 +73,6 @@ export async function issueRegistrationQuotaProbes(input: {
   }
   await Promise.all(Array.from({ length: Math.min(4, batches.length) }, worker));
   return { issued };
-}
-
-/** How often a pool held used up is read again: a reset or top-up the
- * provider already applied reaches routing within about this long. */
-export const EXHAUSTED_QUOTA_REPROBE_INTERVAL_MS = 55_000;
-
-/** The Hub's clock re-reads every pool held used up, so a provider reset,
- * top-up or plan change ends the hold without first refusing a summon. Readings
- * land through the daemon's completed probe like any other. */
-export async function reprobeExhaustedRegistrationQuota(input: { env: Env; directory: AuthorityDatabase },
-  dependencies: QuotaProbeIssueDependencies = {}): Promise<{ issued: number }> {
-  const entries = await readExhaustedRegistrationQuotaProbeTargets({ directory: input.directory,
-    requestId: `quota-exhausted:${crypto.randomUUID()}`, probedWithinMs: EXHAUSTED_QUOTA_REPROBE_INTERVAL_MS });
-  return issueRegistrationQuotaProbes({ ...input, entries }, dependencies);
 }
 
 /** Registration targets of a Space at its active placement; an inactive or
