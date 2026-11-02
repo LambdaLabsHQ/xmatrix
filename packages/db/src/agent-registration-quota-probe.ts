@@ -105,9 +105,7 @@ export async function readRegistrationQuotaProbeTargets(input: {
         ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT 100`,
     values: [input.placement.spaceId], maxRows: 100 });
   });
-  return registrationProbeTargets(input.directory, input.requestId, registrations.map(row => ({
-    owner: String(row.owner_user_id), machine: String(row.machine_id), harness: String(row.harness) })),
-    input.probedWithinMs);
+  return registrationProbeTargets(input.directory, input.requestId, registrations, input.probedWithinMs);
 }
 
 /** The pools held used up right now (a reported usage limit, or a provider
@@ -127,17 +125,17 @@ export async function readExhaustedRegistrationQuotaProbeTargets(input: {
         AND q.observed_at<=statement_timestamp() AND q.expires_at>statement_timestamp()
       WHERE q.remaining<=0 AND e.declaration_json->'enabled'='true'::jsonb
       ORDER BY q.observed_at,e.owner_user_id,e.machine_id,e.harness LIMIT 100`, values: [], maxRows: 100 }));
-  return registrationProbeTargets(input.directory, input.requestId, exhausted.map(row => ({
-    owner: String(row.owner_user_id), machine: String(row.machine_id), harness: String(row.harness) })),
-    input.probedWithinMs);
+  return registrationProbeTargets(input.directory, input.requestId, exhausted, input.probedWithinMs);
 }
 
-/** Probe targets for the requested registrations whose single online daemon
- * can read their quota, skipping a daemon asked within `probedWithinMs`. */
+/** Probe targets for the registration rows (`owner_user_id`, `machine_id`,
+ * `harness`) whose single online daemon can read their quota, skipping a
+ * daemon asked within `probedWithinMs`. */
 async function registrationProbeTargets(directory: AuthorityDatabase, requestId: string,
-  requested: ReadonlyArray<{ owner: string; machine: string; harness: string }>,
-  probedWithinMs: number | undefined): Promise<RegistrationQuotaProbeTarget[]> {
-  if (!requested.length) return [];
+  registrations: readonly QueryResultRow[], probedWithinMs: number | undefined): Promise<RegistrationQuotaProbeTarget[]> {
+  if (!registrations.length) return [];
+  const requested = registrations.map(row => ({ owner: String(row.owner_user_id),
+    machine: String(row.machine_id), harness: String(row.harness) }));
   const rows = await directory.transaction({ requestId,
     operation: "registration.quota-probe.daemons" }, tx => tx.query<QueryResultRow>({
     name: "registration_quota_probe_daemons_v5", text: `SELECT requested.owner,requested.machine,requested.harness,
