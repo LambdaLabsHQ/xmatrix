@@ -77,7 +77,7 @@ const MAX_CONVERSATION_PAGES = 20;
 /** The messages one read of their page edits may name, as a timeline shows them. */
 const MAX_PAGE_EDIT_MESSAGES = 100;
 const MAX_PAGE_EDIT_REVISIONS = 2000;
-const BLOCK = /^[a-z0-9\p{L}\p{N}][a-z0-9\p{L}\p{N}_-]{0,199}$/u;
+const BLOCK = /^[\p{L}\p{N}_-]{1,200}$/u;
 
 function bounded(value: unknown, field: string, max = 300): string {
   if (typeof value !== "string" || !value.trim() || value.length > max) {

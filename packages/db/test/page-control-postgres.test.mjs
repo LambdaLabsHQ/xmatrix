@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { Client } from "pg";
 import { createAuthorityDatabase } from "../dist/index.js";
+import { pageChangedBlocks } from "@xmatrix/protocol";
 
 import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
 import { describePageConversations } from "../dist/page-conversations.js";
@@ -131,6 +132,29 @@ const code = (expected) => (error) => {
   assert.equal(error.code, expected, error.message);
   return true;
 };
+
+integration("pages: live edits commit and link headings whose slugs start with punctuation", async () => {
+  const { client, ids, pages, owner } = await pageTest("page-heading-slug");
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, principal: owner,
+      ...input, requestId: crypto.randomUUID() });
+    const { page } = await call("create", { title: "QA" });
+    const before = (await call("read", { pageId: page.pageId })).page.body;
+    const body = "# QA\n\n## - [ ] Reminder\n\nPending\n\n## _Notes\n\nSaved\n";
+    // The live session derives these ids from the document; the repository must accept the same alphabet.
+    const blockIds = pageChangedBlocks(before, body).filter(Boolean);
+    const edited = await call("edit", { pageId: page.pageId, baseRevision: 1, body,
+      blockIds, conversationIds: [ids.open] });
+    assert.equal(edited.page.headRevision, 2);
+    assert.equal((await call("read", { pageId: page.pageId })).page.body, body);
+    const { links } = await call("links", { pageId: page.pageId });
+    assert.deepEqual(links.map((link) => link.blockId).sort(), ["----reminder", "_notes", "qa"]);
+    for (const invalid of ["bad/slug", "x".repeat(201)]) {
+      await assert.rejects(call("edit", { pageId: page.pageId, baseRevision: 2, body,
+        blockIds: [invalid] }), code("invalid_block_id"));
+    }
+  } finally { await cleanup(client, ids); await client.end(); }
+});
 
 test("sibling positions always sort strictly between their neighbours", () => {
   let before = null;

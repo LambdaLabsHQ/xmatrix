@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Pages save headings that start with punctuation
+
+A heading such as `## - [ ] Reminder` or `## _Notes` produces a section slug
+starting with a hyphen or underscore. The database rejected those slugs when
+the live editor committed its changed sections, leaving the edits in the live
+session while revisions and schedules stayed behind. The database now accepts
+the parser's existing slug alphabet, including either leading character, with
+the same length bound. Existing anchors and pending edits are preserved.
+Hub only, no schema or client change; recovery is a CI-validated Hub release
+reverting the validator change, which would restore the affected save failure.
+
 ## Unreleased: Public pages declare their own language and sharing URL
 
 The Chinese homepage declared English until browser scripts ran. Separate

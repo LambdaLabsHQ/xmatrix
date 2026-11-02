@@ -266,6 +266,10 @@ it belongs in the repository.**
   old messages. A reference grants nothing: a channel the reader cannot see
   renders as "private channel", and a page they cannot read does not load.
   A page reference also links the page to the conversation.
+  Section slugs use the shared Markdown parser's letters, digits, underscores
+  and hyphens, including a leading underscore or hyphen. The database accepts
+  these same characters for changed sections and conversation links; editing
+  a heading never requires rewriting its slug to make the revision save.
   Compact previews (conversation rows, page margin cards and hover previews)
   resolve references against the reader's current Space catalog, rendering
   plain titles inside the surrounding clickable surface. Unavailable references,
