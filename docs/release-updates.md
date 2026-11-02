@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: A notification opens its conversation in place on a phone
+
+Tapping a notification in the iOS or Android app, and going Back from its
+conversation, still slid whole pages in and out as a stack: a View Transition
+covered every phone screen change the lists could not draw themselves. It is
+removed. The one change that moves is a conversation and its channel list
+trading places; a notification replaces the screen without sliding, and Back
+goes to the channel list. Web only; no client or schema change. Recovery is a
+CI-validated Web release reverting this change.
+
 ## Unreleased: App Store Connect reads and submits one-time In-App Purchases
 
 The App Store Connect connector listed and submitted only auto-renewable

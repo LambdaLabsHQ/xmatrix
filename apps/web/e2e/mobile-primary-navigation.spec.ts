@@ -57,6 +57,19 @@ async function openAppLinkForTest(page: Page, href: string) {
   ).__openAppLinkForTest?.(link), href);
 }
 
+/** The iOS app on the channel list of a Space with #general and #ops, its page listening for notifications. */
+async function openIOSChannelListWithOps(page: Page) {
+  await installNativeBridge(page, "ios");
+  const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
+  await page.goto("/app/personal-sspaceperso/channels");
+  await expect(generalChannelRow(page)).toBeVisible();
+  // The init-script bridge exists before the live shell subscribes to it.
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __appLinkListenerCountForTest?: () => number }
+  ).__appLinkListenerCountForTest?.() ?? 0)).toBeGreaterThan(0);
+}
+
 /** Every screen change that moved from now on: the lists trading places, or a whole-page view transition. */
 async function watchScreenMoves(page: Page) {
   await page.evaluate(() => {
@@ -252,15 +265,7 @@ test("a conversation loaded directly goes Back to its channel list", async ({ pa
 });
 
 test("the iOS app's edge swipe goes Back in the page, and a notification opens without a reload", async ({ page }) => {
-  await installNativeBridge(page, "ios");
-  const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
-  await page.goto("/app/personal-sspaceperso/channels");
-  await expect(generalChannelRow(page)).toBeVisible();
-  // The init-script bridge exists before the live shell subscribes to it.
-  await expect.poll(() => page.evaluate(() => (
-    window as typeof window & { __appLinkListenerCountForTest?: () => number }
-  ).__appLinkListenerCountForTest?.() ?? 0)).toBeGreaterThan(0);
+  await openIOSChannelListWithOps(page);
   await page.evaluate(() => { (window as typeof window & { __samePage?: boolean }).__samePage = true; });
   const entries = await historyLength(page);
 
@@ -551,16 +556,10 @@ test("a conversation opened from a notification goes back to the channel list, n
 });
 
 test("a notification tapped in a conversation replaces it in place, and Back goes to the channel list", async ({ page }) => {
-  await installNativeBridge(page, "ios");
-  const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
-  await page.goto("/app/personal-sspaceperso/channels");
+  await openIOSChannelListWithOps(page);
   await generalChannelRow(page).tap();
   await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
   await expect(page.locator("[data-list-transition]")).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => (
-    window as typeof window & { __appLinkListenerCountForTest?: () => number }
-  ).__appLinkListenerCountForTest?.() ?? 0)).toBeGreaterThan(0);
   const entries = await historyLength(page);
 
   // One conversation to another had the whole page slide in over the last, a stack.
