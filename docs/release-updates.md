@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Database maintenance waits through release status changes
+
+The lifecycle broker could select an older beta when a newer release moved
+from queued to running between its separate status reads. Each poll now reads
+one complete, unfiltered release-run list for both successes and active runs,
+including waiting, requested, pending and older stuck trains. The existing
+45-minute wait, annotated tag/SHA verification and executor authority gates
+remain in force. Workflow and selection policy only, no schema or client change;
+recovery is a CI-validated revert through the same broker, never direct executor
+dispatch or a changed production tag.
+
 ## Unreleased: Gmail reads the HTML body behind a "view in HTML" stub
 
 Some senders put only "Please view this email in an HTML capable client" in

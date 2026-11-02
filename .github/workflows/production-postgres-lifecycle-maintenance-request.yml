@@ -60,21 +60,18 @@ jobs:
               event: "workflow_dispatch", per_page: 100, ...params,
               uncached: `${context.runId}-${Date.now()}`, headers: { "cache-control": "no-cache" },
             });
-            const history = await listReleases({ status: "success" });
-            const day = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
             // A release normally takes 9 minutes (p90 26 minutes). Waiting only
             // six short polls skipped the daily pass whenever a train overlapped.
             // Keep the wait bounded and leave job time for API/tag verification.
             const deadline = Date.now() + 45 * 60 * 1000;
             let production;
             while (Date.now() < deadline) {
-              const recent = await listReleases({ status: "success", created: `>=${day}` });
-              const open = [
-                ...await listReleases({ status: "in_progress" }),
-                ...await listReleases({ status: "queued" }),
-              ];
-              const decision = resolveMaintenanceRelease({ history, recent, openRuns: open });
-              core.info(`Saw ${history.length} successful releases and ${recent.length} since ${day}; choice ${decision.release?.head_branch ?? "none"} (run ${decision.release?.id ?? "none"}), wait ${decision.wait}`);
+              // Separate status lists can both omit a queued run that starts
+              // between reads. One unfiltered snapshot includes every status,
+              // plus older stuck trains, and sees completions on the next pass.
+              const runs = await listReleases({});
+              const decision = resolveMaintenanceRelease({ history: runs, openRuns: runs });
+              core.info(`Saw ${runs.length} production runs; choice ${decision.release?.head_branch ?? "none"} (run ${decision.release?.id ?? "none"}), wait ${decision.wait}`);
               if (!decision.release) throw new Error("no successful production release tag is available");
               if (!decision.wait) { production = decision.release; break; }
               const remaining = deadline - Date.now();

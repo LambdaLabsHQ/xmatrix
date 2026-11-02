@@ -52,7 +52,7 @@ export function latestMaintenanceRelease(productionRuns) {
   return (betas.length ? betas : releases).sort((left, right) => right.id - left.id)[0];
 }
 
-const OPEN_RELEASE_STATUSES = new Set(["queued", "in_progress", "waiting", "requested"]);
+const OPEN_RELEASE_STATUSES = new Set(["queued", "in_progress", "waiting", "requested", "pending"]);
 
 /**
  * The broker's full success list is in flight for tens of seconds, so a release
