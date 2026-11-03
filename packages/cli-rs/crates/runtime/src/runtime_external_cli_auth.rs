@@ -944,7 +944,10 @@ fn spawn_daemon_auth_token_refresh(
         let mut sleep_secs = AGENT_RUN_TOKEN_REFRESH_INTERVAL_SECS;
         let mut refresh = DaemonAuthRefreshOutcomes::default();
         loop {
-            wait_for_daemon_auth_refresh(sleep_secs).await;
+            tokio::select! {
+                _ = wait_for_daemon_auth_refresh(sleep_secs) => {}
+                _ = relay.auth_refresh_requested() => {}
+            }
             let refreshed = match resolve_local_daemon_auth_token_for_refresh().await {
                 Ok(Some(token)) => {
                     sleep_secs = refresh.succeeded();

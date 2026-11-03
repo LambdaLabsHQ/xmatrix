@@ -408,6 +408,9 @@ impl Drop for PendingRequestGuard<'_> {
 pub struct AgentInstanceConnectionClient {
     relay_url: String,
     token: Arc<RwLock<String>>,
+    /// A reconnect refused this credential; its owning runtime refreshes it
+    /// through the existing scoped daemon broker, independently of turn input.
+    auth_refresh_notify: Arc<Notify>,
     agent_id: Option<String>,
     agent_name: String,
     agent_type: String,
@@ -507,6 +510,7 @@ impl AgentInstanceConnectionClient {
         Self {
             relay_url,
             token: Arc::new(RwLock::new(token)),
+            auth_refresh_notify: Arc::new(Notify::new()),
             agent_id,
             agent_name,
             agent_type,
@@ -794,6 +798,7 @@ impl AgentInstanceConnectionClient {
 
         let relay_url = self.relay_url.clone();
         let token = self.token.clone();
+        let auth_refresh_notify = self.auth_refresh_notify.clone();
         let write_tx_slot = self.write_tx.clone();
         let mut agent_id = self.agent_id.clone();
         let mut agent_name = self.agent_name.clone();
@@ -828,6 +833,7 @@ impl AgentInstanceConnectionClient {
             // socket at once is redialled ever more slowly, not at the base.
             let mut backoff = Backoff::new(RECONNECT_BASE, RECONNECT_MAX);
             let mut connected_at: Option<std::time::Instant> = None;
+            let mut refused_token: Option<String> = None;
             loop {
                 // ── Wait for a disconnect signal ────────────────────────────
                 disconnect_notify.notified().await;
@@ -949,7 +955,7 @@ impl AgentInstanceConnectionClient {
                     let json = serde_json::to_string(&AgentInstanceConnectMessage {
                         message_type: "agent_instance_connect",
                         request_id: None,
-                        token: token_value,
+                        token: token_value.clone(),
                         identity_id: agent_id.clone(),
                         name: agent_name.clone(),
                         runtime: AgentInstanceRuntimeIdentity {
@@ -1084,7 +1090,15 @@ impl AgentInstanceConnectionClient {
                                 ));
                                 return;
                             }
-                            _ => {
+                            rejected => {
+                                if matches!(&rejected, Ok(AgentInstanceServerMessage::Error {
+                                    failure: Some(failure), ..
+                                }) if failure.code == "agent_run_credential_invalid")
+                                    && refused_token.as_deref() != Some(token_value.as_str())
+                                {
+                                    refused_token = Some(token_value);
+                                    auth_refresh_notify.notify_one();
+                                }
                                 emit_client_network_samples(
                                     &relay_url,
                                     &token,
@@ -1336,6 +1350,12 @@ impl AgentInstanceConnectionClient {
             .write()
             .map_err(|_| CliError::Relay("Auth token state poisoned".into()))? = token;
         Ok(())
+    }
+
+    /// Wake only this connection's credential refresh owner. `Notify` keeps
+    /// one pending request if the owner is currently asking its broker.
+    pub async fn auth_refresh_requested(&self) {
+        self.auth_refresh_notify.notified().await;
     }
 
     /// Expand the client-side product-media allowlist for a channel this Agent

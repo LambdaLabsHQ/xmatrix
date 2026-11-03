@@ -147,6 +147,13 @@ agents.
 - `xmatrix-bootstrap.exe` and `xmatrix machine supervisor start-daemon` belong only to the unreleased signed-continuity design and have no current installation authority.
 - `xmatrix daemon sync-session` applies a newly saved same-Hub, same-user CLI session to a compatible running daemon without restarting it. The saved CLI refresh token is never installed as the daemon refresh token; the daemon exchanges an independent session before switching generations.
 - After an established connection loses enrollment with `Invalid or expired auth token`, the daemon wakes its existing session refresh task immediately instead of retrying the same access token until the periodic timer fires. Concurrent refusals coalesce into one wake; the seven-day session limit, generation checks, refresh failure backoff, and owner/Hub checks still apply. Network failures, retired Machines, and upgrade requirements do not trigger this auth recovery path.
+- An established Agent Instance whose reconnect is refused with
+  `agent_run_credential_invalid` wakes its own Run-token refresh task rather
+  than waiting for the eight-minute refresh timer. The task asks only its
+  existing scoped daemon broker, and reconnect retains the Instance and Run
+  bindings. Repeated refusals of the same token request one refresh; other
+  failures keep their existing retry or terminal behavior. Already-running
+  wrappers need the updated CLI code on their next normal Reborn.
 - A CLI login that starts an absent daemon passes only the Hub location. The daemon reads the canonical saved session itself rather than inheriting the login command's short-lived `XMATRIX_TOKEN`, so later reconnects remain refreshable and eligible for live session synchronization.
 - Windows host updates use the same `xmatrix update` and daemon self-update loop as macOS and Linux.
 - Request records are journaled to a private bounded file before each execution transition. On daemon replacement, pending approvals remain routable, interrupted running requests fail explicitly, and terminal channel notices are resent with the same idempotency identity. Surviving Agents rediscover the new auth and request broker ports while retaining only their exact recovered Run capabilities.
