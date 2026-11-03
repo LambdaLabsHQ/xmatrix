@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Gmail reads a statement-sized message body
+
+The large-body read shipped in the previous beta still failed on a real bank
+statement with "Provider response is too large": the fetched body exceeded the
+Hub's default 256 KiB provider response bound. That one call now allows up to
+3 MiB, enough for the 2 MB body limit once base64-encoded; every other provider
+call keeps its bound. Hub only, no schema or client migration. Recovery is a
+CI-validated beta Hub reverting this change.
+
 ## Unreleased: Gmail reads large message bodies
 
 `@gmail:read` showed "(no text body)" for mail whose HTML body is large, such as

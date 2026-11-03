@@ -36,6 +36,8 @@ const MAX_PARTS = 200;
 const MAX_EXTERNAL_BODIES = 4;
 const MAX_EXTERNAL_BODY = 2_000_000;
 const ATTACHMENT_ID = /^[A-Za-z0-9_-]{1,2048}$/u;
+/* A 2 MB body arrives base64url-encoded (4/3) inside Composio's JSON envelope. */
+const EXTERNAL_BODY_RESPONSE_BYTES = 3 * 1024 * 1024;
 const MAX_ADDRESS = 254;
 const ADDRESS = /^[^\s@<>(),;:"\\[\]]+@[^\s@<>(),;:"\\[\]]+\.[^\s@<>(),;:"\\[\]]+$/u;
 
@@ -51,8 +53,8 @@ function gmailPath(method: "GET" | "POST", path: string): string {
 }
 
 function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
-  query: Record<string, string> = {}, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
-  return composioGet(credentials, gmailPath("GET", path), query, meter);
+  query: Record<string, string> = {}, meter?: UpstreamMeter, maxBytes?: number): Promise<Record<string, unknown>> {
+  return composioGet(credentials, gmailPath("GET", path), query, meter, maxBytes);
 }
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
 
@@ -108,7 +110,8 @@ async function withExternalBodies(credentials: Readonly<Record<string, string>>,
   };
   visit(record(message.payload));
   await Promise.all(pending.map(async (body) => {
-    const fetched = await gmailGet(credentials, `/messages/${id}/attachments/${String(body.attachmentId)}`, {}, meter);
+    const fetched = await gmailGet(credentials, `/messages/${id}/attachments/${String(body.attachmentId)}`, {}, meter,
+      EXTERNAL_BODY_RESPONSE_BYTES);
     if (typeof fetched.data === "string" && fetched.data.length <= MAX_EXTERNAL_BODY * 2) body.data = fetched.data;
   }));
   return message;
