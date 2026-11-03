@@ -47,7 +47,9 @@ test("quoting a passage of a message holds it in this conversation's composer", 
 
   const quote = page.getByTestId("composer-quote");
   await expect(quote).toContainText("Retries back off too slowly.");
-  await expect(quote).toContainText("E2E Tester in #general");
+  // A quote of this conversation is its own reference: no line naming the conversation it is already in.
+  await expect(quote).not.toContainText("#general");
+  await quote.locator("..").screenshot({ path: test.info().outputPath("composer-quote.png") });
   await expect(page).not.toHaveURL(new RegExp(`--${CREATED_CHANNEL_ID}`, "u"));
   await expect(page.locator(".composer-textarea").first()).toBeFocused();
   await expect(menu).toBeHidden();
@@ -91,6 +93,7 @@ test("selecting a passage of a message starts a conversation holding it, linked 
   const quote = page.getByTestId("composer-quote");
   await expect(quote).toContainText("Retries back off too slowly.");
   await expect(quote).toContainText("E2E Tester in #general");
+  await quote.locator("..").screenshot({ path: test.info().outputPath("composer-quote-elsewhere.png") });
   await expect(composer).toBeFocused();
   await expect(menu).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("message-passage-conversation.png") });

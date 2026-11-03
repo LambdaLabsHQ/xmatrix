@@ -2765,15 +2765,30 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   padding: 0.6em 0.9em;
 }
 
-/* The passage a discussion opened from (DiscussionCitation): the quote's tinted paper, sized to its words, its
-   source a quiet line inside the same slip rather than a dash and an underlined link beneath it. */
+/* A quote, of a message or of a page (DiscussionCitation), is one yellow slip: the open ask card's wood thinned
+   into the paper, the same in the composer before it is sent, in the message once it is, and on the words it
+   marks when opened (Daniel 2026-11-03: 统一黄色). It is sized to its words; where it came from is a quiet line
+   inside it, never a dash and an underlined link beneath it. */
+.xmatrix-app {
+  --app-quote-wood: var(--app-wood-panel-base, oklch(0.83 0.07 76));
+  --app-quote-tint: color-mix(in oklch, var(--app-quote-wood) 35%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+.xmatrix-app .rich-message .message-citation,
+.xmatrix-app .message-citation-composer {
+  border-radius: 10px;
+  background: var(--app-quote-tint);
+}
 .xmatrix-app .rich-message .message-citation {
   width: fit-content;
   max-width: 100%;
   margin: 0;
   padding: 10px 14px 9px;
-  border-radius: 10px;
-  background: color-mix(in oklch, var(--foreground) 4.5%, transparent);
+}
+.xmatrix-app .message-citation-composer {
+  margin: 8px 8px 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 19px;
 }
 .xmatrix-app .rich-message .message-citation + * { margin-top: 10px; }
 .xmatrix-app .rich-message .message-citation-text {
@@ -2783,21 +2798,23 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   overflow-wrap: anywhere;
   color: var(--foreground);
 }
-.xmatrix-app .rich-message .message-citation-source {
+.xmatrix-app .message-citation-source {
   margin-top: 4px;
   font-size: 12.5px;
   line-height: 18px;
+  color: var(--muted-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.xmatrix-app .message-citation-composer .message-citation-source { margin-top: 2px; font-size: 12px; }
 .xmatrix-app .rich-message .message-citation-source a {
   color: var(--muted-foreground) !important;
   text-decoration: none !important;
 }
 .xmatrix-app .rich-message .message-citation-source a:hover { color: var(--foreground) !important; }
-/* A quote of a message in this conversation is the slip alone, which opens that message: it darkens under the
-   pointer as a paper tile does, and the words it opened are marked there in the same tint as the jumped-to row. */
+/* A quote of a message in this conversation is the slip alone, which opens that message: it deepens under the
+   pointer, and the words it opened are marked there in the slip's own yellow. */
 .xmatrix-app .rich-message button.message-citation {
   display: block;
   text-align: left;
@@ -2806,10 +2823,10 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   transition: background-color 120ms ease-out;
 }
 .xmatrix-app .rich-message button.message-citation:hover {
-  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+  background: color-mix(in oklch, var(--app-quote-wood) 50%, var(--app-panel-paper, oklch(0.976 0.005 85)));
 }
 ::highlight(cited-passage) {
-  background-color: color-mix(in oklab, var(--primary) 22%, transparent);
+  background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 55%, transparent);
 }
 
 

@@ -113,7 +113,6 @@ import {
   ChevronLeft,
   FileText,
   Paperclip,
-  Quote,
   RefreshCw,
   Reply,
   Video,
@@ -201,6 +200,7 @@ export type ComposerMentionInsertRequest =
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
 import { foldedDiscussionBody, quotedMessage, type DiscussionQuote } from "./selection-discussion";
+import { messageHere } from "./cited-passage";
 
 export type AgentTraceHistoryPanelState = {
   targetKey: string;
@@ -1361,12 +1361,14 @@ export const Composer = memo(function Composer({
           boxHeader={
             <>
               {quote && !quote.anchored && (
-                <div data-testid="composer-quote"
-                  className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
-                  <Quote className="mt-0.5 size-3.5 shrink-0" />
+                // The same yellow slip the quote becomes once sent; where it came from only when that is another
+                // conversation, since a quote of this one is its own reference.
+                <div data-testid="composer-quote" className="message-citation-composer flex items-start gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="line-clamp-2 text-foreground [overflow-wrap:anywhere]">{quote.text}</div>
-                    <div className="truncate">{quote.label}</div>
+                    {!(channel && messageHere(quote.href, channel)) && (
+                      <div className="message-citation-source truncate">{quote.label}</div>
+                    )}
                   </div>
                   {onRemoveQuote && (
                     <button
@@ -1374,7 +1376,7 @@ export const Composer = memo(function Composer({
                       title="Remove quote"
                       aria-label="Remove quote"
                       onClick={onRemoveQuote}
-                      className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                      className="-mr-1.5 -mt-0.5 flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
                     >
                       <X className="size-3.5" />
                     </button>
