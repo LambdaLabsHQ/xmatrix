@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: A list's + row is centred, quieter, and shows Ctrl/⌘+N
+
+The desktop "+ New conversation" row (and New page, Manage machines) drew a
+bold, left-aligned label behind a thin + icon. The label now sits centred in a
+lighter ink without the icon, and a faint ⌘N / Ctrl+N at the row's end, on the
+label's baseline, shows the shortcut that already worked. Only actions Ctrl/⌘+N
+performs show it; New workspace does not. Web only, no schema or protocol
+change. Recovery is a CI-validated beta Web release reverting this change.
+
 ## Unreleased: Agent message headers name their repository
 
 Agent message headers omitted the repository even though the Run already knew
