@@ -162,6 +162,8 @@ jobs:
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Read back and verify the missing production deployment receipt
+        # The default-branch reader binds the Web to the tagged channel;
+        # only versions before 1.3.1-beta.7 retain the shared Web surface.
         if: steps.source.outputs.recover_receipt == 'true'
         shell: bash
         env:

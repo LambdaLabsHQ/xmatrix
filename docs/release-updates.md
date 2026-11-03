@@ -15,6 +15,17 @@ removes it and its file. An image card's Original toggle and × now sit over
 the picture in the light theme instead of below it. Web only; no schema or
 client migration. Recovery is a CI-validated beta release reverting this
 change.
+## Unreleased: Receipt recovery verifies the release channel's Web
+
+The archive recovery reader accepted either Web origin for every beta, so a
+current beta receipt claiming the stable Web could pass. It now requires
+`beta.xmatrix.sh` from `1.3.1-beta.7`, the first immutable train that selected
+the beta Web; older betas and stable releases require `xmatrix.sh`. Exact
+scope, SHA, tag and run checks remain required. Production validates each new
+receipt with the same reader before persisting it to R2; recovery uses the
+default branch's reader without changing historical tags or receipts. No product,
+schema or client migration is needed. A CI-validated forward change to this
+reader can recover a mistaken historical boundary; do not rewrite receipts.
 
 ## Unreleased: Quotes are blocks of what is written, as many as wanted
 
@@ -2361,7 +2372,8 @@ source. `server-release.yml` picks the target from the tagged version
 (`node scripts/version.mjs channel`) and `deploy-config.mjs` renders it
 (`web` or `web-beta`). A stable train may name `web`; it still never names
 `hub`. Deployment receipts record the channel's Web, and the receipt reader
-accepts either Web for betas released before the split. Before a train deploys
+requires `xmatrix.sh` for betas before `1.3.1-beta.7` and `beta.xmatrix.sh`
+from that first split train onward. Before a train deploys
 the Hub, preflight reads the live stable Web's build (`/api/web-build`) back to
 its release and refuses a Hub whose client policy would answer it with 426: a
 different protocol version or a higher minimum Web version

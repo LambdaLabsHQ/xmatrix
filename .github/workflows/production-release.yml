@@ -656,6 +656,15 @@ jobs:
                 ["SHA", receipt.deploySha],
               ])
               .write();
+      - name: Verify the generated deployment receipt
+        env:
+          SOURCE_SCOPE: ${{ needs.preflight.outputs.scope }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.deploy_sha }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RECEIPT_PATH: ${{ steps.receipt.outputs.path }}
+        run: node scripts/verify-production-deployment-receipt.mjs "$RECEIPT_PATH"
       - name: Persist deployment receipt to R2
         env:
           R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
