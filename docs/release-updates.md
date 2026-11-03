@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Connected mobile conversations slide in
+
+Opening a conversation from the channel list now runs its push transition when
+the Human socket is connected. Sending channel focus stamps the incoming
+history acceptance refs before the route commits; navigation now decides
+whether the channel changes before that stamp, so it cannot mistake the new
+channel for one already open and skip the animation. The temporary browser
+Sentry push diagnostic is removed. Beta Web only, no API, schema or native
+change; recovery is a CI-validated beta Web release reverting this change.
+
 ## Unreleased: Gmail reads currency and punctuation entities
 
 A Gmail read showed `&yen;` and similar named HTML entities literally, for

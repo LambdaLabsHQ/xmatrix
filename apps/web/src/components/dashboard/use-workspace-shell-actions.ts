@@ -1379,6 +1379,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (!channel) return;
     setComposingConversation(false);
     if (!messageId && pointerActivationAlreadyHandled(channelId)) return;
+    // Focus stamps the incoming history refs before send(), while the route
+    // still shows the old screen. Decide whether to push before that stamp.
+    const changingChannel = s.selectedChannelIdRef.current !== channelId;
     if (s.viewRef.current === "messages") {
       sendHumanChannelFocus({
         channelId,
@@ -1416,7 +1419,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       pushBrowserPath(nextPath, {});
       setBrowserPath(nextPath);
     };
-    if (s.selectedChannelIdRef.current !== channelId) {
+    if (changingChannel) {
       runMobileScreenTransition("forward", commitNavigation);
     } else {
       commitNavigation();
