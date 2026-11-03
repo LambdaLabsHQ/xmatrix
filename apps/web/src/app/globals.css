@@ -2792,7 +2792,7 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 }
 .xmatrix-app .rich-message .message-citation + * { margin-top: 10px; }
 .xmatrix-app .rich-message * + .message-citation { margin-top: 10px; }
-/* In the composer a quote is a block of the draft (composer-quote-blocks.ts): its lines give way to the slip,
+/* In the composer a quote is a block of the draft (composer-blocks.ts): its lines give way to the slip,
    which sits among the lines written around it and is removed whole by its ×. */
 .xmatrix-app .composer-quote-line { display: none; }
 .xmatrix-app .message-citation-composer.composer-quote-block {
