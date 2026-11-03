@@ -6432,13 +6432,14 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
 }
 
 /* A desktop list's + is the list's first row (a list row, below), set apart
-   by its tone: halfway between the list and the conversation's paper. Its +,
-   label and Ctrl/⌘+N sit centred in the rows' muted ink, lighter than their
-   names, so it reads as the list's action rather than one of its items. */
+   by its tone: halfway between the list and the conversation's paper. Its
+   label sits centred in the rows' muted ink, lighter than their names, so it
+   reads as the list's action rather than one of its items; Ctrl/⌘+N sits at
+   the row's end, where the rows' times end, on the label's baseline. */
 @media (min-width: 768px) {
   html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create.app-list-create {
     width: 100%;
-    gap: 6px;
+    column-gap: 12px;
     padding-left: 20px !important;
     padding-right: 20px !important;
     color: var(--app-panel-ink-muted, var(--muted-foreground)) !important;
@@ -6448,17 +6449,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     background: oklch(0.961 0.006 84) !important;
   }
 
-  html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create .app-list-create-mark svg {
-    width: 14px;
-    height: 14px;
-  }
-
   html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create.app-list-create span.app-list-row-title {
     font-weight: 500 !important;
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create .app-list-create-shortcut {
-    margin-left: 4px;
     font-family: inherit;
     font-size: 12px;
     font-weight: 500;

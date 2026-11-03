@@ -7,18 +7,29 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, open
   from "./workspace-fixtures";
 
 /* A desktop list leads with its +: its first row, full width and square like
-   the rows, set apart by its tone. Its +, label and Ctrl/⌘+N sit centred in a
-   quieter ink than the rows' names. Nothing floats over what is open. */
+   the rows, set apart by its tone. Its label sits centred in a quieter ink
+   than the rows' names, Ctrl/⌘+N at the row's end on the label's baseline.
+   Nothing floats over what is open. */
 
-/** The +, label and shortcut sit centred in the row, the shortcut after the label. */
+/** Where a text box's baseline sits: an empty inline-block's bottom rests on it. */
+const baseline = (element: Element) => {
+  const probe = document.createElement("span");
+  probe.style.display = "inline-block";
+  element.append(probe);
+  const y = probe.getBoundingClientRect().bottom;
+  probe.remove();
+  return y;
+};
+
+/** The label is centred in the row; the shortcut ends at the row's inset, on the label's baseline. */
 async function expectCentredWithShortcut(create: ReturnType<Page["locator"]>) {
+  const label = create.locator(".app-list-row-title");
   const hint = create.locator(".app-list-create-shortcut");
   await expect(hint).toHaveText(/^(⌘N|Ctrl\+N)$/u);
-  const [box, markBox, hintBox] = await Promise.all([create.boundingBox(),
-    create.locator(".app-list-create-mark").boundingBox(), hint.boundingBox()]);
-  const left = markBox!.x - box!.x;
-  const right = box!.x + box!.width - (hintBox!.x + hintBox!.width);
-  expect(Math.abs(left - right)).toBeLessThan(2);
+  const [box, labelBox, hintBox] = await Promise.all([create.boundingBox(), label.boundingBox(), hint.boundingBox()]);
+  expect(labelBox!.x + labelBox!.width / 2).toBeCloseTo(box!.x + box!.width / 2, 0);
+  expect(box!.x + box!.width - (hintBox!.x + hintBox!.width)).toBeCloseTo(20, 0);
+  expect(await hint.evaluate(baseline)).toBeCloseTo(await label.evaluate(baseline), 0);
 }
 
 test.use(E2E_DESKTOP_CONTEXT);
