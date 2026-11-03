@@ -17,6 +17,7 @@ import {
   composerTextOfFragment,
 } from "./composer-editor-text";
 import { MentionChipFace } from "./mention-chip-face";
+import { composerQuoteBlocks } from "./composer-quote-blocks";
 import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
 /**
@@ -79,9 +80,12 @@ export interface ComposerEditorProps {
   onPaste?: (event: ClipboardEvent, field: ComposerField) => void;
   /** Overlays positioned over the text (summon options). */
   children?: ReactNode;
+  /** Whether a quote's link leads to a message of this conversation, which a quote of needs not name. */
+  quoteIsHere?: (href: string) => boolean;
 }
 
 const NO_SPANS: readonly ComposerMentionSpan[] = [];
+const NEVER_HERE = () => false;
 const UNDO_GROUP_MS = 600;
 
 /**
@@ -122,6 +126,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
             "Mod-y": () => restore(history.redo(snapshot())),
             "Shift-Enter": splitBlock,
           }),
+          // Before the base keymap, so Backspace and Delete beside a quote take it whole.
+          composerQuoteBlocks(() => propsRef.current.quoteIsHere ?? NEVER_HERE),
           keymap(baseKeymap),
         ],
       }),
@@ -309,7 +315,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
   useLayoutEffect(() => {
     viewRef.current?.setProps({});
   }, [props.disabled, props.ariaLabel, props.className, props.mentionIndex, props.currentUserIdentityId,
-    props.references, props.summonReadings, props.summonReadingPending]);
+    props.references, props.summonReadings, props.summonReadingPending, props.quoteIsHere]);
 
   return <div ref={hostRef} className="composer-field-host relative min-w-0 flex-1">
     {props.children}

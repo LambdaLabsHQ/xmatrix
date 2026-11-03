@@ -177,7 +177,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { cn } from "@/lib/utils";
 
-import { attachmentKind, spaceVisibilityScope, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { attachmentKind, spaceVisibilityScope, WEB_PROXY_ROUTES, type DiscussionSource } from "@xmatrix/protocol";
 
 import type {
   ChannelAttachment,
@@ -195,12 +195,15 @@ import type {
 export type { ComposerChannelAttachment } from "./workspace-shell-message-model";
 
 export type ComposerMentionInsertRequest =
-  { id: number; kind: "mention"; mention: string };
+  | { id: number; kind: "mention"; mention: string }
+  /** A passage quoted into the draft as a block on the line after the caret (composer-quote-blocks.ts). */
+  | { id: number; kind: "quote"; quote: string; source: DiscussionSource };
 
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
 import { foldedDiscussionBody, quotedMessage, type DiscussionQuote } from "./selection-discussion";
 import { messageHere } from "./cited-passage";
+import { insertQuoteIntoDraft } from "./composer-quote-blocks";
 
 export type AgentTraceHistoryPanelState = {
   targetKey: string;
@@ -259,7 +262,6 @@ export const Composer = memo(function Composer({
   onDraftChange,
   onWorkspaceSelect,
   onCancelReply,
-  onRemoveQuote,
   onAttachmentsChange,
   onOpenAppsForSpace,
   onEditHarnessProfile,
@@ -311,7 +313,6 @@ export const Composer = memo(function Composer({
   onDraftChange: (value: string, invocationDraft?: ComposerInvocationDraft) => void;
   onWorkspaceSelect: (workspaceTarget: string | null) => void;
   onCancelReply: () => void;
-  onRemoveQuote?: () => void;
   onAttachmentsChange: (
     value: ChannelAttachment[] | ((current: ChannelAttachment[]) => ChannelAttachment[])
   ) => void;
@@ -328,6 +329,7 @@ export const Composer = memo(function Composer({
   afterSend?: ReactNode;
 }) {
   const channel = useRealtimeChannel(catalogChannel);
+  const quoteIsHere = useCallback((href: string) => Boolean(channel && messageHere(href, channel)), [channel]);
   const writable = isJoined && (Boolean(channel) || startsConversation);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const fieldRef = useRef<ComposerField | null>(null);
@@ -547,7 +549,9 @@ export const Composer = memo(function Composer({
     const nextCursor = target
       ? target.selectionStart || 0
       : cursor;
-    const next = insertMentionIntoDraft(localDraft, nextCursor, mentionInsertRequest.mention);
+    const next = mentionInsertRequest.kind === "quote"
+      ? insertQuoteIntoDraft(localDraft, nextCursor, mentionInsertRequest.quote, mentionInsertRequest.source)
+      : insertMentionIntoDraft(localDraft, nextCursor, mentionInsertRequest.mention);
     setDraftText(next.value);
     setCursor(next.cursor);
     dismissCompletion();
@@ -832,7 +836,8 @@ export const Composer = memo(function Composer({
   }
 
   // Jev reads each summon as the author types; the hint shows it and the send carries it.
-  // Picked channels and pages are shown by name and sent as their id tokens; a discussion's passage goes first.
+  // Picked channels and pages are shown by name and sent as their id tokens; a page discussion's anchored passage
+  // goes first. Quotes of messages are blocks of the draft itself, so they send where they were put.
   const sendDraft = () => {
     const typed = composerSendDraft(invocationDraftRef.current, localDraft);
     return quote ? quotedMessage(quote, typed) : typed;
@@ -1253,6 +1258,7 @@ export const Composer = memo(function Composer({
           summonReadings={draftSummonReadingsForDisplay(draftIntents.readings, localDraft,
             invocationDraftRef.current?.bindings.filter(isAgentBinding))}
           summonReadingPending={draftIntents.reading}
+          quoteIsHere={quoteIsHere}
           onSummonStartAnyway={reading => {
             const next = forceDraftSummon(fieldRef.current?.value ?? localDraft, reading);
             if (!next) return;
@@ -1360,29 +1366,6 @@ export const Composer = memo(function Composer({
           }
           boxHeader={
             <>
-              {quote && !quote.anchored && (
-                // The same yellow slip the quote becomes once sent; where it came from only when that is another
-                // conversation, since a quote of this one is its own reference.
-                <div data-testid="composer-quote" className="message-citation-composer flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="line-clamp-2 text-foreground [overflow-wrap:anywhere]">{quote.text}</div>
-                    {!(channel && messageHere(quote.href, channel)) && (
-                      <div className="message-citation-source truncate">{quote.label}</div>
-                    )}
-                  </div>
-                  {onRemoveQuote && (
-                    <button
-                      type="button"
-                      title="Remove quote"
-                      aria-label="Remove quote"
-                      onClick={onRemoveQuote}
-                      className="-mr-1.5 -mt-0.5 flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  )}
-                </div>
-              )}
               {replyTarget && (
                 <div className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
                   <Reply className="mt-0.5 size-3.5 shrink-0" />

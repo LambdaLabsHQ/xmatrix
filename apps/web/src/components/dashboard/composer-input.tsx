@@ -32,6 +32,8 @@ export type ComposerInputAuthorityProps = ComposerContextFields & {
   summonReadings?: ReadonlyArray<DraftSummonIntent>;
   /** A reading for the current draft is still on its way. */
   summonReadingPending?: boolean;
+  /** Whether a quote in the draft is of a message in this conversation (composer-quote-blocks.ts). */
+  quoteIsHere?: (href: string) => boolean;
   onSummonStartAnyway?: (reading: DraftSummonIntent) => void;
   onSend: () => void;
   /** Escape cancels (thread draft) or is unused (main composer). */
@@ -97,6 +99,7 @@ function ComposerInputSurface({
   referenceRanges,
   summonReadings,
   summonReadingPending,
+  quoteIsHere,
   onSummonStartAnyway,
   channel,
   space,
@@ -315,6 +318,7 @@ function ComposerInputSurface({
             )}
             mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
             references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
+            quoteIsHere={quoteIsHere}
             hint={stripEmptyPasteSentinel(fieldValue ?? draft).length === 0 ? placeholder : undefined}>
             {onSummonStartAnyway && summonReadings?.some(reading => reading.choice !== "summon") &&
               <ComposerSummonOptions readings={summonReadings}

@@ -2785,12 +2785,46 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   padding: 10px 14px 9px;
 }
 .xmatrix-app .message-citation-composer {
-  margin: 8px 8px 0;
   padding: 8px 12px;
   font-size: 13px;
   line-height: 19px;
 }
 .xmatrix-app .rich-message .message-citation + * { margin-top: 10px; }
+.xmatrix-app .rich-message * + .message-citation { margin-top: 10px; }
+/* In the composer a quote is a block of the draft (composer-quote-blocks.ts): its lines give way to the slip,
+   which sits among the lines written around it and is removed whole by its ×. */
+.xmatrix-app .composer-quote-line { display: none; }
+.xmatrix-app .message-citation-composer.composer-quote-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  cursor: default;
+  user-select: none;
+}
+.xmatrix-app .composer-quote-block:first-child { margin-top: 0; }
+.xmatrix-app .composer-quote-block-body { min-width: 0; flex: 1; }
+.xmatrix-app .composer-quote-block-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+.xmatrix-app .composer-quote-block-remove {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -2px -6px -2px 0;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+}
+.xmatrix-app .composer-quote-block-remove:hover { color: var(--foreground); }
 .xmatrix-app .rich-message .message-citation-text {
   display: block;
   margin: 0;

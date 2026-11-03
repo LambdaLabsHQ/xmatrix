@@ -26,3 +26,18 @@ test("other messages, and quotes without a source line, have no head", () => {
   assert.equal(splitDiscussionHead("> a quote\n\nand a reply"), null);
   assert.equal(splitDiscussionHead("intro\n> a quote\n\n— [x](y)\n\nrest"), null);
 });
+
+test("a message's quoted passages are found wherever they were put, in order, and set aside for its preview", async () => {
+  const { discussionHeadsIn, withoutDiscussionHeads } = await import("../dist/index.js");
+  const first = discussionHead("first passage", { label: "a in #x", href });
+  const second = discussionHead("second\npassage", { label: "b in #y", href });
+  const body = `Look:\n${first}between\n${second}after`;
+  const heads = discussionHeadsIn(body);
+  assert.deepEqual(heads.map(({ quote, label }) => ({ quote, label })),
+    [{ quote: "first passage", label: "a in #x" }, { quote: "second\npassage", label: "b in #y" }]);
+  assert.equal(body.slice(heads[0].start, heads[0].end), first);
+  assert.equal(body.slice(heads[1].start, heads[1].end), second);
+  assert.equal(withoutDiscussionHeads(body), "Look:\nbetween\nafter");
+  assert.equal(withoutDiscussionHeads(first), "");
+  assert.deepEqual(discussionHeadsIn("> a plain quote\n\nand a reply"), []);
+});
