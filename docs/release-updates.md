@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: An agent that vanishes while starting says so, and Windows sees its running daemon
+
+A Run whose process ended in `relay_registered`, `channel_joined` or another
+phase before its agent was ready got no startup-failure notice and did not
+count against routing, because the Hub and the routing breaker each kept their
+own, shorter list of startup phases. Both now read one list in the protocol
+(`RUN_PHASES_BEFORE_READY`), and a process the daemon only found gone says
+that rather than the agent's bare name. A Run someone stopped is not a failed
+start. On Windows the desktop App took a running daemon for a stopped one when
+its two-second PowerShell scan ran out, reporting `service_not_up` with no
+detail and offering a restart that ends the daemon's agents. A daemon lock
+that refuses the App's read now counts as a running daemon, and the scan has
+ten seconds. Hub and Desktop; no schema change. Recovery is a CI-validated
+release reverting these files.
+
 ## Unreleased: CLI release feed reads recover one lost response
 
 HUB-BM lost a CLI release feed response and flattened the failure into a

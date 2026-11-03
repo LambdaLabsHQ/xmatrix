@@ -50,7 +50,7 @@ import {
   type LaunchParameterEvidence,
   type DraftSummonIntent,
   type AgentRegistrationLaunch, utf8ByteLength, hasControlCharacter,
-  currentRoutingQuotaWindows,
+  currentRoutingQuotaWindows, RUN_PHASES_BEFORE_READY,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -166,10 +166,6 @@ export const STARTUP_FAILURE_WINDOW_MINUTES = 30;
 /** How long a start or turn refused as signed out keeps its registration out
  * of routing, unless its machine reports its harnesses again sooner. */
 export const SIGNED_OUT_FAILURE_WINDOW_HOURS = 24;
-/** Run phases a process that exits in them never started: the stored
- * (normalized) form of the phases a startup failure notice is posted for. */
-const STARTUP_FAILURE_PHASES = ["wrapper_startup_failed", "auth_resolving", "workspace_registering",
-  "relay_registering", "relay_register_retrying", "relay_auth_refresh_retrying", "runtime_starting"] as const;
 export type RegistrationLaunchChooser = (input: {
   message: string; sourceSequence?: number; tags: AutoLaunchTags; candidates: RegistrationLaunchCandidate[];
   /** Registrations seen but not offered, so an empty list can name the real cause. */
@@ -1087,7 +1083,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND run.updated_at>=statement_timestamp()-interval '${SIGNED_OUT_FAILURE_WINDOW_HOURS} hours') signed_out ON TRUE`,
       values: [JSON.stringify(candidates.map(candidate => ({ owner: candidate.key.ownerUserId,
         machine: candidate.key.machineId, harness: candidate.key.harness }))),this.placement.spaceId,
-        [...STARTUP_FAILURE_PHASES]], maxRows: 100 }),
+        [...RUN_PHASES_BEFORE_READY]], maxRows: 100 }),
       // How long each harness takes to answer is the harness's own, measured
       // over every launch: a new Space has none of its own to go on.
       await tx.query({ name: "registration_launch_response_latency_v1", text: `SELECT

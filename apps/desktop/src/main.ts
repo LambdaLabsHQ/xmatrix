@@ -26,6 +26,7 @@ import {
 import { autoUpdater } from "electron-updater";
 import {
   commandLooksLikeXmatrixDaemon,
+  daemonLockReadRefused,
   parseDaemonLockPid,
   parsePsDaemonProcesses,
   type ExistingDaemonProcess,
@@ -101,7 +102,9 @@ const UPDATE_CHECK_DELAY_MS = 15_000;
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DAEMON_HEARTBEAT_INTERVAL_MS = 30_000;
 const DAEMON_RESTART_DELAY_MS = 2_000;
-const DAEMON_PROCESS_SCAN_TIMEOUT_MS = 2_000;
+// Windows scans through PowerShell and CIM, whose cold start alone can pass
+// two seconds; a scan cut short reads as "no daemon" while one runs.
+const DAEMON_PROCESS_SCAN_TIMEOUT_MS = process.platform === "win32" ? 10_000 : 2_000;
 const DAEMON_ONLINE_WAIT_ATTEMPTS = 8;
 const DAEMON_ONLINE_WAIT_DELAY_MS = 500;
 const DAEMON_OUTPUT_MAX_CHARS = 4_000;
@@ -1931,7 +1934,10 @@ function findWindowsDaemonProcess(): Promise<ExistingDaemonProcess | null> {
 
 async function findExistingDaemonProcess(): Promise<ExistingDaemonProcess | null> {
   if (process.platform === "win32") {
-    return findWindowsDaemonProcess();
+    // The held lock is the daemon's own word that it runs; the scan only adds its pid.
+    const held = daemonLockReadRefused(() => fs.readFileSync(daemonLockPath()));
+    const scanned = await findWindowsDaemonProcess();
+    return scanned ?? (held ? { command: "", source: "lock" } : null);
   }
 
   const lockPid = readDaemonLockOwnerPid();
@@ -2025,7 +2031,30 @@ async function finishInstalledDaemonStartup(start: ManagedStart, errorMessage: s
   const since = Date.now();
   const existing = await waitForExistingDaemonProcess();
   if (existing) return runningLocalDaemonStatus(existing.pid, true);
-  return setDaemonStatus("error", { message: notUpMessage, failure: daemonFailure("service_not_up", managedDaemonLogTail(since)) });
+  const windowsTask = await windowsDaemonTaskResult();
+  return setDaemonStatus("error", { message: notUpMessage, failure: daemonFailure("service_not_up",
+    windowsTask?.detail ?? managedDaemonLogTail(since), windowsTask?.lastResult) });
+}
+
+/**
+ * What Windows says the daemon task last did. The task writes no log of its
+ * own, so its state and last result are the only account of a daemon that
+ * never came up (0x41301 is "running", 0x8007052E a refused sign-in).
+ */
+async function windowsDaemonTaskResult(): Promise<{ detail: string; lastResult?: number } | null> {
+  if (process.platform !== "win32") return null;
+  const outcome = await runWindowsDaemonTaskCommandOutcome([
+    "$ErrorActionPreference='Stop'",
+    `$taskName=${powershellSingleQuoted(WINDOWS_DAEMON_TASK_NAME)}`,
+    "$info=Get-ScheduledTaskInfo -TaskName $taskName",
+    "$task=Get-ScheduledTask -TaskName $taskName",
+    "'state=' + $task.State + ' lastTaskResult=0x' + ('{0:X}' -f $info.LastTaskResult) + ' lastRunTime=' + $info.LastRunTime.ToUniversalTime().ToString('o')",
+  ].join("; "));
+  const detail = outcome.output.trim();
+  if (!outcome.started || !detail) return null;
+  const hex = detail.match(/lastTaskResult=0x([0-9A-F]+)/iu)?.[1];
+  const lastResult = hex ? Number.parseInt(hex, 16) : undefined;
+  return { detail: `Windows scheduled task: ${detail}`, ...(Number.isSafeInteger(lastResult) ? { lastResult } : {}) };
 }
 
 async function startWindowsDaemonTaskIfAvailable(options: { force?: boolean } = {}) {
@@ -2324,7 +2353,9 @@ async function stopDaemon(options: { disableKeepAlive?: boolean } = {}) {
     if (existing) {
       return setDaemonStatus("running", {
         pid: existing.pid,
-        message: `xMatrix daemon is managed outside this app (pid ${existing.pid}).`,
+        message: existing.pid
+          ? `xMatrix daemon is managed outside this app (pid ${existing.pid}).`
+          : "xMatrix daemon is managed outside this app.",
       });
     }
     return setDaemonStatus("stopped", { message: "xMatrix daemon is stopped." });
