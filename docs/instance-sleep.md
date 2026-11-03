@@ -166,8 +166,20 @@ remain context. Live and catch-up App work queues behind any active turn:
    (2026-10-24: a returning user's machine dropped, their next messages were
    refused silently, and nothing woke the Instance when it came back.)
 
-A wake that is recorded, or refused, pushes `presence_updated` to the
-Channel's people, whose clients read its presence again.
+A rest that is recorded (the daemon's exit or stop report, or a snapshot
+that reconciles an unreported exit), a wake that is recorded or refused, and
+a stop of resting Instances each push `presence_updated` to the Channel's
+people. The push carries the Channel's Agents as its lists show them
+(`memberPresence` with `presenceCoverage: "agents"`), read in the same
+transaction as its audience; clients merge it in place and read no list.
+It is the whole current state, not a step, so a dropped push is repaired by
+the next one or by the read a reconnect makes, and the Hub queues nothing
+for a client that is not connected. A disconnect that reaches a client after
+the push of that Instance's rest is stale: the resting avatar stays. Only
+an asker that stopped or failed to wake ends declared waits, so only then do
+clients read the counts and the unread list again; a sleep or a wake reads
+nothing. An older Hub's push carries nothing, and its clients read the
+Channel again.
 
 A message committed in the few seconds between a sleep and its exit report
 reaches the closing socket rather than a resting Instance; it is caught up by

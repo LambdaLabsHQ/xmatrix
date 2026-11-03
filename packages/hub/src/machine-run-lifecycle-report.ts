@@ -1,4 +1,4 @@
-import { publishChannelInvocationsChanged } from "./channel-live-judgment";
+import { publishChannelInvocationsChanged, publishChannelPresenceChanged } from "./channel-live-judgment";
 import { cleanRepositoryBaseline } from "@xmatrix/protocol";
 import { PostgresMachineLifecycleRepository, RuntimeControlError, type AuthorityDatabase } from "@xmatrix/db";
 
@@ -72,6 +72,13 @@ export async function machineRunLifecycleReport(
   if (value.reused !== true && (input.eventType === "machine_execution_report" || input.eventType === "machine_stop_result" ||
       (Array.isArray(value.changedRunIds) && value.changedRunIds.length > 0))) {
     await publishChannelInvocationsChanged(env, text(input.channelId, "channelId", 300));
+  }
+  // An exit or stop result records whether the Instance rests, and a snapshot
+  // reconciles the ones that ended unreported: the Channel's lists learn how
+  // its Agents stand from this push, never by reading again.
+  if (value.reused !== true && (input.eventType === "machine_run_exited" || input.eventType === "machine_stop_result" ||
+      (input.eventType === "machine_run_snapshot" && Array.isArray(value.changedRunIds) && value.changedRunIds.length > 0))) {
+    await publishChannelPresenceChanged(env, text(input.channelId, "channelId", 300));
   }
   if (input.eventType === "machine_spawn_result" && payload.ok !== true &&
       isRecoverableLaunchFailure(payload.error)) {

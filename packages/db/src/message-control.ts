@@ -8,7 +8,8 @@ import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from 
 import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
-import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
+import type { AgentRegistrationKey, ChannelMemberPresence, MessageCommitReceipt } from "@xmatrix/protocol";
+import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
@@ -2934,6 +2935,23 @@ export class PostgresMessageRepository {
   }): Promise<string[]> {
     const { requestId, spaceId, channelId } = channelRequest(input);
     return this.inSpace(requestId, "message.live-recipients", spaceId, (transaction) => liveRecipientUserIds(transaction, spaceId, channelId));
+  }
+
+  /**
+   * The Channel's live readers and its Agents as their lists show them, from
+   * one snapshot: what a change to an Instance's lifecycle pushes to those
+   * readers, so none of them re-reads a list to learn it.
+   */
+  async liveAgentPresence(input: {
+    requestId: string;
+    spaceId: string;
+    channelId: string;
+  }): Promise<{ recipientUserIds: string[]; memberPresence: Record<string, ChannelMemberPresence> }> {
+    const { requestId, spaceId, channelId } = channelRequest(input);
+    return this.inSpace(requestId, "message.live-agent-presence", spaceId, async (transaction) => ({
+      recipientUserIds: await liveRecipientUserIds(transaction, spaceId, channelId),
+      memberPresence: (await loadChannelAgentPresence(transaction, spaceId, [channelId])).get(channelId) ?? {},
+    }));
   }
 
   /** The Channel's live audience as it stands now: who may read it, and whose cells hold its Instances. */

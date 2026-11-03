@@ -654,7 +654,7 @@ export { ChannelPresenceConflict, channelPresenceInstances, emptyChannelPresence
   reduceChannelPresence } from "./channel-presence.js";
 export type { AgentInstancePresence, ChannelPresence, ChannelPresenceChange, ChannelSnapshot,
   HumanDevicePresence, HumanPresence, PresenceInstanceId } from "./channel-presence.js";
-export { decodeChannelSnapshot, encodeChannelPresence, encodeChannelSnapshot } from "./channel-presence-codec.js";
+export { decodeChannelAgentPresence, decodeChannelSnapshot, encodeChannelPresence, encodeChannelSnapshot } from "./channel-presence-codec.js";
 
 export { agentInstanceMemberPresence, channelPresenceMember } from "./channel-presence-selectors.js";
 export type { ChannelSnapshotCatalogPage, ChannelSnapshotCatalogPageRow, ChannelSnapshotCatalogResolveResult } from "./channel-presence.js";
