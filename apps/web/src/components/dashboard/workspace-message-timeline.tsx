@@ -1406,7 +1406,7 @@ function MessagePassageActions({ rootRef, onAction, quote, discuss }: {
     onAction(action, passage.messageId, passage.quote);
     document.getSelection()?.removeAllRanges();
   };
-  const actionClass = "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-sm hover:bg-muted [&_svg]:size-4";
+  const actionClass = "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-sm [&_svg]:size-4";
   return createPortal(
     <div className={cn("fixed z-50", !below && "-translate-y-full")}
       style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 300)),
@@ -1419,7 +1419,7 @@ function MessagePassageActions({ rootRef, onAction, quote, discuss }: {
             <Quote /> Quote
           </button>
         )}
-        {quote && discuss && <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />}
+        {quote && discuss && <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-foreground/15" />}
         {discuss && (
           <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => act("discuss")}
             className={actionClass}>

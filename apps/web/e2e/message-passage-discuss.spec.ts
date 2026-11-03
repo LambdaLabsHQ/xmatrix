@@ -6,8 +6,19 @@ import { expectDraft } from "./composer-draft";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
-/** Selects a message's text from the first occurrence of `start` to the end of that text node. */
+/**
+ * Selects a message's text from the first occurrence of `start` to the end of
+ * that text node, until the selection menu shows: a row the list re-renders
+ * while it settles drops a selection made in it.
+ */
 async function selectFrom(text: Locator, start: string) {
+  await expect(async () => {
+    await selectOnce(text, start);
+    await expect(text.page().getByTestId("message-selection-menu")).toBeVisible({ timeout: 1000 });
+  }).toPass();
+}
+
+async function selectOnce(text: Locator, start: string) {
   await text.evaluate((body, start) => {
     const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
