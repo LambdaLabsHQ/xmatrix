@@ -19,7 +19,7 @@ const EDGE_OVERHANG = 24;
 const BUTTON_CLASS_NAME =
   "flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground";
 const MENU_ITEM_CLASS_NAME =
-  "flex min-h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm";
+  "flex min-h-9 w-full items-center gap-2.5 px-3 text-left text-sm";
 
 /** A key pressed over a message acts on it, unless it is typing or a chord. */
 function isRowShortcut(event: KeyboardEvent) {
@@ -159,7 +159,7 @@ export function MessageHoverToolbar({
       )}
       {open === "menu" && (
         <PaperPopover role="menu" aria-label="More message actions"
-          className="absolute right-0 top-full mt-1 w-44 p-1">
+          className="absolute right-0 top-full mt-1 w-44">
           {onEdit && (
             <button type="button" role="menuitem" className={MENU_ITEM_CLASS_NAME}
               onClick={() => { setOpen(null); onEdit(); }}>

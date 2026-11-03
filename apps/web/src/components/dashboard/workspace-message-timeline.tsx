@@ -1406,20 +1406,20 @@ function MessagePassageActions({ rootRef, onAction, quote, discuss }: {
     onAction(action, passage.messageId, passage.quote);
     document.getSelection()?.removeAllRanges();
   };
-  const actionClass = "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-sm [&_svg]:size-4";
+  const actionClass = "flex items-center gap-1.5 whitespace-nowrap px-3 text-sm [&_svg]:size-4";
   return createPortal(
     <div className={cn("fixed z-50", !below && "-translate-y-full")}
       style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 300)),
         top: below ? passage.rect.bottom + 6 : passage.rect.top - 6 }}>
       <PaperPopover role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
-        className="flex items-center gap-0.5 p-1">
+        className="flex items-center">
         {quote && (
           <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => act("quote")}
             className={actionClass}>
             <Quote /> Quote
           </button>
         )}
-        {quote && discuss && <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-foreground/15" />}
+        {quote && discuss && <span aria-hidden="true" className="app-paper-popover-divider" />}
         {discuss && (
           <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => act("discuss")}
             className={actionClass}>

@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Floating menus highlight edge to edge
+
+A floating paper menu's hovered item was a rounded box inset in the slip,
+and its corners did not follow the slip's. Items now run to the slip's edges,
+whose own corner cuts the first and last, with a hairline between groups: the
+message and page selection menus, the table tools, the insert and mention
+menus, a heading's menu and a message's More actions. Pill-shaped bars keep
+their round items. Web only, no schema or client migration. Recovery is a
+CI-validated beta release reverting this change.
+
 ## Unreleased: Agent message headers name their repository
 
 Agent message headers omitted the repository even though the Run already knew
