@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Gmail sends from a verified send-as alias
+
+`@gmail:send:<to> from:<address>` refused any address that was not a
+connected mailbox, so a verified Gmail "Send mail as" alias (a company address
+forwarded into a personal Gmail) could not be used. `from:` may now name an
+alias Gmail lists as primary or accepted on one of the caller's mailboxes; the
+mail goes out through that mailbox with the alias in From, the approval card
+names both, and the alias is checked again just before sending. A reply to mail
+addressed to such an alias goes out from it. The existing Gmail grant covers the
+send-as read: no new scope, no reconnect. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this change.
 ## Unreleased: A new Gmail message is one card
 
 A new-mail notification was followed by a separate Gmail read receipt that
