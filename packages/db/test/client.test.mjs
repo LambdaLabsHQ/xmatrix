@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { EventEmitter } from "node:events";
 import { retryPool } from "./retry-pool.fixture.mjs";
 
 import {
@@ -23,8 +24,15 @@ function fakeFactory(options = {}) {
   const clients = [];
   let remainingConnectFailures = options.connectFailures ?? 0;
   const factory = (config) => {
+    // node-postgres's protocol connection, announcing each result row's wire length.
+    const connection = options.rowBytes === undefined ? undefined : new EventEmitter();
+    const answered = (result) => {
+      for (const _row of result.rows) connection?.emit("dataRow", { length: options.rowBytes });
+      return result;
+    };
     const client = {
       config,
+      ...(connection ? { connection } : {}),
       async connect() {
         calls.push({ kind: "connect" });
         if (remainingConnectFailures > 0) {
@@ -32,30 +40,31 @@ function fakeFactory(options = {}) {
           throw new Error("redacted connection failure");
         }
       },
-      async query(input) {
-        const text = typeof input === "string" ? input : input.text;
-        calls.push({ kind: "query", input });
-        if (options.failOn?.test(text)) {
-          const error = new Error("redacted database failure");
-          error.code = options.failureCode ?? "40001";
-          throw error;
-        }
-        if (text === "SELECT many") {
-          return { rows: [{ id: 1 }, { id: 2 }], rowCount: 2 };
-        }
-        if (text.includes("__xmatrix_fence_shard_id")) {
-          const rows = options.placedReadRows ?? [];
-          return { rows, rowCount: rows.length };
-        }
-        if (text.includes("FROM control.space_placement")) {
-          const rows = options.placementRows ?? [{ shard_id: "shard-0", placement_epoch: 2,
-            state: "active", target_shard_id: null }];
-          return { rows, rowCount: rows.length };
-        }
-        return { rows: text === "SELECT one" ? [{ id: 1 }] : [], rowCount: 0 };
-      },
+      async query(input) { return answered(await answer(input)); },
       async end() { calls.push({ kind: "end" }); },
     };
+    async function answer(input) {
+      const text = typeof input === "string" ? input : input.text;
+      calls.push({ kind: "query", input });
+      if (options.failOn?.test(text)) {
+        const error = new Error("redacted database failure");
+        error.code = options.failureCode ?? "40001";
+        throw error;
+      }
+      if (text === "SELECT many") {
+        return { rows: [{ id: 1 }, { id: 2 }], rowCount: 2 };
+      }
+      if (text.includes("__xmatrix_fence_shard_id")) {
+        const rows = options.placedReadRows ?? [];
+        return { rows, rowCount: rows.length };
+      }
+      if (text.includes("FROM control.space_placement")) {
+        const rows = options.placementRows ?? [{ shard_id: "shard-0", placement_epoch: 2,
+          state: "active", target_shard_id: null }];
+        return { rows, rowCount: rows.length };
+      }
+      return { rows: text === "SELECT one" ? [{ id: 1 }] : [], rowCount: 0 };
+    }
     clients.push(client);
     return client;
   };
@@ -197,6 +206,35 @@ test("a session emits one summary splitting wait, checkout, and SQL time", async
   }
   assert.ok(summary.sqlMaxMs <= summary.sqlMs);
   assert.ok(summary.wallMs >= summary.sqlMs);
+});
+
+test("observations and session summaries carry the result bytes each statement received", async () => {
+  const fake = fakeFactory({ rowBytes: 99 });
+  const observations = [];
+  const sessions = [];
+  const database = createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", clientFactory: fake.factory,
+    observer: (point) => observations.push(point), sessionObserver: (summary) => sessions.push(summary),
+  });
+  await database.transaction(context, async (transaction) => {
+    await transaction.query({ name: "many_v1", text: "SELECT many", maxRows: 2 });
+    await transaction.query({ name: "one_v1", text: "SELECT one", maxRows: 1 });
+  });
+  const bytes = Object.fromEntries(observations.map((point) => [point.queryName, point.resultBytes]));
+  // Each row is its announced length plus the message type byte.
+  assert.equal(bytes.many_v1, 2 * 100);
+  assert.equal(bytes.one_v1, 100);
+  assert.equal(bytes.database_phase_begin_v1, 100, "the opening answers its placement fence row");
+  assert.equal(bytes.database_phase_commit_v1, 0);
+  assert.equal(sessions[0].resultBytes, 400);
+
+  const unmetered = fakeFactory();
+  const points = [];
+  await createAuthorityDatabase({ connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0",
+    clientFactory: unmetered.factory, observer: (point) => points.push(point) })
+    .transaction(context, (transaction) => transaction.query({ name: "one_v1", text: "SELECT one", maxRows: 1 }));
+  assert.equal(points.find((point) => point.queryName === "one_v1").resultBytes, 0,
+    "a client without a protocol connection reports no bytes rather than failing");
 });
 
 test("session summaries separate database failures from business rollbacks", async () => {

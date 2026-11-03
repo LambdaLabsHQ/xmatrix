@@ -51,6 +51,11 @@ export interface DatabaseObservation {
   shardId: string | null;
   durationMs: number;
   rowCount: number;
+  /**
+   * Result row bytes received for the statement, as they crossed the wire:
+   * what Hyperdrive returned and PlanetScale counted as egress for it.
+   */
+  resultBytes: number;
   outcome: "ok" | "error" | "row_limit";
   slow: boolean;
   errorCode?: string;
@@ -99,6 +104,8 @@ export interface DatabaseSessionObservation {
   transactions: number;
   queries: number;
   rows: number;
+  /** Result row bytes the session received, openings included. */
+  resultBytes: number;
 }
 
 export type DatabaseSessionObserver = (observation: DatabaseSessionObservation) => void;
