@@ -30,6 +30,14 @@ where it was put, and previews and automatic names read what was written
 around them. Discuss in new channel opens the new conversation's draft
 holding its passage as the first block. Hub and Web; no schema or client
 migration. Recovery is a CI-validated beta release reverting this change.
+## Unreleased: Gmail reads currency and punctuation entities
+
+A Gmail read showed `&yen;` and similar named HTML entities literally, for
+example in a bank statement's amounts. Common currency, typographic and
+spacing entities now read as their characters; unknown names stay as written.
+Hub only, no schema or client migration. Recovery is a CI-validated beta Hub
+reverting this change.
+
 ## Unreleased: Gmail reads a statement-sized message body
 
 The large-body read shipped in the previous beta still failed on a real bank
