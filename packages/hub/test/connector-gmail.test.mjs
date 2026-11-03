@@ -200,9 +200,28 @@ test("read keeps all HTML body segments and marks the existing body preview limi
   assert.doesNotMatch(long.summary, /a{8001}/u);
 });
 
-test("read reports unavailable inline bodies and MIME limits without fetching external parts", async () => {
+test("read fetches a text body Gmail stores by reference, never an attachment", async () => {
+  const html = "<p>Statement for HU YIMING</p><p>Billing address: Room 1, Shanghai</p>";
+  const payload = { mimeType: "multipart/mixed", parts: [
+    { mimeType: "multipart/alternative", parts: [{ mimeType: "text/html", body: { attachmentId: "ANGjdJ_body-1", size: 400_000 } }] },
+    { mimeType: "application/pdf", filename: "statement.pdf", body: { attachmentId: "ANGjdJ_pdf", size: 10 } },
+    { mimeType: "text/plain", filename: "notes.txt", body: { attachmentId: "ANGjdJ_txt", size: 10 } }] };
+  const { result, calls } = await fetched([gmail({ id: "18f2a9c0d1e2b3a4", payload }), gmail({ size: html.length, data: base64url(html) })],
+    () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
+  assert.deepEqual(calls.map(proxied).map(call => call.endpoint), [
+    "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4",
+    "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4/attachments/ANGjdJ_body-1"]);
+  assert.match(result.summary, /Statement for HU YIMING\n+Billing address: Room 1, Shanghai/u);
+  assert.doesNotMatch(result.summary, /some body parts unavailable/u);
+  const oversized = { mimeType: "text/html", body: { attachmentId: "ANGjdJ_big", size: 2_000_001 } };
+  const big = await fetched([gmail({ payload: oversized })], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
+  assert.equal(big.calls.length, 1, "an oversized body is not fetched");
+  assert.match(big.result.summary, /some body parts unavailable/u);
+});
+
+test("read reports unavailable bodies and MIME limits", async () => {
   for (const payload of [
-    { mimeType: "text/plain", body: { attachmentId: "synthetic-body", size: 100 } },
+    { mimeType: "text/plain", body: { size: 100 } },
     { mimeType: "multipart/mixed", parts: Array.from({ length: 201 }, (_, index) =>
       ({ mimeType: "text/plain", body: { data: base64url(`Paragraph ${index}`) } })) },
   ]) {

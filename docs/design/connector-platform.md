@@ -456,7 +456,8 @@ narrower `gmail.readonly` on it is what Google's app-blocked screen refuses
 config therefore requests `https://mail.google.com/` alone, without the
 default profile and contacts scopes, and the Hub is the boundary the grant
 is not: every user-invoked Gmail action passes an endpoint list in `actions/gmail.ts`
-(GET profile, message list, one message and the send-as list; POST
+(GET profile, message list, one message, a text body Gmail stores by
+reference, and the send-as list; POST
 messages/send) and any other endpoint is refused before Composio is called.
 The only write, POST messages/send, belongs to `send` and `reply`. `send`'s
 `from:` may name a send-as alias Gmail lists as primary or verified
@@ -568,7 +569,10 @@ Inline
 rendered HTML for each segment without duplicating alternative versions.
 Attachment parts and their descendants are excluded. Reads visit at most
 200 MIME parts and report incomplete content when that limit is reached or
-an inline text body is stored externally; they do not fetch attachments.
+a text body is unavailable. Gmail returns a large text body (a bank
+statement's HTML, for example) by reference instead of inline; a read fetches up
+to four such text/plain or text/html bodies of at most 2 MB each through
+messages.attachments.get. Parts that are attachments are never fetched.
 The Hub never
 requests a link found in mail; an Agent that needs to confirm a sign-up opens
 the link itself. `send:<address> <subject>\n<body>` sends one plain-text

@@ -32,12 +32,16 @@ const MAX_BODY = 8_000;
 const MAX_LINKS = 50;
 const MAX_LINK = 2_000;
 const MAX_PARTS = 200;
+/* A text body Gmail stores outside the message (large HTML statements) is fetched; real attachments never are. */
+const MAX_EXTERNAL_BODIES = 4;
+const MAX_EXTERNAL_BODY = 2_000_000;
+const ATTACHMENT_ID = /^[A-Za-z0-9_-]{1,2048}$/u;
 const MAX_ADDRESS = 254;
 const ADDRESS = /^[^\s@<>(),;:"\\[\]]+@[^\s@<>(),;:"\\[\]]+\.[^\s@<>(),;:"\\[\]]+$/u;
 
 /* User-invoked Gmail endpoints. The notification worker separately permits only profile/history ID reads. */
 const GMAIL_CALLS: Record<"GET" | "POST", RegExp> = {
-  GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32}|settings\/sendAs)$/u,
+  GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32}|messages\/[0-9a-f]{8,32}\/attachments\/[A-Za-z0-9_-]{1,2048}|settings\/sendAs)$/u,
   POST: /^\/messages\/send$/u,
 };
 
@@ -79,12 +83,43 @@ function decodePart(data: string, contentType: string): string {
 }
 
 /** Inline bodies: mixed segments in order, with plain/HTML alternatives kept separate. */
+function isAttachment(part: Record<string, unknown>): boolean {
+  return !!part.filename || /^attachment(?:\s*;|\s*$)/iu.test(header(part, "content-disposition").trim());
+}
+
+/**
+ * Fill in text/plain and text/html bodies Gmail returned by reference (`body.attachmentId`, used for large parts)
+ * by reading them through messages.attachments.get. Attachment subtrees, oversized parts and parts past
+ * the bound stay unread and still mark the body incomplete.
+ */
+async function withExternalBodies(credentials: Readonly<Record<string, string>>, id: string, message: Record<string, unknown>,
+  meter?: UpstreamMeter): Promise<Record<string, unknown>> {
+  const pending: Record<string, unknown>[] = [];
+  let seen = 0;
+  const visit = (part: Record<string, unknown>): void => {
+    if (seen++ >= MAX_PARTS || isAttachment(part)) return;
+    const mime = String(part.mimeType ?? "").toLowerCase();
+    const body = record(part.body);
+    if ((mime === "text/plain" || mime === "text/html") && typeof body.data !== "string" && typeof body.attachmentId === "string"
+      && ATTACHMENT_ID.test(body.attachmentId) && Number(body.size ?? 0) <= MAX_EXTERNAL_BODY && pending.length < MAX_EXTERNAL_BODIES) {
+      pending.push(body);
+    }
+    if (mime.startsWith("multipart/") && Array.isArray(part.parts)) for (const child of part.parts) visit(record(child));
+  };
+  visit(record(message.payload));
+  await Promise.all(pending.map(async (body) => {
+    const fetched = await gmailGet(credentials, `/messages/${id}/attachments/${String(body.attachmentId)}`, {}, meter);
+    if (typeof fetched.data === "string" && fetched.data.length <= MAX_EXTERNAL_BODY * 2) body.data = fetched.data;
+  }));
+  return message;
+}
+
 export function gmailBodies(payload: Record<string, unknown>): { plain?: string; html?: string; incomplete?: boolean } {
   let seen = 0;
   const visit = (part: Record<string, unknown>): { plain?: string; html?: string; incomplete?: boolean } => {
     if (seen++ >= MAX_PARTS) return { incomplete: true };
     const bodies: { plain?: string; html?: string; incomplete?: boolean } = {};
-    if (part.filename || /^attachment(?:\s*;|\s*$)/iu.test(header(part, "content-disposition").trim())) return bodies;
+    if (isAttachment(part)) return bodies;
     const mime = String(part.mimeType ?? "").toLowerCase();
     const body = record(part.body);
     const data = body.data;
@@ -232,7 +267,8 @@ function gmailMessageText(message: Record<string, unknown>, id: string, mailbox?
 export async function readGmailMessage(credentials: Readonly<Record<string, string>>, mailbox: GmailMailbox, id: string,
   meter?: UpstreamMeter): Promise<string> {
   if (!MESSAGE_ID.test(id)) throw new ProviderRequestError(400, "name a message id from @gmail:search");
-  return gmailMessageText(await gmailGet(mailboxCredentials(credentials, mailbox), `/messages/${id}`, { format: "full" }, meter), id);
+  const scoped = mailboxCredentials(credentials, mailbox);
+  return gmailMessageText(await withExternalBodies(scoped, id, await gmailGet(scoped, `/messages/${id}`, { format: "full" }, meter), meter), id);
 }
 
 type Context = Parameters<ConnectorAction["execute"]>[0];
@@ -411,7 +447,8 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     async execute(context, input) {
       const mailboxes = await usableMailboxes(context);
       const { mailbox, message } = await findMessage(context, mailboxes, input.id, "full");
-      return { summary: gmailMessageText(message, input.id, mailboxes.length > 1 ? mailbox.address : undefined) };
+      const full = await withExternalBodies(mailboxCredentials(context.credentials, mailbox), input.id, message, context.usage);
+      return { summary: gmailMessageText(full, input.id, mailboxes.length > 1 ? mailbox.address : undefined) };
     },
   },
   send: {
