@@ -14,6 +14,7 @@ import {
   fixtureRule,
   releaseFixture,
   screenChangeLanded,
+  routeHumanSocket,
 } from "./workspace-fixtures";
 
 const SLOW_HISTORY_RULE = "slow-channel-general-history";
@@ -453,12 +454,29 @@ test("a part of the push cancelled by its own component does not leave the chang
   await screenChangeLanded(page);
 });
 
-test("a conversation push builds its landing on the quiet frame and never pauses it", async ({ page }) => {
+test("a connected conversation push builds its landing on the quiet frame and never pauses it", async ({ page }) => {
+  let initialFocusSent = false;
+  await routeHumanSocket(page, (frame, reply) => {
+    if (frame.type !== "user_focus_channel") return;
+    initialFocusSent = true;
+    if (frame.channelId) reply({ type: "channel_history", channelId: frame.channelId,
+      requestId: frame.requestId, messages: [], hasMore: false });
+  });
   await installNativeBridge(page, "ios");
   await openGeneralChannelList(page);
   await expect(generalChannelRow(page)).toBeVisible();
+  // The connected path stamps the history accept refs before navigation.
+  // Witness the focus sent by human_connected before tapping the row.
+  await expect.poll(() => initialFocusSent).toBe(true);
   await page.evaluate(() => {
-    const probe = { paused: 0, landings: 0 };
+    const probe = { paused: 0, landings: 0, positions: [] as number[] };
+    let frames = 0;
+    const sample = () => {
+      const timeline = document.querySelector(".app-message-timeline");
+      if (timeline) probe.positions.push(timeline.getBoundingClientRect().left);
+      if (frames++ < 90) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
     (window as typeof window & { __pushProbe?: typeof probe }).__pushProbe = probe;
     const pause = Animation.prototype.pause;
     Animation.prototype.pause = function (this: Animation) {
@@ -477,10 +495,11 @@ test("a conversation push builds its landing on the quiet frame and never pauses
   await generalChannelRow(page).tap();
   await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
   await screenChangeLanded(page);
-  const probe = await page.evaluate(() => (window as typeof window & { __pushProbe?: { paused: number; landings: number } }).__pushProbe!);
-  // On iOS a compositor animation paused before its first frame never moved.
+  const probe = await page.evaluate(() => (window as typeof window & { __pushProbe?: { paused: number; landings: number; positions: number[] } }).__pushProbe!);
+  // Only the drag track is paused; timed landings play when they are built.
   expect(probe).toMatchObject({ paused: 0 });
   expect(probe.landings).toBeGreaterThan(0);
+  expect(probe.positions.some((left) => left > 0 && left < 390), "the connected push crosses the viewport").toBe(true);
   expect(await screenLayout(page)).toMatchObject({ timeline: 0 });
 });
 

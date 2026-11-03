@@ -616,11 +616,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     rootRef: shellRootRef,
     driverRef: mobileListTransitionRef,
     onBack: backToChannelList,
-    explain: () => ({
-      isMobileViewport, mobileDockPager, view, composingConversation, mobileChannelDetailsOpen,
-      agentConfigDialog: Boolean(agentConfigDialog), workspaceSearchOpen, selectedChannel: Boolean(selectedChannel),
-      client: desktopBridge?.client ?? "web",
-    }),
   });
   // Switching dock tabs moves the whole page, its bar and sign with it.
   const dockTabTapped = useRef(false);
