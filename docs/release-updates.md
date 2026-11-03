@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Content lock holders retain their last statement
+
+HUB-BN's About write waited behind `content.ref.commit`, but the captured
+idle transaction did not identify its last statement. The existing bounded
+lock sample now retains a fixed, allowlisted content/billing query label and
+query/state ages for content intent and reference transactions. Sentry's issue
+reader exposes those fields without SQL, values or identities. This is missing
+diagnostic coverage; the underlying slow round trip remains unproven. Locks,
+timeouts, replay and unknown-COMMIT handling are unchanged. Hub only, no schema
+or client migration. Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: An agent that vanishes while starting says so, and Windows sees its running daemon
 
 A Run whose process ended in `relay_registered`, `channel_joined` or another

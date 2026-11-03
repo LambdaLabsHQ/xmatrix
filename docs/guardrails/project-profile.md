@@ -547,5 +547,7 @@ and PostgreSQL conflict reports retain the original exception, correlated
 bounded query evidence and, for deadlocks, a content-free wait graph readable
 through Sentry. Slow execution-owner, Agent Channel-lock and combined message
 append preflight queries share one bounded live blocker sampler per isolate.
+Content intent/reference holders expose only fixed statement labels and bounded
+query/state ages to distinguish their last database step from transaction age.
 See [Agent turn failures](../operations/agent-turn-failures.md)
 and [Runtime delivery errors](../operations/runtime-delivery-errors.md).

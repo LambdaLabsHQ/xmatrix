@@ -86,7 +86,10 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
         for (const [label, wait] of [["lock wait", failure.lockWait], ["read wait", failure.queryWait]] as const) {
           if (!wait) continue;
           const backend = (value: NonNullable<typeof wait.waiter>) =>
-            `${value.owner}/${value.state}/${value.wait}/age=${value.ageMs} ms`;
+            `${value.owner}/${value.state}/${value.wait}/age=${value.ageMs} ms` +
+            (value.queryName ? `/query=${value.queryName}` : "") +
+            (value.queryAgeMs !== undefined ? `/query_age=${value.queryAgeMs} ms` : "") +
+            (value.stateAgeMs !== undefined ? `/state_age=${value.stateAgeMs} ms` : "");
           lines.push(`Database ${label} ${index + 1}: ${wait.status}` +
             (wait.waiter ? ` · waiter=${backend(wait.waiter)} · blockers=${wait.blockers.map(backend).join(";") || "none"}` : ""));
         }

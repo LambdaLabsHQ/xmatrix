@@ -377,7 +377,8 @@ test("scheduled failures expose bounded retry phases and keep unrelated event ex
 });
 
 test("origin wait snapshots reach read_issue with strict content-free validation (HUB-AY/B1)", async () => {
-  const backend = { state: "idle in transaction", wait: "Client", owner: "execution-report", ageMs: 5500 };
+  const backend = { state: "idle in transaction", wait: "Client", owner: "execution-report", ageMs: 5500,
+    queryName: "content_ref_intent_lock_v1", queryAgeMs: 4200, stateAgeMs: 4100 };
   const lockWait = { status: "sampled", waiter: { ...backend, state: "active", wait: "Lock", ageMs: 500 },
     blockers: [backend] };
   const failure = { operation: "runtime.execution-report", shardId: "shard-0", statement: "transaction",
@@ -391,6 +392,9 @@ test("origin wait snapshots reach read_issue with strict content-free validation
       [{ ...lockWait, blockers: [{ ...backend, owner: "op:Private User" }] }, false],
       [{ ...lockWait, blockers: [{ ...backend, owner: `op:${"a".repeat(63)}` }] }, false],
       [{ ...lockWait, blockers: [{ ...backend, ageMs: 120001 }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, queryName: "private-query" }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, queryAgeMs: 120001 }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, stateAgeMs: -1 }] }, false],
       [{ status: "busy", blockers: [] }, true], [{ status: "missing", blockers: [backend] }, false]]) {
       const { result } = await run([{ body: issue }, { body: { ...event, context: {
         database_failure_attempts: JSON.stringify([{ ...failure, [field]: snapshot }]), sql: "private-sql",
@@ -398,7 +402,7 @@ test("origin wait snapshots reach read_issue with strict content-free validation
       if (valid) assert.match(result.summary, new RegExp(`Database ${label} 1: (sampled|busy)`));
       else assert.doesNotMatch(result.summary, /Database failure|Database (?:lock|read) wait/);
       if (snapshot === lockWait) assert.match(result.summary,
-        /blockers=execution-report\/idle in transaction\/Client\/age=5500 ms/);
+        /blockers=execution-report\/idle in transaction\/Client\/age=5500 ms\/query=content_ref_intent_lock_v1\/query_age=4200 ms\/state_age=4100 ms/);
       assert.doesNotMatch(result.summary, /private-/);
     }
   }
