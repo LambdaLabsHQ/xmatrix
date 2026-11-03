@@ -363,3 +363,21 @@ in `blob9`) to identify production frequency and tail latency. The overview
 already shares one metadata scan; adding a timestamp index cannot remove its
 all-time exact counts by itself. PostgreSQL table statistics are estimates,
 not exact row counts.
+
+### Content lock holder evidence
+
+HUB-BN waits on the Channel metadata lock while `content.ref.commit` holds
+its capability share lock. A holder being `idle in transaction` does not prove
+whether its response is delayed or the application is between statements.
+The two observed holders, `content.intent.create` and `content.ref.commit`,
+now prefix statements with an allowlisted, code-owned query label. The bounded
+lock sample projects only that label, transaction age, query age and state age;
+it never returns SQL, parameters or backend identities. Unknown labels become
+`unclassified`. Read these fields through the Sentry issue reader to locate the
+last content/billing statement before changing transaction structure. PostgreSQL
+query age includes execution and subsequent idle time; state age measures time
+in the reported state. Neither measures network latency independently.
+
+The existing single diagnostic connection, sampling deadline, lock timeout,
+capability fences, replay and unknown-COMMIT behavior remain in force. This adds
+missing attribution, rather than claiming to repair the underlying contention.

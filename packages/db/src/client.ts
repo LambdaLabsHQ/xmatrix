@@ -26,7 +26,7 @@ import { dingtalkPreparation, dingtalkDecision, dingtalkPreparedPlan, registerDi
   type DingTalkPreparedPlan, type DingTalkPreparedDecision } from "./dingtalk-prepared-port.js";
 
 import { recordDatabaseFailure, linkDatabaseFailures, type DatabaseFailureEvidence } from "./database-failure-evidence.js";
-import { watchPostgresLockWait, watchPostgresReadWait } from "./postgres-lock-wait.js";
+import { contentLockQueryText, watchPostgresLockWait, watchPostgresReadWait } from "./postgres-lock-wait.js";
 
 const MAX_QUERY_NAME_BYTES = 160;
 const MAX_QUERY_BYTES = 64 * 1024;
@@ -338,7 +338,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
       ? watchPostgresReadWait(query.name, query.text, this.options) : undefined;
     try {
       const result = await this.client.query<Row>({
-        text: readWait?.text ?? query.text,
+        text: readWait?.text ?? contentLockQueryText(this.context.operation, query.name, query.text),
         ...(query.values ? { values: [...query.values] } : {}),
       });
       const durationMs = performance.now() - startedAt;
