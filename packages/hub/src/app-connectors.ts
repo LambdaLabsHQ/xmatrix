@@ -639,7 +639,8 @@ const PASSED_CHECK_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
  * A commit's checks as one verdict, read with one installation's token. A
  * Empty non-Actions suites are placeholders for installed check apps. An
  * empty GitHub Actions suite can be a queued workflow and still holds the
- * verdict. Only the pull request's current head can settle. `settledAt` is
+ * verdict. An entirely skipped or neutral run cannot prove success. Only
+ * the pull request's current head can settle. `settledAt` is
  * when the last suite finished, so a rerun that
  * settles again reads as a new verdict.
  */
@@ -668,14 +669,17 @@ export async function githubCommitCheckVerdict(env: AppConnectorEnv, installatio
   const runResponse = githubObject(await fetchGitHubJson(env, `${path}/check-runs?filter=latest&per_page=100`, auth.token));
   const runs = runResponse.check_runs;
   if (!Array.isArray(runs) || runResponse.total_count !== runs.length || !runs.length || !settledAt) return { state: "pending" };
+  let hasSuccessfulCheck = false;
   for (const run of Array.isArray(runs) ? runs.map(githubObject) : []) {
     if (run.status !== "completed") return { state: "pending" };
     const conclusion = githubString(run.conclusion) ?? "";
+    if (conclusion === "success") hasSuccessfulCheck = true;
     if (PASSED_CHECK_CONCLUSIONS.has(conclusion)) continue;
     if (!FAILED_CHECK_CONCLUSIONS.has(conclusion)) return { state: "pending" };
     const url = githubString(run.html_url);
     failed.push({ name: githubString(run.name) ?? "check", ...(url ? { url } : {}) });
   }
+  if (!failed.length && !hasSuccessfulCheck) return { state: "pending" };
   return { state: failed.length > 0 ? "failed" : "passed", failed, settledAt };
 }
 
