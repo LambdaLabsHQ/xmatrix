@@ -1,7 +1,7 @@
 import { withProviderResponses as fetched } from "./support/fetch-responses.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { GMAIL_ACTIONS as ACTIONS, gmailPreview, verifyGmail } from "../src/connectors/actions/gmail.ts";
+import { decodeEntities, GMAIL_ACTIONS as ACTIONS, gmailPreview, verifyGmail } from "../src/connectors/actions/gmail.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
@@ -213,6 +213,12 @@ test("read fetches a text body Gmail stores by reference, never an attachment", 
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4/attachments/ANGjdJ_body-1"]);
   assert.match(result.summary, /Statement for HU YIMING\n+Billing address: Room 1, Shanghai/u);
   assert.doesNotMatch(result.summary, /some body parts unavailable/u);
+  /* A real statement's HTML is larger than the 256 KiB default response bound; the body fetch allows more. */
+  const statement = `<p>Billing address: Shanghai</p>${"<td>row</td>".repeat(40_000)}`;
+  const large = await fetched([gmail({ payload: { mimeType: "text/html", body: { attachmentId: "ANGjdJ_large", size: statement.length } } }),
+    gmail({ size: statement.length, data: base64url(statement) })], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
+  assert.ok(base64url(statement).length > 256 * 1024);
+  assert.match(large.result.summary, /Billing address: Shanghai/u);
   const oversized = { mimeType: "text/html", body: { attachmentId: "ANGjdJ_big", size: 2_000_001 } };
   const big = await fetched([gmail({ payload: oversized })], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
   assert.equal(big.calls.length, 1, "an oversized body is not fetched");
@@ -507,4 +513,9 @@ test("reply answers from the send-as alias the original was addressed to", async
   const direct = gmail({ id: "18f2a9c0d1e2b3a4", payload: { headers: [{ name: "From", value: "a@b.test" }, { name: "To", value: "me@example.com" }] } });
   const plain = await fetched([direct], () => ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "x" }));
   assert.deepEqual([plain.calls.length, plain.result.from, plain.result.via], [1, "me@example.com", undefined], "mail to the mailbox itself reads no send-as list");
+});
+
+test("statement HTML entities such as &yen; read as their characters; unknown names stay as written", () => {
+  assert.equal(decodeEntities("&yen; 30,000.00 &ndash; &ldquo;Hi&rdquo;&hellip; &AMP; &#165; &#x20AC; &bogus;"),
+    "¥ 30,000.00 – “Hi”… & ¥ € &bogus;");
 });
