@@ -1,17 +1,6 @@
 /** Machine Run startup and stop failures, turned into channel-safe product copy. */
 
-import { publicMachineStartupFailure } from "@xmatrix/protocol";
-
-const MACHINE_RUN_STARTUP_FAILURE_PHASES = new Set([
-  "auth_resolving",
-  "workspace_registering",
-  "relay_registering",
-  "relay_register_retrying",
-  "relay_auth_refresh_retrying",
-  "daemon_auth_refresh_failed",
-  "codex_app_starting",
-  "wrapper_startup_failed",
-]);
+import { publicMachineStartupFailure, runPhaseBeforeReady } from "@xmatrix/protocol";
 
 const MACHINE_RUN_FAILURE_DETAIL_MAX_CHARS = 2_000;
 
@@ -68,11 +57,16 @@ export function machineRunStartupFailureDetail(
   }
   if (eventType !== "machine_run_exited") return undefined;
   const phase = boundedMachineRunFailureText(payload.statusPhase);
-  if (!phase || !MACHINE_RUN_STARTUP_FAILURE_PHASES.has(phase)) return undefined;
+  if (!phase || !runPhaseBeforeReady(phase)) return undefined;
+  // A daemon that finds the process gone (it did not see it exit, often after
+  // the daemon itself restarted) has only its name to say; say what it saw.
+  const gone = payload.status === "process no longer exists" && typeof payload.exitCode !== "number";
   return {
-    detail: publicMachineStartupFailure(payload.runStatusDetail)?.summary
-      ?? publicMachineStartupFailure(payload.status)?.summary
-      ?? `the agent process exited during ${phase}`,
+    detail: gone
+      ? "The agent process was gone before it was ready. It left no exit code or error; its log is on that computer."
+      : publicMachineStartupFailure(payload.runStatusDetail)?.summary
+        ?? publicMachineStartupFailure(payload.status)?.summary
+        ?? `the agent process exited during ${phase}`,
     phase,
   };
 }

@@ -110,3 +110,20 @@ test("a stop nothing in the Channel asked for says why and who caused it", async
   assert.equal(machineStopCauseText({ code: "something_new" }), undefined, "an unknown cause is not guessed");
 });
 
+
+test("a process found gone before it was ready is a failed start that says what the daemon saw", async () => {
+  const { machineRunStartupFailureDetail } = await import("../src/machine-run-failure.ts");
+  // Production 11-03: Antigravity's wrapper vanished after relay_registered;
+  // the next daemon found it gone and had only the agent's name to report.
+  const gone = machineRunStartupFailureDetail("machine_run_exited", { statusPhase: "relay_registered",
+    status: "process no longer exists", runStatusDetail: "antigravity", completed: false });
+  assert.equal(gone?.phase, "relay_registered");
+  assert.match(gone.detail, /gone before it was ready/u);
+  assert.doesNotMatch(gone.detail, /^antigravity$/u);
+  for (const statusPhase of ["channel_joined", "cwd_preparing", "codex_app_starting", "runtime_starting"]) {
+    assert.ok(machineRunStartupFailureDetail("machine_run_exited", { statusPhase, status: "exit code: 1", exitCode: 1 }), statusPhase);
+  }
+  for (const statusPhase of ["runtime_ready", "turn_running", "turn_completed"]) {
+    assert.equal(machineRunStartupFailureDetail("machine_run_exited", { statusPhase, status: "exit code: 1" }), undefined, statusPhase);
+  }
+});

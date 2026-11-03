@@ -26,6 +26,7 @@ import {
 import { autoUpdater } from "electron-updater";
 import {
   commandLooksLikeXmatrixDaemon,
+  daemonLockReadRefused,
   parseDaemonLockPid,
   parsePsDaemonProcesses,
   type ExistingDaemonProcess,
@@ -101,7 +102,9 @@ const UPDATE_CHECK_DELAY_MS = 15_000;
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DAEMON_HEARTBEAT_INTERVAL_MS = 30_000;
 const DAEMON_RESTART_DELAY_MS = 2_000;
-const DAEMON_PROCESS_SCAN_TIMEOUT_MS = 2_000;
+// Windows scans through PowerShell and CIM, whose cold start alone can pass
+// two seconds; a scan cut short reads as "no daemon" while one runs.
+const DAEMON_PROCESS_SCAN_TIMEOUT_MS = process.platform === "win32" ? 10_000 : 2_000;
 const DAEMON_ONLINE_WAIT_ATTEMPTS = 8;
 const DAEMON_ONLINE_WAIT_DELAY_MS = 500;
 const DAEMON_OUTPUT_MAX_CHARS = 4_000;
@@ -1931,7 +1934,10 @@ function findWindowsDaemonProcess(): Promise<ExistingDaemonProcess | null> {
 
 async function findExistingDaemonProcess(): Promise<ExistingDaemonProcess | null> {
   if (process.platform === "win32") {
-    return findWindowsDaemonProcess();
+    // The held lock is the daemon's own word that it runs; the scan only adds its pid.
+    const held = daemonLockReadRefused(() => fs.readFileSync(daemonLockPath()));
+    const scanned = await findWindowsDaemonProcess();
+    return scanned ?? (held ? { command: "", source: "lock" } : null);
   }
 
   const lockPid = readDaemonLockOwnerPid();
@@ -2324,7 +2330,9 @@ async function stopDaemon(options: { disableKeepAlive?: boolean } = {}) {
     if (existing) {
       return setDaemonStatus("running", {
         pid: existing.pid,
-        message: `xMatrix daemon is managed outside this app (pid ${existing.pid}).`,
+        message: existing.pid
+          ? `xMatrix daemon is managed outside this app (pid ${existing.pid}).`
+          : "xMatrix daemon is managed outside this app.",
       });
     }
     return setDaemonStatus("stopped", { message: "xMatrix daemon is stopped." });

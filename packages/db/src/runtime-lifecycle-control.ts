@@ -352,6 +352,9 @@ export class PostgresMachineLifecycleRepository {
           ...(context.machine_name ? { machineName: String(context.machine_name) } : {}) };
         if (!notice ||
             spawnFailure && (context!.status !== "failed" ||
+              metadata(context!).executionCancellation !== undefined) ||
+            // A start someone stopped did not fail: its stop answers for it.
+            eventType === "machine_run_exited" && (metadata(context!).stopRequest !== undefined ||
               metadata(context!).executionCancellation !== undefined)) { /* no Channel notice */ }
         // A stop's Channel feedback is the daemon's actual termination result;
         // a scheduled occurrence keeps its own ledger instead.

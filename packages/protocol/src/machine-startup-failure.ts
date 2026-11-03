@@ -36,3 +36,23 @@ export function publicMachineStartupFailure(detail: unknown): PublicMachineStart
   else if (text.includes("is not accessible") || (text.includes("remote repository") && text.includes("not accessible"))) code = "remote_repo_access";
   return { code, summary: sanitizeMachineFailureDetail(detail), action: "" };
 }
+
+/** The phases a Run reports before its agent is ready, in their stored
+ * (normalized) form: a process that ends in any of them never started, so its
+ * end is a failed start, owed a notice and kept out of routing for a while.
+ * A process found gone in `relay_registered` or `channel_joined` started no
+ * more than one that died in `relay_registering`. */
+export const RUN_PHASES_BEFORE_READY = [
+  "wrapper_starting", "cwd_preparing", "cwd_ready", "auth_resolving", "workspace_registering",
+  "relay_registering", "relay_register_retrying", "relay_auth_refresh_retrying", "relay_registered",
+  "channel_joined", "channel_join_retrying", "runtime_starting", "wrapper_startup_failed",
+] as const;
+
+const PHASES_BEFORE_READY: ReadonlySet<string> = new Set(RUN_PHASES_BEFORE_READY);
+
+/** Whether a reported phase, raw (`codex_app_starting`, `daemon_auth_refresh_failed`)
+ * or stored, comes before the agent is ready. */
+export function runPhaseBeforeReady(phase: string): boolean {
+  return PHASES_BEFORE_READY.has(phase) || phase === "daemon_auth_refresh_failed" ||
+    /^(codex|zcode|grok|acp)_app_starting$/u.test(phase);
+}

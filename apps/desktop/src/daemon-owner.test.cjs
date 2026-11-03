@@ -57,3 +57,13 @@ test("parsePsDaemonProcesses returns daemon candidates without the desktop proce
     },
   ]);
 });
+
+test("a daemon lock whose read is refused is a running daemon's, and only then", async () => {
+  const { daemonLockReadRefused } = await import("./daemon-owner.ts");
+  const refused = (code) => () => { throw Object.assign(new Error(code), { code }); };
+  // Windows: the running daemon's exclusive lock refuses the read.
+  assert.equal(daemonLockReadRefused(refused("EBUSY")), true);
+  // No lock file, or one nobody holds, says no daemon runs.
+  assert.equal(daemonLockReadRefused(refused("ENOENT")), false);
+  assert.equal(daemonLockReadRefused(() => "pid=42\n"), false);
+});
