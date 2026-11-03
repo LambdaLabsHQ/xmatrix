@@ -842,11 +842,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const manageMachines = useStableCallback(() => changeAppView("machines"));
   // One object while what it offers is the same: the list column that shows it is memoized.
   const listCreate = useMemo<CreateAction | null>(() => view === "messages" && canCreateChannel
-    ? { label: "New conversation", onCreate: startNewConversation, active: composingConversation }
+    ? { label: "New conversation", onCreate: startNewConversation, active: composingConversation, shortcut: true }
     : view === "pages"
-      ? { label: "New page", onCreate: createNewPage, disabled: !currentSpaceId }
+      ? { label: "New page", onCreate: createNewPage, disabled: !currentSpaceId, shortcut: true }
       : view === "agents" && user
-        ? { label: "Manage machines", onCreate: manageMachines }
+        ? { label: "Manage machines", onCreate: manageMachines, shortcut: true }
         : null,
   [canCreateChannel, composingConversation, createNewPage, currentSpaceId, manageMachines,
     startNewConversation, user, view]);

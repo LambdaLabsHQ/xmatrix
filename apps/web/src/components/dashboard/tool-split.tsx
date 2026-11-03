@@ -48,11 +48,10 @@ export function ToolSplit({ list, detail, open, label }: {
 }
 
 /** The list column: its name, its + as the first row, one optional control, then the rows. */
-export function ToolList({ title, action, create, createLead, toolbar, children }: {
+export function ToolList({ title, action, create, toolbar, children }: {
   title: string;
   action?: ReactNode;
   create?: CreateAction | null;
-  createLead?: "avatar";
   toolbar?: ReactNode;
   children: ReactNode;
 }) {
@@ -62,7 +61,7 @@ export function ToolList({ title, action, create, createLead, toolbar, children 
         <h1 className="text-xs font-black uppercase tracking-wide text-muted-foreground">{title}</h1>
         {action}
       </div>
-      <ListCreate action={create ?? null} lead={createLead} />
+      <ListCreate action={create ?? null} />
       {toolbar && <div className="px-5 pb-2">{toolbar}</div>}
       <div className="app-tool-list-scroll min-h-0 flex-1 overflow-y-auto pb-4">{children}</div>
     </>

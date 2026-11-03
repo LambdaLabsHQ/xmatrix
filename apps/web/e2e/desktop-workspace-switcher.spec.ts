@@ -171,7 +171,11 @@ test("Team lists every workspace and tags the one you are in", async ({ page }) 
 
   // A new workspace is the list's +, its first row, not one of the workspaces.
   await expect(rows.filter({ hasText: "New workspace" })).toBeHidden();
-  await page.locator(".app-tool-list .app-list-create", { hasText: "New workspace" }).click();
+  const create = page.locator(".app-tool-list .app-list-create", { hasText: "New workspace" });
+  // Ctrl/⌘+N does not make a workspace, so this + shows no shortcut.
+  await expect(create.locator(".app-list-create-shortcut")).toHaveCount(0);
+  await expect(create).toHaveAttribute("title", "New workspace");
+  await create.click();
   await expect(view.getByRole("textbox", { name: "New workspace name" })).toBeVisible();
 });
 

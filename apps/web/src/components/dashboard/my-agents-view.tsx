@@ -144,7 +144,7 @@ export function MyAgentsView({
     : groups.find((group) => agentHarnessSelectionId(group.harness) === selectedAgentId) ?? (selectedAgentId ? undefined : groups[0]);
 
   const list = (
-    <ToolList title="Agents" createLead="avatar" create={{ label: "Manage machines", onCreate: onOpenMachines }}>
+    <ToolList title="Agents" create={{ label: "Manage machines", onCreate: onOpenMachines, shortcut: true }}>
       {error && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{error}</p>}
       {!ready ? (
         <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents and installed harnesses.</p>
