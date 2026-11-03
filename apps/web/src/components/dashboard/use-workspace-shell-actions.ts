@@ -1524,7 +1524,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     return discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }, false);
   }
 
-  /** Puts a quote into a composer's draft as a block (composer-quote-blocks.ts), where the next message carries it. */
+  /** Puts a quote into a composer's draft as a block (composer-blocks.ts), where the next message carries it. */
   function quoteIntoComposer(quote: DiscussionQuote) {
     setMentionInsertRequest((current) => ({ id: (current?.id || 0) + 1, kind: "quote", quote: quote.text,
       source: { label: quote.label, href: quote.href } }));

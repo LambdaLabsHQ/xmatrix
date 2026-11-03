@@ -1,14 +1,20 @@
 # Release Updates
 
-## Unreleased: Connected mobile conversations slide in
+## Unreleased: Pictures are blocks of what is written, a row at a time
 
-Opening a conversation from the channel list now runs its push transition when
-the Human socket is connected. Sending channel focus stamps the incoming
-history acceptance refs before the route commits; navigation now decides
-whether the channel changes before that stamp, so it cannot mistake the new
-channel for one already open and skip the animation. The temporary browser
-Sentry push diagnostic is removed. Beta Web only, no API, schema or native
-change; recovery is a CI-validated beta Web release reverting this change.
+Pictures waited in a strip above the words and showed under the message, in
+no relation to what was written. A picture now goes into the draft where the
+caret is, as its own attachment card (preview, Original, retry, ×) among the
+lines; pictures put together, or one after another, are one row that wraps,
+and words between them start a new row. Sent, each picture is named by its
+place among the message's files (`![name](attachment:1)`), so the message
+draws it where it was put and Agents read the pictures in order with the
+words; any file the words do not name, and every file of older messages,
+stays under them as before. Backspace or Delete beside a picture, or its ×,
+removes it and its file. An image card's Original toggle and × now sit over
+the picture in the light theme instead of below it. Web only; no schema or
+client migration. Recovery is a CI-validated beta release reverting this
+change.
 
 ## Unreleased: Quotes are blocks of what is written, as many as wanted
 
@@ -24,6 +30,16 @@ where it was put, and previews and automatic names read what was written
 around them. Discuss in new channel opens the new conversation's draft
 holding its passage as the first block. Hub and Web; no schema or client
 migration. Recovery is a CI-validated beta release reverting this change.
+
+## Unreleased: Connected mobile conversations slide in
+
+Opening a conversation from the channel list now runs its push transition when
+the Human socket is connected. Sending channel focus stamps the incoming
+history acceptance refs before the route commits; navigation now decides
+whether the channel changes before that stamp, so it cannot mistake the new
+channel for one already open and skip the animation. The temporary browser
+Sentry push diagnostic is removed. Beta Web only, no API, schema or native
+change; recovery is a CI-validated beta Web release reverting this change.
 
 ## Unreleased: Gmail reads currency and punctuation entities
 
