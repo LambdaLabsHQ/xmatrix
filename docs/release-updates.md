@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Quote a selected passage of a message
+
+Selecting text in a message offered only Discuss. It now offers **Quote ｜
+Discuss in new channel**: Quote puts the passage above this conversation's own
+composer, with its author and Channel, and the next message sent there opens
+with it as a quote linking back to the message; Discuss in new channel is the
+former Discuss. Floating paper menus (this one, a message's hover actions, a
+page's selection and `/` menus) are now a flat wood-tinted slip without a
+shadow. Web only, no schema or client migration. Recovery is a CI-validated
+beta release reverting this change.
+
 ## Unreleased: Gmail sends from a verified send-as alias
 
 `@gmail:send:<to> from:<address>` refused any address that was not a

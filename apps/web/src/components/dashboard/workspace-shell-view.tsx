@@ -279,6 +279,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     handleTimelineJumpToMessage,
     handleTimelineOpenThread,
     handleTimelineDiscussPassage,
+    handleTimelineQuotePassage,
     handleTimelineMentionSender,
     handleTimelineRebornSender,
     handleTimelineQuestionnaireAnswer,
@@ -1284,6 +1285,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onReply={handleTimelineReply}
         onOpenThread={handleTimelineOpenThread}
         onDiscussPassage={handleTimelineDiscussPassage}
+        onQuotePassage={handleTimelineQuotePassage}
         onMentionSender={handleTimelineMentionSender}
         onRebornSender={handleTimelineRebornSender}
         reborningSenderKey={reborningAgentInstanceId}
