@@ -5,6 +5,7 @@ import { postgresAuthorityDatabase } from "./postgres-authority-http";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH } from "./runtime-transport/relay-runtime-product-adapter";
 import { analyticsWorkerVersion } from "./analytics-sampling";
+import { CliReleaseNoticeFailure, cliReleaseNoticeEvidence, type CliReleaseNoticeEvidence } from "./cli-release-notice-failure";
 import type { Env } from "./types";
 
 /**
@@ -21,16 +22,37 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 /** The newest release a channel's feed names; a feed that names none of that channel is an error. */
 export async function fetchCliChannelVersion(channel: CliReleaseChannel, fetcher: typeof fetch = fetch): Promise<string> {
-  const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  const response = await fetcher(CLI_RELEASE_FEEDS[channel], { headers: { accept: "application/json" }, signal });
-  if (!response.ok || !response.body) throw new Error(`CLI ${channel} release feed answered ${response.status}`);
-  const bytes = await readBoundedStream(response.body, MAX_BODY_BYTES,
-    () => new Error(`CLI ${channel} release feed is too large`), signal);
-  const body = JSON.parse(new TextDecoder().decode(bytes)) as { version?: unknown };
-  if (typeof body.version !== "string" || cliReleaseChannelOf(body.version) !== channel) {
-    throw new Error(`CLI ${channel} release feed names no ${channel} release`);
+  const failures: CliReleaseNoticeFailure[] = [];
+  for (let attempt = 1; ; attempt++) {
+    const started = Date.now(), signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    let phase: CliReleaseNoticeEvidence["phase"] = "feed_headers", status = 0;
+    try {
+      const response = await fetcher(CLI_RELEASE_FEEDS[channel], { headers: { accept: "application/json" }, signal });
+      status = response.status;
+      phase = "feed_contract";
+      if (!response.ok || !response.body) {
+        void response.body?.cancel().catch(() => undefined);
+        throw new Error(`CLI ${channel} release feed answered ${status}`);
+      }
+      phase = "feed_body";
+      const bytes = await readBoundedStream(response.body, MAX_BODY_BYTES,
+        () => new Error(`CLI ${channel} release feed is too large`), signal);
+      phase = "feed_contract";
+      const body = JSON.parse(new TextDecoder().decode(bytes)) as { version?: unknown } | null;
+      if (typeof body?.version !== "string" || cliReleaseChannelOf(body.version) !== channel) {
+        throw new Error(`CLI ${channel} release feed names no ${channel} release`);
+      }
+      return body.version;
+    } catch (cause) {
+      failures.push(new CliReleaseNoticeFailure(cause, channel, phase, started, status, attempt));
+      // Only a read's transport failure is replayable. Contract failures and
+      // any subsequent owner read or socket delivery keep their own boundary.
+      const transport = (phase === "feed_headers" || phase === "feed_body") &&
+        (signal.aborted || cause instanceof TypeError ||
+          (cause instanceof Error && ["TimeoutError", "AbortError"].includes(cause.name)));
+      if (attempt >= 2 || !transport) throw new AggregateError(failures, `CLI ${channel} release feed failed`);
+    }
   }
-  return body.version;
 }
 
 type CellFetcher = { fetch(request: Request): Promise<Response> };
@@ -58,43 +80,57 @@ export async function noticeCliReleases(env: Env, dependencies: CliReleaseNotice
     { requestId: `cli-release:${crypto.randomUUID()}`, channel: notice.channel, version: notice.version }));
   const cells = dependencies.cells ?? (ownerUserIds => relayRuntimeCellsForOwners(env, ownerUserIds));
   const latest = dependencies.latest ?? (channel => fetchCliChannelVersion(channel));
-  const failures: string[] = [];
+  const failures: unknown[] = [];
   let told = 0;
   try {
     for (const channel of ["stable", "dev"] as const) {
+      const started = Date.now();
+      let phase: CliReleaseNoticeEvidence["phase"] = "feed_read";
       try {
         const notice: MachineDaemonCliReleaseNotice = { type: "machine_cli_release", channel,
           version: await latest(channel) };
+        phase = "owner_read";
         const behind = await owners(notice);
         if (behind.length === 0) continue;
-        const answers = await Promise.all(cells(behind).map(cell => tellCell(env, cell, notice)));
+        phase = "cell_fetch";
+        const answers = await Promise.allSettled(cells(behind).map(cell => tellCell(env, cell, notice)));
         for (const answer of answers) {
-          if (typeof answer === "number") told += answer;
-          else if (answer) failures.push(`${channel}: ${answer.error}`);
+          if (answer.status === "rejected") failures.push(answer.reason);
+          else if (typeof answer.value === "number") told += answer.value;
         }
       } catch (error) {
-        failures.push(`${channel}: ${error instanceof Error ? error.message : String(error)}`);
+        failures.push(cliReleaseNoticeEvidence(error).length > 0
+          ? error : new CliReleaseNoticeFailure(error, channel, phase, started));
       }
     }
   } finally {
     await database?.close();
   }
-  if (failures.length > 0) throw new Error(`CLI release notice failed (${failures.join("; ")})`);
+  if (failures.length > 0) throw new AggregateError(failures, "CLI release notice failed");
   return { told };
 }
 
 /** How many sockets one cell told; `undefined` for a cell still on an earlier release. */
 async function tellCell(env: Env, cell: CellFetcher, notice: MachineDaemonCliReleaseNotice):
-  Promise<number | { error: string } | undefined> {
-  const response = await cell.fetch(new Request(`https://relay-runtime${RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH}`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(notice) }));
-  const body = await response.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
-  if (response.ok && typeof body.told === "number") return body.told;
-  // A deploy reaches this Worker before each cell restarts on it: a cell on
-  // an earlier release has no such route yet and is told on a later pass.
-  if (response.status === 404 && typeof body.workerVersion === "string" &&
-      body.workerVersion !== analyticsWorkerVersion(env)) return undefined;
-  return { error: `cell answered ${response.status}` };
+  Promise<number | undefined> {
+  const started = Date.now();
+  let phase: CliReleaseNoticeEvidence["phase"] = "cell_fetch", status = 0;
+  try {
+    const response = await cell.fetch(new Request(`https://relay-runtime${RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(notice) }));
+    status = response.status;
+    phase = "cell_body";
+    const body = await response.json<Record<string, unknown>>();
+    phase = "cell_contract";
+    if (response.ok && typeof body.told === "number") return body.told;
+    // A deploy reaches this Worker before each cell restarts on it: a cell on
+    // an earlier release has no such route yet and is told on a later pass.
+    if (response.status === 404 && typeof body.workerVersion === "string" &&
+        body.workerVersion !== analyticsWorkerVersion(env)) return undefined;
+    throw new Error(`CLI release notice cell answered ${status}`);
+  } catch (cause) {
+    throw new CliReleaseNoticeFailure(cause, notice.channel, phase, started, status);
+  }
 }
 
 /** The Runtime cell's side: a notice it can trust, or `undefined`. */

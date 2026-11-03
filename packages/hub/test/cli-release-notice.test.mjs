@@ -5,6 +5,7 @@ import * as machine from "../src/runtime-transport/machine-daemon-port.ts";
 import { CLI_RELEASE_FEEDS, fetchCliChannelVersion, noticeCliReleases, parseCliReleaseNotice }
   from "../src/cli-release-notice.ts";
 import { RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH } from "../src/runtime-transport/relay-runtime-product-adapter.ts";
+import { cliReleaseNoticeEvidence } from "../src/cli-release-notice-failure.ts";
 import { FakeSocket } from "./support/runtime-transport.mjs";
 
 const principalFor = (machineId) => Object.freeze({
@@ -77,8 +78,10 @@ test("a channel's feed must name a release of that channel", async () => {
     return new Response(JSON.stringify(body), { status });
   };
   assert.equal(await fetchCliChannelVersion("stable", feed({ version: "2.3.0" })), "2.3.0");
-  await assert.rejects(fetchCliChannelVersion("stable", feed({ version: "2.3.0-beta.1" })), /names no stable release/);
-  await assert.rejects(fetchCliChannelVersion("dev", feed({}, 503)), /answered 503/);
+  await assert.rejects(fetchCliChannelVersion("stable", feed({ version: "2.3.0-beta.1" })),
+    error => /names no stable release/.test(error.errors[0].cause.message));
+  await assert.rejects(fetchCliChannelVersion("dev", feed({}, 503)),
+    error => /answered 503/.test(error.errors[0].cause.message));
 });
 
 test("a pass tells the cells of owners behind each channel and fails loudly on any failure", async () => {
@@ -102,7 +105,8 @@ test("a pass tells the cells of owners behind each channel and fails loudly on a
     latest: async () => { throw new Error("unused"); },
     owners: async () => [],
   }).catch((error) => error);
-  assert.match(rollout.message, /stable: unused; dev: unused/);
+  assert.deepEqual(rollout.errors.map(error => [error.evidence.channel, error.cause.message]),
+    [["stable", "unused"], ["dev", "unused"]]);
   await assert.rejects(noticeCliReleases({}, {
     latest: async (channel) => (channel === "stable" ? "2.3.0" : "2.2.1-beta.20"),
     owners: async () => ["a"],
@@ -110,7 +114,63 @@ test("a pass tells the cells of owners behind each channel and fails loudly on a
       cell("old", () => Response.json({ error: "Not found", workerVersion: "earlier" }, { status: 404 })),
       cell("broken", () => Response.json({ error: "boom" }, { status: 500 })),
     ],
-  }), /stable: cell answered 500; dev: cell answered 500/);
+  }), error => {
+    assert.deepEqual(cliReleaseNoticeEvidence(error).map(({ channel, phase, responseStatus }) =>
+      ({ channel, phase, responseStatus })), [
+      { channel: "stable", phase: "cell_contract", responseStatus: 500 },
+      { channel: "dev", phase: "cell_contract", responseStatus: 500 },
+    ]);
+    return true;
+  });
+});
+
+// The feed is a read, so one lost response can recover before any owner is
+// told. Existing channel/version tests never exercised transport recovery.
+test("a feed retries a lost header or body once with a fresh five-second deadline", async t => {
+  const signals = [];
+  t.mock.method(AbortSignal, "timeout", milliseconds => {
+    assert.equal(milliseconds, 5000);
+    const controller = new AbortController();
+    signals.push(controller.signal);
+    return controller.signal;
+  });
+  for (const phase of ["headers", "body"]) {
+    let calls = 0;
+    const result = await fetchCliChannelVersion("dev", async (_url, init) => {
+      assert.equal(init.signal.aborted, false);
+      if (++calls === 1) {
+        const timeout = new DOMException("timed out", "TimeoutError");
+        if (phase === "headers") throw timeout;
+        return new Response(new ReadableStream({ start(controller) { controller.error(timeout); } }));
+      }
+      return Response.json({ version: "2.3.1-beta.1" });
+    });
+    assert.equal(result, "2.3.1-beta.1");
+    assert.equal(calls, 2);
+  }
+  assert.equal(new Set(signals).size, 4);
+});
+
+test("two lost feed reads retain both causes and never start a third attempt", async () => {
+  const causes = [new DOMException("first timeout", "TimeoutError"), new TypeError("second transport failure")];
+  let calls = 0;
+  await assert.rejects(fetchCliChannelVersion("dev", async () => { throw causes[calls++]; }), error => {
+    assert.deepEqual(error.errors.map(failure => failure.cause), causes);
+    assert.deepEqual(cliReleaseNoticeEvidence(error).map(({ attempt, phase }) => [attempt, phase]),
+      [[1, "feed_headers"], [2, "feed_headers"]]);
+    return true;
+  });
+  assert.equal(calls, 2);
+});
+
+test("invalid, oversized and HTTP failure feeds do not retry or name a release", async () => {
+  for (const response of [() => new Response("{broken"), () => Response.json(null),
+    () => Response.json({ version: "2.3.0" }), () => new Response("x".repeat(65537)),
+    () => new Response("unavailable", { status: 503 })]) {
+    let calls = 0;
+    await assert.rejects(fetchCliChannelVersion("dev", async () => { calls++; return response(); }));
+    assert.equal(calls, 1);
+  }
 });
 
 test("a requested update check goes only to that Machine's daemon, and only if it can check", async () => {
