@@ -18,6 +18,21 @@ use crate::{
     use_zcode_app_backend, uses_claude_code_runtime,
 };
 
+/// Claude Code records the client that drives it as its entrypoint and sends
+/// it with every request. Left alone, a `--print` process calls itself
+/// `sdk-cli`, or inherits `sdk-cli`/`sdk-ts` from a parent Claude session,
+/// and Claude subscriptions currently drain the 5-hour window about twice as
+/// fast per token under those labels as under the interactive ones
+/// (https://github.com/anthropics/claude-code/issues/97074). xMatrix names
+/// itself instead, overwriting any inherited value so every Claude it starts
+/// reports the client that actually runs it.
+pub(crate) const CLAUDE_CODE_ENTRYPOINT_ENV: &str = "CLAUDE_CODE_ENTRYPOINT";
+pub(crate) const CLAUDE_CODE_ENTRYPOINT: &str = "xmatrix";
+
+pub(crate) fn label_claude_entrypoint(command: &mut tokio::process::Command) {
+    command.env(CLAUDE_CODE_ENTRYPOINT_ENV, CLAUDE_CODE_ENTRYPOINT);
+}
+
 pub(crate) fn claude_stream_extra_args(
     resume_id: Option<&str>,
     model: Option<&str>,
