@@ -1,7 +1,7 @@
 import { withProviderResponses as fetched } from "./support/fetch-responses.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { GMAIL_ACTIONS as ACTIONS, gmailPreview, verifyGmail } from "../src/connectors/actions/gmail.ts";
+import { decodeEntities, GMAIL_ACTIONS as ACTIONS, gmailPreview, verifyGmail } from "../src/connectors/actions/gmail.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
@@ -513,4 +513,9 @@ test("reply answers from the send-as alias the original was addressed to", async
   const direct = gmail({ id: "18f2a9c0d1e2b3a4", payload: { headers: [{ name: "From", value: "a@b.test" }, { name: "To", value: "me@example.com" }] } });
   const plain = await fetched([direct], () => ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "x" }));
   assert.deepEqual([plain.calls.length, plain.result.from, plain.result.via], [1, "me@example.com", undefined], "mail to the mailbox itself reads no send-as list");
+});
+
+test("statement HTML entities such as &yen; read as their characters; unknown names stay as written", () => {
+  assert.equal(decodeEntities("&yen; 30,000.00 &ndash; &ldquo;Hi&rdquo;&hellip; &AMP; &#165; &#x20AC; &bogus;"),
+    "¥ 30,000.00 – “Hi”… & ¥ € &bogus;");
 });
