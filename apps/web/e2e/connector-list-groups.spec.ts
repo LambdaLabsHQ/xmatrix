@@ -54,13 +54,18 @@ test("a credentials-only app leads with its form; the command reference stays fo
   expect(await page.getByTestId("connector-commands").locator("li").count()).toBeGreaterThan(4);
 });
 
-test("a connected app shows no call to action, and Disconnect comes last", async ({ page }) => {
+test("a connected app shows no call to action; Reconnect and Disconnect come before what it does", async ({ page }) => {
   await openApps(page, { providers: ["linear"], connections: [connection("linear", "Linear", "configured", "oauth")], app: "Linear" });
 
   await expect(page.getByTestId("connector-status")).toContainText("Connected · via Linear sign-in");
   await expect(page.getByTestId("connector-lead")).toHaveCount(0);
   await expect(page_(page).locator(".app-action-primary")).toHaveCount(0);
-  await expect(page_(page).locator("section[aria-label]").last()).toHaveAttribute("aria-label", "Disconnect");
+  const order = await page_(page).locator("section[aria-label]").evaluateAll((sections) =>
+    sections.map((section) => section.getAttribute("aria-label")));
+  expect(order.indexOf("Disconnect")).toBeGreaterThanOrEqual(0);
+  expect(order.indexOf("Disconnect")).toBeLessThan(order.indexOf("Permissions"));
+  expect(order.at(-1)).toBe("Commands");
+  await expect(page.getByRole("button", { name: "Reconnect Linear" })).toBeVisible();
   await expect(page.getByTestId("connector-policy")).toContainText("Agents read and make changes directly");
 });
 
