@@ -128,7 +128,7 @@ async function sample(selector: number | string, config: ClientConfig,
 export function watchPostgresLockWait(queryName: string, backendPid: number | undefined,
   options: { connectionString: string; lockTimeoutMs: number; clientFactory: (config: ClientConfig) => DiagnosticClient },
 ): (() => Promise<PostgresLockWait | undefined>) | undefined {
-  if (!(["runtime_execution_report_owner_v4", "message_append_preflight_v4", "channel_mutation_root_lock_v2",
+  if (!(["runtime_execution_report_owner_v5", "message_append_preflight_v4", "channel_mutation_root_lock_v2",
     "channel_mutation_head_advance_v1",
     // HUB-BJ: every daemon command first waits on its Machine's advisory scope.
     "machine_control_scope_lock_v2",

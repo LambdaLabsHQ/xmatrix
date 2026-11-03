@@ -177,8 +177,10 @@ export async function acknowledgeMachineExecution(tx: DatabaseTransaction, input
       scope.channelId !== input.channelId || report.sources.some(source => source.channelId !== input.channelId)) {
     return fail("invalid_execution_report", 400, "Execution report identity or evidence is invalid");
   }
-  const run = (await tx.query<QueryResultRow>({ name: "runtime_execution_report_owner_v4", text: `SELECT
-      run.run_id,run.metadata_json,instance.instance_id,instance.channel_instance_id,
+  // Only the execution key of the Run's metadata: a Run's whole metadata is
+  // kilobytes, and every daemon execution report reads this row.
+  const run = (await tx.query<QueryResultRow>({ name: "runtime_execution_report_owner_v5", text: `SELECT
+      run.run_id,run.metadata_json->>'executionKey' AS execution_key,instance.instance_id,instance.channel_instance_id,
       COALESCE(registration.display_name,run.metadata_json->>'agentName') AS agent_name
     FROM data.runs run JOIN data.instances instance ON instance.run_id=run.run_id
       JOIN data.run_agent_registrations binding ON binding.run_id=run.run_id AND binding.space_id=$1
@@ -190,7 +192,7 @@ export async function acknowledgeMachineExecution(tx: DatabaseTransaction, input
       AND instance.channel_id=run.channel_id AND instance.instance_id=$5 AND run.owner_user_id=$6
       AND run.metadata_json->>'machineId'=$7
     LIMIT 1 FOR UPDATE OF run`, values: [input.spaceId, scope.runId, input.channelId, scope.instanceId, scope.agentId, input.ownerUserId, input.machineId], maxRows: 1 }))[0];
-  const executionKey = run?.metadata_json?.executionKey;
+  const executionKey = run?.execution_key;
   if (!run || typeof executionKey !== "string" || await sha256Hex(executionKey) !== scope.executionFingerprint) {
     return fail("execution_report_forbidden", 403, "Execution report requires its original Machine and Run binding");
   }
