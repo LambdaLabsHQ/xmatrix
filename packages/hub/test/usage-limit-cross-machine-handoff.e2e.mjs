@@ -119,7 +119,9 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
     const spawnA = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "claude spawn on machine A");
     const summon = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, { method: "POST", headers,
-      body: JSON.stringify({ body: `@auto repo:${repository} machine:${machineA} fix the bug` }) });
+      // Only A has Claude; an explicit machine condition would intentionally
+      // survive handoff and prevent these cross-machine scenarios.
+      body: JSON.stringify({ body: `@claude repo:${repository} fix the bug` }) });
     assert.equal(summon.status, 200, await summon.clone().text());
     const launch = await spawnA;
     assert.equal(launch.remoteRepo, repository);
