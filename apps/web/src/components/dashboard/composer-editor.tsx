@@ -17,7 +17,7 @@ import {
   composerTextOfFragment,
 } from "./composer-editor-text";
 import { MentionChipFace } from "./mention-chip-face";
-import { composerQuoteBlocks } from "./composer-quote-blocks";
+import { composerBlocks } from "./composer-blocks";
 import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
 /**
@@ -82,6 +82,8 @@ export interface ComposerEditorProps {
   children?: ReactNode;
   /** Whether a quote's link leads to a message of this conversation, which a quote of needs not name. */
   quoteIsHere?: (href: string) => boolean;
+  /** A picture of the draft as the composer draws its attachment: preview, upload, quality and removal. */
+  renderPicture?: (ref: string) => ReactNode;
 }
 
 const NO_SPANS: readonly ComposerMentionSpan[] = [];
@@ -127,7 +129,10 @@ export function ComposerEditor(props: ComposerEditorProps) {
             "Shift-Enter": splitBlock,
           }),
           // Before the base keymap, so Backspace and Delete beside a quote take it whole.
-          composerQuoteBlocks(() => propsRef.current.quoteIsHere ?? NEVER_HERE),
+          composerBlocks(() => propsRef.current.quoteIsHere ?? NEVER_HERE, {
+            add: (element, picture) => portals.add({ key: `picture\u0000${picture}\u0000${Math.random()}`, element, picture }),
+            remove: (element) => portals.remove(element),
+          }),
           keymap(baseKeymap),
         ],
       }),
@@ -319,7 +324,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
   return <div ref={hostRef} className="composer-field-host relative min-w-0 flex-1">
     {props.children}
-    {portalEntries.map((entry) => createPortal(<MentionChipFace of={entry.face} />, entry.element, entry.key))}
+    {portalEntries.map((entry) => createPortal(entry.face ? <MentionChipFace of={entry.face} />
+      : props.renderPicture?.(entry.picture!) ?? null, entry.element, entry.key))}
     {showHint && <span ref={hintRef} className="app-composer-hint-overlay" aria-hidden="true"><ComposerHint hint={props.hint!} /></span>}
   </div>;
 }
@@ -417,7 +423,8 @@ class TextHistory {
   }
 }
 
-type PortalEntry = { key: string; element: HTMLElement; face: FaceOf };
+/** An element a decoration drew that React fills: a chip's face, or a picture of the draft by its reference. */
+type PortalEntry = { key: string; element: HTMLElement } & ({ face: FaceOf; picture?: never } | { picture: string; face?: never });
 
 /** The elements decorations drew that React fills: the chips' faces. */
 class PortalRegistry {

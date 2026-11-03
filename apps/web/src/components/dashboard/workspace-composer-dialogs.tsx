@@ -196,14 +196,15 @@ export type { ComposerChannelAttachment } from "./workspace-shell-message-model"
 
 export type ComposerMentionInsertRequest =
   | { id: number; kind: "mention"; mention: string }
-  /** A passage quoted into the draft as a block on the line after the caret (composer-quote-blocks.ts). */
+  /** A passage quoted into the draft as a block on the line after the caret (composer-blocks.ts). */
   | { id: number; kind: "quote"; quote: string; source: DiscussionSource };
 
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
 import { foldedDiscussionBody, quotedMessage, type DiscussionQuote } from "./selection-discussion";
 import { messageHere } from "./cited-passage";
-import { insertQuoteIntoDraft } from "./composer-quote-blocks";
+import { insertQuoteIntoDraft } from "./composer-blocks";
+import { draftPictures, insertPicturesIntoDraft, sentPictures } from "./inline-attachments";
 
 export type AgentTraceHistoryPanelState = {
   targetKey: string;
@@ -356,6 +357,13 @@ export const Composer = memo(function Composer({
     },
     [onDraftChange]
   );
+  /** The attachment a picture line of the draft names, after its upload landed or its quality changed. */
+  const pictureAliasesRef = useRef(new Map<string, string>());
+  const resolvePicture = useCallback((ref: string) => {
+    let id = ref;
+    for (let step = 0; step < 8 && pictureAliasesRef.current.has(id); step += 1) id = pictureAliasesRef.current.get(id)!;
+    return id;
+  }, []);
   const selectInvocation = (value: string, selected: AgentInvocationSelection, label?: string) => {
     invocationDraftRef.current = selectComposerInvocation(invocationDraftRef.current, value, selected, label);
     setLocalDraft(value);
@@ -412,6 +420,11 @@ export const Composer = memo(function Composer({
     completionApiRef.current?.dismissCompletion();
   }, []);
   const cursor = completionApiRef.current?.cursor ?? 0;
+  // What each picture of the draft shows, and which files the draft holds as pictures rather than in the strip.
+  const inlinedPictures = useMemo(() => new Set(draftPictures(localDraft).map((picture) => resolvePicture(picture.ref))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localDraft, resolvePicture, attachments]);
+
   // Gallery navigation follows the visible cards, including in-place quality changes.
   const composerImages = useMemo(() => [
     ...pendingAttachments.filter((attachment) => !attachment.replacesId),
@@ -550,7 +563,8 @@ export const Composer = memo(function Composer({
       ? target.selectionStart || 0
       : cursor;
     const next = mentionInsertRequest.kind === "quote"
-      ? insertQuoteIntoDraft(localDraft, nextCursor, mentionInsertRequest.quote, mentionInsertRequest.source)
+      // The field's own text: what was typed a moment ago may not have reached the draft state yet.
+      ? insertQuoteIntoDraft(target?.value ?? localDraft, nextCursor, mentionInsertRequest.quote, mentionInsertRequest.source)
       : insertMentionIntoDraft(localDraft, nextCursor, mentionInsertRequest.mention);
     setDraftText(next.value);
     setCursor(next.cursor);
@@ -684,6 +698,29 @@ export const Composer = memo(function Composer({
     }
   }
 
+  /** Puts pictures into the draft on the line after the caret, where writing goes on after them. */
+  function putPicturesInDraft(pictures: { name: string; ref: string }[]) {
+    if (!pictures.length || !writable) return;
+    const field = fieldRef.current;
+    const draft = field?.value ?? localDraft;
+    const next = insertPicturesIntoDraft(draft, field ? field.selectionStart : cursor, pictures);
+    setDraftText(next.value);
+    setCursor(next.cursor);
+    scheduleTextareaSelection(() => fieldRef.current, next.value, { start: next.cursor, end: next.cursor });
+  }
+
+  /** The draft as written in the field; a picture whose line was taken out of it takes its file along. */
+  function changeDraftFromField(value: string) {
+    const kept = new Set(draftPictures(value).map((picture) => resolvePicture(picture.ref)));
+    for (const picture of draftPictures(localDraft)) {
+      const id = resolvePicture(picture.ref);
+      if (kept.has(id)) continue;
+      if (pendingAttachments.some((pending) => pending.id === id)) removePendingAttachment(id);
+      else if (attachments.some((attachment) => attachment.id === id)) removeAttachment(id);
+    }
+    setDraftText(value);
+  }
+
   async function intakeAttachmentCandidates(candidates: AttachmentDropCandidate[]): Promise<number> {
     // Reservations the rendered rows already account for stop being
     // reservations; what is left is the intakes whose rows have not landed yet.
@@ -723,6 +760,9 @@ export const Composer = memo(function Composer({
       ]);
     }
     if (plan.error) setAttachmentError(plan.error);
+    // Pictures are blocks of what is written, put where the caret is (inline-attachments.ts).
+    putPicturesInDraft(plan.entries.filter((entry) => entry.kind === "image" && !entry.rejection)
+      .map((entry) => ({ name: entry.name, ref: entry.id })));
 
     const uploadable = plan.entries.filter((entry) => !entry.rejection);
     if (uploadable.length > 0) await uploadAttachmentEntries(uploadable);
@@ -828,6 +868,8 @@ export const Composer = memo(function Composer({
           ? { sourceMedia: { file: entry.file, original: useOriginalMedia } } : {}),
       };
       clearPendingAttachment(entry.id);
+      // A picture in the draft names the file it was put in as; it is this attachment now.
+      pictureAliasesRef.current.set(replaces?.id ?? entry.id, uploaded.id);
       if (replaces) {
         onAttachmentsChange((current) => current.map((attachment) => attachment.id === replaces.id ? uploaded : attachment));
         if (replaces.url) URL.revokeObjectURL(replaces.url);
@@ -838,12 +880,17 @@ export const Composer = memo(function Composer({
   // Jev reads each summon as the author types; the hint shows it and the send carries it.
   // Picked channels and pages are shown by name and sent as their id tokens; a page discussion's anchored passage
   // goes first. Quotes of messages are blocks of the draft itself, so they send where they were put.
+  // Pictures are sent by their place among the message's attachments: the draft's files, then those still
+  // uploading, in the order the message carries them.
   const sendDraft = () => {
-    const typed = composerSendDraft(invocationDraftRef.current, localDraft);
+    const places = [...attachments.map((attachment) => attachment.id),
+      ...uploadingAttachments.filter((attachment) => !attachment.replacesId).map((attachment) => attachment.id)];
+    const typed = sentPictures(composerSendDraft(invocationDraftRef.current, localDraft),
+      (ref) => { const at = places.indexOf(resolvePicture(ref)); return at < 0 ? undefined : at + 1; });
     return quote ? quotedMessage(quote, typed) : typed;
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const outgoingDraft = useMemo(sendDraft, [localDraft, invocationDraftRef.current, quote]);
+  const outgoingDraft = useMemo(sendDraft, [localDraft, invocationDraftRef.current, quote, attachments, pendingAttachments]);
   const draftIntents = useDraftSummonIntents({ token, channelId: startsConversation ? undefined : channel?.id,
     body: outgoingDraft.body, selections: outgoingDraft.selections });
 
@@ -1113,6 +1160,92 @@ export const Composer = memo(function Composer({
     void uploadAttachmentEntries([entry], original, attachment);
   }
 
+  /** A picture of the draft, drawn where the draft put it as its card is in the strip. */
+  function renderPicture(ref: string) {
+    const id = resolvePicture(ref);
+    const pending = pendingAttachments.find((attachment) => attachment.id === id);
+    if (pending) return renderPendingAttachment(pending);
+    const attachment = attachments.find((item) => item.id === id);
+    return attachment ? renderDraftAttachment(attachment) : null;
+  }
+
+  /** Takes a picture's lines out of the draft along with its file. */
+  function dropPictureLines(id: string) {
+    const field = fieldRef.current;
+    const draft = field?.value ?? localDraft;
+    const lines = draft.split("\n");
+    const kept = lines.filter((line) => {
+      const ref = draftPictures(line)[0]?.ref;
+      return !ref || resolvePicture(ref) !== id;
+    });
+    if (kept.length !== lines.length) setDraftText(kept.join("\n"));
+  }
+
+  /** A file of the draft as its card draws it, in the strip or, for a picture, where the draft put it. */
+  function renderDraftAttachment(attachment: ChannelAttachment) {
+    const replacement = pendingAttachments.find((pending) => pending.replacesId === attachment.id);
+    if (replacement) return renderPendingAttachment(replacement, attachment.id);
+    return attachment.kind === "video" ? (
+      <div
+        key={attachment.id}
+        className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
+      >
+        <div className="relative flex size-20 shrink-0 items-center justify-center bg-black text-white">
+          {attachment.thumbnailUrl ? (
+            <LoadingImage
+              src={attachment.thumbnailUrl}
+              alt={attachment.name}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <Video className="size-7" />
+          )}
+          {renderOriginalOption(attachment)}
+        </div>
+        <ReadyAttachmentDetails attachment={attachment} separator="·" onRemove={() => removeDraftFile(attachment.id)} />
+      </div>
+    ) : attachment.kind === "markdown" || attachment.kind === "file" ? (
+      <div
+        key={attachment.id}
+        className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
+      >
+        <div className="flex size-20 shrink-0 items-center justify-center bg-background text-muted-foreground">
+          {attachment.kind === "markdown" ? <FileText className="size-7" /> : <Paperclip className="size-7" />}
+        </div>
+        <ReadyAttachmentDetails attachment={attachment} separator="-" onRemove={() => removeDraftFile(attachment.id)} />
+      </div>
+    ) : (
+      <div
+        key={attachment.id}
+        className="composer-image-attachment group relative h-20 w-20 shrink-0 overflow-visible rounded-md border border-border bg-muted"
+      >
+        <button
+          type="button"
+          aria-label={`Open ${attachment.name}`}
+          className="block h-full w-full cursor-zoom-in rounded-md"
+          data-lightbox-origin={attachment.id}
+          onClick={() => setOpenComposerImageId(attachment.id)}
+        >
+          <LoadingImage
+            src={attachment.url ?? attachment.dataUrl ?? ""}
+            alt={attachment.name}
+            className="block h-full w-full rounded-md object-cover"
+          />
+        </button>
+        {renderOriginalOption(attachment)}
+        <button
+          type="button"
+          title="Remove attachment"
+          aria-label={`Remove ${attachment.name}`}
+          onClick={() => removeDraftFile(attachment.id)}
+          className="composer-image-remove absolute -right-2 -top-2 z-20 flex size-7 items-center justify-center rounded-full bg-background text-foreground shadow-md ring-1 ring-border hover:bg-muted"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+    );
+  }
+
   function renderPendingAttachment(attachment: PendingAttachment, key = attachment.id) {
     return <PendingAttachmentCard key={key} attachment={attachment}
       onOpen={() => setOpenComposerImageId(attachment.id)}
@@ -1121,11 +1254,16 @@ export const Composer = memo(function Composer({
         removePendingAttachment(attachment.id);
         setAttachmentError(null);
         const entry = { id: crypto.randomUUID(), file, name: file.name, kind: attachment.kind, size: file.size, rejection: null };
+        // Its picture in the draft is the new upload's.
+        pictureAliasesRef.current.set(attachment.id, entry.id);
         const previewUrl = entry.kind === "image" ? pendingPreviewUrl(entry) : undefined;
         setPendingAttachments((current) => [...current, { ...entry, sourceFile: file, previewUrl, original, status: "reading", progress: 0 }]);
         void uploadAttachmentEntries([entry], original);
       } : undefined}
-      onRemove={() => removePendingAttachment(attachment.id)} />;
+      onRemove={() => {
+        removePendingAttachment(attachment.id);
+        dropPictureLines(attachment.id);
+      }} />;
   }
 
   function renderOriginalOption(attachment: ChannelAttachment) {
@@ -1133,6 +1271,12 @@ export const Composer = memo(function Composer({
     return source ? <AttachmentOriginalOption name={source.file.name} checked={source.original}
       onChange={attachmentsEnabled && writable && !sending && !preparingSend
         ? (original) => changeAttachmentOriginal(attachment, original) : undefined} /> : null;
+  }
+
+  /** The reader took a file out: its picture leaves the draft with it. */
+  function removeDraftFile(id: string) {
+    removeAttachment(id);
+    dropPictureLines(id);
   }
 
   function removeAttachment(id: string) {
@@ -1259,6 +1403,7 @@ export const Composer = memo(function Composer({
             invocationDraftRef.current?.bindings.filter(isAgentBinding))}
           summonReadingPending={draftIntents.reading}
           quoteIsHere={quoteIsHere}
+          renderPicture={renderPicture}
           onSummonStartAnyway={reading => {
             const next = forceDraftSummon(fieldRef.current?.value ?? localDraft, reading);
             if (!next) return;
@@ -1300,7 +1445,7 @@ export const Composer = memo(function Composer({
             if (value.length > 0) {
               clearEmptyPasteAnchor();
             }
-            setDraftText(value);
+            changeDraftFromField(value);
             syncCursor(field);
           }}
           onFieldBeforeInput={(event, field) => {
@@ -1395,72 +1540,12 @@ export const Composer = memo(function Composer({
                   </button>
                 </div>
               )}
-              {(attachments.length > 0 || pendingAttachments.length > 0) && (
+              {(attachments.some((attachment) => !inlinedPictures.has(attachment.id))
+                || pendingAttachments.some((attachment) => !attachment.replacesId && !inlinedPictures.has(attachment.id))) && (
                 <div ref={attachmentStripRef} className="flex gap-2 overflow-x-auto px-3 py-3">
-                  {pendingAttachments.filter((attachment) => !attachment.replacesId).map((attachment) => renderPendingAttachment(attachment))}
-                  {attachments.map((attachment) => {
-                    const replacement = pendingAttachments.find((pending) => pending.replacesId === attachment.id);
-                    if (replacement) return renderPendingAttachment(replacement, attachment.id);
-                    return attachment.kind === "video" ? (
-                      <div
-                        key={attachment.id}
-                        className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
-                      >
-                        <div className="relative flex size-20 shrink-0 items-center justify-center bg-black text-white">
-                          {attachment.thumbnailUrl ? (
-                            <LoadingImage
-                              src={attachment.thumbnailUrl}
-                              alt={attachment.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <Video className="size-7" />
-                          )}
-                          {renderOriginalOption(attachment)}
-                        </div>
-                        <ReadyAttachmentDetails attachment={attachment} separator="·" onRemove={() => removeAttachment(attachment.id)} />
-                      </div>
-                    ) : attachment.kind === "markdown" || attachment.kind === "file" ? (
-                      <div
-                        key={attachment.id}
-                        className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
-                      >
-                        <div className="flex size-20 shrink-0 items-center justify-center bg-background text-muted-foreground">
-                          {attachment.kind === "markdown" ? <FileText className="size-7" /> : <Paperclip className="size-7" />}
-                        </div>
-                        <ReadyAttachmentDetails attachment={attachment} separator="-" onRemove={() => removeAttachment(attachment.id)} />
-                      </div>
-                    ) : (
-                      <div
-                        key={attachment.id}
-                        className="composer-image-attachment group relative h-20 w-20 shrink-0 overflow-visible rounded-md border border-border bg-muted"
-                      >
-                        <button
-                          type="button"
-                          aria-label={`Open ${attachment.name}`}
-                          className="block h-full w-full cursor-zoom-in rounded-md"
-                          data-lightbox-origin={attachment.id}
-                          onClick={() => setOpenComposerImageId(attachment.id)}
-                        >
-                          <LoadingImage
-                            src={attachment.url ?? attachment.dataUrl ?? ""}
-                            alt={attachment.name}
-                            className="block h-full w-full rounded-md object-cover"
-                          />
-                        </button>
-                        {renderOriginalOption(attachment)}
-                        <button
-                          type="button"
-                          title="Remove attachment"
-                          aria-label={`Remove ${attachment.name}`}
-                          onClick={() => removeAttachment(attachment.id)}
-                          className="composer-image-remove absolute -right-2 -top-2 z-20 flex size-7 items-center justify-center rounded-full bg-background text-foreground shadow-md ring-1 ring-border hover:bg-muted"
-                        >
-                          <X className="size-3.5" />
-                        </button>
-                      </div>
-                    )
-                  })}
+                  {pendingAttachments.filter((attachment) => !attachment.replacesId && !inlinedPictures.has(attachment.id))
+                    .map((attachment) => renderPendingAttachment(attachment))}
+                  {attachments.filter((attachment) => !inlinedPictures.has(attachment.id)).map(renderDraftAttachment)}
                 </div>
               )}
               {openComposerImage && (
@@ -1469,7 +1554,7 @@ export const Composer = memo(function Composer({
                   activeId={openComposerImage.id}
                   onActiveChange={setOpenComposerImageId}
                   onClose={() => setOpenComposerImageId(null)}
-                  originFor={(id) => attachmentStripRef.current?.querySelector<HTMLElement>(`[data-lightbox-origin="${CSS.escape(id)}"]`) ?? null}
+                  originFor={(id) => composerRef.current?.querySelector<HTMLElement>(`[data-lightbox-origin="${CSS.escape(id)}"]`) ?? null}
                 />
               )}
             </>

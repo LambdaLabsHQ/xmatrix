@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: Pictures are blocks of what is written, a row at a time
+
+Pictures waited in a strip above the words and showed under the message, in
+no relation to what was written. A picture now goes into the draft where the
+caret is, as its own attachment card (preview, Original, retry, ×) among the
+lines; pictures put together, or one after another, are one row that wraps,
+and words between them start a new row. Sent, each picture is named by its
+place among the message's files (`![name](attachment:1)`), so the message
+draws it where it was put and Agents read the pictures in order with the
+words; any file the words do not name, and every file of older messages,
+stays under them as before. Backspace or Delete beside a picture, or its ×,
+removes it and its file. An image card's Original toggle and × now sit over
+the picture in the light theme instead of below it. Web only; no schema or
+client migration. Recovery is a CI-validated beta release reverting this
+change.
 ## Unreleased: Receipt recovery verifies the release channel's Web
 
 The archive recovery reader accepted either Web origin for every beta, so a

@@ -155,6 +155,8 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 
 import { MessageUnsentNotice } from "./message-unsent-notice";
+import { picturedPlaces } from "./inline-attachments";
+import { MessagePicturesContext } from "./inline-pictures";
 import { CitingConversationContext, PASSAGE_HIGHLIGHT, passageRange, takeOpenedPassage } from "./cited-passage";
 import { foldedDiscussionBody, MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
 
@@ -2432,6 +2434,178 @@ export const MessageRow = memo(function MessageRow({
     );
   }
 
+  // An attachment of the message as it is drawn, under its words or where its words put it (inline-pictures.tsx).
+  const renderAttachment = (attachment: ChannelAttachment) => {
+    const mediaIdentity = relayV2AttachmentMediaIdentity(attachment);
+    const baseAttachment = mediaIdentity
+      ? mediaStore.resolved.get(mediaIdentity) ?? attachment
+      : attachment;
+    // Authority product history omits presentation kind. Normalize so
+    // render and load never disagree.
+    const displayAttachment: ChannelAttachment = {
+      ...baseAttachment,
+      kind: presentationAttachmentKind(baseAttachment),
+    };
+    const source = attachmentSource(displayAttachment);
+    // Without a verified media identity there is no loader path for
+    // Relay V2 binary bodies — fail closed instead of spinning forever.
+    const mediaLoadFailed = mediaIdentity
+      ? mediaStore.failures.has(mediaIdentity)
+      : !source;
+    const mediaProgress = mediaIdentity ? mediaStore.progress.get(mediaIdentity) : undefined;
+    const attachmentCopied = copiedAttachmentId === attachment.id;
+    const attachmentCopyFailed = failedAttachmentCopyId === attachment.id;
+    const upload = message.uploads?.find((item) => item.id === attachment.id);
+    return (
+      <div
+        key={attachment.id}
+        className={cn(
+          "group/attachment relative min-w-0",
+          (displayAttachment.kind === "video" || displayAttachment.kind === "markdown" || displayAttachment.kind === "file") &&
+            "col-span-2 sm:col-span-3"
+        )}
+      >
+        {playableMediaKind(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
+          <div className="app-paper-tile p-3">
+            <div className="mb-2 truncate text-sm font-medium">{displayAttachment.name}</div>
+            {source ? (
+              <MediaPlayer kind="audio" src={source} name={displayAttachment.name} />
+            ) : mediaLoadFailed ? (
+              <AttachmentMediaUnavailable />
+            ) : (
+              <MediaDownloadProgress label="Downloading audio" progress={mediaProgress} className="min-h-16 text-muted-foreground" />
+            )}
+            <button type="button" className="mt-2 text-xs text-primary underline" onClick={() => void downloadMessageAttachment(displayAttachment)}>
+              Download {displayAttachment.name}
+            </button>
+          </div>
+        ) : displayAttachment.kind === "video" ? (
+          <div className="message-video-attachment relative aspect-video max-h-[28rem] w-full overflow-hidden border border-border bg-black">
+            {source ? (
+              <MediaPlayer
+                kind="video"
+                name={displayAttachment.name}
+                src={source}
+                poster={displayAttachment.thumbnailUrl}
+                className="absolute inset-0 h-full w-full bg-black object-contain"
+              />
+            ) : mediaLoadFailed ? (
+              <AttachmentMediaUnavailable />
+            ) : (
+              <MediaDownloadProgress label="Downloading video" progress={mediaProgress} />
+            )}
+            {upload && <SentUploadProgress upload={upload} media />}
+            <button
+              type="button"
+              title={`Open ${displayAttachment.name}`}
+              aria-label={`Open ${displayAttachment.name}`}
+              onClick={() => void openMessageAttachment(displayAttachment)}
+              className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
+            >
+              <Maximize2 className="size-4.5" />
+            </button>
+            {source && (
+              <button
+                type="button"
+                title={`Download ${displayAttachment.name}`}
+                aria-label={`Download ${displayAttachment.name}`}
+                onClick={() => void downloadMessageAttachment(displayAttachment)}
+                className="absolute right-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
+              >
+                <Download className="size-4.5" />
+              </button>
+            )}
+          </div>
+        ) : displayAttachment.kind === "markdown" || displayAttachment.kind === "file" ? (
+          <button
+            type="button"
+            title={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
+            aria-label={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
+            onClick={() => void (displayAttachment.kind === "markdown" ? openMessageAttachment : downloadMessageAttachment)(displayAttachment)}
+            className="app-paper-tile flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left transition-colors"
+          >
+            <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
+              {displayAttachment.kind === "markdown" ? <FileText className="size-5" /> : <Paperclip className="size-5" />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-bold text-foreground">{displayAttachment.name}</span>
+              <span className="block text-xs text-muted-foreground">{displayAttachment.kind === "markdown" ? "Markdown" : displayAttachment.mimeType || "File"} - {formatFileSize(displayAttachment.size)}</span>
+            </span>
+            {upload ? <SentUploadProgress upload={upload} media={false} />
+              : displayAttachment.kind === "markdown"
+                ? <Maximize2 className="size-4 shrink-0 text-muted-foreground" />
+                : <Download className="size-4 shrink-0 text-muted-foreground" />}
+          </button>
+        ) : (
+          <button
+            type="button"
+            title={`Open ${displayAttachment.name}`}
+            aria-label={`Open ${displayAttachment.name}`}
+            onClick={() => void openMessageAttachment(displayAttachment)}
+            data-lightbox-origin={displayAttachment.id}
+            className="message-image-attachment relative block max-w-[18rem] overflow-hidden rounded-[0.75rem] border border-border bg-transparent text-left"
+          >
+            {upload && <SentUploadProgress upload={upload} media />}
+            {source ? (
+              <LoadingImage
+                src={source}
+                alt={displayAttachment.name}
+                className="block aspect-square w-full object-cover"
+              />
+            ) : mediaLoadFailed ? (
+              <AttachmentMediaUnavailable />
+            ) : (
+              <MediaSkeleton label="Loading image" className="app-media-skeleton-image" />
+            )}
+          </button>
+        )}
+        {source && !upload && displayAttachment.kind === "image" && (
+          <div className="absolute right-1.5 top-1.5 z-10 flex gap-1 opacity-100 transition md:opacity-0 md:group-hover/attachment:opacity-100">
+            {displayAttachment.kind === "image" && (
+              <button
+                type="button"
+                title={
+                  attachmentCopyLabel(attachment.name, attachmentCopyFailed, attachmentCopied)
+                }
+                aria-label={
+                  attachmentCopyLabel(attachment.name, attachmentCopyFailed, attachmentCopied)
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void copyAttachment(displayAttachment);
+                }}
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-full bg-black/60 text-white shadow-lg transition hover:bg-black/75 focus-visible:opacity-100",
+                  attachmentCopyFailed && "bg-destructive/85 hover:bg-destructive"
+                )}
+              >
+                {attachmentCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+              </button>
+            )}
+            <button
+              type="button"
+              title={`Download ${displayAttachment.name}`}
+              aria-label={`Download ${displayAttachment.name}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                void downloadMessageAttachment(displayAttachment);
+              }}
+              className="flex size-8 items-center justify-center rounded-full bg-black/60 text-white shadow-lg transition hover:bg-black/75 focus-visible:opacity-100"
+            >
+              <Download className="size-4" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+  const pictured = picturedPlaces(message.body);
+  const underWords = (message.attachments ?? []).filter((_attachment, index) => !pictured.has(index + 1));
+  const drawPicture = (place: number) => {
+    const attachment = message.attachments?.[place - 1];
+    return attachment ? renderAttachment(attachment) : null;
+  };
+
   return (
     <div
       ref={actionsRef}
@@ -2770,8 +2944,10 @@ export const MessageRow = memo(function MessageRow({
               <MentionReadMessageScopeProvider scope={mentionReadMessageScope}>
                 {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
                 <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                  <RichMessageContent body={displayBody} collapsed={collapsible && !expanded} components={markdownComponents}
-                    connector={connectorInvocation} />
+                  <MessagePicturesContext.Provider value={drawPicture}>
+                    <RichMessageContent body={displayBody} collapsed={collapsible && !expanded} components={markdownComponents}
+                      connector={connectorInvocation} />
+                  </MessagePicturesContext.Provider>
                 </div>
               </MentionReadMessageScopeProvider>
             )}
@@ -2811,172 +2987,9 @@ export const MessageRow = memo(function MessageRow({
             <span className="pointer-events-none">Show less</span>
           </button>
         )}
-        {!recalled && message.attachments && message.attachments.length > 0 && (
+        {!recalled && underWords.length > 0 && (
           <div ref={attachmentGridRef} className="mt-2 grid w-full max-w-[min(42rem,100%)] min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
-            {message.attachments.map((attachment) => {
-              const mediaIdentity = relayV2AttachmentMediaIdentity(attachment);
-              const baseAttachment = mediaIdentity
-                ? mediaStore.resolved.get(mediaIdentity) ?? attachment
-                : attachment;
-              // Authority product history omits presentation kind. Normalize so
-              // render and load never disagree.
-              const displayAttachment: ChannelAttachment = {
-                ...baseAttachment,
-                kind: presentationAttachmentKind(baseAttachment),
-              };
-              const source = attachmentSource(displayAttachment);
-              // Without a verified media identity there is no loader path for
-              // Relay V2 binary bodies — fail closed instead of spinning forever.
-              const mediaLoadFailed = mediaIdentity
-                ? mediaStore.failures.has(mediaIdentity)
-                : !source;
-              const mediaProgress = mediaIdentity ? mediaStore.progress.get(mediaIdentity) : undefined;
-              const attachmentCopied = copiedAttachmentId === attachment.id;
-              const attachmentCopyFailed = failedAttachmentCopyId === attachment.id;
-              const upload = message.uploads?.find((item) => item.id === attachment.id);
-              return (
-                <div
-                  key={attachment.id}
-                  className={cn(
-                    "group/attachment relative min-w-0",
-                    (displayAttachment.kind === "video" || displayAttachment.kind === "markdown" || displayAttachment.kind === "file") &&
-                      "col-span-2 sm:col-span-3"
-                  )}
-                >
-                  {playableMediaKind(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
-                    <div className="app-paper-tile p-3">
-                      <div className="mb-2 truncate text-sm font-medium">{displayAttachment.name}</div>
-                      {source ? (
-                        <MediaPlayer kind="audio" src={source} name={displayAttachment.name} />
-                      ) : mediaLoadFailed ? (
-                        <AttachmentMediaUnavailable />
-                      ) : (
-                        <MediaDownloadProgress label="Downloading audio" progress={mediaProgress} className="min-h-16 text-muted-foreground" />
-                      )}
-                      <button type="button" className="mt-2 text-xs text-primary underline" onClick={() => void downloadMessageAttachment(displayAttachment)}>
-                        Download {displayAttachment.name}
-                      </button>
-                    </div>
-                  ) : displayAttachment.kind === "video" ? (
-                    <div className="message-video-attachment relative aspect-video max-h-[28rem] w-full overflow-hidden border border-border bg-black">
-                      {source ? (
-                        <MediaPlayer
-                          kind="video"
-                          name={displayAttachment.name}
-                          src={source}
-                          poster={displayAttachment.thumbnailUrl}
-                          className="absolute inset-0 h-full w-full bg-black object-contain"
-                        />
-                      ) : mediaLoadFailed ? (
-                        <AttachmentMediaUnavailable />
-                      ) : (
-                        <MediaDownloadProgress label="Downloading video" progress={mediaProgress} />
-                      )}
-                      {upload && <SentUploadProgress upload={upload} media />}
-                      <button
-                        type="button"
-                        title={`Open ${displayAttachment.name}`}
-                        aria-label={`Open ${displayAttachment.name}`}
-                        onClick={() => void openMessageAttachment(displayAttachment)}
-                        className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
-                      >
-                        <Maximize2 className="size-4.5" />
-                      </button>
-                      {source && (
-                        <button
-                          type="button"
-                          title={`Download ${displayAttachment.name}`}
-                          aria-label={`Download ${displayAttachment.name}`}
-                          onClick={() => void downloadMessageAttachment(displayAttachment)}
-                          className="absolute right-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
-                        >
-                          <Download className="size-4.5" />
-                        </button>
-                      )}
-                    </div>
-                  ) : displayAttachment.kind === "markdown" || displayAttachment.kind === "file" ? (
-                    <button
-                      type="button"
-                      title={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
-                      aria-label={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
-                      onClick={() => void (displayAttachment.kind === "markdown" ? openMessageAttachment : downloadMessageAttachment)(displayAttachment)}
-                      className="app-paper-tile flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left transition-colors"
-                    >
-                      <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
-                        {displayAttachment.kind === "markdown" ? <FileText className="size-5" /> : <Paperclip className="size-5" />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-bold text-foreground">{displayAttachment.name}</span>
-                        <span className="block text-xs text-muted-foreground">{displayAttachment.kind === "markdown" ? "Markdown" : displayAttachment.mimeType || "File"} - {formatFileSize(displayAttachment.size)}</span>
-                      </span>
-                      {upload ? <SentUploadProgress upload={upload} media={false} />
-                        : displayAttachment.kind === "markdown"
-                          ? <Maximize2 className="size-4 shrink-0 text-muted-foreground" />
-                          : <Download className="size-4 shrink-0 text-muted-foreground" />}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      title={`Open ${displayAttachment.name}`}
-                      aria-label={`Open ${displayAttachment.name}`}
-                      onClick={() => void openMessageAttachment(displayAttachment)}
-                      data-lightbox-origin={displayAttachment.id}
-                      className="message-image-attachment relative block max-w-[18rem] overflow-hidden rounded-[0.75rem] border border-border bg-transparent text-left"
-                    >
-                      {upload && <SentUploadProgress upload={upload} media />}
-                      {source ? (
-                        <LoadingImage
-                          src={source}
-                          alt={displayAttachment.name}
-                          className="block aspect-square w-full object-cover"
-                        />
-                      ) : mediaLoadFailed ? (
-                        <AttachmentMediaUnavailable />
-                      ) : (
-                        <MediaSkeleton label="Loading image" className="app-media-skeleton-image" />
-                      )}
-                    </button>
-                  )}
-                  {source && !upload && displayAttachment.kind === "image" && (
-                    <div className="absolute right-1.5 top-1.5 z-10 flex gap-1 opacity-100 transition md:opacity-0 md:group-hover/attachment:opacity-100">
-                      {displayAttachment.kind === "image" && (
-                        <button
-                          type="button"
-                          title={
-                            attachmentCopyLabel(attachment.name, attachmentCopyFailed, attachmentCopied)
-                          }
-                          aria-label={
-                            attachmentCopyLabel(attachment.name, attachmentCopyFailed, attachmentCopied)
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void copyAttachment(displayAttachment);
-                          }}
-                          className={cn(
-                            "flex size-8 items-center justify-center rounded-full bg-black/60 text-white shadow-lg transition hover:bg-black/75 focus-visible:opacity-100",
-                            attachmentCopyFailed && "bg-destructive/85 hover:bg-destructive"
-                          )}
-                        >
-                          {attachmentCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        title={`Download ${displayAttachment.name}`}
-                        aria-label={`Download ${displayAttachment.name}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void downloadMessageAttachment(displayAttachment);
-                        }}
-                        className="flex size-8 items-center justify-center rounded-full bg-black/60 text-white shadow-lg transition hover:bg-black/75 focus-visible:opacity-100"
-                      >
-                        <Download className="size-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {underWords.map(renderAttachment)}
           </div>
         )}
         {/* After the words and the pictures. A choice between them reads as a second message. */}
