@@ -157,7 +157,7 @@ Step 6: Create or reference the agent in a channel when needed.
 
   `@<agent>:<channel-instance-number>`
 
-- To create a persistent instance, use `@auto repo:owner/repo`. Replace `repo:` with `pwd:"<registered/directory>"`. The Web composer inserts these conditions as tags. Use the local path directly, never an opaque workspace ID. The retired `:new` and `:once` suffixes are rejected, not translated. Handoff remains `@<agent>:<channel-instance-number>:handoff:@<successor>` (an existing or already-dead instance transfers its checkout to a new same-machine successor).
+- To create a persistent instance, use `@auto repo:owner/repo`. Replace `repo:` with `pwd:"<registered/directory>"`. The Web composer inserts these conditions as tags. Use the local path directly, never an opaque workspace ID. The retired `:new` and `:once` suffixes are rejected, not translated. Handoff is `@<agent>:<channel-instance-number>:handoff:@<successor> [machine:<name>] <task>`. It confirms the source stop, preserves explicit machine conditions and validates overrides through ordinary launch admission. Browser sessions stay on their machine.
 
 - If no closed channel exists, create one in the Space and summon the Agent there:
 

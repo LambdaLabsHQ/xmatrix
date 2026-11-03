@@ -13,7 +13,7 @@ import type { ComposerInvocationDraft } from "./composer-invocation-bindings";
 import { ChannelHistoryPreload } from "./channel-history-preload";
 import { useStartupBackgroundReady } from "./use-startup-background-ready";
 import { nativeBackOwnsAnimation } from "./use-system-back";
-import type { MobileListTransitionDriver } from "./use-mobile-list-transition";
+import { reportPushDeclined, type MobileListTransitionDriver } from "./use-mobile-list-transition";
 
 import type {
   DesktopAgentPresetDiscovery,
@@ -97,7 +97,7 @@ import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { ChannelPresenceConflict, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelAgentPresence, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -122,7 +122,6 @@ import {
   EMPTY_CHANNEL_HISTORY,
   EVENT_LIMIT,
   HISTORY_REFRESH_INTERVAL_MS,
-  RESTING_PRESENCE_REFRESH_DELAYS_MS,
   HUMAN_FOCUS_STABILITY_MS,
   HUMAN_SOCKET_HISTORY_GRACE_MS,
   HUMAN_SOCKET_HISTORY_PAINTED_GRACE_MS,
@@ -187,6 +186,8 @@ import {
   resolveCurrentSpaceId,
   spacesAuthorityReady,
   channelsAfterAgentInstanceOffline,
+  channelsWithAgentPresence,
+  agentPresenceEndsWaits,
   sameChannelCatalogState,
   replaceBrowserPath,
   placeChannel,
@@ -302,20 +303,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const channelReadStateUserIdRef = useRef<string | null>(null);
   const desktopBridgeRef = useRef<DesktopBridge | null>(desktopBridge);
   const channelsRef = useRef<ChannelSnapshot[]>([]);
-  // An Instance that went offline may be resting rather than gone; its rest is
-  // recorded once its daemon reports the exit, a few seconds after the socket
-  // closes. Read the channel's presence again after that so its avatar stays,
-  // greyed, instead of vanishing until the next catalog refresh.
-  function scheduleRestingPresenceRefresh(channelId: string | undefined) {
-    if (!channelId || typeof window === "undefined") return;
-    const spaceId = channelsRef.current.find((channel) => channel.id === channelId)?.spaceId;
-    if (!spaceId) return;
-    for (const delayMs of RESTING_PRESENCE_REFRESH_DELAYS_MS) {
-      window.setTimeout(() => window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
-        detail: { kind: "presence", spaceId, channelId },
-      })), delayMs);
-    }
-  }
   const spacesRef = useRef<SerializedSpace[]>([]);
 
   const routeSpaceIdRef = useRef<string | null>(null);
@@ -514,7 +501,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       update();
       return;
     }
-    if (mobileListTransitionRef.current?.run(direction, update)) return;
+    const driver = mobileListTransitionRef.current;
+    if (!driver && direction === "forward" && isMobileViewportRef.current) {
+      reportPushDeclined("no list transition was mounted", () => ({ client: getDesktopBridge()?.client ?? "web" }));
+    }
+    if (driver?.run(direction, update)) return;
     update();
   }, []);
 
@@ -1746,12 +1737,33 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           if (message.event.type === "channel_invocations_changed" && message.event.channelId) {
             void queryClient.invalidateQueries({ queryKey: ["agent-launches", message.event.channelId] });
           }
-          // A resting Instance began to wake, or waits for its machine: read its card again.
+          // An Instance went to rest, woke, waits for its machine or was
+          // stopped: the push carries how the Channel's Agents now stand, and
+          // they are merged in place. Only an older Hub's empty push leaves the
+          // Channel to be read again.
           if (message.event.type === "presence_updated" && message.event.channelId) {
-            const spaceId = channelsRef.current.find((channel) => channel.id === message.event.channelId)?.spaceId;
-            if (spaceId) window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
-              detail: { kind: "presence", spaceId, channelId: message.event.channelId },
-            }));
+            const channelId = message.event.channelId;
+            const agents = message.event.metadata?.presenceCoverage === "agents"
+              ? decodeChannelAgentPresence(channelId, message.event.metadata.memberPresence) : undefined;
+            if (agents) {
+              const held = channelsRef.current.find((channel) => channel.id === channelId);
+              setChannels((current) => channelsWithAgentPresence(current, channelId, agents));
+              // An asker that stopped, or whose wake failed, waits no more: only
+              // the counts and the unread list count waits, so only they are read.
+              if (held && userId && agentPresenceEndsWaits(held.presence, agents)) {
+                void queryClient.invalidateQueries({ exact: true,
+                  queryKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId: held.spaceId }) });
+                void queryClient.invalidateQueries({
+                  queryKey: xmatrixQueryKeys.channels({ userId, spaceId: held.spaceId }),
+                  predicate: (query) => query.queryKey[5] === "catalog" && query.queryKey[7] === "unread",
+                });
+              }
+            } else {
+              const spaceId = channelsRef.current.find((channel) => channel.id === channelId)?.spaceId;
+              if (spaceId) window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
+                detail: { kind: "presence", spaceId, channelId },
+              }));
+            }
           }
           // The Hub recorded what a message's command came to: its chip answers now.
           if (message.event.type === "channel_message_interactions_updated" && message.event.channelId) {
@@ -1762,18 +1774,17 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           }
           if (message.event.type === "agent_disconnected") {
             const instanceId = message.event.metadata?.instanceId;
+            // Whether it rests arrives with the push its daemon's exit report makes.
             setChannels((current) => channelsAfterAgentInstanceOffline(current, {
               channelId: message.event.channelId,
               agentId: message.event.agentId,
               instanceId: typeof instanceId === "string" ? instanceId : undefined,
             }));
-            scheduleRestingPresenceRefresh(message.event.channelId);
           }
           break;
         case "agent_lifecycle":
           if (message.status === "offline") {
             setChannels((current) => channelsAfterAgentInstanceOffline(current, message));
-            scheduleRestingPresenceRefresh(message.channelId);
           }
           break;
         case "channel_list":

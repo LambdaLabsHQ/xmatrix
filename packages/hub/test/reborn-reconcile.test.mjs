@@ -71,6 +71,17 @@ test("failed stop never spawns a successor", async () => {
   assert.equal(f.processes.size, 0);
 });
 
+test("a failed stop preserves the daemon's reason in its visible refusal", async () => {
+  const f = fixture();
+  f.port.status = async () => ({ status: "failed", result: { ok: false, error: "Process tree did not exit" } });
+  await reconcileRebornWithPort(f.database, "shard", f.port, "channel");
+  assert.equal(f.row.error_code, "reborn_stop_failed");
+  assert.equal(f.row.error_detail, "Process tree did not exit");
+  assert.equal(f.processes.size, 0);
+  await reconcileRebornWithPort(f.database, "shard", f.port, "channel");
+  assert.match(f.events.at(-1), /Reason: Process tree did not exit/);
+});
+
 test("current permission and deletion fences are checked before physical control", async () => {
   for (const code of ["forbidden", "reborn_source_fenced", "reborn_source_changed"]) {
     const f = fixture();

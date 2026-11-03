@@ -455,12 +455,19 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(inputRun.sourceMessageId, undefined);
     // The caller's own summon constrains the choice.
     let offeredTags;
-    await launches.dispatchInput({ ...inputRequest, commandId: "input-constrained", runId: "run:input-constrained",
-      instanceId: "instance:input-constrained", tags: { harness: "codex", model: "model" } },
+    const pinnedLaunch = await launches.dispatchInput({ ...inputRequest, commandId: "input-constrained", runId: "run:input-constrained",
+      instanceId: "instance:input-constrained", tags: { harness: "codex", model: "model", machine: "machine" } },
     async ({ candidates, tags }) => { offeredTags = tags; return { key: candidates[0].key, model: "model" }; });
-    assert.deepEqual(offeredTags, { harness: "codex", model: "model" });
+    assert.deepEqual(offeredTags, { harness: "codex", model: "model", machine: "machine" });
     const inputReplay = await launches.dispatchInput(inputRequest, async () => assert.fail("replay must not select again"));
     assert.equal(inputReplay.launchId, managed.launchId);
+    await assert.rejects(launches.dispatchInput({ ...inputRequest, tags: { machine: "elsewhere" } },
+      async () => assert.fail("changed replay must not route")), { code: "idempotency_mismatch" });
+    // A chooser cannot relax authored constraints at allocation, even for
+    // handoff input without a source summon to reparse.
+    await assert.rejects(launches.dispatchInput({ ...inputRequest, commandId: "invalid-input-machine",
+      runId: "run:invalid-machine", instanceId: "instance:invalid-machine", tags: { machine: "elsewhere" } },
+    async ({ candidates }) => ({ key: candidates[0].key, model: "model" })), { code: "invalid_registration_launch" });
     // #3270: work that needs GitHub runs only where the daemon shows a usable
     // GitHub login on its live connection. A capability no daemon can prove
     // (`node`) stays guidance and never refuses a launch.
@@ -646,6 +653,13 @@ integration("launch survives a hostname change with stale Workspace metadata and
         WHERE instance_id=$1`, [replay.instanceId])).rows[0].channel_instance_id), actorUserId: "caller" }).catch(error => error);
     assert.equal(rebornTarget.target?.instanceId, replay.instanceId, String(rebornTarget.message ?? ""));
     assert.equal(rebornTarget.target.agentName, "Codex");
+    for (const launched of [pinnedLaunch, parameterLaunch]) {
+      const pinnedTarget = await new PostgresRuntimeRepository(database).getChannelAgentRebornTarget({ requestId: "pinned-target",
+        channelId: "channel", agentName: "Codex", actorUserId: "caller",
+        channelInstanceId: Number((await sql(`SELECT channel_instance_id FROM data.instances WHERE instance_id=$1`,
+          [launched.instanceId])).rows[0].channel_instance_id) });
+      assert.equal(pinnedTarget.target.launchMachineId, "machine", "retain any-input and original message constraints");
+    }
     // `/kill all` and `@agent:kill` read this list: a registered Instance has no
     // Profile, and must still be listed, addressed and stoppable as itself.
     const killTargets = await new PostgresRuntimeRepository(database).listChannelAgentKillTargets({

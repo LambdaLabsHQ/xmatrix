@@ -1,7 +1,8 @@
 # Same-machine instance handoff
 
 > **Superseded for new handoffs.** Every handoff, named or `@auto`, is now an
-> ordinary launch through routing on any machine (§2.2 is the only path; the
+> ordinary launch through routing with explicit machine conditions preserved
+> (§2.2 is the only path; the
 > Hub no longer prepares same-machine handoff intents). The same-machine
 > machinery below remains only for handoffs already prepared, and is to be
 > removed together with the work-site transfer between machines.
@@ -126,9 +127,20 @@ successor starts in a fresh one. Every source's conversation travels (§2.3):
 2. A source lookup or stop issuance failure refuses the handoff; it does not
    silently launch a successor. After a durable stop request, Hub waits up to
    15 s for that result (post-commit work runs in a Worker's
-   background budget), then starts the successor through an ordinary
+   background budget). An unconfirmed stop refuses with
+   `handoff_source_stop_pending`; no successor starts until the daemon confirms
+   the source exited. Replaying the handoff then uses the same stop and branch.
+   After confirmation Hub starts the successor through an ordinary
    any-input launch as the handoff's author, pinned to `repo:<repository>` and,
-   for a named successor, `harness:<harness>`. The dispatch carries
+   for a named successor, `harness:<harness>`. Conditions immediately after the
+   successor address use the ordinary launch parser and admission. An original
+   explicit machine condition is read from its immutable launch request and
+   inherited by stable machine ID, including across reborns and quota handoffs.
+   An authored machine override replaces it and is reauthorized; missing quota,
+   access or availability refuses instead of widening placement. Any-input
+   launch conditions are persisted and rechecked at allocation and replay.
+   Repository/directory conditions may confirm the source site, never change it.
+   The dispatch carries
    `excludeSourceInstanceId`: the authority reads that Instance's durable
    registration binding, verifies its owner, and excludes that exact Agent
    before selection and on replay. The same harness on another machine
@@ -183,7 +195,7 @@ no harness can load another's tool-call blocks, reasoning or signatures.
    not the launch's text (routing never reads it) and not part of the launch's
    request identity, and it is not persisted, so a launch staged before the
    result arrived still recovers, without it. A stop that did not answer
-   within the wait starts the successor without one.
+   within the wait refuses the handoff; it starts no successor.
 4. The successor's daemon writes `HANDOFF.md` (the entries as Markdown, headed
    as untrusted prior context) and `transcript.jsonl` (the same entries) to a
    fresh, owner-only scratch directory and exports it as `XMATRIX_HANDOFF_SESSION_DIR`. The

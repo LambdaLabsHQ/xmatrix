@@ -13,13 +13,14 @@ import { QUICK_REACTION_EMOJIS } from "./workspace-shell-constants";
 const BAR_REACTIONS = ["👍", "✅", "👀"];
 const PICKER_REACTIONS = QUICK_REACTION_EMOJIS.filter((emoji) => !BAR_REACTIONS.includes(emoji));
 
-/** How far `-top-6` lifts the bar above its row. */
-const EDGE_OVERHANG = 24;
+/** How far `-top-8` lifts the bar: its whole height (28px buttons + 2px
+    padding each side), so its bottom edge meets the row's top edge. */
+const EDGE_OVERHANG = 32;
 
 const BUTTON_CLASS_NAME =
   "flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground";
 const MENU_ITEM_CLASS_NAME =
-  "flex min-h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm";
+  "flex min-h-9 w-full items-center gap-2.5 px-3 text-left text-sm";
 
 /** A key pressed over a message acts on it, unless it is typing or a chord. */
 function isRowShortcut(event: KeyboardEvent) {
@@ -31,9 +32,11 @@ function isRowShortcut(event: KeyboardEvent) {
   return window.getSelection()?.isCollapsed !== false;
 }
 
-/* A message's desktop actions: one card of white paper riding the row's top
-   edge, the same place for a row with a header and one without. Above the
-   row, not on it, so the first line it would cover stays readable; what it
+/* A message's desktop actions: one card of white paper standing on the row's
+   top edge, its bottom flush with the hover tone's top (a bar dipping 8px into
+   the tone lined up with nothing, user 2026-11-03), the same place for a row
+   with a header and one without. Above the row, not on it, so the first line
+   it would cover stays readable; what it
    covers instead is the end of the line before, which is usually short. Paper,
    not glass: glass over text blurs it into a smudge (user 2026-10-24). Edit and
    Recall wait behind "⋯", so the bar keeps one length and a destructive action
@@ -115,7 +118,7 @@ export function MessageHoverToolbar({
         // pointer must not wake this row's bar.
         "app-message-hover-toolbar pointer-events-none absolute right-5 z-10 hidden opacity-0 transition-opacity md:block",
         "group-hover:pointer-events-auto group-hover:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100",
-        inside ? "top-1" : "-top-6",
+        inside ? "top-1" : "-top-8",
         open && "pointer-events-auto opacity-100",
       )}
     >
@@ -159,7 +162,7 @@ export function MessageHoverToolbar({
       )}
       {open === "menu" && (
         <PaperPopover role="menu" aria-label="More message actions"
-          className="absolute right-0 top-full mt-1 w-44 p-1">
+          className="absolute right-0 top-full mt-1 w-44">
           {onEdit && (
             <button type="button" role="menuitem" className={MENU_ITEM_CLASS_NAME}
               onClick={() => { setOpen(null); onEdit(); }}>

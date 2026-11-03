@@ -1,10 +1,45 @@
 # Release Updates
 
+## Unreleased: Conversation push diagnostics can be read
+
+WEB-Z captured why the mobile conversation push declined, but the Sentry issue
+reader omitted the shell conditions already attached to the event. Reads now
+retain only its fixed boolean flags and allowlisted view/client labels, so an
+existing event can identify the blocking condition without exposing arbitrary
+extra data. The animation's underlying cause is still being investigated.
+Hub only, no schema or client change; recovery is a CI-validated beta Hub
+release reverting this projection.
+
+## Unreleased: Floating menus highlight edge to edge
+
+A floating paper menu's hovered item was a rounded box inset in the slip,
+and its corners did not follow the slip's. Items now run to the slip's edges,
+whose own corner cuts the first and last, with a hairline between groups: the
+message and page selection menus, the table tools, the insert and mention
+menus, a heading's menu and a message's More actions. Pill-shaped bars keep
+their round items. The shared slip clips highlights with automatic overflow,
+so a height-bounded menu still scrolls by wheel or touch; clipping with hidden
+overflow had overridden the page editor's scrolling and made later options
+unreachable by pointer. Consumers set their size, and the material owns this
+common clipping and scrolling behavior. Web only, no schema or client migration. Recovery is a
+CI-validated beta release reverting this change.
+
+## Unreleased: A list's + row is centred, quieter, and shows Ctrl/⌘+N
+
+The desktop "+ New conversation" row (and New page, Manage machines) drew a
+bold, left-aligned label behind a thin + icon. The label now sits centred in a
+lighter ink without the icon, and a faint ⌘N / Ctrl+N at the row's end, on the
+label's baseline, shows the shortcut that already worked. Only actions Ctrl/⌘+N
+performs show it; New workspace does not. Web only, no schema or protocol
+change. Recovery is a CI-validated beta Web release reverting this change.
+
 ## Unreleased: Agent message headers name their repository
 
 Agent message headers omitted the repository even though the Run already knew
-it. The Hub now captures the admitted repository as a Repository status tag in
-the send-time snapshot, including sends before runtime presentation arrives.
+it. The message commit now reads the admitted repository from the proven Run
+in the authorization transaction and captures it as a Repository status tag,
+including sends before runtime presentation arrives. A stale Instance chip
+array cannot override or erase that repository.
 It uses the sanitized repository reference rather than a managed checkout path;
 later presence changes cannot rewrite historical headers. Existing Web and
 native clients already render this tag. Hub only, no schema or client migration;
@@ -34,6 +69,20 @@ former Discuss. Floating paper menus (this one, a message's hover actions, a
 page's selection and `/` menus) are now a flat wood-tinted slip without a
 shadow. Web only, no schema or client migration. Recovery is a CI-validated
 beta release reverting this change.
+
+## Unreleased: Handoff preserves explicit placement and Instance ownership
+
+Handoff now parses launch conditions after the successor address and carries
+an explicitly selected source machine forward by its admitted identity. An
+override passes ordinary launch authorization; unavailable placement remains a
+visible refusal. A successor starts only after its source's stop is confirmed.
+Reborn stop failures retain the daemon's bounded reason. Exact Instance
+assignments remain context for peers, while unaddressed messages and broadcasts
+keep their existing behavior. Bootstrap identifies the current Instance and Run
+and asks completed temporary helpers to stop, preserving unfinished waits.
+Hub and CLI; no schema migration. Existing wrappers need a normal reborn after
+updating CLI to load the new bootstrap. Recovery is a CI-validated beta release
+reverting the change.
 
 ## Unreleased: Gmail sends from a verified send-as alias
 

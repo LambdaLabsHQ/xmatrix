@@ -69,6 +69,22 @@ const BOTTOM_FADE = 1.8;
 /** Where along the way (0 to 1) a fade starts or ends. Every pose is linear in between. */
 const POSE_STOPS = [0, 1 - 1 / BAR_FADE, 1 - 1 / BOTTOM_FADE, 1 / BOTTOM_FADE, 1 / BAR_FADE, 1].sort((a, b) => a - b);
 
+/*
+ * The iOS app was seen opening a conversation from its channel list with no
+ * push at all, while Back slid as it should, and no page or test reproduced
+ * it. A push that does not run says why, once a page, with the conditions it
+ * was decided on (flags only, nothing anyone wrote).
+ */
+let pushDeclineReported = false;
+export function reportPushDeclined(reason: string, explain: () => Record<string, boolean | string>) {
+  if (pushDeclineReported) return;
+  pushDeclineReported = true;
+  const conditions = explain();
+  void import("@sentry/browser").then(({ captureMessage }) => {
+    captureMessage(`Conversation push did not run: ${reason}`, { level: "warning", extra: conditions });
+  }).catch(() => undefined);
+}
+
 function reducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -211,7 +227,7 @@ function settleOnCompositor(parts: Parts, x: number, target: number, speed: numb
   };
 }
 
-export function useMobileListTransition({ conversationOverList, listShowing, rootRef, driverRef, onBack }: {
+export function useMobileListTransition({ conversationOverList, listShowing, rootRef, driverRef, onBack, explain }: {
   /** A conversation lies over its Space's channel list on a phone, with nothing open over it. */
   conversationOverList: boolean;
   /** The channel list is the screen, and opening a conversation would push it. */
@@ -220,9 +236,11 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
   driverRef: MutableRefObject<MobileListTransitionDriver | null>;
   /** The conversation's Back to the channel list. */
   onBack: () => void;
+  /** What the shell's conditions for the change were, for a push that does not run. */
+  explain: () => Record<string, boolean | string>;
 }): MobileListTransitionStore {
-  const state = useRef({ conversationOverList, listShowing, onBack });
-  state.current = { conversationOverList, listShowing, onBack };
+  const state = useRef({ conversationOverList, listShowing, onBack, explain });
+  state.current = { conversationOverList, listShowing, onBack, explain };
   const store = useScreenChangeStore<MobileListTransitionStage>();
 
   useEffect(() => {
@@ -296,11 +314,13 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       // started there, the push showed on iOS only its last few points.
       if (afterPaint) startAfterPaint(landing.animations);
       m.landing = { toList: target > 0, ...landing };
-      void Promise.all(landing.animations.map((animation) => animation.finished)).then(() => {
+      // Settled, not all finished: a part cancelled by its own component (the
+      // composer box morphing) must not leave the change set up for good.
+      void Promise.allSettled(landing.animations.map((animation) => animation.finished)).then(() => {
         if (m.landing?.animations !== landing.animations) return;
         m.x = target;
         then();
-      }, () => undefined);
+      });
     };
 
     const canDrawBack = () => state.current.conversationOverList && !systemBackLayerOpen() && !reducedMotion();
@@ -312,7 +332,10 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
           update();
           return true;
         }
-        if (reducedMotion()) return false;
+        if (reducedMotion()) {
+          if (direction === "forward") reportPushDeclined("the page asks for reduced motion", state.current.explain);
+          return false;
+        }
         if (direction === "back") {
           if (m.stage === "prepared") {
             window.clearTimeout(m.putAway);
@@ -324,9 +347,16 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
           return true;
         }
         if (m.stage === "prepared") close();
-        if (m.stage || !state.current.listShowing) return false;
+        if (m.stage || !state.current.listShowing) {
+          reportPushDeclined(m.stage ? `a ${m.stage} change is still set up` : "the list was not free to push from", state.current.explain);
+          return false;
+        }
         flushSync(update);
-        if (state.current.conversationOverList && setUpAs("forward")) land(0, 0, () => close(), true);
+        if (!state.current.conversationOverList) {
+          reportPushDeclined("the conversation was not over its list once rendered", state.current.explain);
+        } else if (setUpAs("forward")) {
+          land(0, 0, () => close(), true);
+        }
         return true;
       },
     };

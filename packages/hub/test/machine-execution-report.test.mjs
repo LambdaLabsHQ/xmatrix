@@ -32,8 +32,8 @@ test("execution acknowledgement uses PostgreSQL without requiring a new connecti
         shard_id: "shard-1", placement_epoch: 1, entity_version: 1 }];
       if (query.name === "space_placement_resolve_v1") return [{ space_id: "space", shard_id: "shard-1", placement_epoch: 1,
         state: "active", target_shard_id: null, plan_class: "single" }];
-      if (query.name === "runtime_execution_report_owner_v4") return [{ run_id: "run", instance_id: "instance",
-        metadata_json: { executionKey: "execution-key" }, channel_instance_id: 1 }];
+      if (query.name === "runtime_execution_report_owner_v5") return [{ run_id: "run", instance_id: "instance",
+        execution_key: "execution-key", channel_instance_id: 1 }];
       if (["runtime_message_execution_prior_v1", "runtime_message_execution_upsert_v2", "runtime_execution_report_receipt_v1"].includes(query.name)) return [];
       throw new Error(`Unexpected query ${query.name}`);
   });

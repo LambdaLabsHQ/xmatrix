@@ -5,7 +5,8 @@ Channel command text (sent visibly, then interpreted by the Hub):
   @<agent> machine:<name> <task>             Start work on a named machine
   @<agent>:<instance>:stop [reason]          Stop that Instance's active Run
   @<agent>:<instance>:reborn                 Resume that Instance's continuity
-  @<agent>:<instance>:handoff:@<successor>    Transfer work to a successor
+  @<agent>:<instance>:handoff:@<successor> [machine:<name>] [model:<id>] [effort:<value>] <task>
+                                            Transfer work with launch conditions
   /stop all [reason]                        Stop every live Instance in this Channel
 
 Lifecycle actions use current Channel/Run permissions. The Hub decides access

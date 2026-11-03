@@ -15,8 +15,6 @@ import type { ChannelMessage } from "@xmatrix/protocol";
 import { RELAY_V2_BLOB_MAX_BYTES } from "@xmatrix/protocol/relay-v2/message-attachment";
 
 export const HISTORY_REFRESH_INTERVAL_MS = 30000;
-/** When to re-read a channel's presence after one of its Instances went offline. */
-export const RESTING_PRESENCE_REFRESH_DELAYS_MS = [4_000, 20_000] as const;
 
 export const EMPTY_CHANNEL_HISTORY: ChannelMessage[] = [];
 

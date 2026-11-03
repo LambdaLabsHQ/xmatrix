@@ -7,6 +7,8 @@ import { registrationRepository, summonRepositoryCatalog,
 import {
   agentLaunchExecutable,
   AUTO_LAUNCH_FIELDS,
+  formatAutoLaunchMention,
+  parseLaunchConditions,
   agentPresetForLauncher,
   agentPresetById,
   harnessCommandLine,
@@ -86,6 +88,8 @@ interface LaunchRequest {
   requiredHostCapabilities?: string[];
   /** Caller context copied onto the Run; launch-owned keys always win. */
   runMetadata?: Record<string, unknown>;
+  /** Any-input launches retain authored constraints for allocation and replay. */
+  launchConditions?: AutoLaunchTags;
   /** Caller-owned Run/Instance identities, e.g. a schedule occurrence's. */
   runId?: string; instanceId?: string;
   /** The message this launch answers; its wrapper acknowledges it. Not a fence. */
@@ -435,7 +439,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
 
   /** Undefined when no message carries the invocation. */
   private async source(tx: DatabaseTransaction, input: LaunchRequest) {
-    if (input.sourceMessageId === undefined) return undefined;
+    if (input.sourceMessageId === undefined) {
+      if (input.launchConditions) await this.validateConditions(input,
+        parseLaunchConditions(formatAutoLaunchMention(input.launchConditions), "@auto".length));
+      return undefined;
+    }
     const source = await readMessageInvocationSelections(tx, { deriveFromText: true, spaceId: input.key.spaceId, channelId: input.channelId,
       messageId: input.sourceMessageId, actorUserId: input.actorUserId, body: input.body });
     await assertQuotaRetryAdmission(tx, { channelId: input.channelId, actorUserId: input.actorUserId, admission: input.quotaRetry,
@@ -462,6 +470,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       throw new RegistrationAccessError("registration_invocation_target_mismatch", 403);
     }
     const options = selectionLaunchConditions(input.body, selection);
+    await this.validateConditions(input, options);
+    return source;
+  }
+
+  private async validateConditions(input: LaunchRequest, options: { tags: AutoLaunchTags; error?: string }) {
     const tags = options.tags;
     const machineOk = !tags.machine || await this.machineKnownAs(input.key.ownerUserId, input.key.machineId, tags.machine);
     if (options.error || (input.useRuntimeDefaultModel && tags.model) || (tags.repo && input.workspaceReference !== `repo:${repoSummonReference(tags.repo)}`) ||
@@ -473,7 +486,6 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         !sameHarnessParameterValues(launchHarnessParameters(tags), input.requirements.parameters ?? {})) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
-    return source;
   }
 
   /** The environment revision admitted by the reservation is the one whose
@@ -827,6 +839,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           sourceMessageId, selectionIndex, body: input.body, key: candidate.key, workspaceReference: selected.workspaceReference,
           // The web binds a launch's status, steps and Jev decision to the summon it answers.
           runMetadata: { sourceMention: summonText(selection) },
+          ...(Object.keys(options.tags).length ? { launchConditions: options.tags } : {}),
           ...(candidate.machineName ? { machineName: candidate.machineName } : {}),
           ...selectedParameters(selected, candidate.key.harness) }));
       } catch (error) {
@@ -892,6 +905,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       if (excluded && sameAgentRegistration(parseSpaceAgentRegistrationKey(request.key), excluded)) {
         throw new RegistrationAccessError("handoff_same_agent", 409);
       }
+      if (await digestCanonicalCloneCborV1(request.launchConditions ?? {}) !==
+          await digestCanonicalCloneCborV1(input.tags ?? {})) {
+        throw new RegistrationAccessError("idempotency_mismatch", 409);
+      }
       return this.withHost(commandId, await this.prepare({ ...request, body: input.body }));
     }
     // Read alongside the candidates: the repository list comes from GitHub.
@@ -921,6 +938,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     validateSelectedHarnessParameters(candidate, selected, tags);
     const request = { commandId, actorUserId, channelId, selectionIndex: 0, body: input.body, key: candidate.key,
+      ...(Object.keys(tags).length ? { launchConditions: tags } : {}),
       ...(selected.workspaceReference !== undefined ? { workspaceReference: selected.workspaceReference } : {}),
       ...(requiredHostCapabilities.length ? { requiredHostCapabilities } : {}),
       ...(input.runMetadata ? { runMetadata: input.runMetadata } : {}),

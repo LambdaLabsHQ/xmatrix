@@ -431,6 +431,28 @@ test("a swipe that catches the conversation springing back carries on from where
   expect(await screenLayout(page)).toEqual(before);
 });
 
+test("a part of the push cancelled by its own component does not leave the change set up", async ({ page }) => {
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  await page.evaluate(() => {
+    // The composer box restarts its own animations when its completion panel opens.
+    document.addEventListener("click", () => requestAnimationFrame(() => {
+      for (const part of document.querySelectorAll(".app-composer-shell > *")) {
+        for (const animation of part.getAnimations()) animation.cancel();
+      }
+    }), { capture: true, once: true });
+  });
+  await generalChannelRow(page).tap();
+  await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+  await screenChangeLanded(page);
+  // The next change still runs: Back slides the lists.
+  const moves = await watchScreenMoves(page);
+  await page.getByRole("button", { name: "Back to channels" }).tap();
+  await expectChannelListVisible(page);
+  expect(await moves()).toContain("list:back");
+  await screenChangeLanded(page);
+});
+
 test("the page leaves an edge swipe to the app while a layer is open over the conversation", async ({ page }) => {
   await installNativeBridge(page, "ios");
   await openGeneralChannel(page);

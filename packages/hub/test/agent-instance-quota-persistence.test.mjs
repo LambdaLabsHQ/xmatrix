@@ -18,14 +18,12 @@ function instanceSession(model, run = {}) {
 
 test("model catalog reports reach routing persistence without heartbeat refresh or message-header leakage", async () => {
   const { port, commands } = recordingAgentInstancePort();
-  const session = instanceSession("actual-model", { repository: "LambdaLabsHQ/xmatrix" });
+  const session = instanceSession("actual-model");
   const models = [{ id: "actual-model", model: "actual-model", displayName: "Actual model",
     supportedReasoningEfforts: [{ reasoningEffort: "high", description: "More reasoning" }] }];
   await port.execute(session, { type: "presence_update", models });
   const first = commands[0].input.presentation;
   assert.deepEqual(first.models, models);
-  assert.deepEqual(first.statusChips.find(chip => chip.id === "repo"),
-    { id: "repo", label: "Repository", value: "LambdaLabsHQ/xmatrix" });
   assert.ok(Number.isFinite(Date.parse(first.modelsObservedAt)));
   assert.equal(agentMessagePresentation(first).models, undefined);
   assert.equal(agentMessagePresentation(first).modelsObservedAt, undefined);

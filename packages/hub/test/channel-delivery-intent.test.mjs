@@ -167,13 +167,33 @@ test("Agent peer replies queue unless they address this exact Instance", () => {
   );
 });
 
+// The transport intent is the execution boundary: retaining the message as
+// shared context must not assign another Instance's task to a same-name peer.
+test("an exact Instance assignment is context for its peers on live delivery and catch-up", () => {
+  const target = { agentName: "opencode", channelInstanceId: "11" };
+  const peer = { agentName: "opencode", channelInstanceId: "8" };
+  for (const from of [BASE.from, { kind: "agent", label: "coordinator", identityId: "other" }]) {
+    const message = framed({ from, body: "@opencode:11 continue the original browser task" });
+    assert.equal(agentChannelMessageDeliveryIntent(message, target), "work");
+    assert.equal(agentChannelMessageDeliveryIntent(message, peer), "context");
+    assert.equal(agentChannelMessageRequestsInterrupt(message, peer), false);
+    assert.equal(agentChannelMessageMaySteer(message, peer), false);
+  }
+  for (const body of ["`@opencode:11` is an example", "> @opencode:11", "ordinary update"]) {
+    assert.equal(agentChannelMessageDeliveryIntent(framed({ body }), peer), "work", body);
+  }
+  assert.equal(agentChannelMessageDeliveryIntent(framed({ body: "@opencode:11 and @opencode:8 check your tasks" }), peer), "work");
+});
+
 test("a Human message steers the active turn unless it @-addresses this Instance", () => {
   const recipient = { agentName: "claude", agentId: "agent:owner:claude", channelInstanceId: "1" };
-  for (const body of ["不是", "看下竞品页", "`@claude` is the CLI", "@claude:2 take this", "看下 codex 的输出"]) {
+  for (const body of ["不是", "看下竞品页", "`@claude` is the CLI", "看下 codex 的输出"]) {
     const message = framed({ body });
     assert.equal(agentChannelMessageRequestsInterrupt(message, recipient), true, body);
     assert.equal(agentChannelMessageMaySteer(message, recipient), true, body);
   }
+  assert.equal(agentChannelMessageMaySteer(framed({ body: "@claude:2 take this" }), recipient), false,
+    "another Instance's assignment is context");
   for (const body of ["@claude stop and look", "看下 @claude", "@claude:1 now", "@agent:owner:claude:1 now", "@all heads up"]) {
     assert.equal(agentChannelMessageMaySteer(framed({ body }), recipient), false, body);
   }

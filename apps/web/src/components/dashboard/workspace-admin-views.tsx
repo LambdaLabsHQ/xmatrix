@@ -1034,9 +1034,48 @@ export function channelsAfterAgentInstanceOffline(
   let changed = false;
   const next = channels.map((channel) => {
     if (channel.id !== input.channelId) return channel;
+    // A resting Instance has no socket: a disconnect that arrives after the
+    // push of its rest is stale and must not take its greyed avatar away.
+    const current = channel.presence?.instances.get(presenceInstanceId(input.instanceId!));
+    if (current?.status === "offline" && current.rest) return channel;
     const patched = removeChannelAgentInstancePresence(channel, target);
     if (patched !== channel) changed = true;
     return patched;
+  });
+  return changed ? next : channels;
+}
+
+/**
+ * Whether a pushed Agent presence ends waits the reader's counts may hold: an
+ * Instance that asked and then stopped (it leaves the presence) or whose wake
+ * failed no longer waits for an answer (declaredWaitStandsSql). A sleep or a
+ * wake ends none.
+ */
+export function agentPresenceEndsWaits(prior: ChannelPresence | undefined, pushed: ChannelPresence): boolean {
+  for (const [id, instance] of prior?.instances ?? []) {
+    const next = pushed.instances.get(id);
+    if (!next) return true;
+    if (next.rest === "wake_failed" && instance.rest !== "wake_failed") return true;
+  }
+  for (const [id, instance] of pushed.instances) {
+    if (instance.rest === "wake_failed" && !prior?.instances.has(id)) return true;
+  }
+  return false;
+}
+
+/** How a Channel's Agents stand, as a lifecycle push carries them, merged as a read of that Channel would be. */
+export function channelsWithAgentPresence(
+  channels: ChannelSnapshot[],
+  channelId: string,
+  agents: ChannelPresence,
+): ChannelSnapshot[] {
+  let changed = false;
+  const next = channels.map((channel) => {
+    if (channel.id !== channelId) return channel;
+    const presence = mergeChannelPresence(channel.presence, agents);
+    if (presence === channel.presence) return channel;
+    changed = true;
+    return { ...channel, presence };
   });
   return changed ? next : channels;
 }

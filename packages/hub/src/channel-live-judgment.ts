@@ -1,5 +1,6 @@
 import { SYSTEM_ANNOTATION_AUTHOR, type ObservabilityEvent } from "@xmatrix/protocol";
-import { postgresMessageLiveRecipientUserIds, withPostgresMessageRequestScope } from "./postgres-message-authority";
+import { postgresMessageLiveAgentPresence, postgresMessageLiveRecipientUserIds,
+  withPostgresMessageRequestScope } from "./postgres-message-authority";
 import {
   deliverToAudience,
   RUNTIME_CHANNEL_OBSERVABLE_EVENT_URL,
@@ -39,15 +40,25 @@ export async function publishChannelInvocationsChanged(env: Env, channelId: stri
 }
 
 /**
- * Tell a Channel's people that one of its resting Agent Instances changed
- * outside a live socket: a message woke it, or its machine is offline so the
- * wake waits for it to reconnect. Clients read the Channel's presence again.
- * Best effort, like the push above.
+ * Tell a Channel's people how its Agents stand after one of its Instances
+ * changed outside a live socket: it went to rest, a message woke it, its wake
+ * waits for an offline machine, or it was stopped. The push carries the
+ * Channel's Agents as its lists show them (`presenceCoverage: "agents"`), so a
+ * client merges them in place and reads nothing; the people stay as it holds
+ * them. It is the whole current state, not a step: a dropped push is repaired
+ * by the next one or by the read a reconnect makes. Best effort, like the
+ * pushes above.
  */
 export async function publishChannelPresenceChanged(env: Env, channelId: string): Promise<void> {
-  await publishChannelMessageJudgment(env, channelId, "presence_updated", {})
-    .catch((error: unknown) => console.warn("Channel presence push failed", {
-      channelId, error: error instanceof Error ? error.message : String(error) }));
+  try {
+    const { recipientUserIds, memberPresence } = await withPostgresMessageRequestScope(
+      env, (scope) => postgresMessageLiveAgentPresence(env, channelId, scope));
+    await publishToChannelPeople(env, channelId, recipientUserIds, "presence_updated",
+      { memberPresence, presenceCoverage: "agents" });
+  } catch (error) {
+    console.warn("Channel presence push failed", {
+      channelId, error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 /** A Hub judgment about one message, to every live member of its Channel. */
@@ -61,6 +72,16 @@ async function publishChannelMessageJudgment(
     env,
     (scope) => postgresMessageLiveRecipientUserIds(env, channelId, scope),
   );
+  await publishToChannelPeople(env, channelId, recipientUserIds, type, metadata);
+}
+
+async function publishToChannelPeople(
+  env: Env,
+  channelId: string,
+  recipientUserIds: readonly string[],
+  type: ObservabilityEvent["type"],
+  metadata: Record<string, unknown>,
+): Promise<void> {
   const event: ObservabilityEvent = {
     id: crypto.randomUUID(),
     type,

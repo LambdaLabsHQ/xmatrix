@@ -90,7 +90,7 @@ integration("writer lock failures retain the live blocker without identities or 
     await holder.query("BEGIN; SET LOCAL application_name='xmatrix-execution-report'");
     await holder.query(`SELECT * FROM ${table} FOR UPDATE`);
     const writers = [
-      ["runtime_execution_report_owner_v4", "xmatrix-execution-report", "execution-report"],
+      ["runtime_execution_report_owner_v5", "xmatrix-execution-report", "execution-report"],
       ["channel_mutation_root_lock_v2", "xmatrix-hub-channel-catalog", "catalog"],
       ["channel_mutation_head_advance_v1", "xmatrix-hub-channel-catalog", "catalog"],
     ];
@@ -151,7 +151,7 @@ integration("writer lock failures retain the live blocker without identities or 
     }, async tx => {
       if (++readyCount === 2) releaseReady();
       await ready;
-      return tx.query({ name: "runtime_execution_report_owner_v4", text: `SELECT id FROM ${table} FOR UPDATE`, maxRows: 1 });
+      return tx.query({ name: "runtime_execution_report_owner_v5", text: `SELECT id FROM ${table} FOR UPDATE`, maxRows: 1 });
     })));
     assert.ok(failures.every(result => result.status === "rejected" && result.reason.code === "55P03"));
     assert.deepEqual(failures.map(result => databaseFailureEvidence(result.reason)[0].lockWait.status).sort(), ["busy", "sampled"]);
@@ -163,7 +163,7 @@ integration("writer lock failures retain the live blocker without identities or 
         return new Client(config);
       } });
     assert.deepEqual(await database.transaction({ requestId: "fast", operation: "runtime.execution-report", placement },
-      tx => tx.query({ name: "runtime_execution_report_owner_v4", text: "SELECT 1 AS ok", maxRows: 1 })), [{ ok: 1 }]);
+      tx => tx.query({ name: "runtime_execution_report_owner_v5", text: "SELECT 1 AS ok", maxRows: 1 })), [{ ok: 1 }]);
   } finally {
     try { await holder.query("ROLLBACK"); }
     finally { await isolated.close(); }

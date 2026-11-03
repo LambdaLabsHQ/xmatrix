@@ -36,6 +36,8 @@ const ORDERING_FUNCTIONS = [
   "mergeChannelPresence",
   "removeChannelAgentInstancePresence",
   "channelsAfterAgentInstanceOffline",
+  "channelsWithAgentPresence",
+  "agentPresenceEndsWaits",
   "patchChannelAgentPresenceFromMessage",
 ];
 
@@ -51,9 +53,12 @@ const {
   mergeChannelPresence,
   removeChannelAgentInstancePresence,
   channelsAfterAgentInstanceOffline,
+  channelsWithAgentPresence,
+  agentPresenceEndsWaits,
   patchChannelAgentPresenceFromMessage,
   commitCatalogChannels,
 } = functions;
+const { decodeChannelAgentPresence } = require("@xmatrix/protocol");
 
 test("a cached catalog row replayed after a message never drops an Instance that connected since", () => {
   // Read at page load, before the summon: no Instance yet.
@@ -651,3 +656,50 @@ test("lifecycle is one report: status, rest and offlineReason never mix across r
   assert.equal(mergeLlmUsagePreferringQuotas(observed, missing).quotaUsages[0].percent, 99);
   assert.equal(agentMemberUsage({ ...presence, usage: missing }).quotaUsages[0].percent, 99);
 }
+
+
+// An Instance's rest is recorded when its daemon reports the exit, after its
+// socket closed. The Hub pushes how the Channel's Agents then stand; the list
+// merges that in place instead of reading the Channel again on a timer.
+test("a rest pushed after the disconnect brings the greyed avatar back without a read", () => {
+  const live = { id: "ch:1", channelInstanceId: "1", status: "busy",
+    connectedAt: "2026-11-03T15:00:00Z", lastSeenAt: "2026-11-03T15:10:00Z" };
+  const member = (instance) => ({ "ch:1": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent",
+    label: "claude", instances: [instance] } });
+  const person = { "user:owner-1": { kind: "user", label: "Owner", status: "online", instances: [] } };
+  let channels = [decodeChannelSnapshot({ id: "ch", memberPresence: { ...member(live), ...person } })];
+  channels = channelsAfterAgentInstanceOffline(channels, { channelId: "ch", instanceId: "ch:1" });
+  assert.deepEqual(channelInstances(channels[0]), [], "the closed socket takes the live Instance away");
+  const asleep = { ...live, status: "offline", rest: "sleeping", lastSeenAt: "2026-11-03T15:10:05Z" };
+  const pushed = decodeChannelAgentPresence("ch", member(asleep));
+  channels = channelsWithAgentPresence(channels, "ch", pushed);
+  assert.equal(firstChannelInstance(channels[0]).rest, "sleeping");
+  assert.deepEqual([...channels[0].presence.humans.keys()], ["user:owner-1"], "the people stay as the reader held them");
+  // The disconnect can also arrive after the push: it is stale for a resting Instance.
+  const late = channelsAfterAgentInstanceOffline(channels, { channelId: "ch", instanceId: "ch:1" });
+  assert.equal(late, channels, "a late disconnect keeps the resting avatar");
+  // A push read before a wake cannot put the woken Instance back to sleep.
+  const woken = patchChannelAgentPresenceFromMessage(channels[0], { channelId: "ch", sentAt: "2026-11-03T15:20:00Z",
+    from: { kind: "agent", identityId: "ch:1", instanceId: "ch:1", channelInstanceId: "1" } });
+  const stale = channelsWithAgentPresence([woken], "ch", pushed);
+  assert.equal(firstChannelInstance(stale[0]).status, "busy");
+  // A Channel the reader has not loaded, and an empty or malformed push, change nothing.
+  assert.equal(channelsWithAgentPresence(channels, "other", pushed), channels);
+  assert.equal(decodeChannelAgentPresence("ch", undefined), undefined);
+  assert.equal(decodeChannelAgentPresence("ch", []), undefined);
+});
+
+// Counts and the unread list count an Agent's declared waits, which end when
+// it stops or its wake fails, never when it sleeps or wakes.
+test("only a stop or a failed wake in a pushed presence ends the waits the counts hold", () => {
+  const instance = (rest) => ({ id: "ch:1", channelInstanceId: "1", status: rest ? "offline" : "busy",
+    ...(rest ? { rest } : {}), connectedAt: "2026-11-03T15:00:00Z", lastSeenAt: "2026-11-03T15:10:00Z" });
+  const agents = (...instances) => decodeChannelAgentPresence("ch", instances.length
+    ? { "ch:1": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "claude", instances } } : {});
+  assert.equal(agentPresenceEndsWaits(agents(instance()), agents(instance("sleeping"))), false, "a sleep keeps its waits");
+  assert.equal(agentPresenceEndsWaits(agents(instance("sleeping")), agents(instance())), false, "a wake keeps them");
+  assert.equal(agentPresenceEndsWaits(agents(instance("sleeping")), agents()), true, "a stopped asker leaves and waits no more");
+  assert.equal(agentPresenceEndsWaits(agents(instance("sleeping")), agents(instance("wake_failed"))), true);
+  assert.equal(agentPresenceEndsWaits(undefined, agents(instance("wake_failed"))), true);
+  assert.equal(agentPresenceEndsWaits(undefined, agents(instance("sleeping"))), false);
+});

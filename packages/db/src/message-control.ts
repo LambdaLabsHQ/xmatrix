@@ -8,8 +8,9 @@ import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from 
 import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
-import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
-import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+import type { AgentRegistrationKey, ChannelMemberPresence, MessageCommitReceipt } from "@xmatrix/protocol";
+import { loadChannelAgentPresence } from "./channel-agent-presence.js";
+import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
 
@@ -61,6 +62,8 @@ export interface PostgresMessageAgentRunIdentity {
   instanceId: string;
   channelId: string;
   channelInstanceId: number;
+  /** Admitted repository, read from the proven Run rather than runtime tags. */
+  repository?: string;
   /** Send-time presentation, read from the Instance row this append already
    *  locks for authorization. Absent when the Instance has reported none. */
   presentation?: Record<string, unknown>;
@@ -515,6 +518,7 @@ async function effectiveAppendPrincipal(
     );
   }
   const presentation = run.presentation_json;
+  const repository = typeof metadata.remoteRepo === "string" ? repoSummonReference(metadata.remoteRepo) : undefined;
   const agentRunIdentity: PostgresMessageAgentRunIdentity = {
     registration: { ownerUserId: admission.key.ownerUserId, machineId: admission.key.machineId,
       harness: admission.key.harness },
@@ -522,6 +526,7 @@ async function effectiveAppendPrincipal(
     instanceId: proof.instanceId,
     channelId: run.instance_channel_id,
     channelInstanceId,
+    ...(repository ? { repository } : {}),
     ...(presentation && typeof presentation === "object" && !Array.isArray(presentation) &&
         Object.keys(presentation).length > 0
       ? { presentation }
@@ -2930,6 +2935,23 @@ export class PostgresMessageRepository {
   }): Promise<string[]> {
     const { requestId, spaceId, channelId } = channelRequest(input);
     return this.inSpace(requestId, "message.live-recipients", spaceId, (transaction) => liveRecipientUserIds(transaction, spaceId, channelId));
+  }
+
+  /**
+   * The Channel's live readers and its Agents as their lists show them, from
+   * one snapshot: what a change to an Instance's lifecycle pushes to those
+   * readers, so none of them re-reads a list to learn it.
+   */
+  async liveAgentPresence(input: {
+    requestId: string;
+    spaceId: string;
+    channelId: string;
+  }): Promise<{ recipientUserIds: string[]; memberPresence: Record<string, ChannelMemberPresence> }> {
+    const { requestId, spaceId, channelId } = channelRequest(input);
+    return this.inSpace(requestId, "message.live-agent-presence", spaceId, async (transaction) => ({
+      recipientUserIds: await liveRecipientUserIds(transaction, spaceId, channelId),
+      memberPresence: (await loadChannelAgentPresence(transaction, spaceId, [channelId])).get(channelId) ?? {},
+    }));
   }
 
   /** The Channel's live audience as it stands now: who may read it, and whose cells hold its Instances. */
