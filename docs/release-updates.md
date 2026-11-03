@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: CLI release feed reads recover one lost response
+
+HUB-BM lost a CLI release feed response and flattened the failure into a
+message without its origin or stage. A feed transport failure now gets one
+fresh read, each bounded to five seconds and 64 KiB. Invalid feeds still fail;
+owner queries retain their existing single-read recovery, and socket delivery
+and the whole pass are never replayed. Failed attempts and independent cell
+failures retain their original causes and fixed channel, stage, attempt,
+duration and HTTP status in Sentry and its issue reader, without response
+content or owner/cell identities. The external timeout's cause remains unknown.
+Hub only, no schema or client change; recovery is a CI-validated beta Hub
+release reverting this change.
+
 ## Unreleased: Database maintenance waits through release status changes
 
 The lifecycle broker could select an older beta when a newer release moved
