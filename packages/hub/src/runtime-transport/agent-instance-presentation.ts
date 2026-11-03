@@ -1,4 +1,4 @@
-import { plainRecord } from "@xmatrix/protocol";
+import { plainRecord, repoSummonReference } from "@xmatrix/protocol";
 import {
   parseLlmQuotaAccount,
   parseQuotaObservedAt,
@@ -246,15 +246,21 @@ export function sanitizeAgentInstancePresentation(
 
 export function agentMessagePresentation(
   presentation: Readonly<AgentInstancePresentation> | undefined,
+  /** Server-owned Run admission, never a runtime's checkout path or hint. */
+  repository?: string,
 ): Record<string, unknown> | undefined {
   const canonical = sanitizeAgentInstancePresentation(presentation);
-  if (!canonical) return undefined;
+  const repo = repository && repoSummonReference(repository);
+  const statusChips = repo ? [
+    { id: "repo", label: "Repository", value: repo },
+    ...(canonical?.statusChips ?? []).filter(chip => chip.id.toLowerCase() !== "repo"),
+  ] : canonical?.statusChips;
   const snapshot = {
-    ...(canonical.goal ? { goal: canonical.goal } : {}),
-    ...(canonical.gitBranch ? { gitBranch: canonical.gitBranch } : {}),
-    ...(canonical.model ? { model: canonical.model } : {}),
-    ...(canonical.effort ? { effort: canonical.effort } : {}),
-    ...(canonical.statusChips?.length ? { statusChips: canonical.statusChips } : {}),
+    ...(canonical?.goal ? { goal: canonical.goal } : {}),
+    ...(canonical?.gitBranch ? { gitBranch: canonical.gitBranch } : {}),
+    ...(canonical?.model ? { model: canonical.model } : {}),
+    ...(canonical?.effort ? { effort: canonical.effort } : {}),
+    ...(statusChips?.length ? { statusChips } : {}),
   };
   return Object.keys(snapshot).length > 0 ? snapshot : undefined;
 }
