@@ -155,6 +155,7 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 
 import { MessageUnsentNotice } from "./message-unsent-notice";
+import { CitingConversationContext, PASSAGE_HIGHLIGHT, passageRange, takeOpenedPassage } from "./cited-passage";
 import { foldedDiscussionBody, MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
 
 import {
@@ -701,6 +702,20 @@ export const MessageTimeline = memo(function MessageTimeline({
   const stableOnOpenInternalAppLink = useStableCallback(onOpenInternalAppLink);
   const stableOnMessageExposed = useStableCallback(onMessageExposed);
   const stableOnJumpToMessage = useStableCallback(onJumpToMessage);
+  const citingConversation = useMemo(() => channel
+    ? { channel, openMessage: (messageId: string) => stableOnJumpToMessage(messageId) } : null,
+  [channel, stableOnJumpToMessage]);
+  // The words a quote opened, marked in the message its jump landed on for as long as that row is marked.
+  useEffect(() => {
+    if (!highlightMessageId || typeof Highlight === "undefined") return;
+    const quote = takeOpenedPassage(highlightMessageId);
+    const body = quote
+      ? timelineScrollRef.current?.querySelector(`[${MESSAGE_BODY_ATTRIBUTE}="${CSS.escape(highlightMessageId)}"]`) : null;
+    const range = body && quote ? passageRange(body, quote) : null;
+    if (!range) return;
+    CSS.highlights.set(PASSAGE_HIGHLIGHT, new Highlight(range));
+    return () => { CSS.highlights.delete(PASSAGE_HIGHLIGHT); };
+  }, [highlightMessageId, timelineScrollRef]);
   const stableOnScrollPositionChange = useStableCallback(onScrollPositionChange);
   const stableOnScrollGesture = useStableCallback(onScrollGesture);
   const stableOnNearTop = useStableCallback(onNearTop);
@@ -1209,6 +1224,7 @@ export const MessageTimeline = memo(function MessageTimeline({
     <PageReferenceScopeProvider scope={pageReferenceScope}>
     <AnsweredQuestionnairesProvider timeline={timeline}>
     <MentionReadChannelScopeProvider scope={mentionReadScope}>
+    <CitingConversationContext.Provider value={citingConversation}>
     <div
       ref={setTimelineScrollRoot}
       /* A real gesture always beats an automatic scroll: reading back through
@@ -1361,6 +1377,7 @@ export const MessageTimeline = memo(function MessageTimeline({
         }} quote={Boolean(onQuotePassage)} discuss={Boolean(onDiscussPassage)} />
       )}
     </div>
+    </CitingConversationContext.Provider>
     </MentionReadChannelScopeProvider>
     </AnsweredQuestionnairesProvider>
     </PageReferenceScopeProvider>
