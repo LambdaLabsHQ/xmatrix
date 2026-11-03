@@ -137,10 +137,11 @@ jobs:
             asset: xmatrix-macos-arm64
             binary: xmatrix
             part: macos-arm64
-          # Intel Macs. The Apple Silicon release runner cross-compiles it;
-          # Apple's toolchain carries both architectures, so no second host.
+          # Keep the native ARM version probe on Apple Silicon, but do not
+          # spend a second scarce ARM runner on a binary Intel can run itself.
+          # The self-hosted fleet retains its Apple Silicon cross-build.
           - target: x86_64-apple-darwin
-            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-macos-release"]' || '"macos-26"' }}
+            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-macos-release"]' || '"macos-26-intel"' }}
             asset: xmatrix-macos-x64
             binary: xmatrix
             part: macos-x64
@@ -401,7 +402,8 @@ jobs:
 
       # The bytes this machine uploads are the bytes users run, so they must
       # report exactly the release version: its channel and update source follow
-      # from it. The Intel macOS binary runs under Rosetta on the Apple Silicon host.
+      # from it. Hosted macOS targets run natively; a self-hosted Apple Silicon
+      # runner executes the Intel binary under Rosetta.
       - name: Verify the binary reports the release version
         if: runner.os != 'Windows'
         shell: bash

@@ -3003,7 +3003,7 @@ Secret recovery remains separate; this release neither generates nor rotates key
   upstream Run capability, return a retryable 503 during replacement, and never replay a written
   request. Explicit adoption disables legacy discovery. Already-running older wrappers require an ordinary instance
   Reborn recovery into the fixed CLI; a daemon-only update cannot patch those processes.
-- macOS CLI releases publish `xmatrix-macos-arm64` and `xmatrix-macos-x64`; the Apple Silicon release runner cross-compiles the Intel binary and signs both with the same Developer ID identity. `install.sh` installs the native arm64 binary when its shell runs under Rosetta.
+- macOS CLI releases publish `xmatrix-macos-arm64` and `xmatrix-macos-x64`; hosted builds use Apple Silicon and Intel respectively, and sign both with the same Developer ID identity. The self-hosted Apple Silicon runner still cross-compiles Intel. Both artifacts must execute their exact-version probe before publication. `install.sh` installs the native arm64 binary when its shell runs under Rosetta.
 - The macOS Desktop release builds one app per architecture (`arm64` and `x64`, never universal), each carrying its own architecture's CLI seed. One `latest-mac.yml` lists both; electron-updater picks the `arm64` files on Apple Silicon and the others on Intel, and its legacy top-level `path` stays on the arm64 ZIP.
 - A Windows CLI release publishes the single portable `xmatrix-windows-x64.exe` artifact through the same reviewed,
   immutable R2 handoff as the other CLI platforms. The release manifest records the exact workflow provenance, size,
@@ -3074,3 +3074,15 @@ announcing a passing verdict. All-skipped or all-neutral checks stay pending;
 failures still report, and success beside skipped jobs still passes. Hub only;
 no schema or client migration. Recovery is a CI-validated beta Hub release
 reverting this verdict change.
+
+## Unreleased: The Intel CLI builds on an Intel runner
+
+GitHub's ARM64 runner capacity shortage cancelled both macOS CLI jobs before
+assigning them a machine. The Intel target now uses the standard
+`macos-26-intel` pool; ARM64 keeps `macos-26` and its native executable probe.
+Desktop also stays on Apple Silicon to retain its signed ARM app startup
+check. Target architectures, pinned Rust, Developer ID identity and R2 byte
+verification retain their existing gates. Qualification is a complete beta
+with both native CLI version probes and publication verified. Historical tags
+retain their original workflow; recovery is a CI-validated forward release
+restoring the Intel build host if needed. No client or schema migration.
