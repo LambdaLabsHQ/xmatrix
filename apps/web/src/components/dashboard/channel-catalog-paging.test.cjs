@@ -614,3 +614,38 @@ test("catalog revisions discard unopened speculative pages without crossing Spac
     assert.deepEqual(client.getQueryData(other), page);
   } finally { client.clear(); }
 });
+
+// A read answers with the Space's control head, which runtime, billing,
+// content and automation commits advance too. A newer one from a read said
+// "the catalog changed" and re-read every cached list, in waves.
+test("a read with a newer Space head re-reads no other list; only a change notice does", async () => {
+  const { QueryClient } = require("@tanstack/react-query");
+  const { observeSpaceCatalogRevision } = require("./channel-catalog-refresh.ts");
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+  const prefix = ["xmatrix", "hub", "user", "channels", "space"];
+  const listA = [...prefix, "catalog", "flat", "all", null, ""];
+  const listB = [...prefix, "catalog", "flat", "unread", null, ""];
+  const page = (catalogRevision) => ({ pages: [{ catalogRevision, rows: [] }], pageParams: [null] });
+  const invalidated = (key) => client.getQueryState(key)?.isInvalidated === true;
+  const read = (key, revision) => observeSpaceCatalogRevision({ client, spaceId: "space", prefix,
+    countsKey: [...prefix, "catalog-counts"], revision, sourceQueryKey: key,
+    sourceQueryHash: client.getQueryCache().find({ queryKey: key, exact: true }).queryHash });
+  const notice = (revision) => observeSpaceCatalogRevision({ client, spaceId: "space", prefix,
+    countsKey: [...prefix, "catalog-counts"], revision });
+  try {
+    client.setQueryData(listA, page(5));
+    client.setQueryData(listB, page(5));
+    client.setQueryData(listA, page(9));
+    assert.equal(read(listA, 9), false);
+    assert.equal(invalidated(listB), false, "a read's newer head re-reads no other list");
+    assert.equal(notice(8), true);
+    assert.equal(invalidated(listB), true, "a notice re-reads the lists read before it");
+    assert.equal(invalidated(listA), false, "and not one read after it");
+    client.setQueryData(listB, page(7));
+    read(listB, 7);
+    assert.equal(invalidated(listB), true, "a read answered before the newest notice is read again");
+    client.setQueryData(listB, page(7));
+    read(listB, 7);
+    assert.equal(invalidated(listB), false, "once");
+  } finally { client.clear(); }
+});
