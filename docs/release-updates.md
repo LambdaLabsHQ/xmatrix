@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Claude runs report xMatrix as their client
+
+Claude Code labels every request with the client that drives it. A Claude
+started headless with `--print`, as every xMatrix Agent and one-shot text task
+is, labelled itself `sdk-cli`, and Claude subscriptions currently use up the
+5-hour window about twice as fast per token under that label as under the
+interactive TUI's (anthropics/claude-code#97074). The daemon now sets
+`CLAUDE_CODE_ENTRYPOINT=xmatrix` on every Claude it starts, overwriting a value
+inherited from a parent Claude session, so transcripts and requests name
+xMatrix. Client only; Agents pick it up when their Claude process next starts.
+No schema or protocol change. Recovery is a CI-validated release reverting this
+change.
+
 ## Unreleased: Quote a selected passage of a message
 
 Selecting text in a message offered only Discuss. It now offers **Quote ｜
