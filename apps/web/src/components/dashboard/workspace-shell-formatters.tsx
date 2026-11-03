@@ -49,7 +49,7 @@ import {
 
 import { NonOperationalMentions, renderMentionChildren } from "@/components/dashboard/mention-read-chip";
 import { MessageReferenceChip } from "@/components/dashboard/page-reference-chip";
-import { loneMessageReference, splitDiscussionHead } from "@xmatrix/protocol";
+import { loneMessageReference, withoutDiscussionHeads } from "@xmatrix/protocol";
 
 import {
   type AgentTraceTimelineBlock,
@@ -858,14 +858,13 @@ export function optimisticDesktopUpdateInstallStatus(status: DesktopUpdateStatus
 }
 
 /* mirror of the hub's channelReplyPreview, for live local updates; a
-   discussion's first message previews as what was written after its head */
+   message quoting passages previews as what was written around them */
 export function channelLastMessagePreviewFromEntry(
   entry: ChannelMessage
 ): ChannelSnapshot["lastMessage"] {
-  const head = splitDiscussionHead(entry.body || "");
   const body = entry.recalledAt
     ? "Message recalled"
-    : (head?.rest.trim() ? head.rest : entry.body || "").trim().replace(/\s+/g, " ");
+    : (withoutDiscussionHeads(entry.body || "") || entry.body || "").trim().replace(/\s+/g, " ");
   const bodyPreview = body
     ? body.length > 240
       ? `${body.slice(0, 237)}...`

@@ -10,6 +10,21 @@ channel for one already open and skip the animation. The temporary browser
 Sentry push diagnostic is removed. Beta Web only, no API, schema or native
 change; recovery is a CI-validated beta Web release reverting this change.
 
+## Unreleased: Quotes are blocks of what is written, as many as wanted
+
+A composer held one quote, above what was typed, and a message drew only the
+quote it opened with as a slip. Quote now puts the passage into the draft as
+a yellow block on the line after the caret, so a message can quote several
+passages, each among what is written around it, in the order they were put;
+the caret steps over a block, and Backspace or Delete beside it, or its ×,
+removes it whole. The draft is the message's own Markdown (`> passage`, then
+`— [source](link)`), so drafts save, restore and send unchanged, and Agents
+read the quotes in order. A message draws every such passage as its slip
+where it was put, and previews and automatic names read what was written
+around them. Discuss in new channel opens the new conversation's draft
+holding its passage as the first block. Hub and Web; no schema or client
+migration. Recovery is a CI-validated beta release reverting this change.
+
 ## Unreleased: Gmail reads currency and punctuation entities
 
 A Gmail read showed `&yen;` and similar named HTML entities literally, for
