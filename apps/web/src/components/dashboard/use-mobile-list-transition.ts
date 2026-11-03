@@ -78,8 +78,11 @@ const POSE_STOPS = [0, 1 - 1 / BAR_FADE, 1 - 1 / BOTTOM_FADE, 1 / BOTTOM_FADE, 1
 let pushDeclineReported = false;
 export function reportPushDeclined(reason: string, explain: () => Record<string, boolean | string>) {
   if (pushDeclineReported) return;
-  pushDeclineReported = true;
   const conditions = explain();
+  // Desktop selections use this driver too, but have no push to lose. Do not
+  // spend the page's report before it might later become a phone viewport.
+  if (conditions.isMobileViewport !== true) return;
+  pushDeclineReported = true;
   void import("@sentry/browser").then(({ captureMessage }) => {
     captureMessage(`Conversation push did not run: ${reason}`, { level: "warning", extra: conditions });
   }).catch(() => undefined);

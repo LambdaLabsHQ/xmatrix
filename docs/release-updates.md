@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Desktop navigation does not report a missing mobile push
+
+The conversation push diagnostic added for WEB-Z also ran for desktop
+selections, whose driver deliberately declines mobile animation. Reporting now
+requires a mobile viewport and spends its once-per-page allowance only then;
+a desktop page later resized to a phone can still report its first failure.
+The missing-driver path supplies that same viewport flag. Animation behavior
+is unchanged. Web only, no schema or client change; recovery is a CI-validated
+beta Web release reverting the report scope.
+
 ## Unreleased: Conversation push diagnostics can be read
 
 WEB-Z captured why the mobile conversation push declined, but the Sentry issue
