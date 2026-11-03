@@ -84,7 +84,6 @@ test("a malformed or padded report is refused before anything is written", async
 
 test("an ordinary socket message keeps caller metadata but never Hub-only keys", async () => {
   const { commands, port, session } = harness();
-  session.run.repository = "LambdaLabsHQ/xmatrix";
   await port.execute(session, {
     type: "channel_message", requestId: "r-2", channelId: "channel", body: "hello",
     metadata: { kind: "xmatrix.questionnaire.v1", xmatrixProvenance: "system_fact",
@@ -93,10 +92,6 @@ test("an ordinary socket message keeps caller metadata but never Hub-only keys",
   const [{ input }] = commands;
   assert.equal(input.messageKind, undefined);
   assert.deepEqual(input.residual.appMetadata, { kind: "xmatrix.questionnaire.v1" });
-  assert.deepEqual(input.senderSnapshot.statusChips, [
-    { id: "repo", label: "Repository", value: "LambdaLabsHQ/xmatrix" },
-    { id: "model", label: "Model", value: "claude-opus-5-5" },
-  ]);
 });
 
 test("a Hub that accepts activity says so when an Instance connects", async () => {

@@ -130,6 +130,8 @@ function postgresSenderSnapshot(
     normalizeAgentPresetRuntime(identity.runtime) ?? identity.runtime);
   const channelInstanceId = runIdentity ? String(runIdentity.channelInstanceId) : undefined;
   const instanceLabel = channelInstanceId ? `${identity.name}:${channelInstanceId}` : undefined;
+  const presentation = agentSenderPresentation(runIdentity?.presentation);
+  const statusChips = Array.isArray(presentation.statusChips) ? presentation.statusChips : [];
   return {
     /* The Instance row this append already read carries the header's tags, so
        the send-time snapshot is fixed by the same transaction that authorized
@@ -137,7 +139,13 @@ function postgresSenderSnapshot(
        wins key by key and a caller only fills what the row does not carry --
        an Instance whose first message outruns its first presentation write
        still stamps a header. */
-    ...agentSenderPresentation(runIdentity?.presentation),
+    ...presentation,
+    // The whole persisted chip array wins over a live overlay. Stamp the
+    // admitted repository here so a stale array cannot erase it at commit.
+    ...(runIdentity?.repository ? { statusChips: [
+      { id: "repo", label: "Repository", value: runIdentity.repository },
+      ...statusChips.filter(chip => typeof chip?.id === "string" && chip.id.toLowerCase() !== "repo"),
+    ] } : {}),
     identityId, kind: "agent", agentId: identity.id, label: instanceLabel ?? identity.name,
     name: identity.name, agentName: identity.name, runtime: identity.runtime,
     userId: identity.ownerUserId,

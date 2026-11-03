@@ -236,7 +236,11 @@ test("PostgreSQL sender identity: ordinary Agent", async () => {
   assert.equal(result.senderSnapshot.xmatrixManagementDelegate, undefined);
 });
 
-test("a committed Agent message carries the Instance row's presentation", async () => {
+for (const presentation of [null, {
+  model: "gpt-6-astra", effort: "high",
+  statusChips: [{ id: "repo", label: "Repository", value: "runtime/guess" },
+    { id: "model", label: "Model", value: "gpt-6-astra" }],
+}]) test(`a committed Agent message names its Run repository ${presentation ? "over stale Instance tags" : "before presentation arrives"}`, async () => {
   /* The header's tags died on this exact path and nothing caught it: the only
      guard quoted the route's source text, and the one end-to-end test runs on
      the Durable Object authority, where the read was never gated off. So assert
@@ -246,11 +250,10 @@ test("a committed Agent message carries the Instance row's presentation", async 
      row carries nothing -- an Instance whose first message outruns its first
      presentation write still stamps a header. */
   const database = agentAppendDatabase({ sequenceChannelId: "channel-1", rows: (query) =>
-    query.name === "message_append_run_proof_v3" ? [provenRunRow({ presentation_json: {
-      model: "gpt-6-astra",
-      effort: "high",
-      statusChips: [{ id: "model", label: "Model", value: "gpt-6-astra" }],
-    } })] : agentChannelRows(query) });
+    query.name === "message_append_run_proof_v3" ? [provenRunRow({ presentation_json: presentation,
+      metadata_json: { executionKey: "execution-1",
+        remoteRepo: "https://user:private@github.com/LambdaLabsHQ/xmatrix.git?secret=hidden" },
+    })] : agentChannelRows(query) });
   const result = await postgresMessageAppend({}, "channel-1", {
     commandId: "command-presentation-1", messageId: "message-presentation-1",
     channelId: "channel-1", body: "tagged", principal: { kind: "agent", id: "instance-1" },
@@ -260,16 +263,18 @@ test("a committed Agent message carries the Instance row's presentation", async 
       model: "gpt-5",
       // Absent from the row, and therefore must survive.
       gitBranch: "feat/hub-instance-presentation-row",
+      statusChips: [{ id: "repo", label: "Repository", value: "caller/guess" }],
     },
   }, {
     database, spaceId: "space-1",
     placement: { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 },
   });
 
-  assert.equal(result.senderSnapshot.model, "gpt-6-astra");
-  assert.equal(result.senderSnapshot.effort, "high");
+  assert.equal(result.senderSnapshot.model, presentation ? "gpt-6-astra" : "gpt-5");
+  assert.equal(result.senderSnapshot.effort, presentation ? "high" : undefined);
   assert.deepEqual(result.senderSnapshot.statusChips,
-    [{ id: "model", label: "Model", value: "gpt-6-astra" }]);
+    [{ id: "repo", label: "Repository", value: "LambdaLabsHQ/xmatrix" },
+      ...(presentation ? [{ id: "model", label: "Model", value: "gpt-6-astra" }] : [])]);
   assert.equal(result.senderSnapshot.gitBranch, "feat/hub-instance-presentation-row");
 });
 
