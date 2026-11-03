@@ -41,9 +41,13 @@ import { XAccounts } from "./x-accounts";
  * An App's page. It reads top to bottom in the order the reader needs it:
  * what the app is and whether it works; the one thing to do now, when there
  * is one (connect, reconnect, fix), as the page's only sheet and only solid
- * action; then, once connected, what it reaches, how to use it in a channel,
- * what it did, what it may do, its settings; the command reference, folded;
- * and Disconnect last. A connected app that works shows no call to action.
+ * action; then everything it is signed in with, together, so a person can
+ * reconnect or sign out without scrolling: the accounts, groups or company it
+ * links, its credentials and sign-ins (App Store Connect's API key and web
+ * session), where its events arrive, and Reconnect and Disconnect. After
+ * that, once connected: what it reaches, how to use it in a channel, what it
+ * did, what it may do, its settings, and the command reference, folded. A
+ * connected app that works shows no call to action.
  */
 
 type ConnectOptions = { mode?: "add" | "manage" | "install" | "account"; installationId?: string; xAccountId?: string };
@@ -196,27 +200,6 @@ export function ConnectorDetailPage({
             adding={connecting} canAdd={oauth} onAdd={() => onConnect()} onChanged={refreshConnections}
             onReconnect={(accountId) => onConnect({ xAccountId: accountId })} />
         ) : null}
-        {connector.id === "google" && configured ? (
-          <ConnectorSection title="Documents"
-            note="Choose a Doc or Sheet with the Google account connected to this Space; xMatrix may then read it.">
-            <GoogleDocFileSelection key={spaceId} spaceId={spaceId} token={token} />
-          </ConnectorSection>
-        ) : null}
-
-        {configured ? <ConnectorUseInChannel connector={connector} /> : null}
-
-        {configured || executions.length > 0 ? (
-          <ConnectorActivity executions={executions} members={members} loading={executionsLoading} error={executionsError}
-            credentials={credentials} onRefresh={onRefreshExecutions} onReconnect={() => onConnect()} />
-        ) : null}
-
-        {configured && connectorWriteActions(connector).length > 0 ? (
-          <ConnectorPolicy connector={connector} spaceId={spaceId} token={token} userId={userId} />
-        ) : null}
-
-        {connector.id === "github" && configured && connection ? (
-          <GitHubSettings key={connection.updatedAt} connection={connection} onSave={onSaveMetadata} />
-        ) : null}
         {/* A company app can be replaced by the Space's own app or webhook; said where that is set up. */}
         {(kind === "chat" || kind === "company") && available && connectorTakesCredentials(connector) ? (
           <ConnectorSection title={manualTitle(connector.id)} note={manualNote(connector.id)}>
@@ -248,20 +231,34 @@ export function ConnectorDetailPage({
           && !(connector.id === "stripe" && kind === "oauth" && !hasTypedCredentials)
           ? <ConnectorEventDelivery {...credentials} connector={manualConnector} /> : null}
 
-        <ConnectorCommands connector={connector} />
-
         {configured ? (
-          <section aria-label="Disconnect" className="pb-4">
-            <button type="button" disabled={busy} onClick={onDisconnect} aria-label={`Disconnect ${connector.name}`}
-              className={actionClass({ variant: "danger", size: "sm" })}>
-              {disconnecting ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null}
-              {disconnecting ? "Disconnecting" : `Disconnect ${connector.name}`}
-            </button>
-            <p className="mt-2 max-w-[62ch] text-[12px] leading-[1.45] text-muted-foreground">
-              Commands and channel delivery stop until it is connected again. Typed credentials stay saved; a sign-in is forgotten.
-            </p>
-          </section>
+          <ConnectorSignedIn connector={connector} kind={kind} busy={busy} connecting={connecting}
+            disconnecting={disconnecting} onReconnect={() => onConnect()} onDisconnect={onDisconnect} />
         ) : null}
+
+        {connector.id === "google" && configured ? (
+          <ConnectorSection title="Documents"
+            note="Choose a Doc or Sheet with the Google account connected to this Space; xMatrix may then read it.">
+            <GoogleDocFileSelection key={spaceId} spaceId={spaceId} token={token} />
+          </ConnectorSection>
+        ) : null}
+
+        {configured ? <ConnectorUseInChannel connector={connector} /> : null}
+
+        {configured || executions.length > 0 ? (
+          <ConnectorActivity executions={executions} members={members} loading={executionsLoading} error={executionsError}
+            credentials={credentials} onRefresh={onRefreshExecutions} onReconnect={() => onConnect()} />
+        ) : null}
+
+        {configured && connectorWriteActions(connector).length > 0 ? (
+          <ConnectorPolicy connector={connector} spaceId={spaceId} token={token} userId={userId} />
+        ) : null}
+
+        {connector.id === "github" && configured && connection ? (
+          <GitHubSettings key={connection.updatedAt} connection={connection} onSave={onSaveMetadata} />
+        ) : null}
+
+        <ConnectorCommands connector={connector} />
       </div>
     </ToolPaperScroll>
   );
@@ -415,6 +412,44 @@ function ConnectorLead({ connector, connection, kind, available, busy, connectin
       testId="connector-lead">
       {action}
     </ConnectorBlock>
+  );
+}
+
+/* Apps that list their own accounts, groups or company add and renew each one there; a single sign-in is renewed here. */
+const RENEWS_IN_ITS_OWN_LIST = new Set(["github", "stripe", "gmail", "cloudflare", "x"]);
+
+/** How a connected app is signed in, ended or renewed: beside its credentials, never at the foot of the page. */
+function ConnectorSignedIn({ connector, kind, busy, connecting, disconnecting, onReconnect, onDisconnect }: {
+  connector: AppConnectorManifest;
+  kind: SetupKind;
+  busy: boolean;
+  connecting: boolean;
+  disconnecting: boolean;
+  onReconnect: () => void;
+  onDisconnect: () => void;
+}) {
+  const reconnects = kind === "oauth" && !RENEWS_IN_ITS_OWN_LIST.has(connector.id);
+  return (
+    <section aria-label="Disconnect" data-testid="connector-signed-in">
+      <div className="flex flex-wrap items-center gap-2">
+        {reconnects ? (
+          <button type="button" disabled={busy} onClick={onReconnect} aria-label={`Reconnect ${connector.name}`}
+            className={actionClass({ variant: "secondary", size: "sm" })}>
+            {connecting ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <PlugZap className="size-3.5" />}
+            {connecting ? "Reconnecting" : "Reconnect"}
+          </button>
+        ) : null}
+        <button type="button" disabled={busy} onClick={onDisconnect} aria-label={`Disconnect ${connector.name}`}
+          className={actionClass({ variant: "danger", size: "sm" })}>
+          {disconnecting ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null}
+          {disconnecting ? "Disconnecting" : `Disconnect ${connector.name}`}
+        </button>
+      </div>
+      <p className="mt-2 max-w-[62ch] text-[12px] leading-[1.45] text-muted-foreground">
+        {reconnects ? `Reconnect signs in with ${connector.name} again, for another account or wider access. ` : null}
+        Disconnect stops commands and channel delivery until it is connected again. Typed credentials stay saved; a sign-in is forgotten.
+      </p>
+    </section>
   );
 }
 
