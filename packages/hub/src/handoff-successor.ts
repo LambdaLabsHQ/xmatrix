@@ -1,17 +1,15 @@
-import { HANDOFF_BRANCH_PREFIX, sha256Hex } from "@xmatrix/protocol";
+import { HANDOFF_BRANCH_PREFIX, sha256Hex, type AutoLaunchTags } from "@xmatrix/protocol";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { dispatchRegistrationInput } from "./registration-launch-dispatch";
 import type { Env } from "./types";
 import { offerUsageLimitRecovery } from "./agent-quota-retry";
 
-/** How long a handoff waits for the source's machine to confirm its stop and
- * push before the successor starts anyway. The push is already commanded and
- * the successor fetches the branch once it appears; a Worker's background
- * work after a response does not outlive ~30 seconds. */
+/** Bound the source stop wait to the Worker's background lifetime. A pending
+ * stop refuses the handoff; its exact command remains safe to retry. */
 const HANDOFF_STOP_WAIT_MS = 15_000;
 
-/** A handoff: the source stops and a successor starts through the ordinary
- * launch routing, on any machine, exactly as a summon would. */
+/** A handoff: the source stops and a successor starts through ordinary launch
+ * routing with the same placement conditions as a summon. */
 export interface HandoffSuccessor {
   /** Stable per handoff message, so a replay repeats the same steps and branch. */
   commandId: string;
@@ -34,6 +32,8 @@ export interface HandoffSuccessor {
   repository?: string;
   /** A directory registered on a machine: routing can only place it there. */
   directory?: string;
+  /** Authored launch conditions, admitted by the ordinary launch authority. */
+  tags?: AutoLaunchTags;
 }
 
 type Dependencies = {
@@ -80,16 +80,20 @@ export function handoffSuccessorPrompt(input: { channelId: string; sourceAddress
  * Move a source's work to a successor. Its daemon stops it (a repository
  * checkout is pushed whole, uncommitted and untracked changes included, to a
  * handoff branch); then a new Instance starts through the ordinary any-input
- * launch, constrained only by the work site and a named harness, so routing
- * weighs every registration with quota on every machine, as for any summon.
+ * launch with its work site, launch conditions and named harness, so routing
+ * weighs eligible registrations with quota, as for any summon.
  * Only the source's own registration is excluded.
  */
 export async function launchHandoffSuccessor(env: Env, input: HandoffSuccessor,
   dependencies: Dependencies = {}): Promise<{ agentName: string }> {
   const { repository, directory } = input;
+  // A handoff transfers the source work site; a different work site needs a
+  // new assignment, otherwise its branch would be fetched into the wrong repo.
+  if (input.tags?.repo && input.tags.repo !== repository || input.tags?.pwd && input.tags.pwd !== directory) {
+    throw Object.assign(new Error("Handoff work site conflicts with the source"), { code: "handoff_location_conflict" });
+  }
   const branch = repository ? await handoffBranch(input.commandId) : undefined;
-  // The conversation is read off the stop, so it is there only when the
-  // source's machine answered in time; without it the successor still starts.
+  // A confirmed stop may omit the conversation; it never omits the exit fence.
   const { handoffContext } = await stopSource(env, input, branch, dependencies);
   const site = repository && branch ? { repository, branch } : directory ? { directory } : {};
   // Stop/export observations change as the source exits. Keep the launch
@@ -99,6 +103,7 @@ export async function launchHandoffSuccessor(env: Env, input: HandoffSuccessor,
     body: handoffSuccessorPrompt({ channelId: input.channelId, sourceAddress: input.sourceAddress,
       sourceInstanceId: input.sourceInstanceId, request: input.request, ...site }),
     tags: { ...(repository ? { repo: repository } : directory ? { pwd: directory } : {}),
+      ...input.tags,
       ...(input.harness ? { harness: input.harness } : {}) },
     excludeSourceInstanceId: input.sourceInstanceId,
     ...(handoffContext ? { handoffContext } : {}),
@@ -134,5 +139,8 @@ async function stopSource(env: Env, input: HandoffSuccessor, branch: string | un
   const stopped = await port.issueHandoffStop(target, `handoff-stop:${input.sourceRunId}`.slice(0, 200),
     `${input.sourceAddress} handed off`, input.channelId,
     branch ? { branch, channelId: input.channelId } : undefined, HANDOFF_STOP_WAIT_MS);
+  if (!stopped.stopped) throw Object.assign(new Error("Source stop is still awaiting its daemon report"), {
+    code: "handoff_source_stop_pending",
+  });
   return stopped.handoffContext ? { handoffContext: stopped.handoffContext } : {};
 }
