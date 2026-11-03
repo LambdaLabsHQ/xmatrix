@@ -230,6 +230,7 @@ export function createProductAgentMentionAuthorityPort(input: {
         agentName: value.agentName,
         harness: value.harness,
         ownerUserId: value.ownerUserId,
+        ...(typeof value.launchMachineId === "string" ? { launchMachineId: value.launchMachineId } : {}),
         ...(typeof workspace?.machineId === "string" && typeof workspace.canonicalCwd === "string"
           ? { workspace: { machineId: workspace.machineId, canonicalCwd: workspace.canonicalCwd } }
           : {}),

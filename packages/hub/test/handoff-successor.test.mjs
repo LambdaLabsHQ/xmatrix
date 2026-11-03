@@ -80,13 +80,10 @@ test("@auto leaves the harness to routing and is drawn on the handoff message", 
   assert.deepEqual(dispatch.runMetadata, { handoffSourceInstanceId: "instance-1", sourceMention: "@claude:3:handoff:@auto" });
 });
 
-test("an unconfirmed stop still starts the successor, told to wait for the branch", async () => {
+test("an unconfirmed stop refuses the successor until the exact source has exited", async () => {
   const f = fixture({ stop: async () => ({ stopped: false }) });
-  const result = await launchHandoffSuccessor({}, f.input, f.dependencies);
-  assert.equal(result.agentName, "claude");
-  const body = f.calls.find(call => call[0] === "dispatch")[1].body;
-  assert.match(body, /was asked to push its whole checkout/);
-  assert.match(body, /retry for a few minutes/);
+  await assert.rejects(launchHandoffSuccessor({}, f.input, f.dependencies), { code: "handoff_source_stop_pending" });
+  assert.equal(f.calls.some(call => call[0] === "dispatch"), false);
 });
 
 test("unsaved work still gets a successor, told the work stayed behind", async () => {
@@ -145,7 +142,6 @@ test("pending, successful and failed exports keep the same launch request", asyn
     return { agentName: "codex" };
   };
   for (const stop of [
-    async () => ({ stopped: false }),
     undefined,
     async (...args) => ({ stopped: true, handoffExport: { branch: args[4].branch, state: "failed", dirty: false,
       error: "push failed" } }),
@@ -195,9 +191,26 @@ test("the source's exported conversation goes to the successor's spawn, whatever
   assert.doesNotMatch(dispatch.body, /订第一段住宿/, "the conversation is not routed as the launch's text");
 });
 
-test("a stop that reports no conversation still starts the successor without one", async () => {
-  const f = fixture({ site: {}, stop: async () => ({ stopped: false }) });
+test("a confirmed stop that reports no conversation starts the successor without one", async () => {
+  const f = fixture({ site: {}, stop: async () => ({ stopped: true }) });
   await launchHandoffSuccessor({}, f.input, f.dependencies);
   const dispatch = f.calls.find(call => call[0] === "dispatch")[1];
   assert.equal(Object.hasOwn(dispatch, "handoffContext"), false);
+});
+
+test("handoff conditions reach ordinary routing without losing source exclusion", async () => {
+  const f = fixture({ harness: "codex" });
+  f.input.tags = { machine: "Laptop", model: "chosen", effort: "high" };
+  await launchHandoffSuccessor({}, f.input, f.dependencies);
+  const request = f.calls.find(call => call[0] === "dispatch")[1];
+  assert.deepEqual(request.tags, { repo: "acme/app", harness: "codex", ...f.input.tags });
+  assert.equal(request.excludeSourceInstanceId, "instance-1");
+});
+
+test("a different work site is refused before stopping or exporting source work", async () => {
+  for (const tags of [{ repo: "other/project" }, { pwd: "/other" }]) {
+    const f = fixture(); f.input.tags = tags;
+    await assert.rejects(launchHandoffSuccessor({}, f.input, f.dependencies), { code: "handoff_location_conflict" });
+    assert.deepEqual(f.calls, []);
+  }
 });

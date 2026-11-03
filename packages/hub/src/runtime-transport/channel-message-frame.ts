@@ -20,6 +20,7 @@ import {
   mentionAddressTokens,
   scanMentionAddresses,
   filterOperationalMentions,
+  existingInstanceMentionScanner,
   messagePublicationEvidence,
   parseAutoLaunchMentions,
   MENTION_BROADCAST_NAMES,
@@ -70,8 +71,8 @@ export function channelMessageDeliveryIntent(
 /**
  * Resolve a committed message for one exact live Agent Instance.
  *
- * Ordinary channel messages remain work for every live Instance. Automation is
- * different: its datum is first a canonical Channel fact. It becomes work only
+ * Unaddressed messages remain work for every live Instance. An exact Instance
+ * assignment is context for its peers. Automation becomes work only
  * for the exact live `@agent:N` address it contains. This keeps a fresh
  * `@auto repo:<owner/repo>` summon from interrupting unrelated existing Agents,
  * and makes an Automation that mentions its own live ordinal actionable.
@@ -101,9 +102,16 @@ export function agentChannelMessageDeliveryIntent(
   // limit again and hands itself off a second time.
   if (parseProductHandoffInstanceMentions(message.body).length > 0 ||
       parseProductRebornInstanceMentions(message.body).length > 0) return "context";
+  const exactMentions = [...message.body.matchAll(existingInstanceMentionScanner())].map(match => {
+    const start = match.index! + match[0].length - match[1]!.length - 1;
+    return { start, end: start + match[1]!.length + 1 };
+  });
+  const addressed = filterOperationalMentions(message.body, exactMentions).length > 0 &&
+    filterOperationalMentions(message.body, scanMentionAddresses(message.body,
+      mentionAddressTokens(MENTION_BROADCAST_NAMES))).length === 0;
   const metadata = message.metadata;
-  if (!metadata || typeof metadata !== "object" ||
-      (metadata as Record<string, unknown>).xmatrixProvenance !== "scheduled_automation") {
+  if (!addressed && (!metadata || typeof metadata !== "object" ||
+      (metadata as Record<string, unknown>).xmatrixProvenance !== "scheduled_automation")) {
     return "work";
   }
   const ordinal = recipient.channelInstanceId?.trim();

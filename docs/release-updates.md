@@ -44,6 +44,20 @@ page's selection and `/` menus) are now a flat wood-tinted slip without a
 shadow. Web only, no schema or client migration. Recovery is a CI-validated
 beta release reverting this change.
 
+## Unreleased: Handoff preserves explicit placement and Instance ownership
+
+Handoff now parses launch conditions after the successor address and carries
+an explicitly selected source machine forward by its admitted identity. An
+override passes ordinary launch authorization; unavailable placement remains a
+visible refusal. A successor starts only after its source's stop is confirmed.
+Reborn stop failures retain the daemon's bounded reason. Exact Instance
+assignments remain context for peers, while unaddressed messages and broadcasts
+keep their existing behavior. Bootstrap identifies the current Instance and Run
+and asks completed temporary helpers to stop, preserving unfinished waits.
+Hub and CLI; no schema migration. Existing wrappers need a normal reborn after
+updating CLI to load the new bootstrap. Recovery is a CI-validated beta release
+reverting the change.
+
 ## Unreleased: Gmail sends from a verified send-as alias
 
 `@gmail:send:<to> from:<address>` refused any address that was not a
