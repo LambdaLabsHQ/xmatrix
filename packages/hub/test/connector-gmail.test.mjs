@@ -1,7 +1,7 @@
 import { withProviderResponses as fetched } from "./support/fetch-responses.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { GMAIL_ACTIONS as ACTIONS, verifyGmail } from "../src/connectors/actions/gmail.ts";
+import { GMAIL_ACTIONS as ACTIONS, gmailPreview, verifyGmail } from "../src/connectors/actions/gmail.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
@@ -432,4 +432,60 @@ test("only a mailbox's member subscribes a Channel to its notifications", async 
   assert.match(await sync("*", "someone-else"), /only a mailbox's own member/);
   assert.match(await sync("agent@example.com", "owner"), /only a mailbox's own member/);
   assert.equal(await sync("owner@example.com", "someone-else", false), undefined);
+});
+
+const sendAsList = (...entries) => gmail({ sendAs: [
+  { sendAsEmail: "me@example.com", displayName: "Me", isPrimary: true }, ...entries] });
+const companyAlias = { sendAsEmail: "Hello@Company.test", displayName: "Company, Inc.", verificationStatus: "accepted" };
+
+test("send goes out as a verified send-as alias of the caller's mailbox, named on the card and checked again before sending", async () => {
+  assert.deepEqual(statement("@gmail:send:ops@example.com from:hello@company.test Hi\nBody"),
+    { to: "ops@example.com", from: "hello@company.test", subject: "Hi", body: "Body" });
+  const staged = await fetched([sendAsList(companyAlias)], () => ACTIONS.send.prepare(ctx, { to: "ops@example.com", from: "hello@company.test", subject: "Hi", body: "Body" }));
+  assert.deepEqual(proxied(staged.calls[0]), { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs", query: "" });
+  assert.equal(staged.calls[0].body.method, "GET", "preparing never sends");
+  const frozen = staged.result;
+  assert.deepEqual([frozen.from, frozen.via, frozen.fromName, frozen.account], ["hello@company.test", "me@example.com", "Company, Inc.", "ca_mailbox1"]);
+  assert.match(decodedRaw(frozen.raw), /^From: "Company, Inc\." <hello@company\.test>\r\nTo: ops@example\.com\r\nSubject: Hi\r\n/u);
+  assert.deepEqual(gmailPreview(frozen), { from: "Company, Inc. <hello@company.test> (through me@example.com)",
+    to: "ops@example.com", subject: "Hi", body: "Body" }, "the approval card names the alias and its mailbox");
+  let checks = 0;
+  const sent = await fetched([sendAsList(companyAlias), gmail({ id: "19a0b1c2d3e4f5a6" })],
+    () => ACTIONS.send.execute({ ...ctx, authorizeWrite: async () => { checks++; } }, frozen));
+  assert.deepEqual(sent.calls.map(call => [call.body.method, call.body.connected_account_id]), [["GET", "ca_mailbox1"], ["POST", "ca_mailbox1"]]);
+  assert.equal(checks, 1);
+  assert.equal(sent.calls[1].body.body.raw, frozen.raw, "the approved message is sent unchanged");
+  assert.equal(sent.result.summary, "Sent Gmail message 19a0b1c2d3e4f5a6 from hello@company.test (through me@example.com) to ops@example.com.");
+  for (const changed of [[], [{ ...companyAlias, verificationStatus: "pending" }], [{ ...companyAlias, displayName: "Someone else" }]]) {
+    const blocked = await fetched([sendAsList(...changed)], () => assert.rejects(ACTIONS.send.execute(ctx, frozen), /no longer a verified send-as address of me@example\.com/u));
+    assert.equal(blocked.calls.length, 1, "nothing is sent once the alias changed");
+  }
+  const unicode = await fetched([sendAsList({ ...companyAlias, displayName: "公司" })], () => ACTIONS.send.prepare(ctx, { to: "ops@example.com", from: "hello@company.test", subject: "Hi", body: "" }));
+  assert.match(decodedRaw(unicode.result.raw), /^From: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <hello@company\.test>\r\n/u);
+});
+
+test("send refuses an unverified alias or one outside the caller's mailboxes, listing what it may send from", async () => {
+  const pending = { sendAsEmail: "pending@company.test", displayName: "", verificationStatus: "pending" };
+  await fetched([sendAsList(companyAlias, pending)], () => assert.rejects(
+    ACTIONS.send.prepare(ctx, { to: "ops@example.com", from: "pending@company.test", subject: "Hi", body: "" }),
+    /pending@company\.test is neither a connected Gmail mailbox you may use nor a verified Gmail send-as address of one; you may send from me@example\.com \(send-as: hello@company\.test\)/u));
+  const human = { credentials: shared, caller: { userId: "user-1" } };
+  const listed = await fetched([sendAsList()], () => assert.rejects(
+    ACTIONS.send.prepare(human, { to: "x@example.com", from: "bot@example.com", subject: "s", body: "" }), /you may send from me@example\.com$/u));
+  assert.deepEqual(listed.calls.map(call => call.body.connected_account_id), ["ca_mailbox1"], "another owner's mailbox is never read");
+  const own = await fetched([], () => ACTIONS.send.prepare(ctx, { to: "x@example.com", from: "ME@example.com", subject: "s", body: "" }));
+  assert.deepEqual([own.calls.length, own.result.from, own.result.via], [0, "me@example.com", undefined], "a mailbox's own address needs no send-as read");
+  assert.doesNotMatch(decodedRaw(own.result.raw), /^From:/mu);
+});
+
+test("reply answers from the send-as alias the original was addressed to", async () => {
+  const original = gmail({ id: "18f2a9c0d1e2b3a4", threadId: "18f2a9c0d1e2b300", payload: { headers: [
+    { name: "From", value: "Broker <help@broker.test>" }, { name: "To", value: "Company <hello@company.test>, me@example.com" },
+    { name: "Subject", value: "Your inquiry" }] } });
+  const staged = await fetched([original, sendAsList(companyAlias)], () => ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "Thanks" }));
+  assert.deepEqual([staged.result.from, staged.result.via, staged.result.to], ["hello@company.test", "me@example.com", "help@broker.test"]);
+  assert.match(decodedRaw(staged.result.raw), /^From: "Company, Inc\." <hello@company\.test>\r\nTo: help@broker\.test\r\nSubject: Re: Your inquiry\r\n/u);
+  const direct = gmail({ id: "18f2a9c0d1e2b3a4", payload: { headers: [{ name: "From", value: "a@b.test" }, { name: "To", value: "me@example.com" }] } });
+  const plain = await fetched([direct], () => ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "x" }));
+  assert.deepEqual([plain.calls.length, plain.result.from, plain.result.via], [1, "me@example.com", undefined], "mail to the mailbox itself reads no send-as list");
 });

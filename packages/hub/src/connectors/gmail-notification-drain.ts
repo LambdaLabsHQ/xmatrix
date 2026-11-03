@@ -6,7 +6,8 @@ import { connectorAppRepository, connectorCredentialRepository, gmailRoutingRepo
 import { appendToRoutes, connectorEventMessageId } from "./event-ingress";
 import type { ConnectorEvent } from "./provider";
 import { parseMailboxes, type GmailMailbox } from "./gmail-mailboxes";
-import { autoReadGmailMessage, GMAIL_AUTO_READ_HOURLY_LIMIT } from "./gmail-auto-read";
+import { autoReadGmailMessage } from "./gmail-auto-read";
+import { writeConnectorPrivateResult } from "./private-result-content";
 import { gmailWatchIdentity,gmailWatchToken,renewGmailWatch,verifyGmailWatchMailbox } from "./gmail-watch-client";
 import { gmailIncomingChanges } from "./gmail-notification-api";
 import { ProviderRequestError } from "./http";
@@ -27,29 +28,35 @@ async function routes(env: Env, job: GmailRoutingJob, feature?: string) {
   }
   return [...routes.values()];
 }
-async function post(env: Env, job: GmailRoutingJob, event: ConnectorEvent, feature?: string) {
-  const targets = await routes(env, job, feature);
-  try { await appendToRoutes(env, dispatchProductMessageAppend, "gmail", event, targets); }
+async function post(env: Env, job: GmailRoutingJob, event: ConnectorEvent, feature?: string,
+  deliverTo?: Awaited<ReturnType<typeof routes>>, appMetadata?: Record<string, unknown>) {
+  const targets = deliverTo ?? await routes(env, job, feature);
+  try { await appendToRoutes(env, dispatchProductMessageAppend, "gmail", event, targets, appMetadata); }
   catch { throw new ProviderRequestError(503, "Notification delivery failed"); }
   return targets;
 }
 function notice(job: GmailRoutingJob, eventId: string, body: string): ConnectorEvent {
   return { eventId, sourceRef: `gmail:${job.selection.address}`, feature: "notice", summary: body, body };
 }
-/** The notification carries only the message ID; the connector's own read follows it as a private result. */
+/** One message per new mail and Channel: the notification, carrying the connector's own read as its private result. */
 async function deliver(env: Env, job: GmailRoutingJob, id: string, read: { credentials: Readonly<Record<string, string>>; mailbox: GmailMailbox }) {
   const repository = gmailRoutingRepository(env);
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
-  const event = { eventId: `${job.id}:${id}`, sourceRef: `gmail:${job.selection.address}`, feature: "message.received",
-    summary: "A new Gmail message is available",
-    body: `A new Gmail message is available in ${job.selection.address}. Read it with @gmail:read:${id}.` };
-  const targets = await post(env, job, event, event.feature);
+  const eventId = `${job.id}:${id}`, feature = "message.received";
+  const targets = await routes(env, job, feature);
+  const autoRead = targets.length ? await autoReadGmailMessage(env, { job, id, ...read }) : undefined;
+  // Ownership can change while Gmail answers; a stale read is never stored or announced.
+  if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
+  const privateRead = autoRead && "detail" in autoRead ? autoRead.detail : undefined;
+  // Every copy is stored before any notification names it, so a retry never posts one without its result.
+  if (privateRead !== undefined) await Promise.all(targets.map(route => writeConnectorPrivateResult(env, { channelId: route.channelId,
+    spaceId: job.spaceId, ownerUserId: job.userId, messageId: connectorEventMessageId("gmail", eventId, route.channelId), detail: privateRead })));
+  const body = `A new Gmail message is available in ${job.selection.address}. Read it with @gmail:read:${id}.`;
+  const event = { eventId, sourceRef: `gmail:${job.selection.address}`, feature,
+    summary: "A new Gmail message is available", body: autoRead && "unread" in autoRead ? `${body} ${autoRead.unread}` : body };
+  await post(env, job, event, feature, targets, privateRead === undefined ? undefined : { xmatrixPrivateConnectorResultOwner: job.userId });
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
   await fireConnectorAutomationTriggers(env, { spaceId: job.spaceId, provider: "gmail", event, authorizedUserId: job.userId });
-  await autoReadGmailMessage(env, { job, id, ...read, current: () => repository.current(job),
-    limited: await repository.deliveredLastHour(job, GMAIL_AUTO_READ_HOURLY_LIMIT) >= GMAIL_AUTO_READ_HOURLY_LIMIT,
-    notifications: targets.map(route => ({ channelId: route.channelId,
-      messageId: connectorEventMessageId("gmail", event.eventId, route.channelId) })) });
   await repository.delivered(job,id);
 }
 async function process(env: Env, job: GmailRoutingJob) {
