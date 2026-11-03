@@ -102,3 +102,22 @@ test("an animation cancelled while held stays cancelled", () => {
   frames.frame(16);
   assert.equal(push.playState, "idle");
 });
+
+test("a change built on the quiet frame starts there with what was held, and one put away meanwhile does not", () => {
+  const frames = fakeFrames();
+  const { startAfterPaint, whenQuiet } = (() => {
+    delete require.cache[require.resolve("./start-after-paint.ts")];
+    return require("./start-after-paint.ts");
+  })();
+  const bar = heldAnimation();
+  const built = [];
+  startAfterPaint([bar]);
+  whenQuiet(() => built.push(bar.playState));
+  const putAway = whenQuiet(() => built.push("put away"));
+  frames.frame(16, 60);
+  putAway();
+  frames.frame(16);
+  assert.deepEqual(built, []);
+  frames.frame(16);
+  assert.deepEqual(built, ["running"]);
+});
