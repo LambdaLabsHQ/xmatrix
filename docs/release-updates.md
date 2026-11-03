@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: A quote is one yellow slip
+
+A quoted passage in a sent message was a grey block followed by a dashed,
+underlined "— author in #channel" link. Every quote is now one yellow paper
+slip, the open ask card's wood thinned into the paper, sized to its words:
+above the composer before it is sent, in the message once it is, and on the
+words it marks when opened. A quote of a message in the same conversation is
+its own reference: the slip alone, with no author, time or channel, which
+jumps to that message and highlights exactly the quoted words. A quote from
+another conversation keeps a quiet source line inside the slip. Same-channel
+is decided by the link's path, so quotes written on xmatrix.sh, beta or the
+desktop app all count. The Markdown Agents read is unchanged. Web only, no
+schema or client migration. Recovery is a CI-validated beta release reverting
+this change.
+
 ## Unreleased: Conversation push diagnostics can be read
 
 WEB-Z captured why the mobile conversation push declined, but the Sentry issue
