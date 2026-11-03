@@ -124,7 +124,11 @@ The production x-matrix Space on 2026-09-26:
 - Its title is generated from its content and kept current.
 - Anyone starts one from anywhere: the conversation list, a page block
   ("Discuss"), a mention, an Automation or Focus.
-- **"Discuss" on any selected passage**, of a page or of a message, starts a
+- **"Quote" on a passage selected in a message** puts it above that
+  conversation's own composer, quoted with a link back to the message, and the
+  next message sent there carries it as a discussion's first message does.
+- **"Discuss" on any selected passage** (on a message: "Discuss in new
+  channel"), of a page or of a message, starts a
   new conversation named by what its first message says, as New conversation
   is, and by the passage only until something is written. Its first message opens with the
   passage as a quote and a link back to where it came from, so every Agent in
