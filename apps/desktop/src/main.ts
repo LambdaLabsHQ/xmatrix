@@ -2031,7 +2031,30 @@ async function finishInstalledDaemonStartup(start: ManagedStart, errorMessage: s
   const since = Date.now();
   const existing = await waitForExistingDaemonProcess();
   if (existing) return runningLocalDaemonStatus(existing.pid, true);
-  return setDaemonStatus("error", { message: notUpMessage, failure: daemonFailure("service_not_up", managedDaemonLogTail(since)) });
+  const windowsTask = await windowsDaemonTaskResult();
+  return setDaemonStatus("error", { message: notUpMessage, failure: daemonFailure("service_not_up",
+    windowsTask?.detail ?? managedDaemonLogTail(since), windowsTask?.lastResult) });
+}
+
+/**
+ * What Windows says the daemon task last did. The task writes no log of its
+ * own, so its state and last result are the only account of a daemon that
+ * never came up (0x41301 is "running", 0x8007052E a refused sign-in).
+ */
+async function windowsDaemonTaskResult(): Promise<{ detail: string; lastResult?: number } | null> {
+  if (process.platform !== "win32") return null;
+  const outcome = await runWindowsDaemonTaskCommandOutcome([
+    "$ErrorActionPreference='Stop'",
+    `$taskName=${powershellSingleQuoted(WINDOWS_DAEMON_TASK_NAME)}`,
+    "$info=Get-ScheduledTaskInfo -TaskName $taskName",
+    "$task=Get-ScheduledTask -TaskName $taskName",
+    "'state=' + $task.State + ' lastTaskResult=0x' + ('{0:X}' -f $info.LastTaskResult) + ' lastRunTime=' + $info.LastRunTime.ToUniversalTime().ToString('o')",
+  ].join("; "));
+  const detail = outcome.output.trim();
+  if (!outcome.started || !detail) return null;
+  const hex = detail.match(/lastTaskResult=0x([0-9A-F]+)/iu)?.[1];
+  const lastResult = hex ? Number.parseInt(hex, 16) : undefined;
+  return { detail: `Windows scheduled task: ${detail}`, ...(Number.isSafeInteger(lastResult) ? { lastResult } : {}) };
 }
 
 async function startWindowsDaemonTaskIfAvailable(options: { force?: boolean } = {}) {
