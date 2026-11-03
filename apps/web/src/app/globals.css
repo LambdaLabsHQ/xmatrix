@@ -2765,6 +2765,37 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   padding: 0.6em 0.9em;
 }
 
+/* The passage a discussion opened from (DiscussionCitation): the quote's tinted paper, sized to its words, its
+   source a quiet line inside the same slip rather than a dash and an underlined link beneath it. */
+.xmatrix-app .rich-message .message-citation {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 14px 9px;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--foreground) 4.5%, transparent);
+}
+.xmatrix-app .rich-message .message-citation + * { margin-top: 10px; }
+.xmatrix-app .rich-message .message-citation-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+.xmatrix-app .rich-message .message-citation-source {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.xmatrix-app .rich-message .message-citation-source a {
+  color: var(--muted-foreground) !important;
+  text-decoration: none !important;
+}
+.xmatrix-app .rich-message .message-citation-source a:hover { color: var(--foreground) !important; }
+
 
 /*
  * Desktop: float the composer over the chat timeline, matching the mobile float
