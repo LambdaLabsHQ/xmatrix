@@ -44,7 +44,7 @@ async function confirmProviderQuota(userId, id) {
  * plays machine A's daemon answering the handoff stop. Returns what the
  * Channel and machine B saw.
  */
-async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuota = false, cancelWaiting = false, initialQuota = false } = {}) {
+async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuota = false, cancelWaiting = false, initialQuota = false, pinned = false } = {}) {
   const userId = `cross-machine-handoff-${randomUUID()}`;
   const github = await githubInstallationCatalog(installationId, [{
     id: 1, name: "xmatrix", full_name: repository, private: true, archived: false,
@@ -115,11 +115,12 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       return;
     }
 
-    // claude starts on machine A in a checkout of the repository.
+    // Only machine A has claude. Selecting its harness leaves placement
+    // portable unless the owner explicitly pins this work to that machine.
     const spawnA = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "claude spawn on machine A");
     const summon = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, { method: "POST", headers,
-      body: JSON.stringify({ body: `@auto repo:${repository} machine:${machineA} fix the bug` }) });
+      body: JSON.stringify({ body: `@claude repo:${repository}${pinned ? ` machine:${machineA}` : ""} fix the bug` }) });
     assert.equal(summon.status, 200, await summon.clone().text());
     const launch = await spawnA;
     assert.equal(launch.remoteRepo, repository);
@@ -133,6 +134,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
         runId: launch.runId, executionKey: launch.executionKey, autoJoinChannelId: channel.id } }, token);
     assert.equal((await source.request({ type: "join_channel", channelId: channel.id, historyLimit: 0 })).type, "channel_joined");
 
+    let sleepingHandoff;
     // A sleeping source has no active Run: the old handoff implementation
     // omitted it from stop targets, then the successor's reply woke it again.
     if (sleeping) {
@@ -149,9 +151,10 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       }
       assert.equal(resting.rest_state, "sleeping", JSON.stringify(resting));
       source.ws.close();
-      const response = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
+      // Admission now waits for the daemon's stop confirmation. Answer it
+      // below while this request is in flight, as a real daemon does.
+      sleepingHandoff = worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
         method: "POST", headers, body: JSON.stringify({ body: `@claude:${resting.channel_instance_id}:handoff:@auto` }) });
-      assert.equal(response.status, 200, await response.clone().text());
     }
 
     // Its provider account runs out, or the owner hands off its sleeping work.
@@ -176,7 +179,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       assert.equal(stop.resumeSessionKey, launch.resumeSessionKey);
       for (const [key, value] of Object.entries(repoPool)) assert.equal(stop[key], value);
     }
-    const spawnB = waitForQuota ? null : daemonB.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
+    const spawnB = waitForQuota || pinned ? null : daemonB.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "codex spawn on machine B", 30_000);
     daemonA.ws.send(JSON.stringify({ type: "machine_stop_result", requestId: stop.requestId, runId: stop.runId,
       executionKey: stop.executionKey, agentId: stop.agentId, instanceId: stop.instanceId,
@@ -184,6 +187,21 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       repoIdentity: stop.repoIdentity, repoKeyId: stop.repoKeyId, slotId: stop.slotId,
       worktreeDisposition: stop.worktreeDisposition, ok: true, pid: 4242, cleanupReason: "process_terminated",
       ...answerStop(stop), relayLease: stop.relayLease }));
+    if (sleepingHandoff) {
+      const response = await sleepingHandoff;
+      assert.equal(response.status, 200, await response.clone().text());
+    }
+
+    if (pinned) {
+      await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
+        message => message.messageId === handoff.messageId && (message.commandResult?.notes ?? []).some(note =>
+          /could not hand off.*registration_machine_unavailable/u.test(note.text)),
+        "explicit source machine prevents cross-machine handoff", 30_000);
+      const launches = await inTestTransaction(tx => tx.query({
+        text: "SELECT launch_id FROM data.agent_launches WHERE channel_id=$1", values: [channel.id] }));
+      assert.equal(launches.length, 1, "a portable successor must not bypass the owner's machine constraint");
+      return;
+    }
 
     if (waitForQuota) {
       const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
@@ -302,6 +320,10 @@ test("a machine whose daemon predates exports still hands off with branch retrie
   const { branch, successor } = await usageLimitedOnMachineA(() => ({}));
   assert.ok(successor.prompt.includes(`git fetch origin ${branch} && git checkout --detach FETCH_HEAD`));
   assert.match(successor.prompt, /If the branch never appears, its directory remains on its machine/);
+});
+
+test("an explicit source machine refuses cross-machine quota handoff", async () => {
+  await usageLimitedOnMachineA(() => ({}), { pinned: true });
 });
 
 test("handing off a sleeping source stops it before the successor's reply can wake it", async () => {
