@@ -2777,6 +2777,7 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 }
 .xmatrix-app .rich-message .message-citation + * { margin-top: 10px; }
 .xmatrix-app .rich-message .message-citation-text {
+  display: block;
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2795,6 +2796,21 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   text-decoration: none !important;
 }
 .xmatrix-app .rich-message .message-citation-source a:hover { color: var(--foreground) !important; }
+/* A quote of a message in this conversation is the slip alone, which opens that message: it darkens under the
+   pointer as a paper tile does, and the words it opened are marked there in the same tint as the jumped-to row. */
+.xmatrix-app .rich-message button.message-citation {
+  display: block;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+.xmatrix-app .rich-message button.message-citation:hover {
+  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+}
+::highlight(cited-passage) {
+  background-color: color-mix(in oklab, var(--primary) 22%, transparent);
+}
 
 
 /*

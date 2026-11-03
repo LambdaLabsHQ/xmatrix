@@ -4,7 +4,7 @@
  * Shared rich-message presentation (markdown body).
  * Lives below composer/timeline so both views can import without forming an SCC.
  */
-import { memo } from "react";
+import { memo, useContext } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { splitDiscussionHead, type ConnectorInvocation, type DiscussionHead } from "@xmatrix/protocol";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
@@ -17,6 +17,7 @@ import {
 import { ConnectorCommandChip, MentionRichText } from "./mention-read-chip";
 import { RICH_MESSAGE_CLASS_NAME, RICH_MESSAGE_PARAGRAPH_CLASS_NAME } from "./row-frames";
 import { cn } from "@/lib/utils";
+import { CitingConversationContext, messageHere, notePassageOpened } from "./cited-passage";
 
 export const messageMarkdownComponents: Components = createMessageMarkdownComponents();
 
@@ -78,9 +79,25 @@ export const RichMessageContent = memo(function RichMessageContent({
 
 /**
  * The passage a discussion opened from, as a slip of tinted paper: its words in full ink, and under them, in
- * quiet ink, where they came from, which opens it. Quoted text never summons anyone, so it stays plain text.
+ * quiet ink, where they came from, which opens it. A passage of a message in this conversation is its own
+ * reference: the slip alone, which opens that message with the quoted words marked. Quoted text never summons
+ * anyone, so it stays plain text.
  */
 function DiscussionCitation({ head, components }: { head: DiscussionHead; components: Components }) {
+  const conversation = useContext(CitingConversationContext);
+  const messageId = conversation ? messageHere(head.href, conversation.channel) : undefined;
+  if (conversation && messageId) {
+    return (
+      <button type="button" className="message-citation"
+        onClick={() => {
+          notePassageOpened(messageId, head.quote);
+          conversation.openMessage(messageId);
+        }}>
+        {/* Its words name the button, as a blockquote inside one would not. */}
+        <span className="message-citation-text">{head.quote}</span>
+      </button>
+    );
+  }
   const Anchor = components.a ?? "a";
   return (
     <figure className="message-citation">

@@ -113,16 +113,38 @@ test("a selection across two messages offers nothing", async ({ page }) => {
   await expect(page.getByTestId("message-selection-menu")).toHaveCount(0);
 });
 
-// A message carrying a quoted passage shows it as one paper slip: the words, then where they came from, which links back.
-test("a quoted passage shows as one slip with its source inside it", async ({ page }) => {
+// A passage quoted from another conversation shows as one paper slip: the words, then where they came from, which links back.
+test("a passage quoted from elsewhere shows as one slip with its source inside it", async ({ page }) => {
   const message = { messageId: "m-quoted", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: E2E_USER_SENDER,
     body: "> 我们的成本几乎都花在\"在线\"上\n\n— [claude:1 in #xMatrix 免费与付费模式重新设计](https://xmatrix.sh/app/s/channels/c#message:m1)\n\n那就先把在线成本拆开看。" };
   await openGeneralChannelWithHistory(page, E2E_CHANNEL, [message]);
-  const citation = page.locator("[data-message-body='m-quoted'] .message-citation");
+  const body = page.locator("[data-message-body='m-quoted']");
+  const citation = body.locator(".message-citation");
   await expect(citation.locator("blockquote")).toHaveText("我们的成本几乎都花在\"在线\"上");
   await expect(citation.getByRole("link", { name: "claude:1 in #xMatrix 免费与付费模式重新设计" }))
     .toHaveAttribute("href", "https://xmatrix.sh/app/s/channels/c#message:m1");
-  await expect(page.locator("[data-message-body='m-quoted']")).not.toContainText("—");
-  await expect(page.locator("[data-message-body='m-quoted']")).toContainText("那就先把在线成本拆开看。");
-  await page.locator("[data-message-body='m-quoted']").screenshot({ path: test.info().outputPath("message-citation.png") });
+  await expect(body).not.toContainText("—");
+  await expect(body).toContainText("那就先把在线成本拆开看。");
+  await body.screenshot({ path: test.info().outputPath("message-citation-elsewhere.png") });
+});
+
+// A passage quoted from this conversation is its own reference: the slip alone opens its message with the words marked.
+test("a passage quoted from this conversation opens its message with the words marked", async ({ page }) => {
+  const original = { messageId: "m-cost", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: E2E_USER_SENDER,
+    body: "先说结论。我们的成本几乎都花在\"在线\"上，存储和流量都很便宜。" };
+  const quoting = { messageId: "m-quoted", channelId: E2E_CHANNEL.id, sequence: 2, sentAt: E2E_NOW, from: E2E_USER_SENDER,
+    body: `> 我们的成本几乎都花在"在线"上\n\n— [E2E Tester in #general](/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.id}#message:m-cost)\n\n那就先把在线成本拆开看。` };
+  await openGeneralChannelWithHistory(page, E2E_CHANNEL, [original, quoting]);
+  const body = page.locator("[data-message-body='m-quoted']");
+  const citation = body.getByRole("button", { name: "我们的成本几乎都花在\"在线\"上" });
+  await expect(citation).toBeVisible();
+  await expect(body).not.toContainText("#general");
+  await expect(body).not.toContainText("E2E Tester");
+  await body.screenshot({ path: test.info().outputPath("message-citation-here.png") });
+  await citation.click();
+  await expect(page.locator(".message-jump-highlight [data-message-body='m-cost']")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => CSS.highlights.get("cited-passage")?.values().next().value?.toString()))
+    .toBe("我们的成本几乎都花在\"在线\"上");
+  await page.mouse.move(0, 0);
+  await page.locator(".message-jump-highlight").screenshot({ path: test.info().outputPath("message-citation-landed.png") });
 });
