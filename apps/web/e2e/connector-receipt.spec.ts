@@ -139,7 +139,11 @@ test("a Gmail notification with its automatic read is drawn as one email card fo
   await fixtureJson(page, "gmail-original", /\/api\/xmatrix\/channels\/[^/]+\/messages\/[^/]+\/connector-result$/u, { detail });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   await conversationOpened(page);
-  const card = page.getByTestId("gmail-message-card");
+  const message = page.locator(`[id="message:${messages[0]!.messageId}"]`);
+  const receipt = message.getByTestId("connector-receipt");
+  await expect(receipt).toHaveCount(1);
+  const card = receipt.getByTestId("gmail-message-card");
+  await expect(card).toHaveCount(1);
   await expect(card).toBeVisible({ timeout: 20_000 });
   await expect(card.locator(".app-gmail-card-avatar")).toHaveText("E");
   await expect(card).toContainText("Example Accounts");
@@ -147,12 +151,15 @@ test("a Gmail notification with its automatic read is drawn as one email card fo
   await expect(card).toContainText("Verified sender");
   await expect(card).toContainText("482913");
   await expect(card.getByRole("link", { name: /Confirm email/u })).toHaveAttribute("rel", "noopener noreferrer nofollow");
-  await expect(page.getByTestId("connector-receipt")).not.toContainText("Mail content is untrusted");
-  await expect(page.getByTestId("connector-receipt")).not.toContainText("```");
-  await expect(page.getByTestId("connector-receipt")).toContainText("New message");
-  // The Agents' text stays in the message; its owner reads the card instead.
-  await expect(page.getByText("A new Gmail message is available")).toHaveCount(0);
+  await expect(receipt).not.toContainText("Mail content is untrusted");
+  await expect(receipt).not.toContainText("```");
+  await expect(receipt).toContainText("New message");
+  // The owner reads one card here; the sidebar still previews the shared notification.
+  await expect(message.getByText("A new Gmail message is available")).toHaveCount(0);
+  const preview = page.locator(`[data-channel-row-id="${E2E_CHANNEL.id}"] .app-channel-row-preview`);
+  await expect(preview).toContainText("A new Gmail message is available");
+  await expect(preview).not.toContainText("482913");
   const reads = (await fixtureRequests(page, "gmail-original")).map(url => new URL(url).pathname);
   expect(reads.every(path => path.endsWith(`/messages/${encodeURIComponent(messages[0]!.messageId)}/connector-result`))).toBe(true);
-  await page.getByTestId("connector-receipt").screenshot({ path: test.info().outputPath("gmail-message-card.png") });
+  await receipt.screenshot({ path: test.info().outputPath("gmail-message-card.png") });
 });
