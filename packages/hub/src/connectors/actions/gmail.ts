@@ -56,7 +56,11 @@ function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
   query: Record<string, string> = {}, meter?: UpstreamMeter, maxBytes?: number): Promise<Record<string, unknown>> {
   return composioGet(credentials, gmailPath("GET", path), query, meter, maxBytes);
 }
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
+/* Named entities common in mail HTML (currency in statements, typographic punctuation); others stay as written. */
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ",
+  yen: "¥", euro: "€", pound: "£", cent: "¢", copy: "©", reg: "®", trade: "™", deg: "°", plusmn: "±", times: "×",
+  divide: "÷", middot: "·", bull: "•", sect: "§", para: "¶", ndash: "–", mdash: "—", hellip: "…", lsquo: "‘",
+  rsquo: "’", ldquo: "“", rdquo: "”", laquo: "«", raquo: "»", ensp: " ", emsp: " ", thinsp: " ", shy: "", zwnj: "", zwj: "" };
 
 
 function line(value: unknown, max = 300): string {
