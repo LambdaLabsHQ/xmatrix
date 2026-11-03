@@ -45,7 +45,9 @@ test("a handoff of a directory without a repository stops the source and gives i
     const spawnA = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "claude spawn on machine A");
     const summon = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, { method: "POST", headers,
-      body: JSON.stringify({ body: `@claude machine:${machineA} plan the Bali trip` }) });
+      // Only A has Claude. Leave placement open so its later cross-machine
+      // handoff does not contradict an explicitly pinned source machine.
+      body: JSON.stringify({ body: "@claude plan the Bali trip" }) });
     assert.equal(summon.status, 200, await summon.clone().text());
     const launch = await spawnA;
     assert.match(launch.workspace.canonicalCwd, /^\.xmatrix-management\//u);
