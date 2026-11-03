@@ -11,6 +11,17 @@ names both, and the alias is checked again just before sending. A reply to mail
 addressed to such an alias goes out from it. The existing Gmail grant covers the
 send-as read: no new scope, no reconnect. Hub only, no schema or client
 migration. Recovery is a CI-validated beta Hub reverting this change.
+## Unreleased: A new Gmail message is one card
+
+A new-mail notification was followed by a separate Gmail read receipt that
+held the automatic read, so every arrival took two messages. The connector now
+reads first and posts one notification per Channel that carries the read as
+its private result: the owner sees the email card; others and every Agent see
+the unchanged notification text, which still wakes Agents and fires
+Automations. A failed read says so in that text. The 30-per-hour automatic
+read cap is removed; every read stays metered as `auto_read`. Hub and Web; no
+schema change. History keeps its earlier receipts. Recovery is a CI-validated
+beta release reverting this change.
 
 ## Unreleased: Content lock holders retain their last statement
 

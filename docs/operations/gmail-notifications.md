@@ -84,26 +84,27 @@ Sources: [labels.get](https://developers.google.com/workspace/gmail/api/referenc
 
 ## Automatic read
 
-After a notification is posted, the connector reads that message itself, as
+Before a notification is posted, the connector reads that message itself, as
 the mailbox owner, through the same Gmail read and endpoint allowlist that
-`@gmail:read` uses. Each notified Channel gets a Gmail read receipt right
-after the notification (an App message cannot be a reply target). The read is a private result: the owner sees the message
-in the Web for 30 days while they can read the Channel. Shared history, other
-members, admins and every Agent receive only the mask. Agents get no new access;
-they read a message with their own `@gmail:read` call, as before. The receipt is a
-system fact and wakes no one; the notification stays the work it always was.
+`@gmail:read` uses. Each notified Channel gets one message: the notification,
+carrying the read as its private result. The owner sees the email card in the
+Web for 30 days while they can read the Channel. Shared history, other members,
+admins and every Agent see only the notification text (`Read it with
+@gmail:read:<id>`). Agents get no new access; they read a message with their own
+`@gmail:read` call, as before. The notification wakes subscribed Agents and
+fires Automations as it always did.
 
-- The notification never waits on the read. If the read fails, its receipt
-  says so (the reason stays private). If the owner's access changes while Gmail
-  answers, nothing is stored or posted.
+- Every Channel's private copy is stored before any notification names it. If
+  the read fails, the notification still goes out and its text says the message
+  could not be read automatically (the reason stays in the Hub log as a status
+  kind only). If the owner's access changes while Gmail answers, nothing is
+  stored or posted.
 - Mail is untrusted. The read quotes it as retrieved text, never opens its links
   or remote images, and leaves it unread in Gmail. It reports Gmail's own
   SPF/DKIM/DMARC results (`Sender checks`), so a forged sender reads as failing
   DMARC. Only an `Authentication-Results` header from `mx.google.com` counts.
-- Once a mailbox has delivered 30 messages in the past hour, later notifications
-  are not read automatically. Their receipt says so and names `@gmail:read:<id>`.
-  This caps the Composio calls and stored copies a flood can cause; it costs one
-  proxied read per new message (metered as `auto_read`).
+- Every new message is read; there is no per-mailbox cap. Each read is one
+  proxied Composio call, metered per Space as `auto_read`.
 - Verification and sign-in mail is read like any other. Its codes and links stay
   in the owner's private record. The Hub never extracts them into Secrets.
 

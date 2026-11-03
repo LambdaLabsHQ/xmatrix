@@ -216,6 +216,8 @@ export async function appendToRoutes(
   providerId: string,
   event: ConnectorEvent,
   routes: { channelId: string; authorityRootUserId: string }[],
+  /** Hub-written facts about the event the Web draws from, e.g. its private result's owner. */
+  appMetadata?: Record<string, unknown>,
 ): Promise<number> {
   let delivered = 0;
   for (let offset = 0; offset < routes.length; offset += APPEND_BATCH) {
@@ -228,6 +230,7 @@ export async function appendToRoutes(
         body: event.body,
         principal: { kind: "user", id: route.authorityRootUserId },
         appAuthorId: providerId,
+        ...(appMetadata ? { residual: { appMetadata } } : {}),
       }).catch(() => undefined);
       return response?.ok ? 1 : 0;
     }));

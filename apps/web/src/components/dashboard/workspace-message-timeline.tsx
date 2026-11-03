@@ -1867,8 +1867,13 @@ export const MessageRow = memo(function MessageRow({
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
   }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   // Only the Hub writes an App's system fact, so only there does a receipt's text read as one.
-  const connectorReceipt = useMemo(() => message.senderKind === "app" && message.provenance === "system_fact"
-    ? parseConnectorReceipt(message.body) : undefined, [message.senderKind, message.provenance, message.body]);
+  // An App's event that carries its own private result (a new Gmail message the connector read) is drawn as that result.
+  const privateEventOwner = message.senderKind === "app" && message.provenance !== "system_fact"
+    && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string";
+  const connectorReceipt = useMemo(() => message.senderKind !== "app" ? undefined
+    : message.provenance === "system_fact" ? parseConnectorReceipt(message.body)
+    : privateEventOwner ? [{ subject: "New message", detail: "", private: true }] : undefined,
+  [message.senderKind, message.provenance, message.body, privateEventOwner]);
   const questionnaire = questionnaireMetadata(message.metadata);
   /* Cards the Hub posts are drawn only from a message the Hub wrote: its provenance is a key
      callers cannot set, while the card fields themselves are not. Anyone else's lookalike reads as text. */
