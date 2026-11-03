@@ -334,6 +334,39 @@ configuration's pool from the Cloudflare dashboard (Hyperdrive → configuration
 `waitingClients` returns to 0. Keep transactions short: long ones delay a
 provider failover or restart.
 
+## Result bytes and egress attribution
+
+PlanetScale bills public egress, and Hyperdrive reports `resultBytes` per
+config and time, but neither says which query sent the bytes. The authority
+client meters them itself: node-postgres announces every DataRow with its wire
+length, and the client adds those lengths (plus the message type byte) across
+each statement. Every query point in `postgres_substrate_observability_v4`
+carries its statement's result bytes in `double5`; every session point carries
+the checkout's total, openings included, in `double16`. Rows are not a proxy:
+one catalogue page row is a JSON array of fifty Channels with their head
+messages, about 160 KB for a large Space.
+
+Rank queries and operations by bytes, weighted like every other count:
+
+```sql
+SELECT blob9 AS query, blob11 AS operation,
+  sum(double4 * _sample_interval) AS calls,
+  sum(double5 * double4 * _sample_interval) AS bytes
+FROM xmatrix_relay_authority_observability
+WHERE index1 = 'postgres_substrate_observability_v4' AND blob1 = 'query'
+  AND timestamp > NOW() - INTERVAL '1' DAY
+GROUP BY query, operation ORDER BY bytes DESC LIMIT 30 FORMAT JSON
+```
+
+Reconcile the session total (`blob1 = 'session'`, `double16`) against
+Hyperdrive's `hyperdriveQueriesAdaptiveGroups` `resultBytes` for the same UTC
+hours before treating the ranking as the whole story. The meter does not see
+clients outside the authority database: Better Auth's own pool, the lifecycle
+maintenance executor, migrations and manual read-only sessions. Hyperdrive's
+returned bytes and PlanetScale's billed egress are separate counters and are
+not converted into each other. Points written before 2026-11-03 have no result
+bytes.
+
 ## Channel catalogue counts
 
 A Space-scoped control request (including the Channel list) with no placement

@@ -33,7 +33,14 @@ const MAX_QUERY_BYTES = 64 * 1024;
 const MAX_QUERY_VALUES = 256;
 const MAX_RESULT_ROWS = 10_000;
 
+/** node-postgres's protocol connection: one `dataRow` per result row, with its wire length. */
+interface ResultRowStream {
+  on(event: "dataRow", listener: (message: { length?: number }) => void): unknown;
+}
+
 interface PgClientPort {
+  /** Present on node-postgres clients; the result byte meter listens on it. */
+  connection?: ResultRowStream;
   connect(): Promise<unknown>;
   query<Row extends QueryResultRow = QueryResultRow>(
     input: string | { name?: string; text: string; values?: unknown[] },
@@ -101,6 +108,7 @@ class SingleClientPool implements PgPoolPort {
     // Like a pg Pool checkout, `release(true)` destroys the client so the
     // next checkout connects afresh; a plain release keeps it for `end`.
     const checkout: PgClientPort = {
+      ...(client.connection ? { connection: client.connection } : {}),
       connect: () => client.connect(),
       query: client.query.bind(client),
       end: () => client.end(),
@@ -235,6 +243,31 @@ export function lostBeforeCommit(error: unknown): boolean {
     commitResultMayBeUnknown(error);
 }
 
+const RESULT_BYTES = new WeakMap<ResultRowStream, { bytes: number }>();
+
+/**
+ * Result row bytes this client's connection has received so far, as they
+ * crossed the wire (each DataRow message with its type byte). A connection
+ * runs one statement at a time, so the difference across a statement is that
+ * statement's result. Hyperdrive and PlanetScale bill these bytes as egress;
+ * the meter only adds to a number the driver already parsed. Zero for a
+ * client without a protocol connection.
+ */
+function resultBytesReceived(client: PgClientPort): number {
+  const connection = client.connection;
+  if (!connection || typeof connection.on !== "function") return 0;
+  let meter = RESULT_BYTES.get(connection);
+  if (!meter) {
+    const counted = { bytes: 0 };
+    connection.on("dataRow", (message) => {
+      counted.bytes += (Number.isSafeInteger(message?.length) ? message.length! : 0) + 1;
+    });
+    RESULT_BYTES.set(connection, counted);
+    meter = counted;
+  }
+  return meter.bytes;
+}
+
 function observe(observer: DatabaseObserver | undefined, value: DatabaseObservation): void {
   if (!observer) return;
   try {
@@ -260,7 +293,7 @@ class SessionStats {
   readonly totals = {
     queueMs: 0, checkoutMs: 0, firstStatementMs: 0, beginMs: 0,
     sqlMs: 0, sqlMaxMs: 0, commitMs: 0, rollbackMs: 0,
-    roundTrips: 0, transactions: 0, queries: 0, rows: 0,
+    roundTrips: 0, transactions: 0, queries: 0, rows: 0, resultBytes: 0,
   };
 
   constructor(readonly connectivity: SessionConnectivity) {}
@@ -291,10 +324,11 @@ class SessionStats {
     this.totals[`${phase}Ms`] += durationMs;
   }
 
-  query(durationMs: number, rows: number): void {
+  query(durationMs: number, rows: number, resultBytes: number): void {
     this.statement(durationMs);
     this.totals.queries += 1;
     this.totals.rows += rows;
+    this.totals.resultBytes += resultBytes;
     this.totals.sqlMs += durationMs;
     this.totals.sqlMaxMs = Math.max(this.totals.sqlMaxMs, durationMs);
   }
@@ -336,13 +370,16 @@ class PgDatabaseTransaction implements DatabaseTransaction {
     const finishWait = watchPostgresLockWait(query.name, this.stats.backendPid, this.options);
     const readWait = this.context.statement === "single_read"
       ? watchPostgresReadWait(query.name, query.text, this.options) : undefined;
+    const client = this.client;
+    const bytesBefore = resultBytesReceived(client);
     try {
-      const result = await this.client.query<Row>({
+      const result = await client.query<Row>({
         text: readWait?.text ?? contentLockQueryText(this.context.operation, query.name, query.text),
         ...(query.values ? { values: [...query.values] } : {}),
       });
       const durationMs = performance.now() - startedAt;
-      this.stats.query(durationMs, result.rows.length);
+      const resultBytes = resultBytesReceived(client) - bytesBefore;
+      this.stats.query(durationMs, result.rows.length, resultBytes);
       this.stats.connectivity.reached();
       if (result.rows.length > query.maxRows) {
         this.stats.fail("database_row_limit_exceeded", this.context.operation, query.name);
@@ -350,6 +387,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
           query.name,
           durationMs,
           result.rows.length,
+          resultBytes,
           "row_limit",
           "database_row_limit_exceeded",
         ));
@@ -359,13 +397,16 @@ class PgDatabaseTransaction implements DatabaseTransaction {
         query.name,
         durationMs,
         result.rows.length,
+        resultBytes,
         "ok",
       ));
       return result.rows;
     } catch (error) {
       if (!(error instanceof DatabaseRowLimitError)) {
         const durationMs = performance.now() - startedAt;
-        this.stats.query(durationMs, 0);
+        // Rows of a statement that failed part way still crossed the wire.
+        const resultBytes = resultBytesReceived(client) - bytesBefore;
+        this.stats.query(durationMs, 0, resultBytes);
         this.stats.fail(errorCode(error), this.context.operation, query.name);
         const session = this.stats.failureSession();
         const lockWait = await finishWait?.();
@@ -378,6 +419,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
           query.name,
           durationMs,
           0,
+          resultBytes,
           "error",
           errorCode(error),
         ));
@@ -393,6 +435,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
     queryName: string,
     durationMs: number,
     rowCount: number,
+    resultBytes: number,
     outcome: DatabaseObservation["outcome"],
     code?: string,
   ): DatabaseObservation {
@@ -403,6 +446,7 @@ class PgDatabaseTransaction implements DatabaseTransaction {
       shardId: this.options.shardId,
       durationMs,
       rowCount,
+      resultBytes,
       outcome,
       slow: durationMs >= this.options.slowQueryMs,
       ...(code ? { errorCode: code } : {}),
@@ -665,9 +709,11 @@ function observePhase(
   phase: SessionPhase,
   startedAt: number,
   error?: unknown,
+  resultBytes = 0,
 ): void {
   const durationMs = performance.now() - startedAt;
   stats.phase(phase, durationMs);
+  stats.totals.resultBytes += resultBytes;
   if (error) {
     stats.fail(errorCode(error), context.operation, `database_phase_${phase}_v1`);
     recordDatabaseFailure(error, { operation: context.operation, shardId: options.shardId,
@@ -684,6 +730,7 @@ function observePhase(
     shardId: options.shardId,
     durationMs,
     rowCount: 0,
+    resultBytes,
     outcome: error ? "error" : "ok",
     slow: durationMs >= options.slowQueryMs,
     ...(error ? { errorCode: errorCode(error) } : {}),
@@ -928,14 +975,18 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
    */
   private async open(client: PgClientPort, context: DatabaseRequestContext): Promise<void> {
     const startedAt = performance.now();
+    const bytesBefore = resultBytesReceived(client);
     let admitted: boolean;
     try {
       admitted = await openTransaction(client, context, this.options, this.stats);
     } catch (error) {
-      observePhase(this.options, context, this.stats, "begin", startedAt, error);
+      observePhase(this.options, context, this.stats, "begin", startedAt, error,
+        resultBytesReceived(client) - bytesBefore);
       throw error;
     }
-    observePhase(this.options, context, this.stats, "begin", startedAt);
+    // The opening answers its settings row and any placement fence row.
+    observePhase(this.options, context, this.stats, "begin", startedAt, undefined,
+      resultBytesReceived(client) - bytesBefore);
     if (!admitted) refuseStalePlacement(this.options, context.placement!);
   }
 

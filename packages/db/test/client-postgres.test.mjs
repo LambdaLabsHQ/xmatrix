@@ -47,6 +47,32 @@ integration("one opening message begins the transaction with every setting intac
     isolation: "serializable", lock_timeout: "2s" }]);
 });
 
+// Egress attribution reads node-postgres's protocol connection: a driver
+// upgrade that stops emitting DataRow lengths must fail here, not silently
+// report zero bytes for every query.
+integration("a real driver reports each statement's result bytes as they crossed the wire", async () => {
+  assert.ok(connectionString, "XMATRIX_TEST_POSTGRES_URL is required");
+  const observations = [];
+  const sessions = [];
+  const database = createAuthorityDatabase({ connectionString, shardId: "shard-0",
+    observer: (point) => observations.push(point), sessionObserver: (summary) => sessions.push(summary) });
+  await database.transaction({ requestId: "result-bytes", operation: "client.result-bytes" }, async (transaction) => {
+    await transaction.query({ name: "test_wide_row_v1", text: "SELECT repeat('x', 1000) AS a", maxRows: 1 });
+    await transaction.query({ name: "test_three_rows_v1",
+      text: "SELECT repeat('y', 10) AS b FROM generate_series(1, 3)", maxRows: 3 });
+    await transaction.query({ name: "test_no_rows_v1", text: "SELECT 1 WHERE false", maxRows: 1 });
+  });
+  const bytes = Object.fromEntries(observations.map((point) => [point.queryName, point.resultBytes]));
+  // A DataRow is its type byte, a 4-byte length, a 2-byte field count, and
+  // each field's 4-byte length and text.
+  assert.equal(bytes.test_wide_row_v1, 1 + 4 + 2 + 4 + 1000);
+  assert.equal(bytes.test_three_rows_v1, 3 * (1 + 4 + 2 + 4 + 10));
+  assert.equal(bytes.test_no_rows_v1, 0);
+  assert.ok(bytes.database_phase_begin_v1 > 0, "the opening answers its settings row");
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].resultBytes, bytes.database_phase_begin_v1 + 1011 + 63);
+});
+
 // HUB-AY: a lock timeout erases pg_blocking_pids' wait edge. Existing driver
 // recovery tests cannot prove the diagnostic was taken while the SQL was waiting.
 integration("writer lock failures retain the live blocker without identities or SQL", async () => {
