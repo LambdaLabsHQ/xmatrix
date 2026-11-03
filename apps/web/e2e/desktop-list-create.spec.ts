@@ -7,7 +7,30 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, open
   from "./workspace-fixtures";
 
 /* A desktop list leads with its +: its first row, full width and square like
-   the rows, set apart by its tone. Nothing floats over what is open. */
+   the rows, set apart by its tone. Its label sits centred in a quieter ink
+   than the rows' names, Ctrl/⌘+N at the row's end on the label's baseline.
+   Nothing floats over what is open. */
+
+/** Where a text box's baseline sits: an empty inline-block's bottom rests on it. */
+const baseline = (element: Element) => {
+  const probe = document.createElement("span");
+  probe.style.display = "inline-block";
+  element.append(probe);
+  const y = probe.getBoundingClientRect().bottom;
+  probe.remove();
+  return y;
+};
+
+/** The label is centred in the row; the shortcut ends at the row's inset, on the label's baseline. */
+async function expectCentredWithShortcut(create: ReturnType<Page["locator"]>) {
+  const label = create.locator(".app-list-row-title");
+  const hint = create.locator(".app-list-create-shortcut");
+  await expect(hint).toHaveText(/^(⌘N|Ctrl\+N)$/u);
+  const [box, labelBox, hintBox] = await Promise.all([create.boundingBox(), label.boundingBox(), hint.boundingBox()]);
+  expect(labelBox!.x + labelBox!.width / 2).toBeCloseTo(box!.x + box!.width / 2, 0);
+  expect(box!.x + box!.width - (hintBox!.x + hintBox!.width)).toBeCloseTo(20, 0);
+  expect(await hint.evaluate(baseline)).toBeCloseTo(await label.evaluate(baseline), 0);
+}
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -40,18 +63,20 @@ test("the conversation list leads with New conversation, lit while the draft is 
     return { backdrop: style.backdropFilter, image: style.backgroundImage, radius: style.borderTopLeftRadius };
   });
   expect(paint).toEqual({ backdrop: "none", image: "none", radius: "0px" });
-  // As wide and as tall as a conversation row, its label where the names start, in their type.
+  // As wide and as tall as a conversation row, centred, in the names' size but lighter.
   expect(createBox!.width).toBeCloseTo(rowBox!.width, 0);
   expect(createBox!.height).toBeCloseTo(rowBox!.height, 0);
-  const label = create.locator("span").last();
+  await expectCentredWithShortcut(create);
+  const label = create.locator(".app-list-row-title");
   const name = row.locator(".app-channel-row-name");
-  const [labelBox, nameBox] = await Promise.all([label.boundingBox(), name.boundingBox()]);
-  expect(labelBox!.x).toBeCloseTo(nameBox!.x, 0);
   const type = (element: Element) => {
     const style = getComputedStyle(element);
-    return [style.fontSize, style.fontWeight];
+    return { size: style.fontSize, weight: Number(style.fontWeight), color: style.color };
   };
-  expect(await label.evaluate(type)).toEqual(await name.evaluate(type));
+  const [labelType, nameType] = await Promise.all([label.evaluate(type), name.evaluate(type)]);
+  expect(labelType.size).toBe(nameType.size);
+  expect(labelType.weight).toBeLessThan(nameType.weight);
+  expect(labelType.color).not.toBe(nameType.color);
 
   await create.click();
   await expect(page.getByTestId("new-conversation")).toBeVisible();
@@ -70,11 +95,10 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await expect(page.locator(".app-main .app-list-create")).toHaveCount(0);
   const heading = page.locator(".app-sidebar .app-list-section-heading", { hasText: "All pages" });
   const row = page.locator(".app-sidebar .app-page-row").first();
-  const [createBox, headingBox, rowBox, labelBox, titleBox] = await Promise.all([create.boundingBox(),
-    heading.boundingBox(), row.boundingBox(), create.locator("span").last().boundingBox(),
-    row.getByText("Home", { exact: true }).boundingBox()]);
+  const [createBox, headingBox, rowBox] = await Promise.all([create.boundingBox(), heading.boundingBox(),
+    row.boundingBox()]);
   expect(createBox!.height).toBeCloseTo(rowBox!.height, 0);
-  expect(labelBox!.x).toBeCloseTo(titleBox!.x, 0);
+  await expectCentredWithShortcut(create);
   // With no recent changes, the + leads straight into All pages and its first page.
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
@@ -118,13 +142,12 @@ test("the agent list leads with Manage machines, and an agent, its machines and 
   const heading = page.locator(".app-tool-list-group-title").first();
   const machine = page.locator(".app-tool-list-row").first();
   await expect(machine).toBeVisible();
-  const [createBox, headingBox, machineBox, labelBox, nameBox] = await Promise.all([create.boundingBox(),
-    heading.boundingBox(), machine.boundingBox(), create.locator("span").last().boundingBox(),
-    heading.getByText("codex", { exact: true }).boundingBox()]);
+  const [createBox, headingBox, machineBox] = await Promise.all([create.boundingBox(), heading.boundingBox(),
+    machine.boundingBox()]);
   expect(headingBox!.height).toBeCloseTo(machineBox!.height, 0);
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(createBox!.height).toBeCloseTo(headingBox!.height, 0);
-  expect(labelBox!.x).toBeCloseTo(nameBox!.x, 0);
+  await expectCentredWithShortcut(create);
 });
 
 test("a page row makes a page under it from its own +, shown while the row is hovered", async ({ page }) => {
