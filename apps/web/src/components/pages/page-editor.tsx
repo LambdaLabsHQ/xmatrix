@@ -323,7 +323,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
     <button type="button" title={label} aria-label={label} aria-pressed={active} disabled={disabled}
       // Keep the editor's selection: the button acts on it.
       onMouseDown={(event) => event.preventDefault()} onClick={onRun}
-      className={`flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors
+      className={`flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-colors
         hover:text-foreground disabled:opacity-40 [&_svg]:size-4 ${active ? "bg-muted text-foreground" : ""}`}>
       {children}
     </button>
@@ -880,7 +880,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       {/* Over the page, above the table: taking room in the page would move the text under the pointer. */}
       {canEdit && toolbar?.inTable && tableAt && (
         <div className="absolute z-10 w-fit -translate-y-full" style={{ left: tableAt.left, top: tableAt.top - 6 }}>
-        <PaperPopover role="toolbar" aria-label="Table" className="flex items-center gap-0.5 px-1.5 py-1"
+        <PaperPopover role="toolbar" aria-label="Table" className="flex items-center"
           data-testid="page-table-tools">
           <ToolButton label="Add a row below" onRun={() => run(addRowAfter)}><BetweenHorizontalEnd /></ToolButton>
           <ToolButton label="Add a column to the right" onRun={() => run(addColumnAfter)}><BetweenVerticalEnd /></ToolButton>
@@ -946,7 +946,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         <div className="absolute z-20 -translate-y-full"
           style={{ left: Math.max(0, selectionMenu.left - 8), top: selectionMenu.top - 6 }}>
         <PaperPopover role="toolbar" aria-label="Selection" data-testid="page-selection-menu"
-          className="flex items-center gap-0.5 p-1">
+          className="flex items-center">
           {/* Formatting, for whoever may edit: each mark's button sets it on the selection, or takes it off. */}
           {canEdit && toolbar && (
             <>
@@ -960,20 +960,20 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
               </ToolButton>
               <ToolButton label="Strikethrough" active={toolbar.marks.strike}
                 onRun={() => run(toggleMark(pageSchema.marks.strike))}><Strikethrough /></ToolButton>
-              {selectionActions && <span aria-hidden className="mx-1 h-5 w-px bg-border" />}
+              {selectionActions && <span aria-hidden className="app-paper-popover-divider" />}
             </>
           )}
           {actions?.comment ? (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => { if (current) openComment(current, false); }}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
+              className="flex items-center gap-1.5 px-3 text-sm [&_svg]:size-4">
               <MessageSquare /> Comment
             </button>
           ) : actions?.discuss && (
             <button type="button" onMouseDown={(event) => event.preventDefault()}
               onClick={() => actions.discuss!(section, current ? selectionAnchor(current.state, session.fragment) ?? undefined
                 : undefined)}
-              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
+              className="flex items-center gap-1.5 px-3 text-sm [&_svg]:size-4">
               <MessageSquare /> Discuss
             </button>
           )}
@@ -998,12 +998,12 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       {trigger && menuAt && (
         <div className="absolute z-20 w-64" style={{ left: menuAt.left, top: menuAt.bottom + 4 }}>
         <PaperPopover role="listbox" aria-label={MENU_LABELS[trigger.kind]} data-testid={`page-${trigger.kind}-menu`}
-          className="max-h-80 overflow-y-auto p-1">
+          className="max-h-80 overflow-y-auto">
           {menuItems.map((item, index) => (
             <button key={item.key} type="button" role="option" aria-selected={index === menuIndex}
               onMouseDown={(event) => event.preventDefault()} onClick={() => applyItem(item)}
               onMouseEnter={() => { menu.current.index = index; setMenuIndex(index); }}
-              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm [&_svg]:size-4
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm [&_svg]:size-4
                 [&_svg]:shrink-0 [&_svg]:text-muted-foreground`}>
               {item.icon}
               <span className="min-w-0 flex-1 truncate">{item.label}

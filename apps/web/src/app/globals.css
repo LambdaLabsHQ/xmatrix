@@ -8549,9 +8549,35 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
 }
 
 /* Its items are lines of the slip: a little more ink under the pointer, or
-   while chosen from the keyboard or pressed, and nothing at rest. */
+   while chosen from the keyboard or pressed, and nothing at rest. They run to
+   the slip's edges, so the slip's own corner cuts the first and last one and
+   no inner box has a corner of its own to line up (Daniel 2026-11-03: an
+   inset rounded highlight read as misaligned; chose edge-to-edge segments).
+   A pill (`rounded-full`) keeps its round items, which already share its curve. */
 .app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button {
   background: transparent;
+}
+
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]):not(.rounded-full) {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]):not(.rounded-full) > button {
+  border-radius: 0;
+}
+
+.app-material-paper-popover[role="toolbar"]:not(.rounded-full) > button {
+  min-height: 36px;
+  min-width: 36px;
+}
+
+/* Between groups of a toolbar's items: a hairline from edge to edge. */
+.app-paper-popover-divider {
+  align-self: stretch;
+  width: 1px;
+  background: color-mix(in oklch, var(--foreground) 12%, transparent);
 }
 
 .app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button:is(:hover:not(:disabled), :active, [aria-selected="true"], [aria-pressed="true"]) {
