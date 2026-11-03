@@ -453,6 +453,37 @@ test("a part of the push cancelled by its own component does not leave the chang
   await screenChangeLanded(page);
 });
 
+test("a conversation push builds its landing on the quiet frame and never pauses it", async ({ page }) => {
+  await installNativeBridge(page, "ios");
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  await page.evaluate(() => {
+    const probe = { paused: 0, landings: 0 };
+    (window as typeof window & { __pushProbe?: typeof probe }).__pushProbe = probe;
+    const pause = Animation.prototype.pause;
+    Animation.prototype.pause = function (this: Animation) {
+      // The drag's track is paused by design; a landing is a timed one.
+      if (document.querySelector("[data-list-transition=forward]") && this.effect?.getTiming().fill === "forwards") probe.paused += 1;
+      return pause.call(this);
+    };
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, ...args: Parameters<Element["animate"]>) {
+      const options = args[1];
+      if (document.querySelector("[data-list-transition=forward]") && typeof options === "object" && options?.easing === "linear"
+        && options.fill === "forwards") probe.landings += 1;
+      return animate.apply(this, args);
+    };
+  });
+  await generalChannelRow(page).tap();
+  await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+  await screenChangeLanded(page);
+  const probe = await page.evaluate(() => (window as typeof window & { __pushProbe?: { paused: number; landings: number } }).__pushProbe!);
+  // On iOS a compositor animation paused before its first frame never moved.
+  expect(probe).toMatchObject({ paused: 0 });
+  expect(probe.landings).toBeGreaterThan(0);
+  expect(await screenLayout(page)).toMatchObject({ timeline: 0 });
+});
+
 test("the page leaves an edge swipe to the app while a layer is open over the conversation", async ({ page }) => {
   await installNativeBridge(page, "ios");
   await openGeneralChannel(page);

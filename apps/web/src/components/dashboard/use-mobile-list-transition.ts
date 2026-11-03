@@ -5,7 +5,7 @@ import { flushSync } from "react-dom";
 
 import { useScreenChangeStore, type ScreenChangeStore } from "./screen-change-store";
 import { SPRING_SAMPLES, springDuration, springOffset } from "./screen-spring";
-import { startAfterPaint } from "./start-after-paint";
+import { whenQuiet } from "./start-after-paint";
 import { systemBackLayerOpen } from "./use-system-back";
 
 /*
@@ -257,6 +257,8 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       /** What a drag seeks, from the change's setup until it is let go. */
       track: [] as Animation[],
       landing: null as null | { toList: boolean; position: () => number; animations: Animation[] },
+      /** Cancels a landing waiting for a quiet frame. */
+      putOff: null as null | (() => void),
       putAway: 0,
     };
 
@@ -285,6 +287,8 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
 
     const close = (update?: () => void) => {
       window.clearTimeout(m.putAway);
+      m.putOff?.();
+      m.putOff = null;
       // The screen holds its last pose until the new one is in.
       const holding = [...m.track, ...(m.landing?.animations ?? [])];
       m.stage = null;
@@ -310,20 +314,26 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
     const land = (target: number, speed: number, then: () => void, afterPaint = false) => {
       const parts = m.parts;
       if (!parts) return;
-      for (const animation of m.track) animation.cancel();
-      m.track = [];
-      const landing = settleOnCompositor(parts, m.x, target, speed);
-      // A conversation just rendered is laid out and painted on the next frame;
-      // started there, the push showed on iOS only its last few points.
-      if (afterPaint) startAfterPaint(landing.animations);
-      m.landing = { toList: target > 0, ...landing };
-      // Settled, not all finished: a part cancelled by its own component (the
-      // composer box morphing) must not leave the change set up for good.
-      void Promise.allSettled(landing.animations.map((animation) => animation.finished)).then(() => {
-        if (m.landing?.animations !== landing.animations) return;
-        m.x = target;
-        then();
-      });
+      const start = () => {
+        m.putOff = null;
+        if (m.parts !== parts) return;
+        for (const animation of m.track) animation.cancel();
+        m.track = [];
+        const landing = settleOnCompositor(parts, m.x, target, speed);
+        m.landing = { toList: target > 0, ...landing };
+        // Settled, not all finished: a part cancelled by its own component (the
+        // composer box morphing) must not leave the change set up for good.
+        void Promise.allSettled(landing.animations.map((animation) => animation.finished)).then(() => {
+          if (m.landing?.animations !== landing.animations) return;
+          m.x = target;
+          then();
+        });
+      };
+      // A conversation just rendered keeps its first pose on the paused track,
+      // as a drag holds it, until the main thread is free (start-after-paint.ts);
+      // the landing is made and played only then.
+      if (afterPaint) m.putOff = whenQuiet(start);
+      else start();
     };
 
     const canDrawBack = () => state.current.conversationOverList && !systemBackLayerOpen() && !reducedMotion();

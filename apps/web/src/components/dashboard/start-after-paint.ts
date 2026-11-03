@@ -24,7 +24,8 @@ const ON_TIME_FRAME_MS = 24;
 /** The longest a change waits for the main thread before it moves regardless. */
 const MAX_HOLD_MS = 300;
 
-let held: Animation[] = [];
+/** What runs on the quiet frame: held animations play, and changes that build their animations then build them. */
+let held: Array<() => void> = [];
 let heldSince = 0;
 let waiting = false;
 
@@ -32,8 +33,7 @@ function startHeld() {
   const starting = held;
   held = [];
   waiting = false;
-  // One cancelled meanwhile stays cancelled: play() would start it again.
-  for (const animation of starting) if (animation.playState === "paused") animation.play();
+  for (const start of starting) start();
 }
 
 function waitForQuietFrame() {
@@ -56,13 +56,31 @@ function waitForQuietFrame() {
   requestAnimationFrame(frame);
 }
 
-export function startAfterPaint(animations: Array<Animation | null | undefined>): void {
-  const holding = animations.filter((animation): animation is Animation => Boolean(animation));
-  if (!holding.length) return;
-  for (const animation of holding) animation.pause();
-  held.push(...holding);
+function hold(start: () => void) {
+  held.push(start);
   if (waiting) return;
   waiting = true;
   heldSince = performance.now();
   waitForQuietFrame();
+}
+
+/**
+ * Runs `start` on the quiet frame, with everything else held for it. A change
+ * that can keep its first pose by other means (the conversation push, on its
+ * paused track) creates its animations there instead of pausing them: on iOS a
+ * compositor animation paused before its first frame and played later was not
+ * seen to move at all. Returns a cancel for a change put away meanwhile.
+ */
+export function whenQuiet(start: () => void): () => void {
+  let cancelled = false;
+  hold(() => { if (!cancelled) start(); });
+  return () => { cancelled = true; };
+}
+
+export function startAfterPaint(animations: Array<Animation | null | undefined>): void {
+  const holding = animations.filter((animation): animation is Animation => Boolean(animation));
+  if (!holding.length) return;
+  for (const animation of holding) animation.pause();
+  // One cancelled meanwhile stays cancelled: play() would start it again.
+  hold(() => { for (const animation of holding) if (animation.playState === "paused") animation.play(); });
 }
