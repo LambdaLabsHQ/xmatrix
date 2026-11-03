@@ -333,7 +333,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     openPage,
     closePage,
     openPageConversation,
-    dropDiscussionQuote,
     closePageConversation,
     updateSpaceMemberPermissions,
     updateSpacePreferredLanguage,
@@ -950,9 +949,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     void rebornAgentInstance(...args));
   const handoffDockInstance = useStableCallback((...args: Parameters<typeof handoffAgentInstance>) =>
     void handoffAgentInstance(...args));
-  const removeComposerQuote = useStableCallback(() => {
-    if (selectedChannel) dropDiscussionQuote(selectedChannel.id);
-  });
   const cancelComposerReply = useStableCallback(() => {
     replyTargetRef.current = null;
     replyTargetHistoryRevisionRef.current = -1;
@@ -1361,7 +1357,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onWorkspaceSelect={setDraftWorkspaceTarget}
           onCancelReply={cancelComposerReply}
           quote={discussionQuotes.get(selectedChannel.id) ?? null}
-          onRemoveQuote={removeComposerQuote}
           onAttachmentsChange={changeDraftAttachments}
           onSend={sendComposerMessage}
           onOpenAppsForSpace={openComposerApps}

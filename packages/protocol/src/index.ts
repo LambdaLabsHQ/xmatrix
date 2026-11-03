@@ -33,7 +33,7 @@ export {
 } from "./text-task.js";
 export type { TextTaskRequest, TextTaskResult, TextTaskStatus } from "./text-task.js";
 export { PAGE_AGENT_INK_MS, PAGE_CO_WRITE_RATE, PAGE_MESSAGE_CO_WRITE, PAGE_COWRITE_INPUT_CAPABILITY, PageCoWriteParser, parsePageCoWriteReply } from "./page-co-writing.js";
-export { discussionHead, splitDiscussionHead } from "./discussion-head.js";
+export { discussionHead, discussionHeadsIn, splitDiscussionHead, withoutDiscussionHeads, type PlacedDiscussionHead } from "./discussion-head.js";
 export { automaticConversationName } from "./conversation-name.js";
 export type { DiscussionHead, DiscussionSource } from "./discussion-head.js";
 export type {

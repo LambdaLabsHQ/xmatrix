@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { appViewSelectionQuery, isAppSelectionView, presenceInstanceId } from "@xmatrix/protocol";
+import { appViewSelectionQuery, discussionHead, isAppSelectionView, presenceInstanceId } from "@xmatrix/protocol";
 
 import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
@@ -51,6 +51,8 @@ import {
 } from "@/components/dashboard/mention-complete";
 import {
   clearChannelComposerDraft,
+  emptyChannelComposerDraft,
+  writeChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
 import { useAgentTraceHistorySync } from "@/components/dashboard/use-agent-trace-history-sync";
 import {
@@ -1519,6 +1521,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     return discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }, false);
   }
 
+  /** Puts a quote into a composer's draft as a block (composer-quote-blocks.ts), where the next message carries it. */
+  function quoteIntoComposer(quote: DiscussionQuote) {
+    setMentionInsertRequest((current) => ({ id: (current?.id || 0) + 1, kind: "quote", quote: quote.text,
+      source: { label: quote.label, href: quote.href } }));
+  }
+
   /**
    * A conversation started from a passage of a message (selection-discussion.ts).
    * It opens holding the passage and a link back to the message, is as open as
@@ -1537,7 +1545,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const { channel, created } = await beginConversation({ spaceId: source.spaceId,
         memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote), mode: source.mode,
         metadata: { fromChannelId: source.id, fromMessageId: messageId, autoName: true } });
-      seedQuote(channel.id, messagePassageQuote(source, message, messageId, quote));
+      // The new conversation's draft opens holding the passage as its first block, to write after.
+      const passage = messagePassageQuote(source, message, messageId, quote);
+      writeChannelComposerDraft(s.channelComposerDraftsRef.current, channel.id, { ...emptyChannelComposerDraft(),
+        text: discussionHead(passage.text, passage) });
       // Beside a page it opens beside the page, as a discussion of the page does.
       if (s.viewRef.current === "pages" && s.selectedPageId) openPageConversation(channel.id, { focus: true });
       else navigateToChannel(channel.id);
@@ -1563,7 +1574,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const sourceId = message.channelId ?? s.selectedChannelIdRef.current;
     const source = s.channelsRef.current.find((channel) => channel.id === sourceId);
     if (!source || !message.messageId) return;
-    seedQuote(source.id, messagePassageQuote(source, message, message.messageId, quote));
+    quoteIntoComposer(messagePassageQuote(source, message, message.messageId, quote));
     setComposerAutoFocusRequest((current) => current + 1);
   });
 

@@ -1,5 +1,5 @@
 import { ControlError } from "@xmatrix/db";
-import { automaticConversationName, splitDiscussionHead, utf8ByteLength, type TextTaskResult } from "@xmatrix/protocol";
+import { automaticConversationName, splitDiscussionHead, utf8ByteLength, withoutDiscussionHeads, type TextTaskResult } from "@xmatrix/protocol";
 import { mangledChannelAboutText } from "./channel-about-text";
 import { channelMessageHistory } from "./channel-messages";
 import { channelSpaceId, configureChannel, getChannel, getSpace, type SpacesDependencies } from "./spaces";
@@ -150,8 +150,7 @@ function unreadable(error: unknown): boolean {
 export async function nameDiscussionByFirstMessage(env: Env, input: {
   channelId: string; messageId: string; body: string; actorUserId: string;
 }, dependencies: SpacesDependencies = {}): Promise<void> {
-  const head = splitDiscussionHead(input.body);
-  if (!head?.rest.trim()) return;
+  if (!splitDiscussionHead(input.body) || !withoutDiscussionHeads(input.body)) return;
   const { channel } = await getChannel(env, { channelId: input.channelId,
     principal: { kind: "user", id: input.actorUserId }, purpose: "discussion-name" }, dependencies);
   if ((channel as { metadata?: Record<string, unknown> }).metadata?.autoName !== true) return;
