@@ -76,7 +76,7 @@ export const LiquidGlassPill = React.forwardRef<HTMLElement, LiquidPillProps>(
 );
 
 
-/** A menu or small form floating over the paper: a card of white paper laid on it, never glass. */
+/** A flat wood-tinted slip over paper; constrained menus scroll within its rounded edge. */
 export const PaperPopover = React.forwardRef<HTMLElement, MaterialElementProps>(function PaperPopover(
   { as, className, ...props },
   ref

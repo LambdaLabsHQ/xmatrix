@@ -8561,7 +8561,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
 .app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]):not(.rounded-full) {
   padding: 0;
   gap: 0;
-  overflow: hidden;
+  /* Clip the edge-to-edge highlights at the slip's corners while keeping
+     every item reachable when the caller bounds the menu's height. */
+  overflow: auto;
 }
 
 .app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]):not(.rounded-full) > button {

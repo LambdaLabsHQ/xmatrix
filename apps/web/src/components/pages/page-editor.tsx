@@ -998,7 +998,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       {trigger && menuAt && (
         <div className="absolute z-20 w-64" style={{ left: menuAt.left, top: menuAt.bottom + 4 }}>
         <PaperPopover role="listbox" aria-label={MENU_LABELS[trigger.kind]} data-testid={`page-${trigger.kind}-menu`}
-          className="max-h-80 overflow-y-auto">
+          className="max-h-80">
           {menuItems.map((item, index) => (
             <button key={item.key} type="button" role="option" aria-selected={index === menuIndex}
               onMouseDown={(event) => event.preventDefault()} onClick={() => applyItem(item)}

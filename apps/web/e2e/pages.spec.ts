@@ -1037,6 +1037,30 @@ test("a page is typed like Typora: the caret's line shows its markers", async ({
   await browser.screenshot({ path: test.info().outputPath("pages-editing.png") });
 });
 
+test("a long page menu scrolls to commands below its first screen", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  const server = pageDocument(BODY);
+  const editor = await openLivePage(browser, server);
+  await editor.getByText("In progress", { exact: true }).click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.press("Enter");
+  await browser.keyboard.type("/");
+  const menu = browser.getByTestId("page-insert-menu");
+  const divider = menu.getByRole("option", { name: "Divider", exact: false });
+  await expect(menu).toBeVisible();
+  await expect.poll(() => menu.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+  await expect(divider).not.toBeInViewport();
+  await menu.hover();
+  await browser.mouse.wheel(0, 600);
+  // Assert user scrolling before click(): Playwright would otherwise scroll
+  // the clipped option into view itself and conceal a non-scrollable menu.
+  await expect.poll(() => menu.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+  await expect(divider).toBeInViewport();
+  await divider.click();
+  await expect(editor.locator("hr")).toHaveCount(1);
+  await expect.poll(() => pageMarkdown(server)).toContain("---");
+});
+
 test("a page: reference in a page's text is a chip with the page's title that opens it", async ({ page: browser }) => {
   const planId = "0b7c2a1e-4f3d-4c2b-9a8e-1d2c3b4a5f6e";
   const unseenId = "11111111-2222-4333-8444-555555555555";
