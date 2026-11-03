@@ -18,6 +18,7 @@ import { ConnectorCommandChip, MentionRichText } from "./mention-read-chip";
 import { RICH_MESSAGE_CLASS_NAME, RICH_MESSAGE_PARAGRAPH_CLASS_NAME } from "./row-frames";
 import { cn } from "@/lib/utils";
 import { citingComponents, remarkDiscussionCitations } from "./discussion-citation";
+import { messageUrlTransform, picturingComponents } from "./inline-pictures";
 
 export const messageMarkdownComponents: Components = createMessageMarkdownComponents();
 
@@ -67,7 +68,8 @@ export const RichMessageContent = memo(function RichMessageContent({
           <MentionRichText text={markdownBody} rawMarkdown />
         </pre>
       ) : (
-        <ReactMarkdown remarkPlugins={MESSAGE_REMARK_PLUGINS} components={citingComponents(components)}>
+        <ReactMarkdown remarkPlugins={MESSAGE_REMARK_PLUGINS} urlTransform={messageUrlTransform}
+          components={citingComponents(picturingComponents(components))}>
           {markdownBody}
         </ReactMarkdown>
       )}

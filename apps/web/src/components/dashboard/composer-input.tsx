@@ -32,8 +32,10 @@ export type ComposerInputAuthorityProps = ComposerContextFields & {
   summonReadings?: ReadonlyArray<DraftSummonIntent>;
   /** A reading for the current draft is still on its way. */
   summonReadingPending?: boolean;
-  /** Whether a quote in the draft is of a message in this conversation (composer-quote-blocks.ts). */
+  /** Whether a quote in the draft is of a message in this conversation (composer-blocks.ts). */
   quoteIsHere?: (href: string) => boolean;
+  /** A picture of the draft as the composer draws its attachment (composer-blocks.ts). */
+  renderPicture?: (ref: string) => ReactNode;
   onSummonStartAnyway?: (reading: DraftSummonIntent) => void;
   onSend: () => void;
   /** Escape cancels (thread draft) or is unused (main composer). */
@@ -100,6 +102,7 @@ function ComposerInputSurface({
   summonReadings,
   summonReadingPending,
   quoteIsHere,
+  renderPicture,
   onSummonStartAnyway,
   channel,
   space,
@@ -319,6 +322,7 @@ function ComposerInputSurface({
             mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
             references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
             quoteIsHere={quoteIsHere}
+            renderPicture={renderPicture}
             hint={stripEmptyPasteSentinel(fieldValue ?? draft).length === 0 ? placeholder : undefined}>
             {onSummonStartAnyway && summonReadings?.some(reading => reading.choice !== "summon") &&
               <ComposerSummonOptions readings={summonReadings}
