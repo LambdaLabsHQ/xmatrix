@@ -213,6 +213,12 @@ test("read fetches a text body Gmail stores by reference, never an attachment", 
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4/attachments/ANGjdJ_body-1"]);
   assert.match(result.summary, /Statement for HU YIMING\n+Billing address: Room 1, Shanghai/u);
   assert.doesNotMatch(result.summary, /some body parts unavailable/u);
+  /* A real statement's HTML is larger than the 256 KiB default response bound; the body fetch allows more. */
+  const statement = `<p>Billing address: Shanghai</p>${"<td>row</td>".repeat(40_000)}`;
+  const large = await fetched([gmail({ payload: { mimeType: "text/html", body: { attachmentId: "ANGjdJ_large", size: statement.length } } }),
+    gmail({ size: statement.length, data: base64url(statement) })], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
+  assert.ok(base64url(statement).length > 256 * 1024);
+  assert.match(large.result.summary, /Billing address: Shanghai/u);
   const oversized = { mimeType: "text/html", body: { attachmentId: "ANGjdJ_big", size: 2_000_001 } };
   const big = await fetched([gmail({ payload: oversized })], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
   assert.equal(big.calls.length, 1, "an oversized body is not fetched");
