@@ -163,10 +163,25 @@ upload while default setup is on. The analysis has to finish before the train
 ships; its findings are alerts, not a gate verdict.
 
 CLI release builds run both macOS architectures in parallel on isolated hosted
-VMs. When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized
+VMs: ARM64 on `macos-26`, Intel on `macos-26-intel`. GitHub reported ARM64
+capacity constraints and cancelled both jobs before assigning a runner. The
+Intel build uses its own standard pool instead of taking a second ARM slot;
+each binary still runs its exact-version probe on a host that can execute it.
+The standard pools are free for public repositories
+([GitHub runner reference](https://docs.github.com/en/enterprise-cloud%40latest/actions/reference/runners/github-hosted-runners)).
+Desktop stays on Apple Silicon because its signed ARM app must actually start
+before publication; moving its build to Intel would drop that native probe.
+When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized
 across architectures and release runs because runner services can share the
 user's Keychain search list. Signing identities, per-build isolated keychains,
 artifact verification and publication gates use the same paths in both fleets.
+
+Migration evidence is a beta whose Intel and ARM CLI builds each report the
+pinned compiler, pass their executable version and Developer ID probes, and
+complete the existing R2 verification and publication. This changes the Intel
+build host, not its target, signer or release authority. Existing tags retain
+their original runner; recovery is a CI-validated forward release restoring
+the former host if needed, with the same executable and signing probes.
 
 The root `db:generate`, `db:migrate` and `db:studio` Drizzle commands were
 removed because `@xmatrix/db` no longer uses Drizzle. Use its `check` command
