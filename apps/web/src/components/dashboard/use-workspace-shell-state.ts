@@ -503,7 +503,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }
     const driver = mobileListTransitionRef.current;
     if (!driver && direction === "forward" && isMobileViewportRef.current) {
-      reportPushDeclined("no list transition was mounted", () => ({ client: getDesktopBridge()?.client ?? "web" }));
+      reportPushDeclined("no list transition was mounted", () => ({
+        isMobileViewport: isMobileViewportRef.current, client: getDesktopBridge()?.client ?? "web",
+      }));
     }
     if (driver?.run(direction, update)) return;
     update();
