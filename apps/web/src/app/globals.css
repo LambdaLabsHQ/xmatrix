@@ -8554,13 +8554,15 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
 }
 
 /* A menu or small form floating over the paper (a page's selection menu, `/`
-   insert, a link being typed, the table tools and heading menu; Quote and
-   Discuss on a passage selected in a message) is a flat slip of darker paper
-   laid on the page (user 2026-11-03: 直面风格，不带阴影，改背景色 — replacing
-   the whiter card with a soft shadow chosen 2026-10-19): no edge and no
-   shadow; its tint alone stands it off the text it covers. */
+   insert, a link being typed, the table tools and heading menu, a message's
+   hover actions; Quote and Discuss on a passage selected in a message) is a
+   slip the colour of the app's wood thinned into the paper, the open ask
+   card's material, laid flat on the page (Daniel 2026-11-03: 直面风格，不带阴影，
+   改背景色; chose the wood slip among five, replacing the whiter card with a
+   soft shadow chosen 2026-10-19): no edge and no shadow; its tint alone
+   stands it off the text it covers. */
 .app-material-paper-popover {
-  background: color-mix(in oklch, var(--foreground) 8%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+  background: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 35%, var(--app-panel-paper, oklch(0.976 0.005 85)));
   color: var(--app-panel-ink, var(--foreground));
   border-radius: 8px;
   box-shadow: none;
@@ -8573,7 +8575,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-paper-card .app-tool-lines in
 }
 
 .app-material-paper-popover:is([role="toolbar"], [role="listbox"], [role="menu"]) > button:is(:hover:not(:disabled), :active, [aria-selected="true"], [aria-pressed="true"]) {
-  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+  background: color-mix(in oklch, var(--foreground) 7%, transparent);
 }
 
 /* Notices on the paper: plain white with the tone's rail, not glass. */
