@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as protocol from "@xmatrix/protocol";
+import { gmailPreview } from "../src/connectors/actions/gmail.ts";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts";
 import { commandResult } from "../src/connectors/command-support.ts";
@@ -19,6 +20,7 @@ async function dispatcher({ providerId, spaceId, mode, repository, publish = asy
     "./credentials": { connectorPermissionRepository: () => ({ mode }), connectorActionRequestRepository: () => repository },
     "./http": { ConnectorRemedy, ProviderRequestError },
     "../usage-cost-metering": metering,
+    "./actions/gmail": { gmailPreview },
     ...imports,
   };
   return loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url), name => dependencies[name] ?? {});
