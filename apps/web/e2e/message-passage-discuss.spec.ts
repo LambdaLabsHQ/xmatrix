@@ -132,8 +132,9 @@ test("a passage quoted from elsewhere shows as one slip with its source inside i
 test("a passage quoted from this conversation opens its message with the words marked", async ({ page }) => {
   const original = { messageId: "m-cost", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: E2E_USER_SENDER,
     body: "先说结论。我们的成本几乎都花在\"在线\"上，存储和流量都很便宜。" };
+  // Written on another host than the one reading it, as a quote made on xmatrix.sh is read on beta or the desktop app.
   const quoting = { messageId: "m-quoted", channelId: E2E_CHANNEL.id, sequence: 2, sentAt: E2E_NOW, from: E2E_USER_SENDER,
-    body: `> 我们的成本几乎都花在"在线"上\n\n— [E2E Tester in #general](/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.id}#message:m-cost)\n\n那就先把在线成本拆开看。` };
+    body: `> 我们的成本几乎都花在"在线"上\n\n— [E2E Tester in #general](https://xmatrix.sh/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.id}#message:m-cost)\n\n那就先把在线成本拆开看。` };
   await openGeneralChannelWithHistory(page, E2E_CHANNEL, [original, quoting]);
   const body = page.locator("[data-message-body='m-quoted']");
   const citation = body.getByRole("button", { name: "我们的成本几乎都花在\"在线\"上" });

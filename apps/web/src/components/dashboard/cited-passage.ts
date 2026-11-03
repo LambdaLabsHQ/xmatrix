@@ -13,9 +13,20 @@ export type CitingConversation = { channel: ChannelSnapshot; openMessage: (messa
 /** The conversation on screen; outside a conversation's timeline, none. */
 export const CitingConversationContext = createContext<CitingConversation | null>(null);
 
-/** The message in `channel` a quote's link leads to, or undefined for a link anywhere else. */
+/**
+ * The message in `channel` a quote's link leads to, or undefined for a link anywhere else. The link was written
+ * on whichever host the quoter used (xmatrix.sh, beta, the desktop app), so only its path says where it leads.
+ */
 export function messageHere(href: string, channel: ChannelSnapshot): string | undefined {
-  const link = typeof window === "undefined" ? null : parseInternalChannelLink(href, window.location.href);
+  if (typeof window === "undefined") return undefined;
+  let path: string;
+  try {
+    const url = new URL(href, window.location.href);
+    path = `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return undefined;
+  }
+  const link = parseInternalChannelLink(path, window.location.href);
   if (!link?.messageId) return undefined;
   return resolveChannelRouteKey([channel], link.channelKey, null)?.id === channel.id ? link.messageId : undefined;
 }
