@@ -15,6 +15,24 @@ function token(value: unknown): string | undefined {
   return typeof value === "string" && /^[A-Za-z0-9_.@+-]{1,160}$/u.test(value) ? value : undefined;
 }
 
+/** Fixed shell flags captured by reportPushDeclined; never export arbitrary extra values. */
+function conversationPushConditions(extra: Record<string, unknown>): string[] {
+  const fields: string[] = [];
+  for (const key of ["isMobileViewport", "mobileDockPager", "composingConversation", "mobileChannelDetailsOpen",
+    "agentConfigDialog", "workspaceSearchOpen", "selectedChannel"]) {
+    if (typeof extra[key] === "boolean") fields.push(`${key}=${extra[key]}`);
+  }
+  for (const [key, allowed] of [
+    ["view", ["pages", "messages", "local", "machines", "automation", "status", "agents", "apps", "activity",
+      "team", "profile", "settings", "admin", "more"]],
+    ["client", ["web", "ios", "android", "desktop"]],
+  ] as const) {
+    const value = extra[key];
+    if (typeof value === "string" && (allowed as readonly string[]).includes(value)) fields.push(`${key}=${value}`);
+  }
+  return fields.length ? [`Conversation push conditions: ${fields.join(" · ")}`] : [];
+}
+
 export function sentryEventMetadata(event: Record<string, unknown>): string[] {
   const lines: string[] = [];
   const time = timestamp("Event time", event.dateCreated);
@@ -46,6 +64,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
   // Sentry serializes SDK `extra` as `context` in its issue-event API.
   const extra = event.context;
   if (extra && typeof extra === "object") {
+    lines.push(...conversationPushConditions(extra as Record<string, unknown>));
     lines.push(...postgresConflictMetadata(extra as Record<string, unknown>));
     lines.push(...messageSearchFailureMetadata((extra as Record<string, unknown>).message_search_failure));
     lines.push(...runtimeDatabaseFailureMetadata((extra as Record<string, unknown>).runtime_database_reason));

@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Conversation push diagnostics can be read
+
+WEB-Z captured why the mobile conversation push declined, but the Sentry issue
+reader omitted the shell conditions already attached to the event. Reads now
+retain only its fixed boolean flags and allowlisted view/client labels, so an
+existing event can identify the blocking condition without exposing arbitrary
+extra data. The animation's underlying cause is still being investigated.
+Hub only, no schema or client change; recovery is a CI-validated beta Hub
+release reverting this projection.
+
 ## Unreleased: Floating menus highlight edge to edge
 
 A floating paper menu's hovered item was a rounded box inset in the slip,

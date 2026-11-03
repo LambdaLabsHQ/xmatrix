@@ -6,6 +6,29 @@ import { actionRefusal } from "../src/connectors/connector-commands.ts";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
 
 const read = SENTRY_ACTIONS.read_issue;
+// WEB-Z: the producer already captures these conditions, but an unreadable
+// decision snapshot cannot distinguish a blocked list from a missing driver.
+// Exercise the public read projection, including its privacy boundary.
+test("conversation push conditions survive an issue read without exposing arbitrary extra data", async () => {
+  const conditions = { isMobileViewport: true, mobileDockPager: true, view: "messages",
+    composingConversation: false, mobileChannelDetailsOpen: false, agentConfigDialog: false,
+    workspaceSearchOpen: false, selectedChannel: true, client: "ios" };
+  const { result } = await run([{ body: issue }, { body: { ...event,
+    context: { ...conditions, channelId: "private-channel", text: "private-message" },
+  } }], undefined, "123");
+  for (const [key, value] of Object.entries(conditions)) {
+    assert.ok(result.summary.includes(`${key}=${value}`), `${key} must remain readable`);
+  }
+  assert.doesNotMatch(result.summary, /private-/);
+
+  const malformed = await run([{ body: issue }, { body: { ...event, context: {
+    isMobileViewport: "private-viewport", mobileDockPager: 1, view: "private-view",
+    composingConversation: null, mobileChannelDetailsOpen: { value: "private-detail" },
+    agentConfigDialog: [], workspaceSearchOpen: "false", selectedChannel: "private-channel", client: "private-client",
+  } } }], undefined, "123");
+  assert.doesNotMatch(malformed.result.summary, /Conversation push conditions:|private-/);
+});
+
 // WEB-M/WEB-N: mapped dependency frames alone cannot identify the deployed chunk.
 test("mapped Sentry stacks retain bounded generated locations and occurrence evidence", async () => {
   const { result, calls } = await run([{ body: { ...issue, count: "7",
