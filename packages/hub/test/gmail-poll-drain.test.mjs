@@ -16,8 +16,8 @@ async function drainer() {
     userId:"owner",mode:"poll",historyId:"100",pendingWake:false,
     nextSearchAt:new Date(Date.now()+900000).toISOString(),selection:{address:"me@example.com",account:"ca_owned",owner:"user:owner",
       refreshToken:"private-refresh",appIdentity:await polling.gmailPollIdentity(env),pollToken:{accessToken:"private-access",expiresAt:Date.now()+3600000}}};
-  const calls={finish:[],stage:[],append:[],automation:[],cached:[],searched:0,read:[]};
-  const recent={count:0};
+  const calls={finish:[],stage:[],append:[],automation:[],cached:[],searched:0,read:[],stored:[]};
+  const autoRead={result:{detail:"private body"}};
   // The owner's subscription to this mailbox; tests add others.
   const routes={"gmail:me@example.com":[{channelId:"channel-1",authorityRootUserId:"owner",features:["message.received"]}],"gmail:*":[]};
   let pending=[];
@@ -25,7 +25,6 @@ async function drainer() {
   const repository={cleanup:async()=>{},claim:async()=>[job],current:async()=>state.current,polled:async()=>{},
     pending:async()=>pending,stage:async(_job,ids,historyId,pageToken)=>{calls.stage.push({ids,historyId,pageToken});pending=[...ids];},
     delivered:async(_job,id)=>{pending=pending.filter(item=>item!==id);},searched:async()=>{calls.searched++;},
-    deliveredLastHour:async(_job,limit)=>Math.min(recent.count,limit),
     cachePollToken:async(_job,token)=>{calls.cached.push(token);},finish:async(_job,outcome)=>{calls.finish.push(outcome);}};
   const imports={"./credentials":{gmailRoutingRepository:()=>repository,
     connectorAppRepository:()=>({connectorEventRoutes:async({sourceRef})=>routes[sourceRef] ?? []}),
@@ -33,14 +32,17 @@ async function drainer() {
     version:1,connectionGeneration:"generation",values:{mailboxes:JSON.stringify([job.selection])}})})},
     "./gmail-mailboxes":{parseMailboxes},"./gmail-poll-client":polling,"./gmail-notification-api":{gmailIncomingChanges},
     "./gmail-watch-client":{},"./http":{ProviderRequestError},
-    "./gmail-auto-read":{GMAIL_AUTO_READ_HOURLY_LIMIT:30,autoReadGmailMessage:async(_env,input)=>{
-      calls.read.push({...input,current:await input.current()});}},
-    "./event-ingress":{connectorEventMessageId:(provider,eventId,channelId)=>`app:${provider}:${eventId}:${channelId}`,appendToRoutes:async(_env,append,_provider,event,targets)=>{
-      for(const route of targets)await append(_env,route.channelId,{channelId:route.channelId,body:event.body});}},
+    "./gmail-auto-read":{autoReadGmailMessage:async(_env,input)=>{
+      calls.read.push(input);return typeof autoRead.result==="function" ? autoRead.result() : autoRead.result;}},
+    "./private-result-content":{writeConnectorPrivateResult:async(_env,input)=>{calls.stored.push(input);}},
+    "./event-ingress":{connectorEventMessageId:(provider,eventId,channelId)=>`app:${provider}:${eventId}:${channelId}`,
+      appendToRoutes:async(_env,append,provider,event,targets,appMetadata)=>{
+      for(const route of targets)await append(_env,route.channelId,{channelId:route.channelId,body:event.body,
+        messageId:`app:${provider}:${event.eventId}:${route.channelId}`,appMetadata,stored:calls.stored.length});}},
     "../product-message-append":{dispatchProductMessageAppend:async(_env,_channel,message)=>{calls.append.push(message);return new Response();}},
     "../automation-triggers":{fireConnectorAutomationTriggers:async(_env,event)=>{calls.automation.push(event);}}};
   const {drainGmailNotifications}=load(name=>imports[name]);
-  return {job,state,calls,routes,recent,run:()=>drainGmailNotifications(env)};
+  return {job,state,calls,routes,autoRead,run:()=>drainGmailNotifications(env)};
 }
 
 test("unchanged counts reuse the cached grant and avoid Composio until the independent check is due",async()=>{
@@ -68,25 +70,38 @@ test("a notification reaches only the Channels its owner subscribed to the mailb
   assert.deepEqual(due.calls.append.map(message=>message.channelId),["channel-1","channel-all"]);
   assert.equal(due.calls.automation[0].event.sourceRef,"gmail:me@example.com");
   assert.deepEqual(due.calls.finish,["done"]);
-  // The connector's own read answers exactly the notifications it just posted, as the mailbox owner.
+  // One message per Channel: the notification carries the connector's own read, as the mailbox owner.
   assert.equal(due.calls.read.length,1);
   const [read]=due.calls.read;
-  assert.equal(read.id,"abcdef1234567890");assert.equal(read.limited,false);assert.equal(read.current,true);
+  assert.equal(read.id,"abcdef1234567890");
   assert.deepEqual(read.mailbox,{account:"ca_owned",address:"me@example.com",owner:"user:owner"});
-  assert.deepEqual(read.notifications,[
-    {channelId:"channel-1",messageId:"app:gmail:route-1:abcdef1234567890:channel-1"},
-    {channelId:"channel-all",messageId:"app:gmail:route-1:abcdef1234567890:channel-all"}]);
+  assert.deepEqual(due.calls.stored.map(row=>[row.channelId,row.ownerUserId,row.messageId,row.detail]),[
+    ["channel-1","owner","app:gmail:route-1:abcdef1234567890:channel-1","private body"],
+    ["channel-all","owner","app:gmail:route-1:abcdef1234567890:channel-all","private body"]]);
+  // Both copies are stored before either notification names them.
+  assert.deepEqual(due.calls.append.map(message=>message.stored),[2,2]);
+  for(const message of due.calls.append) {
+    assert.deepEqual(message.appMetadata,{xmatrixPrivateConnectorResultOwner:"owner"});
+    assert.equal(message.body,"A new Gmail message is available in me@example.com. Read it with @gmail:read:abcdef1234567890.");
+  }
+  assert.doesNotMatch(JSON.stringify([due.calls.append,due.calls.automation]),/private body/u);
 });
 
-test("a mailbox past the hourly limit is notified without an automatic read",async()=>{
-  const flooded=await drainer();flooded.job.pendingWake=true;flooded.recent.count=30;
+test("an unread message is notified with its public reason and no private result",async()=>{
+  const failed=await drainer();failed.job.pendingWake=true;failed.autoRead.result={unread:"It could not be read automatically."};
   await fetched([{body:counts},{body:{status:200,data:{historyId:"200",history:[{messagesAdded:[
-    {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],flooded.run);
-  assert.equal(flooded.calls.append.length,1);assert.equal(flooded.calls.read[0].limited,true);
-  const below=await drainer();below.job.pendingWake=true;below.recent.count=29;
+    {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],failed.run);
+  assert.equal(failed.calls.stored.length,0);assert.equal(failed.calls.append[0].appMetadata,undefined);
+  assert.match(failed.calls.append[0].body,/@gmail:read:abcdef1234567890\. It could not be read automatically\.$/u);
+  assert.deepEqual(failed.calls.finish,["done"]);
+});
+
+test("access lost while Gmail answers stores and posts nothing",async()=>{
+  const revoked=await drainer();revoked.job.pendingWake=true;
+  revoked.autoRead.result=()=>{revoked.state.current=false;return {detail:"private body"};};
   await fetched([{body:counts},{body:{status:200,data:{historyId:"200",history:[{messagesAdded:[
-    {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],below.run);
-  assert.equal(below.calls.read[0].limited,false);
+    {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],revoked.run);
+  assert.equal(revoked.calls.stored.length,0);assert.equal(revoked.calls.append.length,0);
 });
 
 test("pending changes, transient confirmation failure and lost authority retain the right outcome",async()=>{
