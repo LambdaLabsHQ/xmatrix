@@ -3064,3 +3064,13 @@ a second failure remains visible. Nonmember rejection, private projections,
 mutation locks and unknown-COMMIT reconciliation are unchanged. Hub only, no
 migration or native update; recovery is a CI-validated beta Hub reverting
 this change. See [PostgreSQL recovery](operations/postgres-hyperdrive-origin.md).
+
+## Unreleased: A skipped check cannot announce that CI passed
+
+A pull request with a merge conflict did not start CI, but its skipped
+external-PR closer alone made the conversation hear "CI passed". The GitHub
+check reader now requires a check that actually concluded success before
+announcing a passing verdict. All-skipped or all-neutral checks stay pending;
+failures still report, and success beside skipped jobs still passes. Hub only;
+no schema or client migration. Recovery is a CI-validated beta Hub release
+reverting this verdict change.
