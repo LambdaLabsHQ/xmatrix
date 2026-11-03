@@ -6442,7 +6442,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     column-gap: 12px;
     padding-left: 20px !important;
     padding-right: 20px !important;
-    color: var(--app-panel-ink-muted, var(--muted-foreground)) !important;
+    color: color-mix(in oklch, var(--app-panel-ink-muted) 70%, transparent) !important;
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create.app-list-create:not(:hover, .app-list-create-active) {
