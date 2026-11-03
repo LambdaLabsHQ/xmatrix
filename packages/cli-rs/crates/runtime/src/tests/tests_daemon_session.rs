@@ -1893,63 +1893,99 @@ mod git_credential_revocation {
     }
 }
 
+// These fixtures share only the fake transport. The real wrapper refresh task
+// and Instance connection own credential recovery in both tests below.
+fn with_run_token_fixture<F: std::future::Future<Output = ()>>(
+    run: impl FnOnce() -> F + std::panic::UnwindSafe,
+) {
+    let _guard = test_process_env_lock();
+    let names = [super::DAEMON_AUTH_URL_ENV, super::DAEMON_AUTH_CAPABILITY_ENV, "XMATRIX_CONFIG_DIR"];
+    let previous = names.map(std::env::var_os);
+    let root = std::env::temp_dir().join(format!("xmatrix-token-refresh-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    unsafe { std::env::set_var("XMATRIX_CONFIG_DIR", &root) };
+    let result = std::panic::catch_unwind(|| {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            run().await;
+        });
+    });
+    restore_daemon_test_env(names, previous);
+    let _ = std::fs::remove_dir_all(root);
+    if let Err(panic) = result { std::panic::resume_unwind(panic); }
+}
+
+async fn fresh_run_token_fixture() -> tokio::task::JoinHandle<()> {
+    let broker = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    unsafe {
+        std::env::set_var(super::DAEMON_AUTH_URL_ENV, format!("http://{}", broker.local_addr().unwrap()));
+        std::env::set_var(super::DAEMON_AUTH_CAPABILITY_ENV, "fixture-capability");
+    }
+    tokio::spawn(async move {
+        let (mut stream, _) = broker.accept().await.unwrap();
+        let request = super::read_daemon_local_http_request(&mut stream).await.unwrap();
+        assert_eq!(request.path, "/auth/token");
+        assert_eq!(request.headers["x-xmatrix-auth-capability"], "fixture-capability");
+        super::write_daemon_auth_broker_response(&mut stream, "200 OK", r#"{"token":"fresh-token"}"#).await;
+    })
+}
+
+async fn run_token_relay_fixture() -> (
+    tokio::net::TcpListener,
+    super::agent_instance_connection::AgentInstanceConnectionClient,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let relay = super::agent_instance_connection::AgentInstanceConnectionClient::new(
+        format!("ws://{}", listener.local_addr().unwrap()),
+        "expired-token".into(), "codex".into(), "codex".into(), None);
+    (listener, relay)
+}
+
+async fn run_registration_fixture(
+    listener: &tokio::net::TcpListener,
+    expected_token: &str,
+    refusal: Option<&str>,
+) -> (tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>, serde_json::Value) {
+    use futures_util::{SinkExt, StreamExt};
+    let (stream, _) = listener.accept().await.unwrap();
+    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+    let request = socket.next().await.unwrap().unwrap().into_text().unwrap();
+    let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+    assert_eq!(request["token"], expected_token);
+    let response = if let Some(code) = refusal {
+        protocol::AgentInstanceServerMessage::Error {
+            request_id: None, message: "Registration refused".into(),
+            failure: Some(protocol::AgentOperationFailure {
+                code: code.into(), stage: "relay.authenticate".into(), origin_stage: None,
+                diagnostic_id: "diag_11111111-1111-4111-8111-111111111111".into(), retryable: false,
+            }),
+        }
+    } else {
+        protocol::AgentInstanceServerMessage::AgentInstanceConnected {
+            agent: test_serialized_agent("codex"), peers: vec![], hub_capabilities: None,
+        }
+    };
+    socket.send(tokio_tungstenite::tungstenite::Message::Text(
+        serde_json::to_string(&response).unwrap().into())).await.unwrap();
+    (socket, request)
+}
+
 // Exercise the real wrapper/daemon/relay boundary: classification alone cannot
 // catch a refresh that never happens or registration retried with the old token.
 #[test]
 fn a_refused_run_credential_is_refreshed_once_before_registering_again() {
-    use futures_util::{SinkExt, StreamExt};
-    let _guard = test_process_env_lock();
-    let names = [super::DAEMON_AUTH_URL_ENV, super::DAEMON_AUTH_CAPABILITY_ENV, "XMATRIX_CONFIG_DIR"];
-    let previous = names.map(std::env::var_os);
-    let root = std::env::temp_dir().join(format!("xmatrix-register-refresh-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&root).unwrap();
-    unsafe { std::env::set_var("XMATRIX_CONFIG_DIR", &root) };
-    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+    with_run_token_fixture(|| async {
         for final_code in [None, Some("agent_run_credential_invalid"), Some("agent_run_forbidden")] {
-            let broker = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            unsafe {
-                std::env::set_var(super::DAEMON_AUTH_URL_ENV, format!("http://{}", broker.local_addr().unwrap()));
-                std::env::set_var(super::DAEMON_AUTH_CAPABILITY_ENV, "fixture-capability");
-            }
-            let refresh = tokio::spawn(async move {
-                let (mut stream, _) = broker.accept().await.unwrap();
-                let request = super::read_daemon_local_http_request(&mut stream).await.unwrap();
-                assert_eq!(request.path, "/auth/token");
-                assert_eq!(request.headers["x-xmatrix-auth-capability"], "fixture-capability");
-                super::write_daemon_auth_broker_response(&mut stream, "200 OK", r#"{"token":"fresh-token"}"#).await;
-            });
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let address = listener.local_addr().unwrap();
+            let refresh = fresh_run_token_fixture().await;
+            let (listener, mut relay) = run_token_relay_fixture().await;
             let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
             let server = tokio::spawn(async move {
                 for (attempt, expected_token) in ["expired-token", "fresh-token"].into_iter().enumerate() {
-                    let (stream, _) = listener.accept().await.unwrap();
-                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-                    let request = socket.next().await.unwrap().unwrap().into_text().unwrap();
-                    let request: serde_json::Value = serde_json::from_str(&request).unwrap();
-                    assert_eq!(request["token"], expected_token);
-                    let code = if attempt == 0 { Some("agent_run_credential_invalid") } else { final_code };
-                    let response = if let Some(code) = code {
-                        protocol::AgentInstanceServerMessage::Error {
-                            request_id: None, message: "Registration refused".into(),
-                            failure: Some(protocol::AgentOperationFailure {
-                                code: code.into(), stage: "relay.authenticate".into(), origin_stage: None,
-                                diagnostic_id: "diag_11111111-1111-4111-8111-111111111111".into(), retryable: false,
-                            }),
-                        }
-                    } else {
-                        protocol::AgentInstanceServerMessage::AgentInstanceConnected {
-                            agent: test_serialized_agent("codex"), peers: vec![], hub_capabilities: None,
-                        }
-                    };
-                    socket.send(tokio_tungstenite::tungstenite::Message::Text(
-                        serde_json::to_string(&response).unwrap().into())).await.unwrap();
+                    let refusal = if attempt == 0 { Some("agent_run_credential_invalid") } else { final_code };
+                    let (_socket, _) = run_registration_fixture(&listener, expected_token, refusal).await;
                     if attempt == 1 { let _ = stopped.await; break; }
                 }
             });
-            let mut relay = super::agent_instance_connection::AgentInstanceConnectionClient::new(
-                format!("ws://{address}"), "expired-token".into(), "codex".into(), "codex".into(), None);
             let result = tokio::time::timeout(Duration::from_secs(5),
                 super::register_long_lived_relay(&mut relay, "fixture", true)).await
                 .expect("refusal cannot cause an unbounded retry");
@@ -1964,8 +2000,57 @@ fn a_refused_run_credential_is_refreshed_once_before_registering_again() {
             refresh.await.unwrap();
         }
     });
-    restore_daemon_test_env(names, previous);
-    let _ = std::fs::remove_dir_all(root);
+}
+
+// Initial registration does not cover an already-running Instance. A refused
+// reconnect must renew promptly; a different refusal must not ask for a token.
+#[test]
+fn reconnect_refreshes_a_refused_run_token_without_waiting_for_the_periodic_timer() {
+    with_run_token_fixture(|| async {
+        for code in ["agent_run_credential_invalid", "agent_run_forbidden"] {
+            let should_refresh = code == "agent_run_credential_invalid";
+            let mut refresh = fresh_run_token_fixture().await;
+            let (listener, mut relay) = run_token_relay_fixture().await;
+            let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+            let server = tokio::spawn(async move {
+                let last_token = if should_refresh { "fresh-token" } else { "expired-token" };
+                for (attempt, expected) in ["expired-token", "expired-token", last_token].into_iter().enumerate() {
+                    let (mut socket, request) = run_registration_fixture(
+                        &listener, expected, (attempt == 1).then_some(code)).await;
+                    if attempt > 0 {
+                        assert_eq!(request["runContext"]["previousInstanceId"], "inst-codex");
+                    }
+                    if attempt == 0 { socket.close(None).await.unwrap(); }
+                    if attempt == 2 { let _ = stopped.await; break; }
+                }
+            });
+            let mut events = relay.event_rx.take().unwrap();
+            relay.register().await.unwrap();
+            let relay = Arc::new(relay);
+            let renewer = super::spawn_daemon_auth_token_refresh(relay.clone(), "fixture");
+            let recovered = tokio::time::timeout(Duration::from_secs(10), async {
+                while let Some(event) = events.recv().await {
+                    if let super::agent_instance_connection::AgentInstanceConnectionEvent::Reconnected { agent, .. } = event {
+                        assert_eq!(agent.instance_id.as_deref(), Some("inst-codex"));
+                        return;
+                    }
+                }
+                panic!("connection events ended before reconnect");
+            }).await;
+            relay.disconnect();
+            renewer.abort();
+            let _ = stop.send(());
+            recovered.expect("reconnect must recover without a Reborn or periodic timer");
+            server.await.unwrap();
+            if should_refresh {
+                refresh.await.unwrap();
+            } else {
+                assert!(tokio::time::timeout(Duration::from_millis(100), &mut refresh).await.is_err(),
+                    "an authorization refusal must not request credential renewal");
+                refresh.abort();
+            }
+        }
+    });
 }
 
 #[tokio::test]
