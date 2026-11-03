@@ -985,3 +985,38 @@ integration("the page tree shows each page's Agents: live in a conversation whos
     await client.end();
   }
 });
+
+// Every page request checks access through the whole tree; it carried every
+// page's title, timestamps and summary (and parsed every head body for the
+// title) to answer for one page. Those bytes are PlanetScale egress on each
+// page read, link list, section update and conversation edit.
+integration("pages: one page's read carries the other pages' access, not their titles or summaries", async () => {
+  const { client, ids, owner } = await pageTest("page-tree-bytes");
+  const observations = [];
+  const pages = new PostgresPageRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0",
+    observer: (point) => observations.push(point) }));
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
+    const created = [];
+    for (let index = 0; index < 40; index += 1) {
+      const { page } = await call("create", { principal: owner, title: `Page ${index}`,
+        body: `# Page ${index}\n\n${"x".repeat(4_000)}\n` });
+      await call("setSummary", { principal: owner, pageId: page.pageId, baseRevision: 1, summary: "s".repeat(240) });
+      created.push(page);
+    }
+    observations.length = 0;
+    const { page } = await call("read", { principal: owner, pageId: created[17].pageId });
+    assert.equal(page.title, "Page 17", "the page read still has its own title");
+    assert.equal(page.summary.text, "s".repeat(240), "and its own summary");
+    const tree = observations.find((point) => point.queryName.startsWith("page_tree_access_"));
+    assert.ok(tree.resultBytes < 40 * 250,
+      `one page's access read returned ${tree.resultBytes} bytes for a 40-page Space`);
+    const listed = (await call("tree", { principal: owner })).pages;
+    assert.equal(listed.length, 40);
+    assert.ok(listed.every((item) => /^Page \d+$/u.test(item.title) && item.summary?.text === "s".repeat(240)),
+      "the tree view still names and summarizes every page");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
