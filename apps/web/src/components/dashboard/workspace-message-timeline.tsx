@@ -171,6 +171,7 @@ import {
   MessageSquare,
   Paperclip,
   Pencil,
+  Quote,
   RefreshCw,
   Reply,
   ArrowRightLeft,
@@ -474,6 +475,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onReply,
   onOpenThread,
   onDiscussPassage,
+  onQuotePassage,
   onMentionSender,
   onRebornSender,
   reborningSenderKey,
@@ -513,6 +515,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   currentUserIdentityId: string;
   /** Starts a conversation from a passage selected in a message's text. */
   onDiscussPassage?: (message: TimelineItem, quote: string) => void;
+  /** Quotes a passage selected in a message's text in this conversation's composer. */
+  onQuotePassage?: (message: TimelineItem, quote: string) => void;
   reborningSenderKey: string | null;
   /** Opens a `page:<id>` chip from a message, at its section when it names one (pages-and-conversations.md §4.3). */
   onOpenPage: PageReferenceScope["onOpenPage"];
@@ -1350,11 +1354,11 @@ export const MessageTimeline = memo(function MessageTimeline({
           }}
         />
       )}
-      {onDiscussPassage && (
-        <MessagePassageDiscuss rootRef={timelineScrollRef} onDiscuss={(messageId, quote) => {
+      {(onQuotePassage || onDiscussPassage) && (
+        <MessagePassageActions rootRef={timelineScrollRef} onAction={(action, messageId, quote) => {
           const message = timeline.find((item) => item.messageId === messageId);
-          if (message) onDiscussPassage(message, quote);
-        }} />
+          if (message) (action === "quote" ? onQuotePassage : onDiscussPassage)?.(message, quote);
+        }} quote={Boolean(onQuotePassage)} discuss={Boolean(onDiscussPassage)} />
       )}
     </div>
     </MentionReadChannelScopeProvider>
@@ -1364,12 +1368,15 @@ export const MessageTimeline = memo(function MessageTimeline({
 });
 
 /**
- * "Discuss" beside a passage selected in one message's text, as a page offers
- * it on a selected passage: a new conversation that opens holding the quote.
+ * What can be done with a passage selected in one message's text: quote it in
+ * this conversation's composer, or discuss it in a new conversation that opens
+ * holding the quote, as a page offers on a selected passage.
  */
-function MessagePassageDiscuss({ rootRef, onDiscuss }: {
+function MessagePassageActions({ rootRef, onAction, quote, discuss }: {
   rootRef: React.RefObject<HTMLDivElement | null>;
-  onDiscuss: (messageId: string, quote: string) => void;
+  onAction: (action: "quote" | "discuss", messageId: string, quote: string) => void;
+  quote: boolean;
+  discuss: boolean;
 }) {
   const [passage, setPassage] = useState<MessagePassageSelection | null>(null);
   useEffect(() => {
@@ -1395,20 +1402,30 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
   if (!passage || typeof document === "undefined") return null;
   // Above the passage, unless that is off the top or a phone's own selection menu sits there.
   const below = passage.rect.top < 56 || window.matchMedia("(pointer: coarse)").matches;
+  const act = (action: "quote" | "discuss") => {
+    onAction(action, passage.messageId, passage.quote);
+    document.getSelection()?.removeAllRanges();
+  };
+  const actionClass = "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-sm hover:bg-muted [&_svg]:size-4";
   return createPortal(
     <div className={cn("fixed z-50", !below && "-translate-y-full")}
-      style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 128)),
+      style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 300)),
         top: below ? passage.rect.bottom + 6 : passage.rect.top - 6 }}>
       <PaperPopover role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
-        className="flex items-center p-1">
-        <button type="button" onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            onDiscuss(passage.messageId, passage.quote);
-            document.getSelection()?.removeAllRanges();
-          }}
-          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
-          <MessageSquare /> Discuss
-        </button>
+        className="flex items-center gap-0.5 p-1">
+        {quote && (
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => act("quote")}
+            className={actionClass}>
+            <Quote /> Quote
+          </button>
+        )}
+        {quote && discuss && <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />}
+        {discuss && (
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => act("discuss")}
+            className={actionClass}>
+            <MessageSquare /> Discuss in new channel
+          </button>
+        )}
       </PaperPopover>
     </div>,
     document.body,
