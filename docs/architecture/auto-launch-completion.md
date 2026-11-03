@@ -67,9 +67,11 @@ Fields are `repo`, `pwd`, `machine` (stable ID), `model`, `effort`, `harness`,
 and values come from runtime snapshots rather than a list of tag names in the
 composer. See [harness parameters](harness-parameters.md) for discovery and
 rollout boundaries. Order is arbitrary. Invalid or duplicate values prevent launch.
-A completed turn leaves the Agent available for follow-up messages. Prompts tell
-Agents that they can stop, reborn or hand off Instances, their own and other
-Agents' alike, but never steer them to stop themselves. Existing idle sleep,
+A completed turn leaves the Agent available for follow-up messages. Temporary
+helpers with a completed assignment and no remaining work send a final receipt
+and stop their own Instance. Waiting on a person or required CI result remains
+unfinished work. An exact Instance assignment is context for peers, including
+catch-up delivery; unaddressed messages and broadcasts remain shared. Existing idle sleep,
 wake, explicit stop and Automation execution deadlines remain separate
 lifecycle mechanisms.
 

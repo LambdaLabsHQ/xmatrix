@@ -6432,54 +6432,34 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
 }
 
 /* A desktop list's + is the list's first row (a list row, below), set apart
-   only by its tone: halfway between the list and the conversation's paper.
-   Each list gives it its rows' leading geometry, so the + sits in their
-   leading slot (a conversation's #, a page's or a section's icon, an agent's
-   avatar) and
-   the label starts where their names do. */
+   by its tone: halfway between the list and the conversation's paper. Its
+   label sits centred in the rows' muted ink, lighter than their names, so it
+   reads as the list's action rather than one of its items; Ctrl/⌘+N sits at
+   the row's end, where the rows' times end, on the label's baseline. */
 @media (min-width: 768px) {
   html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create.app-list-create {
-    --list-create-inset: 20px;
-    --list-create-slot: 15px;
-    --list-create-icon: 12px;
-    --list-create-mark-align: flex-start;
-    --list-create-gap: 0px;
     width: 100%;
-    gap: var(--list-create-gap);
-    padding-left: var(--list-create-inset) !important;
-    color: var(--app-panel-ink, var(--foreground)) !important;
+    column-gap: 12px;
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+    color: color-mix(in oklch, var(--app-panel-ink-muted) 70%, transparent) !important;
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create.app-list-create:not(:hover, .app-list-create-active) {
     background: oklch(0.961 0.006 84) !important;
   }
 
-  html[data-app-theme] .xmatrix-app.xmatrix-app [data-testid="page-tree"] > .app-list-create.app-list-create {
-    --list-create-inset: 36px;
-    --list-create-slot: 16px;
-    --list-create-icon: 16px;
-    --list-create-gap: 8px;
+  html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create.app-list-create span.app-list-row-title {
+    font-weight: 500 !important;
   }
 
-  html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-list > .app-list-create.app-list-create {
-    --list-create-slot: 16px;
-    --list-create-icon: 16px;
-    --list-create-gap: 10px;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-list > .app-list-create.app-list-create[data-lead="avatar"] {
-    --list-create-slot: 32px;
-    --list-create-mark-align: center;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create .app-list-create-mark {
-    width: var(--list-create-slot);
-    justify-content: var(--list-create-mark-align);
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create .app-list-create-mark svg {
-    width: var(--list-create-icon);
-    height: var(--list-create-icon);
+  html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create .app-list-create-shortcut {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 18px;
+    letter-spacing: 0.02em;
+    opacity: 0.6;
   }
 }
 

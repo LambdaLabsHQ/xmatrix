@@ -30,6 +30,15 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Handoff accepts ordinary launch conditions after the successor address and
+inherits an explicit source machine condition by admitted machine identity.
+It refuses an unconfirmed source stop before starting a successor. Exact
+Instance assignments are context for peers; runtime bootstrap identifies the
+current Instance and Run and asks completed temporary helpers to stop. An
+Instance waiting for a person or CI remains available. See
+[handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine) and
+[syntax](../guide/syntax.md#stopping-restarting-and-handing-off).
+
 While a Channel's launch choice is still starting, follow-up messages cannot
 offer or claim a second Agent choice. Their append evidence stays available
 for explicit recovery after a failed or cancelled startup. See

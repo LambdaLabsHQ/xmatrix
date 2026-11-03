@@ -419,7 +419,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     const canonical = sanitizeAgentInstancePresentation(presentation);
     const usage = canonical?.usage;
     const snapshot = {
-      ...agentMessagePresentation(canonical, session.run.repository),
+      ...agentMessagePresentation(canonical),
       ...(canonical?.parameters !== undefined ? { parameters: canonical.parameters, parametersObservedAt: canonical.parametersObservedAt } : parametersReported ? { parameters: [] } : {}),
       // Routing needs the observed model/effort domain too. It is deliberately
       // absent from message headers, but must survive this durable projection.
@@ -745,7 +745,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       resetsAt: message.resetsAt,
       ...(signedOut ? { signedOut } : {}),
       noticeId,
-      senderSnapshot: agentMessagePresentation(session.presentation, session.run.repository) ?? {},
+      senderSnapshot: agentMessagePresentation(session.presentation) ?? {},
     });
     if (!command) return;
     try {
@@ -904,7 +904,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     // Only reviewed runtime-presentation fields cross this boundary. The
     // receiving Authority derives stable Profile and Instance identity from
     // the principal and exact Run proof.
-    const senderSnapshot = agentMessagePresentation(session.presentation, session.run.repository) ?? {};
+    const senderSnapshot = agentMessagePresentation(session.presentation) ?? {};
     const result = await this.dependencies.messages.append({
       commandId: runtimeCommandId(input.commandPrefix, input.messageId),
       messageId: input.messageId,

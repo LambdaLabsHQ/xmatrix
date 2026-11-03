@@ -62,6 +62,8 @@ test("the bar rides the row's top edge on paper and leaves its first line readab
     row.getByText("Progress: the menu is gone").boundingBox(),
   ]);
   expect(cardBox!.y).toBeLessThan(rowBox!.y);
+  // It stands on the row's top edge: its bottom meets the hover tone's top.
+  expect(Math.abs(cardBox!.y + cardBox!.height - rowBox!.y)).toBeLessThanOrEqual(0.5);
   // At most the leading above the first line's glyphs, never the glyphs.
   expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(textBox!.y + 5);
 

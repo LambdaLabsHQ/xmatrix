@@ -9,7 +9,7 @@ import type { QueryResultRow } from "pg";
 import { resumableChannelRun } from "./instance-rest-state.js";
 import { decodeInvocationPageCursor, encodeInvocationPageCursor, type InvocationPagePosition } from "./runtime-invocation-cursor.js";
 import { readInvocationProgress } from "./runtime-invocation-progress.js";
-import { readContinuationSource } from "./runtime-continuation-source.js";
+import { readContinuationMachineConstraint, readContinuationSource } from "./runtime-continuation-source.js";
 import { queryMessageAgentTargets } from "./message-agent-targets.js";
 import { queryMessageExecutions, selectRunExecutionSources } from "./runtime-message-executions.js";
 import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut, parseOfflineMachines, parseMachineAgents,
@@ -1517,12 +1517,14 @@ export class PostgresRuntimeRepository {
           i.instance_id,i.status AS instance_status,i.channel_instance_id,
           r.run_id,r.owner_user_id,r.workspace_machine_id,
           r.workspace_canonical_cwd,r.metadata_json,r.status AS run_status,sr.display_name AS agent_name,
-          sr.harness
+          sr.harness,launch.launch_request_json,origin.spawn_payload_json->>'prompt' AS launch_prompt
         FROM data.instances i
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
         JOIN data.run_agent_registrations b ON b.run_id=r.run_id AND b.space_id=$2
         JOIN data.space_agent_registrations sr ON sr.space_id=b.space_id AND sr.owner_user_id=b.owner_user_id
           AND sr.machine_id=b.machine_id AND sr.harness=b.harness
+        LEFT JOIN data.registration_launch_intents launch ON launch.instance_id=i.instance_id
+        LEFT JOIN data.agent_launches origin ON origin.launch_id=launch.launch_id
         WHERE i.channel_id=$1 AND i.channel_instance_id=$3
           AND (lower(sr.display_name)=$4 OR sr.harness=$4)
         LIMIT 2`, values: [channelId, placement.spaceId,
@@ -1535,11 +1537,13 @@ export class PostgresRuntimeRepository {
       const runMetadata = metadata(row);
       if (runMetadata.instanceDeletion !== undefined) throw new RuntimeControlError(
         "instance_not_found", 404, "Agent Instance was deleted or is being deleted");
+      const launchMachineId = readContinuationMachineConstraint(row.launch_request_json, row.launch_prompt);
       return { target: {
         instanceId: String(row.instance_id), instanceStatus: String(row.instance_status), channelId,
         channelInstanceId: Number(row.channel_instance_id), runId: String(row.run_id),
         runStatus: String(row.run_status), agentName: String(row.agent_name), harness: String(row.harness),
         ownerUserId: String(row.owner_user_id),
+        ...(launchMachineId ? { launchMachineId } : {}),
         ...(row.workspace_machine_id && row.workspace_canonical_cwd ? { workspace: {
           machineId: String(row.workspace_machine_id),
           canonicalCwd: String(row.workspace_canonical_cwd),
