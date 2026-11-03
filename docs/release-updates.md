@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Gmail reads large message bodies
+
+`@gmail:read` showed "(no text body)" for mail whose HTML body is large, such as
+a bank's credit-card statement: Gmail returns such a body by reference
+(`attachmentId`) instead of inline, and the connector did not fetch it. A read
+now fetches up to four such text bodies of at most 2 MB each through
+messages.attachments.get; real attachments are still never read. The existing
+Gmail grant covers it: no new scope, no reconnect. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: A quote is one yellow slip
 
 A quoted passage in a sent message was a grey block followed by a dashed,
