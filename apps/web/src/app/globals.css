@@ -1627,7 +1627,8 @@
     box-shadow: var(--app-light-glass-shadow);
   }
 
-  :root:not(.dark) .xmatrix-app :is(.app-tool-surface, .rounded-lg.border, .rounded-md.border, section.border) > * {
+  /* Not an image card's children: its Original toggle and × sit over the picture, absolutely, as its classes say. */
+  :root:not(.dark) .xmatrix-app :is(.app-tool-surface, .rounded-lg.border, .rounded-md.border, section.border):not(.message-image-attachment):not(.composer-image-attachment) > * {
     position: relative;
     z-index: 1;
   }
@@ -2791,7 +2792,7 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 }
 .xmatrix-app .rich-message .message-citation + * { margin-top: 10px; }
 .xmatrix-app .rich-message * + .message-citation { margin-top: 10px; }
-/* In the composer a quote is a block of the draft (composer-quote-blocks.ts): its lines give way to the slip,
+/* In the composer a quote is a block of the draft (composer-blocks.ts): its lines give way to the slip,
    which sits among the lines written around it and is removed whole by its ×. */
 .xmatrix-app .composer-quote-line { display: none; }
 .xmatrix-app .message-citation-composer.composer-quote-block {
@@ -2825,6 +2826,26 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   color: var(--muted-foreground);
 }
 .xmatrix-app .composer-quote-block-remove:hover { color: var(--foreground); }
+/* Pictures are blocks of what is written too (inline-attachments.ts): pictures on adjacent lines are one row,
+   wrapping when it runs out of room, in the composer as in the message they become. */
+.xmatrix-app .composer-picture-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  margin: 0 0 4px;
+  user-select: none;
+}
+.xmatrix-app .composer-picture-row:first-child { margin-top: 0; }
+/* Each holds the picture's own attachment card, as the strip above the words draws it. */
+.xmatrix-app .composer-picture { display: block; padding: 8px 8px 0 0; }
+.xmatrix-app .rich-message .message-picture-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.xmatrix-app .rich-message * + .message-picture-row,
+.xmatrix-app .rich-message .message-picture-row + * { margin-top: 10px; }
+.xmatrix-app .rich-message .message-picture { display: block; width: min(12rem, 100%); }
 .xmatrix-app .rich-message .message-citation-text {
   display: block;
   margin: 0;
