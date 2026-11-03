@@ -2,7 +2,7 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, E2E_NOW, 
 import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
-import { expectDraft } from "./composer-draft";
+import { draftValue, expectDraft } from "./composer-draft";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -16,6 +16,12 @@ async function selectFrom(text: Locator, start: string) {
     await selectOnce(text, start);
     await expect(text.page().getByTestId("message-selection-menu")).toBeVisible({ timeout: 1000 });
   }).toPass();
+}
+
+/** The composer's text with the box around it, for a screenshot. */
+async function around(element: Locator) {
+  const box = (await element.boundingBox())!;
+  return { x: box.x - 48, y: box.y - 16, width: box.width + 120, height: box.height + 32 };
 }
 
 async function selectOnce(text: Locator, start: string) {
@@ -34,26 +40,61 @@ async function selectOnce(text: Locator, start: string) {
   }, start);
 }
 
-// Quoting a passage of a message puts it above this conversation's composer; the next message sent carries it.
-test("quoting a passage of a message holds it in this conversation's composer", async ({ page }) => {
+// Quoting passages of messages puts each into the draft as a block where the caret is, among what is written, in
+// order; the message sent is that draft.
+test("quoting passages of messages puts each into this conversation's draft as a block, in order", async ({ page }) => {
   const message = { messageId: "m-relay", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: E2E_USER_SENDER,
     body: "The relay stalls when the queue fills. Retries back off too slowly." };
   await openGeneralChannelWithHistory(page, E2E_CHANNEL, [message]);
   const text = page.locator("[data-message-body='m-relay']");
   await expect(text).toBeVisible();
-  await selectFrom(text, "Retries");
   const menu = page.getByTestId("message-selection-menu");
+  const composer = page.locator(".composer-textarea").first();
+  await selectFrom(text, "Retries");
   await menu.getByRole("button", { name: "Quote" }).click();
-
-  const quote = page.getByTestId("composer-quote");
-  await expect(quote).toContainText("Retries back off too slowly.");
-  // A quote of this conversation is its own reference: no line naming the conversation it is already in.
-  await expect(quote).not.toContainText("#general");
-  await quote.locator("..").screenshot({ path: test.info().outputPath("composer-quote.png") });
-  await expect(page).not.toHaveURL(new RegExp(`--${CREATED_CHANNEL_ID}`, "u"));
-  await expect(page.locator(".composer-textarea").first()).toBeFocused();
+  await expect(composer).toBeFocused();
   await expect(menu).toBeHidden();
-  await page.screenshot({ path: test.info().outputPath("message-passage-quoted.png") });
+  await page.keyboard.type("Why so slow?");
+  await page.keyboard.press("Shift+Enter");
+  await selectFrom(text, "The relay");
+  await menu.getByRole("button", { name: "Quote" }).click();
+  await page.keyboard.type("And this?");
+
+  const quotes = page.getByTestId("composer-quote");
+  await expect(quotes).toHaveCount(2);
+  await expect(quotes.nth(0)).toContainText("Retries back off too slowly.");
+  await expect(quotes.nth(1)).toContainText("The relay stalls when the queue fills. Retries back off too slowly.");
+  // A quote of this conversation is its own reference: no line naming the conversation it is already in.
+  await expect(quotes.nth(0)).not.toContainText("#general");
+  const link = (await draftValue(composer))!.match(/\]\(([^)]+)\)/u)![1]!;
+  await expectDraft(composer, `> Retries back off too slowly.\n\n— [E2E Tester in #general](${link})\n\nWhy so slow?\n`
+    + `> The relay stalls when the queue fills. Retries back off too slowly.\n\n— [E2E Tester in #general](${link})\n\nAnd this?`);
+  await expect(page).not.toHaveURL(new RegExp(`--${CREATED_CHANNEL_ID}`, "u"));
+  await page.screenshot({ path: test.info().outputPath("composer-quotes.png"),
+    clip: await around(composer) });
+
+  // Backspace at the start of the line after a quote takes the quote whole.
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Backspace");
+  await expect(quotes).toHaveCount(1);
+  await expectDraft(composer, `> Retries back off too slowly.\n\n— [E2E Tester in #general](${link})\n\nWhy so slow?\nAnd this?`);
+  // Its × does too.
+  await quotes.first().getByRole("button", { name: "Remove quote" }).click();
+  await expectDraft(composer, "Why so slow?\nAnd this?");
+});
+
+// A message shows each passage it quotes as its own slip where it was put, in order among what was written.
+test("a message quoting several passages shows each as a slip in place", async ({ page }) => {
+  const href = "https://xmatrix.sh/app/s/channels/c#message:m1";
+  const message = { messageId: "m-quoting", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: E2E_USER_SENDER,
+    body: `先看这句：\n> 第一段引文\n\n— [claude:1 in #other](${href})\n\n中间的话\n> 第二段引文\n\n— [codex in #other](${href})\n\n最后的话` };
+  await openGeneralChannelWithHistory(page, E2E_CHANNEL, [message]);
+  const body = page.locator("[data-message-body='m-quoting']");
+  await expect(body.locator(".message-citation")).toHaveCount(2);
+  const order = await body.locator(".rich-message > *").allInnerTexts();
+  expect(order.map((value) => value.trim().split("\n")[0])).toEqual(["先看这句：", "第一段引文", "中间的话", "第二段引文", "最后的话"]);
+  await expect(body).not.toContainText("—");
+  await body.screenshot({ path: test.info().outputPath("message-quotes.png") });
 });
 
 // Selecting a passage of a message starts a conversation about it, as a selected passage of a page does.
@@ -89,11 +130,13 @@ test("selecting a passage of a message starts a conversation holding it, linked 
     { conversationId: expect.stringMatching(createdId), pageId: "p-relay", blockId: "status", source: "manual" }]);
   await expect(page).toHaveURL(new RegExp(`--${CREATED_CHANNEL_ID}`, "u"));
   const composer = page.locator(".composer-textarea").first();
-  await expectDraft(composer, /^\u200B?$/u);
+  // Its draft opens holding the passage as its first block, to write after.
+  await expectDraft(composer, /^> Retries back off too slowly\.\n\n— \[E2E Tester in #general\]\([^)]+#message:m-relay\)\n\n$/u);
   const quote = page.getByTestId("composer-quote");
   await expect(quote).toContainText("Retries back off too slowly.");
   await expect(quote).toContainText("E2E Tester in #general");
-  await quote.locator("..").screenshot({ path: test.info().outputPath("composer-quote-elsewhere.png") });
+  await page.screenshot({ path: test.info().outputPath("composer-quote-elsewhere.png"),
+    clip: await around(composer) });
   await expect(composer).toBeFocused();
   await expect(menu).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("message-passage-conversation.png") });
