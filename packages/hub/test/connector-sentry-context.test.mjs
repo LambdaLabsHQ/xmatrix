@@ -382,7 +382,7 @@ test("origin wait snapshots reach read_issue with strict content-free validation
   const lockWait = { status: "sampled", waiter: { ...backend, state: "active", wait: "Lock", ageMs: 500 },
     blockers: [backend] };
   const failure = { operation: "runtime.execution-report", shardId: "shard-0", statement: "transaction",
-    phase: "sql", queryName: "runtime_execution_report_owner_v4", code: "55P03", durationMs: 2000 };
+    phase: "sql", queryName: "runtime_execution_report_owner_v5", code: "55P03", durationMs: 2000 };
   for (const field of ["lockWait", "queryWait"]) {
     const label = field === "lockWait" ? "lock wait" : "read wait";
     for (const [snapshot, valid] of [[lockWait, true], [{ ...lockWait, blockers: Array(5).fill(backend) }, false],
