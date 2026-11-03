@@ -403,24 +403,6 @@ test("an Agent append keeps stable identity before any optional presentation arr
   });
 });
 
-test("message headers capture the admitted Run repository even before runtime presentation", () => {
-  const session = liveSnapshot(runtimeSession());
-  session.repository = "https://user:private@github.com/LambdaLabsHQ/xmatrix.git?secret=hidden";
-  const expected = { id: "repo", label: "Repository", value: "LambdaLabsHQ/xmatrix" };
-  const snapshot = agentMessagePresentationForLiveSnapshot(session);
-  assert.deepEqual(snapshot.statusChips, [expected]);
-
-  session.repository = "other/project";
-  assert.deepEqual(snapshot.statusChips, [expected], "committed headers keep their send-time repository");
-  assert.deepEqual(agentMessagePresentation(undefined, "/private/checkout"), undefined);
-  assert.deepEqual(agentMessagePresentation({ model: "gpt-5", statusChips: [
-    { id: "repo", label: "Repository", value: "runtime/guess" },
-    { id: "model", label: "Model", value: "gpt-5" },
-  ] }, "LambdaLabsHQ/xmatrix").statusChips, [
-    expected, { id: "model", label: "Model", value: "gpt-5" },
-  ]);
-});
-
 test("Grok Build monthly credit quota survives presence merge and Human agent cards", () => {
   const presentation = mergeAgentInstancePresentation(undefined, {
     type: "presence_update",

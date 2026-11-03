@@ -209,7 +209,7 @@ export function agentMessagePresentationForLiveSnapshot(
     ...(session.presentation?.workspaceName
       ? { workspaceName: session.presentation.workspaceName }
       : {}),
-    ...agentMessagePresentation(session.presentation, session.repository),
+    ...agentMessagePresentation(session.presentation),
   };
 }
 

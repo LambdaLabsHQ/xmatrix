@@ -3,8 +3,10 @@
 ## Unreleased: Agent message headers name their repository
 
 Agent message headers omitted the repository even though the Run already knew
-it. The Hub now captures the admitted repository as a Repository status tag in
-the send-time snapshot, including sends before runtime presentation arrives.
+it. The message commit now reads the admitted repository from the proven Run
+in the authorization transaction and captures it as a Repository status tag,
+including sends before runtime presentation arrives. A stale Instance chip
+array cannot override or erase that repository.
 It uses the sanitized repository reference rather than a managed checkout path;
 later presence changes cannot rewrite historical headers. Existing Web and
 native clients already render this tag. Hub only, no schema or client migration;
