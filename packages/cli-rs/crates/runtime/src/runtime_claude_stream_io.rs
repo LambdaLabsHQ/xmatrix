@@ -50,8 +50,8 @@ use crate::runtime_claude_turn::{
 use crate::runtime_harness_questions::{
     claude_questions, publish_questionnaire, questionnaire_message,
 };
-use crate::runtime_trusted_role_prompt::claude_stream_extra_args;
 use crate::runtime_trusted_role_prompt::trusted_role_system_prompt_from_env;
+use crate::runtime_trusted_role_prompt::{claude_stream_extra_args, label_claude_entrypoint};
 use crate::runtime_usage_limit::claude_rate_limit_rejection;
 use crate::runtime_waiting::{ToolWaits, background_wait, claude_tool_wait};
 use crate::{
@@ -258,6 +258,7 @@ pub(crate) fn start_claude_stream_process(
     if let Some(inbox) = crate::bound_goal_inbox_path() {
         command.env(crate::GOAL_INBOX_ENV, inbox);
     }
+    label_claude_entrypoint(&mut command);
     command
         .args(&spawn_args)
         .stdin(Stdio::piped())

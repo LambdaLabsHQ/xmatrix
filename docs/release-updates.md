@@ -1,5 +1,29 @@
 # Release Updates
 
+## Unreleased: Claude runs report xMatrix as their client
+
+Claude Code labels every request with the client that drives it. A Claude
+started headless with `--print`, as every xMatrix Agent and one-shot text task
+is, labelled itself `sdk-cli`, and Claude subscriptions currently use up the
+5-hour window about twice as fast per token under that label as under the
+interactive TUI's (anthropics/claude-code#97074). The daemon now sets
+`CLAUDE_CODE_ENTRYPOINT=xmatrix` on every Claude it starts, overwriting a value
+inherited from a parent Claude session, so transcripts and requests name
+xMatrix. Client only; Agents pick it up when their Claude process next starts.
+No schema or protocol change. Recovery is a CI-validated release reverting this
+change.
+
+## Unreleased: Quote a selected passage of a message
+
+Selecting text in a message offered only Discuss. It now offers **Quote ｜
+Discuss in new channel**: Quote puts the passage above this conversation's own
+composer, with its author and Channel, and the next message sent there opens
+with it as a quote linking back to the message; Discuss in new channel is the
+former Discuss. Floating paper menus (this one, a message's hover actions, a
+page's selection and `/` menus) are now a flat wood-tinted slip without a
+shadow. Web only, no schema or client migration. Recovery is a CI-validated
+beta release reverting this change.
+
 ## Unreleased: Gmail sends from a verified send-as alias
 
 `@gmail:send:<to> from:<address>` refused any address that was not a

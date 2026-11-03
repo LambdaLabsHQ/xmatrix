@@ -1513,6 +1513,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     });
   }
 
+  /** A passage of a message, quoted with a link back to the message. */
+  function messagePassageQuote(source: ChannelSnapshot, message: TimelineItem, messageId: string, quote: string): DiscussionQuote {
+    const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(messageId)}`;
+    return discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }, false);
+  }
+
   /**
    * A conversation started from a passage of a message (selection-discussion.ts).
    * It opens holding the passage and a link back to the message, is as open as
@@ -1531,8 +1537,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const { channel, created } = await beginConversation({ spaceId: source.spaceId,
         memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote), mode: source.mode,
         metadata: { fromChannelId: source.id, fromMessageId: messageId, autoName: true } });
-      const href = `${absoluteChannelUrl(source, s.spacesRef.current)}#message:${encodeURIComponent(messageId)}`;
-      seedQuote(channel.id, discussionQuote(quote, { label: `${message.author} in #${channelTitle(source)}`, href }, false));
+      seedQuote(channel.id, messagePassageQuote(source, message, messageId, quote));
       // Beside a page it opens beside the page, as a discussion of the page does.
       if (s.viewRef.current === "pages" && s.selectedPageId) openPageConversation(channel.id, { focus: true });
       else navigateToChannel(channel.id);
@@ -1551,6 +1556,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   const handleTimelineDiscussPassage = useStableCallback((message: TimelineItem, quote: string) => {
     void discussMessagePassage(message, quote);
+  });
+
+  /** A passage of a message, as a quote in its own conversation's composer, carried by the next message sent there. */
+  const handleTimelineQuotePassage = useStableCallback((message: TimelineItem, quote: string) => {
+    const sourceId = message.channelId ?? s.selectedChannelIdRef.current;
+    const source = s.channelsRef.current.find((channel) => channel.id === sourceId);
+    if (!source || !message.messageId) return;
+    seedQuote(source.id, messagePassageQuote(source, message, message.messageId, quote));
+    setComposerAutoFocusRequest((current) => current + 1);
   });
 
   function openInternalAppLink(href: string): boolean {
@@ -2858,6 +2872,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     handleTimelineJumpToMessage,
     handleTimelineOpenThread,
     handleTimelineDiscussPassage,
+    handleTimelineQuotePassage,
     desktopFrameClass,
     handleTimelineMentionSender,
     handleTimelineRebornSender,

@@ -1,9 +1,58 @@
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, E2E_NOW, openGeneralChannelWithHistory } from "./workspace-fixtures";
+import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { expectDraft } from "./composer-draft";
 
 test.use(E2E_DESKTOP_CONTEXT);
+
+/**
+ * Selects a message's text from the first occurrence of `start` to the end of
+ * that text node, until the selection menu shows: a row the list re-renders
+ * while it settles drops a selection made in it.
+ */
+async function selectFrom(text: Locator, start: string) {
+  await expect(async () => {
+    await selectOnce(text, start);
+    await expect(text.page().getByTestId("message-selection-menu")).toBeVisible({ timeout: 1000 });
+  }).toPass();
+}
+
+async function selectOnce(text: Locator, start: string) {
+  await text.evaluate((body, start) => {
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent!.indexOf(start);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, node.textContent!.length);
+      document.getSelection()!.removeAllRanges();
+      document.getSelection()!.addRange(range);
+      return;
+    }
+  }, start);
+}
+
+// Quoting a passage of a message puts it above this conversation's composer; the next message sent carries it.
+test("quoting a passage of a message holds it in this conversation's composer", async ({ page }) => {
+  const message = { messageId: "m-relay", channelId: E2E_CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: E2E_USER_SENDER,
+    body: "The relay stalls when the queue fills. Retries back off too slowly." };
+  await openGeneralChannelWithHistory(page, E2E_CHANNEL, [message]);
+  const text = page.locator("[data-message-body='m-relay']");
+  await expect(text).toBeVisible();
+  await selectFrom(text, "Retries");
+  const menu = page.getByTestId("message-selection-menu");
+  await menu.getByRole("button", { name: "Quote" }).click();
+
+  const quote = page.getByTestId("composer-quote");
+  await expect(quote).toContainText("Retries back off too slowly.");
+  await expect(quote).toContainText("E2E Tester in #general");
+  await expect(page).not.toHaveURL(new RegExp(`--${CREATED_CHANNEL_ID}`, "u"));
+  await expect(page.locator(".composer-textarea").first()).toBeFocused();
+  await expect(menu).toBeHidden();
+  await page.screenshot({ path: test.info().outputPath("message-passage-quoted.png") });
+});
 
 // Selecting a passage of a message starts a conversation about it, as a selected passage of a page does.
 test("selecting a passage of a message starts a conversation holding it, linked to the same pages", async ({ page }) => {
@@ -21,23 +70,12 @@ test("selecting a passage of a message starts a conversation holding it, linked 
   // Virtuoso keeps a row hidden briefly after it measures it; hidden text selects as nothing.
   await expect(text).toBeVisible();
   // Select the second sentence of the message.
-  await text.evaluate((body) => {
-    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const at = node.textContent!.indexOf("Retries");
-      if (at < 0) continue;
-      const range = document.createRange();
-      range.setStart(node, at);
-      range.setEnd(node, node.textContent!.length);
-      document.getSelection()!.removeAllRanges();
-      document.getSelection()!.addRange(range);
-      return;
-    }
-  });
+  await selectFrom(text, "Retries");
   const menu = page.getByTestId("message-selection-menu");
-  await expect(menu.getByRole("button", { name: "Discuss" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Quote" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Discuss in new channel" })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("message-selection-menu.png") });
-  await menu.getByRole("button", { name: "Discuss" }).click();
+  await menu.getByRole("button", { name: "Discuss in new channel" }).click();
 
   await expect.poll(() => fixtureRequestBodies(page, "conversation-create")).toEqual([expect.objectContaining({
     spaceId: E2E_SPACE.id, name: "“Retries back off too slowly.”", mode: "open",
