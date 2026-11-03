@@ -259,8 +259,25 @@ export function MoreView({
             </ul>
           </section>
         ))}
+        <WebReleaseLine />
       </div>
     </div>
+  );
+}
+
+/** The release this Web was built from, as error reports name it (`xmatrix-v3.1.3-beta.28`); none in a local build. */
+const WEB_RELEASE_VERSION = (process.env.NEXT_PUBLIC_SENTRY_RELEASE ?? "").replace(/^xmatrix-v/u, "");
+
+/* Which Web a phone runs, at the foot of More. An app loads its Web on each
+   launch, so a store build's own version does not say whether a fix is in. */
+function WebReleaseLine() {
+  if (!WEB_RELEASE_VERSION) return null;
+  return (
+    <p className="px-4 py-6 text-center text-xs text-muted-foreground" data-testid="web-release-version">
+      <a href={`/releases/${encodeURIComponent(WEB_RELEASE_VERSION)}`} className="underline-offset-2 hover:underline">
+        Web {WEB_RELEASE_VERSION}
+      </a>
+    </p>
   );
 }
 
