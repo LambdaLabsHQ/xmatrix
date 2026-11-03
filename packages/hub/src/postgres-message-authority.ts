@@ -1105,6 +1105,18 @@ export async function postgresMessageLiveRecipientUserIds(
   });
 }
 
+/** The Channel's live readers and its Agents as their lists show them, read together. */
+export async function postgresMessageLiveAgentPresence(
+  env: Env,
+  channelId: string,
+  dependencies: PostgresMessageDependencies = {},
+) {
+  const context = await postgresMessageBackgroundContext(env, channelId, "message-live-agent-presence", dependencies);
+  return context.messages.liveAgentPresence({
+    requestId: context.requestId, spaceId: context.spaceId, channelId: context.channelId,
+  });
+}
+
 /** The Channel's live audience as it stands now: its readers and the owners of its active Runs. */
 export async function postgresMessageLiveAudience(
   env: Env,

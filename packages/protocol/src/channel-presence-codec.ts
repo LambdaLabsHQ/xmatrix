@@ -69,6 +69,17 @@ function decodePresence(channel: SerializedChannel | ChannelSnapshot): ChannelSn
   return { ...metadata, presence };
 }
 
+/**
+ * A Channel's Agents as a lifecycle push carries them (`presenceCoverage:
+ * "agents"`): the people stay as the reader holds them. Undefined when the
+ * push carries none, as an older Hub's does, or carries a malformed one.
+ */
+export function decodeChannelAgentPresence(channelId: string, memberPresence: unknown): ChannelPresence | undefined {
+  if (!memberPresence || typeof memberPresence !== "object" || Array.isArray(memberPresence)) return undefined;
+  return decodeChannelSnapshot({ id: channelId, memberPresence: memberPresence as Record<string, ChannelMemberPresence>,
+    presenceCoverage: "agents" } as SerializedChannel).presence;
+}
+
 /** Encode only at an external boundary: one legacy member for each Instance. */
 export function encodeChannelSnapshot(channel: ChannelSnapshot): SerializedChannel {
   const { presence, ...metadata } = channel;
