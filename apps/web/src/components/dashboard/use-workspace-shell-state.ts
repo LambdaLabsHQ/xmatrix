@@ -13,7 +13,7 @@ import type { ComposerInvocationDraft } from "./composer-invocation-bindings";
 import { ChannelHistoryPreload } from "./channel-history-preload";
 import { useStartupBackgroundReady } from "./use-startup-background-ready";
 import { nativeBackOwnsAnimation } from "./use-system-back";
-import type { MobileListTransitionDriver } from "./use-mobile-list-transition";
+import { reportPushDeclined, type MobileListTransitionDriver } from "./use-mobile-list-transition";
 
 import type {
   DesktopAgentPresetDiscovery,
@@ -514,7 +514,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       update();
       return;
     }
-    if (mobileListTransitionRef.current?.run(direction, update)) return;
+    const driver = mobileListTransitionRef.current;
+    if (!driver && direction === "forward" && isMobileViewportRef.current) {
+      reportPushDeclined("no list transition was mounted", () => ({ client: getDesktopBridge()?.client ?? "web" }));
+    }
+    if (driver?.run(direction, update)) return;
     update();
   }, []);
 
