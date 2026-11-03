@@ -27,6 +27,7 @@ import { postgresMessageAttachmentAuthorityRequest } from "../postgres-message-a
 import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from "./subscription-parse";
 import { enqueueXUpload } from "./x-upload-executor-do";
 import { X_ACTIONS } from "./actions/x";
+import { gmailPreview } from "./actions/gmail";
 import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 
 /*
@@ -234,7 +235,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
       const preview = providerId === "googlecalendar" ? JSON.parse(prepared.preview!) as Record<string, string>
         : providerId === "gmail"
-        ? Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]))
+        ? gmailPreview(prepared)
         : providerId === "x" && actionId === "accounts" ? { account: "Connected X accounts owned by the requesting member", text: "List handles and account IDs" }
         : providerId === "x" ? { account: `@${prepared.accountUsername} (X account ${prepared.accountId})`,
           text: prepared.text ?? "", ...(prepared.postId ? { quotedPost: prepared.postId } : {}),

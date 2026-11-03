@@ -11,8 +11,9 @@ import type { Env } from "./types";
 /**
  * Every point shares blobs 1-11 and doubles 1-4 (duration, rows, slow, weight),
  * so one weighted quantile query covers any kind. Blob 11 is the code-defined
- * operation the family in blob 2 was derived from. Session points add doubles
- * 5-15 in SESSION_SEGMENTS order.
+ * operation the family in blob 2 was derived from. Query points add double 5,
+ * the statement's result bytes, then a breaker refusal's doubles 6-8. Session
+ * points add doubles 5-16 in SESSION_SEGMENTS order.
  */
 export const POSTGRES_OBSERVABILITY_SCHEMA = "postgres_substrate_observability_v4";
 
@@ -220,17 +221,21 @@ export function recordPostgresQueryObservation(
     ],
     doubles: [
       safeDuration(input.durationMs), safeRowCount(input.rowCount), input.slow ? 1 : 0, kept.weight,
+      safeRowCount(input.resultBytes),
       ...(input.connectivity ? [safeDuration(input.connectivity.retryAfterMs),
         safeDuration(input.connectivity.failureAgeMs), safeRowCount(input.connectivity.failureCount)] : []),
     ],
   });
 }
 
-/** Doubles 5-15 of a session point, in order. */
+/** Doubles 5-16 of a session point, in order. */
 export const SESSION_SEGMENTS = [
   "queueMs", "checkoutMs", "firstStatementMs", "beginMs", "sqlMs", "sqlMaxMs",
-  "commitMs", "rollbackMs", "roundTrips", "transactions", "queries",
+  "commitMs", "rollbackMs", "roundTrips", "transactions", "queries", "resultBytes",
 ] as const satisfies readonly (keyof DatabaseSessionObservation)[];
+
+/** Session segments that count things rather than time them. */
+const SESSION_COUNTS = new Set<string>(["roundTrips", "transactions", "queries", "resultBytes"]);
 
 /**
  * One point per connection checkout: the request-level view of database time.
@@ -268,8 +273,8 @@ export function recordPostgresSessionObservation(
     ],
     doubles: [
       wallMs, safeRowCount(input.rows), slow ? 1 : 0, kept.weight,
-      ...SESSION_SEGMENTS.map((field) => field === "roundTrips" || field === "transactions" ||
-        field === "queries" ? safeRowCount(input[field]) : safeDuration(input[field])),
+      ...SESSION_SEGMENTS.map((field) => SESSION_COUNTS.has(field)
+        ? safeRowCount(input[field]) : safeDuration(input[field])),
     ],
   });
 }

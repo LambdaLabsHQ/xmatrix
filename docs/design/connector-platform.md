@@ -456,9 +456,15 @@ narrower `gmail.readonly` on it is what Google's app-blocked screen refuses
 config therefore requests `https://mail.google.com/` alone, without the
 default profile and contacts scopes, and the Hub is the boundary the grant
 is not: every user-invoked Gmail action passes an endpoint list in `actions/gmail.ts`
-(GET profile, message list and one message; POST messages/send) and any
-other endpoint is refused before Composio is called. The only write, POST
-messages/send, belongs to `send` and `reply`. Gmail inherits the app manifest
+(GET profile, message list, one message and the send-as list; POST
+messages/send) and any other endpoint is refused before Composio is called.
+The only write, POST messages/send, belongs to `send` and `reply`. `send`'s
+`from:` may name a send-as alias Gmail lists as primary or verified
+(`accepted`) on one of the caller's mailboxes: the mail goes out through that
+mailbox with the alias in its From header, the approval card names both, and
+the alias is checked again just before sending. `reply` answers from the
+alias an original was addressed to. The send-as list is a read the existing
+grant already allows; no scope is added. Gmail inherits the app manifest
 `defaultPermission: "ask"`, staging an immutable email for a Space admin to
 approve once (§3.5). A read-only grant would need the company's own
 Google app verified for `gmail.readonly` (OAuth verification and CASA).

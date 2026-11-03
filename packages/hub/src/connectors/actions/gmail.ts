@@ -15,7 +15,11 @@ import { mailboxCredentials, mayUseMailbox, parseMailboxes, type GmailMailbox } 
  * endpoints `GMAIL_CALLS` lists, and the only write, messages/send, belongs to
  * `send` and `reply`, which ask for approval of each frozen email by default. A connection holds several mailboxes, and an
  * action uses only those its caller owns (`gmail-mailboxes.ts`); `read` and
- * `reply` find the message among them. `read` lists every link in the message so an
+ * `reply` find the message among them. `send` may name, as `from:`, a send-as
+ * alias Gmail lists as verified on one of those mailboxes (users.settings.sendAs,
+ * read under the same grant); the mail goes out through that mailbox with the
+ * alias in its From header, and `reply` answers from the alias the original was
+ * addressed to. `read` lists every link in the message so an
  * Agent can open one itself (a sign-up verification link, for example); the
  * Hub never fetches a link found in mail.
  */
@@ -33,7 +37,7 @@ const ADDRESS = /^[^\s@<>(),;:"\\[\]]+@[^\s@<>(),;:"\\[\]]+\.[^\s@<>(),;:"\\[\]]
 
 /* User-invoked Gmail endpoints. The notification worker separately permits only profile/history ID reads. */
 const GMAIL_CALLS: Record<"GET" | "POST", RegExp> = {
-  GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32})$/u,
+  GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32}|settings\/sendAs)$/u,
   POST: /^\/messages\/send$/u,
 };
 
@@ -248,6 +252,74 @@ async function usableMailboxes({ credentials, caller }: Context, only?: string):
   return chosen;
 }
 
+/** A verified send-as identity of a mailbox: another address Gmail lets it put in From. */
+interface SendAsAlias { address: string; name: string }
+
+/** The mailbox's verified send-as aliases other than its own address; Gmail marks the primary and accepted ones usable. */
+async function sendAsAliases({ credentials, usage }: Context, mailbox: GmailMailbox): Promise<SendAsAlias[]> {
+  const listed = await gmailGet(mailboxCredentials(credentials, mailbox), "/settings/sendAs", {}, usage);
+  if (listed.sendAs !== undefined && !Array.isArray(listed.sendAs)) throw new ProviderRequestError(502, "Google did not return Gmail send-as addresses");
+  return ((listed.sendAs as unknown[] | undefined) ?? []).map(record).flatMap((entry) => {
+    const alias = typeof entry.sendAsEmail === "string" ? address(entry.sendAsEmail)?.toLowerCase() : undefined;
+    const usable = entry.isPrimary === true || entry.verificationStatus === "accepted";
+    return alias && usable && alias !== mailbox.address ? [{ address: alias, name: line(entry.displayName, 100).trim() }] : [];
+  });
+}
+
+/** Who a send goes out as: a connected mailbox itself, or a verified send-as alias of exactly one of them. */
+async function sendingIdentity(context: Context, from: string): Promise<{ mailbox: GmailMailbox; alias?: SendAsAlias }> {
+  const usable = await usableMailboxes(context);
+  const wanted = from.toLowerCase();
+  if (!wanted) {
+    if (usable.length > 1) throw new ProviderRequestError(400, "name the sending mailbox: from:<address> before the subject");
+    return { mailbox: usable[0]! };
+  }
+  const own = usable.find(mailbox => mailbox.address === wanted);
+  if (own) return { mailbox: own };
+  const listed = await Promise.all(usable.map(async mailbox => ({ mailbox, aliases: await sendAsAliases(context, mailbox) })));
+  const matches = listed.flatMap(({ mailbox, aliases }) =>
+    aliases.filter(alias => alias.address === wanted).map(alias => ({ mailbox, alias })));
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) {
+    throw new ProviderRequestError(409, `${from} is a send-as address of several of your mailboxes (${matches.map(match => match.mailbox.address).join(", ")}); ` +
+      "a Space admin keeps it on one");
+  }
+  const choices = listed.map(({ mailbox, aliases }) =>
+    aliases.length ? `${mailbox.address} (send-as: ${aliases.map(alias => alias.address).join(", ")})` : mailbox.address);
+  throw new ProviderRequestError(403, `${from} is neither a connected Gmail mailbox you may use nor a verified Gmail send-as ` +
+    `address of one; you may send from ${choices.join("; ")}`);
+}
+
+/** A From header naming the alias; a non-ASCII display name becomes an RFC 2047 word so the address stays plain. */
+function fromHeader(alias: SendAsAlias): string {
+  if (!alias.name) return alias.address;
+  const name = /^[\x20-\x7e]*$/u.test(alias.name) ? `"${alias.name.replace(/["\\]/gu, "\\$&")}"` : mimeHeader(alias.name);
+  return `${name} <${alias.address}>`;
+}
+
+/** Frozen fields naming who sends: `from` is the address recipients see; `via` the connected mailbox when that differs. */
+function senderFields(mailbox: GmailMailbox, alias: SendAsAlias | undefined): Record<string, string> {
+  return { from: alias?.address ?? mailbox.address, ...(alias ? { via: mailbox.address, fromName: alias.name } : {}),
+    account: mailbox.account, owner: mailbox.owner };
+}
+
+/** What an approval card shows of a frozen email: an alias sender names the mailbox it goes out through. */
+export function gmailPreview(prepared: Record<string, string>): Record<string, string> {
+  const preview = Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]));
+  if (prepared.via) preview.from = `${prepared.fromName ? `${prepared.fromName} <${prepared.from}>` : prepared.from} (through ${prepared.via})`;
+  return preview;
+}
+
+/** How a receipt names the sender. */
+function senderLabel(input: Record<string, string>): string {
+  return input.via ? `${input.from} (through ${input.via})` : input.from!;
+}
+
+/** Every bare address in a To or Cc header. */
+function headerAddresses(value: string): string[] {
+  return value.split(",").map(part => address(part)?.toLowerCase()).filter((found): found is string => !!found);
+}
+
 /** The mailbox among `mailboxes` that holds the message; Gmail answers 404 (or 400) for another mailbox's id. */
 async function findMessage({ credentials, usage }: Context, mailboxes: GmailMailbox[], id: string, format: "full" | "metadata") {
   for (const mailbox of mailboxes) {
@@ -261,11 +333,9 @@ async function findMessage({ credentials, usage }: Context, mailboxes: GmailMail
 }
 
 async function prepareSend(context: Context, input: Record<string, string>): Promise<Record<string, string>> {
-  const mailboxes = await usableMailboxes(context, input.from || undefined);
-  if (mailboxes.length > 1) throw new ProviderRequestError(400, "name the sending mailbox: from:<address> before the subject");
-  const mailbox = mailboxes[0]!;
-  return { ...input, from: mailbox.address, account: mailbox.account, owner: mailbox.owner,
-    raw: gmailRaw([["To", input.to!], ["Subject", input.subject!]], input.body!) };
+  const { mailbox, alias } = await sendingIdentity(context, input.from ?? "");
+  return { ...input, ...senderFields(mailbox, alias),
+    raw: gmailRaw([...(alias ? [["From", fromHeader(alias)]] as [string, string][] : []), ["To", input.to!], ["Subject", input.subject!]], input.body!) };
 }
 
 async function prepareReply(context: Context, input: Record<string, string>): Promise<Record<string, string>> {
@@ -273,20 +343,30 @@ async function prepareReply(context: Context, input: Record<string, string>): Pr
   const payload = record(original.payload);
   const to = address(header(payload, "reply-to")) ?? address(header(payload, "from"));
   if (!to) throw new ProviderRequestError(422, "the message has no address to reply to");
+  /* Mail addressed to one of the mailbox's verified send-as aliases is answered from that alias. */
+  const recipients = [...headerAddresses(header(payload, "to")), ...headerAddresses(header(payload, "cc"))];
+  const alias = recipients.some(recipient => recipient !== mailbox.address)
+    ? (await sendAsAliases(context, mailbox)).find(candidate => recipients.includes(candidate.address)) : undefined;
   const threadId = typeof original.threadId === "string" && MESSAGE_ID.test(original.threadId) ? original.threadId : "";
   const originalSubject = header(payload, "subject");
   const subject = /^re:/iu.test(originalSubject) ? originalSubject : `Re: ${originalSubject}`;
   const messageId = line(header(payload, "message-id"), 998).trim();
   const references = [line(header(payload, "references"), 998).trim(), messageId].filter(Boolean).join(" ");
-  return { ...input, to, subject, from: mailbox.address, account: mailbox.account, owner: mailbox.owner, threadId,
-    raw: gmailRaw([["To", to], ["Subject", subject],
+  return { ...input, to, subject, ...senderFields(mailbox, alias), threadId,
+    raw: gmailRaw([...(alias ? [["From", fromHeader(alias)]] as [string, string][] : []), ["To", to], ["Subject", subject],
       ...(messageId ? [["In-Reply-To", messageId], ["References", references]] as [string, string][] : [])], input.body!) };
 }
 
 async function sendPrepared(context: Context, input: Record<string, string>): Promise<string> {
-  const mailbox = (await usableMailboxes(context, input.from))[0]!;
+  const mailbox = (await usableMailboxes(context, input.via || input.from))[0]!;
   if (mailbox.account !== input.account || mailbox.owner !== input.owner) {
     throw new ProviderRequestError(409, "the sending mailbox changed; ask again");
+  }
+  if (input.via) {
+    const alias = (await sendAsAliases(context, mailbox)).find(candidate => candidate.address === input.from);
+    if (!alias || alias.name !== (input.fromName ?? "")) {
+      throw new ProviderRequestError(409, `${input.from} is no longer a verified send-as address of ${mailbox.address}; ask again`);
+    }
   }
   await context.authorizeWrite?.();
   return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined, context.usage);
@@ -341,7 +421,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       if (!to || to !== statement.target) return "name one recipient: @gmail:send:<to address> [from:<mailbox>] <subject>\\n<body>";
       const text = requireText(statement);
       const from = text?.match(/^from:(\S+)\s+/u);
-      if (from && !address(from[1]!)) return "from: names one of your connected mailboxes";
+      if (from && !address(from[1]!)) return "from: names one of your connected mailboxes or one of its verified send-as addresses";
       const { title, body } = titleAndBody(from ? text!.slice(from[0].length) : text ?? "");
       return title ? { to, from: from?.[1] ?? "", subject: title, body } : "write the subject after the recipient";
     },
@@ -349,7 +429,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     async execute(context, input) {
       const frozen = input.raw ? input : await prepareSend(context, input);
       const id = await sendPrepared(context, frozen);
-      return { summary: `Sent Gmail message ${id} from ${frozen.from} to ${frozen.to}.` };
+      return { summary: `Sent Gmail message ${id} from ${senderLabel(frozen)} to ${frozen.to}.` };
     },
   },
   reply: {
@@ -363,7 +443,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     async execute(context, input) {
       const frozen = input.raw ? input : await prepareReply(context, input);
       const id = await sendPrepared(context, frozen);
-      return { summary: `Replied to Gmail message ${frozen.id} from ${frozen.from} as ${id}, to ${frozen.to}.` };
+      return { summary: `Replied to Gmail message ${frozen.id} from ${senderLabel(frozen)} as ${id}, to ${frozen.to}.` };
     },
   },
 };
