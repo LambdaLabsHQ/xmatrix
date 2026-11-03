@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Agent message headers name their repository
+
+Agent message headers omitted the repository even though the Run already knew
+it. The Hub now captures the admitted repository as a Repository status tag in
+the send-time snapshot, including sends before runtime presentation arrives.
+It uses the sanitized repository reference rather than a managed checkout path;
+later presence changes cannot rewrite historical headers. Existing Web and
+native clients already render this tag. Hub only, no schema or client migration;
+older messages without the snapshot remain unchanged. Recovery is a CI-validated
+beta Hub release reverting this change.
+
 ## Unreleased: Claude runs report xMatrix as their client
 
 Claude Code labels every request with the client that drives it. A Claude

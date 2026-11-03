@@ -105,6 +105,7 @@ test("agent message header shows sender context snapshots", async ({ page }) => 
         model: "gpt-5-codex",
         effort: "xhigh",
         statusChips: [
+          { id: "repo", label: "Repository", value: "LambdaLabsHQ/xmatrix" },
           { id: "model", label: "Model", value: "gpt-5-codex" },
         ],
       },
@@ -120,6 +121,9 @@ test("agent message header shows sender context snapshots", async ({ page }) => 
     /Show model names in message headers/
   );
   await expect(row.locator(".app-message-branch-badge")).toContainText("fix-display-model-name");
+  const repoChip = row.locator("[data-status-chip='repo']");
+  await expect(repoChip).toHaveText("LambdaLabsHQ/xmatrix");
+  await expect(repoChip).toHaveAttribute("aria-label", "Repository: LambdaLabsHQ/xmatrix");
   const modelChip = row.locator("[data-status-chip='model']");
   await expect(modelChip).toContainText("gpt-5-codex");
   await expect(modelChip).toHaveAttribute("aria-label", "Model: gpt-5-codex");
