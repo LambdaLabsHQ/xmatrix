@@ -137,6 +137,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
 
     // A sleeping source has no active Run: the old handoff implementation
     // omitted it from stop targets, then the successor's reply woke it again.
+    let sleepingHandoff;
     if (sleeping) {
       daemonA.ws.send(JSON.stringify({ type: "machine_run_exited", runId: launch.runId,
         executionKey: launch.executionKey, agentId: launch.instanceId, agentName: launch.agentName,
@@ -151,9 +152,10 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       }
       assert.equal(resting.rest_state, "sleeping", JSON.stringify(resting));
       source.ws.close();
-      const response = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
+      // The HTTP handoff now waits for a confirmed stop. Answer the daemon's
+      // command below while the request is pending, as the real daemon does.
+      sleepingHandoff = worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
         method: "POST", headers, body: JSON.stringify({ body: `@claude:${resting.channel_instance_id}:handoff:@auto` }) });
-      assert.equal(response.status, 200, await response.clone().text());
     }
 
     // Its provider account runs out, or the owner hands off its sleeping work.
@@ -186,6 +188,11 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       repoIdentity: stop.repoIdentity, repoKeyId: stop.repoKeyId, slotId: stop.slotId,
       worktreeDisposition: stop.worktreeDisposition, ok: true, pid: 4242, cleanupReason: "process_terminated",
       ...answerStop(stop), relayLease: stop.relayLease }));
+
+    if (sleepingHandoff) {
+      const response = await sleepingHandoff;
+      assert.equal(response.status, 200, await response.clone().text());
+    }
 
     if (waitForQuota) {
       const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
