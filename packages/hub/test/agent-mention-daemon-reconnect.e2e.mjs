@@ -29,7 +29,7 @@ async function spawnRenewableRun(worker, daemon, { slug, machineId, hostId }, la
   const started = await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${MOCK_TOKEN}`, "content-type": "application/json" },
-    body: JSON.stringify({ body: `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" keep the spawn lease live` }),
+    body: JSON.stringify({ launch: true, body: `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" keep the spawn lease live` }),
   });
   assert.equal(started.status, 200, await started.text());
   return daemon.inbox.waitFor(

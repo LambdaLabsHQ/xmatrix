@@ -87,7 +87,7 @@ Here `@auto` is the mention, the three words after it are conditions, and everyt
 | `effort:<level>` | Use this reasoning effort |
 | `fast:on` | Turn on the harness's fast mode, when it offers one |
 | `param.<id>:<value>` | Set any other option the harness advertises |
-| `launch:force` | Start even if xMatrix read the mention as not asking for work |
+| `launch:force` | Start even from a send that did not ask to start Agents |
 
 The rules:
 
@@ -130,11 +130,11 @@ Options beyond model and effort differ by harness, so they are not fixed keyword
 
 The composer lists the ids and values a harness currently advertises. `fast:on` is short for `param.fast:on`. A switch accepts `on`, `off`, `true` or `false`.
 
-### When xMatrix reads a mention as not a request
+### Who starts an agent
 
-People mention agents without wanting one started: "the diff `@codex` produced yesterday", or an example in a write-up. xMatrix reads each launch mention in context, and when it reads one as a reference, an explanation or an example, it starts nothing and says so on the mention.
+Sending from the xMatrix composer starts the agents you summon. An agent's message starts one only when it sends with `xmatrix send --launch`; without it, an `@codex` in its report is just a mention, so agents never summon each other by accident. Stop, reborn and handoff work the same either way.
 
-If you did mean it, add `launch:force`:
+A mention that started nothing says so on the mention, and its author can start it from there. `launch:force` written after a mention also starts it, whoever sends the message:
 
 ```text
 @codex launch:force
@@ -269,7 +269,7 @@ The mention itself shows what happened: waiting, working, replied, failed or sto
 
 | What the mention says | What to do |
 | --- | --- |
-| Read as naming the agent, not asking one to start | Add `launch:force` after the mention |
+| Mentioned, not started | Its send did not ask to start agents: press Start on the mention, or send again with `xmatrix send --launch` |
 | No registered environment offers the requested model, effort or harness | Check the id against what the harness reports, or drop the condition; `xmatrix agent list` shows the harnesses each machine runs |
 | The requested machine does not run this Agent | `xmatrix agent list` (or the Agents page) shows each machine's harnesses, whether it is online and its quota |
 | The requested directory is not authorized | Register it with `xmatrix workspace register` on that machine |

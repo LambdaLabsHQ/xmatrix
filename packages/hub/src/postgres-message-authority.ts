@@ -562,6 +562,7 @@ export async function postgresMessageAppend(
       attentionBody: messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND || imported ? "" : command.body,
       certifyMessageAsk: !imported,
       ...(command.awaitsResponse === true ? { awaitsResponse: true } : {}),
+      ...(command.launch === true ? { launch: true } : {}),
       ...(command.waitsOnUserIds?.length ? { waitsOnUserIds: command.waitsOnUserIds } : {}),
       invocationSelections: command.invocationSelections,
       runProof,

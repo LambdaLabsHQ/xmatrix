@@ -149,7 +149,6 @@ export type OutgoingMessage = {
   channelId: string;
   body: string;
   invocationSelections?: ComposerSendSnapshot["invocationSelections"];
-  summonIntents?: ComposerSendSnapshot["summonIntents"];
   attachments: ChannelAttachment[];
   /** Files sent still uploading; the message is appended once they land (sent-upload.ts). */
   uploads?: SentUpload[];

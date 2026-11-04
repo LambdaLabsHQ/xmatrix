@@ -52,7 +52,7 @@ test("an owner's or a Space admin's Disable stops the Agent's running work and E
       executionKey: stop.executionKey, agentId: stop.agentId, instanceId: stop.instanceId,
       ...(stop.worktreeDisposition ? { worktreeDisposition: stop.worktreeDisposition } : {}),
       ok: true, pid: 4242, relayLease: stop.relayLease }));
-    const mention = body => post(`/api/channels/${encodeURIComponent(channel.id)}/messages`, { body });
+    const mention = body => post(`/api/channels/${encodeURIComponent(channel.id)}/messages`, { launch: true, body });
     const refused = daemon.inbox.waitFor(message => message.type === "machine_spawn_agent"
       && message.channelId === channel.id && message.runId !== command.runId, "disabled spawn", 3_000);
     assert.equal((await mention("@codex while disabled")).status, 200);

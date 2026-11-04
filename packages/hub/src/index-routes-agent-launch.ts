@@ -5,7 +5,6 @@ import type { Env } from "./types";
 import { registerAgentRebornRoutes } from "./index-routes-agent-reborn";
 import { registerAgentRegistrationRoutes } from "./index-routes-agent-registration";
 import { registerAgentRoutingRoutes } from "./index-routes-agent-routing";
-import { registerSummonIntentRoutes } from "./index-routes-summon-intent";
 import { actorUserId, requireAuth, requireHumanAuth, jsonErrors } from "./index-shared";
 import { claimFirstMessageLaunch, dispatchRegistrationLaunchAnyway, messageAskAction, showFirstMessageLaunch } from "./registration-launch-dispatch";
 import { runtimePlacement, runtimeRepository } from "./runtime";
@@ -19,7 +18,6 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
   registerAgentRegistrationRoutes(app);
   registerAgentRoutingRoutes(app);
   registerAgentRebornRoutes(app);
-  registerSummonIntentRoutes(app);
   app.post("/api/invocations/diagnostics", (c) => jsonErrors(c, async () => {
     const user = await requireAuth(c.req.raw, c.env);
     const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
@@ -74,7 +72,7 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
       actorUserId: actorUserId(authUser) }), 200, NO_STORE);
   }));
 
-  /* "Launch anyway": the author overrides Jev's reading of one summon. The
+  /* "Start": the author starts one summon its send did not launch. The
      body is only a claim; dispatch rechecks it against the stored body hash
      and requires the caller to be the message's author (or its Agent's owner). */
   app.post("/api/channels/:channelId/messages/:messageId/launch-anyway", (c) => jsonErrors(c, async () => {

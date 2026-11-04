@@ -27,7 +27,7 @@ test("a repository summon launches without a catalog read or repository grant, a
     daemon = await connectDaemon(worker, { machineId, hostId });
     await createRoutableAgent(worker, { token: MOCK_TOKEN, spaceId, name: "codex", machineId, hostId });
     const post = () => worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
-      method: "POST", headers, body: JSON.stringify({ body: original }) });
+      method: "POST", headers, body: JSON.stringify({ launch: true, body: original }) });
     // A named repository is passed to the runtime as the repository to work
     // in: no catalog read and no repository grant come before the launch.
     const pending = daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
@@ -48,7 +48,7 @@ test("a repository summon launches without a catalog read or repository grant, a
     assert.equal(launched.launches.length, 1);
     assert.equal(launched.launches[0].sourceMention, original.trimEnd());
     const named = await json(await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
-      method: "POST", headers, body: JSON.stringify({ body: harnessNamedModel }) }));
+      method: "POST", headers, body: JSON.stringify({ launch: true, body: harnessNamedModel }) }));
     const namedDiagnostic = await json(await worker.fetch("/api/invocations/diagnostics", { method: "POST", headers,
       body: JSON.stringify({ channelId: channel.id, sourceMessageIds: [named.message.messageId] }) }));
     assert.equal(namedDiagnostic.rejections[0].code, "registration_model_unavailable");

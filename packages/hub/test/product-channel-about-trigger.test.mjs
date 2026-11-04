@@ -66,12 +66,12 @@ test("a summon only a signed-out program could take names it and carries its sig
   assert.equal(notices[1].metadata, undefined);
 });
 
-test("a mention Jev declined posts no Channel notice; its card says why", async () => {
+test("a mention its send did not launch posts no Channel notice; its card says why", async () => {
   const input = { env: {}, channelId: "channel", messageId: "summon",
     senderKind: "user", senderId: "human", actorUserId: "human", body: "Correction: @claude was named in a heading" };
   const notices = [];
   assert.equal(await dispatchProductMessageLaunches(input, { registration: async () => ({ selectionCount: 1,
-    prepared: [], rejected: [{ code: "summon_intent_explanation" }, { code: "registration_quota_exhausted" }] }) },
+    prepared: [], rejected: [{ code: "launch_not_requested" }, { code: "registration_quota_exhausted" }] }) },
   async value => notices.push(value)), true);
   assert.equal(notices.length, 1);
   assert.match(notices[0].body, /registration_quota_exhausted/);

@@ -1,6 +1,6 @@
 import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
-import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
+import type { ChannelAttachment } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, isAutoLaunchSummonText, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
@@ -66,8 +66,6 @@ export interface ProductMessagePostCommitInput {
   scheduleBackground?: (task: Promise<unknown>) => void;
   /** Set by the append when this message replies to a cross-Channel link. */
   replyOrigin?: CrossChannelReplyOrigin;
-  /** Jev's reading of each summon while its Human author typed it. */
-  draftIntents?: DraftSummonIntent[];
 }
 
 /**

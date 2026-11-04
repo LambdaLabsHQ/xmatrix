@@ -96,8 +96,9 @@ integration("launch survives a hostname change with stale Workspace metadata and
         description: "", availability: "unattended", maxConcurrent: 4, capabilities: [],
         launch: { runtime: "/opt/codex/bin/codex", runtimeArgs: ["--full-auto"], backend: "codex-app", sandboxMode: "workspace-write" } } });
     const body = "@codex task", bodyHash = await digestCanonicalCloneCborV1(body);
-    const source = async id => sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
-      [id, bodyHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
+    // `launch: false` is a send that did not ask to start the Agents it mentions.
+    const source = async (id, launch = true) => sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
+      [id, bodyHash, { ...(launch ? { launch: true } : {}), selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     await source("message");
     const launches = new PostgresRegistrationLaunchRepository(database, database, placement);
@@ -248,7 +249,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     // An Agent Run's own summon (a Focus delegate, an Agent launching another)
     // stays valid when the staged-launch recheck runs before it commits.
     await sql(`INSERT INTO data.messages VALUES ('space','channel','agent-source','agent',$1,$2,1,1,1,$3,NULL,NULL,NULL)`,
-      [committedInstance.instance_id, bodyHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
+      [committedInstance.instance_id, bodyHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     afterCommit = async context => {
       if (context.operation === "registration.execution.reserve") {
@@ -268,7 +269,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["machine_routing_parameters_v1"]'::jsonb`);
     const parameterHash = await digestCanonicalCloneCborV1(parameterBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','explicit-parameters','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [parameterHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: parameterHash,
+      [parameterHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: parameterHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     const explicitRequest = { ...request, commandId: "explicit-parameters", sourceMessageId: "explicit-parameters",
       body: parameterBody, requirements: { ...request.requirements, parameters: { serviceTier: "future-priority" } } };
@@ -287,7 +288,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(parameterPayload.prompt, parameterBody);
     assert.equal((await launches.prepare(explicitRequest)).launchId, parameterLaunch.launchId);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','cold-parameters','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [parameterHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: parameterHash,
+      [parameterHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: parameterHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     const coldLaunch = await launches.dispatchFromMessage({ commandId: "cold-parameters", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "cold-parameters", body: parameterBody }, async ({ candidates }) => {
@@ -307,19 +308,17 @@ integration("launch survives a hostname change with stale Workspace metadata and
         supportedReasoningEfforts: [{ reasoningEffort: "high", description: "Thorough" }] }],
     }, parameterLaunch.instanceId]);
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["machine_routing_effort_v1"]'::jsonb`);
-    await source("preview-declined");
-    const declined = await launches.dispatchFromMessage({ commandId: "preview-declined", actorUserId: "caller",
-      channelId: "channel", sourceMessageId: "preview-declined", body,
-      draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "explanation" }] },
-      async () => assert.fail("a confirmed non-request allocates no launch and asks no question"));
+    await source("mention-only", false);
+    const declined = await launches.dispatchFromMessage({ commandId: "mention-only", actorUserId: "caller",
+      channelId: "channel", sourceMessageId: "mention-only", body },
+      async () => assert.fail("a send that did not ask to launch allocates nothing and asks no question"));
     assert.equal(declined.selectionCount, 1);
     assert.deepEqual(declined.prepared, []);
-    assert.equal(declined.rejected[0].code, "summon_intent_explanation");
+    assert.equal(declined.rejected[0].code, "launch_not_requested");
     await source("dispatch-source");
     const dispatched = await launches.dispatchFromMessage({ commandId: "dispatch", actorUserId: "caller",
-      channelId: "channel", sourceMessageId: "dispatch-source", body,
-      draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "summon" }] }, async ({ candidates, sourceSequence, summon }) => {
-        assert.equal(summon.readInDraft, true);
+      channelId: "channel", sourceMessageId: "dispatch-source", body }, async ({ candidates, sourceSequence, summon }) => {
+        assert.deepEqual(summon, { text: "@codex", start: 0, end: 6 });
         const boundary = await sql("SELECT timeline_sequence FROM data.messages WHERE message_id=$1", ["dispatch-source"]);
         assert.equal(sourceSequence, Number(boundary.rows[0].timeline_sequence));
         assert.deepEqual(candidates[0].observations.quota, { remainingPercent: 100, assumed: true });
@@ -334,7 +333,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       // the persisted request, never hash services or transient picker input.
       env: { service: new URL("https://launch.internal") }, database, directory: database,
       evaluatorFor: () => assert.fail("replay must not evaluate again"),
-      forceMention: "@codex", draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "summon" }],
+      forceMention: "@codex",
     }, async () => assert.fail("replay must not select again"));
     assert.equal(dispatchReplay.prepared[0].launchId, dispatched.prepared[0].launchId);
     assert.equal(dispatchReplay.prepared[0].reused, true);
@@ -347,7 +346,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal((await sql(`SELECT count(*)::int AS count FROM data.runs`)).rows[0].count, 5);
     const capabilityBody = "@codex task", capabilityHash = await digestCanonicalCloneCborV1(capabilityBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','capability','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [capabilityHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: capabilityHash,
+      [capabilityHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: capabilityHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     await sql(`UPDATE control.agent_registration_environments SET declaration_json=declaration_json||'{"quotaPoolId":"pool"}'::jsonb`);
     await sql(`INSERT INTO control.registration_quota_observations VALUES
@@ -516,7 +515,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       VALUES ('space','space:github',1,'github','GitHub','configured','oauth','[]','[]','[]','[]','owner','repo-catalog',now(),now())`);
     const repoBody = "@codex repo:owner/project", repoHash = await digestCanonicalCloneCborV1(repoBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','repository','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [repoHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: repoHash,
+      [repoHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: repoHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     const repository = await launches.dispatchFromMessage({ commandId: "repository", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "repository", body: repoBody }, async ({ candidates }) => {
@@ -609,7 +608,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       VALUES ('space','page','channel','caller',now())`);
     const coWriteBody = "@codex write the page with me", coWriteHash = await digestCanonicalCloneCborV1(coWriteBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','co-write','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [coWriteHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: coWriteHash,
+      [coWriteHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: coWriteHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     const coWrite = await launches.dispatchFromMessage({ commandId: "co-write", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "co-write", body: coWriteBody }, async ({ candidates, managedWorkspace, managedOnly }) => {
@@ -628,7 +627,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     await sql(`INSERT INTO data.page_links VALUES ('space','channel','{"quote":"q"}',NULL)`);
     const commentBody = "@codex make this shorter", commentHash = await digestCanonicalCloneCborV1(commentBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','comment','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [commentHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: commentHash,
+      [commentHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: commentHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     const comment = await launches.dispatchFromMessage({ commandId: "comment", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "comment", body: commentBody }, async ({ candidates, managedOnly }) => {
@@ -865,7 +864,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const connectorBody = '@codex repo:owner/shared';
     const connectorHash = await digestCanonicalCloneCborV1(connectorBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','connector-repository','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [connectorHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: connectorHash,
+      [connectorHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: connectorHash,
         selections: [{ start: 0, end: 6, text: '@codex', target: { kind: 'capability', harness: 'codex' } }] } }]);
     const beforeConfig = (await sql(`SELECT configuration_json FROM data.space_agent_registrations`)).rows;
     const beforeAccess = (await sql(`SELECT grant_limits,policy_limits,grant_revision,policy_revision FROM data.space_agent_registration_access`)).rows;
@@ -1054,7 +1053,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const managedMessage = async (id, mention, target, condition = '') => {
       const body = `${mention}${condition} QA first conversation`, hash = await digestCanonicalCloneCborV1(body);
       await sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
-        [id, hash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: hash,
+        [id, hash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: hash,
           selections: [{ start: 0, end: mention.length, text: mention, target }] } }]);
       return { commandId: id, actorUserId: 'caller', channelId: 'channel', sourceMessageId: id, body };
     };

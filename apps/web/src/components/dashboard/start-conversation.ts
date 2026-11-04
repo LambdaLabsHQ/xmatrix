@@ -78,7 +78,7 @@ export async function startConversation(input: {
       Authorization: `Bearer ${input.token}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ body: input.body }),
+    body: JSON.stringify({ body: input.body, launch: true }),
     cache: "no-store",
   });
   if (!response.ok) {

@@ -601,6 +601,8 @@ pub(crate) struct SendOptions<'a> {
     pub reply_to: Option<&'a str>,
     /// The sender is waiting on whoever the message mentions.
     pub wait: bool,
+    /// Start the Agents the message summons; without it they are only mentioned.
+    pub launch: bool,
 }
 
 pub(crate) async fn cmd_send(
@@ -618,6 +620,7 @@ pub(crate) async fn cmd_send(
         final_for,
         reply_to,
         wait,
+        launch,
     } = options;
     if let Some(id) = final_for
         && uuid::Uuid::parse_str(id)
@@ -648,6 +651,9 @@ pub(crate) async fn cmd_send(
         message: PublishedMessage,
         #[serde(default, rename = "sendOperation")]
         send_operation: Option<SendOperation>,
+        /// Summons this send did not ask to start: they stay mentions.
+        #[serde(default, rename = "mentionsNotLaunched")]
+        mentions_not_launched: Vec<String>,
     }
 
     let message = build_send_message_body(message_parts, read_stdin, escape_newlines).await?;
@@ -726,6 +732,9 @@ pub(crate) async fn cmd_send(
     if wait {
         payload.insert("awaitsResponse".into(), serde_json::Value::Bool(true));
     }
+    if launch {
+        payload.insert("launch".into(), serde_json::Value::Bool(true));
+    }
     payload.insert(
         "clientMessageId".into(),
         serde_json::Value::String(client_message_id.clone()),
@@ -800,6 +809,13 @@ pub(crate) async fn cmd_send(
             )
             .await);
         }
+        // A daemon from before --launch refuses the field before anything is
+        // sent; dropping it would send the summons as mere mentions.
+        (Err(error), _) if launch && error.to_string().contains("Journaled send contains unsupported fields") => {
+            return Err(CliError::Launch(format!(
+                "{error}. This machine's xMatrix daemon is too old for --launch: run `xmatrix update`, then send again."
+            )));
+        }
         (Err(error), _) => return Err(error),
     };
 
@@ -823,6 +839,12 @@ pub(crate) async fn cmd_send(
         .is_some_and(|operation| operation.recovered_from_receipt)
     {
         println!("The existing receipt was recovered.");
+    }
+    if !response.mentions_not_launched.is_empty() {
+        println!(
+            "Not started, only mentioned: {}. To start an Agent, send with --launch.",
+            response.mentions_not_launched.join(", ")
+        );
     }
 
     Ok(())
@@ -1592,6 +1614,7 @@ pub async fn cmd_send_args(
         final_for,
         reply_to,
         wait,
+        launch,
         recover,
         files,
         stdin,
@@ -1615,6 +1638,7 @@ pub async fn cmd_send_args(
             final_for: final_for.as_deref(),
             reply_to: reply_to.as_deref(),
             wait,
+            launch,
         },
     )
     .await
@@ -2486,7 +2510,9 @@ async fn cmd_channel_chat(
                             token,
                             channel_id,
                             SendOptions { message_parts: &[body.to_string()], attachment_paths: &[],
-                                read_stdin: false, escape_newlines: false, message_id: None, final_for: None, reply_to: None, wait: false },
+                                read_stdin: false, escape_newlines: false, message_id: None, final_for: None, reply_to: None, wait: false,
+                                // A person typing here starts the Agents they summon, as in the web composer.
+                                launch: true },
                         ).await?;
                     }
                 }

@@ -9,8 +9,6 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowUp, Loader2, PlugZap, } from "lucide-react";
-import { ComposerSummonOptions } from "./composer-summon-options";
-import type { DraftSummonIntent } from "@xmatrix/protocol";
 import {
   handleComposerTextareaKeyDown,
   useComposerCompletion,
@@ -28,15 +26,10 @@ import { buildMentionReadIndex } from "./mention-read-state";
 export type ComposerInputAuthorityProps = ComposerContextFields & {
   /** Picked channel and page references in the draft, highlighted as the chips they send as. */
   referenceRanges?: ReadonlyArray<{ start: number; end: number; text: string }>;
-  /** Jev's reading of each summon in the draft, painted on its band; declined mentions offer options at their address. */
-  summonReadings?: ReadonlyArray<DraftSummonIntent>;
-  /** A reading for the current draft is still on its way. */
-  summonReadingPending?: boolean;
   /** Whether a quote in the draft is of a message in this conversation (composer-blocks.ts). */
   quoteIsHere?: (href: string) => boolean;
   /** A picture of the draft as the composer draws its attachment (composer-blocks.ts). */
   renderPicture?: (ref: string) => ReactNode;
-  onSummonStartAnyway?: (reading: DraftSummonIntent) => void;
   onSend: () => void;
   /** Escape cancels (thread draft) or is unused (main composer). */
   onEscape?: () => void;
@@ -99,11 +92,8 @@ function ComposerInputSurface({
   onInvocationSelect,
   onReferenceSelect,
   referenceRanges,
-  summonReadings,
-  summonReadingPending,
   quoteIsHere,
   renderPicture,
-  onSummonStartAnyway,
   channel,
   space,
   token,
@@ -320,14 +310,10 @@ function ComposerInputSurface({
               compact ? "min-h-0 p-0 text-sm" : "min-h-9 px-0 py-1.5 text-sm sm:min-h-11 sm:py-2 sm:text-[15px]"
             )}
             mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
-            references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
+            references={referenceRanges}
             quoteIsHere={quoteIsHere}
             renderPicture={renderPicture}
-            hint={stripEmptyPasteSentinel(fieldValue ?? draft).length === 0 ? placeholder : undefined}>
-            {onSummonStartAnyway && summonReadings?.some(reading => reading.choice !== "summon") &&
-              <ComposerSummonOptions readings={summonReadings}
-              fieldRef={fieldRef} disabled={disabled || !enabled || sending} onStartAnyway={onSummonStartAnyway} />}
-          </ComposerEditor>
+            hint={stripEmptyPasteSentinel(fieldValue ?? draft).length === 0 ? placeholder : undefined} />
           {inputTrailing}
           <button
             type={compact ? "submit" : "button"}

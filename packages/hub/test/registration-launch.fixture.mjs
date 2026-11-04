@@ -154,7 +154,7 @@ export async function launchRegisteredRun(worker, { token, spaceAdminToken = tok
     message.channelId === channelId && message.registration?.key?.machineId === machineId &&
     message.registration?.key?.harness === harness, `registered spawn of ${displayName}`);
   await json(await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, { method: "POST", headers,
-    body: JSON.stringify({ body: `@auto harness:${harness} machine:${machineId} pwd:"${canonicalCwd}" ${prompt}` }) }));
+    body: JSON.stringify({ launch: true, body: `@auto harness:${harness} machine:${machineId} pwd:"${canonicalCwd}" ${prompt}` }) }));
   const command = await spawn;
   return { command, key, canonicalCwd, token: await admitRegisteredSpawn(worker, daemon, command) };
 }

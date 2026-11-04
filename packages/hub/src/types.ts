@@ -130,8 +130,6 @@ export interface Env {
   RATE_LIMIT_ANONYMOUS?: RequestRateLimiter;
   /** Per-user allowance of Human socket sign-ins. */
   RATE_LIMIT_HUMAN_CONNECT?: RequestRateLimiter;
-  /** Per-Human allowance of composer draft previews (Jev). Always enforced. */
-  RATE_LIMIT_SUMMON_INTENT?: RequestRateLimiter;
   RATE_LIMIT_SEARCH_RERANK?: RequestRateLimiter;
   /** Per-owner allowance of open Jev evaluations. Always enforced. */
   RATE_LIMIT_JEV_EVALUATE?: RequestRateLimiter;

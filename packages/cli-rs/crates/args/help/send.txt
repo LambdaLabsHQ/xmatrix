@@ -9,6 +9,10 @@ Channel command text (sent visibly, then interpreted by the Hub):
                                             Transfer work with launch conditions
   /stop all [reason]                        Stop every live Instance in this Channel
 
+A summon (@auto, @<agent>, @<agent> repo:/pwd:/machine:) starts an Agent only
+when the send says --launch; without it the Agent is just mentioned, and the
+reply lists what was not started. Stop, reborn and handoff need no --launch.
+
 Lifecycle actions use current Channel/Run permissions. The Hub decides access
 and routing; message text cannot grant either. Before naming a machine or
 harness, read `xmatrix agent list`: each machine's harnesses, whether it is
@@ -17,6 +21,7 @@ online and its quota. Repositories and directories are in
 `xmatrix connector list`, then send the returned command as a Channel message.
 
 Examples:
+  xmatrix send <channel> --launch "@codex repo:owner/repo fix the failing test"
   xmatrix send <channel> --reply-to <message-id> "Result"
   xmatrix send <channel> --wait "@Daniel Need the missing decision: ..."
   xmatrix send <channel> --final-for <execution-uuid> "Finished"

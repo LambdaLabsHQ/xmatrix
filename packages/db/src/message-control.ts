@@ -7,7 +7,7 @@ import { resolveMessageAgentTargets } from "./message-agent-targets.js";
 import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from "./channel-stop-fence.js";
 import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
-import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
+import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections, messageSummons } from "./message-invocation-selections.js";
 import { ONBOARDING_MESSAGE_KIND, type AgentRegistrationKey, type ChannelMemberPresence, type MessageCommitReceipt } from "@xmatrix/protocol";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
@@ -132,6 +132,8 @@ export interface AppendPostgresMessage {
   certifyMessageAsk?: boolean;
   /** The sender declares it is waiting on the people and Agents this message mentions. */
   awaitsResponse?: boolean;
+  /** The sender asks that the Agents this message summons start; kept with the message for every later dispatch. */
+  launch?: boolean;
   /** People a card waits on though it mentions nobody. Set by the Hub for its own cards, never by a caller. */
   waitsOnUserIds?: string[];
   /** Untrusted picker intent, validated against the canonical body and current grants. */
@@ -1709,12 +1711,17 @@ export class PostgresMessageRepository {
         "message_exists", 409, "Message already exists",
       );
       const searchRank = bounded(committedFacts.search_rank, "searchRank");
-      if (agentTargets.length || invocationSelections) {
+      // The launch request is kept only on a message that summons someone, so a
+      // plain message never looks addressed (message-asks RECEIVER_SQL).
+      const launch = input.launch === true && (invocationSelections !== undefined ||
+        messageSummons(input.attentionBody ?? ""));
+      if (agentTargets.length || invocationSelections || launch) {
         const written = await transaction.query({ name: "message_agent_targets_commit_v1",
           text: `UPDATE data.messages SET agent_invocation_targets_json=$4::jsonb
             WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 AND entity_version=1 RETURNING message_id`,
           values: [spaceId, channelId, messageId, JSON.stringify({ entityVersion: 1, bodyHash, targets: agentTargets,
-            ...(invocationSelections ? { selections: invocationSelections } : {}) })], maxRows: 1 });
+            ...(invocationSelections ? { selections: invocationSelections } : {}),
+            ...(launch ? { launch: true } : {}) })], maxRows: 1 });
         if (written.length !== 1) throw new MessageAuthorityError("message_targets_commit_failed", 500,
           "The original message targets could not be recorded");
       }

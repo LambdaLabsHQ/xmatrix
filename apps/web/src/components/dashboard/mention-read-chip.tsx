@@ -33,9 +33,9 @@ import {
 } from "./mention-read-state";
 import { cn } from "@/lib/utils";
 import { MentionInvocationChip, MentionInvocationRejectionChip, MentionContinuationChip, InvocationPopoverGroup,
-  MentionIntentDeclinedChip, MentionLaunchHintChip, MentionStopChip, MentionSummonPending, MentionControlChip,
+  MentionOnlyChip, MentionLaunchHintChip, MentionStopChip, MentionSummonPending, MentionControlChip,
   MentionRefusedLifecycleChip } from "./mention-invocation-chip";
-import { declinedIntent, readingIntentUntil } from "./summon-intent";
+import { mentionOnly, summonStartingUntil } from "./summon-start";
 import { handoffSuccessorLaunch, segmentMessageInteraction, type InteractionSegment } from "./mention-invocation-state";
 import { HandoffCard } from "./handoff-arrow";
 import { type AutoLaunchMention, isLaunchHintRejection, isMentionAddressStart, isOperationalMentionStart, literalMentionSourceOffsets, nonOperationalMentionRanges, parsePresentedRoutingDecision, type NonOperationalMentionRange } from "@xmatrix/protocol";
@@ -70,17 +70,17 @@ export type MentionReadMessageScope = {
   nonOperationalRanges?: readonly NonOperationalMentionRange[];
   launchStatusUnavailable?: boolean;
   onRetryLaunch?: (launch: SerializedAgentLaunch) => Promise<void>;
-  /** Present only for the message's author: start a summon Jev declined. */
+  /** Present only for the message's author: start a summon its send only mentioned. */
   onLaunchAnyway?: (sourceMention: string) => Promise<void>;
-  /** When the message was sent, so a fresh summon can show Jev reading it. */
+  /** When the message was sent, so a fresh summon can show it starting. */
   sentAt?: string;
   statuses?: readonly ChannelMentionReadStatus[];
 };
 
-/** True while a just-sent summon is within Jev's reading window; flips off on its own. */
-function useIntentReading(sentAt: string | undefined): boolean {
+/** True while a just-sent summon is within its starting window; flips off on its own. */
+function useSummonStarting(sentAt: string | undefined): boolean {
   const [now, setNow] = useState(() => Date.now());
-  const until = readingIntentUntil(sentAt, now);
+  const until = summonStartingUntil(sentAt, now);
   useEffect(() => {
     if (until === undefined) return;
     const timer = setTimeout(() => setNow(Date.now()), Math.max(0, until - Date.now()) + 50);
@@ -92,11 +92,10 @@ function useIntentReading(sentAt: string | undefined): boolean {
 function RecordedRejectionChip({ rejection, labelContent, announcement, scope }: {
   rejection: SerializedAgentInvocationRejection; labelContent?: ReactNode; announcement?: string; scope: MentionReadMessageScope | null;
 }) {
-  const category = declinedIntent(rejection.code);
-  if (category) {
+  if (mentionOnly(rejection.code)) {
     const launchAnyway = scope?.onLaunchAnyway;
-    return <MentionIntentDeclinedChip rejection={rejection} category={category} labelContent={labelContent}
-      onLaunchAnyway={launchAnyway ? () => launchAnyway(rejection.sourceMention) : undefined} />;
+    return <MentionOnlyChip rejection={rejection} labelContent={labelContent}
+      onStart={launchAnyway ? () => launchAnyway(rejection.sourceMention) : undefined} />;
   }
   // A hint (name the machine) is the card. A refusal that failed stays Failed.
   if (isLaunchHintRejection(rejection.code)) {
@@ -199,7 +198,7 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
     };
   }, [rawMarkdown, text, sourcePosition, scope?.sourceBody, scope?.nonOperationalRanges]);
   const base = useContext(MentionIndexContext);
-  const reading = useIntentReading(scope?.launchStatusUnavailable ? undefined : scope?.sentAt);
+  const starting = useSummonStarting(scope?.launchStatusUnavailable ? undefined : scope?.sentAt);
   const segments = useMemo(() => {
     const launches = scope?.launches ?? [];
     const index = base || launches.length
@@ -222,7 +221,7 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
     scope?.stops, scope?.stopReceiptsLoaded, scope?.controls, scope?.notices, scope?.sourceBody, scope?.launchStatusUnavailable]);
   if (!operational) return <PageReferenceRichText text={text} />;
   return <>{segments.map((segment, index) =>
-    <InteractionSegmentView key={index} segment={segment} scope={scope} reading={reading} />)}</>;
+    <InteractionSegmentView key={index} segment={segment} scope={scope} starting={starting} />)}</>;
 });
 
 /**
@@ -230,8 +229,8 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
  * the protocol chooses the contract, never the markup. A text run with no
  * interaction keeps the page-reference rendering every plain run gets.
  */
-function InteractionSegmentView({ segment, scope, reading }: {
-  segment: InteractionSegment<MentionReadTarget>; scope: MentionReadMessageScope | null; reading: boolean;
+function InteractionSegmentView({ segment, scope, starting }: {
+  segment: InteractionSegment<MentionReadTarget>; scope: MentionReadMessageScope | null; starting: boolean;
 }) {
   switch (segment.presentationRef) {
     case null:
@@ -275,7 +274,7 @@ function InteractionSegmentView({ segment, scope, reading }: {
           launch={segment.launch} shared={false}
           unavailable={scope?.launchStatusUnavailable} executions={scope?.executions ?? []} />
         : segment.rejection ? <RecordedRejectionChip rejection={segment.rejection} labelContent={expression} announcement={announcement} scope={scope} />
-        : <MentionSummonPending labelContent={expression} fillKey={fillKey} reading={reading && !segment.mention.error} />;
+        : <MentionSummonPending labelContent={expression} fillKey={fillKey} starting={starting && !segment.mention.error} />;
     }
     case "stop.v1":
       return <MentionStopChip invocation={segment.invocation} receipts={segment.receipts}

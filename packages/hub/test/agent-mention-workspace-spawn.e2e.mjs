@@ -7,6 +7,7 @@ import {
   json,
   mintAgentRunToken,
   MOCK_TOKEN,
+  postChannelMessage,
   randomUUID,
   runAgentConnection,
   test,
@@ -53,7 +54,7 @@ test("bare @agent:new is rejected with a system notice and does not spawn", asyn
     const response = await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
       method: "POST",
       headers: { ...auth, "content-type": "application/json" },
-      body: JSON.stringify({ body: "@codex-bare-route:new investigate the failure" }),
+      body: JSON.stringify({ launch: true, body: "@codex-bare-route:new investigate the failure" }),
     });
     assert.equal(response.status, 200);
 
@@ -109,7 +110,8 @@ test("tagged Auto workspace launch completes daemon spawn, mock Agent registrati
       (message) => message.channelId === channelId && isSpawnOf(message, registration),
       "Authority-owned machine spawn",
     );
-    await postAutoLaunch(worker, { channelId, machineId, canonicalCwd }, "investigate the failure");
+    // No pwd: the registered directory and a private one are both offered, so Jev is asked where the work runs.
+    await postChannelMessage(worker, MOCK_TOKEN, channelId, `@auto harness:codex machine:${machineId} investigate the failure`);
     const command = await spawn;
     assert.equal(command.agentName, "codex-current-route");
     assert.equal(command.workspace.machineId, machineId);
@@ -141,7 +143,7 @@ test("tagged Auto workspace launch completes daemon spawn, mock Agent registrati
         FROM data.content_refs r JOIN data.content_objects o
           ON o.space_id=r.space_id AND o.object_id=r.child_object_id
         WHERE r.owner_kind='summon_decision' AND r.owner_id=$1 ORDER BY r.ref_id`, [summoningMessage.messageId]);
-      // No declared models: one Jev call reads intent, location and fit together.
+      // No declared models: one Jev call reads the location.
       assert.equal(stored.rows.length, 2, "the Jev call persists input and success before spawn");
       assert.equal(stored.rows.filter(row => row.ref_id.endsWith(':started')).length, 1);
       assert.equal(stored.rows.filter(row => row.ref_id.endsWith(':succeeded')).length, 1);
@@ -167,7 +169,7 @@ test("tagged Auto workspace launch completes daemon spawn, mock Agent registrati
         && message.channelId === target.id, "Agent-authored cross-channel summon");
       const crossMessage = await worker.fetch(`/api/channels/${target.id}/messages`, {
         method: "POST", headers: { ...agentAuth, "content-type": "application/json" },
-        body: JSON.stringify({ body: `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" reply once` }),
+        body: JSON.stringify({ launch: true, body: `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" reply once` }),
       });
       assert.equal(crossMessage.status, 200, await crossMessage.clone().text());
       assert.equal((await crossSpawn).channelId, target.id);
@@ -436,6 +438,7 @@ test("Space members and their Agent Runs can discover and launch each other's Ag
         method: "POST",
         headers: memberAuth,
         body: JSON.stringify({
+          launch: true,
           body: `@auto harness:codex machine:${machineId} investigate the failure`,
         }),
       },
@@ -470,15 +473,22 @@ test("Space members and their Agent Runs can discover and launch each other's Ag
       (message) => message.channelId === channel.id && isSpawnOf(message, memberRegistration),
       "Agent-to-Agent cross-user machine spawn",
     );
-    // Live Agent replies use the Runtime WebSocket append path, not Hub HTTP.
-    // Authority must schedule the same tagged launch interpretation for Agents.
-    const delegatedDispatch = await sourceAgent.request({
+    // A live Agent reply (the Runtime WebSocket append path) never asked to
+    // start anyone: its summon stays a mention.
+    const reported = await sourceAgent.request({
       type: "channel_message",
       channelId: channel.id,
-      body: `@auto harness:codex machine:${memberMachineId} investigate as a delegate`,
+      body: `@auto harness:codex machine:${memberMachineId} was named in my report`,
     });
-    assert.equal(delegatedDispatch.type, "channel_message_dispatched");
+    assert.equal(reported.type, "channel_message_dispatched");
+    // `xmatrix send --launch` from the Run starts it.
+    const delegatedDispatch = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
+      method: "POST", headers: { Authorization: `Bearer ${runToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ launch: true, body: `@auto harness:codex machine:${memberMachineId} investigate as a delegate` }),
+    });
+    assert.equal(delegatedDispatch.status, 200, await delegatedDispatch.clone().text());
     const delegatedCommand = await delegatedSpawn;
+    assert.match(delegatedCommand.prompt, /investigate as a delegate/);
     assert.equal(delegatedCommand.workspace.ownerUserId, memberWorkspace.ownerUserId);
     assert.equal(delegatedCommand.workspace.machineId, memberMachineId);
     assert.equal(delegatedCommand.remoteRepo, undefined);
@@ -502,7 +512,7 @@ test("tagged rejection is persisted and queryable through the real Hub without a
     const channelId = channel.channel.id;
     const body = '@auto machine:nonexistent-observability-test';
     await json(await worker.fetch(`/api/channels/${channelId}/messages`, {
-      method: 'POST', headers, body: JSON.stringify({ body }) }));
+      method: 'POST', headers, body: JSON.stringify({ launch: true, body }) }));
     const history = await json(await worker.fetch(`/api/channels/${channelId}/history?limit=20`, { headers }));
     const sourceMessageId = history.messages.find(message => message.body === body)?.messageId;
     assert.equal(typeof sourceMessageId, 'string');
