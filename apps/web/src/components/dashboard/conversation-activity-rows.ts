@@ -1,4 +1,7 @@
-import { channelActivityOf, messageExternalAppSource, type ChannelActivity } from "@xmatrix/protocol";
+import {
+  channelActivityOf, githubPullRequestFactOf, messageExternalAppSource, type ChannelActivity,
+  type GitHubPullRequestFact,
+} from "@xmatrix/protocol";
 import type { TimelineItem } from "./workspace-shell-message-model";
 
 /**
@@ -15,6 +18,15 @@ export const CONTINUATION_WINDOW_MS = 10 * 60 * 1000;
 
 export function timelineItemActivity(item: TimelineItem): ChannelActivity | undefined {
   return channelActivityOf(item.metadata);
+}
+
+/**
+ * A pull request fact GitHub reported (CI verdict, merge, close): drawn as the
+ * same compact line as the "Opened" entry, not as a message.
+ */
+export function timelineItemGitHubFact(item: TimelineItem): GitHubPullRequestFact | undefined {
+  if (item.senderKind !== "app" || item.recalledAt) return undefined;
+  return githubPullRequestFactOf(item.metadata);
 }
 
 /** The narrowest sender identity: two Instances of one Agent are different work. */
@@ -78,7 +90,7 @@ function sameTurn(previous: TimelineItem, item: TimelineItem): boolean {
 
 /** Whether a message can drop its avatar and header under the row above. */
 export function continuesPrevious(previous: TimelineItem | undefined, item: TimelineItem): boolean {
-  if (!previous || previous.folded) return false;
+  if (!previous || previous.folded || timelineItemGitHubFact(previous)) return false;
   return sameTurn(previous, item) && changedTags(previous, item).length === 0;
 }
 
