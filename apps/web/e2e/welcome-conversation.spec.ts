@@ -96,43 +96,26 @@ test.describe("desktop", () => {
     await expect(page.getByText("Welcome to xMatrix").first()).toBeVisible();
   });
 
-  test("once an agent is in, a card starts a new conversation for the person to say what they want", async ({ page }) => {
-    const agentsIn = await welcomeWithAgentIn(page, { funnel: true });
-    await expect(agentsIn).toContainText("@codex is in. Mention it here to give it work", { timeout: 20_000 });
-    await agentsIn.getByRole("button", { name: /Start a new conversation/u }).click();
-    await expect(page.getByRole("textbox", { name: "What should happen" })).toBeVisible();
-    // Which card people choose is counted.
-    await expect.poll(() => fixtureRequestBodies(page, "funnel"))
-      .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "talk" }]);
+  test("once an agent is in, xMatrix says so in one line, and the composer below says how to give it work", async ({ page }) => {
+    const agentsIn = await welcomeWithAgentIn(page);
+    await expect(agentsIn).toHaveText(/^@codex is in\. Mention it here to give it work\./u, { timeout: 20_000 });
+    // No menu of starters: typing @ in the composer is the way in.
+    await expect(agentsIn.locator("li")).toHaveCount(0);
+    await expect(agentsIn.getByRole("button", { name: /new conversation|together|Write something|another computer/u })).toHaveCount(0);
   });
 
-  test("an agent whose program is signed out is named with its machine and signed in here, with no starters", async ({ page }) => {
+  test("an agent whose program is signed out is named with its machine and signed in here", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", login: "signed_out" });
     await expect(agentsIn).toContainText("Claude Code on Workstation is not signed in, so it cannot take work yet.",
       { timeout: 20_000 });
     await expect(agentsIn.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
     await expect(agentsIn).not.toContainText("is in. Mention it here");
-    await expect(agentsIn.getByRole("button", { name: /Start a new conversation/u })).toHaveCount(0);
   });
 
-  test("a signed-in agent of the person's own is in, with its starters", async ({ page }) => {
+  test("a signed-in agent of the person's own is in", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page, { harness: "claude", login: "signed_in" });
     await expect(agentsIn).toContainText("@claude is in. Mention it here to give it work", { timeout: 20_000 });
     await expect(page.getByTestId("signed-out-agent")).toHaveCount(0);
-  });
-
-  test("the first starter makes a page and opens it to be co-written with the agent", async ({ page }) => {
-    // Grok is in too, but co-writing waits on every line: the fast writer is the one asked.
-    const agentsIn = await welcomeWithAgentIn(page, { harness: ["grok", "claude"], login: "signed_in" });
-    await fixtureJson(page, "page-create", /\/api\/xmatrix\/spaces\/[^/]+\/pages$/u, { page: { pageId: "p-first",
-      title: "What I'm working on", parentPageId: null, position: "a", accessMode: "open", headRevision: 1,
-      createdAt: E2E_NOW, updatedAt: E2E_NOW } }, { method: "POST" });
-    const first = agentsIn.getByRole("button", { name: /Write something with AI/u });
-    await expect(first).toContainText("You write a line. @claude writes the next.", { timeout: 20_000 });
-    await first.click();
-    await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "What I'm working on" }]);
-    await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("xmatrix:co-write:p-first"))).toBe("claude");
-    await expect(page).toHaveURL(/p-first|pfirst/u);
   });
 
   test("bring your work in: a Space without GitHub is offered the connect", async ({ page }) => {
@@ -148,15 +131,6 @@ test.describe("desktop", () => {
     await agentsIn.getByRole("button", { name: "acme/api", exact: true }).click({ timeout: 20_000 });
     await expect.poll(() => fixtureRequestBodies(page, "import")).toEqual([{ repository: "acme/api" }]);
     await expect(agentsIn.getByTestId("bring-work-in")).toContainText("Turning acme/api into pages.");
-  });
-
-  test("with two agents in, a card opens a new conversation that calls both to work together", async ({ page }) => {
-    const agentsIn = await welcomeWithAgentIn(page, { harness: ["claude", "codex"] });
-    const together = agentsIn.getByRole("button", { name: /Get several AIs working together/u });
-    await expect(together).toContainText("@claude and @codex split the work", { timeout: 20_000 });
-    await together.click();
-    await expect(page.getByRole("textbox", { name: "What should happen" }))
-      .toContainText("@claude @codex Work on this together and split it between you:");
   });
 });
 
@@ -238,7 +212,7 @@ test.describe("mobile", () => {
 test.describe("a Chinese browser", () => {
   test.use({ ...E2E_DESKTOP_CONTEXT, locale: "zh-CN" });
 
-  test("is welcomed, set up and given its starters in Chinese", async ({ page }) => {
+  test("is welcomed and set up in Chinese", async ({ page }) => {
     await welcomeOnFirstOpen(page);
     await expect.poll(() => fixtureRequestBodies(page, "welcome")).toEqual([{ locale: "zh" }]);
     const welcome = page.getByTestId("connect-machine");
@@ -248,12 +222,8 @@ test.describe("a Chinese browser", () => {
     await expect(welcome).toContainText("下载桌面 App");
   });
 
-  test("its cards are in Chinese, and working together waits for a second agent", async ({ page }) => {
+  test("is told in Chinese that its agent is in", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page);
-    await expect(agentsIn).toContainText("@codex 已接入。在这里 @ 它就能派活", { timeout: 20_000 });
-    await expect(agentsIn.getByRole("button", { name: /开一个新对话/u })).toBeEnabled();
-    const together = agentsIn.getByRole("button", { name: /让多个 AI 一起协作/u });
-    await expect(together).toContainText("再接一个 AI，就能让它们一起协作。");
-    await expect(together).toBeDisabled();
+    await expect(agentsIn).toHaveText(/^@codex 已接入。在这里 @ 它就能派活。/u, { timeout: 20_000 });
   });
 });

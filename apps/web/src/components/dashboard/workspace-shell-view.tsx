@@ -110,7 +110,6 @@ import { searchWorkspacePages } from "./workspace-message-search";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { WorkspaceSearchDialog } from "./workspace-search";
 import type { SearchFilters } from "./workspace-search-model";
-import { OnboardingActionsContext, type OnboardingActions } from "./onboarding-actions";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
 import { ContentSkeleton } from "./content-skeleton";
 
@@ -829,15 +828,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       setNewConversationError(userErrorMessage(error, "Couldn't start the conversation"));
       openNewConversation();
     }));
-  const onboardingActions = useMemo<OnboardingActions>(() => ({
-    startConversation: (draft) => {
-      setNewConversationDraft(draft);
-      setNewConversationError(null);
-      openNewConversation();
-    },
-    connectAnotherComputer: () => changeAppViewRef.current("machines"),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the shell's actions are stable for its life
-  }), []);
   const createNewPage = useStableCallback(() => void pageCreation.create(null));
   const manageMachines = useStableCallback(() => changeAppView("machines"));
   // One object while what it offers is the same: the list column that shows it is memoized.
@@ -1511,7 +1501,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     <AttachmentDropZoneProvider>
     {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
       onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
-    <OnboardingActionsContext.Provider value={onboardingActions}>
     <FaceSpaceContext.Provider value={currentSpaceId}>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
     <RealtimeEventsContext.Provider value={model.realtimeEventViews}>
@@ -1812,7 +1801,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </RealtimeEventsContext.Provider>
     </RealtimeChannelsContext.Provider>
     </FaceSpaceContext.Provider>
-    </OnboardingActionsContext.Provider>
     </AttachmentDropZoneProvider>
   );
 }
