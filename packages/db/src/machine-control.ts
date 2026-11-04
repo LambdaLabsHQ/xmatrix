@@ -172,6 +172,9 @@ function activationReceipt(row: QueryResultRow, receiptId?: string): Record<stri
   };
 }
 
+/** The commands whose result gives the daemon its own record, metadata included. */
+const DAEMON_RECORD_ACTIONS: ReadonlySet<string> = new Set(["enroll", "connect", "recover_connect"]);
+
 function daemon(row: QueryResultRow) {
   return { id: String(row.daemon_id), userId: String(row.owner_user_id), email: String(row.owner_email),
     name: row.display_name ? String(row.display_name) : `xmatrix-daemon-${String(row.hostname ?? "")}`,
@@ -411,9 +414,20 @@ export class PostgresMachineControlRepository {
         values: [ownerUserId, machineId], maxRows: 1 });
         if (retired[0]) throw new MachineControlError("machine_retired", 410, MACHINE_RETIRED_MESSAGE);
       }
-      const currentRows = await tx.query<QueryResultRow>({ name: "machine_control_daemon_lock_v1",
-        text: "SELECT * FROM data.machine_daemons WHERE daemon_id=$1 FOR UPDATE",
-        values: [daemonId], maxRows: 1 });
+      // Only a connection answers the daemon with its own record, inventory
+      // included. Every other command (reports, claims, renewals, results,
+      // issues: about 125,000 a day) locks the row without its metadata, which
+      // is kilobytes of harness inventory and resources nobody reads from a
+      // command's result or its replay.
+      const currentRows = await tx.query<QueryResultRow>(DAEMON_RECORD_ACTIONS.has(action)
+        ? { name: "machine_control_daemon_lock_v1",
+          text: "SELECT * FROM data.machine_daemons WHERE daemon_id=$1 FOR UPDATE",
+          values: [daemonId], maxRows: 1 }
+        : { name: "machine_control_daemon_lock_lean_v1",
+          text: `SELECT daemon_id,owner_user_id,owner_email,machine_id,display_name,status,capabilities_json,
+            connection_epoch,version,created_at,updated_at,routing_observed_at,hostname
+            FROM data.machine_daemons WHERE daemon_id=$1 FOR UPDATE`,
+          values: [daemonId], maxRows: 1 });
       let current: QueryResultRow | undefined = currentRows[0];
       if (!current && hostDerived && action === "enroll") {
         current = await this.recoverLegacyDaemonKey(tx, { ownerUserId, machineId, daemonId });
