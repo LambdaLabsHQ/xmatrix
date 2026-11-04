@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Reloading a conversation no longer waits for a page render
+
+Reloading the app (Ctrl+R / Cmd+R) or opening a link into a Space, view or
+conversation kept the old page on screen while the Web Worker rendered the
+startup frame for that address; a cold Worker took up to about 2 s, longer from
+far networks. Only the bare `/app` was served as the prerendered page. Every
+address the app shell answers itself now gets that same prerendered page, so
+these loads wait only for a static file. Legacy addresses still redirect as
+before. Beta Web only, no API, schema or native change; recovery is a
+CI-validated beta Web release reverting the change.
+
 ## Unreleased: Gmail automatic read failures retain their failing step
 
 HUB-BP reported only 502 when a notification's private message read failed,

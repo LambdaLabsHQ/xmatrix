@@ -8,7 +8,7 @@ import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { isCliMain } from "../../../scripts/cli-entrypoint.mjs";
 
-// Every launch opens /app, which middleware.ts rewrites to this page.
+// Every app shell address (/app, /app/<space>/…) is rewritten to this page by middleware.ts.
 const REQUIRED_PAGES = ["workspace"];
 
 export function populateStaticPageCache(openNextDir) {
