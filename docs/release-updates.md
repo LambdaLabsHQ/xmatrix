@@ -12,6 +12,18 @@ person names. The person sends
 it as is or changes it; nothing is sent for them, and routing still picks the
 agent. Web only; no schema or client migration. Recovery is a CI-validated beta
 release reverting this change.
+## Unreleased: xMatrix's own messages no longer use a Free Space's writes
+
+A Free Space's 500 writes were also spent on what xMatrix itself said: the
+welcome steps it writes into a new person's conversation (written under their
+name, kind `xmatrix.onboarding.v1`) and the `@<agent>` summon it sends for a
+first message nobody was named in. A new Space on 2026-11-03 had used 4 writes
+for one message of its owner. Only messages from people, Agents and apps now
+count, as `docs/design/agent-credits.md` already said for system notices; a
+paid Space's credits were already untouched by these. Writes counted before
+this release stay counted (the counter never goes down). Hub only, no schema
+or client migration. Recovery is a CI-validated beta Hub reverting this
+change.
 ## Unreleased: Reloading a conversation no longer waits for a page render
 
 Reloading the app (Ctrl+R / Cmd+R) or opening a link into a Space, view or

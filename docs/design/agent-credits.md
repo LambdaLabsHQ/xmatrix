@@ -26,13 +26,14 @@ actions use the same balance at the rates below, including actions by a person:
 | A page revision committed by an Agent (edits and suggestions) | 1 |
 | A message or page edit by a person, including imported history | 0 |
 | A system notice (`xmatrix.system.*`) | 0 |
+| Anything else xMatrix says: a welcome step (`xmatrix.onboarding.v1`), the summon it sends for a first message | 0 |
 
 Reading xMatrix content, presence, heartbeats and retries of an already committed
 write cost nothing. X reads are paid upstream operations. A replayed command is answered from its receipt and is not charged
 again.
 
 Free Spaces keep their own allowance: three people and 500 lifetime writes from
-anyone, where a write is an accepted Channel message or a committed page revision
+anyone but xMatrix itself, where a write is an accepted Channel message or a committed page revision
 (edits, suggestions, accepted suggestions and restores; a new page is its first
 revision). Both count on the one `space_billing_usage.free_message_count`
 counter, which deletion never lowers; after the 500th, messages and page
