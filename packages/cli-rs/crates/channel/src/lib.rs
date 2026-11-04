@@ -811,7 +811,12 @@ pub(crate) async fn cmd_send(
         }
         // A daemon from before --launch refuses the field before anything is
         // sent; dropping it would send the summons as mere mentions.
-        (Err(error), _) if launch && error.to_string().contains("Journaled send contains unsupported fields") => {
+        (Err(error), _)
+            if launch
+                && error
+                    .to_string()
+                    .contains("Journaled send contains unsupported fields") =>
+        {
             return Err(CliError::Launch(format!(
                 "{error}. This machine's xMatrix daemon is too old for --launch: run `xmatrix update`, then send again."
             )));
