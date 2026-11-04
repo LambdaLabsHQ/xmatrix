@@ -2,8 +2,8 @@ import { dropHtmlElements, stripHtmlTags } from "@xmatrix/protocol";
 import type { ConnectorAction } from "../provider";
 import type { UpstreamMeter } from "../../usage-cost-metering";
 import { record } from "../command-support";
-import { ProviderRequestError } from "../http";
-import { composioGet, composioPost } from "../composio";
+import { MAIL_SNAPSHOT_RESPONSE_BYTES, ProviderRequestError } from "../http";
+import { composioGet, composioPost, type ComposioBound } from "../composio";
 import { quoteRetrievedText, requireText, titleAndBody } from "./common";
 import { mailboxCredentials, mayUseMailbox, parseMailboxes, type GmailMailbox } from "../gmail-mailboxes";
 import { gmailReadPhase } from "../gmail-read-failure";
@@ -28,7 +28,10 @@ import { gmailReadPhase } from "../gmail-read-failure";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const MESSAGE_ID = /^[0-9a-f]{8,32}$/u;
 const DRAFT_ID = /^[A-Za-z0-9_-]{1,64}$/u;
-const MAX_ATTACHMENTS_LISTED = 50;
+const MAX_DRAFT_ATTACHMENTS = 50;
+const MAX_RECIPIENT_HEADER = 4_000;
+/* A whole draft as base64url `raw` can run to tens of MB; reading and sending it may take longer than an ordinary call. */
+const MAIL_SNAPSHOT: ComposioBound = { mailSnapshot: true, maxBytes: MAIL_SNAPSHOT_RESPONSE_BYTES, timeoutMs: 60_000 };
 const MAX_QUERY = 500;
 const SEARCH_LIMIT = 10;
 const MAX_BODY = 8_000;
@@ -56,8 +59,8 @@ function gmailPath(method: "GET" | "POST", path: string): string {
 }
 
 function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
-  query: Record<string, string> = {}, meter?: UpstreamMeter, maxBytes?: number): Promise<Record<string, unknown>> {
-  return composioGet(credentials, gmailPath("GET", path), query, meter, maxBytes);
+  query: Record<string, string> = {}, meter?: UpstreamMeter, bound?: ComposioBound): Promise<Record<string, unknown>> {
+  return composioGet(credentials, gmailPath("GET", path), query, meter, bound);
 }
 /* Named entities common in mail HTML (currency in statements, typographic punctuation); others stay as written. */
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ",
@@ -118,7 +121,7 @@ async function withExternalBodies(credentials: Readonly<Record<string, string>>,
   visit(record(message.payload));
   await Promise.all(pending.map(async (body) => {
     const fetched = await gmailGet(credentials, `/messages/${id}/attachments/${String(body.attachmentId)}`, {}, meter,
-      EXTERNAL_BODY_RESPONSE_BYTES);
+      { maxBytes: EXTERNAL_BODY_RESPONSE_BYTES });
     if (typeof fetched.data === "string" && fetched.data.length <= MAX_EXTERNAL_BODY * 2) body.data = fetched.data;
   }));
   return message;
@@ -239,8 +242,8 @@ function address(value: string): string | undefined {
 
 /** The one Gmail write: messages/send for a frozen raw message, or drafts/send for a frozen draft. */
 async function gmailSend(credentials: Readonly<Record<string, string>>, path: "/messages/send" | "/drafts/send",
-  body: Record<string, unknown>, meter: UpstreamMeter | undefined): Promise<string> {
-  const sent = await composioPost(credentials, gmailPath("POST", path), body, meter);
+  body: Record<string, unknown>, meter: UpstreamMeter | undefined, bound?: ComposioBound): Promise<string> {
+  const sent = await composioPost(credentials, gmailPath("POST", path), body, meter, bound);
   if (typeof sent.id !== "string") throw new ProviderRequestError(502, "Google did not confirm the sent message");
   return line(sent.id, 32);
 }
@@ -434,12 +437,13 @@ async function sendPrepared(context: Context, input: Record<string, string>): Pr
   return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined, context.usage);
 }
 
-/** The attachment parts of a message, as "name (size bytes)". */
-function attachmentNames(payload: Record<string, unknown>): string[] {
+/** The attachment parts of a message, as "name (size bytes)"; `complete` is false past the MIME part limit. */
+function attachmentNames(payload: Record<string, unknown>): { names: string[]; complete: boolean } {
   const names: string[] = [];
   let seen = 0;
+  let complete = true;
   const visit = (part: Record<string, unknown>): void => {
-    if (seen++ >= MAX_PARTS) return;
+    if (seen++ >= MAX_PARTS) { complete = false; return; }
     if (isAttachment(part)) {
       const size = Number(record(part.body).size);
       names.push(`${line(part.filename || "(unnamed)", 200)}${Number.isFinite(size) && size > 0 ? ` (${size} bytes)` : ""}`);
@@ -448,7 +452,7 @@ function attachmentNames(payload: Record<string, unknown>): string[] {
     if (Array.isArray(part.parts)) for (const child of part.parts) visit(record(child));
   };
   visit(payload);
-  return names;
+  return { names, complete };
 }
 
 /** One draft as the caller sees it: id, the message it holds and its headers, attachments and text. */
@@ -461,9 +465,18 @@ function draftSummary(draft: Record<string, unknown>): { draftId: string; messag
   }
   const bodies = gmailBodies(payload);
   const text = (bodies.plain?.trim() ? bodies.plain.trim() : htmlText(bodies.html ?? "")).slice(0, 2_000);
+  const recipients = Object.fromEntries((["to", "cc", "bcc"] as const).map(name => [name, header(payload, name).replace(/[\r\n\t]+/gu, " ").trim()]));
+  const attachments = attachmentNames(payload);
+  /* The card must show every recipient and attachment the send would carry; what it cannot show is not sent. */
+  if (Object.values(recipients).some(value => value.length > MAX_RECIPIENT_HEADER)) {
+    throw new ProviderRequestError(422, `the draft's recipient list is longer than the ${MAX_RECIPIENT_HEADER} characters an approval card shows`);
+  }
+  if (!attachments.complete || attachments.names.length > MAX_DRAFT_ATTACHMENTS) {
+    throw new ProviderRequestError(422, `the draft has more than ${MAX_DRAFT_ATTACHMENTS} attachments or ${MAX_PARTS} MIME parts, more than an approval card lists`);
+  }
   return { draftId: line(draft.id, 64), messageId: line(message.id, 32), from: line(header(payload, "from")),
-    to: line(header(payload, "to"), 998), cc: line(header(payload, "cc"), 998), bcc: line(header(payload, "bcc"), 998),
-    subject: line(header(payload, "subject")), attachments: attachmentNames(payload).slice(0, MAX_ATTACHMENTS_LISTED), body: text };
+    to: recipients.to!, cc: recipients.cc!, bcc: recipients.bcc!,
+    subject: line(header(payload, "subject")), attachments: attachments.names, body: text };
 }
 
 /** Freeze a draft for approval: who it goes to, from whom, and exactly which attachments. */
@@ -491,20 +504,28 @@ async function requireDraftSender(context: Context, mailbox: GmailMailbox, from:
   }
 }
 
-/** Send the approved draft only if it is still the message that was approved. */
+/**
+ * Send the approved draft exactly as it was checked: read its whole message as `raw`, confirm it is still the
+ * approved message (Gmail gives an edited draft a new message id) and its sender still a verified alias, recheck
+ * authorization, then send that snapshot. An edit made after the read is overwritten by the snapshot, not sent.
+ */
 async function sendDraftPrepared(context: Context, input: Record<string, string>): Promise<string> {
   const mailbox = (await usableMailboxes(context, input.mailbox))[0]!;
   if (mailbox.account !== input.account || mailbox.owner !== input.owner) {
     throw new ProviderRequestError(409, "the sending mailbox changed; ask again");
   }
   const credentials = mailboxCredentials(context.credentials, mailbox);
-  const current = draftSummary(await gmailGet(credentials, `/drafts/${input.draftId}`, { format: "full" }, context.usage));
-  if (current.messageId !== input.messageId) {
+  const current = await gmailGet(credentials, `/drafts/${input.draftId}`, { format: "raw" }, context.usage, MAIL_SNAPSHOT);
+  const message = record(current.message);
+  if (message.id !== input.messageId) {
     throw new ProviderRequestError(409, `draft ${input.draftId} changed after it was approved; ask again`);
   }
-  await requireDraftSender(context, mailbox, current.from);
+  if (typeof message.raw !== "string" || !message.raw) throw new ProviderRequestError(502, "Google did not return the draft's message");
+  await requireDraftSender(context, mailbox, input.from!);
   await context.authorizeWrite?.();
-  return gmailSend(credentials, "/drafts/send", { id: input.draftId }, context.usage);
+  const threadId = typeof message.threadId === "string" && MESSAGE_ID.test(message.threadId) ? message.threadId : undefined;
+  return gmailSend(credentials, "/drafts/send",
+    { id: input.draftId, message: { raw: message.raw, ...(threadId ? { threadId } : {}) } }, context.usage, MAIL_SNAPSHOT);
 }
 
 /** `*` or one connected mailbox address as the target, with an optional Gmail query after it. */

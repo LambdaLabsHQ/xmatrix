@@ -61,29 +61,32 @@ export async function composioConnectedAccount(client: ComposioClient, userId: s
  * One GET to the provider's API through Composio as the stored account; returns the provider's JSON.
  * Each query parameter appears once: Composio's proxy keeps only the last of a repeated name.
  */
-/** A proxied GET; `maxBytes` raises the response bound (capped by `providerJson`) for a call known to answer large. */
+/** How much a proxied call may answer and how long it may take: the default bound, a larger one, or one whole email. */
+export type ComposioBound = { maxBytes?: number; mailSnapshot?: boolean; timeoutMs?: number };
+
+/** A proxied GET; a `bound` raises the response limit (capped by `providerJson`) for a call known to answer large. */
 export async function composioGet(credentials: Readonly<Record<string, string>>, endpoint: string,
-  query: Record<string, string> = {}, meter?: UpstreamMeter, maxBytes?: number): Promise<Record<string, unknown>> {
+  query: Record<string, string> = {}, meter?: UpstreamMeter, bound?: ComposioBound): Promise<Record<string, unknown>> {
   const parameters = Object.entries(query).map(([name, value]) => ({ name, value, type: "query" }));
-  return composioProxy(credentials, { endpoint, method: "GET", parameters }, meter, maxBytes);
+  return composioProxy(credentials, { endpoint, method: "GET", parameters }, meter, bound);
 }
 
 /** One POST of a JSON body to the provider's API through Composio as the stored account. */
 export async function composioPost(credentials: Readonly<Record<string, string>>, endpoint: string,
-  body: Record<string, unknown>, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
-  return composioProxy(credentials, { endpoint, method: "POST", body }, meter);
+  body: Record<string, unknown>, meter?: UpstreamMeter, bound?: ComposioBound): Promise<Record<string, unknown>> {
+  return composioProxy(credentials, { endpoint, method: "POST", body }, meter, bound);
 }
 
 async function composioProxy(credentials: Readonly<Record<string, string>>,
   call: { endpoint: string; method: "GET" | "POST"; parameters?: unknown[]; body?: Record<string, unknown> },
-  meter: UpstreamMeter | undefined, maxBytes?: number): Promise<Record<string, unknown>> {
+  meter: UpstreamMeter | undefined, bound: ComposioBound = {}): Promise<Record<string, unknown>> {
   const account = credentials.composioAccountId ?? "";
   if (!ACCOUNT_ID.test(account)) throw new ProviderRequestError(401, "Connect with Composio first");
   const headers = apiHeaders(credentials.composioApiKey ?? "");
   // A provider refusal Composio relays is still a call Composio executed.
   return metered(meter, "composio", "proxy", async () => {
     const result = await providerJson(`${API}/tools/execute/proxy`, { method: "POST", headers,
-      json: { connected_account_id: account, ...call }, ...(maxBytes ? { maxBytes } : {}) });
+      json: { connected_account_id: account, ...call }, ...bound });
     const status = Number(result.status);
     if (!Number.isInteger(status)) throw new ProviderRequestError(502, "Composio did not return the provider's answer", "proxy_contract");
     if (status < 200 || status > 299) {

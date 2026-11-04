@@ -520,9 +520,10 @@ test("statement HTML entities such as &yen; read as their characters; unknown na
     "¥ 30,000.00 – “Hi”… & ¥ € &bogus;");
 });
 
+const rawDraft = (messageId, raw) => gmail({ id: "r-5712345678901234567", message: { id: messageId, threadId: "18f2a9c0d1e2b300", raw } });
 const draft = (messageId, extra = {}) => gmail({ id: "r-5712345678901234567", message: { id: messageId, threadId: "18f2a9c0d1e2b300", payload: {
   mimeType: "multipart/mixed", headers: [{ name: "From", value: "Company <hello@company.test>" }, { name: "To", value: "Broker <ops@broker.test>" },
-    { name: "Subject", value: "Account application" }],
+    { name: "Cc", value: "desk@broker.test" }, { name: "Bcc", value: "archive@company.test" }, { name: "Subject", value: "Account application" }],
   parts: [{ mimeType: "text/plain", body: { data: base64url("Hello,\nPlease find the forms attached.") } },
     { mimeType: "application/pdf", filename: "application.pdf", body: { attachmentId: "ANGjdJ_a", size: 2_180_143 } },
     { mimeType: "image/jpeg", filename: "passport.jpg", body: { attachmentId: "ANGjdJ_b", size: 727_847 } }] }, ...extra } });
@@ -547,24 +548,38 @@ test("send_draft freezes the draft for approval, then sends it only while it is 
   const frozen = staged.result;
   assert.deepEqual(gmailPreview(frozen), {
     from: "Company <hello@company.test> (draft r-5712345678901234567 in me@example.com)", to: "Broker <ops@broker.test>",
-    subject: "Account application", body: "Hello,\nPlease find the forms attached.",
-    attachments: "2: application.pdf (2180143 bytes); passport.jpg (727847 bytes)" }, "the card names every attachment");
+    subject: "Account application", body: "Hello,\nPlease find the forms attached.", cc: "desk@broker.test", bcc: "archive@company.test",
+    attachments: "2: application.pdf (2180143 bytes); passport.jpg (727847 bytes)" }, "the card names every recipient and attachment");
+  /* The approved snapshot is what is sent: a draft edited during the final authorization check is overwritten by it. */
+  const snapshot = base64url(`From: hello@company.test\r\nTo: ops@broker.test\r\n\r\n${"A".repeat(5 * 1024 * 1024)}`);
   let checks = 0;
-  const sent = await fetched([draft("19a0b1c2d3e4f5a6"), aliasList, gmail({ id: "19a0b1c2d3e4f5a7" })],
+  const sent = await fetched([rawDraft("19a0b1c2d3e4f5a6", snapshot), aliasList, gmail({ id: "19a0b1c2d3e4f5a7" })],
     () => ACTIONS.send_draft.execute({ ...ctx, authorizeWrite: async () => { checks++; } }, frozen));
+  assert.ok(snapshot.length > 4 * 1024 * 1024, "a draft larger than the ordinary 4 MiB bound is read whole");
   assert.deepEqual(sent.calls.map(call => [call.body.method, call.body.endpoint]), [
     ["GET", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-5712345678901234567"],
     ["GET", "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs"],
     ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"]]);
-  assert.deepEqual(sent.calls[2].body.body, { id: "r-5712345678901234567" });
+  assert.equal(proxied(sent.calls[0]).query, "format=raw");
+  assert.deepEqual(sent.calls[2].body.body, { id: "r-5712345678901234567", message: { raw: snapshot, threadId: "18f2a9c0d1e2b300" } });
   assert.equal(checks, 1);
   assert.match(sent.result.summary, /^Sent Gmail draft r-5712345678901234567 as message 19a0b1c2d3e4f5a7 from Company <hello@company\.test> to Broker <ops@broker\.test> with attachments 2: application\.pdf/u);
-  const edited = await fetched([draft("19a0b1c2d3e4f5ff")], () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /changed after it was approved/u));
+  const edited = await fetched([rawDraft("19a0b1c2d3e4f5ff", "eA")], () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /changed after it was approved/u));
   assert.equal(edited.calls.length, 1, "an edited draft is never sent");
-  const revoked = await fetched([draft("19a0b1c2d3e4f5a6"), sendAsList()],
+  const revoked = await fetched([rawDraft("19a0b1c2d3e4f5a6", "eA"), sendAsList()],
     () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /hello@company\.test is not a verified Gmail send-as address of me@example\.com/u));
   assert.equal(revoked.calls.length, 2, "a draft whose alias was revoked is not sent from the mailbox instead");
   const missing = await fetched([gmail({ error: { message: "Requested entity was not found." } }, 404)],
     () => assert.rejects(ACTIONS.send_draft.prepare(ctx, { draftId: "r-1" }), /none of your Gmail mailboxes has draft r-1/u));
   assert.equal(missing.calls.length, 1);
+});
+
+test("send_draft refuses a draft whose recipients or attachments an approval card could not list in full", async () => {
+  const many = Array.from({ length: 51 }, (_, index) => ({ mimeType: "application/pdf", filename: `f${index}.pdf`, body: { attachmentId: `ANGjdJ_${index}`, size: 10 } }));
+  const crowded = gmail({ id: "r-1", message: { id: "19a0b1c2d3e4f5a6", payload: { mimeType: "multipart/mixed",
+    headers: [{ name: "To", value: "a@b.test" }], parts: many } } });
+  await fetched([crowded], () => assert.rejects(ACTIONS.send_draft.prepare(ctx, { draftId: "r-1" }), /more than 50 attachments/u));
+  const long = gmail({ id: "r-1", message: { id: "19a0b1c2d3e4f5a6", payload: { mimeType: "text/plain",
+    headers: [{ name: "Bcc", value: Array.from({ length: 300 }, (_, index) => `person${index}@example.test`).join(", ") }], body: { data: base64url("x") } } } });
+  await fetched([long], () => assert.rejects(ACTIONS.send_draft.prepare(ctx, { draftId: "r-1" }), /recipient list is longer/u));
 });
