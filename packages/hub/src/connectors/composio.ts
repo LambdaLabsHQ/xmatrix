@@ -72,13 +72,22 @@ export async function composioGet(credentials: Readonly<Record<string, string>>,
 }
 
 /** One POST of a JSON body to the provider's API through Composio as the stored account. */
+/** A proxied POST of JSON, or of raw bytes (`binary`) with their content type and any query parameters. */
 export async function composioPost(credentials: Readonly<Record<string, string>>, endpoint: string,
-  body: Record<string, unknown>, meter?: UpstreamMeter, bound?: ComposioBound): Promise<Record<string, unknown>> {
-  return composioProxy(credentials, { endpoint, method: "POST", body }, meter, bound);
+  body: Record<string, unknown> | { binary: { base64: string; contentType: string }; query?: Record<string, string> },
+  meter?: UpstreamMeter, bound?: ComposioBound): Promise<Record<string, unknown>> {
+  if ("binary" in body && body.binary && typeof body.binary === "object") {
+    const { binary, query = {} } = body as { binary: { base64: string; contentType: string }; query?: Record<string, string> };
+    const parameters = Object.entries(query).map(([name, value]) => ({ name, value, type: "query" }));
+    return composioProxy(credentials, { endpoint, method: "POST", parameters,
+      binary_body: { base64: binary.base64, content_type: binary.contentType } }, meter, bound);
+  }
+  return composioProxy(credentials, { endpoint, method: "POST", body: body as Record<string, unknown> }, meter, bound);
 }
 
 async function composioProxy(credentials: Readonly<Record<string, string>>,
-  call: { endpoint: string; method: "GET" | "POST"; parameters?: unknown[]; body?: Record<string, unknown> },
+  call: { endpoint: string; method: "GET" | "POST"; parameters?: unknown[]; body?: Record<string, unknown>;
+    binary_body?: { base64: string; content_type: string } },
   meter: UpstreamMeter | undefined, bound: ComposioBound = {}): Promise<Record<string, unknown>> {
   const account = credentials.composioAccountId ?? "";
   if (!ACCOUNT_ID.test(account)) throw new ProviderRequestError(401, "Connect with Composio first");

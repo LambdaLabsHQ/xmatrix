@@ -551,7 +551,8 @@ test("send_draft freezes the draft for approval, then sends it only while it is 
     subject: "Account application", body: "Hello,\nPlease find the forms attached.", cc: "desk@broker.test", bcc: "archive@company.test",
     attachments: "2: application.pdf (2180143 bytes); passport.jpg (727847 bytes)" }, "the card names every recipient and attachment");
   /* The approved snapshot is what is sent: a draft edited during the final authorization check is overwritten by it. */
-  const snapshot = base64url(`From: hello@company.test\r\nTo: ops@broker.test\r\n\r\n${"A".repeat(5 * 1024 * 1024)}`);
+  const snapshotMime = `From: hello@company.test\r\nTo: ops@broker.test\r\n\r\n${"A".repeat(5 * 1024 * 1024)}`;
+  const snapshot = base64url(snapshotMime);
   let checks = 0;
   const sent = await fetched([rawDraft("19a0b1c2d3e4f5a6", snapshot), aliasList, gmail({ id: "19a0b1c2d3e4f5a7" })],
     () => ACTIONS.send_draft.execute({ ...ctx, authorizeWrite: async () => { checks++; } }, frozen));
@@ -559,9 +560,17 @@ test("send_draft freezes the draft for approval, then sends it only while it is 
   assert.deepEqual(sent.calls.map(call => [call.body.method, call.body.endpoint]), [
     ["GET", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-5712345678901234567"],
     ["GET", "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs"],
-    ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"]]);
+    ["POST", "https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts/send"]]);
   assert.equal(proxied(sent.calls[0]).query, "format=raw");
-  assert.deepEqual(sent.calls[2].body.body, { id: "r-5712345678901234567", message: { raw: snapshot, threadId: "18f2a9c0d1e2b300" } });
+  /* Over Gmail's ~5 MB JSON body limit, the snapshot goes to the upload endpoint as multipart/related. */
+  const upload = sent.calls[2].body;
+  assert.equal(upload.body, undefined);
+  assert.deepEqual(upload.parameters, [{ name: "uploadType", value: "multipart", type: "query" }]);
+  const boundary = upload.binary_body.content_type.match(/^multipart\/related; boundary=(\S+)$/u)[1];
+  const multipart = Buffer.from(upload.binary_body.base64, "base64").toString("latin1");
+  assert.equal(multipart, `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `{"id":"r-5712345678901234567","message":{"threadId":"18f2a9c0d1e2b300"}}\r\n--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n` +
+    `${snapshotMime}\r\n--${boundary}--\r\n`, "the approved snapshot's own bytes are what is sent");
   assert.equal(checks, 1);
   assert.match(sent.result.summary, /^Sent Gmail draft r-5712345678901234567 as message 19a0b1c2d3e4f5a7 from Company <hello@company\.test> to Broker <ops@broker\.test> with attachments 2: application\.pdf/u);
   const edited = await fetched([rawDraft("19a0b1c2d3e4f5ff", "eA")], () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /changed after it was approved/u));

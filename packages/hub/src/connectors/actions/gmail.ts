@@ -26,6 +26,8 @@ import { gmailReadPhase } from "../gmail-read-failure";
  */
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
+/* Gmail takes a message over about 5 MB only through its upload endpoint (up to 35 MB). */
+const UPLOAD_API = "https://gmail.googleapis.com/upload/gmail/v1/users/me";
 const MESSAGE_ID = /^[0-9a-f]{8,32}$/u;
 const DRAFT_ID = /^[A-Za-z0-9_-]{1,64}$/u;
 const MAX_DRAFT_ATTACHMENTS = 50;
@@ -55,7 +57,7 @@ const GMAIL_CALLS: Record<"GET" | "POST", RegExp> = {
 
 function gmailPath(method: "GET" | "POST", path: string): string {
   if (!GMAIL_CALLS[method].test(path)) throw new ProviderRequestError(403, `xMatrix does not call Gmail ${method} ${path}`);
-  return `${API}${path}`;
+  return path === "/drafts/send" ? `${UPLOAD_API}${path}` : `${API}${path}`;
 }
 
 function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
@@ -240,9 +242,9 @@ function address(value: string): string | undefined {
   return bare.length <= MAX_ADDRESS && ADDRESS.test(bare) ? bare : undefined;
 }
 
-/** The one Gmail write: messages/send for a frozen raw message, or drafts/send for a frozen draft. */
+/** The one Gmail write: messages/send for a frozen raw message, or the upload drafts/send for a checked draft snapshot. */
 async function gmailSend(credentials: Readonly<Record<string, string>>, path: "/messages/send" | "/drafts/send",
-  body: Record<string, unknown>, meter: UpstreamMeter | undefined, bound?: ComposioBound): Promise<string> {
+  body: Parameters<typeof composioPost>[2], meter: UpstreamMeter | undefined, bound?: ComposioBound): Promise<string> {
   const sent = await composioPost(credentials, gmailPath("POST", path), body, meter, bound);
   if (typeof sent.id !== "string") throw new ProviderRequestError(502, "Google did not confirm the sent message");
   return line(sent.id, 32);
@@ -524,8 +526,26 @@ async function sendDraftPrepared(context: Context, input: Record<string, string>
   await requireDraftSender(context, mailbox, input.from!);
   await context.authorizeWrite?.();
   const threadId = typeof message.threadId === "string" && MESSAGE_ID.test(message.threadId) ? message.threadId : undefined;
-  return gmailSend(credentials, "/drafts/send",
-    { id: input.draftId, message: { raw: message.raw, ...(threadId ? { threadId } : {}) } }, context.usage, MAIL_SNAPSHOT);
+  return gmailSend(credentials, "/drafts/send", { query: { uploadType: "multipart" },
+    binary: draftUpload({ id: input.draftId!, message: threadId ? { threadId } : {} }, message.raw) }, context.usage, MAIL_SNAPSHOT);
+}
+
+/**
+ * The upload drafts/send body: a multipart/related of the draft's JSON metadata and its message as message/rfc822,
+ * the checked snapshot's own bytes (Gmail's `raw` is base64url of them), base64-encoded for the proxy.
+ */
+export function draftUpload(metadata: Record<string, unknown>, raw: string): { base64: string; contentType: string } {
+  const boundary = `xmatrix-${crypto.randomUUID()}`;
+  const mime = Uint8Array.from(atob(raw.replace(/-/gu, "+").replace(/_/gu, "/")), character => character.charCodeAt(0));
+  const text = new TextEncoder();
+  const head = text.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n`);
+  const tail = text.encode(`\r\n--${boundary}--\r\n`);
+  const bytes = new Uint8Array(head.length + mime.length + tail.length);
+  bytes.set(head, 0); bytes.set(mime, head.length); bytes.set(tail, head.length + mime.length);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  return { base64: btoa(binary), contentType: `multipart/related; boundary=${boundary}` };
 }
 
 /** `*` or one connected mailbox address as the target, with an optional Gmail query after it. */
