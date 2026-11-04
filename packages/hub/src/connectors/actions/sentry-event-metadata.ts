@@ -9,6 +9,7 @@ import { safeServerDiagnosticId } from "../../server-error-diagnostic";
 import { runtimeDatabaseFailureMetadata } from "../../runtime-transport/runtime-database-failure";
 import { machineRegistryCausalityMetadata } from "../../runtime-transport/machine-registry-causality";
 import { durableObjectFailureMetadata } from "../../durable-object-request-failure";
+import { gmailReadFailureMetadata } from "../gmail-read-failure";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
@@ -64,6 +65,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
   // Sentry serializes SDK `extra` as `context` in its issue-event API.
   const extra = event.context;
   if (extra && typeof extra === "object") {
+    lines.push(...gmailReadFailureMetadata(extra as Record<string, unknown>));
     lines.push(...conversationPushConditions(extra as Record<string, unknown>));
     lines.push(...postgresConflictMetadata(extra as Record<string, unknown>));
     lines.push(...messageSearchFailureMetadata((extra as Record<string, unknown>).message_search_failure));

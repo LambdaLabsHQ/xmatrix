@@ -96,9 +96,15 @@ fires Automations as it always did.
 
 - Every Channel's private copy is stored before any notification names it. If
   the read fails, the notification still goes out and its text says the message
-  could not be read automatically (the reason stays in the Hub log as a status
-  kind only). If the owner's access changes while Gmail answers, nothing is
-  stored or posted.
+  could not be read automatically. One Sentry report retains a fixed phase
+  (configuration, message, external body or formatting), failure kind and status;
+  the issue reader exposes these fields. Uploaded Worker code frames retain the
+  failing call site, while provider text, causes, mail content, addresses, account
+  and message IDs stay out of the report. This distinguishes HTTP refusals,
+  response limits, proxy envelopes and message validation without guessing from
+  a shared 502 status. A failed automatic read is not replayed; the notification
+  retains its manual read command. If the owner's access changes while Gmail
+  answers, nothing is stored or posted.
 - Mail is untrusted. The read quotes it as retrieved text, never opens its links
   or remote images, and leaves it unread in Gmail. It reports Gmail's own
   SPF/DKIM/DMARC results (`Sender checks`), so a forged sender reads as failing

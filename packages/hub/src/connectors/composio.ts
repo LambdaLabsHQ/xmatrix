@@ -85,10 +85,10 @@ async function composioProxy(credentials: Readonly<Record<string, string>>,
     const result = await providerJson(`${API}/tools/execute/proxy`, { method: "POST", headers,
       json: { connected_account_id: account, ...call }, ...(maxBytes ? { maxBytes } : {}) });
     const status = Number(result.status);
-    if (!Number.isInteger(status)) throw new ProviderRequestError(502, "Composio did not return the provider's answer");
+    if (!Number.isInteger(status)) throw new ProviderRequestError(502, "Composio did not return the provider's answer", "proxy_contract");
     if (status < 200 || status > 299) {
       const message = record(record(result.data).error).message;
-      throw new ProviderRequestError(status, typeof message === "string" ? message.slice(0, 200) : `the provider answered ${status}`);
+      throw new ProviderRequestError(status, typeof message === "string" ? message.slice(0, 200) : `the provider answered ${status}`, "provider_status");
     }
     return record(result.data);
   });

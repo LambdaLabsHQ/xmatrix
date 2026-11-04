@@ -5,6 +5,7 @@ import { readGmailMessage } from "./actions/gmail";
 import type { GmailMailbox } from "./gmail-mailboxes";
 import { ProviderRequestError } from "./http";
 import { oauthClient } from "./oauth";
+import { reportGmailAutoReadFailure } from "./gmail-read-failure";
 
 /** What the connector's own read of a new message gave its notification. */
 export type GmailAutoRead = { detail: string } | { unread: string };
@@ -27,8 +28,7 @@ export async function autoReadGmailMessage(env: Env, input: {
     return { detail: await readGmailMessage({ ...input.credentials, composioApiKey: key }, input.mailbox, input.id,
       upstreamMeter(env, { spaceId: input.job.spaceId, connector: "gmail", action: "auto_read" })) };
   } catch (error) {
-    // The log names only the failure's kind, never mail content.
-    console.error("Gmail automatic read failed", error instanceof ProviderRequestError ? error.status : "unexpected");
+    reportGmailAutoReadFailure(error);
     return { unread: "It could not be read automatically." };
   }
 }
