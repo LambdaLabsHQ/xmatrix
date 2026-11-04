@@ -540,8 +540,9 @@ test("drafts lists the caller's drafts with their recipients and attachment coun
 test("send_draft freezes the draft for approval, then sends it only while it is unchanged", async () => {
   assert.deepEqual(statement("@gmail:send_draft:r-5712345678901234567"), { draftId: "r-5712345678901234567" });
   assert.equal(typeof statement("@gmail:send_draft:r-5712345678901234567 extra"), "string");
-  const staged = await fetched([draft("19a0b1c2d3e4f5a6")], () => ACTIONS.send_draft.prepare(ctx, { draftId: "r-5712345678901234567" }));
-  assert.equal(staged.calls.length, 1);
+  const aliasList = sendAsList(companyAlias);
+  const staged = await fetched([draft("19a0b1c2d3e4f5a6"), aliasList], () => ACTIONS.send_draft.prepare(ctx, { draftId: "r-5712345678901234567" }));
+  assert.equal(staged.calls.length, 2);
   assert.equal(staged.calls[0].body.method, "GET", "preparing never sends");
   const frozen = staged.result;
   assert.deepEqual(gmailPreview(frozen), {
@@ -549,16 +550,20 @@ test("send_draft freezes the draft for approval, then sends it only while it is 
     subject: "Account application", body: "Hello,\nPlease find the forms attached.",
     attachments: "2: application.pdf (2180143 bytes); passport.jpg (727847 bytes)" }, "the card names every attachment");
   let checks = 0;
-  const sent = await fetched([draft("19a0b1c2d3e4f5a6"), gmail({ id: "19a0b1c2d3e4f5a7" })],
+  const sent = await fetched([draft("19a0b1c2d3e4f5a6"), aliasList, gmail({ id: "19a0b1c2d3e4f5a7" })],
     () => ACTIONS.send_draft.execute({ ...ctx, authorizeWrite: async () => { checks++; } }, frozen));
   assert.deepEqual(sent.calls.map(call => [call.body.method, call.body.endpoint]), [
     ["GET", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-5712345678901234567"],
+    ["GET", "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs"],
     ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"]]);
-  assert.deepEqual(sent.calls[1].body.body, { id: "r-5712345678901234567" });
+  assert.deepEqual(sent.calls[2].body.body, { id: "r-5712345678901234567" });
   assert.equal(checks, 1);
   assert.match(sent.result.summary, /^Sent Gmail draft r-5712345678901234567 as message 19a0b1c2d3e4f5a7 from Company <hello@company\.test> to Broker <ops@broker\.test> with attachments 2: application\.pdf/u);
   const edited = await fetched([draft("19a0b1c2d3e4f5ff")], () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /changed after it was approved/u));
   assert.equal(edited.calls.length, 1, "an edited draft is never sent");
+  const revoked = await fetched([draft("19a0b1c2d3e4f5a6"), sendAsList()],
+    () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /hello@company\.test is not a verified Gmail send-as address of me@example\.com/u));
+  assert.equal(revoked.calls.length, 2, "a draft whose alias was revoked is not sent from the mailbox instead");
   const missing = await fetched([gmail({ error: { message: "Requested entity was not found." } }, 404)],
     () => assert.rejects(ACTIONS.send_draft.prepare(ctx, { draftId: "r-1" }), /none of your Gmail mailboxes has draft r-1/u));
   assert.equal(missing.calls.length, 1);

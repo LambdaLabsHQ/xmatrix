@@ -472,10 +472,23 @@ async function prepareDraft(context: Context, input: Record<string, string>): Pr
     `none of your Gmail mailboxes has draft ${input.draftId}; list them with @gmail:drafts:*`);
   const summary = draftSummary(found);
   if (!summary.to && !summary.cc && !summary.bcc) throw new ProviderRequestError(422, `draft ${input.draftId} has no recipient`);
+  await requireDraftSender(context, mailbox, summary.from);
   return { ...input, draftId: summary.draftId, messageId: summary.messageId, mailbox: mailbox.address,
     account: mailbox.account, owner: mailbox.owner, from: summary.from || mailbox.address, to: summary.to, cc: summary.cc,
     bcc: summary.bcc, subject: summary.subject, body: summary.body,
     attachments: summary.attachments.length ? `${summary.attachments.length}: ${summary.attachments.join("; ")}` : "" };
+}
+
+/**
+ * A draft's From must be its mailbox or one of that mailbox's verified send-as aliases: for any other address
+ * Gmail silently sends from the mailbox instead, which is not the sender the approval card named.
+ */
+async function requireDraftSender(context: Context, mailbox: GmailMailbox, from: string): Promise<void> {
+  const sender = address(from)?.toLowerCase() ?? mailbox.address;
+  if (sender === mailbox.address) return;
+  if (!(await sendAsAliases(context, mailbox)).some(alias => alias.address === sender)) {
+    throw new ProviderRequestError(409, `the draft's sender ${sender} is not a verified Gmail send-as address of ${mailbox.address}`);
+  }
 }
 
 /** Send the approved draft only if it is still the message that was approved. */
@@ -489,6 +502,7 @@ async function sendDraftPrepared(context: Context, input: Record<string, string>
   if (current.messageId !== input.messageId) {
     throw new ProviderRequestError(409, `draft ${input.draftId} changed after it was approved; ask again`);
   }
+  await requireDraftSender(context, mailbox, current.from);
   await context.authorizeWrite?.();
   return gmailSend(credentials, "/drafts/send", { id: input.draftId }, context.usage);
 }
