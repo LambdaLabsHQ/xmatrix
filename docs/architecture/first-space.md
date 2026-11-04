@@ -57,13 +57,12 @@ is how to connect one.
     on mac-mini is not signed in") and offers the harness sign-in in place, and
     no card is shown
     while no agent can answer.
-  Once an agent can answer, the step offers one card for each way of working,
-  each a single click: start a new conversation and just say it (routing picks
-  the agent); have two of the person's agents work together (a new
-  conversation whose composer holds `@a @b …` for them to finish); write a page
-  with an agent (a new page that opens co-writing with it); connect another
-  computer (Machines). Under them, bringing work in: connect GitHub, or draft
-  pages from one of its repositories (the page import).
+  Once an agent can answer, the step says so in one line ("@codex is in.
+  Mention it here to give it work.") and offers no menu of starters: the
+  composer below already says "@ to summon an agent" (Daniel, 2026-11-04;
+  the four starter cards were removed). A Space without GitHub gets one more
+  line and its action: connect GitHub so agents can work in several
+  repositories in parallel. Once GitHub is connected, nothing more is said.
 - On a phone (the shell's phone width) the first step shows no command, and no
   setup command is prepared: a command is no use there. It says to open
   xmatrix.sh on the computer and sign in with the same email, where the
@@ -107,7 +106,7 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 | `download_clicked` | "Download the desktop app" is followed |
 | `terminal_seen` | the terminal's sign-in request is shown for approval |
 | `approved` | the person approves it |
-| `starter_chosen` | a card in the welcome is chosen (`talk`, `together`, `cowrite`, `machines`) |
+| `starter_chosen` | a welcome starter card was chosen (no longer sent since the cards were removed on 2026-11-04; older clients may still send it) |
 
 - Each step names where it was shown (`welcome`, `space`, `agents`,
   `conversation` for the reply to an unanswered first message, or `shell`

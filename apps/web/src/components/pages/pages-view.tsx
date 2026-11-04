@@ -46,7 +46,6 @@ import { PageReaderChangeGutter, PageReaderChangeMark, PageReaderChangesOffer } 
 import type { SuggestionsReport } from "./page-suggestions";
 import { usePageSuggestions } from "./use-page-suggestions";
 import { PageWriteWith } from "./page-write-with";
-import { takeCoWriteRequest } from "@/lib/pages/co-write-request";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { usePageWriters } from "./page-writers";
 import {
@@ -1239,7 +1238,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return ["claude", "codex", ...writers.agents.map((agent) => agent.harness)]
       .find((harness) => harness !== quiet && writers.agents.some((agent) => agent.harness === harness));
   };
-  // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
+  // The co-writing call an `@` on the page makes (set below, once coWrite exists).
   const coWriteRef = useRef<((harness: string, blockId: string | null, summon?: PageSummon) => Promise<void>) | null>(null);
   const callInstanceRef = useRef<((instance: PageInstance, blockId: string | null, summon: PageSummon) => Promise<void>) | null>(null);
   // The `@`s this reader called Agents with on the page, each showing how its call goes.
@@ -1273,13 +1272,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     },
   } : undefined, [addSummon, instances, page, queryClient, referenceCatalog?.channelActivityMs, referenceCatalog?.channels, spaceId, token, tree.data, userId,
     writers.agents]);
-  useEffect(() => {
-    if (!page || !canEdit || !coWriteRef.current) return;
-    const harness = takeCoWriteRequest(page.pageId);
-    if (harness) void coWriteRef.current(harness, null);
-    // Once per page opened, not on every change to it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page?.pageId, canEdit]);
 
   if (!spaceId) return <div className="p-6 text-sm text-muted-foreground">Choose a Space to see its pages.</div>;
   if (canMigrate && tree.data && (!page || reviewing === spaceId)) {

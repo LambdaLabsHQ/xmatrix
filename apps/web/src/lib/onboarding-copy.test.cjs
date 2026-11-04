@@ -12,11 +12,9 @@ test("names read as a sentence in each language", () => {
   assert.equal(zh.listNames(["Claude Code", "Codex", "Gemini"]), "Claude Code、Codex 和 Gemini");
 });
 
-test("the welcome's cards say the same in both languages", () => {
+test("an agent in is one line, and co-writing says the same in both languages", () => {
   const { en, zh } = ONBOARDING_COPY;
-  for (const card of ["talk", "together", "coWrite", "machines"]) {
-    assert.deepEqual(Object.keys(zh[card]).sort(), Object.keys(en[card]).sort(), card);
-  }
-  assert.equal(zh.together.draft("claude", "codex").startsWith("@claude @codex "), true);
-  assert.equal(en.together.draft("claude", "codex").startsWith("@claude @codex "), true);
+  assert.equal(en.agentsIn("@codex", true), "@codex is in. Mention it here to give it work.");
+  assert.equal(zh.agentsIn("@codex", true), "@codex 已接入。在这里 @ 它就能派活。");
+  assert.deepEqual(Object.keys(zh.coWrite).sort(), Object.keys(en.coWrite).sort());
 });

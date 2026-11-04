@@ -633,25 +633,13 @@ test.describe("on a phone", () => {
     expect(await browser.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
   });
 
-  test("a page made to be co-written calls its Agent as it opens, with no tap", async ({ page: browser }) => {
-    await stubCoWriting(browser, "");
-    await stubWriters(browser, ["claude", "codex"]);
-    // What the welcome's "Write a page with an agent" leaves for the page it made.
-    await browser.addInitScript(() => window.sessionStorage.setItem("xmatrix:co-write:p-relay", "codex"));
-    await expect(await openRelayOnPhone(browser, pageDocument(BODY))).toContainText("In progress");
-    await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
-      /^@codex launch:force You're co-writing page:p-relay with me live\./u);
-    expect(await fixtureRequestBodies(browser, "co-writing")).toEqual([{ conversationId: await fixtureCreatedChannelId(browser,
-      "channel-create"), live: true }]);
-    // Asked once: opening the page again does not call it again.
-    expect(await browser.evaluate(() => window.sessionStorage.getItem("xmatrix:co-write:p-relay"))).toBeNull();
-  });
-
   test("an empty page being co-written asks for its first line and names who writes the next", async ({ page: browser }) => {
     await stubCoWriting(browser, "");
     await stubWriters(browser, ["claude"]);
-    await browser.addInitScript(() => window.sessionStorage.setItem("xmatrix:co-write:p-relay", "claude"));
     const editor = await openRelayOnPhone(browser, pageDocument(""));
+    // Start co-writing as a reader does: a tap on the Agent's face, then the Agent.
+    await browser.getByRole("button", { name: "Write with claude" }).click();
+    await browser.getByTestId("page-write-with").getByRole("button", { name: "claude" }).click();
     await expect(editor.locator(".page-placeholder")).toHaveAttribute("data-placeholder",
       "Write the first line here. @claude writes the next.", { timeout: 20_000 });
   });

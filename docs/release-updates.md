@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: The welcome says an agent is in, in one line, with no cards
+
+Once a new person's agent was in, the welcome showed four cards (start a new
+conversation, several AIs together, write with AI, connect another computer).
+Of the external people whose agents were in, 8 of 39 in 28 days still never
+sent a message. Daniel's call (2026-11-04): no menu; the welcome says
+"@codex is in. Mention it here to give it work." and the composer below it
+already says "@ to summon an agent". A Space without GitHub is offered
+"Connect GitHub so agents can work in several repositories in parallel."
+(it used to say the repositories "become pages"); once GitHub is connected the
+welcome says nothing more, and no longer lists repositories to draft pages from.
+The welcome's one-click co-writing page and the code only it used are gone;
+co-writing from a page is unchanged. Web only; no schema or client migration.
+Recovery is a CI-validated beta release reverting this change.
+
 ## Unreleased: xMatrix's own messages no longer use a Free Space's writes
 
 A Free Space's 500 writes were also spent on what xMatrix itself said: the
