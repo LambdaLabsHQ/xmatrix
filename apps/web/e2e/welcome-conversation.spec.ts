@@ -102,7 +102,7 @@ test.describe("desktop", () => {
     await agentsIn.getByRole("button", { name: /Start a new conversation/u }).click();
     const composer = page.getByRole("textbox", { name: "What should happen" });
     await expect(composer).toBeVisible();
-    await expect(composer).toContainText("Find the project I worked on most recently on this computer and write a page about it");
+    await expect(composer).toContainText("Ask me which project folder to look at, then write a page about it");
     // Which card people choose is counted.
     await expect.poll(() => fixtureRequestBodies(page, "funnel"))
       .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "talk" }]);
