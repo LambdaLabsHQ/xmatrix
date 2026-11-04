@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Gmail sends a saved draft, attachments included, after approval
+
+The Gmail connector could only send a plain-text email it composed itself, so
+an email with attachments drafted in Gmail could not go out through an
+approval. `@gmail:drafts:*` now lists your drafts with their recipients and
+attachment count, and `@gmail:send_draft:<draft id>` sends one as it is. The
+approval card names its sender, recipients, subject, text and every attachment;
+a draft edited after approval is refused rather than sent. The existing Gmail
+grant covers drafts: no new scope, no reconnect. Hub and protocol only, no
+schema or client migration. Recovery is a CI-validated beta Hub reverting this
+change.
+
 ## Unreleased: The welcome says an agent is in, in one line, with no cards
 
 Once a new person's agent was in, the welcome showed four cards (start a new

@@ -457,9 +457,21 @@ config therefore requests `https://mail.google.com/` alone, without the
 default profile and contacts scopes, and the Hub is the boundary the grant
 is not: every user-invoked Gmail action passes an endpoint list in `actions/gmail.ts`
 (GET profile, message list, one message, a text body Gmail stores by
-reference, and the send-as list; POST
-messages/send) and any other endpoint is refused before Composio is called.
-The only write, POST messages/send, belongs to `send` and `reply`. `send`'s
+reference, the send-as list, the draft list and one draft; POST messages/send
+and drafts/send) and any other endpoint is refused before Composio is called.
+The only writes are POST messages/send, which belongs to `send` and `reply`,
+and POST drafts/send, which belongs to `send_draft`. `drafts:*` lists a
+caller's drafts (id, sender, recipients, subject, attachment count).
+`send_draft:<draft id>` freezes the draft's sender, To, Cc, Bcc, subject,
+text and every attachment name and size for the approval card, together with
+the Gmail message id the draft holds; a draft whose recipients or attachments
+the card cannot list in full is refused, never shown in part. Sending reads the
+draft's whole message as `raw` (up to 48 MiB, the only provider response allowed
+past 4 MiB), refuses when its message id changed (Gmail gives an edited draft a
+new message) or its sender is no longer the mailbox or a verified send-as
+alias, rechecks authorization, and sends that snapshot with drafts/send, so an
+edit made after the check is overwritten rather than sent. It is how an email
+with attachments, composed in Gmail, is sent after approval. `send`'s
 `from:` may name a send-as alias Gmail lists as primary or verified
 (`accepted`) on one of the caller's mailboxes: the mail goes out through that
 mailbox with the alias in its From header, the approval card names both, and
