@@ -6316,11 +6316,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     filter: drop-shadow(0 1px 0 oklch(0.97 0.03 85 / 0.55));
   }
 
-  /* Summary and linked pages are quiet grey prose on the same paper as the
-     messages, the way a list row's subtitle sits under its title. No rule,
-     band, card frame, glass or shadow (user 2026-11-04: 分割线…不够简洁). */
+  /* Summary and linked pages are quiet grey prose on the deeper paper the
+     desktop lists use, so their tone, not a rule, sets them apart from the
+     messages (user 2026-11-04: 分割线…不够简洁 / summary 那里能不能有个颜色区分).
+     No rule, card frame, glass or shadow. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-about {
-    background: transparent !important;
+    background: oklch(0.941 0.007 82) !important;
     color: var(--foreground) !important;
     border: 0 !important;
     -webkit-backdrop-filter: none !important;
