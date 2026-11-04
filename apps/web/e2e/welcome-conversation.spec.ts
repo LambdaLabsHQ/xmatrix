@@ -96,11 +96,13 @@ test.describe("desktop", () => {
     await expect(page.getByText("Welcome to xMatrix").first()).toBeVisible();
   });
 
-  test("once an agent is in, a card starts a new conversation for the person to say what they want", async ({ page }) => {
+  test("once an agent is in, a card starts a new conversation holding a first task about the person's own project", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page, { funnel: true });
     await expect(agentsIn).toContainText("@codex is in. Mention it here to give it work", { timeout: 20_000 });
     await agentsIn.getByRole("button", { name: /Start a new conversation/u }).click();
-    await expect(page.getByRole("textbox", { name: "What should happen" })).toBeVisible();
+    const composer = page.getByRole("textbox", { name: "What should happen" });
+    await expect(composer).toBeVisible();
+    await expect(composer).toContainText("Find the project I worked on most recently on this computer and write a page about it");
     // Which card people choose is counted.
     await expect.poll(() => fixtureRequestBodies(page, "funnel"))
       .toEqual([{ step: "starter_chosen", surface: "welcome", device: "desktop_web", starter: "talk" }]);

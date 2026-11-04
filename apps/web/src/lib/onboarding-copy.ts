@@ -73,7 +73,11 @@ const en = {
      xMatrix itself kept people learning the tool instead of using it. */
   /* What xMatrix is for, one card each: talking, several agents at once, the
      live page, every computer. One click shows it. */
-  talk: { title: "Start a new conversation", detail: "Say what you want done. No need to @ anyone: xMatrix picks an AI to take it." },
+  /* The person's first task, written for them: about their own project, ending in a
+     page. Of the people whose agents were in, about one in five never sent a word
+     (2026-11-04); an empty composer left them to invent one. Theirs to send or change. */
+  talk: { title: "Start a new conversation", detail: "Send the first task written for you, or say your own. No need to @ anyone: xMatrix picks an AI to take it.",
+    draft: "Find the project I worked on most recently on this computer and write a page about it: what it does, where it stands, and the three most useful next steps." },
   together: { title: "Get several AIs working together", detail: (a: string, b: string) =>
     `@${a} and @${b} split the work and pass it between them. You watch it come together.`,
     needsTwo: "Bring in one more AI, and they can work together.",
@@ -216,7 +220,8 @@ const zh: OnboardingCopy = {
   copy: (copied) => copied ? "已复制" : "复制",
   agentsIn: (names, one) =>
     `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
-  talk: { title: "开一个新对话", detail: "说一件你想做的事。不用 @ 谁，xMatrix 会挑一个 AI 来接。" },
+  talk: { title: "开一个新对话", detail: "发出替你写好的第一个任务，或者说你自己的事。不用 @ 谁，xMatrix 会挑一个 AI 来接。",
+    draft: "找到我在这台电脑上最近在做的项目，写一页：它是做什么的、现在做到哪了、接下来最值得做的三件事。" },
   together: { title: "让多个 AI 一起协作", detail: (a, b) => `@${a} 和 @${b} 分工干活、互相接力，你看着事情做成。`,
     needsTwo: "再接一个 AI，就能让它们一起协作。", draft: (a, b) => `@${a} @${b} 你们分工合作，一起把这件事做完：` },
   machines: { title: "再接一台电脑", detail: "公司的、家里的电脑或服务器，上面的 AI 能在同一个对话里碰头。" },

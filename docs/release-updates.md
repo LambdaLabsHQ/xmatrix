@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: The welcome's first card holds a first task about the person's own project
+
+Of the people whose agents were in, about one in five never sent a word
+(8 of 39 external accounts in 28 days, 2026-11-04): their agents were signed in
+and online, and nothing failed. "Start a new conversation" opened an empty
+composer and left them to invent a first task. It now opens holding one: find
+the project worked on most recently on this computer and write a page on what
+it does, where it stands and the three most useful next steps. The person sends
+it as is or changes it; nothing is sent for them, and routing still picks the
+agent. Web only; no schema or client migration. Recovery is a CI-validated beta
+release reverting this change.
+
 ## Unreleased: Gmail automatic read failures retain their failing step
 
 HUB-BP reported only 502 when a notification's private message read failed,

@@ -99,7 +99,7 @@ function AgentsInMessage({ spaceId, token, userId }: {
       <p className={signedOut.length > 0 ? "mt-3" : undefined}>{copy.agentsIn(copy.listNames(handles), handles.length === 1)}</p>
       <ul className="m-0 mt-3 grid list-none gap-2 p-0 sm:grid-cols-2">
         {actions && <Card title={copy.talk.title} detail={copy.talk.detail}
-          onClick={() => { count("talk"); actions.startConversation(""); }} />}
+          onClick={() => { count("talk"); actions.startConversation(copy.talk.draft); }} />}
         {actions && <Card title={copy.together.title}
           detail={pair ? copy.together.detail(pair[0], pair[1]) : copy.together.needsTwo}
           disabled={!pair}
