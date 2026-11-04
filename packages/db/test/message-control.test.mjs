@@ -3,6 +3,7 @@ import test from "node:test";
 import { digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 
 import {
+  isBillableMessage,
   MessageAuthorityError,
   PostgresMessageRepository,
 } from "../dist/message-control.js";
@@ -1254,3 +1255,15 @@ function messageCommandFields() {
 function historyDatabase() {
   return database(query => placement(query) ?? (query.name === "message_history_page_v5" ? historyPage() : []));
 }
+
+test("xMatrix's own messages never use a Space's writes", () => {
+  // People, Agents and apps write; the counter and credits read this flag.
+  assert.equal(isBillableMessage("user", "xmatrix.message.text"), true);
+  assert.equal(isBillableMessage("agent", "xmatrix.message.text"), true);
+  assert.equal(isBillableMessage("app", "xmatrix.message.text"), true);
+  // A system notice, a welcome step written under the owner's name, and the
+  // summon xMatrix sends for a first message are xMatrix speaking.
+  assert.equal(isBillableMessage("user", "xmatrix.system.runtime-failure"), false);
+  assert.equal(isBillableMessage("user", "xmatrix.onboarding.v1"), false);
+  assert.equal(isBillableMessage("system", "xmatrix.message.text"), false);
+});
