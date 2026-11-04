@@ -8,7 +8,7 @@ import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from 
 import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
-import type { AgentRegistrationKey, ChannelMemberPresence, MessageCommitReceipt } from "@xmatrix/protocol";
+import { ONBOARDING_MESSAGE_KIND, type AgentRegistrationKey, type ChannelMemberPresence, type MessageCommitReceipt } from "@xmatrix/protocol";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
@@ -245,6 +245,14 @@ export interface PostgresSenderSnapshotRepair {
     expectedRecordDigest: string;
     prepared: PreparedPostgresMessageRecord;
   }>;
+}
+
+/** What xMatrix itself says is never a write the Space pays for (agent-credits.md):
+ * its system notices, the welcome steps it writes under the owner's name, and the
+ * summon it sends for a first message. Only people's, Agents' and apps' speech counts. */
+export function isBillableMessage(senderKind: string, messageKind: string): boolean {
+  return senderKind !== "system" && !messageKind.startsWith("xmatrix.system.") &&
+    messageKind !== ONBOARDING_MESSAGE_KIND;
 }
 
 function bounded(value: unknown, field: string, maximum = 300): string {
@@ -1357,6 +1365,7 @@ export class PostgresMessageRepository {
     }
     const senderId = bounded(input.senderId, "senderId");
     const messageKind = bounded(input.messageKind, "messageKind", 128);
+    const billableMessage = isBillableMessage(senderKind, messageKind);
     const sentAt = timestamp(input.sentAt, "sentAt");
     const requestDigest = digest(input.requestDigest, "requestDigest");
     const recordDigest = digest(input.prepared.recordDigest, "prepared.recordDigest");
@@ -1837,7 +1846,7 @@ export class PostgresMessageRepository {
               $13::text AS author_kind,$14::boolean AS credits_waived FROM admission`,
         values: [`message:${spaceId}:${messageId}:1`, spaceId, messageId, sequence,
           JSON.stringify(result), sentAt, commandId, requestDigest, expiresAt,
-          !messageKind.startsWith("xmatrix.system."), channelId, recordDigest, senderKind,
+          billableMessage, channelId, recordDigest, senderKind,
           input.creditsWaived === true],
         maxRows: 1,
       }))[0];
@@ -1850,7 +1859,7 @@ export class PostgresMessageRepository {
       );
       if (dingtalkEffect) await finishDingTalkEffect(transaction,dingtalkEffect);
       const published = publishedResult(admission, this.billing, {
-        billable: !messageKind.startsWith("xmatrix.system."), now: sentAt,
+        billable: billableMessage, now: sentAt,
       });
       // Who the message reaches, read in its own transaction: it is delivered
       // the moment it commits, never after a second read. Not part of the
