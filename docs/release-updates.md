@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Gmail sends a large draft through the upload endpoint
+
+The first real `@gmail:send_draft`, an application email of about 5 MB of
+attachments, was approved and then refused by Gmail with 413 Request Entity
+Too Large: the checked snapshot went in an ordinary JSON body, which Gmail caps
+at about 5 MB. It now goes to Gmail's upload endpoint as multipart/related
+(the draft id and the snapshot's own message bytes), which takes up to 35 MB.
+Nothing was sent by the failed attempt. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: Gmail sends a saved draft, attachments included, after approval
 
 The Gmail connector could only send a plain-text email it composed itself, so

@@ -469,8 +469,12 @@ the card cannot list in full is refused, never shown in part. Sending reads the
 draft's whole message as `raw` (up to 48 MiB, the only provider response allowed
 past 4 MiB), refuses when its message id changed (Gmail gives an edited draft a
 new message) or its sender is no longer the mailbox or a verified send-as
-alias, rechecks authorization, and sends that snapshot with drafts/send, so an
-edit made after the check is overwritten rather than sent. It is how an email
+alias, rechecks authorization, and sends that snapshot through Gmail's upload
+endpoint (`/upload/.../drafts/send?uploadType=multipart`: the draft id as JSON
+metadata and the snapshot's own bytes as `message/rfc822`, passed to Composio
+as `binary_body`), so an edit made after the check is overwritten rather than
+sent. Gmail's ordinary JSON endpoint refuses a message over about 5 MB with
+413; the upload endpoint takes up to 35 MB. It is how an email
 with attachments, composed in Gmail, is sent after approval. `send`'s
 `from:` may name a send-as alias Gmail lists as primary or verified
 (`accepted`) on one of the caller's mailboxes: the mail goes out through that
