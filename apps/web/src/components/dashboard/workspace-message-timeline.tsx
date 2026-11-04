@@ -927,6 +927,7 @@ export const MessageTimeline = memo(function MessageTimeline({
       : jumpStartRef.current.wasInView && timelineRowIsInFullView(row, container)) {
       jumpScrollTargetRef.current = null;
       jumpStartRef.current = null;
+      if (row) readingAnchor.hold(row.id);
       return "landed";
     }
     // Virtuoso's imperative index space is the data index; `firstItemIndex`
@@ -942,6 +943,7 @@ export const MessageTimeline = memo(function MessageTimeline({
     if (timelineRowIsOnScreen(placed, container) && timelineRowIsSettled(placed, container)) {
       jumpScrollTargetRef.current = null;
       jumpStartRef.current = null;
+      if (placed) readingAnchor.hold(placed.id);
       return "landed";
     }
     return "settling";

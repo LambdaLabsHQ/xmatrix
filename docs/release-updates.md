@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: A jumped-to message stays where it landed
+
+Opening a Needs-you conversation landed on and highlighted the message, then
+private result cards above it loaded their content and pushed it off screen a
+second later. The timeline now holds a landed message in place while rows above
+it change height, until the reader touches, scrolls, clicks or types, jumps
+again, or switches conversation. Web only, no schema or client migration.
+Recovery is a CI-validated beta Web reverting this change.
+
 ## Unreleased: Gmail hands a large approved draft to Composio by short-lived link
 
 The upload-endpoint fix still ended in 413: Composio's proxy, not Gmail,

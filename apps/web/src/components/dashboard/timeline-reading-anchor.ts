@@ -59,6 +59,30 @@ export function observeTimelineBoxes(root: Element, observer: ResizeObserver, de
   }
 }
 
+/* Where the anchor row's text sits below the timeline's top edge, or null once
+   the virtualizer has taken the row out of the rendered window. */
+function readingAnchorTop(root: HTMLElement, rowId: string): number | null {
+  const content = readingAnchorContent(root, rowId);
+  return content ? content.getBoundingClientRect().top - root.getBoundingClientRect().top : null;
+}
+
+/* Calls `onLayout` before paint after anything that can move the anchor row:
+   a resize of the timeline's boxes or the row, and a commit that swaps the
+   virtualizer's margin or padding without changing any observed border box.
+   Returns the disconnect. */
+function followTimelineLayout(root: HTMLElement, rowId: string, onLayout: () => void): () => void {
+  const observer = new ResizeObserver(onLayout);
+  observeTimelineBoxes(root, observer);
+  const row = root.ownerDocument.getElementById(rowId);
+  if (row && root.contains(row)) observer.observe(row, { box: "border-box" });
+  const mutations = new MutationObserver(onLayout);
+  mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] });
+  return () => {
+    observer.disconnect();
+    mutations.disconnect();
+  };
+}
+
 /**
  * Keeps the reader's message fixed on screen across a history prepend.
  *
@@ -100,10 +124,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
     let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const anchorTop = (): number | null => {
-      const content = readingAnchorContent(root, rowId);
-      return content ? content.getBoundingClientRect().top - root.getBoundingClientRect().top : null;
-    };
+    const anchorTop = () => readingAnchorTop(root, rowId);
 
     /* Where the timeline was scrolled when the anchor was last known to be in
        place. A scroll event's difference from it is the reader's own movement
@@ -179,14 +200,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       corrected = true;
       hold(top, offset);
     };
-    const observer = new ResizeObserver(correctLayout);
-    observeTimelineBoxes(root, observer);
-    const row = root.ownerDocument.getElementById(rowId);
-    if (row && root.contains(row)) observer.observe(row, { box: "border-box" });
-    // A virtualizer margin or padding swap can move the text without changing
-    // any observed border box. Follow that commit before its next paint too.
-    const mutations = new MutationObserver(correctLayout);
-    mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] });
+    const stopFollowing = followTimelineLayout(root, rowId, correctLayout);
 
     /* The reader keeps scrolling while the page settles. Their scroll moves
        the anchor on purpose, so the held place follows it; the virtualizer
@@ -232,8 +246,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
     deadlineTimer = setTimeout(release, READING_ANCHOR_MAX_MS);
 
     releaseRef.current = () => {
-      observer.disconnect();
-      mutations.disconnect();
+      stopFollowing();
       if (settleTimer !== null) clearTimeout(settleTimer);
       if (deadlineTimer !== null) clearTimeout(deadlineTimer);
       root.removeEventListener("scroll", onScroll, true);
@@ -241,7 +254,46 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
     };
   }, [release, root]);
 
+  /**
+   * Keeps a message a jump has just landed on where the reader sees it. Rows
+   * above it keep changing height after the landing (a private result loads,
+   * an image decodes, a fold opens), and the list does not compensate for
+   * rows above the viewport while nobody scrolls, so without this the landed
+   * message slides off screen a second later. Every layout change and every
+   * scroll the list makes on its own is followed, before paint, by putting the
+   * row back. The reader's first input anywhere on the page ends it (a touch,
+   * a wheel, a key, a click on jump-to-latest or send), as do another jump and
+   * a channel switch. Nothing times it out: what grows above arrives from the
+   * network whenever it arrives. Nobody is scrolling while it corrects, so its
+   * writes are not the mid-momentum ones iPhone WebKit paints as a blank band.
+   */
+  const hold = useCallback((rowId: string) => {
+    if (!root) return;
+    release();
+    const anchorTop = () => readingAnchorTop(root, rowId);
+    const offset = anchorTop();
+    if (offset === null) return;
+    const correctLayout = () => {
+      const top = anchorTop();
+      if (top === null) {
+        release();
+        return;
+      }
+      if (Math.abs(top - offset) >= 0.5) root.scrollTop += top - offset;
+    };
+    const stopFollowing = followTimelineLayout(root, rowId, correctLayout);
+    root.addEventListener("scroll", correctLayout, { passive: true, capture: true });
+    const page = root.ownerDocument;
+    const readerEvents = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+    for (const event of readerEvents) page.addEventListener(event, release, { passive: true, capture: true });
+    releaseRef.current = () => {
+      stopFollowing();
+      root.removeEventListener("scroll", correctLayout, true);
+      for (const event of readerEvents) page.removeEventListener(event, release, true);
+    };
+  }, [release, root]);
+
   useEffect(() => release, [release, root]);
 
-  return useMemo(() => ({ snapshot, apply, release }), [apply, release, snapshot]);
+  return useMemo(() => ({ snapshot, apply, hold, release }), [apply, hold, release, snapshot]);
 }
