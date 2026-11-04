@@ -241,7 +241,55 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
     };
   }, [release, root]);
 
+  /**
+   * Keeps a message a jump has just landed on where the reader sees it. Rows
+   * above it keep changing height after the landing (a private result loads,
+   * an image decodes, a fold opens), and the list does not compensate for
+   * rows above the viewport while nobody scrolls, so without this the landed
+   * message slides off screen a second later. Every layout change and every
+   * scroll the list makes on its own is followed, before paint, by putting the
+   * row back. The reader's first input anywhere on the page ends it (a touch,
+   * a wheel, a key, a click on jump-to-latest or send), as do another jump and
+   * a channel switch. Nothing times it out: what grows above arrives from the
+   * network whenever it arrives. Nobody is scrolling while it corrects, so its
+   * writes are not the mid-momentum ones iPhone WebKit paints as a blank band.
+   */
+  const hold = useCallback((rowId: string) => {
+    if (!root) return;
+    release();
+    const anchorTop = (): number | null => {
+      const content = readingAnchorContent(root, rowId);
+      return content ? content.getBoundingClientRect().top - root.getBoundingClientRect().top : null;
+    };
+    const offset = anchorTop();
+    if (offset === null) return;
+    const correctLayout = () => {
+      const top = anchorTop();
+      if (top === null) {
+        release();
+        return;
+      }
+      if (Math.abs(top - offset) >= 0.5) root.scrollTop += top - offset;
+    };
+    const observer = new ResizeObserver(correctLayout);
+    observeTimelineBoxes(root, observer);
+    const row = root.ownerDocument.getElementById(rowId);
+    if (row && root.contains(row)) observer.observe(row, { box: "border-box" });
+    const mutations = new MutationObserver(correctLayout);
+    mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] });
+    root.addEventListener("scroll", correctLayout, { passive: true, capture: true });
+    const page = root.ownerDocument;
+    const readerEvents = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+    for (const event of readerEvents) page.addEventListener(event, release, { passive: true, capture: true });
+    releaseRef.current = () => {
+      observer.disconnect();
+      mutations.disconnect();
+      root.removeEventListener("scroll", correctLayout, true);
+      for (const event of readerEvents) page.removeEventListener(event, release, true);
+    };
+  }, [release, root]);
+
   useEffect(() => release, [release, root]);
 
-  return useMemo(() => ({ snapshot, apply, release }), [apply, release, snapshot]);
+  return useMemo(() => ({ snapshot, apply, hold, release }), [apply, hold, release, snapshot]);
 }
