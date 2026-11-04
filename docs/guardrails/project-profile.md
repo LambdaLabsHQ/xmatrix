@@ -451,11 +451,11 @@ parameterized cost/credit analysis, public SKU attribution, bounded daily or cre
 Monitoring incident edges route by metrics-scope project through authenticated
 per-connection ingress. See [GCP connector](../connectors/gcp.md).
 
-The Web composer previews Jev's summon intent while typing, with mention bands
-and a declined-mention explanation and Start anyway option at the address. Human-confirmed readings travel with the exact message;
-publication takes completed readings without waiting for previews. Launch
-authorization remains server-owned, and unread or unavailable previews
-retain post-send checks. See [invocation status](../design/mention-invocation/README.md).
+A summon starts an Agent only when its send asks to (`launch: true`): the Web
+composer always does, an Agent with `xmatrix send --launch`. Otherwise the
+mention stays a mention whose card offers its author Start; Jev no longer reads
+intent. Launch authorization remains server-owned. See
+[invocation status](../design/mention-invocation/README.md).
 
 Windows Agent children enforce UTF-8 transport settings and use managed PowerShell
 entrypoints that initialize console and pipeline encoding for each command.

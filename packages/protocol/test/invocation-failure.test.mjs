@@ -17,8 +17,8 @@ test("every registered summon rejection has a public, bounded explanation", () =
   assert.doesNotMatch(preparationRejectionMessage("registration_daemon_offline"), /workspace|registered environment/i);
 });
 
-test("only readings and machine-naming prompts are launch hints; failures are not", () => {
-  for (const code of ["summon_intent_reference", "summon_intent_explanation", "summon_intent_example",
+test("only mention-only outcomes and machine-naming prompts are launch hints; failures are not", () => {
+  for (const code of ["launch_not_requested", "summon_intent_reference", "summon_intent_explanation", "summon_intent_example",
     "registration_machine_not_auto_assigned", "registration_machine_ambiguous"]) {
     assert.equal(isLaunchHintRejection(code), true, code);
   }
@@ -157,16 +157,3 @@ test("answer failures name the actual request key without a fixed parameter list
   assert.equal(parseDecisionAnswerFailure({ questionKey: "browserMode", issue: "private error" }), undefined);
 });
 
-
-test("draft readings bind the exact UTF-16 range and reject stale or ambiguous input", async () => {
-  const { parseDraftSummonIntents } = await import("../dist/index.js");
-  const body = "🌍 @codex asks @codex";
-  const first = { start: 3, end: 9, mention: "@codex", choice: "summon" };
-  const second = { start: 15, end: 21, mention: "@codex", choice: "reference" };
-  assert.deepEqual(parseDraftSummonIntents([first, second], body), [first, second]);
-  assert.equal(parseDraftSummonIntents(undefined, body), undefined);
-  for (const value of [null, {}, [first, first], [{ ...first, start: 2 }], [{ ...first, end: 10 }],
-    [{ ...first, choice: "invalid" }], [{ ...first, extra: true }], [{ ...first, start: -1 }],
-    [{ ...first, start: 3.5 }], Array(17).fill(first)]) assert.throws(() => parseDraftSummonIntents(value, body));
-  assert.throws(() => parseDraftSummonIntents([first], "changed body"));
-});

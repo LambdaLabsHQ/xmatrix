@@ -50,7 +50,6 @@ import {
   type OfflineMachine,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
-  type DraftSummonIntent,
   type AgentRegistrationLaunch, utf8ByteLength, hasControlCharacter,
   currentRoutingQuotaWindows, RUN_PHASES_BEFORE_READY,
 } from "@xmatrix/protocol";
@@ -179,11 +178,8 @@ export type RegistrationLaunchChooser = (input: {
   /** The conversation co-writes a page or discusses a passage of one: only the private managed directory is
    * offered, ready at once, with no repository to check out first. */
   managedOnly?: true;
-  /** The mention being decided, when a message launches: Jev first reads
-   * whether its author is asking an Agent to start, unless `launch:force`. */
-  summon?: { text: string; start: number; end: number; authorKind: "user" | "agent";
-    /** Jev read it as a request while the author typed, and the author sent it. */
-    readInDraft?: true };
+  /** The mention being launched, when a message launches: its send asked for it to start. */
+  summon?: { text: string; start: number; end: number };
   /** A message that summons nobody: Jev first reads whether its author wants
    * an Agent to start now. */
   askToStart?: true;
@@ -719,12 +715,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     quotaRetry?: AgentQuotaRetryAdmission;
     onlySelectionIndex?: number;
     commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
-    /** The author's "launch anyway" for one mention Jev read as a non-request:
-     * only that summon is prepared, as if it carried `launch:force`. */
+    /** "Start" on a mention its send did not launch: only that summon is
+     * prepared, as if it carried `launch:force`. */
     forceMention?: string;
-    /** Jev's reading of each summon while the author typed, by its text; the
-     * author sent the message knowing it, so it answers the intent question. */
-    draftIntents?: ReadonlyArray<DraftSummonIntent>;
   }, choose?: RegistrationLaunchChooser) {
     const actorUserId = text(input.actorUserId), channelId = text(input.channelId),
       sourceMessageId = text(input.sourceMessageId), commandId = text(input.commandId, 200);
@@ -778,11 +771,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (recovered) { prepared.push(recovered); continue; }
         const options = selectionLaunchConditions(input.body, selection);
         if (options.error) throw new RegistrationAccessError("invalid_registration_launch", 400);
-        const draftRead = input.forceMention === undefined && source.authorKind === "user"
-          ? input.draftIntents?.find(item => item.start === selection.start && item.end === options.end &&
-            item.mention === summonText(selection))?.choice : undefined;
-        if (draftRead !== undefined && draftRead !== "summon" && options.tags.launch !== "force") {
-          rejected.push({ selectionIndex, code: `summon_intent_${draftRead}`, sourceMention: summonText(selection) });
+        // A summon starts only when its send asked to launch, or its text says
+        // launch:force; otherwise it stays a mention with a Start on its card.
+        if (!source.launch && options.tags.launch !== "force" && input.forceMention === undefined) {
+          rejected.push({ selectionIndex, code: "launch_not_requested", sourceMention: summonText(selection) });
           continue;
         }
         // A conversation without a requested repository/directory can start in
@@ -816,8 +808,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates, managedWorkspace,
             ...(managedOnly ? { managedOnly } : {}), blocked: listed.blocked,
             tags: input.forceMention !== undefined ? { ...options.tags, launch: "force" } : options.tags,
-            summon: { text: summonText(selection), start: selection.start, end: options.end, authorKind: source.authorKind,
-              ...(draftRead === "summon" ? { readInDraft: true as const } : {}) } });
+            summon: { text: summonText(selection), start: selection.start, end: options.end } });
         }
         catch (error) {
           // A model or its input read failed before any launch allocation. Do not

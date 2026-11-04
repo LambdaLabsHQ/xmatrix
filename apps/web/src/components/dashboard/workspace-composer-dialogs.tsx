@@ -7,8 +7,6 @@ import { registrationMachineBusy, registrationMachineName } from "./machine-name
 import { ImageGalleryLightbox } from "./attachment-lightbox";
 import { useSystemBackHandler } from "./use-system-back";
 import { useComposerHint } from "./composer-hints";
-import { useDraftSummonIntents } from "./use-draft-summon-intents";
-import { draftSummonReadingsForDisplay, forceDraftSummon } from "./summon-intent";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
@@ -877,7 +875,6 @@ export const Composer = memo(function Composer({
     }
   }
 
-  // Jev reads each summon as the author types; the hint shows it and the send carries it.
   // Picked channels and pages are shown by name and sent as their id tokens; a page discussion's anchored passage
   // goes first. Quotes of messages are blocks of the draft itself, so they send where they were put.
   // Pictures are sent by their place among the message's attachments: the draft's files, then those still
@@ -889,10 +886,6 @@ export const Composer = memo(function Composer({
       (ref) => { const at = places.indexOf(resolvePicture(ref)); return at < 0 ? undefined : at + 1; });
     return quote ? quotedMessage(quote, typed) : typed;
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const outgoingDraft = useMemo(sendDraft, [localDraft, invocationDraftRef.current, quote, attachments, pendingAttachments]);
-  const draftIntents = useDraftSummonIntents({ token, channelId: startsConversation ? undefined : channel?.id,
-    body: outgoingDraft.body, selections: outgoingDraft.selections });
 
   async function submitComposer() {
     // Enter reaches here without the Send button's gate: a file still being
@@ -918,7 +911,6 @@ export const Composer = memo(function Composer({
         sourceRevision: 1, sourceBodyHash, selections }, {
         spaceId: space?.id ?? channel?.spaceId ?? "", body, bodyHash: sourceBodyHash, revision: 1,
       }) : undefined;
-      const summonIntents = body === outgoingDraft.body ? draftIntents.readings : [];
       if (invocationScopeRef.current !== sendScope) {
         // The composer moved to another conversation, which ends its uploads.
         for (const upload of uploads) {
@@ -934,7 +926,6 @@ export const Composer = memo(function Composer({
       await onSend({
         body,
         ...(invocationSelections ? { invocationSelections } : {}),
-        ...(summonIntents.length ? { summonIntents } : {}),
         attachments: sentAttachments,
         ...(uploads.length ? { uploads } : {}),
       });
@@ -1399,21 +1390,8 @@ export const Composer = memo(function Composer({
           onInvocationSelect={selectInvocation}
           onReferenceSelect={selectReference}
           referenceRanges={invocationDraftRef.current?.bindings.filter((binding) => !isAgentBinding(binding))}
-          summonReadings={draftSummonReadingsForDisplay(draftIntents.readings, localDraft,
-            invocationDraftRef.current?.bindings.filter(isAgentBinding))}
-          summonReadingPending={draftIntents.reading}
           quoteIsHere={quoteIsHere}
           renderPicture={renderPicture}
-          onSummonStartAnyway={reading => {
-            const next = forceDraftSummon(fieldRef.current?.value ?? localDraft, reading);
-            if (!next) return;
-            setDraftText(next.body);
-            requestAnimationFrame(() => {
-              const input = fieldRef.current;
-              input?.focus();
-              input?.setSelectionRange(next.caret, next.caret);
-            });
-          }}
           channel={channel}
           space={space}
           token={token}

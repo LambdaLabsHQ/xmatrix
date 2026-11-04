@@ -931,7 +931,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           Authorization: `Bearer ${currentToken}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ body: text }),
+        // A person typed it: it starts the Agents it summons, as the composer does.
+        body: JSON.stringify({ body: text, launch: true }),
         cache: "no-store",
       })
         .then(async (res) => {
@@ -1842,7 +1843,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       attachments: snapshot.attachments,
       uploads: snapshot.uploads,
       invocationSelections: snapshot.invocationSelections,
-      summonIntents: snapshot.summonIntents,
       appMentions: parseAppMentions(snapshot.body, APP_CONNECTORS),
     });
   }
@@ -2485,7 +2485,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const channelId = channel.id;
 
     const invocationSelections = fromComposer ? composerSnapshot?.invocationSelections : undefined;
-    const summonIntents = fromComposer ? composerSnapshot?.summonIntents : undefined;
     const appMentions = parseAppMentions(body, APP_CONNECTORS);
     const replyToMessageId = replySnapshot?.messageId;
     const replyTo = replySnapshot?.messageId
@@ -2510,15 +2509,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setReplyTarget(null);
     }
     await deliverOutgoingMessage(channel, {
-      body, invocationSelections, summonIntents, attachments, uploads, replyToMessageId, replyTo, appMentions,
+      body, invocationSelections, attachments, uploads, replyToMessageId, replyTo, appMentions,
     });
   }
 
   /** Shows the message as pending in its channel at once, then appends it. */
   async function deliverOutgoingMessage(
     channel: ChannelSnapshot,
-    { body, invocationSelections, summonIntents, attachments, uploads, replyToMessageId, replyTo, appMentions }:
-      Pick<OutgoingMessage, "body" | "invocationSelections" | "summonIntents" | "attachments" | "uploads" | "replyToMessageId" | "replyTo" | "appMentions">,
+    { body, invocationSelections, attachments, uploads, replyToMessageId, replyTo, appMentions }:
+      Pick<OutgoingMessage, "body" | "invocationSelections" | "attachments" | "uploads" | "replyToMessageId" | "replyTo" | "appMentions">,
   ): Promise<string | null> {
     if (!s.token) return null;
     const channelId = channel.id;
@@ -2535,7 +2534,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       channelId,
       body,
       invocationSelections,
-      summonIntents,
       attachments,
       ...(uploads?.length ? { uploads } : {}),
       replyToMessageId,
@@ -2557,7 +2555,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    * Answers the stored message's id, or null when the row stayed unsent or unconfirmed.
    */
   async function attemptOutgoingSend(token: string, channel: ChannelSnapshot, outgoing: OutgoingMessage): Promise<string | null> {
-    const { clientMessageId, body, invocationSelections, summonIntents, replyToMessageId, appMentions, sentAt, uploads } = outgoing;
+    const { clientMessageId, body, invocationSelections, replyToMessageId, appMentions, sentAt, uploads } = outgoing;
     let { attachments } = outgoing;
     const channelId = channel.id;
     try {
@@ -2580,7 +2578,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         clientMessageId,
         body,
         invocationSelections,
-        summonIntents,
         attachments,
         replyToMessageId,
         appMentions,

@@ -222,6 +222,7 @@ fn private_payload(body: &Value) -> Result<Value> {
                 | "replyToMessageId"
                 | "awaitsResponse"
                 | "readThroughSequence"
+                | "launch"
         )
     }) {
         return Err(failure("Journaled send contains unsupported fields"));

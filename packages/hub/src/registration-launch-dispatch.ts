@@ -5,7 +5,7 @@ import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
 import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags, DraftSummonIntent, HarnessSignedOut, HarnessTooOld, MachineAgents, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type { AutoLaunchTags, HarnessSignedOut, HarnessTooOld, MachineAgents, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresQuotaRetryRepository,
@@ -45,9 +45,8 @@ export async function executeRegistrationLaunchDispatch(input: {
   onlySelectionIndex?: number;
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor?: LaunchEvaluator;
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
-  /** The author's "launch anyway" for one summon Jev read as a non-request. */
+  /** "Start" on one summon its send did not launch. */
   forceMention?: string;
-  draftIntents?: DraftSummonIntent[];
 }) {
   const { placement, repository } = await channelLaunchRepository(input);
   const result = await repository.dispatchFromMessage(input, input.evaluatorFor ? registrationLaunchChooser(input.evaluatorFor(placement.spaceId), registrationLaunchContextReader({
@@ -474,7 +473,7 @@ export async function executeRegistrationUsageLimitHold(input: {
 
 interface MessageLaunch {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string;
-  commandId: string; forceMention?: string; draftIntents?: DraftSummonIntent[];
+  commandId: string; forceMention?: string;
 }
 
 interface MessageLaunchResult {
@@ -518,7 +517,6 @@ async function dispatchFromMessage(input: MessageLaunch, dependencies: MessageLa
 
 export async function dispatchRegistrationLaunchesAfterMessage(input: {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string;
-  draftIntents?: DraftSummonIntent[];
   scheduleBackground?: (task: Promise<unknown>) => void;
 }, dependencies: MessageLaunchDependencies = {},
 ): Promise<{ selectionCount: number; prepared: Array<{ launchId: string }>; rejected?: MessageLaunchRejection[] }> {
@@ -536,8 +534,8 @@ export async function dispatchRegistrationLaunchesAfterMessage(input: {
   return { selectionCount: result.selectionCount, prepared: result.prepared, rejected: result.rejected };
 }
 
-/** "Launch anyway": the source message's author answers the intent question
- * for one summon Jev declined. Message authority, fences and every other check
+/** "Start": the source message's author starts one summon its send did not
+ * launch. Message authority, fences and every other check
  * are the ordinary registration dispatch; only this summon is prepared. */
 export async function dispatchRegistrationLaunchAnyway(input: {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string; sourceMention: string;

@@ -1,8 +1,8 @@
 import type { Context, Hono } from "hono";
 import { runtimeRepository } from "./runtime";
-import { AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, agentSendSubmissionCanonical, callerMessageMetadata, messagePublicationEvidence, parseDraftSummonIntents, sha256Hex } from "@xmatrix/protocol";
+import { AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, agentSendSubmissionCanonical, callerMessageMetadata, messagePublicationEvidence, sha256Hex, summonMentions } from "@xmatrix/protocol";
 import { ChannelActivityInvalid } from "@xmatrix/protocol";
-import type { ChannelAppMention, ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
+import type { ChannelAppMention, ChannelAttachment } from "@xmatrix/protocol";
 import { subscribeRunToPullRequest } from "./github-pull-request-subscription";
 import type { Env } from "./types";
 import { LIVE_RUN_LAUNCH_FIELDS, liveRunIsAdmitted, snapshotLiveRunFromProductGateway } from "./live-run-admission";
@@ -78,6 +78,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         "invocationSelections",
         "finalReplyExecutionId",
         "appMentions",
+        "launch",
         "attachments",
         "body",
         "clientMessageId",
@@ -116,6 +117,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         senderAgentInstanceId?: string;
         senderRunId?: string;
         senderExecutionKey?: string;
+        launch?: unknown;
         summonIntents?: unknown;
       };
       const message = channelAppMentionsForPublicMessage(body.body, body.appMentions);
@@ -125,16 +127,14 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           error: "Agent invocation selections require a Human caller", code: "invocation_selection_forbidden",
         }, 403);
       }
-      // Jev's reading while a Human typed: sending it answers the intent
-      // question for that author, as `launch:force` in the text would.
-      let draftIntents: DraftSummonIntent[] | undefined;
-      if (body.summonIntents !== undefined) {
-        if (principal || body.senderAgentId || body.senderAgentInstanceId) return c.json({
-          error: "Draft summon intents require a Human caller", code: "summon_intent_forbidden",
-        }, 403);
-        try { draftIntents = parseDraftSummonIntents(body.summonIntents, typeof body.body === "string" ? body.body : ""); }
-        catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid draft summon intents" }, 400); }
+      if (body.launch !== undefined && typeof body.launch !== "boolean") {
+        return c.json({ error: "launch must be a boolean" }, 400);
       }
+      // The web composer asks every send to start the Agents it mentions. One
+      // from before `launch` sent Jev's draft readings instead, only with a summon.
+      const launch = body.launch === true || body.summonIntents !== undefined;
+      const notLaunched = launch || typeof body.body !== "string" ? []
+        : summonMentions(body.body).filter(mention => !mention.force).map(mention => mention.text);
       if (body.awaitsResponse !== undefined && typeof body.awaitsResponse !== "boolean") {
         return c.json({ error: "awaitsResponse must be a boolean" }, 400);
       }
@@ -316,6 +316,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           ...(body.invocationSelections === undefined ? {} : { invocationSelections: body.invocationSelections }),
           ...(body.finalReplyExecutionId === undefined ? {} : { finalReplyExecutionId: body.finalReplyExecutionId }),
           ...(body.awaitsResponse === true ? { awaitsResponse: true } : {}),
+          ...(launch ? { launch: true } : {}),
           ...(body.readThroughSequence === undefined
             ? {} : { readThroughSequence: body.readThroughSequence as number }),
           principal: appendPrincipal,
@@ -452,7 +453,6 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             ...(committedAttachments?.length ? { attachments: committedAttachments } : {}),
             ...(crossChannelReplyOrigin(committed.replyOrigin)
               ? { replyOrigin: crossChannelReplyOrigin(committed.replyOrigin) } : {}),
-            ...(draftIntents?.length ? { draftIntents } : {}),
           });
           // waitUntil is cancelled after the response and the summon then vanishes.
           if (productMessageControlFinishesBeforeResponse(message.body)) {
@@ -481,6 +481,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             metadata: body.metadata,
             ...(committedAttachments?.length ? { attachments: committedAttachments } : {}),
           },
+          // Summons this send did not ask to start: they stay mentions, and the sender is told.
+          ...(!launch && notLaunched.length ? { mentionsNotLaunched: notLaunched } : {}),
         });
     } catch (error) {
       return requestErrorResponse(c, error);

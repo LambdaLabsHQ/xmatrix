@@ -446,34 +446,25 @@ The older sections below describe previous implementations. Their capacity
 gates and semantic prerequisite stages are superseded by this contract, and the
 headroom ranking above replaces their deterministic ranking. Historical passing tests do not prove the new contract complete.
 
-## Summon intent (2026-09-26)
+## Who starts an Agent (2026-11-04)
 
-A launch mention is language, so Jev reads whether its author is asking an
-Agent to start before any allocation. Every message-invoked launch — composite
-registration dispatch, legacy `@auto` and legacy harness shouts, from a Human or
-an Agent — adds one `intent` choice question to the same Jev request that picks
-the environment, so the check adds no model round trip. The request state
-carries the mention's text and UTF-16 offsets in the message Jev reads and the
-author kind (`user` or `agent`), never a sender identity. The answer is one of
-`summon`, `reference`, `explanation` or `example`
-(`SUMMON_INTENT_CATEGORIES` in `@xmatrix/protocol`). Only `summon` continues;
-any other answer discards the environment choice and records the bounded
-rejection `summon_intent_<category>`, so the mention's chip explains why no
-Agent started. A failed or unconfigured Jev starts nothing, as before.
+A launch mention starts an Agent only when its send asked to: the message
+request carries `launch: true` (`xmatrix send --launch`, the MCP `send_message`
+tool's `launch`), or the mention's text says `launch:force`. The web composer,
+the CLI's interactive chat and a Page schedule line always ask. An Agent's live
+reply over the Runtime WebSocket never does, so an Agent naming another in a
+report starts nothing. The request is stored with the message (in
+`agent_invocation_targets_json.launch`, only on a message that summons someone),
+so a quota retry or recovery reads the same answer. A summon its send did not
+ask to start is recorded as the rejection `launch_not_requested`; the Channel is
+not told, and the mention's card offers its author Start.
 
-`launch:force` after the mention is the author's own answer: the intent
-question is not asked and the launch evidence records `intent.source =
-"author"`. Environment choice, parameter choice and every authority check are
-unchanged. Existing-Instance lifecycle addresses (`:stop`, `:reborn`,
-`:handoff`, `name:N`) never reach Jev.
-
-The labeled case set in `packages/hub/scripts/summon-intent-eval.mjs` holds the
-2026-09-26 kill-all stray summons as negatives and real requests as positives;
-run it with `--live` (or `--hub` from a live Agent Run, through the deployed
-`/api/ai/jev/evaluate`) before changing the intent rubric. On 2026-09-26 the
-`--hub` run passed 12/12: every negative read as `explanation` or `reference`
-(lowest margin 0.56, the English syntax warning) and every positive as
-`summon` (0.94–1.0).
+Jev no longer reads whether a mention is a request (the 2026-09-26 intent
+question and the composer's draft reading were removed): it chooses only the
+environment, model and repository. Old messages keep their recorded
+`summon_intent_*` rejections, which read the same as `launch_not_requested`.
+Existing-Instance lifecycle addresses (`:stop`, `:reborn`, `:handoff`, `name:N`)
+need no launch request.
 
 ## Product contract
 

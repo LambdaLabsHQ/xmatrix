@@ -141,6 +141,23 @@ export function deriveHarnessInvocationSelections(source: {
   return parseAgentInvocationSelections(envelope(selections), source);
 }
 
+/** The summons a message writes, each through its last condition: harness shouts,
+ * `@auto` and condition summons. Each starts an Agent only when its send asks to
+ * launch (`xmatrix send --launch`, the web composer) or it says `launch:force`. */
+export function summonMentions(body: string): Array<{ start: number; end: number; text: string; force: boolean }> {
+  let ranges: ReturnType<typeof nonOperationalMentionRanges> | undefined;
+  const summons = [...parseHarnessCapabilityMentions(body),
+    ...parseAutoLaunchMentions(body).filter(mention => isAutoLaunchSummonText(mention.text))
+      .map(mention => ({ start: mention.start, end: isConditionSummonText(mention.text)
+        ? mention.conditions[0]?.end ?? mention.end : mention.start + 5 }))]
+    .filter(mention => isOperationalMentionStart(mention.start, ranges ??= nonOperationalMentionRanges(body)))
+    .sort((left, right) => left.start - right.start);
+  return summons.map(({ start, end }) => {
+    const options = selectionLaunchConditions(body, { start, end, text: body.slice(start, end) });
+    return { start, end: options.end, text: body.slice(start, options.end), force: options.tags.launch === "force" };
+  });
+}
+
 /** Create-instance mentions (`@name:new[:workspace]`, `@name:once`) with the
  * addressed name, for a caller that resolves names in its Space. */
 export function createInstanceMentions(body: string): Array<{ start: number; end: number; name: string }> {

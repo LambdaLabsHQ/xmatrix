@@ -37,28 +37,17 @@ evaluation entry point through Vercel AI Gateway. It accepts one shared `state`
 and named Boolean, Choice or Score `questions`. Routing is one possible caller;
 this package does not launch Agents, choose Machines or alter production routing.
 
-While a Human types a summon, the composer previews Jev's reading through
-`POST /api/channels/:id/summon-intent`. One preview reads up to four summons,
-and each may be retried once, so it can cost eight Jev calls. Each signed-in
-Human may request 60 previews a minute (`RATE_LIMIT_SUMMON_INTENT`); over that
-the Hub answers `429 rate_limited` before reading the draft or the Channel,
-the composer shows no reading, and sending still asks Jev once after the
-message is committed. `launch:force` and sending are not limited by it.
-
-A `summon_intent_reference`, `summon_intent_explanation` or
-`summon_intent_example` rejection means Jev read the mention as naming,
-explaining or quoting an Agent rather than asking one to start; its decision
-record holds the `intent` answer and probabilities. It is not a failure, so the
-Channel gets no notice: the mention's own card says why and offers Launch anyway. The author can write
-`launch:force` after the mention to skip that check. The same is true of a hint that only tells the
+Jev does not read whether a launch mention is a request: a summon starts only
+when its send asked to (`launch: true`, or `launch:force` in the text). A
+`launch_not_requested` rejection (or an old `summon_intent_*` one) is not a
+failure, so the Channel gets no notice: the mention's own card says why and
+offers Start. The same is true of a hint that only tells the
 author how to name the machine (`registration_machine_not_auto_assigned`, `registration_machine_ambiguous`):
 the card says it, and the Channel is not told. A launch that failed (quota, an offline machine, no
 registration, and the rest) still posts its notice.
-A new conversation's mention-less first message is read the same way with the
-start rubric; Jev's `conversation` answer starts nothing and records nothing
-visible (see `../architecture/auto-launch-completion.md`). The same eval script carries
-labeled start cases. Check the intent rubric
-with `node packages/hub/scripts/summon-intent-eval.mjs --live`.
+A new conversation's mention-less first message is the one message Jev reads for
+intent, with the start rubric; Jev's `conversation` answer starts nothing and records nothing
+visible (see `../architecture/auto-launch-completion.md`).
 
 ## Worker endpoint and handoff
 

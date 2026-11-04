@@ -169,7 +169,7 @@ test("owner delete fences an in-flight remote-repo spawn before abandoning its p
     const started = await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
       method: "POST",
       headers: { ...auth, "content-type": "application/json" },
-      body: JSON.stringify({ body: `@auto harness:codex machine:${machineId} repo:LambdaLabsHQ/xmatrix delete during spawn` }),
+      body: JSON.stringify({ launch: true, body: `@auto harness:codex machine:${machineId} repo:LambdaLabsHQ/xmatrix delete during spawn` }),
     });
     assert.equal(started.status, 200, await started.text());
     const spawn = await daemon.inbox.waitFor(
@@ -224,7 +224,7 @@ test("owner delete fences an in-flight remote-repo spawn before abandoning its p
     const failedStarted = await worker.fetch(`/api/channels/${encodeURIComponent(failedChannelId)}/messages`, {
       method: "POST",
       headers: { ...auth, "content-type": "application/json" },
-      body: JSON.stringify({ body: `@auto harness:codex machine:${machineId} repo:LambdaLabsHQ/xmatrix delete after failed acknowledgement` }),
+      body: JSON.stringify({ launch: true, body: `@auto harness:codex machine:${machineId} repo:LambdaLabsHQ/xmatrix delete after failed acknowledgement` }),
     });
     assert.equal(failedStarted.status, 200, await failedStarted.text());
     const failedSpawn = await daemon.inbox.waitFor(

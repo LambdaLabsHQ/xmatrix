@@ -47,7 +47,7 @@ test("a handoff of a directory without a repository stops the source and gives i
     const summon = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, { method: "POST", headers,
       // Only A has Claude. Leave placement open so its later cross-machine
       // handoff does not contradict an explicitly pinned source machine.
-      body: JSON.stringify({ body: "@claude plan the Bali trip" }) });
+      body: JSON.stringify({ launch: true, body: "@claude plan the Bali trip" }) });
     assert.equal(summon.status, 200, await summon.clone().text());
     const launch = await spawnA;
     assert.match(launch.workspace.canonicalCwd, /^\.xmatrix-management\//u);

@@ -548,17 +548,16 @@ test('effort routing excludes unproven controls before weighing fit or machine h
   error => error.code === 'registration_effort_unavailable');
 });
 
-test('default-only harnesses read intent, location and fit in one call, then weigh machine load', async () => {
+test('default-only harnesses read location and fit in one call, then weigh machine load', async () => {
   const calls = [];
   const available = twoHarnesses.map(candidate => ({ ...candidate, models: [] }));
   available.push({ ...available[1], key: { ...available[1].key, ownerUserId: 'idle', machineId: 'idle' },
     workspaces: available[1].workspaces.map(workspace => ({ ...workspace, machineId: 'idle' })),
     observations: { outstandingMachineAllocations: 0, quota: { remainingPercent: 100, assumed: true },
       machineResources: { cpuUsagePercent: 5 } } });
-  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, { intent: 'summon' }); })({
-    message: '@auto inspect', tags: {}, candidates: available,
-    summon: { text: '@auto', start: 0, end: 5, authorKind: 'human' } });
-  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['intent', 'workspace', 'fit_0', 'fit_1']]);
+  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@auto inspect', tags: {}, candidates: available, summon: { text: '@auto', start: 0, end: 5 } });
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace', 'fit_0', 'fit_1']]);
   assert.equal(chosen.key.machineId, 'idle');
   assert.equal(chosen.useRuntimeDefaultModel, true);
   assert.equal(chosen.parameterEvidence.placement.ranking[0].machineId, 'idle');
@@ -640,33 +639,16 @@ test('a listed repository comes first; directories are offered only when no repo
   assert.equal(directory.parameterEvidence.selections.repo, undefined);
 });
 
-const summon = { text: '@codex', start: 0, end: 6, authorKind: 'agent' };
-test('Jev answers intent in the first call; a non-request starts nothing', async () => {
-  const calls = [];
-  const choose = registrationLaunchChooser(async input => { calls.push(input); return answer(input, { intent: 'explanation' }); });
-  await assert.rejects(choose({ message: '@codex was started by my heading', tags: {}, candidates, summon }),
-    error => error.code === 'summon_intent_explanation' && error.status === 409);
-  assert.equal(calls.length, 1);
-  assert.deepEqual(Object.keys(calls[0].questions), ['intent', 'workspace', 'modelEffort']);
-  assert.deepEqual(calls[0].state.summon, summon);
-});
-test('a request launches and keeps the intent evidence', async () => {
-  const calls = [];
-  const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, { intent: 'summon' }); })({
-    message: '@codex inspect', tags: {}, candidates, summon });
-  assert.equal(calls.length, 1, "intent, location and model are read together");
-  assert.equal(result.parameterEvidence.intent.source, 'jev');
-  assert.equal(result.parameterEvidence.intent.probabilities.summon, 1);
-  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
-  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
-});
-test('launch:force skips only the intent question', async () => {
+const summon = { text: '@codex', start: 0, end: 6 };
+test('a summon its send asked to launch asks Jev no intent question', async () => {
   const calls = [];
   const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
-    message: '@auto launch:force inspect', tags: { launch: 'force' }, candidates: twoHarnesses, summon });
-  assert.deepEqual(Object.keys(calls[0].questions), ['workspace', 'fit_0', 'fit_1']);
+    message: '@codex inspect', tags: {}, candidates, summon });
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
   assert.equal(Object.hasOwn(calls[0].state, 'summon'), false);
   assert.deepEqual(result.parameterEvidence.intent, { source: 'author' });
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
 });
 test('a message that summons nobody asks Jev whether to start and a no refuses', async () => {
   const calls = [];
@@ -757,16 +739,6 @@ test("a laptop is the machine's own form; Jev is not asked and headroom still pi
   assert.deepEqual(parseLaunchParameterEvidence(selected.parameterEvidence), selected.parameterEvidence);
 });
 
-
-test('a Human-confirmed draft reading skips only intent and keeps the remaining launch selection', async () => {
-  const calls = [];
-  const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
-    message: '@codex inspect', tags: {}, candidates, summon: { ...summon, readInDraft: true } });
-  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
-  assert.deepEqual(result.parameterEvidence.intent, { source: 'draft' });
-  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
-  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
-});
 
 test('an environment that failed to start in the last 30 minutes goes after every one that did not', async () => {
   // 2026-10-17: `@auto` sent a new user's first task to a Grok that could not start, twice in a row.

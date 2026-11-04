@@ -83,7 +83,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       }));
       const body = `@claude repo:${repository} machine:${machineA} fix the bug`;
       const response = await worker.fetch(`/api/channels/${channel.id}/messages`, { method: "POST", headers,
-        body: JSON.stringify({ body }) });
+        body: JSON.stringify({ launch: true, body }) });
       assert.equal(response.status, 200, await response.clone().text());
       const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
         message => message.metadata?.kind === "xmatrix.quota-retry-offer", "initial quota wait offer", 30_000);
@@ -120,7 +120,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
     const spawnA = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "claude spawn on machine A");
     const summon = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, { method: "POST", headers,
-      body: JSON.stringify({ body: `@claude repo:${repository}${pinned ? ` machine:${machineA}` : ""} fix the bug` }) });
+      body: JSON.stringify({ launch: true, body: `@claude repo:${repository}${pinned ? ` machine:${machineA}` : ""} fix the bug` }) });
     assert.equal(summon.status, 200, await summon.clone().text());
     const launch = await spawnA;
     assert.equal(launch.remoteRepo, repository);

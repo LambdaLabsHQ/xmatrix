@@ -148,6 +148,7 @@ async function json(response) {
   return payload;
 }
 
+/** A send as the web composer makes it: it asks the Agents it summons to start. */
 async function postChannelMessage(worker, token, channelId, body, extra = {}) {
   return json(
     await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
@@ -156,7 +157,7 @@ async function postChannelMessage(worker, token, channelId, body, extra = {}) {
         Authorization: `Bearer ${token}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ body, ...extra }),
+      body: JSON.stringify({ launch: true, body, ...extra }),
     })
   );
 }

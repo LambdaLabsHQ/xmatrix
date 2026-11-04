@@ -213,11 +213,10 @@ export {
   PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage, rejectionCause,
   REGISTRATION_PREPARATION_REJECTION_CODES, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS,
   isLaunchHintRejection, LAUNCH_HINT_REJECTION_CODES,
-  SUMMON_INTENT_CATEGORIES, SUMMON_INTENT_INSTRUCTIONS, SUMMON_INTENT_REJECTION_CODES, parseDraftSummonIntents,
+  isMentionOnlyRejection, MENTION_ONLY_REJECTION_CODES,
 } from "./invocation-failure.js";
 export type {
-  DecisionAnswerFailure, DecisionAnswerIssue, DraftSummonIntent, HarnessSignedOut, LaunchMachineBlock, LaunchRefusal, OfflineMachine,
-  SummonIntentCategory,
+  DecisionAnswerFailure, DecisionAnswerIssue, HarnessSignedOut, LaunchMachineBlock, LaunchRefusal, OfflineMachine,
 } from "./invocation-failure.js";
 export {
   boundedRoutingLabel, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, cursorQuotaBucketForModel, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingQuotaObservation, routingQuotaResetTime, routingQuotaText, visibleRoutingChoiceRows,
@@ -445,7 +444,7 @@ export type {
 } from "./runtime-operation-failure.js";
 export {
   createInstanceMentions, deriveHarnessInvocationSelections, isOperationalInvocationSpan, parseAgentInvocationSelections,
-  selectionLaunchConditions,
+  selectionLaunchConditions, summonMentions,
 } from "./agent-invocation-selection.js";
 export type {
   AgentInvocationSelection, AgentInvocationSelections, AgentInvocationTarget,

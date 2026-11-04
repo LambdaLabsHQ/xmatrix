@@ -7579,7 +7579,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   background: color-mix(in oklab, var(--invocation-color) 12%, transparent);
 }
 
-/* Summon intent. Right after sending, Jev is reading the sentence: a light
+/* A summon starting. Right after sending, xMatrix chooses where it runs: a light
    band sweeps across the author's own words. The answer resolves in place — a
    request lights into the routed chip; anything else settles back into prose
    with a dotted underline that explains itself. */
@@ -7681,26 +7681,14 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
-/* What the draft knows before it is sent: a forced launch, a malformed one, and Jev's reading of a summon. */
-.xmatrix-app .composer-textarea .app-mention-chip:is([data-forced="true"], [data-invalid="true"], [data-intent]) {
+/* What the draft knows before it is sent: a forced launch and a malformed one. */
+.xmatrix-app .composer-textarea .app-mention-chip:is([data-forced="true"], [data-invalid="true"]) {
   background: color-mix(in oklab, var(--chip-ink) var(--chip-fill, 14%), transparent);
   color: var(--chip-ink);
 }
 .xmatrix-app .composer-textarea .app-mention-chip[data-forced="true"] { --chip-ink: oklch(0.62 0.16 70); --chip-fill: 22%; }
 .xmatrix-app .composer-textarea .app-mention-chip[data-invalid="true"] { --chip-ink: var(--destructive); }
-.xmatrix-app .composer-textarea .app-mention-chip[data-intent="summon"] { --chip-ink: oklch(0.55 0.17 285); --chip-fill: 16%; }
-.xmatrix-app .composer-textarea .app-mention-chip[data-intent="declined"] { --chip-ink: var(--muted-foreground); --chip-fill: 9%; }
-.xmatrix-app .composer-textarea .app-mention-chip[data-intent="reading"] { --chip-ink: var(--primary); --chip-fill: 10%; opacity: 0.6; }
 .app-composer-hint-overlay { position: absolute; pointer-events: none; user-select: none; white-space: pre; }
-.app-composer-summon-declined {
-  position: absolute; pointer-events: auto; padding: 0; border: 0; background: transparent; cursor: help;
-  border-bottom: 1.5px dotted var(--muted-foreground); border-radius: 2px;
-}
-.app-composer-summon-declined:hover,
-.app-composer-summon-declined[data-popup-open] { border-bottom-color: var(--foreground); }
-.app-composer-summon-declined:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.app-composer-summon-popup { font-size: 14px; }
-.app-composer-summon-explanation { margin: 12px 0; font-size: 15px; line-height: 1.5; }
 /* The empty composer's hint (composer-hints.ts), drawn where the text would start.
    The words stay faint; the trigger they teach sits in the band it will become,
    and @ wears the summon violet because typing it calls an Agent in. It starts
@@ -7796,7 +7784,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 }
 
 /* A parameter Jev chose, drawn into the mention after the author's words.
-   Same highlight as a written condition, in the ink of "Jev is reading".
+   Same highlight as a written condition, in the ink of "Starting".
    Each choice pops in on its own beat, in the order it was decided, then stays lit. */
 .xmatrix-app .app-summon-condition[data-jev="true"],
 .xmatrix-app .app-summon-condition[data-routing="true"] {

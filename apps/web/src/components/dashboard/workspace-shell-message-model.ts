@@ -13,7 +13,6 @@ import type {
 import type {
   AgentGoalStatus,
   AgentInvocationSelections,
-  DraftSummonIntent,
   AgentRuntimeState,
   FaceOf,
   ChannelAttachment,
@@ -35,8 +34,6 @@ import type { SentUpload } from "./sent-upload";
 export type ComposerSendSnapshot = {
   body: string;
   invocationSelections?: AgentInvocationSelections;
-  /** Jev's reading of each summon while the author typed this exact body. */
-  summonIntents?: DraftSummonIntent[];
   attachments: ChannelAttachment[];
   /** Files still uploading when Send was pressed; the message is appended once they land. */
   uploads?: SentUpload[];

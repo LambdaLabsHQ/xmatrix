@@ -129,6 +129,8 @@ export async function dispatchScheduledMessageOccurrence(
     body,
     principal: { kind: senderKind, id: senderId },
     authorityRootUserId,
+    // A schedule line that names an Agent asks it to start, as a send from the composer does.
+    launch: true,
     // A reminder is for its author: it waits on them in Needs you, and so reaches their devices.
     ...(automationRunsOnce(payload) ? { waitsOnUserIds: [authorityRootUserId] } : {}),
     residual: {

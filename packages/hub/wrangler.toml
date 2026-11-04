@@ -114,13 +114,6 @@ simple = { limit = 30, period = 60 }
 
 # Allowances on Jev, which the operator pays a provider for. They bound spend
 # rather than traffic, so they are refused whatever RATE_LIMIT_ENFORCED says.
-# Composer draft previews, per signed-in Human: one request asks Jev up to
-# eight times (four summons, each retried once).
-[[ratelimits]]
-name = "RATE_LIMIT_SUMMON_INTENT"
-namespace_id = "3804"
-simple = { limit = 60, period = 60 }
-
 # Open Jev evaluations, per owning Human; an Agent Run counts as its owner.
 [[ratelimits]]
 name = "RATE_LIMIT_JEV_EVALUATE"

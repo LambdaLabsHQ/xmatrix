@@ -2605,8 +2605,11 @@ pub struct SendArgs {
     /// Declare that you are waiting on the people and Agents this message mentions. It stays with them until they answer.
     #[arg(long)]
     pub wait: bool,
+    /// Start the Agents this message summons (`@<agent>`, `@auto`, `@repo:…`). Without it they are only mentioned.
+    #[arg(long)]
+    pub launch: bool,
     /// Recover a saved send by checking its receipt before retrying the same message
-    #[arg(long, conflicts_with_all = ["message_id", "final_for", "reply_to", "wait", "files", "stdin", "escape_newlines", "message"])]
+    #[arg(long, conflicts_with_all = ["message_id", "final_for", "reply_to", "wait", "launch", "files", "stdin", "escape_newlines", "message"])]
     pub recover: Option<String>,
     /// File attachment path. Repeat for multiple files.
     #[arg(long = "file")]

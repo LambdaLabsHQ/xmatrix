@@ -1,5 +1,5 @@
 import { agentPresetForLauncher, createInstanceMentions, deriveHarnessInvocationSelections, digestCanonicalCloneCborV1,
-  parseAgentInvocationSelections, type AgentInvocationSelections, type AgentInvocationTarget } from "@xmatrix/protocol";
+  parseAgentInvocationSelections, summonMentions, type AgentInvocationSelections, type AgentInvocationTarget } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
 import { requireChannelCapability } from "./channel-capability-policy.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
@@ -56,6 +56,11 @@ export function bodyWithoutInvocationSelections(body: string, selections: AgentI
       result.slice(selection.end);
   }
   return result;
+}
+
+/** Whether a message summons anyone, so its launch request is worth keeping. */
+export function messageSummons(body: string): boolean {
+  return summonMentions(body).length > 0;
 }
 
 /** xMatrix's own `@<harness>` reply summoning the harness decided for a new
@@ -138,7 +143,9 @@ export async function readMessageInvocationSelections(tx: DatabaseTransaction, i
   spaceId: string; channelId: string; messageId: string; actorUserId: string; body: string;
   /** The Space is composite: derive capability selections from harness shouts. */
   deriveFromText?: boolean;
-}): Promise<(AgentInvocationSelections & { sourceSequence: number; authorKind: "user" | "agent" }) | null> {
+}): Promise<(AgentInvocationSelections & { sourceSequence: number; authorKind: "user" | "agent";
+  /** Its send asked that the Agents it summons start. */
+  launch: boolean }) | null> {
   await requireChannelCapability(tx, { spaceId: input.spaceId, channelId: input.channelId,
     principal: { kind: "user", id: input.actorUserId }, capability: "runtime_new_work",
     error: failure => new MessageAuthorityError(failure.code, failure.status, failure.message) });
@@ -166,7 +173,8 @@ export async function readMessageInvocationSelections(tx: DatabaseTransaction, i
     return { ...(envelope === undefined
       ? deriveHarnessInvocationSelections(source, await createMentionTargets(tx, input.spaceId, input.body))
       : parseAgentInvocationSelections(envelope, source)), sourceSequence,
-      authorKind: row.author_kind === "agent" ? "agent" as const : "user" as const };
+      authorKind: row.author_kind === "agent" ? "agent" as const : "user" as const,
+      launch: row.agent_invocation_targets_json?.launch === true };
   } catch {
     throw new MessageAuthorityError("invocation_selection_stale", 409, "Invocation source has changed");
   }

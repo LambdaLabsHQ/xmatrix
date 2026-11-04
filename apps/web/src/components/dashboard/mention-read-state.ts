@@ -322,8 +322,6 @@ export type ComposerMentionSpan = {
   forced?: boolean;
   invalid?: boolean;
   self?: boolean;
-  /** Jev's reading of a summon while the author types: still reading, a request, or not one. */
-  intent?: "reading" | "summon" | "declined";
   /** The face the sent chip leads with, drawn over the `@`: a member's, or the harness a summon names. `@auto` has none yet. */
   face?: FaceOf;
 };

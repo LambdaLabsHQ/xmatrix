@@ -5,7 +5,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
+import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -377,8 +377,6 @@ async function appendChannelMessageWithAttachments(input: {
   replyToMessageId?: string;
   appMentions: ReturnType<typeof parseAppMentions>;
   invocationSelections?: AgentInvocationSelections;
-  /** Jev's reading of each summon while the author typed this exact body. */
-  summonIntents?: DraftSummonIntent[];
   deadlineMs?: number;
 }): Promise<{
   message?: unknown;
@@ -401,7 +399,8 @@ async function appendChannelMessageWithAttachments(input: {
     replyToMessageId: input.replyToMessageId,
     appMentions: input.appMentions.length > 0 ? input.appMentions : undefined,
     invocationSelections: input.invocationSelections,
-    summonIntents: input.summonIntents?.length ? input.summonIntents : undefined,
+    // A person sends from here: the Agents the message summons start.
+    launch: true,
     attachments: committedAttachments.length > 0 ? committedAttachments : undefined,
   });
   // The deadline, retry bounding and outcome classification live in
