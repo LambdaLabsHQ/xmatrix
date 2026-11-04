@@ -2,7 +2,7 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, E2E_NOW, 
 import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { CREATED_CHANNEL_ID, fixtureChannelCreate, fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
-import { draftValue, expectDraft } from "./composer-draft";
+import { draftValue, expectDraft, setDraftSelection } from "./composer-draft";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -81,6 +81,25 @@ test("quoting passages of messages puts each into this conversation's draft as a
   // Its × does too.
   await quotes.first().getByRole("button", { name: "Remove quote" }).click();
   await expectDraft(composer, "Why so slow?\nAnd this?");
+});
+
+// A reused quote widget follows edits before it. The unchanged-position case
+// above cannot detect a remove button still holding its creation coordinates.
+test("a quote's remove button follows edits before the quote", async ({ page }) => {
+  await openGeneralChannelWithHistory(page, E2E_CHANNEL, [{ messageId: "quote-source", channelId: E2E_CHANNEL.id,
+    sequence: 1, sentAt: E2E_NOW, from: E2E_USER_SENDER, body: "Quoted words." }]);
+  const text = page.locator('[data-message-body="quote-source"]');
+  const composer = page.locator(".composer-textarea").first();
+  await composer.click();
+  await page.keyboard.type("Intro");
+  await page.keyboard.press("Shift+Enter");
+  await selectFrom(text, "Quoted words.");
+  await page.getByTestId("message-selection-menu").getByRole("button", { name: "Quote", exact: true }).click();
+  await page.keyboard.type("End");
+  await setDraftSelection(composer, 0);
+  await page.keyboard.type("Added ");
+  await page.getByTestId("composer-quote").getByRole("button", { name: "Remove quote" }).click();
+  await expectDraft(composer, "Added Intro\nEnd");
 });
 
 // A message shows each passage it quotes as its own slip where it was put, in order among what was written.

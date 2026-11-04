@@ -191,6 +191,12 @@ first-message automatic summon and author choice window. Passage
 discussions are named after the first message's text rather than its quote;
 section discussions keep the section name. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
 
+Message attachment placement follows the final displayed Markdown tree; files
+not drawn inline remain beneath the message, including code, quote slips,
+collapsed previews and plain-text fallback. Composer quote controls resolve their
+current editor position after earlier edits. See
+[conversation content](../design/pages-and-conversations.md#32-conversation).
+
 Unaddressed Human speech has positive, publication-bound evidence and an
 explicit author choice under its original message. It shares the first-message
 launch decision and durable summon coordinator. Missing tracking stays unknown;
