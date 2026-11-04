@@ -167,7 +167,7 @@ test("connection termination reports retain each attempt's fixed driver reason (
         return { connect: async () => {}, end: async () => { closed++; }, async query() {
           const failure = Object.assign(new Error(messages[(index + attempt) % messages.length], {
             cause: new Error("PRIVATE_SENTINEL cause"),
-          }), { code: reasons[(index + attempt) % reasons.length] ? "58000" : "CONNECTION_TERMINATED",
+          }), { code: reasons[(index + attempt) % reasons.length] ? (index % 2 ? undefined : "58000") : "CONNECTION_TERMINATED",
             detail: "PRIVATE_SENTINEL detail" });
           // Distinct uploaded call sites avoid Sentry's adjacent-event dedupe.
           failure.stack = `Error: PRIVATE_SENTINEL\n    at openTransaction (index.js:${100 + index}:7)`;
@@ -182,6 +182,8 @@ test("connection termination reports retain each attempt's fixed driver reason (
     await sendErrorReports();
     assert.equal(opened, 2, "one fresh-session replay only");
     assert.equal(closed, 2, "both failed sessions close");
+    assert.equal(replies[0].failure.code, "postgres_runtime_unavailable");
+    assert.equal(replies[0].failure.retryable, true, "a recorded connection loss is an outage, not a permanent refusal");
     const events = exceptionEvents(envelopes);
     assert.equal(events.length, 1, "each exhausted command produces one event");
     const event = events.at(-1);

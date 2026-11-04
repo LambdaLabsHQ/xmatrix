@@ -67,7 +67,10 @@ Hyperdrive's explicit egress-severed response. These labels distinguish the
 observed driver messages, not the underlying cause; no raw message or cause
 is stored. Historical events without the field remain readable. A missing code
 or capture-boundary stack remains insufficient
-to diagnose an outage or authorize a transaction replay.
+to diagnose an outage or authorize a transaction replay. A termination recorded
+by the database client returns the existing retryable unavailable response after
+its single replay is exhausted. Raw generic termination text or `58000` without
+that evidence does not change classification; explicit SQL rejections keep theirs.
 
 Message authority failures also explicitly report the original exception and
 bounded database evidence, rather than relying on console serialization.
