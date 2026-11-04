@@ -10,7 +10,8 @@ const TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 
 export class ProviderRequestError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string,
+    readonly failureKind: "http_status" | "response_too_large" | "proxy_contract" | "provider_status" | "message_contract" | "unclassified" = "unclassified") {
     super(message);
     this.name = "ProviderRequestError";
   }
@@ -65,7 +66,7 @@ export async function providerJson(url: URL | string, init: RequestInit & { json
   const response = await fetch(url, { ...rest, headers, redirect: "manual",
     ...(json !== undefined ? { body: JSON.stringify(json) } : {}), signal });
   const bytes = await readBoundedStream(response.body, limit,
-    () => new ProviderRequestError(502, "Provider response is too large"), signal);
+    () => new ProviderRequestError(502, "Provider response is too large", "response_too_large"), signal);
   const textBody = new TextDecoder().decode(bytes);
   let parsed: unknown = {};
   try { parsed = textBody ? JSON.parse(textBody) : {}; } catch { parsed = {}; }
@@ -79,7 +80,7 @@ export async function providerJson(url: URL | string, init: RequestInit & { json
         // Google APIs answer `{ "error": { "message": … } }`.
         : typeof (value as { message?: unknown } | undefined)?.message === "string" ? (value as { message: string }).message : "")
       .find(Boolean) ?? response.statusText;
-    throw new ProviderRequestError(response.status, `Provider returned ${response.status}${reason ? `: ${String(reason).slice(0, 200)}` : ""}`);
+    throw new ProviderRequestError(response.status, `Provider returned ${response.status}${reason ? `: ${String(reason).slice(0, 200)}` : ""}`, "http_status");
   }
   return payload;
 }

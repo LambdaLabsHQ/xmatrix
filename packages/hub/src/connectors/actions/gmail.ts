@@ -6,6 +6,7 @@ import { ProviderRequestError } from "../http";
 import { composioGet, composioPost } from "../composio";
 import { quoteRetrievedText, requireText, titleAndBody } from "./common";
 import { mailboxCredentials, mayUseMailbox, parseMailboxes, type GmailMailbox } from "../gmail-mailboxes";
+import { gmailReadPhase } from "../gmail-read-failure";
 
 /*
  * Gmail (API v1) through Composio: the Google account signs in to Composio's
@@ -253,7 +254,7 @@ function senderChecks(payload: Record<string, unknown>): string {
 /** A full message as the reader sees it: headers, sender checks, text body and every link, quoted as untrusted. */
 function gmailMessageText(message: Record<string, unknown>, id: string, mailbox?: string): string {
   const payload = record(message.payload);
-  if (!payload.mimeType) throw new ProviderRequestError(502, "Google did not return a Gmail message");
+  if (!payload.mimeType) throw new ProviderRequestError(502, "Google did not return a Gmail message", "message_contract");
   const bodies = gmailBodies(payload);
   const text = (bodies.plain?.trim() ? bodies.plain.trim() : htmlText(bodies.html ?? "")) || "(no text body)";
   const links = gmailLinks(bodies);
@@ -275,7 +276,9 @@ export async function readGmailMessage(credentials: Readonly<Record<string, stri
   meter?: UpstreamMeter): Promise<string> {
   if (!MESSAGE_ID.test(id)) throw new ProviderRequestError(400, "name a message id from @gmail:search");
   const scoped = mailboxCredentials(credentials, mailbox);
-  return gmailMessageText(await withExternalBodies(scoped, id, await gmailGet(scoped, `/messages/${id}`, { format: "full" }, meter), meter), id);
+  const message = await gmailReadPhase("message", () => gmailGet(scoped, `/messages/${id}`, { format: "full" }, meter));
+  const complete = await gmailReadPhase("external_body", () => withExternalBodies(scoped, id, message, meter));
+  return gmailReadPhase("format", () => gmailMessageText(complete, id));
 }
 
 type Context = Parameters<ConnectorAction["execute"]>[0];

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Gmail automatic read failures retain their failing step
+
+HUB-BP reported only 502 when a notification's private message read failed,
+losing the distinction between an oversized response, a Composio HTTP/proxy
+failure, Gmail's refusal and message formatting. One explicit report now keeps
+the read step, fixed failure kind, status and uploaded Worker code locations;
+Sentry issue reads expose the same bounded diagnosis. Provider text, mail,
+credentials and mailbox/message identity remain private. Notifications still
+arrive with their manual read command after failure. This supplies missing
+evidence; the original 502's underlying cause is unconfirmed. Hub only, no
+schema or client migration. Recovery is a CI-validated beta Hub reverting this
+change.
+
 ## Unreleased: Pictures are blocks of what is written, a row at a time
 
 Pictures waited in a strip above the words and showed under the message, in
