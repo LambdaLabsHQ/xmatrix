@@ -423,10 +423,10 @@ export class PostgresMachineControlRepository {
         ? { name: "machine_control_daemon_lock_v1",
           text: "SELECT * FROM data.machine_daemons WHERE daemon_id=$1 FOR UPDATE",
           values: [daemonId], maxRows: 1 }
-        : { name: "machine_control_daemon_lock_lean_v1",
-          text: `SELECT daemon_id,owner_user_id,owner_email,machine_id,display_name,status,capabilities_json,
-            connection_epoch,version,created_at,updated_at,routing_observed_at,hostname
-            FROM data.machine_daemons WHERE daemon_id=$1 FOR UPDATE`,
+        : { name: "machine_control_daemon_lock_lean_v2",
+          // Every column the row has, whatever its schema, with metadata left null.
+          text: `SELECT (jsonb_populate_record(NULL::data.machine_daemons, to_jsonb(d)-'metadata_json')).*
+            FROM data.machine_daemons d WHERE d.daemon_id=$1 FOR UPDATE`,
           values: [daemonId], maxRows: 1 });
       let current: QueryResultRow | undefined = currentRows[0];
       if (!current && hostDerived && action === "enroll") {
