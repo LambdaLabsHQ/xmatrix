@@ -27,6 +27,8 @@ import { gmailReadPhase } from "../gmail-read-failure";
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const MESSAGE_ID = /^[0-9a-f]{8,32}$/u;
+const DRAFT_ID = /^[A-Za-z0-9_-]{1,64}$/u;
+const MAX_ATTACHMENTS_LISTED = 50;
 const MAX_QUERY = 500;
 const SEARCH_LIMIT = 10;
 const MAX_BODY = 8_000;
@@ -44,8 +46,8 @@ const ADDRESS = /^[^\s@<>(),;:"\\[\]]+@[^\s@<>(),;:"\\[\]]+\.[^\s@<>(),;:"\\[\]]
 
 /* User-invoked Gmail endpoints. The notification worker separately permits only profile/history ID reads. */
 const GMAIL_CALLS: Record<"GET" | "POST", RegExp> = {
-  GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32}|messages\/[0-9a-f]{8,32}\/attachments\/[A-Za-z0-9_-]{1,2048}|settings\/sendAs)$/u,
-  POST: /^\/messages\/send$/u,
+  GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32}|messages\/[0-9a-f]{8,32}\/attachments\/[A-Za-z0-9_-]{1,2048}|settings\/sendAs|drafts|drafts\/[A-Za-z0-9_-]{1,64})$/u,
+  POST: /^\/(?:messages|drafts)\/send$/u,
 };
 
 function gmailPath(method: "GET" | "POST", path: string): string {
@@ -235,11 +237,17 @@ function address(value: string): string | undefined {
   return bare.length <= MAX_ADDRESS && ADDRESS.test(bare) ? bare : undefined;
 }
 
-async function sendRaw(credentials: Readonly<Record<string, string>>, raw: string, threadId: string | undefined,
-  meter: UpstreamMeter | undefined): Promise<string> {
-  const sent = await composioPost(credentials, gmailPath("POST", "/messages/send"), { raw, ...(threadId ? { threadId } : {}) }, meter);
+/** The one Gmail write: messages/send for a frozen raw message, or drafts/send for a frozen draft. */
+async function gmailSend(credentials: Readonly<Record<string, string>>, path: "/messages/send" | "/drafts/send",
+  body: Record<string, unknown>, meter: UpstreamMeter | undefined): Promise<string> {
+  const sent = await composioPost(credentials, gmailPath("POST", path), body, meter);
   if (typeof sent.id !== "string") throw new ProviderRequestError(502, "Google did not confirm the sent message");
   return line(sent.id, 32);
+}
+
+function sendRaw(credentials: Readonly<Record<string, string>>, raw: string, threadId: string | undefined,
+  meter: UpstreamMeter | undefined): Promise<string> {
+  return gmailSend(credentials, "/messages/send", { raw, ...(threadId ? { threadId } : {}) }, meter);
 }
 
 /** What Gmail's own checks said about the sender, so a forged From reads as failing DMARC.
@@ -352,6 +360,8 @@ function senderFields(mailbox: GmailMailbox, alias: SendAsAlias | undefined): Re
 /** What an approval card shows of a frozen email: an alias sender names the mailbox it goes out through. */
 export function gmailPreview(prepared: Record<string, string>): Record<string, string> {
   const preview = Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]));
+  for (const key of ["cc", "bcc", "attachments"]) if (prepared[key]) preview[key] = prepared[key]!;
+  if (prepared.mailbox && prepared.draftId) preview.from = `${prepared.from} (draft ${prepared.draftId} in ${prepared.mailbox})`;
   if (prepared.via) preview.from = `${prepared.fromName ? `${prepared.fromName} <${prepared.from}>` : prepared.from} (through ${prepared.via})`;
   return preview;
 }
@@ -366,16 +376,22 @@ function headerAddresses(value: string): string[] {
   return value.split(",").map(part => address(part)?.toLowerCase()).filter((found): found is string => !!found);
 }
 
-/** The mailbox among `mailboxes` that holds the message; Gmail answers 404 (or 400) for another mailbox's id. */
-async function findMessage({ credentials, usage }: Context, mailboxes: GmailMailbox[], id: string, format: "full" | "metadata") {
+/** The mailbox among `mailboxes` holding `path` (a message or a draft); Gmail answers 404 (or 400) for another mailbox's id. */
+async function findInMailboxes({ credentials, usage }: Context, mailboxes: GmailMailbox[], path: string, format: "full" | "metadata",
+  missing: string): Promise<{ mailbox: GmailMailbox; found: Record<string, unknown> }> {
   for (const mailbox of mailboxes) {
     try {
-      return { mailbox, message: await gmailGet(mailboxCredentials(credentials, mailbox), `/messages/${id}`, { format }, usage) };
+      return { mailbox, found: await gmailGet(mailboxCredentials(credentials, mailbox), path, { format }, usage) };
     } catch (error) {
       if (!(error instanceof ProviderRequestError) || (error.status !== 404 && error.status !== 400)) throw error;
     }
   }
-  throw new ProviderRequestError(404, `none of your Gmail mailboxes has message ${id}`);
+  throw new ProviderRequestError(404, missing);
+}
+
+async function findMessage(context: Context, mailboxes: GmailMailbox[], id: string, format: "full" | "metadata") {
+  const { mailbox, found } = await findInMailboxes(context, mailboxes, `/messages/${id}`, format, `none of your Gmail mailboxes has message ${id}`);
+  return { mailbox, message: found };
 }
 
 async function prepareSend(context: Context, input: Record<string, string>): Promise<Record<string, string>> {
@@ -418,34 +434,103 @@ async function sendPrepared(context: Context, input: Record<string, string>): Pr
   return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined, context.usage);
 }
 
+/** The attachment parts of a message, as "name (size bytes)". */
+function attachmentNames(payload: Record<string, unknown>): string[] {
+  const names: string[] = [];
+  let seen = 0;
+  const visit = (part: Record<string, unknown>): void => {
+    if (seen++ >= MAX_PARTS) return;
+    if (isAttachment(part)) {
+      const size = Number(record(part.body).size);
+      names.push(`${line(part.filename || "(unnamed)", 200)}${Number.isFinite(size) && size > 0 ? ` (${size} bytes)` : ""}`);
+      return;
+    }
+    if (Array.isArray(part.parts)) for (const child of part.parts) visit(record(child));
+  };
+  visit(payload);
+  return names;
+}
+
+/** One draft as the caller sees it: id, the message it holds and its headers, attachments and text. */
+function draftSummary(draft: Record<string, unknown>): { draftId: string; messageId: string; from: string; to: string; cc: string;
+  bcc: string; subject: string; attachments: string[]; body: string } {
+  const message = record(draft.message);
+  const payload = record(message.payload);
+  if (typeof draft.id !== "string" || typeof message.id !== "string" || !payload.mimeType) {
+    throw new ProviderRequestError(502, "Google did not return a Gmail draft");
+  }
+  const bodies = gmailBodies(payload);
+  const text = (bodies.plain?.trim() ? bodies.plain.trim() : htmlText(bodies.html ?? "")).slice(0, 2_000);
+  return { draftId: line(draft.id, 64), messageId: line(message.id, 32), from: line(header(payload, "from")),
+    to: line(header(payload, "to"), 998), cc: line(header(payload, "cc"), 998), bcc: line(header(payload, "bcc"), 998),
+    subject: line(header(payload, "subject")), attachments: attachmentNames(payload).slice(0, MAX_ATTACHMENTS_LISTED), body: text };
+}
+
+/** Freeze a draft for approval: who it goes to, from whom, and exactly which attachments. */
+async function prepareDraft(context: Context, input: Record<string, string>): Promise<Record<string, string>> {
+  const { mailbox, found } = await findInMailboxes(context, await usableMailboxes(context), `/drafts/${input.draftId}`, "full",
+    `none of your Gmail mailboxes has draft ${input.draftId}; list them with @gmail:drafts:*`);
+  const summary = draftSummary(found);
+  if (!summary.to && !summary.cc && !summary.bcc) throw new ProviderRequestError(422, `draft ${input.draftId} has no recipient`);
+  return { ...input, draftId: summary.draftId, messageId: summary.messageId, mailbox: mailbox.address,
+    account: mailbox.account, owner: mailbox.owner, from: summary.from || mailbox.address, to: summary.to, cc: summary.cc,
+    bcc: summary.bcc, subject: summary.subject, body: summary.body,
+    attachments: summary.attachments.length ? `${summary.attachments.length}: ${summary.attachments.join("; ")}` : "" };
+}
+
+/** Send the approved draft only if it is still the message that was approved. */
+async function sendDraftPrepared(context: Context, input: Record<string, string>): Promise<string> {
+  const mailbox = (await usableMailboxes(context, input.mailbox))[0]!;
+  if (mailbox.account !== input.account || mailbox.owner !== input.owner) {
+    throw new ProviderRequestError(409, "the sending mailbox changed; ask again");
+  }
+  const credentials = mailboxCredentials(context.credentials, mailbox);
+  const current = draftSummary(await gmailGet(credentials, `/drafts/${input.draftId}`, { format: "full" }, context.usage));
+  if (current.messageId !== input.messageId) {
+    throw new ProviderRequestError(409, `draft ${input.draftId} changed after it was approved; ask again`);
+  }
+  await context.authorizeWrite?.();
+  return gmailSend(credentials, "/drafts/send", { id: input.draftId }, context.usage);
+}
+
+/** `*` or one connected mailbox address as the target, with an optional Gmail query after it. */
+function parseMailboxQuery(statement: { target: string; text: string }, action: string): Record<string, string> | string {
+  const query = statement.text.trim();
+  const mailbox = statement.target === "*" ? "" : address(statement.target);
+  if (mailbox === undefined || (mailbox && mailbox !== statement.target)) {
+    return `use @gmail:${action}:* <Gmail query> or @gmail:${action}:<connected mailbox address> <Gmail query>`;
+  }
+  return query.length <= MAX_QUERY ? { query, mailbox } : `keep the search under ${MAX_QUERY} characters`;
+}
+
+/** List `kind` (messages or drafts) per mailbox the caller may use, read each one and render it as a line. */
+async function listPerMailbox(context: Context, input: Record<string, string>, kind: "messages" | "drafts",
+  item: { id: RegExp; format: "full" | "metadata"; render: (found: Record<string, unknown>) => string }) {
+  const mailboxes = await usableMailboxes(context, input.mailbox || undefined);
+  const lines = await Promise.all(mailboxes.map(async (mailbox) => {
+    const credentials = mailboxCredentials(context.credentials, mailbox);
+    const result = await gmailGet(credentials, `/${kind}`,
+      { maxResults: String(SEARCH_LIMIT), ...(input.query ? { q: input.query } : {}) }, context.usage);
+    if (result[kind] !== undefined && !Array.isArray(result[kind])) {
+      throw new ProviderRequestError(502, `Google did not return a Gmail ${kind === "messages" ? "message" : "draft"} list`);
+    }
+    const ids = ((result[kind] as unknown[] | undefined) ?? []).slice(0, SEARCH_LIMIT)
+      .map(value => String(record(value).id)).filter(id => item.id.test(id));
+    const found = await Promise.all(ids.map(id => gmailGet(credentials, `/${kind}/${id}`, { format: item.format }, context.usage)));
+    return found.map(entry => mailboxes.length > 1 ? `${mailbox.address}\t${item.render(entry)}` : item.render(entry));
+  }));
+  return { lines: lines.flat(), several: mailboxes.length > 1 };
+}
+
 export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
   search: {
     effect: "read", requires: ["mailboxes"],
-    parse(statement) {
-      const query = statement.text.trim();
-      const mailbox = statement.target === "*" ? "" : address(statement.target);
-      if (mailbox === undefined || (mailbox && mailbox !== statement.target)) {
-        return "use @gmail:search:* <Gmail query> or @gmail:search:<connected mailbox address> <Gmail query>";
-      }
-      return query.length <= MAX_QUERY ? { query, mailbox } : `keep the search under ${MAX_QUERY} characters`;
-    },
+    parse: statement => parseMailboxQuery(statement, "search"),
     async execute(context, input) {
-      const mailboxes = await usableMailboxes(context, input.mailbox || undefined);
-      const lines = await Promise.all(mailboxes.map(async (mailbox) => {
-        const credentials = mailboxCredentials(context.credentials, mailbox);
-        const result = await gmailGet(credentials, "/messages",
-          { maxResults: String(SEARCH_LIMIT), ...(input.query ? { q: input.query } : {}) }, context.usage);
-        if (result.messages !== undefined && !Array.isArray(result.messages)) {
-          throw new ProviderRequestError(502, "Google did not return a Gmail message list");
-        }
-        const ids = ((result.messages as unknown[] | undefined) ?? []).slice(0, SEARCH_LIMIT)
-          .map(value => String(record(value).id)).filter(id => MESSAGE_ID.test(id));
-        const messages = await Promise.all(ids.map(id => gmailGet(credentials, `/messages/${id}`, { format: "metadata" }, context.usage)));
-        return messages.map(message => mailboxes.length > 1 ? `${mailbox.address}\t${messageLine(message)}` : messageLine(message));
-      }));
-      const columns = `${mailboxes.length > 1 ? "mailbox, " : ""}id, received UTC, from, subject, snippet`;
+      const { lines, several } = await listPerMailbox(context, input, "messages", { id: MESSAGE_ID, format: "metadata", render: messageLine });
+      const columns = `${several ? "mailbox, " : ""}id, received UTC, from, subject, snippet`;
       return { summary: `Newest Gmail messages${input.query ? ` matching ${line(input.query)}` : ""} (${columns}); ` +
-        "read one with @gmail:read:<id>:\n" + quoteRetrievedText(lines.flat().join("\n") || "(no messages)") };
+        "read one with @gmail:read:<id>:\n" + quoteRetrievedText(lines.join("\n") || "(no messages)") };
     },
   },
   read: {
@@ -477,6 +562,33 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const frozen = input.raw ? input : await prepareSend(context, input);
       const id = await sendPrepared(context, frozen);
       return { summary: `Sent Gmail message ${id} from ${senderLabel(frozen)} to ${frozen.to}.` };
+    },
+  },
+  drafts: {
+    effect: "read", requires: ["mailboxes"],
+    parse: statement => parseMailboxQuery(statement, "drafts"),
+    async execute(context, input) {
+      const { lines, several } = await listPerMailbox(context, input, "drafts", { id: DRAFT_ID, format: "full", render: (found) => {
+        const draft = draftSummary(found);
+        return [draft.draftId, draft.from, draft.to, draft.subject, `${draft.attachments.length} attachment(s)`].join("\t");
+      } });
+      const columns = `${several ? "mailbox, " : ""}draft id, from, to, subject, attachments`;
+      return { summary: `Gmail drafts${input.query ? ` matching ${line(input.query)}` : ""} (${columns}); ` +
+        "send one with @gmail:send_draft:<draft id>:\n" + quoteRetrievedText(lines.join("\n") || "(no drafts)") };
+    },
+  },
+  send_draft: {
+    effect: "write", requires: ["mailboxes"],
+    parse(statement) {
+      return DRAFT_ID.test(statement.target) && !statement.text.trim()
+        ? { draftId: statement.target } : "name a draft id from @gmail:drafts:*";
+    },
+    prepare: prepareDraft,
+    async execute(context, input) {
+      const frozen = input.messageId ? input : await prepareDraft(context, input);
+      const id = await sendDraftPrepared(context, frozen);
+      return { summary: `Sent Gmail draft ${frozen.draftId} as message ${id} from ${frozen.from} to ${frozen.to}` +
+        `${frozen.attachments ? ` with attachments ${frozen.attachments}` : ""}.` };
     },
   },
   reply: {

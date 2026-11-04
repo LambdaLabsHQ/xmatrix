@@ -315,7 +315,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",
       defaultPermission: "ask",
-      description: "Search and read with xmatrix call; results publish normally unless --private masks the Channel/history result. Both record invocation parameters; private originals go to the caller and its Human owner’s protected Web view for 30 days. Sending search/read with xmatrix send publishes results normally. Signs in through Composio. Each mailbox serves only its owner and their Agents. Sending and replying ask for approval by default.",
+      description: "Search and read with xmatrix call; results publish normally unless --private masks the Channel/history result. Both record invocation parameters; private originals go to the caller and its Human owner’s protected Web view for 30 days. Sending search/read with xmatrix send publishes results normally. Signs in through Composio. Each mailbox serves only its owner and their Agents. Sending, replying and sending a draft ask for approval by default.",
       oauth: { authorizeUrl: "https://backend.composio.dev/api/v3.1/connected_accounts/link",
         tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "mailboxes", flow: "composio" },
       credentials: [{ id: "mailboxes", label: "Mailboxes", managed: true, description: "Each Connect adds a mailbox; a Space admin assigns each one to a member or an Agent. Never typed by hand." }],
@@ -324,6 +324,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         readAction("read", "Read message", "Headers, text body and every link of one message. xmatrix call publishes results normally; add --private only to mask them in the Channel and execution history. Invocation parameters are visible in both modes; never put a credential in them. The Hub does not extract credentials or automatically create secrets.", "<message id>"),
         writeAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Asks a Space admin to approve each request by default.", "<to address> [from:<mailbox>] <subject>\n<body>"),
         writeAction("reply", "Reply", "Reply in the thread of one message, to its sender. Asks a Space admin to approve each request by default.", "<message id> <body>"),
+        readAction("drafts", "List drafts", "The 10 newest drafts per mailbox, optionally matching a Gmail query, with draft id, sender, recipients, subject and attachment count. Use * for all available mailboxes or name one connected mailbox.", "*|<mailbox> [gmail search]"),
+        writeAction("send_draft", "Send draft", "Send one saved draft as it is, attachments included. The approval card shows its sender, recipients, subject, text and every attachment name; a draft edited after approval is not sent. Asks a Space admin to approve each request by default.", "<draft id>"),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://mail.google.com/"], secretRefs: [] },

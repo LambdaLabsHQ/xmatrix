@@ -55,7 +55,7 @@ test("Connect signs in through Composio as a per-attempt user and stores only th
   assert.deepEqual(manifest.auth.scopes, ["https://mail.google.com/"]);
   for (const [id, action] of Object.entries(ACTIONS)) {
     const entry = manifest.actions.find(candidate => candidate.id === id);
-    const write = id === "send" || id === "reply";
+    const write = id === "send" || id === "reply" || id === "send_draft";
     assert.deepEqual([action.effect, entry?.effect],
       write ? ["write", "write"] : ["read", "read"], id);
   }
@@ -518,4 +518,48 @@ test("reply answers from the send-as alias the original was addressed to", async
 test("statement HTML entities such as &yen; read as their characters; unknown names stay as written", () => {
   assert.equal(decodeEntities("&yen; 30,000.00 &ndash; &ldquo;Hi&rdquo;&hellip; &AMP; &#165; &#x20AC; &bogus;"),
     "¥ 30,000.00 – “Hi”… & ¥ € &bogus;");
+});
+
+const draft = (messageId, extra = {}) => gmail({ id: "r-5712345678901234567", message: { id: messageId, threadId: "18f2a9c0d1e2b300", payload: {
+  mimeType: "multipart/mixed", headers: [{ name: "From", value: "Company <hello@company.test>" }, { name: "To", value: "Broker <ops@broker.test>" },
+    { name: "Subject", value: "Account application" }],
+  parts: [{ mimeType: "text/plain", body: { data: base64url("Hello,\nPlease find the forms attached.") } },
+    { mimeType: "application/pdf", filename: "application.pdf", body: { attachmentId: "ANGjdJ_a", size: 2_180_143 } },
+    { mimeType: "image/jpeg", filename: "passport.jpg", body: { attachmentId: "ANGjdJ_b", size: 727_847 } }] }, ...extra } });
+
+test("drafts lists the caller's drafts with their recipients and attachment count", async () => {
+  assert.deepEqual(statement("@gmail:drafts:* to:broker.test"), { query: "to:broker.test", mailbox: "" });
+  const listed = await fetched([gmail({ drafts: [{ id: "r-5712345678901234567" }] }), draft("19a0b1c2d3e4f5a6")],
+    () => ACTIONS.drafts.execute(ctx, { query: "", mailbox: "" }));
+  assert.deepEqual(listed.calls.map(proxied), [
+    { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/drafts", query: "maxResults=10" },
+    { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-5712345678901234567", query: "format=full" }]);
+  assert.match(listed.result.summary, /r-5712345678901234567\tCompany <hello@company\.test>\tBroker <ops@broker\.test>\tAccount application\t2 attachment\(s\)/u);
+});
+
+test("send_draft freezes the draft for approval, then sends it only while it is unchanged", async () => {
+  assert.deepEqual(statement("@gmail:send_draft:r-5712345678901234567"), { draftId: "r-5712345678901234567" });
+  assert.equal(typeof statement("@gmail:send_draft:r-5712345678901234567 extra"), "string");
+  const staged = await fetched([draft("19a0b1c2d3e4f5a6")], () => ACTIONS.send_draft.prepare(ctx, { draftId: "r-5712345678901234567" }));
+  assert.equal(staged.calls.length, 1);
+  assert.equal(staged.calls[0].body.method, "GET", "preparing never sends");
+  const frozen = staged.result;
+  assert.deepEqual(gmailPreview(frozen), {
+    from: "Company <hello@company.test> (draft r-5712345678901234567 in me@example.com)", to: "Broker <ops@broker.test>",
+    subject: "Account application", body: "Hello,\nPlease find the forms attached.",
+    attachments: "2: application.pdf (2180143 bytes); passport.jpg (727847 bytes)" }, "the card names every attachment");
+  let checks = 0;
+  const sent = await fetched([draft("19a0b1c2d3e4f5a6"), gmail({ id: "19a0b1c2d3e4f5a7" })],
+    () => ACTIONS.send_draft.execute({ ...ctx, authorizeWrite: async () => { checks++; } }, frozen));
+  assert.deepEqual(sent.calls.map(call => [call.body.method, call.body.endpoint]), [
+    ["GET", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-5712345678901234567"],
+    ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"]]);
+  assert.deepEqual(sent.calls[1].body.body, { id: "r-5712345678901234567" });
+  assert.equal(checks, 1);
+  assert.match(sent.result.summary, /^Sent Gmail draft r-5712345678901234567 as message 19a0b1c2d3e4f5a7 from Company <hello@company\.test> to Broker <ops@broker\.test> with attachments 2: application\.pdf/u);
+  const edited = await fetched([draft("19a0b1c2d3e4f5ff")], () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /changed after it was approved/u));
+  assert.equal(edited.calls.length, 1, "an edited draft is never sent");
+  const missing = await fetched([gmail({ error: { message: "Requested entity was not found." } }, 404)],
+    () => assert.rejects(ACTIONS.send_draft.prepare(ctx, { draftId: "r-1" }), /none of your Gmail mailboxes has draft r-1/u));
+  assert.equal(missing.calls.length, 1);
 });
