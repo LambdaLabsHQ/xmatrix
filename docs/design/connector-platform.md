@@ -471,10 +471,16 @@ past 4 MiB), refuses when its message id changed (Gmail gives an edited draft a
 new message) or its sender is no longer the mailbox or a verified send-as
 alias, rechecks authorization, and sends that snapshot through Gmail's upload
 endpoint (`/upload/.../drafts/send?uploadType=multipart`: the draft id as JSON
-metadata and the snapshot's own bytes as `message/rfc822`, passed to Composio
-as `binary_body`), so an edit made after the check is overwritten rather than
-sent. Gmail's ordinary JSON endpoint refuses a message over about 5 MB with
-413; the upload endpoint takes up to 35 MB. It is how an email
+metadata and the snapshot's own bytes as `message/rfc822`), so an edit made
+after the check is overwritten rather than sent. Gmail's ordinary JSON endpoint
+refuses a message over about 5 MB, and Composio's proxy itself refuses an
+inline body of a few MB (both answer 413), so the bytes never travel inline:
+the Hub stages the multipart body in `ATTACHMENT_BUCKET` under an unguessable
+256-bit token, serves it at `GET /api/connectors/mail-snapshots/<token>` for at
+most ten minutes, hands Composio that URL as `binary_body.url`, and deletes the
+object as soon as the send ends, sent or failed. The token is the only
+credential; the URL names no mailbox and is never shown in a Channel. A Hub
+without the bucket or `HUB_URL` refuses `send_draft` instead of sending inline. It is how an email
 with attachments, composed in Gmail, is sent after approval. `send`'s
 `from:` may name a send-as alias Gmail lists as primary or verified
 (`accepted`) on one of the caller's mailboxes: the mail goes out through that

@@ -28,6 +28,7 @@ import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from 
 import { enqueueXUpload } from "./x-upload-executor-do";
 import { X_ACTIONS } from "./actions/x";
 import { gmailPreview } from "./actions/gmail";
+import { mailSnapshotLinks } from "./mail-snapshot-link";
 import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 
 /*
@@ -361,7 +362,9 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };
   const saveCredentials = grant ? credentialRenewal(input.env, spaceId, providerId, grant.version) : undefined;
   const usage = upstreamMeter(input.env, { spaceId, connector: providerId, action: actionId });
-  return { credentials, caller, authorizeWrite, usage, ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  const mailSnapshot = providerId === "gmail" && actionId === "send_draft" && input.env.ATTACHMENT_BUCKET && input.env.HUB_URL
+    ? mailSnapshotLinks(input.env.ATTACHMENT_BUCKET, input.env.HUB_URL) : undefined;
+  return { credentials, caller, authorizeWrite, usage, ...(mailSnapshot ? { mailSnapshot } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }

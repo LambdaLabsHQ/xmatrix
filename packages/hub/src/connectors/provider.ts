@@ -50,6 +50,8 @@ export interface ConnectorActionContext {
   x?: XActionCapability;
   /** Channel attachment access and account-bound X video upload receipts. */
   xMedia?: XMediaCapability;
+  /** Short-lived Hub URLs that let Composio fetch an approved Gmail draft snapshot too large to send inline. */
+  mailSnapshot?: import("./mail-snapshot-link").MailSnapshotLinks;
   /** Revalidates current app permission immediately before an outbound write. */
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */

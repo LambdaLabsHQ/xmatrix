@@ -554,8 +554,14 @@ test("send_draft freezes the draft for approval, then sends it only while it is 
   const snapshotMime = `From: hello@company.test\r\nTo: ops@broker.test\r\n\r\n${"A".repeat(5 * 1024 * 1024)}`;
   const snapshot = base64url(snapshotMime);
   let checks = 0;
+  const stagedSnapshots = [];
+  const mailSnapshot = { async stage(bytes, contentType) {
+    const entry = { bytes, contentType, removed: 0 };
+    stagedSnapshots.push(entry);
+    return { url: "https://hub.test/api/connectors/mail-snapshots/token-1", remove: async () => { entry.removed++; } };
+  } };
   const sent = await fetched([rawDraft("19a0b1c2d3e4f5a6", snapshot), aliasList, gmail({ id: "19a0b1c2d3e4f5a7" })],
-    () => ACTIONS.send_draft.execute({ ...ctx, authorizeWrite: async () => { checks++; } }, frozen));
+    () => ACTIONS.send_draft.execute({ ...ctx, mailSnapshot, authorizeWrite: async () => { checks++; } }, frozen));
   assert.ok(snapshot.length > 4 * 1024 * 1024, "a draft larger than the ordinary 4 MiB bound is read whole");
   assert.deepEqual(sent.calls.map(call => [call.body.method, call.body.endpoint]), [
     ["GET", "https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-5712345678901234567"],
@@ -566,8 +572,12 @@ test("send_draft freezes the draft for approval, then sends it only while it is 
   const upload = sent.calls[2].body;
   assert.equal(upload.body, undefined);
   assert.deepEqual(upload.parameters, [{ name: "uploadType", value: "multipart", type: "query" }]);
-  const boundary = upload.binary_body.content_type.match(/^multipart\/related; boundary=(\S+)$/u)[1];
-  const multipart = Buffer.from(upload.binary_body.base64, "base64").toString("latin1");
+  /* Composio refuses an inline body of a few MB, so it fetches the staged snapshot from a short-lived Hub URL. */
+  assert.deepEqual(upload.binary_body, { url: "https://hub.test/api/connectors/mail-snapshots/token-1", content_type: stagedSnapshots[0].contentType });
+  assert.equal(stagedSnapshots.length, 1);
+  assert.equal(stagedSnapshots[0].removed, 1, "the staged snapshot is deleted once the send ends");
+  const boundary = stagedSnapshots[0].contentType.match(/^multipart\/related; boundary=(\S+)$/u)[1];
+  const multipart = Buffer.from(stagedSnapshots[0].bytes).toString("latin1");
   assert.equal(multipart, `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
     `{"id":"r-5712345678901234567","message":{"threadId":"18f2a9c0d1e2b300"}}\r\n--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n` +
     `${snapshotMime}\r\n--${boundary}--\r\n`, "the approved snapshot's own bytes are what is sent");
@@ -578,6 +588,13 @@ test("send_draft freezes the draft for approval, then sends it only while it is 
   const revoked = await fetched([rawDraft("19a0b1c2d3e4f5a6", "eA"), sendAsList()],
     () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /hello@company\.test is not a verified Gmail send-as address of me@example\.com/u));
   assert.equal(revoked.calls.length, 2, "a draft whose alias was revoked is not sent from the mailbox instead");
+  const unstaged = await fetched([rawDraft("19a0b1c2d3e4f5a6", "eA"), aliasList],
+    () => assert.rejects(ACTIONS.send_draft.execute(ctx, frozen), /no staging for large Gmail drafts/u));
+  assert.equal(unstaged.calls.length, 2, "without staging nothing is posted");
+  const failing = { async stage() { return { url: "https://hub.test/x", remove: async () => { failing.removed = true; } }; } };
+  await fetched([rawDraft("19a0b1c2d3e4f5a6", "eA"), aliasList, gmail({ error: { message: "boom" } }, 500)],
+    () => assert.rejects(ACTIONS.send_draft.execute({ ...ctx, mailSnapshot: failing }, frozen)));
+  assert.equal(failing.removed, true, "a failed send still deletes the staged snapshot");
   const missing = await fetched([gmail({ error: { message: "Requested entity was not found." } }, 404)],
     () => assert.rejects(ACTIONS.send_draft.prepare(ctx, { draftId: "r-1" }), /none of your Gmail mailboxes has draft r-1/u));
   assert.equal(missing.calls.length, 1);
