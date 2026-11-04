@@ -7,6 +7,8 @@
  * attachment it does not name stays under its words, as every attachment did before.
  */
 
+import { markdownLines } from "@xmatrix/protocol";
+
 /** A picture's line in a draft or a message: its name and what it points at. */
 const PICTURE_LINE = /^!\[((?:[^\]\\\n]|\\.)*)\]\(attachment:([^\s()]+)\)$/u;
 
@@ -19,8 +21,8 @@ export function pictureOfLine(line: string): { name: string; ref: string } | nul
 
 /** The pictures a draft holds, by line. */
 export function draftPictures(text: string): DraftPicture[] {
-  return text.split("\n").flatMap((line, index) => {
-    const picture = pictureOfLine(line);
+  return Array.from(markdownLines(text)).flatMap(({ line, prose }, index) => {
+    const picture = prose ? pictureOfLine(line) : null;
     return picture ? [{ line: index, ...picture }] : [];
   });
 }
@@ -61,13 +63,14 @@ export function sentPictures<T extends { start: number; end: number }>(draft: { 
   placeOf: (ref: string) => number | undefined): { body: string; selections: T[] } {
   if (!draft.body.includes("](attachment:")) return draft;
   const lines = draft.body.split("\n");
+  const pictures = new Map(draftPictures(draft.body).map((picture) => [picture.line, picture]));
   const out: string[] = [];
   const moved: { from: number; to: number; delta: number }[] = [];
   let source = 0;
   let written = 0;
   let previous: "picture" | "text" | "blank" | null = null;
-  for (const line of lines) {
-    const picture = pictureOfLine(line);
+  for (const [index, line] of lines.entries()) {
+    const picture = pictures.get(index);
     const place = picture ? placeOf(picture.ref) : undefined;
     const kind = picture ? (place ? "picture" : null) : line.trim() ? "text" : "blank";
     if (kind) {

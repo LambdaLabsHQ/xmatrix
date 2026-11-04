@@ -492,7 +492,7 @@ export {
   restrictedChannelContentScope, spaceVisibilityScope, uploadScopeCoversRefScope,
 } from "./restricted-content-scope.js";
 export {
-  GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
+  GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref, markdownLines,
   gitHubFileReferences, gitHubFileUrl, mergePageText, mergePageWords,
   PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, pageMediaFile, pageMediaReference, pageMediaReferences,
   pageMediaRefId, parsePageMedia,

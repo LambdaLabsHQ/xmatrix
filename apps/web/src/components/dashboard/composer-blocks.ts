@@ -12,7 +12,7 @@ import type { Node as DocNode } from "prosemirror-model";
 import { Plugin, TextSelection, type EditorState, type Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { composerTextOf } from "./composer-editor-text";
-import { pictureOfLine, putBlockInDraft } from "./inline-attachments";
+import { draftPictures, putBlockInDraft } from "./inline-attachments";
 
 
 /** A quote's lines in the document: paragraphs `first` to `last`, from before the first to after the last. */
@@ -47,13 +47,14 @@ export function quoteBlocksOf(doc: DocNode): QuoteBlock[] {
 /** The draft's quotes and rows of pictures, in order. */
 export function blocksOf(doc: DocNode): Block[] {
   const quotes = quoteBlocksOf(doc);
+  const pictures = new Map(draftPictures(composerTextOf(doc)).map((picture) => [picture.line, picture]));
   const rows: PictureRow[] = [];
   let pos = 0;
   doc.forEach((paragraph, _offset, line) => {
     const from = pos;
     pos += paragraph.nodeSize;
     if (quotes.some((quote) => line >= quote.first && line <= quote.last)) return;
-    const picture = pictureOfLine(paragraph.textContent);
+    const picture = pictures.get(line);
     if (!picture) return;
     const last = rows.at(-1);
     const entry = { ...picture, from, to: pos };
