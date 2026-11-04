@@ -60,8 +60,9 @@ is how to connect one.
   Once an agent can answer, the step says so in one line ("@codex is in.
   Mention it here to give it work.") and offers no menu of starters: the
   composer below already says "@ to summon an agent" (Daniel, 2026-11-04;
-  the four starter cards were removed). Under that line, bringing work in:
-  connect GitHub, or draft pages from one of its repositories (the page import).
+  the four starter cards were removed). A Space without GitHub gets one more
+  line and its action: connect GitHub so agents can work in several
+  repositories in parallel. Once GitHub is connected, nothing more is said.
 - On a phone (the shell's phone width) the first step shows no command, and no
   setup command is prepared: a command is no use there. It says to open
   xmatrix.sh on the computer and sign in with the same email, where the

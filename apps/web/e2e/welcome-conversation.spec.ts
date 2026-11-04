@@ -118,19 +118,18 @@ test.describe("desktop", () => {
     await expect(page.getByTestId("signed-out-agent")).toHaveCount(0);
   });
 
-  test("bring your work in: a Space without GitHub is offered the connect", async ({ page }) => {
+  test("a Space without GitHub is offered the connect, for agents to work across its repositories", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page, { repositories: { repos: [], repoStatus: "not-connected" } });
     await expect(agentsIn.getByTestId("bring-work-in")).toContainText("Connect GitHub so agents can work in several repositories in parallel.", { timeout: 20_000 });
     await expect(agentsIn.getByRole("button", { name: "Connect GitHub", exact: true })).toBeVisible();
   });
 
-  test("bring your work in: a Space with GitHub drafts pages from a repository", async ({ page }) => {
+  test("once GitHub is connected, the welcome says nothing more about it", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page,
       { repositories: { repos: [{ value: "acme/site" }, { value: "acme/api" }], repoStatus: "authorized" } });
-    await fixtureJson(page, "import", "**/page-migration/import", { conversationId: "channel-import" }, { method: "POST" });
-    await agentsIn.getByRole("button", { name: "acme/api", exact: true }).click({ timeout: 20_000 });
-    await expect.poll(() => fixtureRequestBodies(page, "import")).toEqual([{ repository: "acme/api" }]);
-    await expect(agentsIn.getByTestId("bring-work-in")).toContainText("An agent is reading acme/api and drafting pages.");
+    await expect(agentsIn).toContainText("@codex is in.", { timeout: 20_000 });
+    await expect(agentsIn.getByTestId("bring-work-in")).toHaveCount(0);
+    await expect(agentsIn.getByRole("button", { name: "acme/api" })).toHaveCount(0);
   });
 });
 
