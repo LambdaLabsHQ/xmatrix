@@ -875,9 +875,20 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   /** The message a jump has scrolled toward and not yet seen centred. */
   const jumpScrollTargetRef = useRef<string | null>(null);
+  /* Whether the jump's row was already in full view when the jump began. Only
+     such a row is left where it is; one that a fetched page has just brought
+     into view is centred, or the list's prepend anchoring can push it under
+     an edge after it was counted as landed. */
+  const jumpStartRef = useRef<{ messageId: string; wasInView: boolean } | null>(null);
   const scrollToMessage = useStableCallback((messageId: string): TimelineJumpOutcome => {
     const container = timelineScrollRef.current;
     const anchorHash = `#message:${messageId}`;
+    if (jumpStartRef.current?.messageId !== messageId) {
+      jumpStartRef.current = {
+        messageId,
+        wasInView: timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container),
+      };
+    }
     const index = rows.findIndex((item) => item.messageId === messageId ||
       item.folded?.some((entry) => entry.messageId === messageId));
     if (index < 0) return "unavailable";
@@ -887,10 +898,14 @@ export const MessageTimeline = memo(function MessageTimeline({
     readingAnchor.release();
     // The list is still landing on its last row and undoes a scroll made now.
     // What the tail shows keeps its place through the handover, so a row in
-    // full view there has landed; any other jump goes on once the list has
-    // taken over.
+    // full view there since the jump began has landed; any other jump goes on
+    // once the list has taken over.
     if (opening) {
-      if (timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container)) return "landed";
+      if (jumpStartRef.current.wasInView &&
+        timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container)) {
+        jumpStartRef.current = null;
+        return "landed";
+      }
       jumpAwaitsOpeningRef.current = true;
       return "opening";
     }
@@ -909,8 +924,9 @@ export const MessageTimeline = memo(function MessageTimeline({
     // the timeline's edge is not one the reader can see, so it is centred too.
     if (jumpScrollTargetRef.current === messageId
       ? timelineRowIsOnScreen(row, container) && timelineRowIsSettled(row, container)
-      : timelineRowIsInFullView(row, container)) {
+      : jumpStartRef.current.wasInView && timelineRowIsInFullView(row, container)) {
       jumpScrollTargetRef.current = null;
+      jumpStartRef.current = null;
       return "landed";
     }
     // Virtuoso's imperative index space is the data index; `firstItemIndex`
@@ -925,6 +941,7 @@ export const MessageTimeline = memo(function MessageTimeline({
     const placed = resolveTimelineAnchor(anchorHash, container);
     if (timelineRowIsOnScreen(placed, container) && timelineRowIsSettled(placed, container)) {
       jumpScrollTargetRef.current = null;
+      jumpStartRef.current = null;
       return "landed";
     }
     return "settling";
@@ -1553,11 +1570,10 @@ const NO_STOPS: readonly SerializedAgentStop[] = [];
 /** Where the reader had read to, and what happened since (conversation-activity.md §3.5). */
 function SinceDivider({ digest }: { digest: SinceDigest }) {
   return (
-    <div className="app-since-divider flex items-center gap-3 px-5 py-2" role="separator"
+    /* Words only, no rules either side: the brass tone marks the place. */
+    <div className="app-since-divider flex px-5 pb-1 pt-3" role="separator"
       aria-label={sinceDigestLine(digest)}>
-      <span className="h-px min-w-4 flex-1 bg-primary/40" aria-hidden="true" />
-      <span className="max-w-[80%] truncate text-[11px] font-bold text-primary">{sinceDigestLine(digest)}</span>
-      <span className="h-px min-w-4 flex-1 bg-primary/40" aria-hidden="true" />
+      <span className="min-w-0 truncate text-[11px] font-semibold text-primary">{sinceDigestLine(digest)}</span>
     </div>
   );
 }
@@ -3239,14 +3255,15 @@ export function ReplyPreview({
         event.preventDefault();
         onJump(reply.messageId, reply.sequence);
       }}
-      className="mb-1.5 mt-1 flex max-w-[min(36rem,100%)] items-start gap-2 border-l-2 border-primary/60 bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+      /* One quiet line, no bar or band: the arrow says it is a reply
+         (user 2026-11-04: 分割线啊，什么都不够简洁). */
+      className="app-message-reply-preview mb-1 mt-0.5 flex max-w-[min(36rem,100%)] items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
     >
-      <Reply className="mt-0.5 size-3.5 shrink-0" />
-      <span className="min-w-0">
-        <span className="block truncate font-bold text-foreground">{reply.author}</span>
-        <span className="line-clamp-2 [overflow-wrap:anywhere]">
-          {foldedDiscussionBody(reply.body) || "Attachment"}
-        </span>
+      <Reply className="size-3.5 shrink-0" />
+      <span className="min-w-0 truncate">
+        <span className="font-semibold text-foreground">{reply.author}</span>
+        {" "}
+        {foldedDiscussionBody(reply.body) || "Attachment"}
       </span>
     </a>
   );

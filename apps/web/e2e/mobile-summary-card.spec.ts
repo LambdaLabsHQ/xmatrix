@@ -49,12 +49,10 @@ test("mobile Summary stays on paper below the bar and ellipsizes at two lines", 
   await expect(card).toHaveCSS("background-image", "none");
   await expect(card).toHaveCSS("box-shadow", "none");
   await expect(page.locator(".app-topbar")).toHaveCSS("box-shadow", "none");
-  // About the conversation, not part of it: its own paper tone, closed by a
-  // hairline, so the message stream visibly starts below it.
-  await expect(card).toHaveCSS("border-bottom-width", "1px");
-  const [bandFill, streamFill] = await Promise.all([card, page.locator(".app-message-surface")]
-    .map((locator) => locator.evaluate((element) => getComputedStyle(element).backgroundColor)));
-  expect(bandFill).not.toBe(streamFill);
+  // Quiet grey prose on the messages' own paper: no rule or band sets it
+  // apart (user 2026-11-04: 分割线…不够简洁).
+  await expect(card).toHaveCSS("border-bottom-width", "0px");
+  await expect(card).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   // Two clamped lines, and the card is tall enough to show both: the dead
   // clamp used to cut the next line in half at the card's bottom edge.

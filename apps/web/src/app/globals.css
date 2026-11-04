@@ -5469,6 +5469,26 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   color: inherit !important;
 }
 
+/* On a phone a sender's tags wrap onto several lines, and a grey label round
+   each one turned the header into a block of boxes. There they are plain
+   grey words with their icons, like a list row's subtitle; the meter's tone
+   and every tag stay (user 2026-11-04: 分割线啊，什么都不够简洁). */
+@media (max-width: 767px) {
+  .xmatrix-app .app-message-meta {
+    column-gap: 0.75rem;
+    row-gap: 0;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-message-meta .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip {
+    background: transparent !important;
+    padding-inline: 0 !important;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-message-meta .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip > .app-usage-meter-fill {
+    display: none;
+  }
+}
+
 /* Mobile app shell reset.
    Keep this last: the dashboard has several material/glass generations above,
    and phone ergonomics need a single authoritative layout pass. */
@@ -6296,15 +6316,13 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     filter: drop-shadow(0 1px 0 oklch(0.97 0.03 85 / 0.55));
   }
 
-  /* Summary and linked pages are about the conversation, not part of it:
-     quiet prose on the bar's paper under the sign, closed by a hairline so
-     the message stream visibly starts below it. No band, card frame, glass
-     or shadow. */
+  /* Summary and linked pages are quiet grey prose on the same paper as the
+     messages, the way a list row's subtitle sits under its title. No rule,
+     band, card frame, glass or shadow (user 2026-11-04: 分割线…不够简洁). */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-about {
-    background: var(--background) !important;
+    background: transparent !important;
     color: var(--foreground) !important;
     border: 0 !important;
-    border-bottom: 1px solid var(--border) !important;
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
     box-shadow: none !important;
