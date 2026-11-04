@@ -17,7 +17,7 @@ import { Client } from "pg";
 import { createAuthorityDatabase, PostgresContentRepository } from "../../db/dist/index.js";
 import {
   acceptSpaceInvite, channelSpaceId, connectDaemon, createClosedChannel, createSpace, createWorkspace, inviteToSpace,
-  isSpawnOf, postAutoLaunch, registerTestAgent, startPgHubWorker, testMachine,
+  isSpawnOf, registerTestAgent, startPgHubWorker, testMachine,
   homeSpaceId,
   testPostgresUrl,
 } from "./agent-launch-postgres.fixture.mjs";
