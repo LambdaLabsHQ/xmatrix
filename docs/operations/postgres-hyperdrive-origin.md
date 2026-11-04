@@ -61,7 +61,12 @@ these fields and the response's diagnostic reference. Deployed `index.js`
 frames retain source-map resolution; driver messages, SQL details and causes
 are excluded. Exact documented Hyperdrive `58000` messages map to finite
 internal, pool-acquisition or connection-refused labels; other text stays
-unclassified. A missing code or capture-boundary stack remains insufficient
+unclassified. Each `CONNECTION_TERMINATED` attempt also retains a fixed
+`driverReason` for pg's generic termination, pg's unexpected termination, or
+Hyperdrive's explicit egress-severed response. These labels distinguish the
+observed driver messages, not the underlying cause; no raw message or cause
+is stored. Historical events without the field remain readable. A missing code
+or capture-boundary stack remains insufficient
 to diagnose an outage or authorize a transaction replay.
 
 Message authority failures also explicitly report the original exception and

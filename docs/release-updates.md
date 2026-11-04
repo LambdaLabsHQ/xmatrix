@@ -12,6 +12,18 @@ longer strands its remove control: it reads the widget's current editor position
 Web only; no schema, API or saved-message migration. Recovery is a CI-validated
 beta Web release reverting this change.
 
+## Unreleased: Database connection terminations retain their driver reason
+
+HUB-BQ failed both fresh connections at BEGIN before business SQL. Recovery
+already replayed once, but the common CONNECTION_TERMINATED code erased the
+difference between pg termination messages and Hyperdrive's explicit egress
+severance. Each failure attempt now retains a fixed driver reason, readable
+through Sentry without copying driver text, SQL, credentials or causes. This
+fills a diagnostic gap; the underlying outage remains unconfirmed. Existing
+retry limits and unknown-COMMIT reconciliation are unchanged. Hub only, no
+schema or client migration; recovery is a CI-validated beta Hub reverting this
+change. Historical events remain readable.
+
 ## Unreleased: A jumped-to message stays where it landed
 
 Opening a Needs-you conversation landed on and highlighted the message, then
