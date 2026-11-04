@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Gmail hands a large approved draft to Composio by short-lived link
+
+The upload-endpoint fix still ended in 413: Composio's proxy, not Gmail,
+refuses a request body of a few MB, so an approved draft of about 5 MB of
+attachments could not be sent through it at all. The Hub now stages the
+checked snapshot under an unguessable token for at most ten minutes, lets
+Composio fetch it from `/api/connectors/mail-snapshots/<token>` and deletes it
+as soon as the send ends. What is sent is still exactly the approved snapshot.
+Hub only, no schema or client migration. Recovery is a CI-validated beta Hub
+reverting this change.
+
 ## Unreleased: Gmail sends a large draft through the upload endpoint
 
 The first real `@gmail:send_draft`, an application email of about 5 MB of

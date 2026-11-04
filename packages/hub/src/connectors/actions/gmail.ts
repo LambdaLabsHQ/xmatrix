@@ -526,15 +526,23 @@ async function sendDraftPrepared(context: Context, input: Record<string, string>
   await requireDraftSender(context, mailbox, input.from!);
   await context.authorizeWrite?.();
   const threadId = typeof message.threadId === "string" && MESSAGE_ID.test(message.threadId) ? message.threadId : undefined;
-  return gmailSend(credentials, "/drafts/send", { query: { uploadType: "multipart" },
-    binary: draftUpload({ id: input.draftId!, message: threadId ? { threadId } : {} }, message.raw) }, context.usage, MAIL_SNAPSHOT);
+  if (!context.mailSnapshot) throw new ProviderRequestError(503, "the Hub has no staging for large Gmail drafts (ATTACHMENT_BUCKET and HUB_URL)");
+  const upload = draftUpload({ id: input.draftId!, message: threadId ? { threadId } : {} }, message.raw);
+  /* Composio refuses an inline body of a few MB, so it fetches the snapshot from a short-lived Hub URL. */
+  const staged = await context.mailSnapshot.stage(upload.bytes, upload.contentType);
+  try {
+    return await gmailSend(credentials, "/drafts/send", { query: { uploadType: "multipart" },
+      binary: { url: staged.url, contentType: upload.contentType } }, context.usage, MAIL_SNAPSHOT);
+  } finally {
+    await staged.remove();
+  }
 }
 
 /**
  * The upload drafts/send body: a multipart/related of the draft's JSON metadata and its message as message/rfc822,
- * the checked snapshot's own bytes (Gmail's `raw` is base64url of them), base64-encoded for the proxy.
+ * the checked snapshot's own bytes (Gmail's `raw` is base64url of them).
  */
-export function draftUpload(metadata: Record<string, unknown>, raw: string): { base64: string; contentType: string } {
+export function draftUpload(metadata: Record<string, unknown>, raw: string): { bytes: Uint8Array; contentType: string } {
   const boundary = `xmatrix-${crypto.randomUUID()}`;
   const mime = Uint8Array.from(atob(raw.replace(/-/gu, "+").replace(/_/gu, "/")), character => character.charCodeAt(0));
   const text = new TextEncoder();
@@ -543,9 +551,7 @@ export function draftUpload(metadata: Record<string, unknown>, raw: string): { b
   const tail = text.encode(`\r\n--${boundary}--\r\n`);
   const bytes = new Uint8Array(head.length + mime.length + tail.length);
   bytes.set(head, 0); bytes.set(mime, head.length); bytes.set(tail, head.length + mime.length);
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  return { base64: btoa(binary), contentType: `multipart/related; boundary=${boundary}` };
+  return { bytes, contentType: `multipart/related; boundary=${boundary}` };
 }
 
 /** `*` or one connected mailbox address as the target, with an optional Gmail query after it. */
