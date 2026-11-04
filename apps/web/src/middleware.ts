@@ -1,22 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { isAppShellPath } from "@/lib/app-shell-route";
 
 export function middleware(request: NextRequest) {
-  const rewriteUrl = getAppRewriteUrl(request);
-  if (rewriteUrl) {
-    return NextResponse.rewrite(rewriteUrl, { request });
+  if (isAppShellPath(request.nextUrl.pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/workspace";
+    return NextResponse.rewrite(url, { request });
   }
 
   return NextResponse.next({ request });
-}
-
-function getAppRewriteUrl(request: NextRequest) {
-  if (request.nextUrl.pathname !== "/app") {
-    return null;
-  }
-
-  const url = request.nextUrl.clone();
-  url.pathname = "/workspace";
-  return url;
 }
 
 export const config = {

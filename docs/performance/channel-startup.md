@@ -282,9 +282,16 @@ the chunks they name. `worker.mjs` replaces OpenNext's
 past a deploy; the Cloudflare zone does not cache Worker responses, so the year
 bought nothing and only risked a proxy serving removed chunks. The Hub preconnect
 hint stays as `<link rel="preconnect">` at the top of `<head>`; the prerendered
-response no longer repeats it as a `Link` header. `/app/<space>/…` deep links
-stay per-request (dynamic segments; prerendering them would need a writable
-per-path cache and would still miss on every new link).
+response no longer repeats it as a `Link` header. Every other shell address
+(`/app/<space>`, `/app/<space>/<view>`, `/app/<space>/channels/<id>`;
+`apps/web/src/lib/app-shell-route.ts`) is rewritten to the same `/workspace`
+page: the shell reads its Space, view and channel from `location`, so the
+bytes are identical. A reload, a notification link or a desktop window restored
+on a channel therefore no longer waits for a cold isolate to render the
+startup frame; before, a reload kept the old page on screen for that whole
+render (0.1–0.9 s p50–p90 from US-East on 2026-11-04, `/app` 0.07–0.16 s). Only
+the legacy redirect addresses (`direct`, `roles`, `analytics`,
+`/app/<space>/<channel>`) still run route code.
 
 Local `wrangler dev` of the production OpenNext build, fresh Worker per sample,
 first-request TTFB: `/app` 1.37–1.76 s before, 0.15–0.28 s after (warm 0.02–0.06
