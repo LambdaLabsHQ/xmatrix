@@ -40,6 +40,7 @@ import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
   RichMessageContent,
+  prepareRichMessageContent,
   messageMarkdownComponents,
 } from "./workspace-shell-rich-message";
 
@@ -155,7 +156,6 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 
 import { MessageUnsentNotice } from "./message-unsent-notice";
-import { picturedPlaces } from "./inline-attachments";
 import { MessagePicturesContext } from "./inline-pictures";
 import { CitingConversationContext, PASSAGE_HIGHLIGHT, passageRange, takeOpenedPassage } from "./cited-passage";
 import { foldedDiscussionBody, MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
@@ -2435,23 +2435,6 @@ export const MessageRow = memo(function MessageRow({
     return observeToolbarLayout(avatar, toolbar, layoutRoot, positionRebornToolbar, false);
   }, [canRebornSender, rebornControlVisible, reborningSender, positionRebornToolbar]);
 
-  if (message.isEvent) {
-    const Icon = message.eventType ? EVENT_ICONS[message.eventType] || Hash : Hash;
-
-    return (
-      <div className="app-message-row group flex items-center gap-2 px-5 py-1.5 text-xs text-muted-foreground hover:bg-muted/30">
-        <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted">
-          <Icon className="size-3.5" />
-        </div>
-        <span className="message-event-text min-w-0 flex-1 truncate">
-          {message.author !== "xMatrix" ? `${message.author} - ${displayBody}` : displayBody}
-        </span>
-        <MessageCopyButton copied={copied} onCopy={() => void copyMessage()} />
-        <MessageTimestamp value={message.sentAt} />
-      </div>
-    );
-  }
-
   // An attachment of the message as it is drawn, under its words or where its words put it (inline-pictures.tsx).
   const renderAttachment = (attachment: ChannelAttachment) => {
     const mediaIdentity = relayV2AttachmentMediaIdentity(attachment);
@@ -2617,12 +2600,111 @@ export const MessageRow = memo(function MessageRow({
       </div>
     );
   };
-  const pictured = picturedPlaces(message.body);
-  const underWords = (message.attachments ?? []).filter((_attachment, index) => !pictured.has(index + 1));
-  const drawPicture = (place: number) => {
+  const cardBody = onboardingStage ? (
+    <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : crossSpaceRead ? (
+    <CrossSpaceReadCard
+      request={crossSpaceRead}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : settingsRequest && channel && token && message.messageId && message.sequence ? (
+    <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")} agentName={settingsRequest.agentName}
+      {...(settingsRequest.reason ? { reason: settingsRequest.reason } : {})} />
+  ) : secretRequest ? (
+    <SecretRequestCardView
+      request={secretRequest}
+      messageId={message.messageId}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : secretAccessRequest ? (
+    <SecretAccessRequestCardView
+      request={secretAccessRequest}
+      messageId={message.messageId}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : questionnaire ? (
+    <QuestionnaireMessage
+      questionnaire={questionnaire}
+      message={message}
+      onAnswer={onQuestionnaireAnswer}
+    />
+  ) : routingDecision ? (
+    <RoutingDecisionBoard decision={routingDecision} />
+  ) : quotaRetryId && channel ? (
+    <QuotaRetryNotice id={quotaRetryId} channelId={channel.id} body={displayBody} spaceId={channel.spaceId??null}
+      token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : signedOutNotice ? (
+    <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} requestedBy={signedOutNotice.requestedBy}
+      spaceId={channel?.spaceId ?? null} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
+        signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
+      notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
+  ) : offlineNotice ? (
+    <MachineOfflineNotice offline={offlineNotice.offline} sourceMention={offlineNotice.summon?.sourceMention}
+      spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
+      onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
+        ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
+  ) : turnFailure ? (
+    <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody} continued={turnContinued}
+      spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : connectorReceipt ? (
+    <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
+      <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}
+        {...(channel && message.messageId && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string"
+          ? { privateResult: { channelId: channel.id, messageId: message.messageId,
+            ownerUserId: message.metadata.xmatrixPrivateConnectorResultOwner, token } } : {})} />
+      {channel && token && !contextOnly && message.messageId && message.sequence &&
+        connectorReceiptFixesOf(message.metadata).length ? (
+        <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
+          userId={currentUserIdentityId.replace(/^user:/, "")} />
+      ) : null}
+    </div>
+  ) : isMachineRunFailureNotice(message) ? (
+    <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
+  ) : null;
+  const hasCardBody = cardBody !== null || Boolean(message.isEvent);
+  const richMessage = useMemo(() => prepareRichMessageContent({ body: hasCardBody ? "" : displayBody,
+    collapsed: collapsible && !expanded, components: markdownComponents, connector: connectorInvocation }),
+  [hasCardBody, displayBody, collapsible, expanded, markdownComponents, connectorInvocation]);
+  const presentedBody = cardBody ?? (
+    <MentionReadMessageScopeProvider scope={mentionReadMessageScope}>
+      {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
+      <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
+        <MessagePicturesContext.Provider value={drawPicture}>
+          {richMessage.content}
+        </MessagePicturesContext.Provider>
+      </div>
+    </MentionReadMessageScopeProvider>
+  );
+  const underWords = (message.attachments ?? []).filter((_attachment, index) =>
+    !richMessage.picturedPlaces.has(index + 1));
+  function drawPicture(place: number) {
     const attachment = message.attachments?.[place - 1];
     return attachment ? renderAttachment(attachment) : null;
-  };
+  }
+
+  if (message.isEvent) {
+    const Icon = message.eventType ? EVENT_ICONS[message.eventType] || Hash : Hash;
+
+    return (
+      <div className="app-message-row group flex items-center gap-2 px-5 py-1.5 text-xs text-muted-foreground hover:bg-muted/30">
+        <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted">
+          <Icon className="size-3.5" />
+        </div>
+        <span className="message-event-text min-w-0 flex-1 truncate">
+          {message.author !== "xMatrix" ? `${message.author} - ${displayBody}` : displayBody}
+        </span>
+        <MessageCopyButton copied={copied} onCopy={() => void copyMessage()} />
+        <MessageTimestamp value={message.sentAt} />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -2891,84 +2973,7 @@ export const MessageRow = memo(function MessageRow({
             {message.replyTo && (
               <ReplyPreview reply={message.replyTo} onJump={onJumpToMessage} />
             )}
-            {onboardingStage ? (
-              <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : crossSpaceRead ? (
-              <CrossSpaceReadCard
-                request={crossSpaceRead}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : settingsRequest && channel && token && message.messageId && message.sequence ? (
-              <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} agentName={settingsRequest.agentName}
-                {...(settingsRequest.reason ? { reason: settingsRequest.reason } : {})} />
-            ) : secretRequest ? (
-              <SecretRequestCardView
-                request={secretRequest}
-                messageId={message.messageId}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : secretAccessRequest ? (
-              <SecretAccessRequestCardView
-                request={secretAccessRequest}
-                messageId={message.messageId}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : questionnaire ? (
-              <QuestionnaireMessage
-                questionnaire={questionnaire}
-                message={message}
-                onAnswer={onQuestionnaireAnswer}
-              />
-            ) : routingDecision ? (
-              <RoutingDecisionBoard decision={routingDecision} />
-            ) : quotaRetryId && channel ? (
-              <QuotaRetryNotice id={quotaRetryId} channelId={channel.id} body={displayBody} spaceId={channel.spaceId??null}
-                token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : signedOutNotice ? (
-              <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} requestedBy={signedOutNotice.requestedBy}
-                spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-                onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
-                  signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
-                notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
-            ) : offlineNotice ? (
-              <MachineOfflineNotice offline={offlineNotice.offline} sourceMention={offlineNotice.summon?.sourceMention}
-                spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
-                onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
-                  ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
-            ) : turnFailure ? (
-              <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody} continued={turnContinued}
-                spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : connectorReceipt ? (
-              <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}
-                  {...(channel && message.messageId && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string"
-                    ? { privateResult: { channelId: channel.id, messageId: message.messageId,
-                      ownerUserId: message.metadata.xmatrixPrivateConnectorResultOwner, token } } : {})} />
-                {channel && token && !contextOnly && message.messageId && message.sequence &&
-                  connectorReceiptFixesOf(message.metadata).length ? (
-                  <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
-                    userId={currentUserIdentityId.replace(/^user:/, "")} />
-                ) : null}
-              </div>
-            ) : isMachineRunFailureNotice(message) ? (
-              <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
-            ) : (
-              <MentionReadMessageScopeProvider scope={mentionReadMessageScope}>
-                {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
-                <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                  <MessagePicturesContext.Provider value={drawPicture}>
-                    <RichMessageContent body={displayBody} collapsed={collapsible && !expanded} components={markdownComponents}
-                      connector={connectorInvocation} />
-                  </MessagePicturesContext.Provider>
-                </div>
-              </MentionReadMessageScopeProvider>
-            )}
+            {presentedBody}
             {!recalled && collapsible && !expanded && (
               // Disclosure is a different layer from the message actions: the
               // body fades out under `.rich-message-collapsed::after` and its

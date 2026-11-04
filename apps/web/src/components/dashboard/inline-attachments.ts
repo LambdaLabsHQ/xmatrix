@@ -92,14 +92,3 @@ export function sentPictures<T extends { start: number; end: number }>(draft: { 
   return { body: out.join("\n").replace(/\n+$/u, ""), selections: draft.selections.map((selection) =>
     ({ ...selection, start: shift(selection.start), end: shift(selection.end) })) };
 }
-
-/** The places (1-based) of the attachments a message's words draw where they were put. */
-export function picturedPlaces(body: string): Set<number> {
-  const places = new Set<number>();
-  for (const line of body.split("\n")) {
-    const picture = pictureOfLine(line.trim());
-    const place = picture ? Number(picture.ref) : NaN;
-    if (Number.isInteger(place) && place > 0) places.add(place);
-  }
-  return places;
-}

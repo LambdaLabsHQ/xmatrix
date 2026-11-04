@@ -101,3 +101,45 @@ async function around(element: import("@playwright/test").Locator) {
   const box = (await element.boundingBox())!;
   return { x: box.x - 60, y: box.y - 40, width: box.width + 140, height: box.height + 80 };
 }
+
+// Attachment fallback follows the pictures actually rendered, including Markdown
+// literals, references and the disclosure/plain-text paths. The upload tests above
+// cover generated picture rows; they cannot catch a second parser hiding a file.
+test("literal picture syntax and quoted passages keep their attachments available", async ({ page }) => {
+  const bodies = [
+    "```md\n![red.png](attachment:1)\n```",
+    "    ![red.png](attachment:1)",
+    "> ![red.png](attachment:1)\n\n— [Elsewhere](https://xmatrix.sh/app/s/channels/c#message:m1)\n\nWords",
+  ];
+  await openComposer(page, bodies.map((body, index) => ({ messageId: `literal-${index}`, channelId: E2E_CHANNEL.id,
+    sequence: index + 1, sentAt: E2E_NOW, from: E2E_USER_SENDER, body,
+    attachments: [{ id: `literal-file-${index}`, kind: "image", name: "red.png", mimeType: "image/png", size: 68,
+      dataUrl: `data:image/png;base64,${RED}` }] })));
+  for (let index = 0; index < bodies.length; index += 1) {
+    const row = page.locator(`[id="message:literal-${index}"]`);
+    await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+    await expect(row.locator(".message-picture")).toHaveCount(0);
+  }
+});
+
+test("Markdown image references consume a file once where they render", async ({ page }) => {
+  await openComposer(page, [{ messageId: "reference-picture", channelId: E2E_CHANNEL.id, sequence: 1,
+    sentAt: E2E_NOW, from: E2E_USER_SENDER, body: "![red.png][photo]\n\n[photo]: attachment:1",
+    attachments: [{ id: "reference-file", kind: "image", name: "red.png", mimeType: "image/png", size: 68,
+      dataUrl: `data:image/png;base64,${RED}` }] }]);
+  const row = page.locator('[id="message:reference-picture"]');
+  await expect(row.locator(".message-picture").getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+  await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+});
+
+test("a picture outside the shown text stays available through expansion and plain-text rendering", async ({ page }) => {
+  await openComposer(page, [{ messageId: "long-picture", channelId: E2E_CHANNEL.id, sequence: 1,
+    sentAt: E2E_NOW, from: E2E_USER_SENDER, body: `${"Long message. ".repeat(4_000)}\n\n![red.png](attachment:1)`,
+    attachments: [{ id: "long-file", kind: "image", name: "red.png", mimeType: "image/png", size: 68,
+      dataUrl: `data:image/png;base64,${RED}` }] }]);
+  const row = page.locator('[id="message:long-picture"]');
+  await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+  await row.getByRole("button", { name: "Show more" }).click();
+  await expect(row.locator(".message-plain-text")).toHaveCount(1);
+  await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+});

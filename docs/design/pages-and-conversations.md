@@ -128,7 +128,14 @@ The production x-matrix Space on 2026-09-26:
   conversation's draft as a block on the line after the caret, quoted with a
   link back to the message. A draft holds as many quotes as its author puts
   in, each among what is written around it, and the message sent carries them
-  in that order; each shows as its own slip there.
+  in that order; each shows as its own slip there. A slip's removal uses its
+  current editor position, so editing earlier words cannot strand its control.
+- **Pictures within a message** name the message's attachments by position
+  (`![name](attachment:1)`). The final rendered Markdown tree records the files
+  it actually draws; remaining attachments stay beneath the message. Code,
+  quoted passages shown as text, collapsed-away content, plain-text fallback
+  and system cards cannot consume a file they do not render. Markdown image
+  references use the same image nodes and do not duplicate the fallback tile.
 - **"Discuss" on any selected passage** (on a message: "Discuss in new
   channel"), of a page or of a message, starts a
   new conversation named by what its first message says, as New conversation

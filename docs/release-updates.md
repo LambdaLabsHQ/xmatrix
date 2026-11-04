@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Message files follow the pictures actually shown
+
+An attachment could disappear when its picture syntax was inside code or beyond
+a folded preview, while a Markdown image reference showed the same file twice.
+The message now prepares its displayed body and consumed attachments from one
+final Markdown tree, after quote replacement. Files not actually drawn remain
+under the words, including in long plain-text messages and system cards. The
+independent line scanner is removed. Editing before a composer quote also no
+longer strands its remove control: it reads the widget's current editor position.
+Web only; no schema, API or saved-message migration. Recovery is a CI-validated
+beta Web release reverting this change.
+
 ## Unreleased: A jumped-to message stays where it landed
 
 Opening a Needs-you conversation landed on and highlighted the message, then

@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
-const { draftPictures, insertPicturesIntoDraft, picturedPlaces, sentPictures } = require("./inline-attachments.ts");
+const { draftPictures, insertPicturesIntoDraft, sentPictures } = require("./inline-attachments.ts");
 
 test("pictures go on the line after the caret, or in place of an empty one, with a line to write on after", () => {
   const into = insertPicturesIntoDraft("Look", 4, [{ name: "a.png", ref: "r1" }, { name: "b [1].png", ref: "r2" }]);
@@ -22,6 +22,5 @@ test("a sent draft names each picture by its place among the message's files, a 
     (ref) => places.get(ref));
   assert.equal(sent.body, "@codex look\n\n![a.png](attachment:1)\n![b.png](attachment:2)\n\nwhy?");
   assert.deepEqual(sent.selections.map(({ start, end }) => sent.body.slice(start, end)), ["@codex", "why"]);
-  assert.deepEqual([...picturedPlaces(sent.body)], [1, 2]);
   assert.equal(sentPictures({ body: "plain", selections: [] }, () => 1).body, "plain");
 });
