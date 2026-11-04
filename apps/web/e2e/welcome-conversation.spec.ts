@@ -120,7 +120,7 @@ test.describe("desktop", () => {
 
   test("bring your work in: a Space without GitHub is offered the connect", async ({ page }) => {
     const agentsIn = await welcomeWithAgentIn(page, { repositories: { repos: [], repoStatus: "not-connected" } });
-    await expect(agentsIn.getByTestId("bring-work-in")).toContainText("Bring your work in. Connect GitHub", { timeout: 20_000 });
+    await expect(agentsIn.getByTestId("bring-work-in")).toContainText("Connect GitHub so agents can work in several repositories in parallel.", { timeout: 20_000 });
     await expect(agentsIn.getByRole("button", { name: "Connect GitHub", exact: true })).toBeVisible();
   });
 
@@ -130,7 +130,7 @@ test.describe("desktop", () => {
     await fixtureJson(page, "import", "**/page-migration/import", { conversationId: "channel-import" }, { method: "POST" });
     await agentsIn.getByRole("button", { name: "acme/api", exact: true }).click({ timeout: 20_000 });
     await expect.poll(() => fixtureRequestBodies(page, "import")).toEqual([{ repository: "acme/api" }]);
-    await expect(agentsIn.getByTestId("bring-work-in")).toContainText("Turning acme/api into pages.");
+    await expect(agentsIn.getByTestId("bring-work-in")).toContainText("An agent is reading acme/api and drafting pages.");
   });
 });
 
