@@ -19,7 +19,7 @@ export interface PageBlock {
   end: number;
 }
 
-const FENCE = /^\s{0,3}(`{3,}|~{3,})/u;
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
 const HEADING = /^\s{0,3}(#{1,6})\s(.*)$/u;
 
 /** A heading line's text: no surrounding blanks or closing `#` run. */
@@ -46,8 +46,9 @@ export function* markdownLines(markdown: string): Generator<{ line: string; offs
     const fenceMatch = FENCE.exec(line);
     if (fenceMatch) {
       const marker = fenceMatch[1]!;
-      if (fence === null) fence = marker[0]!;
-      else if (marker[0] === fence) fence = null;
+      if (fence === null) {
+        if (marker[0] !== "`" || !fenceMatch[2]!.includes("`")) fence = marker;
+      } else if (marker[0] === fence[0] && marker.length >= fence.length && !fenceMatch[2]!.trim()) fence = null;
     }
     yield { line, offset, end, prose: fence === null && !fenceMatch };
     offset = end;

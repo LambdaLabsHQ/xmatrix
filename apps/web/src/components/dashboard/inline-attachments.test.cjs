@@ -24,3 +24,23 @@ test("a sent draft names each picture by its place among the message's files, a 
   assert.deepEqual(sent.selections.map(({ start, end }) => sent.body.slice(start, end)), ["@codex", "why"]);
   assert.equal(sentPictures({ body: "plain", selections: [] }, () => 1).body, "plain");
 });
+
+// The send boundary used to erase attachment-looking lines inside code. Rendering
+// tests cannot catch it: the text was already lost before the message was stored.
+test("literal attachment examples stay byte-for-byte inside fenced code, including unmatched and shorter fences", () => {
+  const examples = [
+    "```md\n![example.png](attachment:1)\n```",
+    "~~~md\n![example.png](attachment:r1)\n~~~",
+    "````md\n```\n![example.png](attachment:r1)\n````",
+    "```md\n![example.png](attachment:missing)",
+  ];
+  for (const code of examples) {
+    const body = `${code}\n`;
+    assert.deepEqual(draftPictures(body), []);
+    assert.equal(sentPictures({ body, selections: [] }, () => 1).body, code);
+  }
+  const body = `${examples[0]}\n![real.png](attachment:r1)\nEnd`;
+  assert.deepEqual(draftPictures(body).map(({ ref }) => ref), ["r1"]);
+  assert.equal(sentPictures({ body, selections: [] }, (ref) => ref === "r1" ? 2 : undefined).body,
+    `${examples[0]}\n\n![real.png](attachment:2)\n\nEnd`);
+});

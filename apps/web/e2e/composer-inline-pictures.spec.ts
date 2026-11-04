@@ -143,3 +143,16 @@ test("a picture outside the shown text stays available through expansion and pla
   await expect(row.locator(".message-plain-text")).toHaveCount(1);
   await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
 });
+
+// The composer must not turn an example in code into a picture widget. Its send
+// transform must preserve those words even when no matching file was uploaded.
+test("an attachment example in fenced code remains literal through editing and sending", async ({ page }) => {
+  const composer = await openComposer(page);
+  const body = "```md\n![example.png](attachment:1)\n```\nAn example, not an uploaded picture.";
+  await composer.click();
+  await page.keyboard.insertText(body);
+  await expect(page.getByTestId("composer-picture")).toHaveCount(0);
+  await expect(composer).toContainText("![example.png](attachment:1)");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "picture-send")).toEqual([expect.objectContaining({ body })]);
+});
