@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Release storage tests skip idle retry waits
+
+The R2 upload regression spent 24 seconds in production retry backoffs on every
+PR and release gate. It now records and fast-forwards only those waits while
+keeping real abort deadlines, child-process termination, retry counts, phase
+diagnostics and credential redaction checks. The file runs in the bounded
+child-process test lane because it launches Wrangler fixtures. Production
+transfer behavior and required gates are unchanged; no migration is needed.
+
 ## Unreleased: Message files follow the pictures actually shown
 
 An attachment could disappear when its picture syntax was inside code or beyond
