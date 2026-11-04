@@ -59,6 +59,30 @@ export function observeTimelineBoxes(root: Element, observer: ResizeObserver, de
   }
 }
 
+/* Where the anchor row's text sits below the timeline's top edge, or null once
+   the virtualizer has taken the row out of the rendered window. */
+function readingAnchorTop(root: HTMLElement, rowId: string): number | null {
+  const content = readingAnchorContent(root, rowId);
+  return content ? content.getBoundingClientRect().top - root.getBoundingClientRect().top : null;
+}
+
+/* Calls `onLayout` before paint after anything that can move the anchor row:
+   a resize of the timeline's boxes or the row, and a commit that swaps the
+   virtualizer's margin or padding without changing any observed border box.
+   Returns the disconnect. */
+function followTimelineLayout(root: HTMLElement, rowId: string, onLayout: () => void): () => void {
+  const observer = new ResizeObserver(onLayout);
+  observeTimelineBoxes(root, observer);
+  const row = root.ownerDocument.getElementById(rowId);
+  if (row && root.contains(row)) observer.observe(row, { box: "border-box" });
+  const mutations = new MutationObserver(onLayout);
+  mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] });
+  return () => {
+    observer.disconnect();
+    mutations.disconnect();
+  };
+}
+
 /**
  * Keeps the reader's message fixed on screen across a history prepend.
  *
@@ -100,10 +124,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
     let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const anchorTop = (): number | null => {
-      const content = readingAnchorContent(root, rowId);
-      return content ? content.getBoundingClientRect().top - root.getBoundingClientRect().top : null;
-    };
+    const anchorTop = () => readingAnchorTop(root, rowId);
 
     /* Where the timeline was scrolled when the anchor was last known to be in
        place. A scroll event's difference from it is the reader's own movement
@@ -179,14 +200,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       corrected = true;
       hold(top, offset);
     };
-    const observer = new ResizeObserver(correctLayout);
-    observeTimelineBoxes(root, observer);
-    const row = root.ownerDocument.getElementById(rowId);
-    if (row && root.contains(row)) observer.observe(row, { box: "border-box" });
-    // A virtualizer margin or padding swap can move the text without changing
-    // any observed border box. Follow that commit before its next paint too.
-    const mutations = new MutationObserver(correctLayout);
-    mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] });
+    const stopFollowing = followTimelineLayout(root, rowId, correctLayout);
 
     /* The reader keeps scrolling while the page settles. Their scroll moves
        the anchor on purpose, so the held place follows it; the virtualizer
@@ -232,8 +246,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
     deadlineTimer = setTimeout(release, READING_ANCHOR_MAX_MS);
 
     releaseRef.current = () => {
-      observer.disconnect();
-      mutations.disconnect();
+      stopFollowing();
       if (settleTimer !== null) clearTimeout(settleTimer);
       if (deadlineTimer !== null) clearTimeout(deadlineTimer);
       root.removeEventListener("scroll", onScroll, true);
@@ -257,10 +270,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
   const hold = useCallback((rowId: string) => {
     if (!root) return;
     release();
-    const anchorTop = (): number | null => {
-      const content = readingAnchorContent(root, rowId);
-      return content ? content.getBoundingClientRect().top - root.getBoundingClientRect().top : null;
-    };
+    const anchorTop = () => readingAnchorTop(root, rowId);
     const offset = anchorTop();
     if (offset === null) return;
     const correctLayout = () => {
@@ -271,19 +281,13 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       }
       if (Math.abs(top - offset) >= 0.5) root.scrollTop += top - offset;
     };
-    const observer = new ResizeObserver(correctLayout);
-    observeTimelineBoxes(root, observer);
-    const row = root.ownerDocument.getElementById(rowId);
-    if (row && root.contains(row)) observer.observe(row, { box: "border-box" });
-    const mutations = new MutationObserver(correctLayout);
-    mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] });
+    const stopFollowing = followTimelineLayout(root, rowId, correctLayout);
     root.addEventListener("scroll", correctLayout, { passive: true, capture: true });
     const page = root.ownerDocument;
     const readerEvents = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
     for (const event of readerEvents) page.addEventListener(event, release, { passive: true, capture: true });
     releaseRef.current = () => {
-      observer.disconnect();
-      mutations.disconnect();
+      stopFollowing();
       root.removeEventListener("scroll", correctLayout, true);
       for (const event of readerEvents) page.removeEventListener(event, release, true);
     };
