@@ -492,7 +492,7 @@ export {
   restrictedChannelContentScope, spaceVisibilityScope, uploadScopeCoversRefScope,
 } from "./restricted-content-scope.js";
 export {
-  GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref, markdownLines,
+  GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
   gitHubFileReferences, gitHubFileUrl, mergePageText, mergePageWords,
   PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, pageMediaFile, pageMediaReference, pageMediaReferences,
   pageMediaRefId, parsePageMedia,
@@ -670,3 +670,5 @@ export type { GoogleCalendarSendUpdates } from "./google-calendar.js";
 export { AGENT_QUOTA_RETRY_NOTICE_KIND, quotaRetryOfferId, type AgentQuotaRetry, type AgentQuotaRetryAdmission } from "./agent-quota-retry.js";
 
 export type { StripeAccountView, StripeAccountPage } from "./stripe-accounts.js";
+
+export { parseMarkdown } from "./markdown.js";

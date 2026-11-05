@@ -7,24 +7,39 @@
  * attachment it does not name stays under its words, as every attachment did before.
  */
 
-import { markdownLines } from "@xmatrix/protocol";
+import { parseMarkdown } from "@xmatrix/protocol";
+import type { Nodes } from "mdast";
 
 /** A picture's line in a draft or a message: its name and what it points at. */
 const PICTURE_LINE = /^!\[((?:[^\]\\\n]|\\.)*)\]\(attachment:([^\s()]+)\)$/u;
 
 export type DraftPicture = { line: number; name: string; ref: string };
 
-export function pictureOfLine(line: string): { name: string; ref: string } | null {
+function pictureOfLine(line: string): { name: string; ref: string } | null {
   const match = PICTURE_LINE.exec(line);
   return match ? { name: match[1]!.replace(/\\([[\]\\])/gu, "$1"), ref: match[2]! } : null;
 }
 
 /** The pictures a draft holds, by line. */
 export function draftPictures(text: string): DraftPicture[] {
-  return Array.from(markdownLines(text)).flatMap(({ line, prose }, index) => {
-    const picture = prose ? pictureOfLine(line) : null;
-    return picture ? [{ line: index, ...picture }] : [];
-  });
+  if (!text.includes("](attachment:")) return [];
+  const lines = text.split("\n");
+  const pictures: DraftPicture[] = [];
+  const visit = (node: Nodes) => {
+    if (node.type === "image" && node.position) {
+      const { start, end } = node.position;
+      const line = lines[start.line - 1]!;
+      // Only the composer's whole-line picture syntax is an editable block.
+      // Code, HTML and other literal contexts never produce image nodes.
+      if (start.column === 1 && end.line === start.line && end.column === line.length + 1) {
+        const picture = pictureOfLine(line);
+        if (picture) pictures.push({ line: start.line - 1, ...picture });
+      }
+    }
+    if ("children" in node) for (const child of node.children) visit(child);
+  };
+  visit(parseMarkdown(text));
+  return pictures;
 }
 
 export function pictureLine(name: string, ref: string): string {

@@ -44,3 +44,25 @@ test("literal attachment examples stay byte-for-byte inside fenced code, includi
   assert.equal(sentPictures({ body, selections: [] }, (ref) => ref === "r1" ? 2 : undefined).body,
     `${examples[0]}\n\n![real.png](attachment:2)\n\nEnd`);
 });
+
+// Only an actual Markdown image may be rewritten as an uploaded picture. These
+// contexts span lines, so a fence-only scan cannot protect their literal source.
+test("inline code and HTML retain attachment-looking source when sending, with or without a matching upload", () => {
+  for (const body of [
+    "`example\n![example.png](attachment:r1)\nend`",
+    "``example\n![example.png](attachment:r1)\nend``",
+    "<!--\n![example.png](attachment:r1)\n-->",
+    "<div>\n![example.png](attachment:r1)\n</div>",
+  ]) {
+    assert.deepEqual(draftPictures(body), []);
+    for (const place of [undefined, 2]) {
+      assert.equal(sentPictures({ body, selections: [] }, () => place).body, body);
+    }
+  }
+  const body = "`example\n![example.png](attachment:r1)\nend`\n![real.png](attachment:r2)\nwhy?";
+  assert.deepEqual(draftPictures(body).map(({ ref }) => ref), ["r2"]);
+  const start = body.indexOf("why?");
+  const sent = sentPictures({ body, selections: [{ start, end: start + 4 }] }, () => 1);
+  assert.equal(sent.body, "`example\n![example.png](attachment:r1)\nend`\n\n![real.png](attachment:1)\n\nwhy?");
+  assert.deepEqual(sent.selections.map(({ start, end }) => sent.body.slice(start, end)), ["why?"]);
+});

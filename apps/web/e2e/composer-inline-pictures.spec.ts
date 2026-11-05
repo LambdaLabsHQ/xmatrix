@@ -66,11 +66,17 @@ test("removing a picture from the draft takes its file along", async ({ page }) 
   await page.keyboard.press("Home");
   await page.keyboard.press("Backspace");
   await expect(pictures).toHaveCount(1);
+  // Removing the real file must not erase the same reference written as code.
+  const redLine = (await draftValue(composer))!.split("\n")[0]!;
+  const literal = `\`\`\`md\n${redLine}\n\`\`\``;
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.insertText(`\n\n${literal}`);
+  await expect(pictures).toHaveCount(1);
   await pictures.first().getByRole("button", { name: "Remove red.png" }).click();
   await expect(pictures).toHaveCount(0);
-  await expectDraft(composer, "Words");
+  await expectDraft(composer, `Words\n\n${literal}`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect.poll(() => fixtureRequestBodies(page, "picture-send")).toEqual([expect.objectContaining({ body: "Words" })]);
+  await expect.poll(() => fixtureRequestBodies(page, "picture-send")).toEqual([expect.objectContaining({ body: `Words\n\n${literal}` })]);
   const [sent] = await fixtureRequestBodies(page, "picture-send") as { attachments?: unknown[] }[];
   expect(sent!.attachments ?? []).toEqual([]);
 });
@@ -146,9 +152,9 @@ test("a picture outside the shown text stays available through expansion and pla
 
 // The composer must not turn an example in code into a picture widget. Its send
 // transform must preserve those words even when no matching file was uploaded.
-test("an attachment example in fenced code remains literal through editing and sending", async ({ page }) => {
+test("attachment examples in literal Markdown remain text through editing and sending", async ({ page }) => {
   const composer = await openComposer(page);
-  const body = "```md\n![example.png](attachment:1)\n```\nAn example, not an uploaded picture.";
+  const body = "```md\n![example.png](attachment:1)\n```\n\n`inline example\n![inline.png](attachment:2)\nend`\n\n<!--\n![hidden.png](attachment:3)\n-->\n\nAn example, not an uploaded picture.";
   await composer.click();
   await page.keyboard.insertText(body);
   await expect(page.getByTestId("composer-picture")).toHaveCount(0);
