@@ -72,9 +72,13 @@ test("any page markdown converts once to canonical form and then stays put", () 
     }
   }
   for (const input of inputs) {
-    const once = canonicalPageMarkdown(input);
-    assert.equal(canonicalPageMarkdown(once), once);
-    assert.ok(markdownToPageDoc(once).eq(markdownToPageDoc(input)), "canonical form reads as the same document");
+    // Both assertions share the original and canonical documents. Reparsing
+    // either adds no evidence, especially across the full documentation corpus.
+    const original = markdownToPageDoc(input);
+    const once = pageDocToMarkdown(original);
+    const canonical = markdownToPageDoc(once);
+    assert.equal(pageDocToMarkdown(canonical), once);
+    assert.ok(canonical.eq(original), "canonical form reads as the same document");
   }
 });
 

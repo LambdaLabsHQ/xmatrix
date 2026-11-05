@@ -12,6 +12,15 @@ compatibility migration. Existing daemons receive the fix when they update to a
 release containing it. Recovery is a CI-validated CLI release reverting this
 change; Hub credential verification remains unchanged.
 
+## Unreleased: Markdown round-trip tests reuse their parsed documents
+
+The shared Node gate parsed both the original and canonical Markdown twice for
+every document in the repository corpus. The round-trip test now reuses those
+documents for its idempotence and equivalence assertions. Every corpus input,
+syntax case and assertion remains; focused tests still cover the convenience
+API. Product behavior, required gates and release authority are unchanged.
+No migration is needed.
+
 ## Unreleased: Literal attachment examples survive sending in every Markdown context
 
 An attachment-looking line inside multiline inline code or HTML was treated as
