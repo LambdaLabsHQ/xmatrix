@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Literal attachment examples survive sending in every Markdown context
+
+An attachment-looking line inside multiline inline code or HTML was treated as
+a draft picture: sending deleted it without an upload, or rewrote it when an
+upload matched. Draft widgets and sending now inventory actual image nodes in
+the shared GFM tree, using the same parser configuration as Page documents and
+operational mentions. Whole-line uploaded pictures keep their existing format
+and selection offsets. Web only; no schema, API or saved-message migration.
+Recovery is a CI-validated beta Web release reverting this change.
+
 ## Unreleased: The timeline stays put while rows above the reader load
 
 A reader who had scrolled up in a conversation saw it jump when a row above

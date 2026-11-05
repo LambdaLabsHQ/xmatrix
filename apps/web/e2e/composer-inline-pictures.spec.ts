@@ -146,9 +146,9 @@ test("a picture outside the shown text stays available through expansion and pla
 
 // The composer must not turn an example in code into a picture widget. Its send
 // transform must preserve those words even when no matching file was uploaded.
-test("an attachment example in fenced code remains literal through editing and sending", async ({ page }) => {
+test("attachment examples in literal Markdown remain text through editing and sending", async ({ page }) => {
   const composer = await openComposer(page);
-  const body = "```md\n![example.png](attachment:1)\n```\nAn example, not an uploaded picture.";
+  const body = "```md\n![example.png](attachment:1)\n```\n\n`inline example\n![inline.png](attachment:2)\nend`\n\n<!--\n![hidden.png](attachment:3)\n-->\n\nAn example, not an uploaded picture.";
   await composer.click();
   await page.keyboard.insertText(body);
   await expect(page.getByTestId("composer-picture")).toHaveCount(0);

@@ -136,9 +136,10 @@ The production x-matrix Space on 2026-09-26:
   quoted passages shown as text, collapsed-away content, plain-text fallback
   and system cards cannot consume a file they do not render. Markdown image
   references use the same image nodes and do not duplicate the fallback tile.
-  Draft picture controls and the send transform share the same prose-line
-  scan. Attachment-looking lines in fenced code remain literal text, including
-  unclosed fences; sending never resolves or removes those examples as uploads.
+  Draft picture controls and the send transform inventory actual image nodes
+  from the shared GFM tree, restricted to the composer's whole-line picture
+  syntax. Attachment-looking lines in code or HTML remain literal source;
+  sending never resolves or removes those examples as uploads.
 - **"Discuss" on any selected passage** (on a message: "Discuss in new
   channel"), of a page or of a message, starts a
   new conversation named by what its first message says, as New conversation
