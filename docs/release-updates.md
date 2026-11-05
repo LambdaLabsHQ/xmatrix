@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: The timeline stays put while rows above the reader load
+
+A reader who had scrolled up in a conversation saw it jump when a row above
+the screen grew late, most often a Gmail card filling in its private result,
+and the same while scrolling up with a wheel or trackpad. The list made up for
+rows above the first one in view only while the reader was scrolling up, and
+that direction resets 50ms after the last scroll event. It now makes up for
+them in any direction and at rest. Web only, a react-virtuoso patch; no schema
+or client migration. Recovery is a CI-validated beta Web reverting this change.
+
 ## Unreleased: Release storage tests skip idle retry waits
 
 The R2 upload regression spent 24 seconds in production retry backoffs on every
