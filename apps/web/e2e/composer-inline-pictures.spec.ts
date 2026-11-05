@@ -66,11 +66,17 @@ test("removing a picture from the draft takes its file along", async ({ page }) 
   await page.keyboard.press("Home");
   await page.keyboard.press("Backspace");
   await expect(pictures).toHaveCount(1);
+  // Removing the real file must not erase the same reference written as code.
+  const redLine = (await draftValue(composer))!.split("\n")[0]!;
+  const literal = `\`\`\`md\n${redLine}\n\`\`\``;
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.insertText(`\n\n${literal}`);
+  await expect(pictures).toHaveCount(1);
   await pictures.first().getByRole("button", { name: "Remove red.png" }).click();
   await expect(pictures).toHaveCount(0);
-  await expectDraft(composer, "Words");
+  await expectDraft(composer, `Words\n\n${literal}`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect.poll(() => fixtureRequestBodies(page, "picture-send")).toEqual([expect.objectContaining({ body: "Words" })]);
+  await expect.poll(() => fixtureRequestBodies(page, "picture-send")).toEqual([expect.objectContaining({ body: `Words\n\n${literal}` })]);
   const [sent] = await fixtureRequestBodies(page, "picture-send") as { attachments?: unknown[] }[];
   expect(sent!.attachments ?? []).toEqual([]);
 });

@@ -136,7 +136,7 @@ The production x-matrix Space on 2026-09-26:
   quoted passages shown as text, collapsed-away content, plain-text fallback
   and system cards cannot consume a file they do not render. Markdown image
   references use the same image nodes and do not duplicate the fallback tile.
-  Draft picture controls and the send transform inventory actual image nodes
+  Draft picture controls, file removal and the send transform inventory actual image nodes
   from the shared GFM tree, restricted to the composer's whole-line picture
   syntax. Attachment-looking lines in code or HTML remain literal source;
   sending never resolves or removes those examples as uploads.

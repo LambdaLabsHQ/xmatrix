@@ -1165,10 +1165,9 @@ export const Composer = memo(function Composer({
     const field = fieldRef.current;
     const draft = field?.value ?? localDraft;
     const lines = draft.split("\n");
-    const kept = lines.filter((line) => {
-      const ref = draftPictures(line)[0]?.ref;
-      return !ref || resolvePicture(ref) !== id;
-    });
+    const removed = new Set(draftPictures(draft).filter((picture) => resolvePicture(picture.ref) === id)
+      .map((picture) => picture.line));
+    const kept = lines.filter((_line, index) => !removed.has(index));
     if (kept.length !== lines.length) setDraftText(kept.join("\n"));
   }
 

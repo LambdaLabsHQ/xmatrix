@@ -4,7 +4,8 @@
 
 An attachment-looking line inside multiline inline code or HTML was treated as
 a draft picture: sending deleted it without an upload, or rewrote it when an
-upload matched. Draft widgets and sending now inventory actual image nodes in
+upload matched. Removing a real picture also erased literal references to the
+same file. Draft widgets, file removal and sending now inventory actual image nodes in
 the shared GFM tree, using the same parser configuration as Page documents and
 operational mentions. Whole-line uploaded pictures keep their existing format
 and selection offsets. Web only; no schema, API or saved-message migration.
