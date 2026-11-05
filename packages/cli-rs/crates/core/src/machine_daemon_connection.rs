@@ -1304,7 +1304,10 @@ enum ConnectionInstruction {
         report: MachineDaemonReport,
         reply: oneshot::Sender<std::result::Result<String, String>>,
     },
-    RefreshAuthCredential(String),
+    RefreshAuthCredential {
+        credential: String,
+        connection_epoch: Option<u64>,
+    },
     /// The owner removed this Machine; Hub refused its credential refresh.
     Retired(String),
     RenewLease {
@@ -1755,6 +1758,9 @@ impl MachineDaemonConnectionClient {
     /// inside the actor would also stall heartbeats and let Hub presence expire
     /// even though the daemon process and control socket were still alive.
     pub async fn refresh_auth(&self, token: String) -> Result<()> {
+        // Bind before enrollment awaits the network: this socket can be
+        // replaced while the replacement credential is being minted.
+        let connection_epoch = self.connection_epoch();
         *self
             .enrollment_token
             .write()
@@ -1778,9 +1784,10 @@ impl MachineDaemonConnectionClient {
             }
         };
         self.instruction_tx
-            .send(ConnectionInstruction::RefreshAuthCredential(
-                enrollment.credential,
-            ))
+            .send(ConnectionInstruction::RefreshAuthCredential {
+                credential: enrollment.credential,
+                connection_epoch,
+            })
             .map_err(|_| CliError::Relay("Machine Daemon control connection is closed".into()))
     }
 
@@ -2531,7 +2538,13 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                                 break error;
                             }
                         }
-                        Some(ConnectionInstruction::RefreshAuthCredential(credential)) => {
+                        Some(ConnectionInstruction::RefreshAuthCredential { credential, connection_epoch }) => {
+                            // Reconnect enrolled its own fresh credential. A refresh
+                            // queued before or during that reconnect belongs to no
+                            // current socket and must not roll its HTTP cache back.
+                            if connection_epoch != Some(epoch) {
+                                continue;
+                            }
                             let message = serde_json::json!({
                                 "type": "refresh_auth",
                                 "requestId": uuid::Uuid::new_v4().to_string(),

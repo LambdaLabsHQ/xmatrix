@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: A reconnected daemon keeps its fresh Machine credential
+
+HUB-A9 received a refresh credential that had expired 901 seconds earlier.
+The reconnect path could enroll a fresh token, then replay a queued old refresh
+and roll its local HTTP credential cache back.
+Refresh now captures the live connection epoch before minting and is sent only
+on that same connection. Offline and replaced-connection refreshes are discarded;
+current refreshes retain their wire format. CLI daemon only; no schema or Hub
+compatibility migration. Existing daemons receive the fix when they update to a
+release containing it. Recovery is a CI-validated CLI release reverting this
+change; Hub credential verification remains unchanged.
+
 ## Unreleased: Literal attachment examples survive sending in every Markdown context
 
 An attachment-looking line inside multiline inline code or HTML was treated as

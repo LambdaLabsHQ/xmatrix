@@ -147,6 +147,7 @@ agents.
 - `xmatrix-bootstrap.exe` and `xmatrix machine supervisor start-daemon` belong only to the unreleased signed-continuity design and have no current installation authority.
 - `xmatrix daemon sync-session` applies a newly saved same-Hub, same-user CLI session to a compatible running daemon without restarting it. The saved CLI refresh token is never installed as the daemon refresh token; the daemon exchanges an independent session before switching generations.
 - After an established connection loses enrollment with `Invalid or expired auth token`, the daemon wakes its existing session refresh task immediately instead of retrying the same access token until the periodic timer fires. Concurrent refusals coalesce into one wake; the seven-day session limit, generation checks, refresh failure backoff, and owner/Hub checks still apply. Network failures, retired Machines, and upgrade requirements do not trigger this auth recovery path.
+- A Machine credential refresh captures the live connection epoch before minting its token. The actor sends it and updates its HTTP credential cache only on that same connection. Reconnect enrolls a fresh credential; refreshes queued offline or still minting for the replaced socket are discarded. Current-connection refreshes keep their existing wire format and verification.
 - An established Agent Instance whose reconnect is refused with
   `agent_run_credential_invalid` wakes its own Run-token refresh task rather
   than waiting for the eight-minute refresh timer. The task asks only its
