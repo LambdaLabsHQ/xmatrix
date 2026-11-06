@@ -112,7 +112,6 @@ import {
   FileText,
   Paperclip,
   RefreshCw,
-  Reply,
   Video,
   X,
 } from "lucide-react";
@@ -199,6 +198,7 @@ export type ComposerMentionInsertRequest =
 
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
+import { InlineRowPreview } from "./inline-row-preview";
 import { foldedDiscussionBody, quotedMessage, type DiscussionQuote } from "./selection-discussion";
 import { messageHere } from "./cited-passage";
 import { insertQuoteIntoDraft } from "./composer-blocks";
@@ -1489,32 +1489,32 @@ export const Composer = memo(function Composer({
           boxHeader={
             <>
               {replyTarget && (
-                <div className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
-                  <Reply className="mt-0.5 size-3.5 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-bold text-foreground">
-                      Replying to {replyTarget.author}
-                    </div>
-                    <div className="line-clamp-2 [overflow-wrap:anywhere]">
-                      {foldedDiscussionBody(replyTarget.body) || "Attachment"}
-                    </div>
-                    {replyTarget.linkOrigin?.kind === "link" && (
-                      <div className="mt-1 font-medium">
-                        {replyTarget.linkOrigin.channelName
-                          ? `Your reply will also be posted in #${replyTarget.linkOrigin.channelName}.`
-                          : "Your reply will also be posted in the Channel this Agent works in."}
+                /* The message replied to is quoted whole: the same slip as a quoted passage in the draft. */
+                <div className="px-3 pt-3">
+                  <div className="message-citation-composer composer-quote-block" data-testid="composer-reply">
+                    <div className="composer-quote-block-body">
+                      <div className="composer-quote-block-text">
+                        <InlineRowPreview text={foldedDiscussionBody(replyTarget.body) || "Attachment"} />
                       </div>
-                    )}
+                      <div className="message-citation-source">{replyTarget.author}</div>
+                      {replyTarget.linkOrigin?.kind === "link" && (
+                        <div className="message-citation-source">
+                          {replyTarget.linkOrigin.channelName
+                            ? `Your reply will also be posted in #${replyTarget.linkOrigin.channelName}.`
+                            : "Your reply will also be posted in the Channel this Agent works in."}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      title="Cancel reply"
+                      aria-label="Cancel reply"
+                      onClick={onCancelReply}
+                      className="composer-quote-block-remove"
+                    >
+                      <X className="size-3.5" />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    title="Cancel reply"
-                    aria-label="Cancel reply"
-                    onClick={onCancelReply}
-                    className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <X className="size-3.5" />
-                  </button>
                 </div>
               )}
               {(attachments.some((attachment) => !inlinedPictures.has(attachment.id))

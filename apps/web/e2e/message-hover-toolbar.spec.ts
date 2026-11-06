@@ -109,7 +109,7 @@ test("a common reaction is one click, and R replies to the message under the poi
 
   await row.hover();
   await page.keyboard.press("r");
-  await expect(page.getByText("Replying to Daniel")).toBeVisible();
+  await expect(page.getByTestId("composer-reply")).toContainText("Daniel");
 });
 
 test("one's own message keeps Edit and Recall behind More actions", async ({ page }) => {
