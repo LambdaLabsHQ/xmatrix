@@ -960,7 +960,7 @@ change the line.
   codec. Whether a pull request merged is not said: no record holds it per
   conversation (the author's own merge is not posted, and the subscription
   ends when the pull request closes). Lists are read again on the existing
-  `automations` pushes and when Schedules opens; nothing polls.
+  `automations` pushes and when Schedules opens; no timer reads them for it.
 
 ### 6.5 A GitHub file is embedded by reference
 
