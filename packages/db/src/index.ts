@@ -9,6 +9,7 @@ export {
   type ChannelCatalogResolveInput,
   type ChannelHeadMessage,
 } from "./channel-catalog.js";
+export type { AgentInstanceRecord } from "./channel-agent-presence.js";
 export {
   createAuthorityDatabaseRouter,
   type AuthorityDatabaseRouterOptions,
