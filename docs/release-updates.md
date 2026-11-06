@@ -14,6 +14,17 @@ written, and the refusal names the line and what to give instead. CLI only;
 no Hub, schema or protocol change. Older CLIs write what they are given.
 Recovery is a CI-validated beta CLI reverting this change.
 
+## Unreleased: An idle Agent's 5h/1w usage comes back when its Channel is opened
+
+A registration's quota reading counts for fifteen minutes, and since idle
+Instances stopped polling their provider (#1328) nothing read it again while
+an Agent sat idle, so its Channel card lost its 5h/1w tags. Opening the
+Channel is now the event that reads it: when the Agents it shows have no
+reading in force, the Hub asks their machines' daemons for one (the existing
+once-a-minute-per-daemon probe), and the reading reaches the owner's card
+when the probe lands. Hub only, no schema or client protocol migration.
+Recovery is a CI-validated Hub reverting the change.
+
 ## Unreleased: A page's name is its first top-level heading, wherever it stands
 
 Two Lambda Labs business-line pages read "Untitled" in the page tree,
