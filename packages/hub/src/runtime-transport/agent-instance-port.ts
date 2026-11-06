@@ -110,6 +110,12 @@ export interface AgentInstanceAuthorityRunBinding {
   instanceStatus: LiveAgentStatus;
   /** Authority version claimed by this connection, retained across hibernation. */
   connectionVersion?: number;
+  /**
+   * How many reports this connection has made at `connectionVersion`: with it,
+   * the revision of everything the connection says about its Instance.
+   * Retained across hibernation, so a report never repeats a sequence.
+   */
+  presenceSequence?: number;
   /** Dense per-channel ordinal for `@agent:N` / memberPresence cards. */
   channelInstanceId?: string;
   cwd?: string;
@@ -786,6 +792,9 @@ export class AgentInstanceRuntimeTransport {
       const nextPresentation = message.type === "presence_update"
         ? mergeAgentInstancePresentation(session.presentation, message)
         : undefined;
+      // Each report is the connection's next: what it persists and what it
+      // shows carry the same revision.
+      if (message.type === "presence_update") session.run.presenceSequence = (session.run.presenceSequence ?? 0) + 1;
       const output = await this.backend.execute(session, message);
       this.sockets.sendOutput(ws, output);
       if (message.type === "presence_update") {
