@@ -10,6 +10,22 @@ reading in force, the Hub asks their machines' daemons for one (the existing
 once-a-minute-per-daemon probe), and the reading reaches the owner's card
 when the probe lands. Hub only, no schema or client protocol migration.
 Recovery is a CI-validated Hub reverting the change.
+## Unreleased: A page's name is its first top-level heading, wherever it stands
+
+Two Lambda Labs business-line pages read "Untitled" in the page tree,
+Schedules and root tables while their documents carried `# NomadCafe` and
+`# 酒店积分数据产品（常旅客）`: an Agent's edit had left `page read` header text
+above the heading, and only a heading a document opened with named it. There
+is no stored title to drift; production history shows 49 revisions of 18
+pages unnamed this way, by notes, stray rules and pasted headers. A page's
+name is now its document's first top-level heading outside fenced code,
+wherever it stands (`data.page_title` in SQL, `pageTitleLine` in the protocol);
+a document without one, or whose first one is empty, still reads "Untitled".
+Rename rewrites that heading where it stands; the editor draws "Untitled" only
+for a document without one, and the byline and the published page stand under
+the title wherever it is. Hub and beta Web with expand migration 0238;
+`data.page_name` stays for the Hub this replaces until a contract migration
+drops it. Recovery is a CI-validated beta Hub and Web reverting this change.
 
 ## Unreleased: Phone conversation heads share state without inspecting the app tree
 
