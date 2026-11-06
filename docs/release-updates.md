@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: page edit takes what page read printed, never its header alone
+
+Agents wrote `xmatrix page read`'s header into pages: 62 revisions of 10
+Lambda Labs pages since 2026-10-02 carry its lines, first written by codex,
+claude, opencode and grok. `page edit -f` took a file as the page's text, so
+each Agent cut the header off by hand; a cut one line short or mid-header
+landed above the page's heading. `page edit` and `page create` now take the
+page's text or all of what `page read` printed, whose header is left out. A
+line only that header writes (`pageId:`, `headRevision:`, the `writeLive:`
+hint) elsewhere outside fenced code means it was cut by hand: nothing is
+written, and the refusal names the line and what to give instead. CLI only;
+no Hub, schema or protocol change. Older CLIs write what they are given.
+Recovery is a CI-validated beta CLI reverting this change.
+
 ## Unreleased: An idle Agent's 5h/1w usage comes back when its Channel is opened
 
 A registration's quota reading counts for fifteen minutes, and since idle
@@ -10,6 +24,7 @@ reading in force, the Hub asks their machines' daemons for one (the existing
 once-a-minute-per-daemon probe), and the reading reaches the owner's card
 when the probe lands. Hub only, no schema or client protocol migration.
 Recovery is a CI-validated Hub reverting the change.
+
 ## Unreleased: A page's name is its first top-level heading, wherever it stands
 
 Two Lambda Labs business-line pages read "Untitled" in the page tree,
