@@ -4561,11 +4561,14 @@ impl From<GitRunError> for GitCommandError {
 /// Every Git command the pool and run worktrees start: no console window,
 /// no fsmonitor, the current grant's credentials, and no repository bindings
 /// inherited from a hook (explicit `-C` commands must not mutate the hook's
-/// caller), with prompts off and no stdin.
+/// caller), with prompts off and no stdin. On Windows, paths past MAX_PATH
+/// are allowed: a deep repository otherwise cannot be checked out at all.
 pub(crate) fn background_git_command() -> tokio::process::Command {
     let mut command = tokio::process::Command::new("git");
     xmatrix_process_tree::hide_tokio_console_window(&mut command);
     command.args(["-c", "core.fsmonitor=false"]);
+    #[cfg(windows)]
+    command.args(["-c", "core.longpaths=true"]);
     apply_git_credential_helper(&mut command);
     command
         .env_remove("GIT_DIR")
