@@ -3,6 +3,7 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 const { decodeChannelSnapshot, channelPresenceInstances } = require("@xmatrix/protocol");
 const { createRealtimeChannels } = require("./instance-store.ts");
+const { patchChannelsRegistrationQuota } = require("./registration-quota-patch.ts");
 const { buildAgentWorkItems } = require("./workspace-shell-recovered.tsx");
 const registration = { ownerUserId: "owner", machineId: "machine", harness: "codex" };
 const record = (version, sequence, extra = {}) => ({ id: "channel:1", channelId: "channel", channelInstanceId: "1",
@@ -81,7 +82,9 @@ test("registration quota updates the modern view independently of Instance revis
   const fact = store.instances.get("channel:1");
   const reading = (percent, at = "2026-11-06T19:00:00Z") => ({ quotaState: "observed",
     quotaSource: "provider_api", quotaObservedAt: at, quotaUsages: [{ label: "5h", percent }] });
-  store.instances.receiveQuota(registration, reading(40));
+  // Exercise the pre-refactor frame path too: its view patch used to be lost
+  // when Channel ingestion stripped the now-derived Instance roster.
+  store.set(current => patchChannelsRegistrationQuota(current, registration, reading(40)));
   assert.equal(store.get("channel").presence.instances.get("channel:1").usage.quotaUsages[0].percent, 40);
   assert.equal(store.instances.get("channel:1"), fact, "account updates never rewrite Instance facts");
   store.instances.receive([record(2, 8, { status: "idle", usage: { totalTokens: 18 } })]);
