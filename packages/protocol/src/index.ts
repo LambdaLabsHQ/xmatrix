@@ -657,7 +657,7 @@ export type { AgentInstancePresence, ChannelPresence, ChannelPresenceChange, Cha
   HumanDevicePresence, HumanPresence, PresenceInstanceId } from "./channel-presence.js";
 export { decodeChannelAgentPresence, decodeChannelSnapshot, encodeChannelPresence, encodeChannelSnapshot } from "./channel-presence-codec.js";
 export { parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity,
-  parseRegistrationPresentation, mergeRegistrationPresentation, withNewestRegistrationPresentation } from "./instance-record.js";
+  mergeRegistrationPresentation, withNewestRegistrationPresentation } from "./instance-record.js";
 export type { InstanceRecord, InstanceRevision, InstanceActivity, RegistrationPresentation } from "./instance-record.js";
 
 export { agentInstanceMemberPresence, channelPresenceMember } from "./channel-presence-selectors.js";

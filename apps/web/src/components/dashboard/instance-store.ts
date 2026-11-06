@@ -1,6 +1,6 @@
 import { parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity, presenceInstanceId,
-  accountQuotaUsageFromCandidates, withRegistrationQuota,
-  type AgentRegistrationKey, type LlmUsage, type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type AgentInstancePresence } from "@xmatrix/protocol";
+  accountQuotaUsageFromCandidates, withRegistrationQuota, mergeRegistrationPresentation,
+  type RegistrationPresentation, type AgentRegistrationKey, type LlmUsage, type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type AgentInstancePresence } from "@xmatrix/protocol";
 import { createRealtimeCollection, type RealtimeCollection, type RealtimeCollectionCommit } from "./realtime-collection";
 
 /** Session-owned Instance facts. Channel lists are only metadata and query
@@ -10,7 +10,6 @@ export function createInstanceStore() {
   const activities = new Map<string, InstanceActivity>();
   const quotas = new Map<string, LlmUsage>();
   const registrationKey = (key: AgentRegistrationKey) => JSON.stringify([key.ownerUserId, key.machineId, key.harness]);
-  type RegistrationPresentation = NonNullable<InstanceRecord["registrationPresentation"]>;
   const registrations = new Map<string, RegistrationPresentation>();
   const channelSpaces = new Map<string, string>();
   const presentationKey = (spaceId: string, key: AgentRegistrationKey) => JSON.stringify([spaceId, registrationKey(key)]);
@@ -98,7 +97,8 @@ export function createInstanceStore() {
           const key = presentationKey(presentation.key.spaceId, presentation.key);
           if (!channelSpaces.has(record.channelId)) channelSpaces.set(record.channelId, presentation.key.spaceId);
           const held = registrations.get(key);
-          if (!held || held.version < presentation.version) { registrations.set(key, presentation); renamed.add(key); }
+          const next = mergeRegistrationPresentation(held, presentation);
+          if (next && next !== held) { registrations.set(key, next); renamed.add(key); }
         }
         const held = updates.get(record.id) ?? records.get(record.id);
         const { registrationPresentation: _presentation, ...fact } = record;

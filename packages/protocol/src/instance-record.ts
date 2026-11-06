@@ -70,7 +70,7 @@ export function withNewestRegistrationPresentation(kept: InstanceRecord,
 }
 
 /** A registration's display facts, only for the registration the record names. */
-export function parseRegistrationPresentation(value: unknown, registration?: AgentRegistrationKey): RegistrationPresentation {
+function parseRegistrationPresentation(value: unknown, registration?: AgentRegistrationKey): RegistrationPresentation {
   if (!isPlainRecord(value) || !Number.isSafeInteger(value.version) || Number(value.version) < 1 ||
       typeof value.displayName !== "string" || value.displayName.length === 0 || value.displayName.length > 300 ||
       value.displayName !== value.displayName.trim() || hasControlCharacter(value.displayName)) {
