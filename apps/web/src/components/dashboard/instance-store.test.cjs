@@ -3,6 +3,7 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 const { decodeChannelSnapshot, channelPresenceInstances } = require("@xmatrix/protocol");
 const { createRealtimeChannels } = require("./instance-store.ts");
+const { buildAgentWorkItems } = require("./workspace-shell-recovered.tsx");
 const registration = { ownerUserId: "owner", machineId: "machine", harness: "codex" };
 const record = (version, sequence, extra = {}) => ({ id: "channel:1", channelId: "channel", channelInstanceId: "1",
   label: "codex:1", agentName: "codex", registration, status: "busy", connectedAt: "2026-11-06T18:00:00Z",
@@ -34,7 +35,7 @@ test("explicit terminal records leave the dock but stay available to exact sende
   store.instances.receive([record(3, 0, { status: "offline" })]);
   store.instances.receive([record(2, 999, { status: "busy", lastSeenAt: "2099-01-01T00:00:00Z" })]);
   const channel = store.get("channel");
-  assert.deepEqual(channelPresenceInstances(channel.presence), []);
+  assert.deepEqual(buildAgentWorkItems(channel, []), []);
   assert.equal(channel.presence.instances.get("channel:1").status, "offline");
   store.instances.receive([record(4, 1, { status: "idle" })]);
   assert.equal(channelPresenceInstances(store.get("channel").presence)[0].status, "idle");
