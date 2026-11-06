@@ -55,6 +55,12 @@ test("mobile Summary stays on paper below the bar and ellipsizes at two lines", 
   const [bandFill, streamFill] = await Promise.all([card, page.locator(".app-message-surface")]
     .map((locator) => locator.evaluate((element) => getComputedStyle(element).backgroundColor)));
   expect(bandFill).not.toBe(streamFill);
+  // The bar above is the same block, so the sign's shadow falls on one tone
+  // (user 2026-11-04: 白顶栏+灰带子+阴影不协调), and the Summary starts
+  // clear of that shadow.
+  const barFill = await page.locator(".app-topbar").first().evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(barFill).toBe(bandFill);
+  await expect(card.locator(".app-mobile-channel-about-summary")).toHaveCSS("padding-top", "24px");
 
   // Two clamped lines, and the card is tall enough to show both: the dead
   // clamp used to cut the next line in half at the card's bottom edge.

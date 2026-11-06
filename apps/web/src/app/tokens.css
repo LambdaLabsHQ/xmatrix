@@ -428,5 +428,9 @@
     --app-panel-list: var(--app-panel-paper);
     /* The list is already paper, so a pressed row deepens instead. */
     --app-panel-row-active: oklch(0.941 0.007 82);
+    /* A conversation's head (bar, Summary, pages) sits on this deeper paper,
+       and the first words under the sign start this far below the bar. */
+    --app-mobile-head-paper: oklch(0.941 0.007 82);
+    --app-mobile-head-room: 24px;
   }
 }
