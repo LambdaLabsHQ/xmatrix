@@ -12,7 +12,6 @@ import {
   checkStable,
   codeqlAnalyses,
   codeqlLanguages,
-  COMPONENTS,
   inflightRef,
   intentRef,
   nextBetaVersion,
