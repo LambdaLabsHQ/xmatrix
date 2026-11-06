@@ -215,7 +215,9 @@ validated version). For every online daemon reporting
 with `autoUpdate: "enabled"` and an installed `version` other than the latest,
 and that was not told about this preset in the last 30 minutes, Hub issues a
 `release` harness action naming the preset only. A preset with an update recipe
-but no registry is told the same way once a day, without a version. The daemon
+but no registry is told the same way once a day, without a version. Action
+admission requires an official update recipe, matching the daemon; a missing
+version registry does not reject that daily notice. The daemon
 reads the registry itself, never a version from Hub, and when the installed
 version differs (or there is no registry) runs the update: an
 `interactiveOnly` harness at once, beside live sessions as its own updater

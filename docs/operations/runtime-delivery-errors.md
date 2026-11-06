@@ -73,6 +73,19 @@ register/unregister path (HUB-9E) that was once that caller is gone: no cell
 registers anywhere, and the directory's namespace answers 410. Message delivery
 still does not replay an unknown commit.
 
+HUB-BS/BT reached the Agent and Machine Daemon WebSocket upgrade routes with
+`overloaded=true` and an opaque platform internal-error reference. The shared
+socket router now retains the failed Runtime fetch's wall duration (capped at
+120 seconds), owner-cell versus unassigned routing, the platform's `remote`
+flag (or unavailable), and a fixed message category. Known overload messages
+distinguish request count, queued bytes, queue age and request rate; an opaque
+reference is only `internal`, not an attribution of the overload's cause.
+The HTTP report and Sentry reader expose those fields without owner/cell names,
+URLs, headers or reference values in the diagnostic. Compare the duration and
+category with Runtime traffic on recurrence. The original exception, single
+report, 503 response and client backoff remain; the router does not retry an
+overloaded connection. The underlying overload is still unconfirmed.
+
 Machine text-task answers that update a conversation's About carry the current
 Runtime's local delivery capability through the catalog mutation and its
 after-commit notification. Deliver the catalog change directly to that cell;

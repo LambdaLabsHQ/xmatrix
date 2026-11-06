@@ -30,6 +30,14 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Runtime WebSocket upgrade failures retain bounded fetch duration, owner versus
+unassigned routing, remote flag and a fixed platform message category, readable
+through Sentry without identities or request data. Overload is not replayed by
+the router. See [Runtime delivery errors](../operations/runtime-delivery-errors.md).
+Daily harness release notices without a version registry are admitted when an
+official update recipe exists, matching the daemon's action support. See
+[harness management](../harness-management.md).
+
 Handoff accepts ordinary launch conditions after the successor address and
 inherits an explicit source machine condition by admitted machine identity.
 It refuses an unconfirmed source stop before starting a successor. Exact
