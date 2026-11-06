@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Phone conversation heads share state without inspecting the app tree
+
+The phone navigation bar inferred its paper tone from a Summary plaque found
+by an app-root `:has()` selector. The shell now supplies the same summary and
+linked-page data to the bar and plaque, keeping their shared tone, spacing and
+page actions. A stylesheet architecture gate rejects this root dependency,
+and the existing scroll scope test now covers phones as well as desktop.
+The pre-fix bounded scroll sample passed its element-count budget; this change
+does not claim a measured jank reduction. Web only, no schema or client
+protocol migration. Recovery is a CI-validated beta Web reverting the change.
+
 ## Unreleased: System judgments recover a lost database response
 
 HUB-BV lost the outbox INSERT response while recording a Machine result on

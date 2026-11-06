@@ -89,4 +89,9 @@ test("mobile Summary stays on paper below the bar and ellipsizes at two lines", 
   // Still the way into channel details.
   await card.getByRole("button", { name: "Open channel Summary" }).tap();
   await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
+
+  // A conversation without either kind of head content keeps its plain bar.
+  await openGeneralChannelWithHistory(page, { ...channel, summary: "  " }, history);
+  await expect(card).toHaveCount(0);
+  await expect(page.locator(".app-topbar").first()).not.toHaveCSS("background-color", bandFill);
 });
