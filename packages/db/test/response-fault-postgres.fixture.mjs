@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Client } from "pg";
-import { createAuthorityDatabase } from "../dist/index.js";
+import { createAuthorityDatabase, PostgresSpaceControlRepository } from "../dist/index.js";
 import { connectionString } from "./postgres-database.fixture.mjs";
 
 /** Lose a real SQL response after PostgreSQL executed it, preserving transaction ownership. */
@@ -45,3 +45,9 @@ export function recoveringDatabase(getFault) {
   return { database, clients };
 }
 
+
+/** Space-control reads exercised through real SQL and the shared response-loss client. */
+export function recoveringSpaceControl(getFault) {
+  const { database, clients } = recoveringDatabase(getFault);
+  return { spaces: new PostgresSpaceControlRepository(database, "shard-0"), clients };
+}

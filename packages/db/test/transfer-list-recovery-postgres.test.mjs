@@ -1,16 +1,14 @@
 import assert from "node:assert/strict";
-import { PostgresSpaceControlRepository } from "../dist/index.js";
 import { integration } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
-import { recoveringDatabase } from "./response-fault-postgres.fixture.mjs";
+import { recoveringSpaceControl } from "./response-fault-postgres.fixture.mjs";
 
 // Healthy transfer tests own the two-confirmation move. Generic client tests
 // cannot catch this caller retaining BEGIN or reusing authority after a loss.
 integration("transfer queues recover one loss and recheck admin authority and placement (XMATRIX-HUB-BW)", async () => {
   const f = await spaceSecretFixture();
   let fault;
-  const { database, clients } = recoveringDatabase(() => fault);
-  const spaces = new PostgresSpaceControlRepository(database, "shard-0");
+  const { spaces, clients } = recoveringSpaceControl(() => fault);
   const input = { requestId: crypto.randomUUID(), spaceId: f.ids.space,
     principal: { kind: "user", id: f.ids.admin } };
   const read = (extra = {}) => spaces.listTransferProposals({ ...input, ...extra });
