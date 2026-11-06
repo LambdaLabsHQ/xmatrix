@@ -1,11 +1,16 @@
 # Release Updates
 
-## Unreleased: A page's comment thread covers less of what it says
+## Unreleased: A page's comment thread reads top to bottom on one sheet
 
-In a page's margin, an Agent at work floated a full-size disc over the
-thread's last lines, and a "back to the last person" capsule covered its
-first. The thread now drops that capsule, and the disc shrinks from 46px to
-32px at the comments' own inset. The Conversations view keeps both. Web only.
+An open thread in a page's margin inherited the Conversations view's floating
+layout: a 46px glass Agent disc and a glass reply capsule floated over its
+last lines, a "back to the last person" capsule over its first, and the Agent
+showed again as a chip in the head. The thread now stands in flow: head,
+comments, the Agents on its last line as the next comment's author (24px
+face, name and dots, or what it is doing), then the reply box on the card's
+paper a shade deeper. Comment avatars drop their status dot, an Agent's
+controls open on a paper slip, and the jump capsule is gone from the margin.
+The Conversations view is unchanged. Web only.
 
 ## Unreleased: System judgments recover a lost database response
 

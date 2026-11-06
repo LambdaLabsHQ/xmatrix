@@ -601,22 +601,14 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-age
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer {
   padding: 0 0.75rem 0.75rem !important;
 }
-.xmatrix-app .page-margin-open .app-composer-box {
+.xmatrix-app .page-margin-open .app-composer-box.app-composer-box {
   --app-liquid-surface-bg: color-mix(in oklab, var(--foreground) 6%, transparent) !important;
   --app-liquid-shared-surface-bg: var(--app-liquid-surface-bg) !important;
-  --app-liquid-specular-lead: transparent !important;
-  --app-liquid-specular-trail: transparent !important;
-  --app-liquid-float-shadow: transparent !important;
-  --app-liquid-fill-tint: transparent !important;
-  --app-liquid-rim-layers: 0 0 transparent !important;
-  --app-liquid-edge-meniscus: 0 0 transparent !important;
-  --app-glass-edge: none !important;
 }
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .page-margin-open.page-margin-open
   .app-composer-box.app-composer-box:not(.app-agent-work-card).app-material-liquid-pill {
   border: none !important;
   border-radius: 1.125rem !important;
-  background: color-mix(in oklab, var(--foreground) 6%, transparent) !important;
   box-shadow: none !important;
   --app-liquid-backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -661,7 +653,7 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app
 }
 /* The capsule's glass is drawn from the liquid tokens; on the paper they draw nothing. */
 .xmatrix-app .page-comment-box,
-.xmatrix-app .page-comment-box .app-composer-box {
+.xmatrix-app :is(.page-comment-box, .page-margin-open) .app-composer-box {
   --app-liquid-surface-bg: transparent !important;
   --app-liquid-shared-surface-bg: transparent !important;
   --app-liquid-specular-lead: transparent !important;

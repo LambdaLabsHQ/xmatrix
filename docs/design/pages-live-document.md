@@ -687,6 +687,14 @@ or joining one never leaves the page.
   passage again. Messages read as comments (a small avatar, name and time
   on one line, the text below) and a one-line reply box closes it; a thread
   with nothing said yet is just its head and that box, as a new comment is.
+  It reads top to bottom on one sheet and nothing floats over what was said
+  (asked by Daniel 2026-11-06): the Agents in it stand on its last line,
+  above the reply box, each as the next comment's author (its face at the
+  comments' avatar size, then its name and dots, or what it is doing), and
+  are not repeated in the head; a comment's avatar carries no status. The
+  reply box is the card's paper a shade deeper, with no glass or shadow, and
+  an Agent's controls open on a paper slip. The thread has no way back to a
+  person's last message: it is short enough to scroll.
   The card's head carries resolve, *Open in Conversations* and close. The other
   cards stay beside the page and make room above and below it, and it
   scrolls with the document. One conversation is open at a time; closing it
@@ -696,7 +704,7 @@ or joining one never leaves the page.
   closes the conversation.
 - **The thread is the conversation, at comment size.** It is the product's
   one conversation surface, so mentions and summons, approvals and the Agent
-  work dock work there; per-message tags and actions, attachments and the
+  work dock (on the thread's last line) work there; per-message tags and actions, attachments and the
   full header stay in *Open in Conversations*, which gives it the whole
   window.
 - **The conversation list.** The page toolbar's comment icon and total count,
