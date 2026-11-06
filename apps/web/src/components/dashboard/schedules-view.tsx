@@ -292,7 +292,7 @@ function ScheduleRow({ automation, depth, state, selected, onSelect, end, subtit
             <span className="app-page-row-title app-list-row-title min-w-0 flex-1 truncate">{automation.name}</span>
             {end && <span className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums">{end}</span>}
           </span>
-          <span className="app-list-row-meta truncate">{subtitle}</span>
+          <span className="app-list-row-meta truncate" title={subtitle}>{subtitle}</span>
         </button>
       </PageTreeRow>
     </li>

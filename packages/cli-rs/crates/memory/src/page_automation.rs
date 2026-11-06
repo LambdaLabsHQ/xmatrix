@@ -280,7 +280,9 @@ mod tests {
         );
         assert_eq!(
             render_page_automations_header(&[audited]),
-            format!("automations:\n  - a-1 · #audit · next 2026-11-07T04:30:00.000Z\n    {summary}\n")
+            format!(
+                "automations:\n  - a-1 · #audit · next 2026-11-07T04:30:00.000Z\n    {summary}\n"
+            )
         );
     }
 }

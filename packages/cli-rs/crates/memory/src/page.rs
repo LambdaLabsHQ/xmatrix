@@ -1373,7 +1373,8 @@ mod page_tests {
         ] }))
         .unwrap();
         let automations: Vec<crate::page_automation::PageAutomation> = serde_json::from_value(json!([
-            { "id": "a-1", "enabled": true, "blockId": "现状", "nextRunAt": "2026-11-09T17:28:51.546Z" }
+            { "id": "a-1", "enabled": true, "blockId": "现状", "nextRunAt": "2026-11-09T17:28:51.546Z",
+              "outcomes": [{ "kind": "page", "scheduledFor": "2026-11-04T04:59:00.000Z", "conversationId": "conv-1" }] }
         ]))
         .unwrap();
         let end = crate::page_automation::render_page_automations_header(&automations)
