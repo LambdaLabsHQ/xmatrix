@@ -3,6 +3,9 @@ import test from "node:test";
 import { createAuth } from "../src/better-auth.ts";
 import { logBetterAuthHandlerMetrics } from "../src/auth-observability.ts";
 import { integration, isolatedPostgres } from "../../db/test/postgres-database.fixture.mjs";
+import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
+import { captureErrorReports, exceptionEvents } from "./support/error-reports.mjs";
+import { sentryEventMetadata } from "../src/connectors/actions/sentry-event-metadata.ts";
 
 async function fixture() {
   const f = await isolatedPostgres("oauth_callback", { shard: true });
@@ -128,6 +131,73 @@ test("OAuth session metrics require a newly issued session cookie and never log 
         .some(({ routeGroup }) => routeGroup === "session_created"), false);
     }
   }
+});
+
+// HUB-BR: real state storage and signed-cookie verification must produce one
+// readable diagnosis without changing refusal, consuming valid state or leaking proof.
+integration("OAuth cookie refusals retain a private, request-local diagnosis in the original error report", async t => {
+  const f = await fixture();
+  const envelopes = captureErrorReports(t);
+  const warnings = t.mock.method(console, "warn", () => {});
+  const secrets = ["private-callback-code"];
+  const cookieOf = response => response.headers.getSetCookie().map(value => value.split(";", 1)[0]).join("; ");
+  try {
+    const flows = [];
+    for (const provider of ["google", "github"]) {
+      const start = () => f.call("/sign-in/social", { body: { provider,
+        callbackURL: `${f.env.APP_URL}/app`, errorCallbackURL: `${f.env.APP_URL}/login` } });
+      const started = await start(), other = await start();
+      const state = new URL((await started.json()).url).searchParams.get("state");
+      const cookie = cookieOf(started), otherCookie = cookieOf(other);
+      secrets.push(state, cookie.split("=", 2)[1], otherCookie.split("=", 2)[1]);
+      flows.push({ provider, state, cookie, otherCookie });
+    }
+    for (const [kind, cookieFor] of [["missing", () => undefined],
+      ["invalid", () => `${flows[0].cookie.split("=", 1)[0]}=private-invalid-signature`],
+      ["different", flow => flow.otherCookie]]) {
+      // Keep independent cases apart from the SDK's consecutive-event deduper;
+      // production uses no custom fingerprint and keeps SDK deduplication.
+      reportError(new Error("OAuth diagnostic test boundary"));
+      await sendErrorReports();
+      envelopes.splice(0);
+      warnings.mock.resetCalls();
+      // Both providers in flight: evidence must stay with its own HTTP request.
+      const responses = await Promise.all(flows.map(flow => f.call(
+        `/callback/${flow.provider}?state=${flow.state}&code=private-callback-code`, { cookie: cookieFor(flow) })));
+      for (const response of responses) {
+        assert.equal(response.status, 302);
+        assert.equal(response.headers.get("location"), `${f.env.APP_URL}/login?error=state_mismatch`);
+      }
+      await sendErrorReports();
+      const events = exceptionEvents(envelopes.splice(0));
+      assert.equal(events.length, 1, "identical errors keep the SDK's existing deduplication");
+      const diagnoses = warnings.mock.calls.map(call => call.arguments[1]);
+      assert.deepEqual(diagnoses.map(value => value.oauth_provider).sort(), ["github", "google"]);
+      assert.ok(diagnoses.every(value => value.oauth_state_cookie === kind));
+      for (const event of events) {
+        assert.equal(event.exception.values[0].value, "State mismatch: State not persisted correctly");
+        assert.deepEqual(event.extra, { oauth_provider: event.extra.oauth_provider,
+          oauth_state_cookie: kind, oauth_state_present: "true", oauth_code_present: "true", oauth_error_present: "false" });
+        assert.deepEqual(sentryEventMetadata({ context: event.extra }), [
+          `OAuth browser state: ${event.extra.oauth_provider} · cookie=${kind} · state=true · code=true · error=false`,
+        ]);
+        const serialized = JSON.stringify(event);
+        for (const secret of [...secrets, "private-invalid-signature"]) assert.equal(serialized.includes(secret), false);
+      }
+    }
+    // Refused cookies did not consume state; its genuine browser proof still works.
+    for (const flow of flows) {
+      const response = await f.call(`/callback/${flow.provider}?state=${flow.state}&error=access_denied`, { cookie: flow.cookie });
+      assert.equal(response.headers.get("location"), `${f.env.APP_URL}/login?error=access_denied`);
+    }
+    await sendErrorReports();
+    assert.equal(exceptionEvents(envelopes).length, 0, "valid browser proof creates no mismatch report");
+    assert.equal((await f.run("SELECT count(*)::int n FROM control.auth_sessions"))[0].n, 0);
+    for (const extra of [{ oauth_provider: "private" }, { oauth_provider: "google", oauth_state_cookie: "private" },
+      { oauth_provider: "github", oauth_state_cookie: "missing", oauth_state_present: "private", oauth_code_present: "true", oauth_error_present: "false" }]) {
+      assert.deepEqual(sentryEventMetadata({ context: extra }), []);
+    }
+  } finally { await f.close(); }
 });
 
 integration("GitHub private verified email signs in to one stable account; unverified matching email cannot link", async (t) => {

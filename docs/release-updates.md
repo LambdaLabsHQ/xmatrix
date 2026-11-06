@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: OAuth cookie refusals identify the failed browser binding
+
+HUB-BR found and parsed its stored OAuth state, then refused its signed browser
+cookie. Google and GitHub callbacks now retain the original error with a fixed
+cookie diagnosis and parameter-presence flags, readable through the Sentry
+connector. Request-local evidence keeps simultaneous flows separate and retains
+no state, code, cookie, URL or identity. Validation, state consumption, callback
+recovery and SDK deduplication are unchanged. This adds the missing
+diagnostic; the original browser cause remains unproven. Hub only, no schema or
+client migration. Recovery is a CI-validated beta Hub reverting the change.
+
 ## Unreleased: An idle Machine Daemon no longer wakes the Hub or writes PostgreSQL
 
 The daemon's minute session probe and its at-least-minutely load report each

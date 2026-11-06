@@ -26,6 +26,7 @@ import { passwordResetEmail, VERIFIED_PASSWORD_OPTIONS } from "./auth-password-p
 import { runBetterAuthHandlerWithObservedHookFailure } from "./better-auth-request-lifecycle";
 import { mintHandleForNewAccount } from "./human-handle-mint";
 import { mcpOAuthPlugins } from "./mcp-oauth";
+import { oauthStateDiagnostic } from "./oauth-state-diagnostic";
 import { TWO_FACTOR_REQUIRED, twoFactorPlugins } from "./two-factor";
 import { appOrigin, appOrigins, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
@@ -233,6 +234,7 @@ function createAuthWithDatabase(
   };
 
   const jwtPlugin = postgresJwtPlugin(env, postgres);
+  const stateDiagnostic = socialCallback ? oauthStateDiagnostic() : undefined;
   return betterAuth({
     appName: "xMatrix",
     baseURL: hubAuthBaseUrl(env),
@@ -241,6 +243,7 @@ function createAuthWithDatabase(
     database,
     trustedOrigins: Array.from(new Set([...appOrigins(env), hubAuthBaseUrl(env)])),
     socialProviders,
+    ...(stateDiagnostic ? { logger: stateDiagnostic.logger } : {}),
     // A missing/consumed state cannot supply the flow's errorCallbackURL.
     // Keep that refusal recoverable through the deployment-owned login page.
     ...(socialCallback ? { onAPIError: { errorURL: `${appOrigin(env)}/login` } } : {}),
@@ -335,6 +338,7 @@ function createAuthWithDatabase(
       },
     },
     plugins: [
+      ...(stateDiagnostic ? [stateDiagnostic.plugin] : []),
       emailOTP({
         async sendVerificationOTP({ email, otp }) {
           try {
