@@ -365,7 +365,7 @@ function senderFields(mailbox: GmailMailbox, alias: SendAsAlias | undefined): Re
 /** What an approval card shows of a frozen email: an alias sender names the mailbox it goes out through. */
 export function gmailPreview(prepared: Record<string, string>): Record<string, string> {
   const preview = Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]));
-  for (const key of ["cc", "bcc", "attachments"]) if (prepared[key]) preview[key] = prepared[key]!;
+  for (const key of ["cc", "bcc", "attachments", "inlineImages"]) if (prepared[key]) preview[key] = prepared[key]!;
   if (prepared.mailbox && prepared.draftId) preview.from = `${prepared.from} (draft ${prepared.draftId} in ${prepared.mailbox})`;
   if (prepared.via) preview.from = `${prepared.fromName ? `${prepared.fromName} <${prepared.from}>` : prepared.from} (through ${prepared.via})`;
   return preview;
@@ -439,27 +439,35 @@ async function sendPrepared(context: Context, input: Record<string, string>): Pr
   return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined, context.usage);
 }
 
-/** The attachment parts of a message, as "name (size bytes)"; `complete` is false past the MIME part limit. */
-function attachmentNames(payload: Record<string, unknown>): { names: string[]; complete: boolean } {
+/**
+ * The file parts of a message, as "name (size bytes)", split into real attachments and inline images (a part with a
+ * Content-ID or `Content-Disposition: inline`, such as the logos of a quoted signature), so a card that would send
+ * only someone's signature logos cannot look like it carries the documents its text promises. `complete` is false
+ * past the MIME part limit.
+ */
+function attachmentNames(payload: Record<string, unknown>): { names: string[]; inline: string[]; complete: boolean } {
   const names: string[] = [];
+  const inline: string[] = [];
   let seen = 0;
   let complete = true;
   const visit = (part: Record<string, unknown>): void => {
     if (seen++ >= MAX_PARTS) { complete = false; return; }
     if (isAttachment(part)) {
       const size = Number(record(part.body).size);
-      names.push(`${line(part.filename || "(unnamed)", 200)}${Number.isFinite(size) && size > 0 ? ` (${size} bytes)` : ""}`);
+      const label = `${line(part.filename || "(unnamed)", 200)}${Number.isFinite(size) && size > 0 ? ` (${size} bytes)` : ""}`;
+      const embedded = !!header(part, "content-id") || /^inline(?:\s*;|\s*$)/iu.test(header(part, "content-disposition").trim());
+      (embedded ? inline : names).push(label);
       return;
     }
     if (Array.isArray(part.parts)) for (const child of part.parts) visit(record(child));
   };
   visit(payload);
-  return { names, complete };
+  return { names, inline, complete };
 }
 
 /** One draft as the caller sees it: id, the message it holds and its headers, attachments and text. */
 function draftSummary(draft: Record<string, unknown>): { draftId: string; messageId: string; from: string; to: string; cc: string;
-  bcc: string; subject: string; attachments: string[]; body: string } {
+  bcc: string; subject: string; attachments: string[]; inline: string[]; body: string } {
   const message = record(draft.message);
   const payload = record(message.payload);
   if (typeof draft.id !== "string" || typeof message.id !== "string" || !payload.mimeType) {
@@ -473,12 +481,12 @@ function draftSummary(draft: Record<string, unknown>): { draftId: string; messag
   if (Object.values(recipients).some(value => value.length > MAX_RECIPIENT_HEADER)) {
     throw new ProviderRequestError(422, `the draft's recipient list is longer than the ${MAX_RECIPIENT_HEADER} characters an approval card shows`);
   }
-  if (!attachments.complete || attachments.names.length > MAX_DRAFT_ATTACHMENTS) {
+  if (!attachments.complete || attachments.names.length + attachments.inline.length > MAX_DRAFT_ATTACHMENTS) {
     throw new ProviderRequestError(422, `the draft has more than ${MAX_DRAFT_ATTACHMENTS} attachments or ${MAX_PARTS} MIME parts, more than an approval card lists`);
   }
   return { draftId: line(draft.id, 64), messageId: line(message.id, 32), from: line(header(payload, "from")),
     to: recipients.to!, cc: recipients.cc!, bcc: recipients.bcc!,
-    subject: line(header(payload, "subject")), attachments: attachments.names, body: text };
+    subject: line(header(payload, "subject")), attachments: attachments.names, inline: attachments.inline, body: text };
 }
 
 /** Freeze a draft for approval: who it goes to, from whom, and exactly which attachments. */
@@ -491,7 +499,9 @@ async function prepareDraft(context: Context, input: Record<string, string>): Pr
   return { ...input, draftId: summary.draftId, messageId: summary.messageId, mailbox: mailbox.address,
     account: mailbox.account, owner: mailbox.owner, from: summary.from || mailbox.address, to: summary.to, cc: summary.cc,
     bcc: summary.bcc, subject: summary.subject, body: summary.body,
-    attachments: summary.attachments.length ? `${summary.attachments.length}: ${summary.attachments.join("; ")}` : "" };
+    /* "none" is said outright: a card listing only inline images must not read as carrying files. */
+    attachments: summary.attachments.length ? `${summary.attachments.length}: ${summary.attachments.join("; ")}` : "none",
+    inlineImages: summary.inline.length ? `${summary.inline.length}: ${summary.inline.join("; ")}` : "" };
 }
 
 /**
@@ -631,7 +641,8 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     async execute(context, input) {
       const { lines, several } = await listPerMailbox(context, input, "drafts", { id: DRAFT_ID, format: "full", render: (found) => {
         const draft = draftSummary(found);
-        return [draft.draftId, draft.from, draft.to, draft.subject, `${draft.attachments.length} attachment(s)`].join("\t");
+        return [draft.draftId, draft.from, draft.to, draft.subject,
+          `${draft.attachments.length} attachment(s)${draft.inline.length ? `, ${draft.inline.length} inline image(s)` : ""}`].join("\t");
       } });
       const columns = `${several ? "mailbox, " : ""}draft id, from, to, subject, attachments`;
       return { summary: `Gmail drafts${input.query ? ` matching ${line(input.query)}` : ""} (${columns}); ` +
@@ -649,7 +660,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const frozen = input.messageId ? input : await prepareDraft(context, input);
       const id = await sendDraftPrepared(context, frozen);
       return { summary: `Sent Gmail draft ${frozen.draftId} as message ${id} from ${frozen.from} to ${frozen.to}` +
-        `${frozen.attachments ? ` with attachments ${frozen.attachments}` : ""}.` };
+        ` with attachments ${frozen.attachments || "none"}${frozen.inlineImages ? ` and inline images ${frozen.inlineImages}` : ""}.` };
     },
   },
   reply: {
