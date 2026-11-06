@@ -609,3 +609,25 @@ test("send_draft refuses a draft whose recipients or attachments an approval car
     headers: [{ name: "Bcc", value: Array.from({ length: 300 }, (_, index) => `person${index}@example.test`).join(", ") }], body: { data: base64url("x") } } } });
   await fetched([long], () => assert.rejects(ACTIONS.send_draft.prepare(ctx, { draftId: "r-1" }), /recipient list is longer/u));
 });
+
+test("a draft's card separates real attachments from inline signature images and says when there are none", async () => {
+  const logo = (name, size) => ({ mimeType: "image/png", filename: name,
+    headers: [{ name: "Content-ID", value: `<${name}@01DD>` }, { name: "Content-Disposition", value: `inline; filename="${name}"` }],
+    body: { attachmentId: `ANGjdJ_${name}`, size } });
+  const reply = (parts) => gmail({ id: "r-77", message: { id: "19a0b1c2d3e4f5a6", payload: { mimeType: "multipart/mixed",
+    headers: [{ name: "From", value: "me@example.com" }, { name: "To", value: "ops@broker.test" }, { name: "Subject", value: "RE: forms" }],
+    parts: [{ mimeType: "text/plain", body: { data: base64url("Attached are the forms.") } }, ...parts] } } });
+  /* The real failure: a reply promising documents whose only file parts were the quoted signature's logos. */
+  const logosOnly = await fetched([reply([logo("image001.png", 52012), logo("image002.png", 1074)])],
+    () => ACTIONS.send_draft.prepare(ctx, { draftId: "r-77" }));
+  assert.deepEqual([gmailPreview(logosOnly.result).attachments, gmailPreview(logosOnly.result).inlineImages],
+    ["none", "2: image001.png (52012 bytes); image002.png (1074 bytes)"]);
+  const withPdf = await fetched([reply([logo("image001.png", 52012),
+    { mimeType: "application/pdf", filename: "SS-4.pdf", body: { attachmentId: "ANGjdJ_pdf", size: 81234 } }])],
+  () => ACTIONS.send_draft.prepare(ctx, { draftId: "r-77" }));
+  assert.deepEqual([gmailPreview(withPdf.result).attachments, gmailPreview(withPdf.result).inlineImages],
+    ["1: SS-4.pdf (81234 bytes)", "1: image001.png (52012 bytes)"]);
+  const listed = await fetched([gmail({ drafts: [{ id: "r-77" }] }), reply([logo("image001.png", 52012)])],
+    () => ACTIONS.drafts.execute(ctx, { query: "", mailbox: "" }));
+  assert.match(listed.result.summary, /\t0 attachment\(s\), 1 inline image\(s\)/u);
+});

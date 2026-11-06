@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a Gmail draft's approval card says when it carries no real attachment
+
+A reply to TradeStation was approved and sent whose card listed "7
+attachments", all the logos of the quoted signature, while the two PDFs its
+text promised had never been attached. The card and receipt now list real
+attachments and inline images (parts with a Content-ID or `inline`
+disposition) separately, and say "Attachments: none" outright, so a card of
+logos cannot read as carrying documents. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: Instance status has one ordered source
 
 A newly running Agent could speak while its message said `instance offline`:
