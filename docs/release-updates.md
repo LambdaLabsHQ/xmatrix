@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: An idle Machine Daemon no longer wakes the Hub or writes PostgreSQL
+
+The daemon's minute session probe and its at-least-minutely load report each
+woke the owner's Relay Runtime, and every report wrote PostgreSQL. The daemon
+now probes with the edge heartbeat the Runtime auto-answers without waking, and
+the Hub reads liveness from the platform's timestamp of that answer: a daemon
+silent past 45 s is closed and shown offline at the next event in its owner's
+cell, or within 30 s while it carries a Run. Load history is kept on the daemon
+one sample per minute and sent with the next report, at most five minutes late;
+placement load is reported on material change. A failed delivery no longer
+closes the daemon with the client-upgrade code that stopped it reconnecting.
+Old daemons keep the previous behaviour; no schema migration. Recovery is
+reverting this change: the Hub ignores the new capability and field.
+
 ## Unreleased: A reconnected daemon keeps its fresh Machine credential
 
 HUB-A9 received a refresh credential that had expired 901 seconds earlier.
