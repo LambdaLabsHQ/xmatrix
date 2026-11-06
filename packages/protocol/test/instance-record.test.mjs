@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeInstanceRecord, parseInstanceRecord } from "../dist/index.js";
+import { mergeInstanceRecord, parseInstanceRecord, withNewestRegistrationPresentation } from "../dist/index.js";
 
 const record = (version, sequence, fields = {}) => parseInstanceRecord({
   id: "channel:1", channelId: "channel", channelInstanceId: "1", label: "codex:1", agentName: "codex",
@@ -49,4 +49,31 @@ test("record identity cannot be transferred and malformed revisions are refused"
     { version: 1, sequence: 0.5 }, { version: "1", sequence: 0 }]) {
     assert.throws(() => parseInstanceRecord({ ...current, revision }), /Invalid Instance record/);
   }
+});
+
+test("a registration's display facts ride with the record only for the registration it names", () => {
+  const key = { spaceId: "space", ownerUserId: "owner", machineId: "machine", harness: "codex" };
+  const named = record(1, 0, { registrationPresentation: { key, version: 3, displayName: "Builder" } });
+  assert.deepEqual(named.registrationPresentation, { key, version: 3, displayName: "Builder" });
+  for (const registrationPresentation of [
+    { key: { ...key, machineId: "other" }, version: 3, displayName: "Builder" },
+    { key, version: 0, displayName: "Builder" },
+    { key, version: 3, displayName: " Builder" },
+    { key, version: 3, displayName: "" },
+    { key: { ownerUserId: "owner", machineId: "machine", harness: "codex" }, version: 3, displayName: "Builder" },
+  ]) {
+    assert.throws(() => record(1, 0, { registrationPresentation }));
+  }
+  // A rename is not an Instance change: the record's own order is untouched by
+  // it, and the name goes by the registration's version whichever read came first.
+  const renamed = record(1, 0, { registrationPresentation: { key, version: 4, displayName: "Shipper" } });
+  assert.equal(mergeInstanceRecord(named, renamed), named);
+  for (const [held, read] of [[named, renamed], [renamed, named]]) {
+    const kept = withNewestRegistrationPresentation(mergeInstanceRecord(held, read), held, read);
+    assert.equal(kept.registrationPresentation.displayName, "Shipper");
+    assert.deepEqual(kept.revision, { version: 1, sequence: 0 });
+  }
+  const later = record(2, 0, { status: "offline" });
+  assert.equal(withNewestRegistrationPresentation(mergeInstanceRecord(renamed, later), renamed, later)
+    .registrationPresentation.version, 4, "a newer record without the facts keeps the newest held name");
 });

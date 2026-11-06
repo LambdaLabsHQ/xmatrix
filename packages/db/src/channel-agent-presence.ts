@@ -6,6 +6,7 @@ import {
   agentFaceUrl,
   isLiveAgentStatus,
   isAgentInstanceOfflineReason,
+  type AgentGoalStatus,
   type AgentInstanceRest,
   type AgentStatusChip,
   repoSummonReference,
@@ -13,6 +14,7 @@ import {
   type InstanceRecord,
   type InstanceRevision,
   mergeInstanceRecord,
+  withNewestRegistrationPresentation,
   type SerializedAgentInstance,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
@@ -50,6 +52,11 @@ interface InstanceRecordRow extends QueryResultRow {
   instance_model?: string | null;
   instance_effort?: string | null;
   instance_status_chips?: unknown;
+  instance_goal?: unknown;
+  instance_git_branch?: string | null;
+  registration_space?: string | null;
+  registration_display_name?: string | null;
+  registration_version?: string | number | null;
   channel_id: string;
   channel_instance_id: string | number;
   status: string;
@@ -93,12 +100,15 @@ const PRESENCE_RUN_METADATA_KEYS = ["routedAs", "clientVersion", "machineId", "h
 const PRESENCE_RUN_METADATA_SQL = `jsonb_strip_nulls(jsonb_build_object(${PRESENCE_RUN_METADATA_KEYS
   .map((key) => `'${key}',r.metadata_json->'${key}'`).join(",")}))`;
 /**
- * Durable presentation a list can show without the runtime snapshot. Activity,
- * files, intent, runtimeState and goal stay off this read; live frames fill them.
+ * Durable presentation a list can show without the runtime snapshot: what the
+ * connection persisted with the report its revision names. Activity, files,
+ * intent and runtimeState are temporary work and stay off this read.
  */
 const DURABLE_PRESENTATION_SQL = `i.presentation_json->>'model' AS instance_model,
         i.presentation_json->>'effort' AS instance_effort,
-        i.presentation_json->'statusChips' AS instance_status_chips`;
+        i.presentation_json->'statusChips' AS instance_status_chips,
+        i.presentation_json->'goal' AS instance_goal,
+        i.presentation_json->>'gitBranch' AS instance_git_branch`;
 /** What every Instance record is made of, whichever read selects it. */
 const RECORD_COLUMNS_SQL = `i.instance_id,i.channel_id,i.channel_instance_id,i.status,r.status AS run_status,
         i.version AS instance_version,i.presentation_json->'presenceVersion' AS presence_version,
@@ -109,7 +119,8 @@ const RECORD_COLUMNS_SQL = `i.instance_id,i.channel_id,i.channel_instance_id,i.s
         r.workspace_canonical_cwd,${PRESENCE_RUN_METADATA_SQL} AS run_metadata_json,
         COALESCE(s.display_name,r.metadata_json->>'agentName','Agent') AS agent_name,
         owner.email AS owner_email,
-        b.owner_user_id AS registration_owner,b.machine_id AS registration_machine,b.harness AS registration_harness`;
+        b.owner_user_id AS registration_owner,b.machine_id AS registration_machine,b.harness AS registration_harness,
+        s.space_id AS registration_space,s.display_name AS registration_display_name,s.version AS registration_version`;
 /** Why an offline Instance is still its Channel's (docs/instance-sleep.md §5). */
 const REST_COLUMNS_SQL = `i.rest_state,i.rest_reason,
         (r.status='starting' OR EXISTS (SELECT 1 FROM data.agent_reborn_intents intent
@@ -296,7 +307,9 @@ export async function readChannelInstances(
     for (const record of exact.records) {
       if (record.channelId !== channelId) continue;
       const held = byId.get(record.id);
-      byId.set(record.id, mergeInstanceRecord(held, record) as AgentInstanceRecord);
+      // The record goes by Instance revision; its registration's name by the registration's own version.
+      byId.set(record.id, withNewestRegistrationPresentation(mergeInstanceRecord(held, record), held, record) as
+        AgentInstanceRecord);
     }
     records.set(channelId, [...byId.values()].sort((left, right) =>
       Number(left.channelInstanceId) - Number(right.channelInstanceId)));
@@ -379,16 +392,37 @@ export async function loadVisibleLiveAgentPresence(
 
 /** Model, effort and chips stored on the Instance. A value this read cannot show is omitted. */
 function durableInstancePresentation(row: InstanceRecordRow): Pick<
-  SerializedAgentInstance, "model" | "effort" | "statusChips"
+  SerializedAgentInstance, "model" | "effort" | "statusChips" | "goal"
 > {
   const model = boundedPresentationText(row.instance_model, 128);
   const effort = boundedPresentationText(row.instance_effort, 64);
   const statusChips = durableStatusChips(row.instance_status_chips);
+  const goal = durableGoal(row.instance_goal);
   return {
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
     ...(statusChips ? { statusChips } : {}),
+    ...(goal ? { goal } : {}),
   };
+}
+
+const GOAL_TEXT_LIMITS = { objective: 1_024, status: 128, updatedAt: 64, reason: 512, nextAction: 512 } as const;
+const GOAL_COUNTERS = ["tokensUsed", "timeUsedSeconds", "iterationCount", "contextUsed", "toolCallCount"] as const;
+
+/** The goal the connection persisted, as far as this read can show it; anything else is left out. */
+function durableGoal(value: unknown): AgentGoalStatus | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const goal: AgentGoalStatus = typeof source.active === "boolean" ? { active: source.active } : {};
+  for (const [key, limit] of Object.entries(GOAL_TEXT_LIMITS) as [keyof typeof GOAL_TEXT_LIMITS, number][]) {
+    const text = boundedPresentationText(source[key], limit);
+    if (text) goal[key] = text;
+  }
+  for (const key of GOAL_COUNTERS) {
+    const number = source[key];
+    if (typeof number === "number" && Number.isFinite(number) && number >= 0) goal[key] = number;
+  }
+  return Object.keys(goal).length > 0 ? goal : undefined;
 }
 
 function boundedPresentationText(value: unknown, maxLength: number): string | undefined {
@@ -535,16 +569,37 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
     ...(metadataText(runMetadata, "workspaceName")
       ? { workspaceName: metadataText(runMetadata, "workspaceName") }
       : {}),
-    ...(metadataText(runMetadata, "gitBranch")
-      ? { gitBranch: metadataText(runMetadata, "gitBranch") }
+    // The branch the connection last reported, else the one its Run started on.
+    ...(boundedPresentationText(row.instance_git_branch, 256) || metadataText(runMetadata, "gitBranch")
+      ? { gitBranch: boundedPresentationText(row.instance_git_branch, 256) || metadataText(runMetadata, "gitBranch") }
       : {}),
     ...durableInstancePresentation(row),
     agentName: label,
     registration: { ownerUserId: row.registration_owner, machineId: row.registration_machine,
       harness: row.registration_harness },
+    ...registrationPresentationOf(row),
     ...(row.owner_email ? { email: row.owner_email } : {}),
     revision: revisionOf(row),
   };
+}
+
+/**
+ * How the Space names the Instance's registration, with that registration's
+ * own version. It rides with the record but is another entity: a rename moves
+ * this version and never the Instance revision. Absent without a Space row.
+ */
+function registrationPresentationOf(row: InstanceRecordRow): Pick<AgentInstanceRecord, "registrationPresentation"> {
+  if (row.registration_version === null || row.registration_version === undefined) return {};
+  const version = Number(row.registration_version);
+  const displayName = boundedPresentationText(row.registration_display_name, 300);
+  if (!Number.isSafeInteger(version) || version < 1 || !displayName || !row.registration_space) {
+    throw new DatabaseContractError("Agent registration presentation is invalid");
+  }
+  return { registrationPresentation: {
+    key: { spaceId: row.registration_space, ownerUserId: row.registration_owner,
+      machineId: row.registration_machine, harness: row.registration_harness },
+    version, displayName,
+  } };
 }
 
 function placeRecord(byChannel: Map<string, AgentInstanceRecord[]>, record: AgentInstanceRecord): void {
@@ -555,7 +610,8 @@ function placeRecord(byChannel: Map<string, AgentInstanceRecord[]>, record: Agen
 
 /** The legacy Presence entry of one record: the Instance under its registration's member. */
 function memberPresenceEntry(record: AgentInstanceRecord): ChannelMemberPresence {
-  const { agentName, registration, email, revision: _revision, ...instance } = record;
+  const { agentName, registration, email, revision: _revision, registrationPresentation: _presentation,
+    ...instance } = record;
   const avatarUrl = harnessAvatarUrl(registration.harness);
   return {
     kind: "agent",
