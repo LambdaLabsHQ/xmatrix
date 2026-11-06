@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import {
   E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, E2E_USER_SENDER,
-  fixtureJson, fixtureRequests, installWorkspaceStubs, routeHumanSocket,
+  fixtureJson, fixtureRequests, fixtureRequestBodies, installWorkspaceStubs, routeHumanSocket,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -170,8 +170,8 @@ test("versioned Instance reports alone drive dock, sender badge and Reborn throu
   await expect(dock.getByRole("button", { name: /Open codex/ })).toBeVisible();
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => { (window as unknown as { __renderCounts: { counting: boolean } }).__renderCounts.counting = true; });
-  for (let sequence = 2; sequence <= 20; sequence++) send!({ type: "instance_records", records: [
-    { ...instance, activity: `Working ${sequence}`, revision: { version: 2, sequence } },
+  for (let sequence = 2; sequence <= 20; sequence++) send!({ type: "instance_activity", activities: [
+    { instanceId: instance.id, channelId: channel.id, activity: `Working ${sequence}`, revision: { version: 2, sequence } },
   ] });
   await page.waitForTimeout(100);
   expect(await page.evaluate(() => (window as unknown as { __renderCounts: { messageRows: number } }).__renderCounts.messageRows)).toBe(0);
@@ -187,4 +187,15 @@ test("versioned Instance reports alone drive dock, sender badge and Reborn throu
   await expect(row.getByText("instance offline", { exact: true })).toHaveCount(0);
   await expect(dock.getByRole("button", { name: /Open codex/ })).toBeVisible();
   await expect(row.getByRole("button", { name: /Reborn/ })).toHaveCount(0);
+  // A stop missed while backgrounded is answered by exact ID, including ended
+  // rows; the ordinary live/resting catalog window deliberately omits it.
+  await fixtureJson(page, "canonical-exact", "**/api/xmatrix/channels/resolve", {
+    protocolVersion: 1, channels: [{ ...channel, instanceRecords: [{ ...instance, status: "offline",
+      revision: { version: 5, sequence: 0 } }], missingInstanceIds: [] }], pathsByChannelId: {},
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(row.getByText("instance offline", { exact: true })).toBeVisible();
+  expect(await fixtureRequestBodies(page, "canonical-exact")).toContainEqual(expect.objectContaining({
+    knownInstanceIds: [instance.id], includeParticipants: true,
+  }));
 });

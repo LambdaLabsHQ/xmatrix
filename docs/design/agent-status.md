@@ -27,7 +27,19 @@ Instance row's `version` orders lifecycle transitions; the current socket's
 `(version, sequence)`, replacing the whole record only when newer. Wall clocks,
 array arrival order and mutable Agent names do not order facts. Presentation
 writes are fenced by the current Run and Instance version and persist the
-sequence, so a database read and a live frame obey the same rule.
+sequence, so a database read and a live frame obey the same rule. Hub forwards
+records constructed by the database mapper; it does not reconstruct facts
+from a live card.
+
+Temporary `activity`, `intent`, `files` and `runtimeState` belong to the socket,
+not to the durable record. `instance_activity` frames carry its current version
+and report sequence; they cannot establish residency or change durable status.
+A newer lifecycle, terminal record, or later durable checkpoint fences old
+work. The Web derives the display by joining compatible work to its record.
+Every report carries the cached durable record before activity, so losing the
+connect snapshot cannot make later reports unplaceable. Work outside the
+focused Channel shares the existing one-second bounded digest window; durable
+facts are delivered immediately. Unchanged work does not add database writes.
 
 Channel catalog reads are bounded observation windows, not rosters. They return
 `instanceRecords`, including an explicit empty array, and never remove records

@@ -8,7 +8,7 @@ import type {
 
 import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
-import { releaseNotesPath } from "@xmatrix/protocol";
+import { releaseNotesPath, isChannelResidentInstance } from "@xmatrix/protocol";
 
 import {
   accountQuotaUsageFromCandidates,
@@ -1055,7 +1055,7 @@ export function channelsAfterAgentInstanceOffline(
 export function agentPresenceEndsWaits(prior: ChannelPresence | undefined, pushed: ChannelPresence): boolean {
   for (const [id, instance] of prior?.instances ?? []) {
     const next = pushed.instances.get(id);
-    if (!next) return true;
+    if (!next || isChannelResidentInstance(instance) && !isChannelResidentInstance(next)) return true;
     if (next.rest === "wake_failed" && instance.rest !== "wake_failed") return true;
   }
   for (const [id, instance] of pushed.instances) {

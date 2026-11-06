@@ -1,17 +1,19 @@
-import { parseInstanceRecord, mergeInstanceRecord, presenceInstanceId,
-  type InstanceRecord, type ChannelSnapshot, type AgentInstancePresence } from "@xmatrix/protocol";
+import { parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity, presenceInstanceId,
+  type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type AgentInstancePresence } from "@xmatrix/protocol";
 import { createRealtimeCollection, type RealtimeCollection, type RealtimeCollectionCommit } from "./realtime-collection";
 
 /** Session-owned Instance facts. Channel lists are only metadata and query
  * windows; neither a late list nor an empty one can end a live Instance. */
 export function createInstanceStore() {
   const records = createRealtimeCollection<InstanceRecord>();
-  const byChannel = new Map<string, ReadonlyMap<string, InstanceRecord>>();
+  const activities = new Map<string, InstanceActivity>();
+  type InstanceView = InstanceRecord & Pick<InstanceActivity, "activity" | "intent" | "files" | "runtimeState">;
+  const byChannel = new Map<string, ReadonlyMap<string, InstanceView>>();
   const channelById = new Map<string, string>();
   const listeners = new Map<string, Set<() => void>>();
   const modern = new Set<string>();
   const changes = new Set<(ids: readonly string[]) => void>();
-  records.subscribeChanges(ids => {
+  const publish = (ids: readonly string[]) => {
     const touched = new Set<string>();
     for (const id of ids) {
       const record = records.get(id);
@@ -22,14 +24,29 @@ export function createInstanceStore() {
       const next = new Map(byChannel.get(channelId));
       for (const id of ids) {
         const record = records.get(id);
-        if (record?.channelId === channelId) { next.set(id, record); channelById.set(id, channelId); }
-        else { next.delete(id); if (!record) channelById.delete(id); }
+        if (record?.channelId === channelId) {
+          const activity = activities.get(id);
+          if (activity && (activity.revision.version !== record.revision.version ||
+              activity.revision.sequence < record.revision.sequence)) activities.delete(id);
+          const work = activities.get(id);
+          // Work is live-only. A terminal record fences every old activity,
+          // even when a trace or an activity packet arrives after the stop.
+          const combined = work && (record.status !== "offline" || record.offlineReason) ? {
+            ...record, activity: work.activity, intent: work.intent, files: work.files, runtimeState: work.runtimeState,
+          } : record;
+          next.set(id, combined);
+          channelById.set(id, channelId);
+        } else {
+          next.delete(id);
+          if (!record) { channelById.delete(id); activities.delete(id); }
+        }
       }
       byChannel.set(channelId, next);
       for (const notify of listeners.get(channelId) ?? []) notify();
     }
     for (const notify of changes) notify([...touched]);
-  });
+  };
+  records.subscribeChanges(publish);
   return {
     get: records.get,
     getSnapshot: records.getSnapshot,
@@ -57,6 +74,21 @@ export function createInstanceStore() {
       for (const record of parsed) modern.add(record.channelId);
       if (updates.size) records.receive([...updates.values()]);
     },
+    receiveActivity(incoming: readonly InstanceActivity[]) {
+      const updates = new Map<string, InstanceActivity>();
+      for (const value of incoming) {
+        const activity = parseInstanceActivity(value);
+        const record = records.get(activity.instanceId);
+        if (!record || record.channelId !== activity.channelId || record.revision.version !== activity.revision.version || activity.revision.sequence < record.revision.sequence ||
+            record.status === "offline" && !record.offlineReason) continue;
+        const held = updates.get(activity.instanceId) ?? activities.get(activity.instanceId);
+        const next = mergeInstanceActivity(held, activity);
+        if (next !== held) updates.set(activity.instanceId, next);
+      }
+      if (!updates.size) return;
+      for (const [id, activity] of updates) activities.set(id, activity);
+      publish([...updates.keys()]);
+    },
     /** An exact read may remove only the record it was asked about. A newer
      * stream observation that arrived during the read must survive its miss. */
     reconcileMissing(ids: readonly string[], asked: ReadonlyMap<string, InstanceRecord>) {
@@ -69,7 +101,7 @@ export function createInstanceStore() {
       own.add(notify);
       return () => { own.delete(notify); if (!own.size) listeners.delete(channelId); };
     },
-    clear() { modern.clear(); records.set([]); byChannel.clear(); channelById.clear(); },
+    clear() { modern.clear(); activities.clear(); records.set([]); byChannel.clear(); channelById.clear(); },
   };
 }
 
@@ -80,7 +112,7 @@ export type InstanceStore = ReturnType<typeof createInstanceStore>;
 export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
   const metadata = createRealtimeCollection<ChannelSnapshot>();
   const instances = createInstanceStore();
-  const views = new Map<string, { channel: ChannelSnapshot; records: ReadonlyMap<string, InstanceRecord> | undefined; view: ChannelSnapshot }>();
+  const views = new Map<string, { channel: ChannelSnapshot; records: ReturnType<InstanceStore["getChannel"]>; view: ChannelSnapshot }>();
   const view = (channel: ChannelSnapshot | undefined) => {
     if (!channel || !instances.hasChannel(channel.id)) return channel;
     const records = instances.getChannel(channel.id);

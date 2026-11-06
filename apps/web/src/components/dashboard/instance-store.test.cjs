@@ -52,3 +52,25 @@ test("only exact misses delete held facts, fenced against a newer report during 
   store.set([]);
   assert.equal(store.instances.get("channel:1"), undefined);
 });
+
+test("temporary activity never establishes residency, cannot change status and ends with its lifecycle", () => {
+  const store = createRealtimeChannels([window()]);
+  const activity = (version, sequence, intent) => ({ instanceId: "channel:1", channelId: "channel",
+    revision: { version, sequence }, intent });
+  store.instances.receiveActivity([activity(2, 1, "Unknown work")]);
+  assert.deepEqual(channelPresenceInstances(store.get("channel").presence), []);
+  store.instances.receive([record(2, 4)]);
+  store.instances.receiveActivity([activity(2, 6, "Current work")]);
+  store.instances.receiveActivity([activity(2, 5, "Old work")]);
+  assert.equal(store.get("channel").presence.instances.get("channel:1").intent, "Current work");
+  assert.equal(store.get("channel").presence.instances.get("channel:1").status, "busy");
+  store.instances.receive([record(2, 7, { status: "idle" })]);
+  store.instances.receiveActivity([activity(2, 6, "Late previous turn")]);
+  assert.equal(store.get("channel").presence.instances.get("channel:1").intent, undefined,
+    "a newer durable checkpoint fences older work even within the same connection");
+  store.instances.receive([record(3, 0, { status: "offline" })]);
+  store.instances.receiveActivity([activity(2, 999, "Late old work")]);
+  assert.equal(store.get("channel").presence.instances.get("channel:1").intent, undefined);
+  store.instances.receive([record(4, 1, { status: "idle" })]);
+  assert.equal(store.get("channel").presence.instances.get("channel:1").intent, undefined);
+});

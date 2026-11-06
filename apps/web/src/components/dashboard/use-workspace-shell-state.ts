@@ -106,6 +106,8 @@ import type {
   ObservabilityEvent,
   SerializedAgent,
   ChannelSnapshot,
+  InstanceRecord,
+  ChannelPresence,
   SerializedMachineDaemon,
   SerializedAutomation,
   SerializedSpace,
@@ -938,7 +940,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         if (!channelIds.length) continue;
         try {
           const result = await fetchChannelCatalogResolve({ token: requestToken, spaceId, channelIds,
-            knownInstanceIds, includeParticipants: false, signal: AbortSignal.timeout(20_000) });
+            knownInstanceIds, includeParticipants: true, signal: AbortSignal.timeout(20_000) });
           if (tokenRef.current !== requestToken) return;
           for (const channel of result.channels) {
             if (!realtimeChannels.get(channel.id)) continue;
@@ -1542,6 +1544,19 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       connection.backOff();
     }
 
+    const refreshEndedWaits = (held: ChannelSnapshot | undefined, presence: ChannelPresence | undefined) => {
+      if (!held || !presence || !agentPresenceEndsWaits(held.presence, presence)) return;
+      void queryClient.invalidateQueries({ exact: true,
+        queryKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId: held.spaceId }) });
+      void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.channels({ userId, spaceId: held.spaceId }),
+        predicate: query => query.queryKey[5] === "catalog" && query.queryKey[7] === "unread" });
+    };
+    const receiveInstanceRecords = (records: readonly InstanceRecord[], channelId?: string) => {
+      const before = new Map(records.map(record => [record.channelId, realtimeChannels.get(record.channelId)]));
+      realtimeChannels.instances.receive(records, channelId);
+      for (const [id, held] of before) refreshEndedWaits(held, realtimeChannels.get(id)?.presence);
+    };
+
     const repairPresenceConflict = createChannelPresenceRepair(channelId => {
       const channel = realtimeChannels.get(channelId);
       if (!channel) return;
@@ -1675,8 +1690,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
     function handleRelayMessage(message: ChannelSnapshotFrame) {
       switch (message.type) {
+        case "instance_activity":
+          realtimeChannels.instances.receiveActivity(message.activities);
+          break;
         case "instance_records":
-          realtimeChannels.instances.receive(message.records);
+          receiveInstanceRecords(message.records);
           break;
         case "error":
           if (message.requestId === "web-subscribe" && !relayPushConnectedRef.current &&
@@ -1794,7 +1812,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             const channelId = message.event.channelId;
             const records = message.event.metadata?.instanceRecords;
             if (Array.isArray(records)) {
-              realtimeChannels.instances.receive(records, channelId);
+              receiveInstanceRecords(records, channelId);
               break;
             }
             if (realtimeChannels.instances.hasChannel(channelId)) break;
@@ -1803,16 +1821,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             if (agents) {
               const held = channelsRef.current.find((channel) => channel.id === channelId);
               setChannels((current) => channelsWithAgentPresence(current, channelId, agents));
-              // An asker that stopped, or whose wake failed, waits no more: only
-              // the counts and the unread list count waits, so only they are read.
-              if (held && userId && agentPresenceEndsWaits(held.presence, agents)) {
-                void queryClient.invalidateQueries({ exact: true,
-                  queryKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId: held.spaceId }) });
-                void queryClient.invalidateQueries({
-                  queryKey: xmatrixQueryKeys.channels({ userId, spaceId: held.spaceId }),
-                  predicate: (query) => query.queryKey[5] === "catalog" && query.queryKey[7] === "unread",
-                });
-              }
+              refreshEndedWaits(held, agents);
             } else {
               const spaceId = channelsRef.current.find((channel) => channel.id === channelId)?.spaceId;
               if (spaceId) window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
