@@ -10,6 +10,9 @@ import {
   type AgentStatusChip,
   repoSummonReference,
   type ChannelMemberPresence,
+  type InstanceRecord,
+  type InstanceRevision,
+  mergeInstanceRecord,
   type SerializedAgentInstance,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
@@ -25,9 +28,24 @@ const MAX_VISIBLE_LIVE_AGENT_CHANNELS = 200;
 /** Resting Instances shown per Channel, newest first (docs/instance-sleep.md §5). */
 export const MAX_RESTING_INSTANCES_PER_CHANNEL = 12;
 const MAX_RESTING_AGENT_INSTANCES = 2_048; // the query's literal LIMIT
+/** Instance ids one exact read answers for (the query's literal LIMIT). */
+export const MAX_KNOWN_INSTANCE_IDS = 1_024;
 
-interface ChannelAgentPresenceRow extends QueryResultRow {
+/**
+ * One Instance as it stands, complete in itself (protocol `InstanceRecord`),
+ * with its owner's email when the Space shows it. `revision.version` is
+ * `data.instances.version`, which every lifecycle write advances (launch,
+ * connect, transition, rest, wake failure, reborn, handoff, stop);
+ * `revision.sequence` orders one connection's reports within that version and
+ * is 0 when the row holds no report made at its current version.
+ */
+export type AgentInstanceRecord = InstanceRecord & { email?: string };
+
+interface InstanceRecordRow extends QueryResultRow {
   instance_id: string;
+  instance_version: string | number;
+  presence_version?: unknown;
+  presence_sequence?: unknown;
   instance_usage?: LlmUsage | null;
   instance_model?: string | null;
   instance_effort?: string | null;
@@ -35,6 +53,7 @@ interface ChannelAgentPresenceRow extends QueryResultRow {
   channel_id: string;
   channel_instance_id: string | number;
   status: string;
+  run_status: string;
   created_at: string | Date;
   updated_at: string | Date;
   registration_owner: string;
@@ -48,6 +67,7 @@ interface ChannelAgentPresenceRow extends QueryResultRow {
   rest_state?: string | null;
   rest_reason?: string | null;
   waking?: boolean | null;
+  launch_in_flight?: boolean | null;
 }
 
 const iso = (value: string | Date) => checkedStoredIso(value,
@@ -77,42 +97,63 @@ const PRESENCE_RUN_METADATA_SQL = `jsonb_strip_nulls(jsonb_build_object(${PRESEN
 const DURABLE_PRESENTATION_SQL = `i.presentation_json->>'model' AS instance_model,
         i.presentation_json->>'effort' AS instance_effort,
         i.presentation_json->'statusChips' AS instance_status_chips`;
-
-function harnessAvatarUrl(harness: string): string | undefined {
-  return agentFaceUrl(harness);
-}
-
-/**
- * Reads the complete, bounded Agent Instance Presence projection for the exact
- * Channels selected by an authoritative PostgreSQL catalog transaction.
- */
-export async function loadChannelAgentPresence(
-  transaction: DatabaseTransaction,
-  spaceId: string,
-  channelIds: readonly string[],
-): Promise<Map<string, Record<string, ChannelMemberPresence>>> {
-  const selected = [...new Set(channelIds)];
-  const selectedSet = new Set(selected);
-  const byChannel = new Map<string, Record<string, ChannelMemberPresence>>();
-  if (selected.length === 0) return byChannel;
-  if (selected.length > MAX_CHANNEL_SELECTORS) {
-    throw new DatabaseContractError("Agent presence Channel selector limit exceeded");
-  }
-  const rows = await transaction.query<ChannelAgentPresenceRow>({
-    name: "channel_agent_presence_v10",
-    text: `SELECT i.instance_id,i.channel_id,i.channel_instance_id,i.status,
+/** What every Instance record is made of, whichever read selects it. */
+const RECORD_COLUMNS_SQL = `i.instance_id,i.channel_id,i.channel_instance_id,i.status,r.status AS run_status,
+        i.version AS instance_version,i.presentation_json->'presenceVersion' AS presence_version,
+        i.presentation_json->'presenceSequence' AS presence_sequence,
         i.created_at,i.updated_at,i.presentation_json->'usage' AS instance_usage,${DURABLE_PRESENTATION_SQL},
         r.workspace_machine_id,
         r.workspace_canonical_cwd,${PRESENCE_RUN_METADATA_SQL} AS run_metadata_json,
         COALESCE(s.display_name,r.metadata_json->>'agentName','Agent') AS agent_name,
         owner.email AS owner_email,
-        b.owner_user_id AS registration_owner,b.machine_id AS registration_machine,b.harness AS registration_harness
-      FROM data.instances i
+        b.owner_user_id AS registration_owner,b.machine_id AS registration_machine,b.harness AS registration_harness`;
+/** Why an offline Instance is still its Channel's (docs/instance-sleep.md §5). */
+const REST_COLUMNS_SQL = `i.rest_state,i.rest_reason,
+        (r.status='starting' OR EXISTS (SELECT 1 FROM data.agent_reborn_intents intent
+          WHERE intent.source_instance_id=i.instance_id AND intent.state IN ('waiting','prepared'))) AS waking,
+        EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.instance_id=i.instance_id
+          AND launch.state IN ('prepared','queued','admitted','spawned')) AS launch_in_flight`;
+/** The rows a record joins, in the Space bound to `spaceSql`. */
+function recordFromSql(spaceSql: string): string {
+  return `FROM data.instances i
       JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
-      JOIN data.run_agent_registrations b ON b.run_id=r.run_id AND b.space_id=$1
+      JOIN data.run_agent_registrations b ON b.run_id=r.run_id AND b.space_id=${spaceSql}
       LEFT JOIN data.space_agent_registrations s ON s.space_id=b.space_id AND s.owner_user_id=b.owner_user_id
         AND s.machine_id=b.machine_id AND s.harness=b.harness
-      LEFT JOIN data.space_members owner ON owner.space_id=$1 AND owner.user_id=b.owner_user_id
+      LEFT JOIN data.space_members owner ON owner.space_id=${spaceSql} AND owner.user_id=b.owner_user_id`;
+}
+
+function harnessAvatarUrl(harness: string): string | undefined {
+  return agentFaceUrl(harness);
+}
+
+function selectedChannels(channelIds: readonly string[]): string[] {
+  const selected = [...new Set(channelIds)];
+  if (selected.length > MAX_CHANNEL_SELECTORS) {
+    throw new DatabaseContractError("Agent presence Channel selector limit exceeded");
+  }
+  return selected;
+}
+
+/**
+ * Every Agent Instance record the exact Channels selected by an authoritative
+ * PostgreSQL catalog read show: all live Instances, and the newest few resting
+ * ones. It is a bounded window, not the Channel's whole roster: an Instance
+ * missing from it is unknown to the reader, never gone. Every selected Channel
+ * has an entry, empty when it shows no Instance.
+ */
+export async function loadChannelInstanceRecords(
+  transaction: DatabaseTransaction,
+  spaceId: string,
+  channelIds: readonly string[],
+): Promise<Map<string, AgentInstanceRecord[]>> {
+  const selected = selectedChannels(channelIds);
+  const byChannel = new Map<string, AgentInstanceRecord[]>(selected.map((channelId) => [channelId, []]));
+  if (selected.length === 0) return byChannel;
+  const live = await transaction.query<InstanceRecordRow>({
+    name: "channel_agent_presence_v11",
+    text: `SELECT ${RECORD_COLUMNS_SQL}
+      ${recordFromSql("$1")}
       WHERE i.channel_id=ANY($2::text[])
         AND i.status IN (${LIVE_AGENT_STATUS_SQL})
         AND r.status IN ('running','stopping')
@@ -121,36 +162,22 @@ export async function loadChannelAgentPresence(
     values: [spaceId, selected],
     maxRows: MAX_ACTIVE_AGENT_INSTANCES + 1,
   });
-  if (rows.length > MAX_ACTIVE_AGENT_INSTANCES) {
+  if (live.length > MAX_ACTIVE_AGENT_INSTANCES) {
     throw new DatabaseContractError("Active Agent Instance presence limit exceeded");
   }
-  for (const row of rows) {
-    if (!isLiveAgentStatus(row.status)) {
-      throw new DatabaseContractError("Agent presence status is invalid");
-    }
-    addPresenceRow(byChannel, selectedSet, row);
+  for (const row of live) {
+    const record = instanceRecord(row);
+    if (!isLiveAgentStatus(record.status)) throw new DatabaseContractError("Agent presence status is invalid");
+    placeRecord(byChannel, record);
   }
   // A resting Instance is offline but still the Channel's: the next message
   // wakes it (docs/instance-sleep.md §5). Newest first, a bounded few per
   // Channel; unlike live Instances, a Channel with more simply shows fewer.
-  const resting = await transaction.query<ChannelAgentPresenceRow>({
-    name: "channel_agent_resting_presence_v6",
-    text: `SELECT * FROM (SELECT i.instance_id,i.channel_id,i.channel_instance_id,i.status,i.rest_state,i.rest_reason,
-        i.created_at,i.updated_at,i.presentation_json->'usage' AS instance_usage,${DURABLE_PRESENTATION_SQL},
-        r.workspace_machine_id,
-        r.workspace_canonical_cwd,${PRESENCE_RUN_METADATA_SQL} AS run_metadata_json,
-        COALESCE(s.display_name,r.metadata_json->>'agentName','Agent') AS agent_name,
-        owner.email AS owner_email,
-        b.owner_user_id AS registration_owner,b.machine_id AS registration_machine,b.harness AS registration_harness,
-        (r.status='starting' OR EXISTS (SELECT 1 FROM data.agent_reborn_intents intent
-          WHERE intent.source_instance_id=i.instance_id AND intent.state IN ('waiting','prepared'))) AS waking,
+  const resting = await transaction.query<InstanceRecordRow>({
+    name: "channel_agent_resting_presence_v7",
+    text: `SELECT * FROM (SELECT ${RECORD_COLUMNS_SQL},${REST_COLUMNS_SQL},
         row_number() OVER (PARTITION BY i.channel_id ORDER BY i.updated_at DESC,i.instance_id) AS rest_rank
-      FROM data.instances i
-      JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
-      JOIN data.run_agent_registrations b ON b.run_id=r.run_id AND b.space_id=$1
-      LEFT JOIN data.space_agent_registrations s ON s.space_id=b.space_id AND s.owner_user_id=b.owner_user_id
-        AND s.machine_id=b.machine_id AND s.harness=b.harness
-      LEFT JOIN data.space_members owner ON owner.space_id=$1 AND owner.user_id=b.owner_user_id
+      ${recordFromSql("$1")}
       WHERE i.channel_id=ANY($2::text[]) AND i.status='offline'
         AND (i.rest_state IN ('sleeping','interrupted','wake_failed')
           OR (i.rest_state IS NULL AND r.status IN ('starting','running') AND EXISTS (
@@ -163,22 +190,153 @@ export async function loadChannelAgentPresence(
     maxRows: MAX_RESTING_AGENT_INSTANCES,
   });
   for (const row of resting) {
-    // A launched Instance that has not connected yet has no rest; it is waking
-    // for the first time, and the Channel shows it from the summon onwards.
-    if (row.status === "offline" && (row.rest_state === null || row.rest_state === undefined)) {
-      addPresenceRow(byChannel, selectedSet, row, "waking");
-      continue;
-    }
-    if (row.status !== "offline" || (row.rest_state !== "sleeping" && row.rest_state !== "interrupted" &&
-        row.rest_state !== "wake_failed")) {
-      throw new DatabaseContractError("Resting Agent presence state is invalid");
-    }
-    // A failed wake's successor never reached its daemon, so its Run may still
-    // read `starting`; the failure, not that Run, is the Instance's state.
-    addPresenceRow(byChannel, selectedSet, row,
-      row.rest_state !== "wake_failed" && row.waking === true ? "waking" : row.rest_state);
+    const record = instanceRecord(row);
+    if (!record.rest) throw new DatabaseContractError("Resting Agent presence state is invalid");
+    placeRecord(byChannel, record);
   }
   return byChannel;
+}
+
+/**
+ * Exactly these Instances, as they stand now, wherever they stand: live,
+ * resting or gone. Only Instances of `channelIds` (Channels the caller has
+ * authorized for this reader) answer; every other id, including one that no
+ * longer exists, is named in `missingInstanceIds`. Unlike absence from a
+ * Channel window, a missing id here is an answer: the reader holds nothing the
+ * Space can still show it.
+ */
+export async function loadAgentInstanceRecordsById(
+  transaction: DatabaseTransaction,
+  spaceId: string,
+  channelIds: readonly string[],
+  instanceIds: readonly string[],
+): Promise<{ records: AgentInstanceRecord[]; missingInstanceIds: string[] }> {
+  const requested = [...new Set(instanceIds)];
+  if (requested.some((id) => typeof id !== "string" || id.length === 0 || id.length > 300)) {
+    throw new DatabaseContractError("Instance id is invalid");
+  }
+  if (requested.length > MAX_KNOWN_INSTANCE_IDS) {
+    throw new DatabaseContractError("Known Instance id limit exceeded");
+  }
+  const channels = selectedChannels(channelIds);
+  if (requested.length === 0 || channels.length === 0) return { records: [], missingInstanceIds: requested };
+  const rows = await transaction.query<InstanceRecordRow>({
+    name: "agent_instance_records_by_id_v1",
+    text: `SELECT ${RECORD_COLUMNS_SQL},${REST_COLUMNS_SQL}
+      ${recordFromSql("$1")}
+      WHERE i.instance_id=ANY($2::text[]) AND i.channel_id=ANY($3::text[])
+      ORDER BY i.channel_id,i.channel_instance_id,i.instance_id
+      LIMIT 1024`,
+    values: [spaceId, requested, channels],
+    maxRows: MAX_KNOWN_INSTANCE_IDS,
+  });
+  const allowed = new Set(channels);
+  const records = rows.map((row) => {
+    if (!allowed.has(row.channel_id)) {
+      throw new DatabaseContractError("Agent presence escaped its selected Channel scope");
+    }
+    return instanceRecord(row);
+  });
+  const found = new Set(records.map((record) => record.id));
+  return { records, missingInstanceIds: requested.filter((id) => !found.has(id)) };
+}
+
+/** The Channel an Instance id names: stored ids are `<channelId>:<ordinal>` (0084). */
+function instanceChannelId(instanceId: string): string | undefined {
+  const at = instanceId.lastIndexOf(":");
+  return at > 0 && /^[1-9][0-9]{0,15}$/u.test(instanceId.slice(at + 1)) ? instanceId.slice(0, at) : undefined;
+}
+
+/** A Channel read's Agent Instances, in both shapes its answer carries. */
+export interface ChannelInstances {
+  /** The window in the legacy member-keyed shape, for `memberPresence`. */
+  readonly memberPresence: Map<string, Record<string, ChannelMemberPresence>>;
+  /** Each selected Channel's records: its window and, for ids its reader holds, their exact answer. */
+  readonly records: Map<string, AgentInstanceRecord[]>;
+  /** Set when the reader named the ids it holds: per selected Channel, those of its ids that no longer answer. */
+  readonly missing?: Map<string, string[]>;
+}
+
+/**
+ * The Agent Instances of the exact Channels an authoritative catalog read
+ * selected. With `knownInstanceIds` (the records its reader holds), each of
+ * those Channels also answers for every one of its ids exactly, ended ones
+ * included, so the reader can retire what it holds without inferring anything
+ * from the window. Ids of Channels outside the selection get no answer: the
+ * Channel's own absence from the read is that answer.
+ */
+export async function readChannelInstances(
+  transaction: DatabaseTransaction,
+  spaceId: string,
+  channelIds: readonly string[],
+  knownInstanceIds?: readonly string[],
+): Promise<ChannelInstances> {
+  const window = await loadChannelInstanceRecords(transaction, spaceId, channelIds);
+  const memberPresence = channelMemberPresence(window);
+  if (knownInstanceIds === undefined) return { memberPresence, records: window };
+  if (!Array.isArray(knownInstanceIds) || knownInstanceIds.length > MAX_KNOWN_INSTANCE_IDS) {
+    throw new DatabaseContractError("Known Instance id limit exceeded");
+  }
+  const known = [...new Set(knownInstanceIds)].filter((id) => {
+    if (typeof id !== "string" || id.length === 0 || id.length > 300) {
+      throw new DatabaseContractError("Instance id is invalid");
+    }
+    const channelId = instanceChannelId(id);
+    return channelId !== undefined && window.has(channelId);
+  });
+  const exact = await loadAgentInstanceRecordsById(transaction, spaceId, [...window.keys()], known);
+  const records = new Map<string, AgentInstanceRecord[]>();
+  for (const [channelId, windowRecords] of window) {
+    const byId = new Map(windowRecords.map((record) => [record.id, record]));
+    for (const record of exact.records) {
+      if (record.channelId !== channelId) continue;
+      const held = byId.get(record.id);
+      byId.set(record.id, mergeInstanceRecord(held, record) as AgentInstanceRecord);
+    }
+    records.set(channelId, [...byId.values()].sort((left, right) =>
+      Number(left.channelInstanceId) - Number(right.channelInstanceId)));
+  }
+  const missing = new Map<string, string[]>([...window.keys()].map((channelId) => [channelId, []]));
+  for (const id of exact.missingInstanceIds) missing.get(instanceChannelId(id)!)?.push(id);
+  return { memberPresence, records, missing };
+}
+
+/** Put one Channel's records, and its exact misses when asked, on its serialized answer. */
+export function withChannelInstanceRecords(
+  channel: Record<string, unknown>,
+  instances: ChannelInstances,
+  channelId: string,
+): Record<string, unknown> {
+  channel.instanceRecords = instances.records.get(channelId) ?? [];
+  if (instances.missing) channel.missingInstanceIds = instances.missing.get(channelId) ?? [];
+  return channel;
+}
+
+/** The legacy member-keyed shape of Channel windows, for readers of `memberPresence`. */
+export function channelMemberPresence(
+  records: ReadonlyMap<string, readonly AgentInstanceRecord[]>,
+): Map<string, Record<string, ChannelMemberPresence>> {
+  const byChannel = new Map<string, Record<string, ChannelMemberPresence>>();
+  for (const [channelId, channelRecords] of records) {
+    if (channelRecords.length === 0) continue;
+    const channelPresence: Record<string, ChannelMemberPresence> = {};
+    for (const record of channelRecords) channelPresence[record.id] = memberPresenceEntry(record);
+    byChannel.set(channelId, channelPresence);
+  }
+  return byChannel;
+}
+
+/**
+ * The Agent Instance Presence of the exact Channels selected by an
+ * authoritative PostgreSQL catalog transaction, in the legacy member-keyed
+ * shape: the window `loadChannelInstanceRecords` reads.
+ */
+export async function loadChannelAgentPresence(
+  transaction: DatabaseTransaction,
+  spaceId: string,
+  channelIds: readonly string[],
+): Promise<Map<string, Record<string, ChannelMemberPresence>>> {
+  return channelMemberPresence(await loadChannelInstanceRecords(transaction, spaceId, channelIds));
 }
 
 /**
@@ -215,7 +373,7 @@ export async function loadVisibleLiveAgentPresence(
 }
 
 /** Model, effort and chips stored on the Instance. A value this read cannot show is omitted. */
-function durableInstancePresentation(row: ChannelAgentPresenceRow): Pick<
+function durableInstancePresentation(row: InstanceRecordRow): Pick<
   SerializedAgentInstance, "model" | "effort" | "statusChips"
 > {
   const model = boundedPresentationText(row.instance_model, 128);
@@ -272,39 +430,73 @@ function durableStatusChips(value: unknown): AgentStatusChip[] | undefined {
   return chips;
 }
 
-/** One Instance's Presence entry. A Run's actor is its Instance, as in runtime
- * presence and message senders; a registration is launch configuration. */
-function addPresenceRow(
-  byChannel: Map<string, Record<string, ChannelMemberPresence>>,
-  selected: ReadonlySet<string>,
-  row: ChannelAgentPresenceRow,
-  rest?: AgentInstanceRest,
-): void {
-  if (!selected.has(row.channel_id)) {
-    throw new DatabaseContractError("Agent presence escaped its selected Channel scope");
+/**
+ * How a row stands. A live row whose Run has ended, and an offline one with
+ * no rest and no first launch in flight, have left the Channel; both windows
+ * and exact reads classify with this one rule.
+ */
+function recordState(row: InstanceRecordRow): {
+  status: SerializedAgentInstance["status"];
+  rest?: AgentInstanceRest;
+} {
+  if (isLiveAgentStatus(row.status)) {
+    return row.run_status === "running" || row.run_status === "stopping"
+      ? { status: row.status } : { status: "offline" };
   }
+  if (row.status !== "offline") throw new DatabaseContractError("Agent presence status is invalid");
+  if (row.rest_state === "wake_failed") return { status: "offline", rest: "wake_failed" };
+  // A failed wake's successor never reached its daemon, so its Run may still
+  // read `starting`; the failure, not that Run, is the Instance's state.
+  if (row.rest_state === "sleeping" || row.rest_state === "interrupted") {
+    return { status: "offline", rest: row.waking === true ? "waking" : row.rest_state };
+  }
+  // A launched Instance that has not connected yet has no rest; it is waking
+  // for the first time, and the Channel shows it from the summon onwards.
+  if ((row.rest_state === null || row.rest_state === undefined) && row.launch_in_flight === true &&
+      (row.run_status === "starting" || row.run_status === "running")) {
+    return { status: "offline", rest: "waking" };
+  }
+  if (row.rest_state !== null && row.rest_state !== undefined && row.rest_state !== "stopped") {
+    throw new DatabaseContractError("Resting Agent presence state is invalid");
+  }
+  return { status: "offline" };
+}
+
+function revisionOf(row: InstanceRecordRow): InstanceRevision {
+  const version = Number(row.instance_version);
+  if (!Number.isSafeInteger(version) || version < 1) {
+    throw new DatabaseContractError("Agent presence version is invalid");
+  }
+  const sequence = Number(row.presence_sequence);
+  // A report made under an earlier version says nothing about this one.
+  return Number(row.presence_version) === version && Number.isSafeInteger(sequence) && sequence > 0
+    ? { version, sequence } : { version, sequence: 0 };
+}
+
+/** One Instance's record. A Run's actor is its Instance, as in runtime
+ * presence and message senders; a registration is launch configuration. */
+function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
   const ordinal = Number(row.channel_instance_id);
   if (!Number.isSafeInteger(ordinal) || ordinal < 1) {
     throw new DatabaseContractError("Agent presence ordinal is invalid");
   }
+  const { status, rest } = recordState(row);
   const runMetadata = row.run_metadata_json ?? {};
   const remoteRepo = metadataText(runMetadata, "remoteRepo");
   const repository = remoteRepo ? repoSummonReference(remoteRepo) : undefined;
   const label = row.agent_name;
-  const avatarUrl = harnessAvatarUrl(row.registration_harness);
   const channelInstanceId = String(ordinal);
-  const connectedAt = iso(row.created_at);
-  const lastSeenAt = iso(row.updated_at);
-  const instance: SerializedAgentInstance = {
+  const usage = localLlmUsage(row.instance_usage ?? undefined);
+  return {
     id: row.instance_id,
     channelInstanceId,
     channelId: row.channel_id,
     label: `${label}:${channelInstanceId}`,
-    connectedAt,
-    lastSeenAt,
-    status: row.status as SerializedAgentInstance["status"],
+    connectedAt: iso(row.created_at),
+    lastSeenAt: iso(row.updated_at),
+    status,
     ...(repository ? { repository } : {}),
-    ...(localLlmUsage(row.instance_usage ?? undefined) ? { usage: localLlmUsage(row.instance_usage ?? undefined) } : {}),
+    ...(usage ? { usage } : {}),
     ...(rest ? { rest } : {}),
     ...(rest === "wake_failed" && row.rest_reason ? { restReason: row.rest_reason } : {}),
     // A message could not wake it: its machine is offline, and wakes it on reconnect.
@@ -337,18 +529,32 @@ function addPresenceRow(
       ? { gitBranch: metadataText(runMetadata, "gitBranch") }
       : {}),
     ...durableInstancePresentation(row),
-  };
-  const channelPresence = byChannel.get(row.channel_id) ?? {};
-  channelPresence[row.instance_id] = {
-    kind: "agent",
-    label,
+    agentName: label,
     registration: { ownerUserId: row.registration_owner, machineId: row.registration_machine,
       harness: row.registration_harness },
     ...(row.owner_email ? { email: row.owner_email } : {}),
+    revision: revisionOf(row),
+  };
+}
+
+function placeRecord(byChannel: Map<string, AgentInstanceRecord[]>, record: AgentInstanceRecord): void {
+  const channelRecords = byChannel.get(record.channelId);
+  if (!channelRecords) throw new DatabaseContractError("Agent presence escaped its selected Channel scope");
+  channelRecords.push(record);
+}
+
+/** The legacy Presence entry of one record: the Instance under its registration's member. */
+function memberPresenceEntry(record: AgentInstanceRecord): ChannelMemberPresence {
+  const { agentName, registration, email, revision: _revision, ...instance } = record;
+  const avatarUrl = harnessAvatarUrl(registration.harness);
+  return {
+    kind: "agent",
+    label: agentName,
+    registration,
+    ...(email ? { email } : {}),
     ...(avatarUrl ? { avatarUrl } : {}),
-    lastSeenAt,
+    lastSeenAt: instance.lastSeenAt,
     usage: instance.usage,
     instances: [instance],
   };
-  byChannel.set(row.channel_id, channelPresence);
 }

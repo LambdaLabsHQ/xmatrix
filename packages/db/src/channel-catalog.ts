@@ -4,7 +4,7 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { singleReadStatements } from "./single-read-statements.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
-import { loadChannelAgentPresence } from "./channel-agent-presence.js";
+import { readChannelInstances, withChannelInstanceRecords } from "./channel-agent-presence.js";
 import {
   channelVisibilityScope,
   CHANNEL_ACTIVITY_MESSAGE_KIND,
@@ -69,6 +69,11 @@ export interface ChannelCatalogResolveInput {
   routeToken?: string;
   /** False returns metadata only; member/presence fields are omitted, not cleared. */
   includeParticipants?: boolean;
+  /**
+   * Instance ids the reader holds. Each resolved Channel answers for its own
+   * ids exactly, ended ones included, in `missingInstanceIds` when gone.
+   */
+  knownInstanceIds?: readonly string[];
 }
 
 interface CatalogRow extends ChannelPresentationRow {
@@ -676,7 +681,7 @@ export class PostgresChannelCatalogRepository {
       if (!envelope && !stats) throw new DatabaseContractError("Catalog page is unavailable");
       const rows = envelope?.page_rows ?? [];
       const page = rows.slice(0, limit);
-      const presence = await loadChannelAgentPresence(
+      const instances = await readChannelInstances(
         transaction, spaceId, page.map((row) => row.channel_id),
       );
       const last = page.at(-1);
@@ -686,7 +691,8 @@ export class PostgresChannelCatalogRepository {
         openChannelHumanMemberIdsBySpace:
           await openChannelHumanMemberIdsBySpace(transaction, spaceId, page),
         rows: page.map((row) => ({
-          channel: serialize(row, presence.get(row.channel_id)),
+          channel: withChannelInstanceRecords(serialize(row, instances.memberPresence.get(row.channel_id)),
+            instances, row.channel_id),
           ownActivityAt: iso(row.activity_at),
         })),
         nextCursor: rows.length > limit && last ? {
@@ -831,12 +837,13 @@ export class PostgresChannelCatalogRepository {
         const key = row.requested_route_token ?? row.requested_channel_id;
         (paths[key] ??= []).push(row.channel_id);
       }
-      const presence = input.includeParticipants === false ? new Map()
-        : await loadChannelAgentPresence(transaction, spaceId, [...byId.keys()]);
+      const instances = input.includeParticipants === false ? undefined
+        : await readChannelInstances(transaction, spaceId, [...byId.keys()], input.knownInstanceIds);
       return {
         protocolVersion: 1,
         channels: [...byId.values()].map((row) => {
-          const channel = serialize(row, presence.get(row.channel_id));
+          const channel = serialize(row, instances?.memberPresence.get(row.channel_id));
+          if (instances) withChannelInstanceRecords(channel, instances, row.channel_id);
           if (input.includeParticipants === false) {
             delete channel.memberPresence;
             delete channel.visibleHumanMemberIds;
