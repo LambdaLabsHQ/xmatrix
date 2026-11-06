@@ -704,12 +704,12 @@ export function canMentionMessageSender(message: TimelineItem): boolean {
   return !message.recalledAt && (message.senderKind === "agent" || message.senderKind === "user");
 }
 
-export function rebornBodyForMessageSender(message: TimelineItem): string | null {
+export function rebornBodyForMessageSender(message: TimelineItem, status?: string): string | null {
   if (message.senderKind !== "agent" || message.reservedSystemAgent || message.recalledAt) {
     return null;
   }
   // Only for dead/offline instances; live controls already expose Reborn on the work dock.
-  if (!message.senderInstanceStale && message.senderStatus !== "offline") {
+  if (status !== "offline") {
     return null;
   }
   const mention = (message.senderMention || "").trim().replace(/^[@＠]/, "");
@@ -723,8 +723,8 @@ export function rebornBodyForMessageSender(message: TimelineItem): string | null
   return `@${name}:${ordinal}:reborn`;
 }
 
-export function canRebornMessageSender(message: TimelineItem): boolean {
-  return Boolean(rebornBodyForMessageSender(message));
+export function canRebornMessageSender(message: TimelineItem, status?: string): boolean {
+  return Boolean(rebornBodyForMessageSender(message, status));
 }
 
 export function isMessageActionBypassTarget(target: EventTarget): boolean {

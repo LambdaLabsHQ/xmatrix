@@ -14,7 +14,7 @@ import { readSpaceCommandReplay, storeSpaceCommandReplay } from "./command-repla
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { singleReadStatements } from "./single-read-statements.js";
 import { DatabaseContractError } from "./errors.js";
-import { loadChannelAgentPresence, loadVisibleLiveAgentPresence } from "./channel-agent-presence.js";
+import { loadVisibleLiveAgentPresence, readChannelInstances, withChannelInstanceRecords } from "./channel-agent-presence.js";
 import { insertSpaceMember, spaceMemberRole } from "./space-members.js";
 import { writeOutbox } from "./outbox.js";
 import { advanceSpaceControlHead } from "./space-control-head.js";
@@ -1748,6 +1748,8 @@ export class PostgresSpaceControlRepository {
     principal: SpaceControlPrincipal;
     /** Names the read path for observation; `channel.get` unless a caller narrows it. */
     operation?: `channel.get${string}`;
+    /** Instance ids the reader holds for this Channel: each is answered exactly, ended ones included. */
+    knownInstanceIds?: readonly string[];
   }): Promise<Record<string, unknown>> {
     const { requestId, spaceId, principalId } = principalScope(input);
     const channelId = bounded(input.channelId, "channelId");
@@ -1776,10 +1778,10 @@ export class PostgresSpaceControlRepository {
       });
       const row = rows[0];
       if (!row) throw new SpaceControlError("channel_not_found", 404, "Channel not found");
-      const presence = await loadChannelAgentPresence(transaction, spaceId, [channelId]);
-      const channel = serializeChannel(row,
+      const instances = await readChannelInstances(transaction, spaceId, [channelId], input.knownInstanceIds);
+      const channel = withChannelInstanceRecords(serializeChannel(row,
         row.mode === "closed" ? await this.visibleHumanIds(transaction, row) : [],
-        presence.get(channelId));
+        instances.memberPresence.get(channelId)), instances, channelId);
       const members = row.mode === "open" ? await transaction.query<QueryResultRow & { user_id: string }>({
         name: "open_channel_space_members_v1",
         text: `SELECT user_id FROM data.space_members
@@ -2643,15 +2645,15 @@ export class PostgresSpaceControlRepository {
         maxRows: limit + 1,
       });
       const page = rows.slice(0, limit);
-      const presence = await loadChannelAgentPresence(
+      const instances = await readChannelInstances(
         transaction, spaceId, page.map((row) => row.channel_id),
       );
       const serialized: Record<string, unknown>[] = [];
       for (const row of page) {
-        serialized.push(serializeChannel(
+        serialized.push(withChannelInstanceRecords(serializeChannel(
           row, row.visible_human_ids ?? [],
-          presence.get(row.channel_id),
-        ));
+          instances.memberPresence.get(row.channel_id),
+        ), instances, row.channel_id));
       }
       const openMemberRows = page.some((row) => row.mode === "open")
         ? await transaction.query<QueryResultRow & { user_id: string }>({

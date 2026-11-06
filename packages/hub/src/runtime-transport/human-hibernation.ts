@@ -35,7 +35,7 @@ export function parseHumanHibernationAttachment(value: unknown): HumanHibernatio
       !hibernationHasOnlyKeys(session, [
         "user", "connectedAt", "lastSeenAt", "focusedChannelId",
         "deviceClient", "deviceLabel", "platform", "clientVersion", "clientProtocolVersion", "presenceDigest",
-        "presenceCoverage",
+        "presenceCoverage", "instanceRecords",
       ]) ||
       !hibernationValidDate(session.connectedAt) || !hibernationValidDate(session.lastSeenAt) ||
       !(session.focusedChannelId === null || hibernationBoundedString(session.focusedChannelId)) ||
@@ -46,7 +46,8 @@ export function parseHumanHibernationAttachment(value: unknown): HumanHibernatio
       !(session.clientProtocolVersion === undefined ||
         (Number.isSafeInteger(session.clientProtocolVersion) && (session.clientProtocolVersion as number) > 0)) ||
       !(session.presenceDigest === undefined || session.presenceDigest === true) ||
-      !(session.presenceCoverage === undefined || session.presenceCoverage === true)) {
+      !(session.presenceCoverage === undefined || session.presenceCoverage === true) ||
+      !(session.instanceRecords === undefined || session.instanceRecords === true)) {
     return undefined;
   }
   const user = session.user;
@@ -70,6 +71,7 @@ export function parseHumanHibernationAttachment(value: unknown): HumanHibernatio
       ...hibernationClientVersions(session),
       ...(session.presenceDigest === true ? { presenceDigest: true } : {}),
       ...(session.presenceCoverage === true ? { presenceCoverage: true } : {}),
+      ...(session.instanceRecords === true ? { instanceRecords: true } : {}),
     },
   };
 }

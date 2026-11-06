@@ -1,11 +1,13 @@
-import { SYSTEM_ANNOTATION_AUTHOR, type ObservabilityEvent } from "@xmatrix/protocol";
+import { SYSTEM_ANNOTATION_AUTHOR, utf8ByteLength, type ObservabilityEvent } from "@xmatrix/protocol";
 import { postgresMessageLiveAgentPresence, postgresMessageLiveRecipientUserIds,
   withPostgresMessageRequestScope } from "./postgres-message-authority";
 import {
   deliverToAudience,
+  RUNTIME_CHANNEL_AGENT_PRESENCE_URL,
   RUNTIME_CHANNEL_OBSERVABLE_EVENT_URL,
   runtimeJsonRequest,
 } from "./runtime-transport/runtime-principal-delivery";
+import { channelAgentPresenceDeliveryBody, channelInstanceRecordBatches } from "./runtime-transport/channel-agent-presence-delivery";
 import type { Env } from "./types";
 
 /* The Hub's judgments about a Channel's messages, pushed to its live people.
@@ -40,25 +42,59 @@ export async function publishChannelInvocationsChanged(env: Env, channelId: stri
 }
 
 /**
- * Tell a Channel's people how its Agents stand after one of its Instances
- * changed outside a live socket: it went to rest, a message woke it, its wake
- * waits for an offline machine, or it was stopped. The push carries the
- * Channel's Agents as its lists show them (`presenceCoverage: "agents"`), so a
- * client merges them in place and reads nothing; the people stay as it holds
- * them. It is the whole current state, not a step: a dropped push is repaired
- * by the next one or by the read a reconnect makes. Best effort, like the
- * pushes above.
+ * Tell a Channel's people how its Agents stand after some of its Instances
+ * (`instanceIds`) changed outside a live socket: they went to rest, a message
+ * woke them, their wake waits for an offline machine, or they were stopped.
+ * Each changed Instance is read exactly, so one that ended arrives as its
+ * terminal record, never as an absence; the Channel's window comes with it.
+ * Records go first; old clients get the Channel's Agents as their lists show
+ * them (`presenceCoverage: "agents"`). A push that fails is read and sent
+ * once more, so the last word on an Instance is the current one; past that,
+ * the read a reconnect makes repairs it.
  */
-export async function publishChannelPresenceChanged(env: Env, channelId: string): Promise<void> {
-  try {
-    const { recipientUserIds, memberPresence } = await withPostgresMessageRequestScope(
-      env, (scope) => postgresMessageLiveAgentPresence(env, channelId, scope));
+export async function publishChannelPresenceChanged(env: Env, channelId: string,
+  instanceIds: readonly string[] = []): Promise<void> {
+  const publish = async () => {
+    const { recipientUserIds, memberPresence, instanceRecords } = await withPostgresMessageRequestScope(
+      env, (scope) => postgresMessageLiveAgentPresence(env, channelId, scope, instanceIds));
+    // The longest actual recipient envelope determines the shared batches.
+    const recipient = (userId: string) => ({ userId, digest: false, card: false, channel: false, immediate: [] });
+    const longest = recipientUserIds.reduce((held, userId) =>
+      utf8ByteLength(JSON.stringify(userId)) > utf8ByteLength(JSON.stringify(held)) ? userId : held, "");
+    const batches = channelInstanceRecordBatches(instanceRecords,
+      { channelId, reason: "update", recipients: [recipient(longest)] });
+    for (const records of batches) {
+      await deliverToAudience({
+        env, label: "Instance records", audience: { humans: recipientUserIds },
+        request: share => {
+          const body = channelAgentPresenceDeliveryBody({ channelId, reason: "update", records,
+            recipients: [recipient(share.owner)] });
+          if (!body) throw new RangeError("Instance records exceed delivery budget");
+          return runtimeJsonRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_URL, body);
+        },
+      });
+    }
     await publishToChannelPeople(env, channelId, recipientUserIds, "presence_updated",
       { memberPresence, presenceCoverage: "agents" });
-  } catch (error) {
-    console.warn("Channel presence push failed", {
-      channelId, error: error instanceof Error ? error.message : String(error) });
+  };
+  try {
+    await publish();
+  } catch (first) {
+    console.warn("Channel presence push failed; reading again", {
+      channelId, error: first instanceof Error ? first.message : String(first) });
+    await new Promise((resolve) => setTimeout(resolve, CHANNEL_PRESENCE_RETRY_MS));
+    await publish().catch((error: unknown) => console.warn("Channel presence push failed", {
+      channelId, error: error instanceof Error ? error.message : String(error) }));
   }
+}
+
+/** How long a failed presence push waits before it reads and sends again. */
+const CHANNEL_PRESENCE_RETRY_MS = 1_000;
+
+/** The Instance a Run belongs to: stored Run ids are `<instanceId>#<n>` (0084). */
+export function runInstanceId(runId: string): string | undefined {
+  const at = runId.lastIndexOf("#");
+  return at > 0 ? runId.slice(0, at) : undefined;
 }
 
 /** A Hub judgment about one message, to every live member of its Channel. */

@@ -547,7 +547,7 @@ async fn page_text_for_agent(
 /// Text the Agent writes into a page, as the page takes it (`page_media`):
 /// the images it read are the page's own again, and an image of a local file
 /// is refused — one the page already showed at `base` is not the Agent's to
-/// answer for.
+/// answer for. The header `page read` prints is not the page's (`page_text`).
 async fn page_text_from_agent(
     hub_url: &str,
     token: &str,
@@ -555,6 +555,7 @@ async fn page_text_from_agent(
     base: Option<(&str, u64)>,
     text: &str,
 ) -> error::Result<String> {
+    let text = page_text(text)?;
     let (written, refused) = page_media::to_page(text, HashSet::new());
     let Some((page, revision)) = base.filter(|_| !refused.is_empty()) else {
         return refused_or(written, &refused);
@@ -585,8 +586,91 @@ fn refused_or(written: String, refused: &[String]) -> error::Result<String> {
 /// How a Run writes into the page as it replies, said where it reads the page.
 fn live_write_hint(page_id: &str) -> String {
     format!(
-        "writeLive: in your reply, ⟦write page:{page_id}⟧ ⟦after \"words on the page\"⟧ markdown ⟦/write⟧ goes into the page as you write it\n"
+        "{LIVE_WRITE_HINT}{page_id}⟧ ⟦after \"words on the page\"⟧ markdown ⟦/write⟧ goes into the page as you write it\n"
     )
+}
+
+const LIVE_WRITE_HINT: &str = "writeLive: in your reply, ⟦write page:";
+
+/// What `page read` prints: the page under its header, whose last lines say what the page's
+/// Automations are and how a Run writes into it.
+pub(crate) fn render_page_read(
+    page: &PageDocument,
+    awareness: Option<&PageAwareness>,
+    header_end: &str,
+) -> String {
+    let document = render_page_document_with(page, awareness);
+    match document.split_once("\n---\n") {
+        Some((front, body)) if !header_end.is_empty() => {
+            format!("{front}\n{header_end}---\n{body}")
+        }
+        _ => document,
+    }
+}
+
+/// The page's own text in what an Agent writes into it (`page edit`, `page create`): all of
+/// what `page read` printed leaves its header out. A line of that header anywhere else means
+/// the text was cut out of a read by hand, so nothing is written: a page never carries it.
+fn page_text(text: &str) -> error::Result<&str> {
+    let text = read_header_end(text).map_or(text, |end| &text[end..]);
+    match read_header_line(text) {
+        None => Ok(text),
+        Some((number, line)) => Err(CliError::Launch(format!(
+            "Nothing was written: line {number} (`{line}`) is from the header `xmatrix page read` prints \
+             above a page, not from the page. Give the page's text, which starts after that header's \
+             closing `---`, or all of what `page read` printed."
+        ))),
+    }
+}
+
+/// Where the page's text starts in `text` that opens with the header `page read` prints.
+fn read_header_end(text: &str) -> Option<usize> {
+    let mut end = 0;
+    for (index, line) in text.split_inclusive('\n').enumerate() {
+        end += line.len();
+        let line = line.trim_end();
+        match index {
+            0 if line != "---" => return None,
+            1 if !line.starts_with("pageId: ") => return None,
+            0 | 1 => {}
+            _ if line == "---" => return Some(end),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The first line outside fenced code that only `page read`'s header writes, numbered from 1.
+fn read_header_line(text: &str) -> Option<(usize, &str)> {
+    let mut fence: Option<String> = None;
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        let marker: String = match line.chars().next() {
+            Some(first @ ('`' | '~')) => line.chars().take_while(|c| *c == first).collect(),
+            _ => String::new(),
+        };
+        if marker.len() >= 3 {
+            match &fence {
+                None => fence = Some(marker),
+                Some(open) if marker.starts_with(open.as_str()) && line.len() == marker.len() => {
+                    fence = None
+                }
+                Some(_) => {}
+            }
+            continue;
+        }
+        let header = line
+            .strip_prefix("pageId: ")
+            .is_some_and(|id| !id.is_empty() && !id.contains(char::is_whitespace))
+            || line
+                .strip_prefix("headRevision: ")
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            || line.starts_with(LIVE_WRITE_HINT);
+        if fence.is_none() && header {
+            return Some((index + 1, line));
+        }
+    }
+    None
 }
 
 /// Page markdown and Automation instructions can be resent with -f or --stdin.
@@ -699,7 +783,6 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             )
             .await;
             let response = PageResponse { page: page_read };
-            let document = render_page_document_with(&response.page, awareness.as_ref());
             // A page's Automations are live references: the header says what each one is now.
             let mut header = crate::page_automation::render_page_automations_header(&automations);
             // A Run's reply goes into a page as it is written (runtime_page_stream_write).
@@ -712,11 +795,7 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             }
             print!(
                 "{}",
-                match document.split_once("\n---\n") {
-                    Some((front, body)) if !header.is_empty() =>
-                        format!("{front}\n{header}---\n{body}"),
-                    _ => document,
-                }
+                render_page_read(&response.page, awareness.as_ref(), &header)
             );
             Ok(())
         }
@@ -1269,6 +1348,67 @@ mod page_tests {
         };
         let rendered = render_page_document(&doc);
         assert!(rendered.starts_with("---\npageId: p\ntitle: P\nrevision: 1\nheadRevision: 1\ncanEdit: true\nlastEditedBy: Yiming\n---\n# P\n"));
+    }
+
+    /// What a Run's `page read` printed for NomadCafe on 2026-11-04, header and all.
+    fn printed_read() -> (PageDocument, String) {
+        let doc = PageDocument {
+            summary: page("p", None, "V"),
+            body: "# NomadCafe\n\n## 现状\n\nOpen in Canggu.\n".into(),
+            revision_info: PageRevision {
+                revision: 61,
+                kind: "edit".into(),
+                authors: vec![PageAuthor {
+                    kind: "agent".into(),
+                    label: "codex".into(),
+                }],
+                conversation_ids: vec![],
+                created_at: "2026-11-04T04:59:39.273Z".into(),
+            },
+        };
+        let awareness: PageAwareness = serde_json::from_value(json!({ "blocks": [
+            { "blockId": "现状", "updated": { "revision": 60, "authors": [{ "kind": "agent", "label": "codex" }],
+                "conversationIds": ["conv-1"], "createdAt": "2026-11-04T04:59:39.273Z" } },
+            { "blockId": "", "working": [{ "name": "claude:1", "status": "busy", "conversationId": "conv-2" }] }
+        ] }))
+        .unwrap();
+        let automations: Vec<crate::page_automation::PageAutomation> = serde_json::from_value(json!([
+            { "id": "a-1", "enabled": true, "blockId": "现状", "nextRunAt": "2026-11-09T17:28:51.546Z",
+              "outcomes": [{ "kind": "page", "scheduledFor": "2026-11-04T04:59:00.000Z", "conversationId": "conv-1" }] }
+        ]))
+        .unwrap();
+        let end = crate::page_automation::render_page_automations_header(&automations)
+            + &live_write_hint("p");
+        let printed = render_page_read(&doc, Some(&awareness), &end);
+        (doc, printed)
+    }
+
+    #[test]
+    fn what_page_read_printed_is_written_back_as_the_page_text() {
+        let (doc, printed) = printed_read();
+        assert_eq!(page_text(&printed).unwrap(), doc.body);
+        // As a refused edit prints the head, and as the page's own text.
+        assert_eq!(page_text(&render_page_document(&doc)).unwrap(), doc.body);
+        assert_eq!(page_text(&doc.body).unwrap(), doc.body);
+    }
+
+    #[test]
+    fn a_page_read_header_cut_out_by_hand_never_reaches_the_page() {
+        let (_, printed) = printed_read();
+        // What Agents left above a page's heading: the header without its first line, or its tail.
+        for cut in [
+            &printed[4..],
+            &printed[printed.find("writeLive").unwrap()..],
+        ] {
+            let refused = page_text(cut).unwrap_err().to_string();
+            assert!(
+                refused.contains("Nothing was written: line 1 ("),
+                "{refused}"
+            );
+        }
+        // The same lines quoted as code are the page's text.
+        let quoted = "# CLI\n\n```\npageId: p\nheadRevision: 3\n```\n";
+        assert_eq!(page_text(quoted).unwrap(), quoted);
     }
 
     #[test]

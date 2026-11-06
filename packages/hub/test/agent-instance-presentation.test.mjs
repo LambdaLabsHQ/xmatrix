@@ -710,13 +710,13 @@ test('model catalog observation time changes only when a catalog is reported', (
 test("registration catalog and live presence retain one card per Instance through disconnect", async () => {
   const rows = [3, 4].map(ordinal => ({
     instance_id: `instance-${ordinal}`, channel_id: "channel-1", channel_instance_id: ordinal,
-    status: "online", created_at: "2026-09-24T09:00:00Z", updated_at: "2026-09-24T09:01:00Z", registration_owner: "owner-1", registration_machine: "machine-1",
+    status: "online", run_status: "running", instance_version: 1, created_at: "2026-09-24T09:00:00Z", updated_at: "2026-09-24T09:01:00Z", registration_owner: "owner-1", registration_machine: "machine-1",
     registration_harness: "claude", workspace_machine_id: "machine-1",
     workspace_canonical_cwd: "/workspace", run_metadata_json: { identityKind: "instance", remoteRepo: "LambdaLabsHQ/xmatrix" },
     profile_name: "Claude", profile_runtime: "claude", profile_metadata_json: {}, owner_email: null,
   }));
   const catalog = await loadChannelAgentPresence({ async query(statement) {
-    return statement.name === "channel_agent_resting_presence_v6" ? [] : rows;
+    return statement.name === "channel_agent_resting_presence_v7" ? [] : rows;
   } }, "space-1", ["channel-1"]);
   let channel = { id: "channel-1", memberPresence: catalog.get("channel-1") };
   const sessions = rows.map(row => ({

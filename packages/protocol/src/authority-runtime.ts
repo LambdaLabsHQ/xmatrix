@@ -380,6 +380,11 @@ export interface SerializedChannel {
    */
   visibleHumanMemberIds?: string[];
   memberPresence?: Record<string, ChannelMemberPresence>;
+  /** Independent, versioned Instance observations. This is a window, never a
+   * complete roster: an omitted Instance has no implied lifecycle transition. */
+  instanceRecords?: import("./instance-record.js").InstanceRecord[];
+  /** Explicit misses from a requested exact-ID reconciliation, not a window. */
+  missingInstanceIds?: string[];
   /**
    * What `memberPresence` speaks for. Absent, it is the Channel's whole
    * presence, people included. `agents`: only its Agent Instances, sent by a

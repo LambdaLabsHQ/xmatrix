@@ -129,3 +129,20 @@ test("presence for unshown conversations leaves as one digest per window, newest
   digests.flush(socket);
   assert.equal(sent.length, 2, "an empty window sends nothing");
 });
+
+test("background work batches by Instance revision, rather than arrival order, without changing durable records", async () => {
+  const { HumanPresenceDigests } = await import("../src/runtime-transport/human-presence-digest.ts");
+  const frames = [];
+  const digests = new HumanPresenceDigests((_socket, frame) => frames.push(frame));
+  const socket = {};
+  const activity = (version, sequence, intent) => ({ instanceId: "channel:1", channelId: "channel",
+    revision: { version, sequence }, intent });
+  const newer = activity(4, 1, "Resumed work");
+  digests.addActivity(socket, activity(3, 2, "Previous work"));
+  digests.addActivity(socket, newer);
+  digests.addActivity(socket, activity(3, 999, "Late old socket"));
+  digests.flush(socket);
+  assert.deepEqual(frames, [{ type: "instance_activity", activities: [newer] }]);
+  digests.flush(socket);
+  assert.equal(frames.length, 1, "a flushed window is not replayed");
+});

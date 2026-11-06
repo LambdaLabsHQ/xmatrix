@@ -1036,6 +1036,13 @@ export interface SerializedAutomation {
   lastError?: string;
   /** Latest durable dispatch attempt, including a retryable failure that has not produced a Run. */
   latestExecution?: AutomationExecutionStatus;
+  /**
+   * What its latest occurrences produced, newest first: at most ten, within
+   * the thirty days occurrences are kept (docs/design/pages-live-document.md
+   * §6.4). A page's Automation read through its page's or its Space's list;
+   * absent from other reads and from older Hubs.
+   */
+  outcomes?: AutomationOutcome[];
   /** Successful scheduled deliveries; migrated legacy Agent runs remain counted. */
   deliveryCount: number;
   lastDeliveryAt?: string;
@@ -1144,6 +1151,21 @@ export interface AutomationExecutionStatus {
   finishedAt?: string;
   errorCode?: string;
   errorMessage?: string;
+}
+
+/**
+ * What one occurrence produced, read from its own conversation, strongest
+ * first: a pull request it opened, a page it changed, nothing, or no Agent
+ * started; `running` until that is settled.
+ */
+export const AUTOMATION_OUTCOME_KINDS = ["pull_request", "page", "none", "failed_to_start", "running"] as const;
+export type AutomationOutcomeKind = (typeof AUTOMATION_OUTCOME_KINDS)[number];
+
+export interface AutomationOutcome {
+  kind: AutomationOutcomeKind;
+  scheduledFor: string;
+  /** The conversation the occurrence ran in. */
+  conversationId: string;
 }
 
 export interface AutomationCapabilities {

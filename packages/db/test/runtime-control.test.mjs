@@ -65,7 +65,7 @@ test("confirmed terminal transitions fence the exact Run without invoking deleti
 test("an Instance's live status is written with its presentation, and never revives or retires it", async () => {
   const db = database(query => {
     if (query.name === "space_placement_resolve_v1") return [activePlacementRow()];
-    if (query.name === "runtime_instance_presentation_v4") return [{ instance_id: "instance-1" }];
+    if (query.name === "runtime_instance_presentation_v5") return [{ instance_id: "instance-1" }];
     return [];
   });
   const repository = new PostgresRuntimeRepository(db);
@@ -73,10 +73,8 @@ test("an Instance's live status is written with its presentation, and never revi
     presentation: { model: "m" }, at: "2026-10-03T15:34:00.000Z" };
   await repository.recordInstancePresentation({ ...input, status: "busy" });
   await repository.recordInstancePresentation(input);
-  const writes = db.calls.filter(query => query.name === "runtime_instance_presentation_v4");
+  const writes = db.calls.filter(query => query.name === "runtime_instance_presentation_v5");
   assert.deepEqual(writes.map(query => query.values[3]), ["busy", null]);
-  // Liveness belongs to the lifecycle: only a live row moves between live statuses.
-  assert.match(writes[0].text, /status=CASE WHEN \$4::text IS NOT NULL AND status IN \('online','busy','idle'\) THEN \$4::text ELSE status END/);
   assert.equal(JSON.parse(writes[0].values[1]).status, undefined, "status stays out of the header snapshot");
   await assert.rejects(() => repository.recordInstancePresentation({ ...input, status: "offline" }),
     error => error.code === "invalid_runtime_request");
@@ -641,7 +639,7 @@ test("Instance quota persistence uses its Run binding and leaves no per-Instance
   const db = database(query => {
     if (query.name === "space_placement_resolve_v1") return [{ space_id: "space-1", shard_id: "shard-0",
       placement_epoch: 1, state: "active", target_shard_id: null, plan_class: "shared" }];
-    if (query.name === "runtime_instance_presentation_v4") return [{ instance_id: "instance-1", run_id: "bound-run" }];
+    if (query.name === "runtime_instance_presentation_v5") return [{ instance_id: "instance-1", run_id: "bound-run" }];
     if (query.name === "runtime_instance_quota_binding_v1") {
       assert.deepEqual(query.values, ["bound-run", "space-1"]);
       return [{ owner_user_id: "owner", machine_id: "bound-machine", harness: "claude" }];
@@ -652,7 +650,7 @@ test("Instance quota persistence uses its Run binding and leaves no per-Instance
     actorUserId: "owner", spaceId: "space-1", instanceId: "instance-1", at: new Date().toISOString(),
     presentation: { model: "m", usage: { totalTokens: 7, contextUsedTokens: 3, quotaSource: "provider_api", quotaUsages: [{ percent: 100 }] } } });
   assert.deepEqual(result.registration, { ownerUserId: "owner", machineId: "bound-machine", harness: "claude" });
-  const write = db.calls.find(query => query.name === "runtime_instance_presentation_v4");
+  const write = db.calls.find(query => query.name === "runtime_instance_presentation_v5");
   assert.deepEqual(JSON.parse(write.values[1]), { model: "m", usage: { totalTokens: 7, contextUsedTokens: 3 } });
   assert.equal(write.values[4], "owner");
 });

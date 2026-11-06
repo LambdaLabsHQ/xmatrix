@@ -106,6 +106,8 @@ try {
     // Exercise deletion against the current schema, including registered Run dependencies.
     "packages/db/test/space-deletion-postgres.test.mjs",
     "packages/db/test/automation-run-links-postgres.test.mjs",
+    // A schedule's outcomes read each occurrence's conversation through the 0239 indexes.
+    "packages/db/test/automation-outcomes-postgres.test.mjs",
     "packages/db/test/postgres-fixture-lifecycle.test.mjs",
     "packages/db/test/client-postgres.test.mjs",
     // Machine advisory scopes and runtime heads need real live lock-wait evidence.

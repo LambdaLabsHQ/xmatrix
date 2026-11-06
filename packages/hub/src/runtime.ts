@@ -79,18 +79,20 @@ export function jevEvaluator(env: RuntimeEnv, context: {
 export async function recordInstancePresentation(env: RuntimeEnv, input: {
   commandId: string; actorUserId: string; spaceId: string; instanceId: string;
   presentation: Record<string, unknown> | null; status?: string; at: string;
+  /** The reporting connection's revision; with it the write answers with the Instance's record. */
+  ordering?: { expectedVersion: number; runId: string; presenceSequence: number };
 }) {
   const result = await runtimeRepository(env).recordInstancePresentation({
     actorUserId: input.actorUserId, requestId: input.commandId, spaceId: input.spaceId,
     instanceId: input.instanceId, presentation: input.presentation,
-    ...(input.status ? { status: input.status } : {}), at: input.at,
+    ...(input.status ? { status: input.status } : {}), ...input.ordering, at: input.at,
   });
   // A reading with headroom may leave a refused summon's wait ready; the
   // caller delivers it without holding up this report.
   const quotaWaitsReady = result.registration
     ? await observeRegistrationQuota(runtimeDirectory(env), result.registration, input.presentation?.usage, input.commandId)
     : false;
-  return { instanceId: result.instanceId, recorded: result.recorded,
+  return { instanceId: result.instanceId, recorded: result.recorded, ...(result.record ? { record: result.record } : {}),
     ...(quotaWaitsReady && result.registration ? { quotaWaitsReadyFor: result.registration.ownerUserId } : {}) };
 }
 

@@ -45,7 +45,7 @@ import { RELAY_RUNTIME_HUMAN_PRESENCE_PATH } from "./runtime-transport/human-pre
 import { RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH, RELAY_RUNTIME_AGENT_SWITCH_CONTINUATION_PATH } from "./product-agent-model-effort";
 import { RELAY_RUNTIME_AGENT_PRESENCE_PATH } from "./runtime-transport/agent-presence-snapshot";
 import {
-  parseChannelAgentPresenceDelivery,
+  readChannelAgentPresenceDelivery,
   RELAY_RUNTIME_CHANNEL_AGENT_PRESENCE_PATH,
 } from "./runtime-transport/channel-agent-presence-delivery";
 import { createProductionRelayRuntimeProductPortFactory } from "./runtime-transport/production-product-port-factory";
@@ -430,7 +430,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_CHANNEL_AGENT_PRESENCE_PATH) {
       if (!this.productAdapter) return runtimeTransportUnavailable("product");
-      const delivery = parseChannelAgentPresenceDelivery(await request.json().catch(() => undefined));
+      const delivery = await readChannelAgentPresenceDelivery(request).catch(() => undefined);
       if (!delivery) {
         return Response.json({ error: "Invalid channel agent presence delivery" }, {
           status: 400,

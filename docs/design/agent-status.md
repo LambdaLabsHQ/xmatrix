@@ -20,35 +20,86 @@ for how long) are words in the work dock, never more colours.
 
 ## Instance identity in presence
 
-The shared protocol model stores Human presence and devices separately from a
-read-only map of Agent Instances keyed by branded global Instance ID. Each
-Instance has one required registration; selectors derive the harness avatar,
-ordering and daemon filtering. Member aliases and aggregate `instances[]` are
-legacy wire shapes, decoded before Hub overlays or Web stores and encoded
-only at the boundary. No wire migration or coordinated CLI update is needed.
+An Instance has one self-contained `InstanceRecord`, keyed by its opaque
+Instance ID, with its Channel, ordinal and required registration. The database
+Instance row's `version` orders lifecycle transitions; the current socket's
+`sequence` orders reports within that version. Readers merge by
+`(version, sequence)`, replacing the whole record only when newer. Wall clocks,
+array arrival order and mutable Agent names do not order facts. Presentation
+writes are fenced by the current Run and Instance version and persist the
+sequence, so a database read and a live frame obey the same rule. Hub forwards
+records constructed by the database mapper; it does not reconstruct facts
+from a live card.
 
-The reducer is the sole map writer and lifecycle merger. Full authoritative
-snapshots replace residency; omitted presence preserves the prior projection,
-and an explicit empty snapshot clears it. Live reports only update known IDs.
-Messages only patch known Instances, never establish residency, and cannot
-wake an offline Instance. Deletes require the exact ID. Reborn retains that
-ID and registration while changing Run; handoff allocates a new Instance and
-slot. Partial slot or registration conflicts request authoritative reads per
-Channel/Instance, at most three per five minutes and only on incoming reports;
-short coalescing and bounded eviction let a read racing ahead of commit recover. Invalid
-Authority snapshots are diagnosed and isolated rather than repeatedly fetched.
+Temporary `activity`, `intent`, `files` and `runtimeState` belong to the socket,
+not to the durable record. `instance_activity` frames carry its current version
+and report sequence; they cannot establish residency or change durable status.
+A newer lifecycle, terminal record, or later durable checkpoint fences old
+work. The Web derives the display by joining compatible work to its record.
+Every report carries the cached durable record before activity, so losing the
+connect snapshot cannot make later reports unplaceable. Work outside the
+focused Channel shares the existing one-second bounded digest window; durable
+facts are delivered immediately. Unchanged work does not add database writes.
 
-A message's Instance status stays unknown until the Channel has a presence
-snapshot. History arriving first must not produce an `instance offline` badge
-or an offline avatar. Once loaded, an authoritative snapshot that omits the
-exact Instance still marks that historical sender offline.
+Channel catalog reads are bounded observation windows, not rosters. They return
+`instanceRecords`, including an explicit empty array, and never remove records
+through absence. An offline record without a rest state or machine-offline
+reason is an explicit terminal fact. Resting and machine-offline Instances stay
+in the work dock; terminal records leave it but remain available to exact sender
+lookup. Missing records stay unknown and never produce `instance offline`.
+Message bodies, sender names and historical sender snapshots cannot establish
+or revive an Instance.
 
-Legacy grouped rows split into individual Instances without copying aggregate
-Run activity, intent or clocks to siblings; only registration-level quota is
-shared. Canonical entries win over duplicate aliases, which are diagnosed.
-Hub overlays isolate conflicting sessions. A stale launch placeholder is
-suppressed by the same exact Instance ID. These projections grant no membership,
-execution or access authority; immutable message avatars remain historical.
+The Web keeps Instance facts once in a session-owned store, with a derived
+Channel index. Channel metadata and Human/device presence remain independent.
+The Channel `presence.instances` view is a read-only compatibility selector;
+Instance records are not copied into the catalog or into timeline rows. Sender
+avatars, the offline badge, Reborn controls and the work dock read the same live
+view. Primitive status selectors keep activity-only updates out of Markdown
+renders. Terminal status wins over historical trace activity.
+
+Reconnect and foreground/Channel focus reconcile held Instance IDs in bounded
+exact reads, including ended rows. Only explicit exact-read misses remove held
+facts; a miss cannot remove a newer observation received during the request.
+Tombstones live with the session and are cleared on access removal or logout.
+No polling, Channel counter, trigger or complete-roster assumption is needed.
+
+An unreachable machine is a checkpoint of its connection, not a lifecycle
+change. When a machine's daemon leaves or returns, each connection it hosts
+takes its next report sequence in its socket's own order and persists the
+projection (`offlineReason: "machine_offline"`, or none) with its presentation;
+the row's own status stays live. Its record reads offline with that reason
+until a later checkpoint says the machine returned, and any lifecycle version
+still outranks it.
+
+Delivery has a known limit. A frame to a person's socket on another cell is
+retried within the delivery (three attempts over about half a second), and a
+lifecycle push that still fails reads its Instances again and sends once more.
+Nothing replays a frame to a socket that stayed open: `data.outbox` has no
+consumer and Human sockets have no replay. If both attempts fail, a socket
+that stays connected keeps its last record until its person focuses the
+Channel, returns to the foreground or reconnects, each of which reads the
+Instances it holds exactly. This is event-driven recovery, not a delivery
+guarantee or a wall-clock bound on staleness.
+
+`instance_records_v1` negotiates self-contained Human socket frames. Existing
+`memberPresence`, cards and digests remain a bounded compatibility path for
+older consumers. Once a Channel has modern records, those legacy projections
+cannot change its Instance facts. Human devices retain their existing flow.
+Registration names, faces and account quota remain registration-owned display
+facts, not authority to connect or execute. Reborn retains the Instance and
+registration while starting a new Run; handoff allocates a new Instance.
+
+The original incident's exact lost/late frame cannot be reconstructed from
+retained logs. The reproducible defects were whole-window replacement,
+non-self-contained cards, and copied live status in historical rows. A new
+Channel-wide watermark was rejected: the existing read is bounded and uses
+multiple SELECTs, which under PostgreSQL [Read Committed isolation](https://www.postgresql.org/docs/current/transaction-iso.html)
+can observe different snapshots; a counter alone cannot make absence proof.
+Updating the shared Channel row from Instance triggers would also add lock
+ordering to message and lifecycle transactions; PostgreSQL documents
+[consistent lock order](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-DEADLOCKS)
+as the primary deadlock defense.
 
 ## 2. Vocabulary
 

@@ -110,6 +110,12 @@ export interface AgentInstanceAuthorityRunBinding {
   instanceStatus: LiveAgentStatus;
   /** Authority version claimed by this connection, retained across hibernation. */
   connectionVersion?: number;
+  /**
+   * How many reports this connection has made at `connectionVersion`: with it,
+   * the revision of everything the connection says about its Instance.
+   * Retained across hibernation, so a report never repeats a sequence.
+   */
+  presenceSequence?: number;
   /** Dense per-channel ordinal for `@agent:N` / memberPresence cards. */
   channelInstanceId?: string;
   cwd?: string;
@@ -182,6 +188,10 @@ export interface AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     details: { code?: number; reason?: string; wasClean?: boolean },
   ): void | Promise<void>;
+  /** How the cell tells whether a connection's machine can act on what it is sent. */
+  observeMachineReachability?(reachable: (session: Readonly<AgentInstanceRuntimeSession>) => boolean): void;
+  /** Checkpoint a connection whose machine became reachable or not, at its current report count. */
+  reproject?(session: Readonly<AgentInstanceRuntimeSession>): Promise<void>;
 }
 
 export class AgentInstanceAuthorityCapabilityError extends Error {
@@ -344,6 +354,27 @@ export class AgentInstanceRuntimeTransport {
   handleFrame(ws: WebSocket, frame: string | ArrayBuffer): Promise<void> { return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame)); }
   liveSessions(): readonly Readonly<AgentInstanceRuntimeSession>[] {
     return Array.from(this.sockets.entries(), ([, session]) => session);
+  }
+
+  /**
+   * The machine hosting the selected connections became reachable or not;
+   * nothing else about them changed. Each records that, in its socket's own
+   * order with its other reports, as its next checkpoint, then shows it.
+   */
+  reprojectMachine(selected: (session: Readonly<AgentInstanceRuntimeSession>) => boolean): void {
+    for (const [ws, session] of this.sockets.entries()) {
+      if (!selected(session)) continue;
+      void this.sockets.ordered.enqueue(ws, async () => {
+        if (this.sockets.get(ws) !== session) return;
+        session.run.presenceSequence = (session.run.presenceSequence ?? 0) + 1;
+        await this.backend.reproject?.(session);
+        const attachment = this.hibernationAttachment(ws);
+        if (attachment) ws.serializeAttachment?.(attachment);
+        await this.onPresenceChange?.({ reason: "update", session });
+      }).catch((error: unknown) => {
+        console.error("Agent Instance machine reachability fanout failed", error);
+      });
+    }
   }
 
 
@@ -786,6 +817,9 @@ export class AgentInstanceRuntimeTransport {
       const nextPresentation = message.type === "presence_update"
         ? mergeAgentInstancePresentation(session.presentation, message)
         : undefined;
+      // Each report is the connection's next: what it persists and what it
+      // shows carry the same revision.
+      if (message.type === "presence_update") session.run.presenceSequence = (session.run.presenceSequence ?? 0) + 1;
       const output = await this.backend.execute(session, message);
       this.sockets.sendOutput(ws, output);
       if (message.type === "presence_update") {

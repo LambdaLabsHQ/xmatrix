@@ -278,7 +278,9 @@ export function createProductAgentInterventionAuthorityPort(input: {
       const retired = await runtime().stopRestingInstances({ requestId: stableCommandId("handoff-rest-stop", controlId),
         channelId, actorUserId: input.actorUserId, handoffSource: { instanceId: target.instanceId, runId: target.runId } }) as
         Record<string, unknown>;
-      if (Array.isArray(retired.stopped) && retired.stopped.length > 0) await publishChannelPresenceChanged(input.env, channelId);
+      if (Array.isArray(retired.stopped) && retired.stopped.length > 0) {
+        await publishChannelPresenceChanged(input.env, channelId, stoppedInstanceIds(retired.stopped));
+      }
       await issueDaemonStop(target, controlId, reason, channelId, { export: handoffExport });
       const result = await awaitDaemonStopResult(target, controlId, timeoutMs, true);
       if (!result) return { stopped: false };
@@ -294,7 +296,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
         exclude: [...target.exclude],
       }) as Record<string, unknown>;
       const stopped = Array.isArray(result.stopped) ? result.stopped : [];
-      if (stopped.length > 0) await publishChannelPresenceChanged(input.env, channelId);
+      if (stopped.length > 0) await publishChannelPresenceChanged(input.env, channelId, stoppedInstanceIds(stopped));
       return stopped.flatMap((raw) => {
         const value = record(raw);
         return typeof value?.instanceId === "string" && typeof value.mentionTarget === "string"
@@ -476,4 +478,11 @@ export async function stopAgentRunLeavingChannel(
   );
   await port.publishSystemNotice(channelId, `@${target.mentionTarget} left the channel.`);
   return { status: 200, body: { ok: true, stopping: true, agent: target.mentionTarget } };
+}
+
+/** The Instances a resting stop retired, as it names them. */
+function stoppedInstanceIds(stopped: readonly unknown[]): string[] {
+  return stopped.flatMap((entry) => entry && typeof entry === "object" &&
+    typeof (entry as { instanceId?: unknown }).instanceId === "string"
+    ? [(entry as { instanceId: string }).instanceId] : []);
 }
