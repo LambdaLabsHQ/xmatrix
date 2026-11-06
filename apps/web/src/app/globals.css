@@ -6383,8 +6383,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
 
   /* A phone's channel list meets the sign with the same room as a
      conversation's Summary, clear of the sign's shadow (user 2026-11-06:
-     列表页面只需要统一 padding，无需颜色变化). */
-  .xmatrix-app.xmatrix-app-shell .app-mobile-chat-list > .app-list-section-heading:first-child {
+     列表页面只需要统一 padding，无需颜色变化). The list's skeleton holds that
+     first heading's place, so it takes the same room; otherwise every row
+     drops by it when the catalog lands. */
+  .xmatrix-app.xmatrix-app-shell .app-mobile-chat-list > .app-list-section-heading:first-child,
+  .xmatrix-app.xmatrix-app-shell .app-mobile-chat-list > .app-list-skeleton:first-child .app-list-section-heading {
     min-height: calc(36px + var(--app-mobile-head-room) - 9px);
   }
 
