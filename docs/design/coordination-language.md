@@ -1,10 +1,19 @@
-# Lun: xMatrix host design
+# Coordination language: xMatrix host design
 
 Status: design proposal. No language interpreter, new execution authority or
 production migration is implemented by this document.
 
-Lun is the proposed standalone coordination language for teams of people and AI
-agents. Its language specification, standard library, reference runtime and
+The proposed standalone language makes coordination programmable at the
+abstraction level of autonomous people and complete AI agents. Follow-ups,
+decision policies and other coordination patterns become programs and reusable
+libraries rather than separate platform features.
+
+It expresses how participants cooperate to accomplish shared work: their requests,
+responsibilities, dependencies and outcomes. Each participant retains control
+over how it does its work. Waiting, scheduling and resumption support these
+relationships; they do not define the language's identity.
+
+Its language specification, standard library, reference runtime and
 conformance suite belong to an independent project. This document describes the
 xMatrix host boundary and the evidence needed to replace existing waiting paths.
 The language direction is modern functional programming: expressions, immutable
