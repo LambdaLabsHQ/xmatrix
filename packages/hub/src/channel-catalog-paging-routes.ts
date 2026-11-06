@@ -247,6 +247,7 @@ export function registerChannelCatalogPagingRoutes(
       channelIds?: unknown;
       routeToken?: unknown;
       includeParticipants?: unknown;
+      knownInstanceIds?: unknown;
     }>().catch(() => null);
     const spaceId = typeof body?.spaceId === "string" ? body.spaceId.trim() : "";
     const rawChannelIds = Array.isArray(body?.channelIds) ? body.channelIds : [];
@@ -263,6 +264,11 @@ export function registerChannelCatalogPagingRoutes(
         channelIds.length + (routeToken ? 1 : 0) > 200 || !validChannelIds || !validRouteToken) {
       return c.json({ error: "Channel catalog resolve request is invalid" }, 400);
     }
+    const knownInstanceIds = body?.knownInstanceIds;
+    if (knownInstanceIds !== undefined && (!Array.isArray(knownInstanceIds) || knownInstanceIds.length > 1_024 ||
+        !knownInstanceIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 300))) {
+      return c.json({ error: "Known Instance ids are invalid" }, 400);
+    }
     const includeParticipants = body?.includeParticipants !== false;
     const sessionsPromise = includeParticipants ? loadLiveHumanPresenceFromRuntime(
       boundary.getRelayRuntime(c.env), c.req.url,
@@ -270,6 +276,7 @@ export function registerChannelCatalogPagingRoutes(
     const result = await boundary.resolveChannelCatalog(c.env, {
       spaceId, principal: { kind: "user", id: userId }, channelIds, ...(routeToken ? { routeToken } : {}),
       includeParticipants,
+      ...(knownInstanceIds !== undefined ? { knownInstanceIds: [...new Set(knownInstanceIds as string[])] } : {}),
     });
     const {
       openChannelHumanMemberIdsBySpace = {},
