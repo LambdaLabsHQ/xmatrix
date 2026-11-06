@@ -89,7 +89,8 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
   // retired About session is not restored.
   const optionalPrincipalKeys = ["hostId", "runKind", "channelWriteAllowed"] as const;
   const requiredRunKeys = ["runId", "agentId", "instanceId", "executionKey", "channelId", "machineId", "status", "instanceStatus"] as const;
-  const optionalRunKeys = ["hostId", "kind", "channelDeliveryEnabled", "channelInstanceId", "cwd", "repository", "connectionVersion"] as const;
+  const optionalRunKeys = ["hostId", "kind", "channelDeliveryEnabled", "channelInstanceId", "cwd", "repository", "connectionVersion",
+    "presenceSequence"] as const;
   if (!hibernationRecord(principal) ||
       !hibernationHasOnlyKeys(principal, [...principalKeys, ...optionalPrincipalKeys]) ||
       !principalKeys.every((key) => Object.prototype.hasOwnProperty.call(principal, key)) ||
@@ -104,6 +105,8 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
       !(run.repository === undefined || hibernationBoundedString(run.repository, 2_048)) ||
       !(run.connectionVersion === undefined ||
         Number.isSafeInteger(run.connectionVersion) && (run.connectionVersion as number) > 0) ||
+      !(run.presenceSequence === undefined ||
+        Number.isSafeInteger(run.presenceSequence) && (run.presenceSequence as number) > 0) ||
       !(run.kind === undefined || run.kind === "channel-instance") ||
       !(principal.runKind === undefined || principal.runKind === "channel-instance") ||
       !(principal.channelWriteAllowed === undefined || principal.channelWriteAllowed === true) ||
@@ -123,6 +126,7 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
     status: run.status as "starting" | "running",
     instanceStatus: run.instanceStatus as LiveAgentStatus,
     ...(typeof run.connectionVersion === "number" ? { connectionVersion: run.connectionVersion } : {}),
+    ...(typeof run.presenceSequence === "number" ? { presenceSequence: run.presenceSequence } : {}),
     ...(typeof run.channelInstanceId === "string" ? { channelInstanceId: run.channelInstanceId } : {}),
     ...(typeof run.cwd === "string" ? { cwd: run.cwd } : {}),
     ...(typeof run.repository === "string" ? { repository: run.repository } : {}),

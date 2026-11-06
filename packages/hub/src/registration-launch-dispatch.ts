@@ -254,7 +254,10 @@ export async function wakeRestingInstances(env: Env, input: {
   const value = await executeRestingInstanceWake({ ...runtimePlacement(env), ...input });
   if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
   // Its card shows it waking, or waiting for its machine, now rather than at the next read.
-  if (value.woken.length > 0 || value.refused.length > 0) await publishChannelPresenceChanged(env, input.channelId);
+  if (value.woken.length > 0 || value.refused.length > 0) {
+    await publishChannelPresenceChanged(env, input.channelId,
+      [...value.woken, ...value.refused].map((entry) => entry.instanceId));
+  }
   return value;
 }
 

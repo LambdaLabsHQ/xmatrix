@@ -309,14 +309,20 @@ export class RelayRuntimeProductCallbackAdapter {
    */
   deliverChannelAgentPresence(delivery: ChannelAgentPresenceDelivery): number {
     let delivered = 0;
+    // An Instance's record, then its activity, ahead of every legacy frame.
+    const facts: import("@xmatrix/protocol/connections/human").HumanServerMessage[] = [
+      ...(delivery.records?.length ? [{ type: "instance_records" as const, records: delivery.records }] : []),
+      ...(delivery.activities?.length ? [{ type: "instance_activity" as const, activities: delivery.activities }] : []),
+    ];
     for (const recipient of delivery.recipients) {
+      let hit = false;
+      for (const frame of facts) if (this.human.deliverToUser(recipient.userId, frame)) hit = true;
       const card = recipient.card && delivery.card
         ? { type: "enhanced_presence" as const, agent: delivery.card }
         : undefined;
       const channel = recipient.channel && delivery.channel
         ? { type: "channel_updated" as const, channel: delivery.channel }
         : undefined;
-      let hit = false;
       if (recipient.digest) {
         if ((card || channel) &&
             this.human.deliverAgentPresence(recipient.userId, delivery.channelId, card, channel)) {
