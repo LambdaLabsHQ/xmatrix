@@ -162,16 +162,18 @@ jobs:
         uses: ./.github/actions/ios-simulator-test
 
   # Code scanning before anything ships: CodeQL's security-extended queries
-  # on the frozen source, for the languages this train's components are
-  # written in and the workflows that release them
-  # (scripts/release-train.mjs, codeqlAnalyses). Pull requests and merges
-  # are not scanned. The analysis must finish before the train ships; its
-  # findings are code scanning alerts on main, not a verdict. Test code never
-  # ships, so it is not scanned. The JavaScript and TypeScript analysis runs
-  # as two halves side by side. Rust stays one analysis so cross-crate flow
-  # remains. This CodeQL only accepts Rust build-mode none. Its rust-analyzer
-  # does not load an include! that leaves the crate, so the shared action-name
-  # macro is an ordinary macro in its own crate and expanded at each call.
+  # on the frozen source. Hub, Web and Desktop JavaScript and TypeScript, and
+  # the workflows that release this train, are scanned on every channel. Rust,
+  # Kotlin and Swift are scanned only on a stable train, with the client
+  # suites (scripts/release-train.mjs, codeqlAnalyses). Pull requests and
+  # merges are not scanned. The analysis must finish before the train ships;
+  # its findings are code scanning alerts on main, not a verdict. Test code
+  # never ships, so it is not scanned. The JavaScript and TypeScript analysis
+  # runs as two halves side by side. Rust stays one analysis so cross-crate
+  # flow remains. This CodeQL only accepts Rust build-mode none. Its
+  # rust-analyzer does not load an include! that leaves the crate, so the
+  # shared action-name macro is an ordinary macro in its own crate and
+  # expanded at each call.
   codeql:
     needs: plan
     if: needs.plan.outputs.scope != ''

@@ -52,16 +52,34 @@ test("a scope is canonical, unique and keeps desktop with its cli", () => {
   }
 });
 
-test("no component ships unscanned; the workflows that release it are scanned too", () => {
-  for (const component of COMPONENTS) {
-    const [workflows, language, ...rest] = codeqlLanguages([component]);
-    assert.equal(workflows, "actions", component);
-    assert.equal(typeof language, "string", component);
-    assert.deepEqual(rest, [], component);
-    const analysed = codeqlAnalyses([component]);
-    assert.deepEqual([...new Set(analysed.map((analysis) => analysis.language))], [workflows, language], component);
-    assert.equal(new Set(analysed.map((analysis) => analysis.category)).size, analysed.length, "one category per analysis");
+test("client languages are scanned on stable only; hub, web and desktop on every train", () => {
+  for (const component of ["hub", "web", "desktop"]) {
+    for (const channel of ["beta", "stable"]) {
+      const languages = codeqlLanguages([component], channel);
+      assert.deepEqual(languages, ["actions", "javascript-typescript"], `${channel} ${component}`);
+      const analysed = codeqlAnalyses([component], channel);
+      assert.deepEqual([...new Set(analysed.map((analysis) => analysis.language))], languages, component);
+      assert.equal(new Set(analysed.map((analysis) => analysis.category)).size, analysed.length, component);
+    }
   }
+  for (const [component, language] of [["cli", "rust"], ["android", "java-kotlin"], ["ios", "swift"]]) {
+    assert.deepEqual(codeqlLanguages([component], "beta"), ["actions"], component);
+    assert.deepEqual(codeqlAnalyses([component], "beta").map((analysis) => analysis.language), ["actions"], component);
+    assert.deepEqual(codeqlLanguages([component], "stable"), ["actions", language], component);
+    const stable = codeqlAnalyses([component], "stable");
+    assert.deepEqual(stable.map((analysis) => analysis.language), ["actions", language], component);
+    assert.equal(stable.find((analysis) => analysis.language === language).category, `/language:${language}`);
+  }
+  assert.deepEqual(
+    codeqlLanguages(["hub", "web", "cli", "desktop", "android", "ios"], "beta"),
+    ["actions", "javascript-typescript"],
+  );
+  assert.deepEqual(
+    codeqlLanguages(["web", "cli", "desktop", "android", "ios"], "stable"),
+    ["actions", "javascript-typescript", "rust", "java-kotlin", "swift"],
+  );
+  assert.throws(() => codeqlLanguages(["cli"]), /beta or stable/u);
+  assert.throws(() => codeqlAnalyses(["cli"], "dev"), /beta or stable/u);
 });
 
 test("the JavaScript and TypeScript halves read every shipped file exactly once, and no test", () => {
@@ -82,7 +100,7 @@ test("the JavaScript and TypeScript halves read every shipped file exactly once,
     return (!paths.length || paths.some((pattern) => matches(pattern, file))) &&
       !list("paths-ignore").some((pattern) => matches(pattern, file));
   };
-  const halves = codeqlAnalyses(["hub", "web"]).filter((analysis) => analysis.language === "javascript-typescript");
+  const halves = codeqlAnalyses(["hub", "web"], "beta").filter((analysis) => analysis.language === "javascript-typescript");
   assert.deepEqual(halves.map((half) => half.part), ["web", "server"]);
   const shipped = ["apps/web/src/app/page.tsx", "apps/web/worker.mjs", "packages/hub/src/index.ts",
     "packages/protocol/src/index.ts", "packages/db/src/space-control.ts", "scripts/release-train.mjs",

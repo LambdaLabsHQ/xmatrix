@@ -2546,9 +2546,11 @@ All releases form one ascending SemVer line:
 - **Gates.** A train runs the CI gates for what it ships on its release
   commit. The Hub suite gates each beta that ships the Hub; the Web suites and
   client suites (Rust on Linux and Windows, Desktop, Android, the iOS
-  simulator) gate the stable that ships them. Every train runs CodeQL on its source for the
-  languages it ships before anything deploys
-  (`docs/operations/ci-lint-and-public-runners.md`).
+  simulator) gate the stable that ships them. Every train runs CodeQL on its
+  source for Hub, Web and Desktop JavaScript and TypeScript, and for the
+  workflows it releases, before anything deploys. Rust, Kotlin and Swift
+  CodeQL run on the stable train that ships that client, beside those client
+  suites (`docs/operations/ci-lint-and-public-runners.md`).
 - **Evidence.** Each tag's annotation records the `scope`, `source` and
   `channel` later trains read back. The request's authorization job is named
   `authorize <scope> production <tag>`, and stable preflight accepts only the

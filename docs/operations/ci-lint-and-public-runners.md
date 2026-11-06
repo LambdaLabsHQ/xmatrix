@@ -157,16 +157,24 @@ PNPM enters the job's PATH only after installation and its version probe succeed
 This recovery applies only to package-manager bootstrap, never validation or
 deployment failures.
 
-CodeQL scans before a release ships, not on pull requests or merges. Each
-release train runs CodeQL's security-extended queries on its frozen source for
-the languages its components are written in, plus the workflows that release
-them (`codeql` in `production-release-request.yml`; languages from
-`codeqlLanguages` in `scripts/release-train.mjs`). Swift builds on macOS with
-autobuild; the other languages use build mode `none`. Results upload as code
-scanning alerts on `main` under the same `/language:<name>` categories GitHub's
-default setup used, which must stay disabled: GitHub refuses a workflow's
-upload while default setup is on. The analysis has to finish before the train
-ships; its findings are alerts, not a gate verdict.
+CodeQL scans before a release ships, not on pull requests or merges. A beta
+scans Hub, Web and Desktop JavaScript and TypeScript, plus the workflows that
+release it. Rust, Kotlin and Swift are scanned on the stable train that ships
+that client, in the same layer as the client suites, not on the beta that
+publishes them to a dev channel or TestFlight (`codeql` in
+`production-release-request.yml`; languages from `codeqlLanguages` in
+`scripts/release-train.mjs`). Swift builds on macOS with autobuild; the other
+languages use build mode `none`. Results upload as code scanning alerts on
+`main` under the same `/language:<name>` categories GitHub's default setup
+used, which must stay disabled: GitHub refuses a workflow's upload while
+default setup is on. The analysis has to finish before the train ships; its
+findings are alerts, not a gate verdict. A train already running keeps the
+scan list it started with. Existing tags and artifacts stay immutable. The
+next beta that ships the CLI shows no Rust analysis, while JavaScript,
+TypeScript and the release workflows still run; the next stable that ships a
+client runs that client's language. Recovery is a CI-validated forward release
+that puts the language back on the beta list. Do not cancel a train to change
+its scan, and do not treat an alert as a skipped gate.
 
 CLI release builds run both macOS architectures in parallel on isolated hosted
 VMs: ARM64 on `macos-26`, Intel on `macos-26-intel`. GitHub reported ARM64

@@ -101,12 +101,23 @@ export function normalizeScope(requested, channel = "beta") {
   return COMPONENTS.filter((item) => items.includes(item));
 }
 
+// Rust, Kotlin and Swift reach only a dev channel or TestFlight on a beta.
+// Their analyses sit with the client suites and run on the stable train.
+const STABLE_ONLY_CODEQL_LANGUAGES = new Set(["rust", "java-kotlin", "swift"]);
+
 /**
- * The CodeQL languages a train scans before it ships `scope`: those its
- * components are written in, and the workflows that release them.
+ * The CodeQL languages a train scans before it ships `scope`. Hub, Web and
+ * Desktop JavaScript and TypeScript, plus the workflows that release the
+ * train, are scanned on every channel. Rust, Kotlin and Swift are scanned
+ * only when `channel` is stable.
  */
-export function codeqlLanguages(scope) {
-  return [...new Set(["actions", ...scope.map((component) => CODEQL_LANGUAGE[component])])];
+export function codeqlLanguages(scope, channel) {
+  if (channel !== "beta" && channel !== "stable") {
+    throw new Error("CodeQL channel must be beta or stable");
+  }
+  const languages = scope.map((component) => CODEQL_LANGUAGE[component])
+    .filter((language) => channel === "stable" || !STABLE_ONLY_CODEQL_LANGUAGES.has(language));
+  return [...new Set(["actions", ...languages])];
 }
 
 // Test code never ships, so no analysis reads it.
@@ -128,14 +139,14 @@ function codeqlConfig({ paths = [], ignore = [] }) {
 }
 
 /**
- * The CodeQL analyses a train runs before it ships `scope`: its languages
- * (codeqlLanguages), each whole or in its parts, with the alert category each
- * uploads to and its configuration. The configuration comes from the train's
- * own revision, not the source it scans, so a stable of an older beta reads
- * the same paths.
+ * The CodeQL analyses a train runs before it ships `scope` on `channel`:
+ * its languages (codeqlLanguages), each whole or in its parts, with the alert
+ * category each uploads to and its configuration. The configuration comes from
+ * the train's own revision, not the source it scans, so a stable of an older
+ * beta reads the same paths and still selects client languages.
  */
-export function codeqlAnalyses(scope) {
-  return codeqlLanguages(scope).flatMap((language) => (CODEQL_PARTS[language] ?? [{ part: "all" }]).map((part) => ({
+export function codeqlAnalyses(scope, channel) {
+  return codeqlLanguages(scope, channel).flatMap((language) => (CODEQL_PARTS[language] ?? [{ part: "all" }]).map((part) => ({
     language,
     part: part.part,
     category: part.part === "all" ? `/language:${language}` : `/language:${language}/${part.part}`,
@@ -503,7 +514,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   output("tag", tag);
   output("channel", channel);
   output("source_sha", sourceSha);
-  output("codeql_analyses", JSON.stringify(codeqlAnalyses(scope)));
+  output("codeql_analyses", JSON.stringify(codeqlAnalyses(scope, channel)));
   output("intents", intents.map((intent) => intent.id).join(","));
 }
 
