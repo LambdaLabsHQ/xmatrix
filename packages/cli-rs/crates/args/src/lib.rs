@@ -2098,7 +2098,7 @@ pub enum PageCommand {
         /// New markdown
         #[arg(long = "message", short = 'm')]
         body: Option<String>,
-        /// Read markdown from a file
+        /// Read markdown from a file: the page's text, or all of what `xmatrix page read` printed (its header is left out)
         #[arg(long, short = 'f')]
         file: Option<PathBuf>,
         /// Read markdown from stdin
