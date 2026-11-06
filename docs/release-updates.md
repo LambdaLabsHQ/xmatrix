@@ -1,5 +1,92 @@
 # Release Updates
 
+## Unreleased: A reconnected daemon keeps its fresh Machine credential
+
+HUB-A9 received a refresh credential that had expired 901 seconds earlier.
+The reconnect path could enroll a fresh token, then replay a queued old refresh
+and roll its local HTTP credential cache back.
+Refresh now captures the live connection epoch before minting and is sent only
+on that same connection. Offline and replaced-connection refreshes are discarded;
+current refreshes retain their wire format. CLI daemon only; no schema or Hub
+compatibility migration. Existing daemons receive the fix when they update to a
+release containing it. Recovery is a CI-validated CLI release reverting this
+change; Hub credential verification remains unchanged.
+
+## Unreleased: Markdown round-trip tests reuse their parsed documents
+
+The shared Node gate parsed both the original and canonical Markdown twice for
+every document in the repository corpus. The round-trip test now reuses those
+documents for its idempotence and equivalence assertions. Every corpus input,
+syntax case and assertion remains; focused tests still cover the convenience
+API. Product behavior, required gates and release authority are unchanged.
+No migration is needed.
+
+## Unreleased: Literal attachment examples survive sending in every Markdown context
+
+An attachment-looking line inside multiline inline code or HTML was treated as
+a draft picture: sending deleted it without an upload, or rewrote it when an
+upload matched. Removing a real picture also erased literal references to the
+same file. Draft widgets, file removal and sending now inventory actual image nodes in
+the shared GFM tree, using the same parser configuration as Page documents and
+operational mentions. Whole-line uploaded pictures keep their existing format
+and selection offsets. Web only; no schema, API or saved-message migration.
+Recovery is a CI-validated beta Web release reverting this change.
+
+## Unreleased: The timeline stays put while rows above the reader load
+
+A reader who had scrolled up in a conversation saw it jump when a row above
+the screen grew late, most often a Gmail card filling in its private result,
+and the same while scrolling up with a wheel or trackpad. The list made up for
+rows above the first one in view only while the reader was scrolling up, and
+that direction resets 50ms after the last scroll event. It now makes up for
+them in any direction and at rest. Web only, a react-virtuoso patch; no schema
+or client migration. Recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: Release storage tests skip idle retry waits
+
+The R2 upload regression spent 24 seconds in production retry backoffs on every
+PR and release gate. It now records and fast-forwards only those waits while
+keeping real abort deadlines, child-process termination, retry counts, phase
+diagnostics and credential redaction checks. The file runs in the bounded
+child-process test lane because it launches Wrangler fixtures. Production
+transfer behavior and required gates are unchanged; no migration is needed.
+
+## Unreleased: Message files follow the pictures actually shown
+
+An attachment could disappear when its picture syntax was inside code or beyond
+a folded preview, while a Markdown image reference showed the same file twice.
+The message now prepares its displayed body and consumed attachments from one
+final Markdown tree, after quote replacement. Files not actually drawn remain
+under the words, including in long plain-text messages and system cards. The
+independent line scanner is removed. Editing before a composer quote also no
+longer strands its remove control: it reads the widget's current editor position.
+Web only; no schema, API or saved-message migration. Recovery is a CI-validated
+beta Web release reverting this change.
+
+## Unreleased: Recorded database connection terminations remain recoverable
+
+HUB-BQ failed both fresh connections at BEGIN before business SQL. Recovery
+already replayed once, but the common CONNECTION_TERMINATED code erased the
+difference between pg termination messages and Hyperdrive's explicit egress
+severance. Each failure attempt now retains a fixed driver reason, readable
+through Sentry without copying driver text, SQL, credentials or causes. This
+fills a diagnostic gap; the underlying outage remains unconfirmed. The Hub also
+uses the database's recorded termination evidence to answer retryable unavailable
+after the single replay is exhausted, instead of a permanent session failure.
+Arbitrary text and explicit SQL rejections retain their classification. Existing
+retry limits and unknown-COMMIT reconciliation are unchanged. Hub only, no
+schema or client migration; recovery is a CI-validated beta Hub reverting this
+change. Historical events remain readable.
+
+## Unreleased: A jumped-to message stays where it landed
+
+Opening a Needs-you conversation landed on and highlighted the message, then
+private result cards above it loaded their content and pushed it off screen a
+second later. The timeline now holds a landed message in place while rows above
+it change height, until the reader touches, scrolls, clicks or types, jumps
+again, or switches conversation. Web only, no schema or client migration.
+Recovery is a CI-validated beta Web reverting this change.
+
 ## Unreleased: Gmail hands a large approved draft to Composio by short-lived link
 
 The upload-endpoint fix still ended in 413: Composio's proxy, not Gmail,

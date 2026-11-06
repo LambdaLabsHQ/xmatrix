@@ -1,7 +1,6 @@
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmFromMarkdown, gfmToMarkdown } from "mdast-util-gfm";
+import { parseMarkdown } from "./markdown.js";
+import { gfmToMarkdown } from "mdast-util-gfm";
 import { toMarkdown } from "mdast-util-to-markdown";
-import { gfm } from "micromark-extension-gfm";
 import { diffIndices } from "node-diff3";
 import { Fragment, Schema, type Mark, type Node as DocNode } from "prosemirror-model";
 import { pageBlocks } from "./page-markdown.js";
@@ -141,10 +140,6 @@ interface MdNode {
 
 type MarkSpec = { type: string; attrs?: Record<string, unknown> };
 type JsonNode = { type: string; attrs?: Record<string, unknown>; content?: JsonNode[]; text?: string; marks?: MarkSpec[] };
-
-function parseMarkdown(markdown: string): MdNode {
-  return fromMarkdown(markdown, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }) as unknown as MdNode;
-}
 
 function source(markdown: string, node: MdNode): string {
   const start = node.position?.start.offset;

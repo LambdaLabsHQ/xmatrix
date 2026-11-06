@@ -478,3 +478,72 @@ async fn reconnect_discards_queued_snapshots_without_rebinding_effect_results() 
         "old full and partial snapshots are discarded; current evidence and historical effects are unchanged"
     );
 }
+
+// A refresh can finish minting while its socket is offline. Reconnect already
+// enrolled a fresh credential, so draining that queued refresh must never roll
+// the socket or HTTP credential cache back to the previous connection's token.
+#[tokio::test(start_paused = true)]
+async fn reconnect_discards_old_auth_refreshes_and_keeps_current_refreshes() {
+    let hub = ScriptedHub::new(Vec::new(), Vec::new());
+    let (client, mut events) = connected_client(&hub).await;
+    hub.lose_the_network_path();
+    assert!(disconnected(next_event(&mut events).await).contains("heartbeat timed out"));
+    client
+        .instruction_tx
+        .send(ConnectionInstruction::RefreshAuthCredential {
+            credential: "old-credential".into(),
+            connection_epoch: Some(1),
+        })
+        .unwrap();
+    client
+        .instruction_tx
+        .send(ConnectionInstruction::RefreshAuthCredential {
+            credential: "offline-credential".into(),
+            connection_epoch: None,
+        })
+        .unwrap();
+    assert_reconnected(next_event(&mut events).await);
+    // An enrollment that began before reconnect can also finish afterwards.
+    client
+        .instruction_tx
+        .send(ConnectionInstruction::RefreshAuthCredential {
+            credential: "late-old-credential".into(),
+            connection_epoch: Some(1),
+        })
+        .unwrap();
+    client
+        .instruction_tx
+        .send(ConnectionInstruction::RefreshAuthCredential {
+            credential: "current-credential".into(),
+            connection_epoch: Some(2),
+        })
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if hub
+                .0
+                .reports
+                .lock()
+                .unwrap()
+                .last()
+                .is_some_and(|(_, value)| {
+                    value["type"] == "refresh_auth" && value["token"] == "current-credential"
+                })
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the current connection's refresh reaches the Hub");
+    let reports = hub.0.reports.lock().unwrap();
+    assert_eq!(
+        reports.len(),
+        1,
+        "a refresh from the old connection is discarded"
+    );
+    assert_eq!(reports[0].0, 2);
+    assert_eq!(reports[0].1["token"], "current-credential");
+    assert_eq!(client.machine_credential().unwrap(), "current-credential");
+}

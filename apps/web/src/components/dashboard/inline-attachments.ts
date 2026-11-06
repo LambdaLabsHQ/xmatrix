@@ -7,22 +7,39 @@
  * attachment it does not name stays under its words, as every attachment did before.
  */
 
+import { parseMarkdown } from "@xmatrix/protocol";
+import type { Nodes } from "mdast";
+
 /** A picture's line in a draft or a message: its name and what it points at. */
 const PICTURE_LINE = /^!\[((?:[^\]\\\n]|\\.)*)\]\(attachment:([^\s()]+)\)$/u;
 
 export type DraftPicture = { line: number; name: string; ref: string };
 
-export function pictureOfLine(line: string): { name: string; ref: string } | null {
+function pictureOfLine(line: string): { name: string; ref: string } | null {
   const match = PICTURE_LINE.exec(line);
   return match ? { name: match[1]!.replace(/\\([[\]\\])/gu, "$1"), ref: match[2]! } : null;
 }
 
 /** The pictures a draft holds, by line. */
 export function draftPictures(text: string): DraftPicture[] {
-  return text.split("\n").flatMap((line, index) => {
-    const picture = pictureOfLine(line);
-    return picture ? [{ line: index, ...picture }] : [];
-  });
+  if (!text.includes("](attachment:")) return [];
+  const lines = text.split("\n");
+  const pictures: DraftPicture[] = [];
+  const visit = (node: Nodes) => {
+    if (node.type === "image" && node.position) {
+      const { start, end } = node.position;
+      const line = lines[start.line - 1]!;
+      // Only the composer's whole-line picture syntax is an editable block.
+      // Code, HTML and other literal contexts never produce image nodes.
+      if (start.column === 1 && end.line === start.line && end.column === line.length + 1) {
+        const picture = pictureOfLine(line);
+        if (picture) pictures.push({ line: start.line - 1, ...picture });
+      }
+    }
+    if ("children" in node) for (const child of node.children) visit(child);
+  };
+  visit(parseMarkdown(text));
+  return pictures;
 }
 
 export function pictureLine(name: string, ref: string): string {
@@ -61,13 +78,14 @@ export function sentPictures<T extends { start: number; end: number }>(draft: { 
   placeOf: (ref: string) => number | undefined): { body: string; selections: T[] } {
   if (!draft.body.includes("](attachment:")) return draft;
   const lines = draft.body.split("\n");
+  const pictures = new Map(draftPictures(draft.body).map((picture) => [picture.line, picture]));
   const out: string[] = [];
   const moved: { from: number; to: number; delta: number }[] = [];
   let source = 0;
   let written = 0;
   let previous: "picture" | "text" | "blank" | null = null;
-  for (const line of lines) {
-    const picture = pictureOfLine(line);
+  for (const [index, line] of lines.entries()) {
+    const picture = pictures.get(index);
     const place = picture ? placeOf(picture.ref) : undefined;
     const kind = picture ? (place ? "picture" : null) : line.trim() ? "text" : "blank";
     if (kind) {
@@ -91,15 +109,4 @@ export function sentPictures<T extends { start: number; end: number }>(draft: { 
   // The line left to write on after the last pictures is not part of the message.
   return { body: out.join("\n").replace(/\n+$/u, ""), selections: draft.selections.map((selection) =>
     ({ ...selection, start: shift(selection.start), end: shift(selection.end) })) };
-}
-
-/** The places (1-based) of the attachments a message's words draw where they were put. */
-export function picturedPlaces(body: string): Set<number> {
-  const places = new Set<number>();
-  for (const line of body.split("\n")) {
-    const picture = pictureOfLine(line.trim());
-    const place = picture ? Number(picture.ref) : NaN;
-    if (Number.isInteger(place) && place > 0) places.add(place);
-  }
-  return places;
 }

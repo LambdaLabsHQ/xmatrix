@@ -1,3 +1,5 @@
+import { databaseFailureEvidence } from "@xmatrix/db";
+
 const RETRYABLE_NETWORK_CODES = new Set([
   "ECONNREFUSED",
   "ECONNRESET",
@@ -14,6 +16,7 @@ const RETRYABLE_NETWORK_CODES = new Set([
   "CONNECT_TIMEOUT",
   "QUERY_READ_TIMEOUT",
   "CONNECTION_UNUSABLE",
+  "CONNECTION_TERMINATED",
 ]);
 
 /** Seconds a client should wait before replaying a retryable PostgreSQL failure. */
@@ -63,6 +66,11 @@ export function postgresTransactionConflict(error: unknown): boolean {
 export function retryablePostgresFailure(error: unknown): boolean {
   const rawCode = errorField(error, "code");
   const code = rawCode.toUpperCase();
+  // The db client recognizes exact pg/Hyperdrive termination messages, even
+  // when Hyperdrive supplies generic 58000. Trust its captured failure, not
+  // arbitrary text with no database provenance or an explicit SQL rejection.
+  if ((!code || code === "58000") &&
+      databaseFailureEvidence(error).at(-1)?.code === "CONNECTION_TERMINATED") return true;
   // pg emits these exact transport failures as plain Error objects, without a
   // SQLSTATE. Never let message matching override an explicit database code.
   // pg-pool wraps a checkout that hit connectionTimeoutMillis as

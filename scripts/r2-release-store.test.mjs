@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
+import { setTimeout as realSetTimeout } from "node:timers";
 import {
   buildManifest,
   downloadDirectory,
@@ -562,7 +563,18 @@ test("the version picks the channel: betas to dev, stables to stable, and neithe
       ["cli-v1.2.5-beta.10", "cli-v1.2.5"]);
   }));
 
-test("probe and readback timeouts keep their phase and drop credential evidence", async () => {
+test("probe and readback timeouts keep their phase and drop credential evidence", async (t) => {
+  // Exercise real aborts, child termination and I/O, but do not spend 24 seconds
+  // asleep between failures. Record the requested production backoffs so a
+  // missing retry or changed delay still fails this upload-boundary test.
+  const backoffs = [];
+  t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+    if (delay === 2_000 || delay === 4_000) {
+      backoffs.push(delay);
+      return realSetTimeout(callback, 0, ...args);
+    }
+    return realSetTimeout(callback, delay, ...args);
+  });
   const root = await mkdtemp(path.join(tmpdir(), "xmatrix-r2-phase-test-"));
   const source = path.join(root, "source");
   const prior = captureReleaseEnv({
@@ -759,6 +771,7 @@ if (mode === "missing" && count === 1) {
       assert.equal(uploads, scenario.uploaded);
       assert.equal(await readFile(countPath, "utf8"), scenario.gets);
     }
+    assert.deepEqual(backoffs, [2_000, 4_000, 2_000, 4_000, 2_000, 4_000, 2_000, 4_000]);
   } finally {
     restoreEnv(prior);
     await rm(root, { recursive: true, force: true });

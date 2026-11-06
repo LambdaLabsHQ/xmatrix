@@ -12,7 +12,7 @@ import type { Node as DocNode } from "prosemirror-model";
 import { Plugin, TextSelection, type EditorState, type Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { composerTextOf } from "./composer-editor-text";
-import { pictureOfLine, putBlockInDraft } from "./inline-attachments";
+import { draftPictures, putBlockInDraft } from "./inline-attachments";
 
 
 /** A quote's lines in the document: paragraphs `first` to `last`, from before the first to after the last. */
@@ -47,13 +47,14 @@ export function quoteBlocksOf(doc: DocNode): QuoteBlock[] {
 /** The draft's quotes and rows of pictures, in order. */
 export function blocksOf(doc: DocNode): Block[] {
   const quotes = quoteBlocksOf(doc);
+  const pictures = new Map(draftPictures(composerTextOf(doc)).map((picture) => [picture.line, picture]));
   const rows: PictureRow[] = [];
   let pos = 0;
   doc.forEach((paragraph, _offset, line) => {
     const from = pos;
     pos += paragraph.nodeSize;
     if (quotes.some((quote) => line >= quote.first && line <= quote.last)) return;
-    const picture = pictureOfLine(paragraph.textContent);
+    const picture = pictures.get(line);
     if (!picture) return;
     const last = rows.at(-1);
     const entry = { ...picture, from, to: pos };
@@ -115,7 +116,8 @@ function pictureRow(row: PictureRow, slots: PictureSlots): HTMLElement {
   return element;
 }
 
-function slip(view: EditorView, block: QuoteBlock, isHere: (href: string) => boolean): HTMLElement {
+function slip(view: EditorView, block: QuoteBlock, isHere: (href: string) => boolean,
+  getPos: () => number | undefined): HTMLElement {
   const element = document.createElement("div");
   element.className = "message-citation-composer composer-quote-block";
   element.contentEditable = "false";
@@ -134,7 +136,9 @@ function slip(view: EditorView, block: QuoteBlock, isHere: (href: string) => boo
     body.append(source);
   }
   element.append(body, removeButton("Remove quote", () => {
-    const current = quoteBlocksOf(view.state.doc).find((candidate) => candidate.from === block.from);
+    // Widgets survive edits before them; their captured block coordinates do
+    // not. The editor owns the widget's current position, including duplicates.
+    const current = quoteBlocksOf(view.state.doc).find((candidate) => candidate.from === getPos());
     if (current) view.dispatch(removeBlock(view.state, current));
     view.focus();
   }));
@@ -171,7 +175,7 @@ export function composerBlocks(isHere: () => (href: string) => boolean, slots: P
         const decorations: Decoration[] = [];
         for (const block of blocks) {
           if (block.kind === "quote") {
-            decorations.push(Decoration.widget(block.from, (view) => slip(view, block, isHere()), {
+            decorations.push(Decoration.widget(block.from, (view, getPos) => slip(view, block, isHere(), getPos), {
               side: -1, ignoreSelection: true, stopEvent: () => true,
               key: `quote\u0000${block.quote}\u0000${block.label}\u0000${block.href}\u0000${isHere()(block.href)}`,
             }));

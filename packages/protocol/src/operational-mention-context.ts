@@ -1,6 +1,4 @@
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmFromMarkdown } from "mdast-util-gfm";
-import { gfm } from "micromark-extension-gfm";
+import { parseMarkdown } from "./markdown.js";
 import { decodeString } from "micromark-util-decode-string";
 import { createInstanceMentionScanner, existingInstanceMentionScanner, handoffInstanceMentionScanner, rebornInstanceMentionScanner } from "./agent-mention.js";
 
@@ -53,7 +51,7 @@ function autolinkSourceRanges(body: string, source: Node): NonOperationalMention
  */
 export function nonOperationalMentionRanges(body: string): NonOperationalMentionRange[] {
   if (!body) return [];
-  const root = fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+  const root = parseMarkdown(body);
   const ranges: NonOperationalMentionRange[] = [];
   const recoveredAutolinks = new Set<Node>();
   const pending: { node: Node; source: Node }[] = [{ node: root, source: root }];

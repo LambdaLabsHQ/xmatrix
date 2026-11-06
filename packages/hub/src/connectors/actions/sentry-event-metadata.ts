@@ -100,6 +100,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       for (const [index, failure] of parseDatabaseFailureEvidence(JSON.parse(attempts)).entries()) {
         lines.push(`Database failure ${index + 1}: ${failure.operation} · ${failure.shardId} · ${failure.statement} · ` +
           `${failure.phase} · ${failure.queryName} · ${failure.code} · ${failure.durationMs} ms`);
+        if (failure.driverReason) lines.push(`Database driver reason ${index + 1}: ${failure.driverReason}`);
         const session = failure.session;
         if (session) lines.push(`Database session ${index + 1}: wall=${session.wallMs} ms · queue=${session.queueMs} ms · ` +
           `checkout=${session.checkoutMs} ms · begin=${session.beginMs} ms · sql=${session.sqlMs} ms · ` +
