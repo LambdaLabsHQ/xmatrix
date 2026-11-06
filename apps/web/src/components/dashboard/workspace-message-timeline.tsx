@@ -157,6 +157,7 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 import { MessageUnsentNotice } from "./message-unsent-notice";
 import { MessagePicturesContext } from "./inline-pictures";
+import { InlineRowPreview } from "./inline-row-preview";
 import { CitingConversationContext, PASSAGE_HIGHLIGHT, passageRange, takeOpenedPassage } from "./cited-passage";
 import { foldedDiscussionBody, MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
 
@@ -3262,16 +3263,14 @@ export function ReplyPreview({
         event.preventDefault();
         onJump(reply.messageId, reply.sequence);
       }}
-      /* One quiet line, no bar or band: the arrow says it is a reply
-         (user 2026-11-04: 分割线啊，什么都不够简洁). */
-      className="app-message-reply-preview mb-1 mt-0.5 flex max-w-[min(36rem,100%)] items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+      /* A reply quotes the whole message, so it is the same yellow slip as a quoted passage: the words, then
+         who wrote them in quiet ink (Daniel 2026-11-06: 引用整条消息和引用某段内容可以用同一种方式表达). */
+      className="message-citation message-reply-citation"
     >
-      <Reply className="size-3.5 shrink-0" />
-      <span className="min-w-0 truncate">
-        <span className="font-semibold text-foreground">{reply.author}</span>
-        {" "}
-        {foldedDiscussionBody(reply.body) || "Attachment"}
+      <span className="message-citation-text">
+        <InlineRowPreview text={foldedDiscussionBody(reply.body) || "Attachment"} />
       </span>
+      <span className="message-citation-source">{reply.author}</span>
     </a>
   );
 }

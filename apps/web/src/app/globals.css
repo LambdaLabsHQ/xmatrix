@@ -2880,6 +2880,34 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 .xmatrix-app .rich-message button.message-citation:hover {
   background: color-mix(in oklch, var(--app-quote-wood) 50%, var(--app-panel-paper, oklch(0.976 0.005 85)));
 }
+/* A reply is a quote of the whole message: the same slip above the reply's words, two lines of the message and
+   its author in quiet ink, opening the message as a quoted passage does. */
+.xmatrix-app .message-reply-citation {
+  display: block;
+  width: fit-content;
+  max-width: min(36rem, 100%);
+  margin: 2px 0 10px;
+  padding: 10px 14px 9px;
+  border-radius: 10px;
+  background: var(--app-quote-tint);
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 20px;
+  text-decoration: none;
+  transition: background-color 120ms ease-out;
+}
+.xmatrix-app .message-reply-citation:hover {
+  background: color-mix(in oklch, var(--app-quote-wood) 50%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+.xmatrix-app .message-reply-citation .message-citation-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.xmatrix-app .message-reply-citation .message-citation-source { display: block; margin-top: 2px; }
+.xmatrix-app .message-citation-composer .message-citation-source + .message-citation-source { margin-top: 0; }
 ::highlight(cited-passage) {
   background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 55%, transparent);
 }
