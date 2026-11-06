@@ -340,6 +340,7 @@ export type {
 } from "./connections/human.js";
 export {
   HUMAN_CLIENT_PRESENCE_COVERAGE,
+  HUMAN_CLIENT_INSTANCE_RECORDS,
   HUMAN_CLIENT_PRESENCE_DIGEST,
   HUMAN_HEARTBEAT_PING,
   HUMAN_HEARTBEAT_PONG,
@@ -654,6 +655,8 @@ export { ChannelPresenceConflict, channelPresenceInstances, emptyChannelPresence
 export type { AgentInstancePresence, ChannelPresence, ChannelPresenceChange, ChannelSnapshot,
   HumanDevicePresence, HumanPresence, PresenceInstanceId } from "./channel-presence.js";
 export { decodeChannelAgentPresence, decodeChannelSnapshot, encodeChannelPresence, encodeChannelSnapshot } from "./channel-presence-codec.js";
+export { parseInstanceRecord, mergeInstanceRecord } from "./instance-record.js";
+export type { InstanceRecord, InstanceRevision } from "./instance-record.js";
 
 export { agentInstanceMemberPresence, channelPresenceMember } from "./channel-presence-selectors.js";
 export type { ChannelSnapshotCatalogPage, ChannelSnapshotCatalogPageRow, ChannelSnapshotCatalogResolveResult } from "./channel-presence.js";
