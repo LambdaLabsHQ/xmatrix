@@ -1,4 +1,4 @@
-import { mergeInstanceRecord, type InstanceRecord } from "@xmatrix/protocol";
+import { mergeInstanceRecord, withNewestRegistrationPresentation, type InstanceRecord } from "@xmatrix/protocol";
 
 /**
  * The Instance record each live connection of this cell last wrote, exactly
@@ -14,10 +14,12 @@ export class InstanceRecordCache {
     return this.records.get(instanceId);
   }
 
-  /** Keep the further-along of what is held and what was answered. */
+  /** Keep the further-along of what is held and what was answered: the record
+   * by Instance revision, its registration's name by the registration's version. */
   remember(record: InstanceRecord): InstanceRecord {
     const held = this.records.get(record.id);
-    const kept = held && held.channelId === record.channelId ? mergeInstanceRecord(held, record) : record;
+    const kept = held && held.channelId === record.channelId
+      ? withNewestRegistrationPresentation(mergeInstanceRecord(held, record), held, record) : record;
     this.records.set(record.id, kept);
     return kept;
   }
