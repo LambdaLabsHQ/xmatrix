@@ -164,6 +164,7 @@ export type HumanServerMessage =
   | { type: "presence"; online: boolean; agent: SerializedAgent }
   | { type: "enhanced_presence"; agent: SerializedAgent }
   | HumanPresenceDigestMessage
+  | { type: "instance_activity"; activities: import("../instance-record.js").InstanceActivity[] }
   | { type: "instance_records"; records: import("../instance-record.js").InstanceRecord[] }
   | HumanRegistrationQuotaMessage
   | {
