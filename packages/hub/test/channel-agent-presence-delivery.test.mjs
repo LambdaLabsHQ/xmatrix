@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   channelAgentPresenceDeliveryBody,
   channelInstanceRecordBatches,
+  readChannelAgentPresenceDelivery,
   parseChannelAgentPresenceDelivery,
 } from "../src/runtime-transport/channel-agent-presence-delivery.ts";
 import { serializedAgentsFromPresence } from "../src/live-agent-instance-read.ts";
@@ -99,7 +100,7 @@ test("the online agent list is one row per live instance, ordered and capped", (
   assert.deepEqual(listed[1].instances.map((instance) => instance.id), ["instance-b"]);
 });
 
-test("large lifecycle windows preserve every terminal record within receiver item and byte bounds", () => {
+test("large lifecycle windows preserve every terminal record within the transport byte budget", async () => {
   const records = Array.from({ length: 601 }, (_, index) => ({ id: `${channelId}:${index + 1}`, channelId,
     channelInstanceId: String(index + 1), agentName: "codex", label: `codex:${index + 1}`,
     registration: { ownerUserId: "owner", machineId: "machine", harness: "codex" },
@@ -109,9 +110,17 @@ test("large lifecycle windows preserve every terminal record within receiver ite
   const delivery = { channelId, reason: "update", recipients: [recipient({ card: false, channel: false, digest: false })] };
   assert.equal(channelAgentPresenceDeliveryBody({ ...delivery, records }), undefined,
     "one large window cannot fit in the internal delivery");
+  const compact = records.slice(0, 300).map(({ cwd: _cwd, ...record }) => record);
+  const compactBody = channelAgentPresenceDeliveryBody({ ...delivery, records: compact });
+  const received = await readChannelAgentPresenceDelivery(new Request("https://runtime.test/presence", {
+    method: "POST", body: compactBody,
+  }));
+  assert.equal(received.records.length, 300, "a fitting frame has no arbitrary Instance-count refusal");
+  assert.equal(await readChannelAgentPresenceDelivery(new Request("https://runtime.test/presence", {
+    method: "POST", body: " ".repeat(256_001),
+  })), undefined, "the transport itself bounds bytes before parsing");
   for (const window of [records, records.map(({ cwd: _cwd, ...record }) => record)]) {
-    const delivered = channelInstanceRecordBatches(window).flatMap(batch => {
-      assert.ok(batch.length <= 256);
+    const delivered = channelInstanceRecordBatches(window, delivery).flatMap(batch => {
       const body = channelAgentPresenceDeliveryBody({ ...delivery, records: batch });
       assert.ok(Buffer.byteLength(body) <= 256_000);
       const received = parseChannelAgentPresenceDelivery(JSON.parse(body));

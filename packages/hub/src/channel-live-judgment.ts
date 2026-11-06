@@ -1,4 +1,4 @@
-import { SYSTEM_ANNOTATION_AUTHOR, type ObservabilityEvent } from "@xmatrix/protocol";
+import { SYSTEM_ANNOTATION_AUTHOR, utf8ByteLength, type ObservabilityEvent } from "@xmatrix/protocol";
 import { postgresMessageLiveAgentPresence, postgresMessageLiveRecipientUserIds,
   withPostgresMessageRequestScope } from "./postgres-message-authority";
 import {
@@ -57,12 +57,18 @@ export async function publishChannelPresenceChanged(env: Env, channelId: string,
   const publish = async () => {
     const { recipientUserIds, memberPresence, instanceRecords } = await withPostgresMessageRequestScope(
       env, (scope) => postgresMessageLiveAgentPresence(env, channelId, scope, instanceIds));
-    for (const records of channelInstanceRecordBatches(instanceRecords)) {
+    // The longest actual recipient envelope determines the shared batches.
+    const recipient = (userId: string) => ({ userId, digest: false, card: false, channel: false, immediate: [] });
+    const longest = recipientUserIds.reduce((held, userId) =>
+      utf8ByteLength(JSON.stringify(userId)) > utf8ByteLength(JSON.stringify(held)) ? userId : held, "");
+    const batches = channelInstanceRecordBatches(instanceRecords,
+      { channelId, reason: "update", recipients: [recipient(longest)] });
+    for (const records of batches) {
       await deliverToAudience({
         env, label: "Instance records", audience: { humans: recipientUserIds },
         request: share => {
           const body = channelAgentPresenceDeliveryBody({ channelId, reason: "update", records,
-            recipients: [{ userId: share.owner, digest: false, card: false, channel: false, immediate: [] }] });
+            recipients: [recipient(share.owner)] });
           if (!body) throw new RangeError("Instance records exceed delivery budget");
           return runtimeJsonRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_URL, body);
         },

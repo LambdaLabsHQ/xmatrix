@@ -1,4 +1,5 @@
 import type { InstanceActivity, InstanceRecord, SerializedAgent, SerializedChannel } from "@xmatrix/protocol";
+import { readBoundedRequestBody } from "../request-body";
 import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
 import { isPlainRecord, parseInstanceActivity, parseInstanceRecord, utf8ByteLength } from "@xmatrix/protocol";
 
@@ -60,26 +61,35 @@ export function channelAgentPresenceDeliveryBody(delivery: ChannelAgentPresenceD
   return utf8ByteLength(body) <= MAX_PRESENCE_BODY_BYTES ? body : undefined;
 }
 
-/** A lifecycle read is a window plus exact ended rows, often larger than one
- * internal frame. Keep every record while respecting both receiver bounds. */
-export function channelInstanceRecordBatches(records: readonly InstanceRecord[]): InstanceRecord[][] {
+/** Split by the actual wire byte budget, including the recipient envelope.
+ * The number of Instances never determines whether a fact is accepted. */
+export function channelInstanceRecordBatches(records: readonly InstanceRecord[],
+  envelope: Pick<ChannelAgentPresenceDelivery, "channelId" | "reason" | "recipients">): InstanceRecord[][] {
+  const budget = MAX_PRESENCE_BODY_BYTES - utf8ByteLength(JSON.stringify({ ...envelope, records: [] }));
   const batches: InstanceRecord[][] = [];
   let batch: InstanceRecord[] = [];
   let bytes = 0;
   for (const record of records) {
-    const size = utf8ByteLength(JSON.stringify(record)) + 1;
-    // Leave half the body budget for routing and JSON envelope fields.
-    if (size > MAX_PRESENCE_BODY_BYTES / 2) throw new RangeError("Instance record exceeds delivery budget");
-    if (batch.length && (batch.length >= 256 || bytes + size > MAX_PRESENCE_BODY_BYTES / 2)) {
+    const size = utf8ByteLength(JSON.stringify(record));
+    if (size > budget) throw new RangeError("Instance record exceeds delivery budget");
+    if (batch.length && bytes + size + 1 > budget) {
       batches.push(batch);
       batch = [];
       bytes = 0;
     }
+    bytes += size + (batch.length ? 1 : 0);
     batch.push(record);
-    bytes += size;
   }
   if (batch.length) batches.push(batch);
   return batches;
+}
+
+/** Bound transport bytes before parsing a potentially large list. */
+export async function readChannelAgentPresenceDelivery(request: Request): Promise<ChannelAgentPresenceDelivery | undefined> {
+  const body = await readBoundedRequestBody(request, MAX_PRESENCE_BODY_BYTES);
+  if (!body) return undefined;
+  try { return parseChannelAgentPresenceDelivery(JSON.parse(new TextDecoder().decode(body))); }
+  catch { return undefined; }
 }
 
 export function parseChannelAgentPresenceDelivery(value: unknown): ChannelAgentPresenceDelivery | undefined {
@@ -122,7 +132,7 @@ export function parseChannelAgentPresenceDelivery(value: unknown): ChannelAgentP
 
 /** Every entry parses, or the list is refused. */
 function parsedList<T>(value: unknown, parse: (entry: unknown) => T): T[] | undefined {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 256) return undefined;
+  if (!Array.isArray(value) || value.length === 0) return undefined;
   try {
     return value.map(parse);
   } catch {
