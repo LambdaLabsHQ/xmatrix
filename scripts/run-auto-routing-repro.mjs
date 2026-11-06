@@ -113,6 +113,7 @@ try {
     "packages/db/test/runtime-head-deadlock-postgres.test.mjs",
     // Lost-response regressions must execute their actual authorization SQL.
     "packages/db/test/catalog-read-recovery-postgres.test.mjs",
+    "packages/db/test/message-system-annotation.test.mjs",
     "packages/db/test/content-ref-commit-postgres.test.mjs",
     // Storage metering and multipart progress against the widened content schema.
     "packages/db/test/content-storage-postgres.test.mjs",

@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: System judgments recover a lost database response
+
+HUB-BV lost the outbox INSERT response while recording a Machine result on
+its command message, before COMMIT. System annotations now close the failed
+session and replay their database-only transaction once on a fresh session,
+including when the caller owns a request session. Each attempt rereads the
+message and annotation, preserving recall and idempotence; live publication
+stays outside recovery. A second loss or an answered rejection still fails,
+and an unknown COMMIT is never replayed immediately. The underlying stall
+remains unconfirmed. Hub only; no schema or client migration. Recovery is a
+CI-validated beta Hub reverting this change.
+
 ## Unreleased: Socket overloads keep their failed Runtime fetch evidence
 
 HUB-BS/BT reported only an opaque platform error at the Agent and Machine

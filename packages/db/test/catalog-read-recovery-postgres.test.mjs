@@ -1,40 +1,10 @@
 import assert from "node:assert/strict";
-import { Client } from "pg";
-import { createAuthorityDatabase, PostgresAutomationRepository, PostgresBillingRepository, PostgresChannelCatalogRepository,
+import { PostgresAutomationRepository, PostgresBillingRepository, PostgresChannelCatalogRepository,
   PostgresPageRepository, PostgresSpaceControlRepository } from "../dist/index.js";
-import { integration, connectionString } from "./postgres-database.fixture.mjs";
+import { integration } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
+import { recoveringDatabase } from "./response-fault-postgres.fixture.mjs";
 import { describePageConversations } from "../dist/page-conversations.js";
-
-function recoveringDatabase(readFault) {
-  const clients = [];
-  const database = createAuthorityDatabase({ connectionString, shardId: "shard-0",
-    clientFactory(config) {
-      const client = new Client(config);
-      const entry = { queries: [], ended: false };
-      clients.push(entry);
-      const query = client.query.bind(client);
-      client.query = async input => {
-        assert.equal(entry.ended, false, "a destroyed checkout cannot be reused");
-        const text = typeof input === "string" ? input : input.text;
-        entry.queries.push(text);
-        const result = await query(input);
-        const fault = readFault();
-        if (fault?.matches.test(text) && fault.remaining > 0) {
-          fault.remaining -= 1;
-          fault.checkouts.push(entry);
-          await fault.beforeThrow?.();
-          throw fault.error;
-        }
-        return result;
-      };
-      const end = client.end.bind(client);
-      client.end = async () => { entry.ended = true; await end(); };
-      return client;
-    },
-  });
-  return { database, clients };
-}
 
 async function assertReadRecovery(read, expected, clients, injectFault) {
   const before = clients.length;

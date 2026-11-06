@@ -3,7 +3,8 @@ import { connectionString, integration, seedMessageSpace, integrationAuthority }
 
 import { Client } from "pg";
 
-import { PostgresMessageRepository } from "../dist/index.js";
+import { databaseFailureEvidence, DatabaseCommitUnknownError, PostgresMessageRepository } from "../dist/index.js";
+import { recoveringDatabase } from "./response-fault-postgres.fixture.mjs";
 
 /**
  * The Hub records its own judgment about a message as `system`, never as the
@@ -72,4 +73,62 @@ integration("a system annotation is the Hub's, idempotent, and leaves the invoca
   } finally {
     await client.end();
   }
+});
+
+// HUB-BV lost the outbox response after all annotation writes. Healthy
+// idempotence tests cannot catch a missing fresh-session replay or partial facts.
+integration("system judgments recover one pre-COMMIT loss and recheck the message (HUB-BV)", async () => {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    for (const scenario of ["recover", "recall", "twice", "answered", "commit"]) {
+      await seed();
+      const failure = scenario === "answered"
+        ? Object.assign(new Error("database rejection"), { code: "57014" }) : new Error("Query read timeout");
+      const fault = { matches: scenario === "commit" ? /^COMMIT$/u : /INSERT INTO data\.outbox/u,
+        remaining: scenario === "twice" ? 2 : 1, error: failure, checkouts: [],
+        ...(scenario === "twice" ? { errors: [new Error("Query read timeout"), failure] } : {}),
+        ...(scenario === "recall" ? { afterClose: () => client.query(
+          "UPDATE data.messages SET recalled_at=now() WHERE space_id=$1 AND message_id='status'", [SPACE]) } : {}) };
+      const { database, clients } = recoveringDatabase(() => fault);
+      const session = database.openSession();
+      // Hub callers can already own a request session; recovery must still
+      // acquire a new session instead of reviving the abandoned transaction.
+      const repository = new PostgresMessageRepository(session, true);
+      const input = { requestId: scenario, spaceId: SPACE, channelId: "conversation", messageId: "status",
+        namespace: "xmatrix.command-result", annotationId: "xmatrix.command-result:status",
+        payload: { note: "Machine stopped" }, requestDigest: DIGEST };
+      try {
+        if (scenario === "recover" || scenario === "recall") {
+          const result = await repository.annotateAsSystem(input);
+          assert.equal(result?.authorUserId ?? null, scenario === "recall" ? null : "system:xmatrix");
+          assert.equal(await repository.annotateAsSystem(input), null, "same judgment stays idempotent");
+        } else {
+          await assert.rejects(repository.annotateAsSystem(input), error => {
+            if (scenario === "commit") assert.ok(error instanceof DatabaseCommitUnknownError);
+            else assert.equal(error, failure);
+            if (scenario === "twice") assert.equal(databaseFailureEvidence(error).length, 2);
+            return true;
+          });
+        }
+      } finally { await session.close(); }
+      assert.equal(fault.checkouts.length, scenario === "twice" ? 2 : 1);
+      assert.ok(clients.every(entry => entry.ended), "all owned sessions close");
+      for (const abandoned of fault.checkouts) {
+        assert.equal(abandoned.queries.includes("COMMIT"), scenario === "commit");
+        assert.equal(abandoned.queries.includes("ROLLBACK"), scenario === "answered",
+          "a lost response destroys its checkout without queueing ROLLBACK");
+      }
+      const mutations = Number(scenario === "recover" || scenario === "commit");
+      const [row] = (await client.query(`SELECT entity_version,invocation_input_version,annotations_json
+        FROM data.messages WHERE space_id=$1 AND message_id='status'`, [SPACE])).rows;
+      assert.equal(Number(row.entity_version), 1 + mutations);
+      assert.equal(Number(row.invocation_input_version), 1);
+      assert.equal(row.annotations_json.length, mutations);
+      for (const table of ["message_annotations", "message_mutations", "outbox", "idempotency_keys"]) {
+        assert.equal(Number((await client.query(`SELECT count(*) FROM data.${table} WHERE space_id=$1`, [SPACE])).rows[0].count),
+          mutations, `${scenario}: ${table} is atomic and written once`);
+      }
+    }
+  } finally { await client.end(); }
 });
