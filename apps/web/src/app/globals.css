@@ -6350,7 +6350,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
      不协调). The bar takes the tone only while that block is there, so a
      conversation without a Summary or pages keeps a plain bar. No rule, card
      frame, glass or shadow. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-about) .app-topbar.app-mobile-channel-detail-bar,
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-mobile-channel-detail-bar.app-mobile-channel-head-bar,
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-about {
     background: var(--app-mobile-head-paper) !important;
   }

@@ -552,19 +552,23 @@ test("an `@` calling a live Instance names its conversation, since Instance name
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
 
-  test("the pages a conversation touches are chips on its Summary plaque", async ({ page: browser }) => {
-    await openChannelTouchingRelay(browser, "Shipping the relay rewrite behind the v2 flag.");
-    // One plaque, not a glass card stacked over a wood one.
-    await expect(browser.getByTestId("conversation-page-cards")).toBeHidden();
-    const plaque = browser.locator(".app-mobile-channel-about");
-    await expect(plaque).toHaveCount(1);
-    await expect(plaque).toContainText("Shipping the relay rewrite");
-    const chip = plaque.getByTestId("mobile-conversation-pages").getByRole("button", { name: "Relay" });
-    await expect(chip).toBeVisible();
-    await chip.click();
-    await expect(browser.getByTestId("pages-view")).toBeVisible();
-    await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
-  });
+  for (const summary of ["Shipping the relay rewrite behind the v2 flag.", undefined]) {
+    test(`the pages a conversation touches share the phone head ${summary ? "with" : "without"} a Summary`, async ({ page: browser }) => {
+      await openChannelTouchingRelay(browser, summary);
+      // One plaque, not a glass card stacked over a wood one.
+      await expect(browser.getByTestId("conversation-page-cards")).toBeHidden();
+      const plaque = browser.locator(".app-mobile-channel-about");
+      await expect(plaque).toHaveCount(1);
+      if (summary) await expect(plaque).toContainText("Shipping the relay rewrite");
+      const chip = plaque.getByTestId("mobile-conversation-pages").getByRole("button", { name: "Relay" });
+      await expect(chip).toBeVisible();
+      const fill = await plaque.evaluate(element => getComputedStyle(element).backgroundColor);
+      await expect(browser.locator(".app-topbar").first()).toHaveCSS("background-color", fill);
+      await chip.click();
+      await expect(browser.getByTestId("pages-view")).toBeVisible();
+      await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
+    });
+  }
 
   test("what changed since the reader last read is walked from the right edge, beside each change, until viewed", async ({ page: browser }) => {
     const editor = await openChangedPage(browser);
