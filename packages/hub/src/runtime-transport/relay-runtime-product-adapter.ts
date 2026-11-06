@@ -91,6 +91,8 @@ export interface RelayRuntimeProductPortFactory {
 export interface RelayRuntimeProductDurableObjectContext {
   acceptWebSocket(socket: WebSocket): void;
   getWebSockets(): WebSocket[];
+  /** When the platform last auto-answered this socket's heartbeat (Durable Object state). */
+  getWebSocketAutoResponseTimestamp?(socket: WebSocket): Date | null;
 }
 
 /** Explicit dependency-injection factory; production route selection remains outside this module. */
@@ -349,6 +351,30 @@ export class RelayRuntimeProductCallbackAdapter {
     input: Parameters<AgentInstanceRuntimeTransport["switchInstanceControl"]>[0],
   ): ReturnType<AgentInstanceRuntimeTransport["switchInstanceControl"]> {
     return this.agentInstance.switchInstanceControl(input);
+  }
+
+  /**
+   * Settle daemon sockets that went silent without closing. The cell calls
+   * this on every event it wakes for; `except` is the socket that sent it.
+   */
+  evictSilentMachineDaemons(except?: WebSocket): number {
+    const heartbeatAt = this.context.getWebSocketAutoResponseTimestamp;
+    if (!heartbeatAt) return 0;
+    return this.machineDaemon.evictSilent((ws) => heartbeatAt.call(this.context, ws), { except });
+  }
+
+  /**
+   * Whether a daemon here carries a live Run: then its silence must be found
+   * without waiting for another event, because the Run's Channel is waiting.
+   */
+  machineDaemonRunNeedsWatch(): boolean {
+    const routes = this.machineDaemon.edgeHeartbeatRoutes();
+    if (routes.length === 0) return false;
+    for (const session of this.agentInstance.liveSessions()) {
+      const route = liveAgentMachineRoute(session);
+      if (routes.some((daemon) => sameRouteIdentity(daemon, route))) return true;
+    }
+    return false;
   }
 
   claimPendingMachineDaemonCommands(identity: MachineDaemonRouteIdentity) {

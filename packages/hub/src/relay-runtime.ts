@@ -1,4 +1,5 @@
 import { runtimeDeliveryFetchIngress, withRuntimeDeliveryIngress } from "./runtime-transport/runtime-delivery-diagnostics";
+import { MACHINE_DAEMON_RUN_WATCH_MS } from "./runtime-transport/machine-daemon-port";
 import { TURN_RETRY_RUNTIME_PATH } from "./agent-turn-retry-policy";
 import { plainDeliveryRecord as plainObject } from "./runtime-transport/delivery-record";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
@@ -218,6 +219,8 @@ export class RelayRuntimeLive extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     return this.asCell(runtimeDeliveryFetchIngress(request), async () => {
+      // Whatever this request reads or delivers sees liveness as it is now.
+      this.settleSilentMachineDaemons();
       try {
         return await this.routeFetch(request);
       } catch (error) {
@@ -534,6 +537,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
 
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
     return this.asCell("socket_message", async () => {
+      this.settleSilentMachineDaemons(socket);
       if (!this.productAdapter?.owns(socket)) {
         socket.close(1008, "Runtime accepts only product sockets");
         return;
@@ -560,12 +564,54 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   /**
+   * Machine daemons are not watched on a timer: their heartbeat is answered at
+   * the edge and timestamped by the platform, and any event that wakes this
+   * cell first closes the ones that went silent (machine-daemon-port.ts).
+   */
+  private settleSilentMachineDaemons(except?: WebSocket): void {
+    try {
+      this.productAdapter?.evictSilentMachineDaemons(except);
+    } catch (error) {
+      // A liveness sweep must never fail the event that woke the cell.
+      console.error("Machine Daemon silence sweep failed", error);
+    }
+  }
+
+  /**
+   * The one timer, and only while a daemon here carries a Run: a machine that
+   * vanishes mid-Run leaves no event behind, and its Channel would wait for a
+   * reply that never comes. With no Run left the alarm is not renewed.
+   */
+  private async watchMachineDaemonRuns(): Promise<void> {
+    try {
+      if (!this.productAdapter?.machineDaemonRunNeedsWatch()) return;
+      if (await this.ctx.storage.getAlarm() !== null) return;
+      await this.ctx.storage.setAlarm(Date.now() + MACHINE_DAEMON_RUN_WATCH_MS);
+    } catch (error) {
+      console.error("Machine Daemon Run watch could not be armed", error);
+    }
+  }
+
+  async alarm(): Promise<void> {
+    return this.asCell("alarm", async () => {
+      this.settleSilentMachineDaemons();
+    });
+  }
+
+  /**
    * Handles one event as this cell's work: what it publishes, however deep in
    * the code that commits it, serves this cell's own sockets locally instead
    * of calling back into the cell, where it would wait behind this event.
    */
   private asCell<T>(ingress: Parameters<typeof withRuntimeDeliveryIngress>[0], operation: () => Promise<T>): Promise<T> {
-    return withRuntimeDeliveryIngress(ingress, () => runAsRuntimeCell(this.deliverySelf, operation));
+    return withRuntimeDeliveryIngress(ingress, () => runAsRuntimeCell(this.deliverySelf, async () => {
+      try {
+        return await operation();
+      } finally {
+        // Any event may have started or ended a Run on one of these machines.
+        await this.watchMachineDaemonRuns();
+      }
+    }));
   }
 
   /** The Worker names the owner cell it routed a socket to; remember it. */

@@ -37,6 +37,8 @@ test("stackless delivery reports retain invocation-local hop evidence and never 
   });
   const runtime = Object.create(RelayRuntimeLive.prototype);
   runtime.productAdapter = {
+    evictSilentMachineDaemons: () => 0,
+    machineDaemonRunNeedsWatch: () => false,
     owns: () => true,
     webSocketMessage: () => publish("update"),
     webSocketClose: () => publish("disconnect"),

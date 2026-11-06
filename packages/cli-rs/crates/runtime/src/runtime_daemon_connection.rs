@@ -2226,6 +2226,8 @@ async fn run_daemon_connection(
             "agent:spawn_in_workspace",
             "pty:headless",
             "machine_command_admission_ack_v1",
+            // The Hub reads this daemon's liveness from its edge heartbeat.
+            xmatrix_cli_core::machine_daemon_connection::MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY,
             "machine_run_snapshot_causal_v1",
             "machine_routing_model_v1",
             "machine_routing_effort_v1",
@@ -2304,6 +2306,8 @@ async fn run_daemon_connection(
             "agent:spawn_in_workspace".to_string(),
             "pty:headless".to_string(),
             "machine_command_admission_ack_v1".to_string(),
+            xmatrix_cli_core::machine_daemon_connection::MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY
+                .to_string(),
             "machine_run_snapshot_causal_v1".to_string(),
             "machine_routing_model_v1".to_string(),
             "machine_routing_effort_v1".to_string(),

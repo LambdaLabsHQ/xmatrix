@@ -42,7 +42,7 @@ const HEARTBEAT_TIMEOUT_MS: u64 = 90_000;
 /// Object that owns this socket. It must match the Hub's `HUMAN_HEARTBEAT_PING`
 /// byte for byte. Its answer carries no `ts`, so it never parses as a reply:
 /// like any server frame it only proves the socket, which is all this probe asks.
-const EDGE_HEARTBEAT_FRAME: &str = r#"{"type":"ping","requestId":"web-heartbeat"}"#;
+pub(crate) const EDGE_HEARTBEAT_FRAME: &str = r#"{"type":"ping","requestId":"web-heartbeat"}"#;
 const TRACE_REAP_INTERVAL_MS: u64 = HEARTBEAT_INTERVAL_MS;
 const CONNECT_TIMEOUT_MS: u64 = 15_000;
 const REGISTER_RESPONSE_TIMEOUT_SECS: u64 = 20;
