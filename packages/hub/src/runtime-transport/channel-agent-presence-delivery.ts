@@ -1,6 +1,6 @@
-import type { SerializedAgent, SerializedChannel } from "@xmatrix/protocol";
+import type { InstanceActivity, InstanceRecord, SerializedAgent, SerializedChannel } from "@xmatrix/protocol";
 import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
-import { isPlainRecord, utf8ByteLength } from "@xmatrix/protocol";
+import { isPlainRecord, parseInstanceActivity, parseInstanceRecord, utf8ByteLength } from "@xmatrix/protocol";
 
 export const RELAY_RUNTIME_CHANNEL_AGENT_PRESENCE_PATH = "/internal/product/channel-agent-presence";
 
@@ -28,6 +28,10 @@ export interface ChannelAgentPresenceDelivery {
   channel?: SerializedChannel;
   lifecycle?: HumanServerMessage;
   observable?: HumanServerMessage;
+  /** The changed Instances as the database answered them; every recipient gets them first. */
+  records?: InstanceRecord[];
+  /** What their live connections say they are doing, after the records. */
+  activities?: InstanceActivity[];
   recipients: ChannelAgentPresenceRecipient[];
 }
 
@@ -41,6 +45,8 @@ export function channelAgentPresenceDeliveryBody(delivery: ChannelAgentPresenceD
     ...(delivery.channel ? { channel: delivery.channel } : {}),
     ...(delivery.lifecycle ? { lifecycle: delivery.lifecycle } : {}),
     ...(delivery.observable ? { observable: delivery.observable } : {}),
+    ...(delivery.records?.length ? { records: delivery.records } : {}),
+    ...(delivery.activities?.length ? { activities: delivery.activities } : {}),
     recipients,
   };
   let body = JSON.stringify(payload);
@@ -65,8 +71,12 @@ export function parseChannelAgentPresenceDelivery(value: unknown): ChannelAgentP
   const channel = value.channel === undefined ? undefined : channelSnapshot(value.channel, channelId);
   const lifecycle = value.lifecycle === undefined ? undefined : typedFrame(value.lifecycle, "agent_lifecycle");
   const observable = value.observable === undefined ? undefined : typedFrame(value.observable, "observable_event");
+  const records = value.records === undefined ? undefined : parsedList(value.records, parseInstanceRecord);
+  const activities = value.activities === undefined ? undefined : parsedList(value.activities, parseInstanceActivity);
   if ((value.card !== undefined && !card) || (value.channel !== undefined && !channel) ||
-      (value.lifecycle !== undefined && !lifecycle) || (value.observable !== undefined && !observable)) {
+      (value.lifecycle !== undefined && !lifecycle) || (value.observable !== undefined && !observable) ||
+      (value.records !== undefined && !records) || (value.activities !== undefined && !activities) ||
+      [...records ?? [], ...activities ?? []].some((entry) => entry.channelId !== channelId)) {
     return undefined;
   }
   const recipients: ChannelAgentPresenceRecipient[] = [];
@@ -82,8 +92,20 @@ export function parseChannelAgentPresenceDelivery(value: unknown): ChannelAgentP
     ...(channel ? { channel } : {}),
     ...(lifecycle ? { lifecycle } : {}),
     ...(observable ? { observable } : {}),
+    ...(records ? { records } : {}),
+    ...(activities ? { activities } : {}),
     recipients,
   };
+}
+
+/** Every entry parses, or the list is refused. */
+function parsedList<T>(value: unknown, parse: (entry: unknown) => T): T[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 256) return undefined;
+  try {
+    return value.map(parse);
+  } catch {
+    return undefined;
+  }
 }
 
 function parseRecipient(value: unknown): ChannelAgentPresenceRecipient | undefined {

@@ -2969,12 +2969,14 @@ export class PostgresMessageRepository {
     requestId: string;
     spaceId: string;
     channelId: string;
+    /** Instances whose lifecycle just changed: each is answered exactly, ended ones included. */
+    instanceIds?: readonly string[];
   }): Promise<{ recipientUserIds: string[]; memberPresence: Record<string, ChannelMemberPresence>;
     instanceRecords: AgentInstanceRecord[] }> {
     const { requestId, spaceId, channelId } = channelRequest(input);
     return this.inSpace(requestId, "message.live-agent-presence", spaceId, async (transaction) => {
       const recipientUserIds = await liveRecipientUserIds(transaction, spaceId, channelId);
-      const instances = await readChannelInstances(transaction, spaceId, [channelId]);
+      const instances = await readChannelInstances(transaction, spaceId, [channelId], input.instanceIds);
       return { recipientUserIds, memberPresence: instances.memberPresence.get(channelId) ?? {},
         instanceRecords: instances.records.get(channelId) ?? [] };
     });
