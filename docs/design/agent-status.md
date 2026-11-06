@@ -79,8 +79,8 @@ Nothing replays a frame to a socket that stayed open: `data.outbox` has no
 consumer and Human sockets have no replay. If both attempts fail, a socket
 that stays connected keeps its last record until its person focuses the
 Channel, returns to the foreground or reconnects, each of which reads the
-Instances it holds exactly. This is a bound on staleness, not a delivery
-guarantee.
+Instances it holds exactly. This is event-driven recovery, not a delivery
+guarantee or a wall-clock bound on staleness.
 
 `instance_records_v1` negotiates self-contained Human socket frames. Existing
 `memberPresence`, cards and digests remain a bounded compatibility path for
