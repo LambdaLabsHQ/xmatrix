@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: A page's comment thread no longer hides its own words
+
+An open thread in a page's margin floated the Conversations view's Agent
+disc (46px) and composer over its last lines, a "back to the last person"
+capsule over its first, and showed its Agent again as a chip in the head.
+The same glass disc and composer now stand in flow under the comments at
+the thread's scale (a 32px disc on the comments' avatar column, a 40px
+composer), the head names the conversation on the passage's column without
+the chip, comment avatars drop their status dot, the jump capsule is gone
+from the margin, and text fades at the scroll edges. The Conversations view
+is unchanged. Web only.
 ## Unreleased: page edit takes what page read printed, never its header alone
 
 Agents wrote `xmatrix page read`'s header into pages: 62 revisions of 10
