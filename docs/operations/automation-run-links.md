@@ -34,8 +34,12 @@ For scoped operational verification, join the view to occurrences and filter its
 `space_id` and a bounded occurrence window. Count distinct occurrences and Runs
 separately, compare Run status, and keep unlinked occurrences separate. Reading
 this relation does not grant access to another Space or replace API permission
-checks. Source message/launch retention still bounds historical attribution;
-Run-to-PR/deployment attribution and supplier/model cost inputs are separate work.
+checks. Source message/launch retention still bounds historical attribution.
+What each occurrence produced (a pull request, a page change, nothing, or no
+Agent started) is read from its conversation wherever schedules are listed
+([live documents §6.4](../design/pages-live-document.md#64-storage-and-execution));
+deployment attribution, merge outcomes and supplier/model cost inputs are
+separate work.
 
 With the existing runtime credential injected as `DATABASE_URL`, run
 `node packages/db/scripts/automation-run-links-report.mjs <space-id> <from-ISO> <to-ISO>`.

@@ -57,6 +57,10 @@ test("due Automation commits one canonical message with App metadata and no dupl
     assert.equal(delivered.metadata?.appMentions?.[0]?.actionId, "issue_to_channel");
     assert.equal(persisted.lastMessageId, delivered.messageId);
     assert.deepEqual(persisted.latestExecution.runs, [], "message delivery alone proves no Run");
+    // Its Space's list says what the occurrence produced, read from the conversation it ran in.
+    const listed = (await listTasks(worker, space.id)).automations.find((candidate) => candidate.id === task.id);
+    assert.deepEqual(listed.outcomes, [{ kind: "none", scheduledFor: persisted.latestExecution.scheduledFor,
+      conversationId: persisted.lastChannelId }], "an App command starts no Agent and changes no page");
     const [occurrence] = await inWorkerTransaction(worker, tx => tx.query({ text:
       "SELECT run_id,instance_id FROM data.automation_occurrences WHERE automation_id=$1",
     values: [task.id] }));

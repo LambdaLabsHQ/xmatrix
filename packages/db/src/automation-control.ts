@@ -33,6 +33,9 @@ import {
 import { reserveNaturalKey } from "./natural-keys.js";
 import { pageAccess, pageAccessMap } from "./page-control.js";
 import { AutomationControlError, automationName, commitAutomationChange as commit } from "./automation-commit.js";
+import {
+  AUTOMATION_OUTCOME_BATCH, occurrenceFacts, occurrenceFactsQuery, type AutomationOccurrenceFacts,
+} from "./automation-outcome-facts.js";
 
 export { automationName };
 import { commandFields } from "./command-fields.js";
@@ -947,6 +950,28 @@ export class PostgresAutomationRepository {
       const visible = await withPageAccess(tx, text(input.userId, "userId", 300), rows);
       return { tasks: visible.map(automationFromRow) };
     });
+  }
+
+  /**
+   * What each of these page Automations' latest occurrences left in its own
+   * conversation, newest first (docs/design/pages-live-document.md §6.4), for
+   * Automations the caller has already read. Only the Space's page Automations
+   * are answered; anything else named is left out.
+   */
+  async recentOccurrences(input: { requestId: string; spaceId: string; automationIds: readonly string[] }):
+    Promise<AutomationOccurrenceFacts[]> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const spaceId = text(input.spaceId, "spaceId", 300);
+    if (!Array.isArray(input.automationIds) || input.automationIds.length > AUTOMATION_OUTCOME_BATCH) {
+      throw new AutomationControlError("invalid_automation_request", 400, "automationIds is invalid");
+    }
+    const automationIds = [...new Set(input.automationIds.map((id) => text(id, "automationId", 300)))];
+    if (automationIds.length === 0) return [];
+    const placement = await this.placement(requestId, "automation.outcomes.placement", spaceId);
+    return this.read({ requestId, operation: "automation.outcomes", placement: {
+      spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch,
+    } }, async (tx) => (await tx.query<QueryResultRow>(occurrenceFactsQuery(spaceId, automationIds)))
+      .map(occurrenceFacts));
   }
 
   private async listAcrossActivePlacements(input: {

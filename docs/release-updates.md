@@ -10,6 +10,7 @@ reading in force, the Hub asks their machines' daemons for one (the existing
 once-a-minute-per-daemon probe), and the reading reaches the owner's card
 when the probe lands. Hub only, no schema or client protocol migration.
 Recovery is a CI-validated Hub reverting the change.
+
 ## Unreleased: A page's name is its first top-level heading, wherever it stands
 
 Two Lambda Labs business-line pages read "Untitled" in the page tree,
@@ -26,6 +27,24 @@ for a document without one, and the byline and the published page stand under
 the title wherever it is. Hub and beta Web with expand migration 0238;
 `data.page_name` stays for the Hub this replaces until a contract migration
 drops it. Recovery is a CI-validated beta Hub and Web reverting this change.
+
+## Unreleased: A schedule says what its latest runs produced
+
+Learning which of a Space's schedules earn their cadence took a manual,
+hours-long audit of their conversations. Each page Automation listed by its
+page or its Space now carries `outcomes`: its ten latest occurrences that were
+not cancelled, newest first, each a pull request it opened, a page it changed,
+nothing, failed to start, or still running. The Hub reads them from each
+occurrence's own conversation (its launches, Runs, page revisions and activity
+entries) in one bounded statement per list; nothing new is stored and merges
+are not shown. `xmatrix page automation list` and `page read` print
+`last 10: 4 PR · 3 page · 2 none · 1 failed to start`, and Schedules shows the
+summary in each row and every run, with its conversation, in its detail.
+Expand migration 0239 adds online indexes for those reads (a GIN index on page
+revision conversations and a partial index on activity entries and failure
+notices). Hub, Web, CLI and shared protocol; older clients ignore the additive
+field. Recovery is a CI-validated beta reverting the change; the indexes may
+stay.
 
 ## Unreleased: Phone conversation heads share state without inspecting the app tree
 
