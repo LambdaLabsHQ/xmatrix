@@ -695,8 +695,9 @@ or joining one never leaves the page.
   It reads top to bottom and nothing floats over what was said (asked by
   Daniel 2026-11-06): the Agent work dock and the composer are the
   Conversations view's own glass disc and capsule at the thread's scale (a
-  2rem disc on the comments' avatar column, a 2.5rem composer), standing in
-  flow under the comments instead of over them. The Agents are not repeated
+  2rem disc on the comments' avatar column, its island's caption and words
+  on one line, a 2.5rem composer), standing in flow under the comments
+  instead of over them. The Agents are not repeated
   in the head, and a comment's avatar carries no status. The thread has no
   way back to a person's last message: it is short enough to scroll.
   The card's head carries resolve, *Open in Conversations* and close. The other
