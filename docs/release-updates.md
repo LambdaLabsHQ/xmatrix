@@ -11,6 +11,30 @@ composer), the head names the conversation on the passage's column without
 the chip, comment avatars drop their status dot, the jump capsule is gone
 from the margin, and text fades at the scroll edges. The Conversations view
 is unchanged. Web only.
+## Unreleased: page edit takes what page read printed, never its header alone
+
+Agents wrote `xmatrix page read`'s header into pages: 62 revisions of 10
+Lambda Labs pages since 2026-10-02 carry its lines, first written by codex,
+claude, opencode and grok. `page edit -f` took a file as the page's text, so
+each Agent cut the header off by hand; a cut one line short or mid-header
+landed above the page's heading. `page edit` and `page create` now take the
+page's text or all of what `page read` printed, whose header is left out. A
+line only that header writes (`pageId:`, `headRevision:`, the `writeLive:`
+hint) elsewhere outside fenced code means it was cut by hand: nothing is
+written, and the refusal names the line and what to give instead. CLI only;
+no Hub, schema or protocol change. Older CLIs write what they are given.
+Recovery is a CI-validated beta CLI reverting this change.
+
+## Unreleased: An idle Agent's 5h/1w usage comes back when its Channel is opened
+
+A registration's quota reading counts for fifteen minutes, and since idle
+Instances stopped polling their provider (#1328) nothing read it again while
+an Agent sat idle, so its Channel card lost its 5h/1w tags. Opening the
+Channel is now the event that reads it: when the Agents it shows have no
+reading in force, the Hub asks their machines' daemons for one (the existing
+once-a-minute-per-daemon probe), and the reading reaches the owner's card
+when the probe lands. Hub only, no schema or client protocol migration.
+Recovery is a CI-validated Hub reverting the change.
 
 ## Unreleased: A page's name is its first top-level heading, wherever it stands
 
