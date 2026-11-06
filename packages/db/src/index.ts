@@ -242,7 +242,7 @@ export { MACHINE_OFFLINE_REST_REASON, PostgresRegistrationRebornRepository, WAKE
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {
-  inActiveSpace, namedPageBody, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError, pageNameFrom,
+  inActiveSpace, namedPageBody, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError,
   pagePositionBetween, pageTitle, PostgresPageRepository, renamedPageBody, UNNAMED_PAGE,
 } from "./page-control.js";
 export type {

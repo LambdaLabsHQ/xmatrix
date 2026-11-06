@@ -217,9 +217,9 @@ export function sessionPrincipal(authUser: AuthUser, conversationId?: string): P
 }
 
 /**
- * A page is named by the heading its document opens with (pages-live-document.md §4.1), so a
- * rename edits that line, through the live session like any edit: people on the page see it at
- * once, and what they are typing elsewhere stays. A head that moves meanwhile is read again once.
+ * A page is named by its document's first top-level heading (pages-live-document.md §4.1), so a
+ * rename edits that line where it stands, through the live session like any edit: people on the page
+ * see it at once, and what they are typing elsewhere stays. A head that moves meanwhile is read again once.
  */
 async function renamePage(env: Env, spaceId: string, pageId: string, authUser: AuthUser, title: string): Promise<void> {
   const name = pageTitle(title);

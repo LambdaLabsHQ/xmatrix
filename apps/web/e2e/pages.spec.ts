@@ -905,7 +905,7 @@ test("an owner may start a Space's pages from a repository or a first page, and 
   await fixtureJson(browser, "page-tree-first", pageTree, { pages: [page("p-first", null, "First document", "V")] });
   await fixtureJson(browser, "page-create", pageTree, { page: page("p-first", null, "First document", "V") },
     { method: "POST" });
-  // Its name is the heading its document opens with.
+  // Its name is its document's first top-level heading.
   await fixtureJson(browser, "first-document", /\/pages\/p-first$/u, { page: { ...page("p-first", null, "First document", "V"),
     body: "# First document\n", revisionInfo: { revision: 1, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } },
   { method: "GET" });
@@ -2404,8 +2404,8 @@ test("link text can still be selected and its address edited, and unsafe links n
 
 test("everyday editing works as in Google Docs: rename the page, grow a table, links from typed URLs", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1280, height: 800 });
-  // A page is named by the heading its document opens with; one that opens without a name reads "Untitled"
-  // in its place, and clicking it starts that heading in the document.
+  // A page is named by its document's first top-level heading; one without such a heading reads "Untitled"
+  // above its text, and clicking it starts that heading in the document.
   await stubPages(browser, [page("p-relay", null, "Untitled", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   const server = pageDocument("## Relay\n\n| Area | State |\n|---|---|\n| Search | Shipped |\n\nSee the notes.\n");
