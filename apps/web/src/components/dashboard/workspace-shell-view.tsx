@@ -110,7 +110,7 @@ import { searchWorkspacePages } from "./workspace-message-search";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { WorkspaceSearchDialog } from "./workspace-search";
 import type { SearchFilters } from "./workspace-search-model";
-import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
+import { ConversationPageCards, useConversationPages } from "@/components/pages/conversation-page-cards";
 import { ContentSkeleton } from "./content-skeleton";
 
 // Views the first screen does not draw load when first shown, so their code is
@@ -524,6 +524,14 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
      wood carries only liquid glass and this screen has none. */
   const showSpaceFirstTask =
     !showSpaceAgentSetup && spaceFirstTask.kind !== "hidden" && !selectedChannel;
+  // The phone's bar and plaque render one head from the same data. Do not
+  // discover its presence by inspecting the whole app's descendant DOM.
+  const mobileConversationPages = useConversationPages({
+    spaceId: selectedChannel?.spaceId ?? "",
+    conversationId: selectedChannel?.id ?? "",
+    token: selectedChannel ? token ?? null : null,
+  });
+  const hasMobileConversationHead = Boolean(selectedChannel?.summary?.trim() || mobileConversationPages.length);
   const [firstTaskBusy, setFirstTaskBusy] = useState(false);
   const [firstTaskError, setFirstTaskError] = useState<string | null>(null);
   const [firstTaskWorkspace, setFirstTaskWorkspace] = useState<ChosenWorkspace | null>(null);
@@ -1223,9 +1231,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <MobileChannelSummaryPlaque
           summary={selectedChannel.summary}
           onOpen={openMobileChannelDetails}
-          spaceId={selectedChannel.spaceId}
-          conversationId={selectedChannel.id}
-          token={token ?? null}
+          pages={mobileConversationPages}
           onOpenPage={openPage}
         />
       )}
@@ -1644,6 +1650,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             composing={composingConversation}
             onCloseComposing={() => setComposingConversation(false)}
             channel={composingConversation ? null : selectedChannel}
+            hasConversationHead={hasMobileConversationHead}
             spaces={spaces}
             currentSpaceId={currentSpaceId}
             view={view}
