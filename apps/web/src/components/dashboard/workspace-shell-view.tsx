@@ -1313,6 +1313,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onRebornAgentInstance={rebornDockInstance}
         onHandoffAgentInstance={handoffDockInstance}
         onOpenAgentTrace={openAgentTrace}
+        inPageMargin={placement === "page-margin"}
       />
       {/* The composer sits in the reserved bottom gutter; the work dock stays
           anchored to --app-composer-height. */}

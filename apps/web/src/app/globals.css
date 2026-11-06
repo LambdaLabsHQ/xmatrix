@@ -2136,7 +2136,9 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
   color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
 }
 
-.xmatrix-app .message-author-avatar .identity-avatar-face.identity-avatar-face {
+/* An Agent on a page thread's last line is that thread's next author: the same disc. */
+.xmatrix-app .message-author-avatar .identity-avatar-face.identity-avatar-face,
+.xmatrix-app .page-margin-open .app-agent-work-avatar .identity-avatar-face.identity-avatar-face {
   background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
@@ -3583,7 +3585,8 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   pointer-events: auto;
 }
 
-.xmatrix-app .app-agent-work-morph.app-agent-work-morph.app-liquid-glass-surface {
+/* Glass, or a paper slip on a page's thread: the same growth either way. */
+.xmatrix-app .app-agent-work-morph.app-agent-work-morph.app-agent-work-morph {
   /* The content sits on the bottom edge, so a glass smaller than it cuts
      off the top and the right, never the island's row. */
   display: flex;
