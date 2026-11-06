@@ -799,7 +799,10 @@ export function MobileChannelSummaryPlaque({
             type="button"
             aria-label="Open channel Summary"
             onClick={onOpen}
-            className="app-mobile-channel-about-summary flex w-full items-start gap-2 px-[var(--mobile-content-inset,1rem)] pb-2.5 pt-2.5 text-left active:opacity-80"
+            className={cn(
+              "app-mobile-channel-about-summary flex w-full items-start gap-2 px-[var(--mobile-content-inset,1rem)] pt-[var(--app-mobile-head-room,1.5rem)] text-left active:opacity-80",
+              pages.length > 0 ? "pb-2.5" : "pb-[18px]"
+            )}
           >
             {/* No `block` here: it and line-clamp both set `display`, and the
                 clamp needs -webkit-box. Losing that clipped the card mid-line
@@ -813,8 +816,8 @@ export function MobileChannelSummaryPlaque({
         {pages.length > 0 && (
           <div
             className={cn(
-              "app-mobile-channel-pages flex gap-1.5 overflow-x-auto px-[var(--mobile-content-inset,1rem)] pb-3",
-              !text && "pt-2.5"
+              "app-mobile-channel-pages flex gap-4 overflow-x-auto px-[var(--mobile-content-inset,1rem)] pb-[18px]",
+              !text && "pt-[var(--app-mobile-head-room,1.5rem)]"
             )}
             data-testid="mobile-conversation-pages"
           >
@@ -824,7 +827,7 @@ export function MobileChannelSummaryPlaque({
                 type="button"
                 title={section ? `${page.title} › ${section.title}` : page.title}
                 onClick={() => onOpenPage(pageId)}
-                className="app-mobile-channel-page-chip flex h-7 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full pl-2 pr-2.5 text-xs font-semibold active:opacity-80"
+                className="app-mobile-channel-page-chip flex h-7 max-w-[13rem] shrink-0 items-center gap-1.5 text-[13px] font-semibold active:opacity-60"
               >
                 <FileText className="size-3.5 shrink-0" aria-hidden="true" />
                 <span className="truncate">{page.title}</span>

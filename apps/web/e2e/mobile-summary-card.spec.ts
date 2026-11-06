@@ -49,10 +49,18 @@ test("mobile Summary stays on paper below the bar and ellipsizes at two lines", 
   await expect(card).toHaveCSS("background-image", "none");
   await expect(card).toHaveCSS("box-shadow", "none");
   await expect(page.locator(".app-topbar")).toHaveCSS("box-shadow", "none");
-  // Quiet grey prose on the messages' own paper: no rule or band sets it
-  // apart (user 2026-11-04: 分割线…不够简洁).
+  // Set apart by a deeper paper tone, not a rule (user 2026-11-04:
+  // 分割线…不够简洁 / summary 那里能不能有个颜色区分).
   await expect(card).toHaveCSS("border-bottom-width", "0px");
-  await expect(card).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  const [bandFill, streamFill] = await Promise.all([card, page.locator(".app-message-surface")]
+    .map((locator) => locator.evaluate((element) => getComputedStyle(element).backgroundColor)));
+  expect(bandFill).not.toBe(streamFill);
+  // The bar above is the same block, so the sign's shadow falls on one tone
+  // (user 2026-11-04: 白顶栏+灰带子+阴影不协调), and the Summary starts
+  // clear of that shadow.
+  const barFill = await page.locator(".app-topbar").first().evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(barFill).toBe(bandFill);
+  await expect(card.locator(".app-mobile-channel-about-summary")).toHaveCSS("padding-top", "24px");
 
   // Two clamped lines, and the card is tall enough to show both: the dead
   // clamp used to cut the next line in half at the card's bottom edge.
