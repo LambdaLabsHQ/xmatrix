@@ -7,6 +7,7 @@ import { publicLaunchFailureCode, publicLaunchFailureMessage, publicRuntimeError
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import type { QueryResultRow } from "pg";
 import { resumableChannelRun } from "./instance-rest-state.js";
+import { loadAgentInstanceRecordsById, type AgentInstanceRecord } from "./channel-agent-presence.js";
 import { decodeInvocationPageCursor, encodeInvocationPageCursor, type InvocationPagePosition } from "./runtime-invocation-cursor.js";
 import { readInvocationProgress } from "./runtime-invocation-progress.js";
 import { readContinuationMachineConstraint, readContinuationSource } from "./runtime-continuation-source.js";
@@ -752,7 +753,8 @@ export class PostgresRuntimeRepository {
     runId?: string;
     presenceSequence?: number;
     at: string;
-  }): Promise<{ instanceId: string; recorded: boolean; registration?: { ownerUserId: string; machineId: string; harness: string } }> {
+  }): Promise<{ instanceId: string; recorded: boolean; registration?: { ownerUserId: string; machineId: string; harness: string };
+    record?: AgentInstanceRecord }> {
     const requestId = text(input.requestId, "requestId", 200);
     const spaceId = text(input.spaceId, "spaceId", 300);
     const instanceId = text(input.instanceId, "instanceId", 300);
@@ -780,33 +782,42 @@ export class PostgresRuntimeRepository {
     const { presenceVersion: _version, presenceSequence: _sequence, ...rest } = reported ?? {};
     const presentation = reported === null ? null : rest;
     const placement = await this.spaces.resolve(requestId, "runtime.instance.presentation", spaceId);
-    const rows = await this.spaces.transaction(requestId, "runtime.instance.presentation", placement, (tx) => tx.query<QueryResultRow>({
-      name: "runtime_instance_presentation_v5",
-      // Hibernation can omit the large model catalog from live presentation.
-      // Omission is not a withdrawal; only an explicit models field replaces
-      // the durable observation, including an empty list that clears it.
-      text: `UPDATE data.instances SET presentation_json=
-          CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'models')
-            THEN jsonb_strip_nulls(jsonb_build_object('models',presentation_json->'models',
-              'modelsObservedAt',presentation_json->'modelsObservedAt')) ELSE '{}'::jsonb END ||
-          CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'parameters')
-            THEN jsonb_strip_nulls(jsonb_build_object('parameters',presentation_json->'parameters',
-              'parametersObservedAt',presentation_json->'parametersObservedAt')) ELSE '{}'::jsonb END || COALESCE($2::jsonb,'{}'::jsonb) ||
-          CASE WHEN $6::bigint IS NULL THEN '{}'::jsonb
-            ELSE jsonb_build_object('presenceVersion',$6::bigint,'presenceSequence',$8::bigint) END,updated_at=$3,
-          status=CASE WHEN $4::text IS NOT NULL AND status IN (${LIVE_AGENT_STATUS_SQL}) THEN $4::text ELSE status END
-        WHERE instance_id=$1 AND EXISTS (SELECT 1 FROM data.runs r
-          WHERE r.run_id=data.instances.run_id AND r.owner_user_id=$5)
-          AND CASE WHEN $6::bigint IS NULL
-            THEN presentation_json->'presenceVersion' IS DISTINCT FROM to_jsonb(version)
-            ELSE version=$6::bigint AND run_id=$7::text
-              AND (presentation_json->'presenceVersion' IS DISTINCT FROM to_jsonb($6::bigint)
-                OR COALESCE((presentation_json->>'presenceSequence')::bigint,0)<$8::bigint) END
-        RETURNING instance_id,run_id`,
-      values: [instanceId, presentation === null ? null : JSON.stringify({ ...presentation, usage: localLlmUsage(presentation.usage as import("@xmatrix/protocol").LlmUsage | undefined) }), at, input.status ?? null, text(input.actorUserId, "actorUserId", 300),
-        ordered?.version ?? null, ordered?.runId ?? null, ordered?.sequence ?? null],
-      maxRows: 1,
-    }));
+    const written = await this.spaces.transaction(requestId, "runtime.instance.presentation", placement, async (tx) => {
+      const rows = await tx.query<QueryResultRow>({
+        name: "runtime_instance_presentation_v5",
+        // Hibernation can omit the large model catalog from live presentation.
+        // Omission is not a withdrawal; only an explicit models field replaces
+        // the durable observation, including an empty list that clears it.
+        text: `UPDATE data.instances SET presentation_json=
+            CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'models')
+              THEN jsonb_strip_nulls(jsonb_build_object('models',presentation_json->'models',
+                'modelsObservedAt',presentation_json->'modelsObservedAt')) ELSE '{}'::jsonb END ||
+            CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'parameters')
+              THEN jsonb_strip_nulls(jsonb_build_object('parameters',presentation_json->'parameters',
+                'parametersObservedAt',presentation_json->'parametersObservedAt')) ELSE '{}'::jsonb END || COALESCE($2::jsonb,'{}'::jsonb) ||
+            CASE WHEN $6::bigint IS NULL THEN '{}'::jsonb
+              ELSE jsonb_build_object('presenceVersion',$6::bigint,'presenceSequence',$8::bigint) END,updated_at=$3,
+            status=CASE WHEN $4::text IS NOT NULL AND status IN (${LIVE_AGENT_STATUS_SQL}) THEN $4::text ELSE status END
+          WHERE instance_id=$1 AND EXISTS (SELECT 1 FROM data.runs r
+            WHERE r.run_id=data.instances.run_id AND r.owner_user_id=$5)
+            AND CASE WHEN $6::bigint IS NULL
+              THEN presentation_json->'presenceVersion' IS DISTINCT FROM to_jsonb(version)
+              ELSE version=$6::bigint AND run_id=$7::text
+                AND (presentation_json->'presenceVersion' IS DISTINCT FROM to_jsonb($6::bigint)
+                  OR COALESCE((presentation_json->>'presenceSequence')::bigint,0)<$8::bigint) END
+          RETURNING instance_id,run_id,channel_id`,
+        values: [instanceId, presentation === null ? null : JSON.stringify({ ...presentation, usage: localLlmUsage(presentation.usage as import("@xmatrix/protocol").LlmUsage | undefined) }), at, input.status ?? null, text(input.actorUserId, "actorUserId", 300),
+          ordered?.version ?? null, ordered?.runId ?? null, ordered?.sequence ?? null],
+        maxRows: 1,
+      });
+      // What this report made the Instance, read back by the one projection
+      // every read uses: whoever relays it shows exactly what a read would.
+      const record = rows[0] && ordered
+        ? (await loadAgentInstanceRecordsById(tx, spaceId, [String(rows[0].channel_id)], [instanceId])).records[0]
+        : undefined;
+      return { rows, record };
+    });
+    const { rows, record } = written;
     const binding = rows[0] && input.presentation?.usage ? await this.database.transaction({
       requestId, operation: "runtime.instance.quota-binding",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
@@ -816,7 +827,7 @@ export class PostgresRuntimeRepository {
     const key = binding[0];
     return { instanceId, recorded: rows.length > 0, ...(key ? { registration: {
       ownerUserId: String(key.owner_user_id), machineId: String(key.machine_id), harness: String(key.harness),
-    } } : {}) };
+    } } : {}), ...(record ? { record } : {}) };
   }
 
   private async transitionRun(tx: DatabaseTransaction, input: Record<string, unknown>, actorUserId: string,
