@@ -134,10 +134,13 @@ integration("a connection's reports are ordered by (version, sequence) and fence
   const f = await spaceSecretFixture();
   const runtime = new PostgresRuntimeRepository(f.database);
   const spaces = new PostgresSpaceControlRepository(f.database, "shard-0");
-  const current = async () => {
+  const read = async () => {
     const { channel } = await spaces.getChannel({ requestId: randomUUID(), spaceId: f.ids.space,
       channelId: f.ids.channel, principal: { kind: "user", id: f.ids.owner }, knownInstanceIds: [f.ids.instance] });
-    const record = channel.instanceRecords.find((entry) => entry.id === f.ids.instance);
+    return channel.instanceRecords.find((entry) => entry.id === f.ids.instance);
+  };
+  const current = async () => {
+    const record = await read();
     return { status: record.status, ...(record.rest ? { rest: record.rest } : {}), revision: record.revision };
   };
   const report = (fields) => runtime.recordInstancePresentation({ requestId: randomUUID(), actorUserId: f.ids.owner,
@@ -149,8 +152,11 @@ integration("a connection's reports are ordered by (version, sequence) and fence
   await f.client.query("INSERT INTO data.space_control_heads(space_id,commit_sequence,updated_at) VALUES($1,0,now())",
     [f.ids.space]);
   try {
-    assert.equal((await ordered(1, 2, "busy")).recorded, true);
+    const written = await ordered(1, 2, "busy");
+    assert.equal(written.recorded, true);
     assert.deepEqual(await current(), { status: "busy", revision: { version: 1, sequence: 2 } });
+    // The write answers with the record any later read returns at that revision.
+    assert.deepEqual(written.record, await read());
     // An overtaken report, a replay, another Run's or another version's: refused, and nothing moves.
     for (const refused of [ordered(1, 1, "idle"), ordered(1, 2, "idle"), ordered(1, 3, "idle", `${f.ids.run}-other`),
       ordered(2, 3, "idle")]) {
