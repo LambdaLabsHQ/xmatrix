@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: A Codex CLI too old for xMatrix is named instead of started
+
+Codex threads start with the goal tools as one namespaced dynamic tool, which
+Codex CLI 0.140 and older reject at `thread/start` ("missing field
+`inputSchema`"). A new Windows user's first message on Codex CLI 0.104.0 failed
+with only that protocol error. The Codex preset now requires 0.141.0, the first
+release with namespaced dynamic tools: routing leaves an older Codex out, the
+connect flow says it is too old, and a refusal names Codex CLI, the machine and
+its update. Protocol registry only; no schema, daemon or client migration.
+Recovery is reverting this change.
+
 ## Unreleased: OAuth cookie refusals identify the failed browser binding
 
 HUB-BR found and parsed its stored OAuth state, then refused its signed browser
