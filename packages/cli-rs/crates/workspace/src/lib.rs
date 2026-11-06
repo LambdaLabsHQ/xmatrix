@@ -110,12 +110,15 @@ pub fn normalize_workspace_path_string_for_storage(path: &str) -> String {
     path.to_string()
 }
 
-/// A quiet background Git metadata probe, with fsmonitor disabled.
+/// A quiet background Git metadata probe, with fsmonitor disabled and, on
+/// Windows, paths past MAX_PATH allowed.
 pub fn git_probe_command(cwd: &Path, args: &[&str]) -> std::process::Command {
     let mut command = std::process::Command::new("git");
     configure_background_command(&mut command);
+    command.args(["-c", "core.fsmonitor=false"]);
+    #[cfg(windows)]
+    command.args(["-c", "core.longpaths=true"]);
     command
-        .args(["-c", "core.fsmonitor=false"])
         .arg("-C")
         .arg(cwd)
         .args(args)

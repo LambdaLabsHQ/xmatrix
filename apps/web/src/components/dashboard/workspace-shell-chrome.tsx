@@ -95,7 +95,7 @@ import {
   Users,
 } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
-import { useConversationPages } from "@/components/pages/conversation-page-cards";
+import type { ConversationPage } from "@/components/pages/conversation-page-cards";
 
 import {
   CenteredDialogShell,
@@ -555,6 +555,7 @@ export function TopWorkspaceBar({
   composing = false,
   onCloseComposing,
   channel,
+  hasConversationHead = false,
   spaces,
   currentSpaceId,
   view,
@@ -579,6 +580,7 @@ export function TopWorkspaceBar({
   composing?: boolean;
   onCloseComposing?: () => void;
   channel: ChannelSnapshot | null;
+  hasConversationHead?: boolean;
   spaces: SerializedSpace[];
   currentSpaceId: string | null;
   view: AppView;
@@ -637,6 +639,7 @@ export function TopWorkspaceBar({
       className={cn(
         "app-topbar flex h-12 shrink-0 items-center gap-2 bg-background px-3 text-foreground sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,36rem)_minmax(0,1fr)]",
         showBack && "app-mobile-channel-detail-bar",
+        conversationOpen && hasConversationHead && "app-mobile-channel-head-bar",
         tabRoot && "app-mobile-tab-root-bar",
         ghost
       )}
@@ -769,25 +772,20 @@ export function TopWorkspaceBar({
   );
 }
 
-/* Summary sits on the same paper as the messages, outside their scroller.
-   It stays below the fixed-height wood navigation bar and has no card frame. */
+/* Summary and linked pages share the navigation bar's paper tone, outside
+   the message scroller. Their parent supplies the same content to both. */
 export function MobileChannelSummaryPlaque({
   summary,
   onOpen,
-  spaceId,
-  conversationId,
-  token,
+  pages,
   onOpenPage,
 }: {
   summary?: string;
   onOpen: () => void;
-  spaceId: string;
-  conversationId: string;
-  token: string | null;
+  pages: ConversationPage[];
   onOpenPage: (pageId: string) => void;
 }) {
   const text = summary?.trim();
-  const pages = useConversationPages({ spaceId, conversationId, token });
   if (!text && pages.length === 0) return null;
   /* Summary and linked pages share the paper content inset. No extra
      SUMMARY eyebrow or pin column takes width from the text. */
