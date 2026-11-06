@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Registration presentation keeps its own clock
+
+The ordered Instance store no longer accepts writes to its derived Channel
+view. Registration quota now updates a separate account pool and joins local
+Instance counters when displayed, including on cold reads. A registration's
+name travels with its own Space-scoped version, so a rename reaches an idle or
+ended Instance on focus, reconnect or cold read without changing its lifecycle.
+The same database projection now includes the persisted goal and current Git
+branch. Hub, beta Web and additive shared protocol; no migration. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: a Gmail draft's approval card says when it carries no real attachment
 
 A reply to TradeStation was approved and sent whose card listed "7
