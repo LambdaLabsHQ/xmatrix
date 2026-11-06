@@ -3,8 +3,12 @@
 Status: design proposal. No language interpreter, new execution authority or
 production migration is implemented by this document.
 
-The proposed standalone coordination language expresses how autonomous people
-and complete AI agents cooperate to accomplish shared work: their requests,
+The proposed standalone language makes coordination programmable at the
+abstraction level of autonomous people and complete AI agents. Follow-ups,
+decision policies and other coordination patterns become programs and reusable
+libraries rather than separate platform features.
+
+It expresses how participants cooperate to accomplish shared work: their requests,
 responsibilities, dependencies and outcomes. Each participant retains control
 over how it does its work. Waiting, scheduling and resumption support these
 relationships; they do not define the language's identity.
