@@ -224,6 +224,8 @@ test("Automation refreshes task state while the page remains open", async ({ pag
     channels: [E2E_CHANNEL],
     automationResponses: [
       [E2E_AUTOMATION],
+      // Opening Schedules reads the list again: what a run produced settles after the push that announced it.
+      [E2E_AUTOMATION],
       [{
         ...E2E_PAUSED_AUTOMATION,
         name: "Refreshed schedule",

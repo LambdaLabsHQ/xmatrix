@@ -8,6 +8,7 @@ import { sessionCall, sessionPrincipal } from "./index-routes-pages";
 import { productCommandId, requireAuth, requestErrorStatus } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { commitAutomation } from "./automations";
+import { withOutcomes } from "./automation-outcomes";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import { runPrincipalOf } from "./run-principal";
 import type { Env } from "./types";
@@ -205,7 +206,9 @@ export function registerPageAutomationRoutes(app: Hono<{ Bindings: Env }>): void
     // read as its Human alongside, is answered only once that read has passed.
     const read = new PostgresPageRepository(database(c.env)).read({ requestId: crypto.randomUUID(), spaceId, pageId,
       principal: runPrincipalOf(authUser) });
-    return { automations: await pageAutomations(c.env, spaceId, pageId, humanOf(authUser), read) };
+    const automations = await pageAutomations(c.env, spaceId, pageId, humanOf(authUser), read);
+    // What each one's latest occurrences produced, as the Space's list says it.
+    return { automations: await withOutcomes(new PostgresAutomationRepository(database(c.env)), spaceId, automations) };
   }));
   for (const action of ["pause", "resume", "run"] as const) {
     app.post(`${base}/:automationId/${action}`, (c) => run(c, async (authUser) => ({

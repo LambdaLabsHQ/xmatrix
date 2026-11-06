@@ -38,6 +38,44 @@ pub(crate) struct PageAutomation {
     pub last_run_at: Option<String>,
     #[serde(default)]
     pub last_channel_id: Option<String>,
+    /// What its latest occurrences produced, newest first; older Hubs omit it.
+    #[serde(default)]
+    pub outcomes: Vec<AutomationOutcome>,
+}
+
+/// What one occurrence produced, read from its conversation
+/// (docs/design/pages-live-document.md §6.4).
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct AutomationOutcome {
+    pub kind: String,
+}
+
+/// Each outcome as the summary counts it, strongest first.
+const OUTCOME_LABELS: [(&str, &str); 5] = [
+    ("pull_request", "PR"),
+    ("page", "page"),
+    ("none", "none"),
+    ("failed_to_start", "failed to start"),
+    ("running", "running"),
+];
+
+/// `last 10: 4 PR · 3 page · 2 none · 1 failed to start`, or nothing before
+/// it has run: whether its runs are worth their cadence.
+fn outcome_summary(outcomes: &[AutomationOutcome]) -> Option<String> {
+    if outcomes.is_empty() {
+        return None;
+    }
+    let counts: Vec<String> = OUTCOME_LABELS
+        .iter()
+        .filter_map(|(kind, label)| {
+            let count = outcomes
+                .iter()
+                .filter(|outcome| outcome.kind == *kind)
+                .count();
+            (count > 0).then(|| format!("{count} {label}"))
+        })
+        .collect();
+    Some(format!("last {}: {}", outcomes.len(), counts.join(" · ")))
 }
 
 #[derive(Deserialize)]
@@ -46,7 +84,7 @@ struct ListResponse {
 }
 
 /// One schedule: its id to act on it, where it is, whether and when it runs,
-/// then its line.
+/// then its line and what its latest runs produced.
 pub(crate) fn render_page_automation(automation: &PageAutomation) -> String {
     let place = match automation.block_id.as_deref() {
         None | Some("") => "(top of page)".to_string(),
@@ -66,8 +104,11 @@ pub(crate) fn render_page_automation(automation: &PageAutomation) -> String {
         (Some(at), None) => format!(" · last {at}"),
         _ => String::new(),
     };
+    let produced = outcome_summary(&automation.outcomes)
+        .map(|summary| format!("\n    {summary}"))
+        .unwrap_or_default();
     format!(
-        "{} · {place} · {state}{last}\n    {}",
+        "{} · {place} · {state}{last}\n    {}{produced}",
         automation.id,
         automation.source.as_deref().unwrap_or_default()
     )
@@ -91,7 +132,8 @@ pub(crate) async fn page_automations(
         .unwrap_or_default()
 }
 
-/// The `automations:` lines of `page read`'s header.
+/// The `automations:` lines of `page read`'s header: each schedule's first
+/// line, then what its latest runs produced.
 pub(crate) fn render_page_automations_header(automations: &[PageAutomation]) -> String {
     if automations.is_empty() {
         return String::new();
@@ -101,6 +143,9 @@ pub(crate) fn render_page_automations_header(automations: &[PageAutomation]) -> 
         let line = render_page_automation(automation);
         let first = line.lines().next().unwrap_or_default();
         out.push_str(&format!("  - {first}\n"));
+        if let Some(summary) = outcome_summary(&automation.outcomes) {
+            out.push_str(&format!("    {summary}\n"));
+        }
     }
     out
 }
@@ -203,5 +248,41 @@ mod tests {
         assert!(render_page_automation(&done).starts_with(
             "a-3 · (top of page) · done: give its ⏳ a new time to remind again · last 2026-11-01T02:00:03.000Z in c-9"
         ));
+    }
+
+    #[test]
+    fn a_schedule_says_what_its_latest_runs_produced_strongest_first() {
+        let kinds = [
+            "running",
+            "pull_request",
+            "page",
+            "none",
+            "pull_request",
+            "failed_to_start",
+            "page",
+            "pull_request",
+            "none",
+            "page",
+        ];
+        let audited = automation(json!({
+            "id": "a-1", "enabled": true, "blockId": "audit", "nextRunAt": "2026-11-07T04:30:00.000Z",
+            "source": "- [ ] @codex audit the code 🔁 every day",
+            "outcomes": kinds.iter().map(|kind| json!({
+                "kind": kind, "scheduledFor": "2026-11-06T04:30:00.000Z", "conversationId": "c-1",
+            })).collect::<Vec<_>>(),
+        }));
+        let summary = "last 10: 3 PR · 3 page · 2 none · 1 failed to start · 1 running";
+        assert_eq!(
+            render_page_automation(&audited),
+            format!(
+                "a-1 · #audit · next 2026-11-07T04:30:00.000Z\n    - [ ] @codex audit the code 🔁 every day\n    {summary}"
+            )
+        );
+        assert_eq!(
+            render_page_automations_header(&[audited]),
+            format!(
+                "automations:\n  - a-1 · #audit · next 2026-11-07T04:30:00.000Z\n    {summary}\n"
+            )
+        );
     }
 }

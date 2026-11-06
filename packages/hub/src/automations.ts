@@ -1,6 +1,7 @@
 import { ControlError, PostgresAutomationRepository } from "@xmatrix/db";
 
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
+import { withOutcomes } from "./automation-outcomes";
 import { createPostgresAuthorityFleet, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
 import type { Env } from "./types";
@@ -20,20 +21,25 @@ export function getAutomation(env: PostgresAuthorityFleetEnv, input: Record<stri
   return automationRepository(env).get({ ...input, requestId: crypto.randomUUID() });
 }
 
-/** Every Automation of a Channel or Space its reader may see, following the cursor. */
+/**
+ * Every Automation of a Channel or Space its reader may see, following the
+ * cursor. A Space's list also says what its page Automations' latest
+ * occurrences produced.
+ */
 export async function listAutomations(env: PostgresAuthorityFleetEnv, input: Record<string, unknown>) {
   const repository = automationRepository(env);
-  const automations: unknown[] = [];
+  const automations: Array<{ id: string }> = [];
   let executionEnabled = true;
   let cursor: string | undefined;
   do {
     const page = await repository.list({ ...input, requestId: crypto.randomUUID(), limit: 200,
       ...(cursor ? { cursor } : {}) });
-    automations.push(...(Array.isArray(page.tasks) ? page.tasks : []));
+    automations.push(...(Array.isArray(page.tasks) ? page.tasks as Array<{ id: string }> : []));
     executionEnabled &&= page.executionEnabled === true;
     cursor = typeof page.cursor === "string" && page.cursor ? page.cursor : undefined;
   } while (cursor);
-  return { automations, executionEnabled };
+  const spaceId = typeof input.spaceId === "string" && input.spaceId ? input.spaceId : undefined;
+  return { automations: spaceId ? await withOutcomes(repository, spaceId, automations) : automations, executionEnabled };
 }
 
 /**

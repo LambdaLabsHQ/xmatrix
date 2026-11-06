@@ -1,4 +1,5 @@
-import type { SerializedAutomation } from "@xmatrix/protocol";
+import { AUTOMATION_OUTCOME_KINDS, type AutomationOutcome, type AutomationOutcomeKind, type SerializedAutomation }
+  from "@xmatrix/protocol";
 
 /**
  * The Space's Schedules are an index of its Automations, not where they are
@@ -37,6 +38,34 @@ export function scheduleAttention(automation: SerializedAutomation, executionEna
   if (automation.lastError) return `Its last run failed: ${automation.lastError}`;
   if (automation.enabled && executionEnabled === false) return "Scheduled runs are unavailable";
   return null;
+}
+
+const OUTCOME_COUNT_LABELS: Record<AutomationOutcomeKind, string> = {
+  pull_request: "PR", page: "page", none: "none", failed_to_start: "failed to start", running: "running",
+};
+
+/**
+ * What its latest runs produced, strongest first:
+ * `last 10: 4 PR · 3 page · 2 none · 1 failed to start`. Null before it has
+ * run, or from a Hub that does not say (docs/design/pages-live-document.md §6.4).
+ */
+export function scheduleOutcomeSummary(outcomes: readonly AutomationOutcome[] | undefined): string | null {
+  if (!outcomes?.length) return null;
+  const counts = AUTOMATION_OUTCOME_KINDS.flatMap((kind) => {
+    const count = outcomes.filter((outcome) => outcome.kind === kind).length;
+    return count ? [`${count} ${OUTCOME_COUNT_LABELS[kind]}`] : [];
+  });
+  return `last ${outcomes.length}: ${counts.join(" · ")}`;
+}
+
+const OUTCOME_LABELS: Record<AutomationOutcomeKind, string> = {
+  pull_request: "Opened a pull request", page: "Changed a page", none: "Changed nothing",
+  failed_to_start: "Did not start", running: "Running",
+};
+
+/** One run's outcome as its row in Schedules says it. */
+export function scheduleOutcomeLabel(kind: AutomationOutcomeKind): string {
+  return OUTCOME_LABELS[kind] ?? kind;
 }
 
 export function scheduleRunning(automation: SerializedAutomation): boolean {

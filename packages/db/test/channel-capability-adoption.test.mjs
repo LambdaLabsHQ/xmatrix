@@ -52,6 +52,10 @@ const exactOrLifecycleOwnerAuthorities = [
   // A page commit, after the page authority authorized the edit, reconciles
   // that page's Automations; it joins Channels only for their Space.
   "automation-page-anchor.ts",
+  // What listed page Automations produced is read after their catalog read
+  // authorized them; it joins Channels only to keep them in the asked Space,
+  // and returns coarse facts of each occurrence's own conversation.
+  "automation-outcome-facts.ts",
   "channel-transfer.ts",
   // A Space owner's or admin's one-time move to pages reads every Channel of
   // that Space by design, after the owner/admin check; it returns only the plan.
