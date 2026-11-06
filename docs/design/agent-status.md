@@ -64,6 +64,24 @@ facts; a miss cannot remove a newer observation received during the request.
 Tombstones live with the session and are cleared on access removal or logout.
 No polling, Channel counter, trigger or complete-roster assumption is needed.
 
+An unreachable machine is a checkpoint of its connection, not a lifecycle
+change. When a machine's daemon leaves or returns, each connection it hosts
+takes its next report sequence in its socket's own order and persists the
+projection (`offlineReason: "machine_offline"`, or none) with its presentation;
+the row's own status stays live. Its record reads offline with that reason
+until a later checkpoint says the machine returned, and any lifecycle version
+still outranks it.
+
+Delivery has a known limit. A frame to a person's socket on another cell is
+retried within the delivery (three attempts over about half a second), and a
+lifecycle push that still fails reads its Instances again and sends once more.
+Nothing replays a frame to a socket that stayed open: `data.outbox` has no
+consumer and Human sockets have no replay. If both attempts fail, a socket
+that stays connected keeps its last record until its person focuses the
+Channel, returns to the foreground or reconnects, each of which reads the
+Instances it holds exactly. This is a bound on staleness, not a delivery
+guarantee.
+
 `instance_records_v1` negotiates self-contained Human socket frames. Existing
 `memberPresence`, cards and digests remain a bounded compatibility path for
 older consumers. Once a Channel has modern records, those legacy projections

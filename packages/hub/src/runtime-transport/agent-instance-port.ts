@@ -188,6 +188,10 @@ export interface AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     details: { code?: number; reason?: string; wasClean?: boolean },
   ): void | Promise<void>;
+  /** How the cell tells whether a connection's machine can act on what it is sent. */
+  observeMachineReachability?(reachable: (session: Readonly<AgentInstanceRuntimeSession>) => boolean): void;
+  /** Checkpoint a connection whose machine became reachable or not, at its current report count. */
+  reproject?(session: Readonly<AgentInstanceRuntimeSession>): Promise<void>;
 }
 
 export class AgentInstanceAuthorityCapabilityError extends Error {
@@ -350,6 +354,27 @@ export class AgentInstanceRuntimeTransport {
   handleFrame(ws: WebSocket, frame: string | ArrayBuffer): Promise<void> { return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame)); }
   liveSessions(): readonly Readonly<AgentInstanceRuntimeSession>[] {
     return Array.from(this.sockets.entries(), ([, session]) => session);
+  }
+
+  /**
+   * The machine hosting the selected connections became reachable or not;
+   * nothing else about them changed. Each records that, in its socket's own
+   * order with its other reports, as its next checkpoint, then shows it.
+   */
+  reprojectMachine(selected: (session: Readonly<AgentInstanceRuntimeSession>) => boolean): void {
+    for (const [ws, session] of this.sockets.entries()) {
+      if (!selected(session)) continue;
+      void this.sockets.ordered.enqueue(ws, async () => {
+        if (this.sockets.get(ws) !== session) return;
+        session.run.presenceSequence = (session.run.presenceSequence ?? 0) + 1;
+        await this.backend.reproject?.(session);
+        const attachment = this.hibernationAttachment(ws);
+        if (attachment) ws.serializeAttachment?.(attachment);
+        await this.onPresenceChange?.({ reason: "update", session });
+      }).catch((error: unknown) => {
+        console.error("Agent Instance machine reachability fanout failed", error);
+      });
+    }
   }
 
 

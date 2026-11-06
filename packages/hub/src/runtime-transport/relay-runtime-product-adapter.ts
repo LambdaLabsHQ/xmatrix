@@ -128,8 +128,10 @@ export function createRelayRuntimeProductAdapter(
         machineReachable: (session) => machineReachable(liveAgentMachineRoute(session)),
       })
     : undefined;
+  const agentBackend = factory.agentInstance();
+  agentBackend.observeMachineReachability?.((session) => machineReachable(liveAgentMachineRoute(session)));
   agentInstance = new AgentInstanceRuntimeTransport(
-    factory.agentInstance(),
+    agentBackend,
     undefined,
     agentPresenceChange,
     async ({ session, message }) => {
@@ -174,13 +176,8 @@ export function createRelayRuntimeProductAdapter(
     },
     (route) => {
       // The Instances on this machine did not change; how they must be shown did.
-      if (!agentPresenceChange || restore.pending) return;
-      for (const session of agentInstance.liveSessions()) {
-        if (!sameRouteIdentity(liveAgentMachineRoute(session), route)) continue;
-        void Promise.resolve(agentPresenceChange({ reason: "update", session })).catch((error) => {
-          console.error("Agent Instance machine reachability fanout failed", error);
-        });
-      }
+      if (restore.pending) return;
+      agentInstance.reprojectMachine((session) => sameRouteIdentity(liveAgentMachineRoute(session), route));
     },
     options.admit,
   );

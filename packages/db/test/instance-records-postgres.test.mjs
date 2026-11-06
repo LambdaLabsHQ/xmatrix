@@ -171,6 +171,17 @@ integration("a connection's reports are ordered by (version, sequence) and fence
     assert.deepEqual(await current(), { status: "busy", revision: { version: 1, sequence: 2 } });
     assert.equal((await ordered(1, 3, "idle")).recorded, true);
 
+    // An unreachable machine is a checkpoint of the connection, not a lifecycle
+    // change: shown offline with its reason, and back with the next checkpoint.
+    assert.equal((await report({ status: "idle", expectedVersion: 1, runId: f.ids.run, presenceSequence: 4,
+      presentation: { model: "m", offlineReason: "machine_offline" } })).recorded, true);
+    const unreachable = await read();
+    assert.deepEqual({ status: unreachable.status, offlineReason: unreachable.offlineReason, rest: unreachable.rest },
+      { status: "offline", offlineReason: "machine_offline", rest: undefined });
+    assert.equal((await ordered(1, 5, "idle")).recorded, true);
+    assert.deepEqual(await current(), { status: "idle", revision: { version: 1, sequence: 5 } });
+    assert.equal((await read()).offlineReason, undefined);
+
     // A reconnect claims the next version: the row's earlier sequence no
     // longer counts, and the predecessor socket can no longer report.
     const connected = await runtime.mutate({ kind: "instance_connect", instanceId: f.ids.instance,

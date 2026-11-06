@@ -426,8 +426,12 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     // for persistence (and would deduplicate quota-only updates away).
     const canonical = sanitizeAgentInstancePresentation(presentation);
     const usage = canonical?.usage;
+    // A connection whose machine is unreachable is shown offline until a later
+    // checkpoint says the machine returned; its own status stays live.
+    const shownOffline = this.machineReachable && !this.machineReachable(session) ? "machine_offline" : undefined;
     const snapshot = {
       ...agentMessagePresentation(canonical),
+      ...(shownOffline ? { offlineReason: shownOffline } : {}),
       ...(canonical?.parameters !== undefined ? { parameters: canonical.parameters, parametersObservedAt: canonical.parametersObservedAt } : parametersReported ? { parameters: [] } : {}),
       // Routing needs the observed model/effort domain too. It is deliberately
       // absent from message headers, but must survive this durable projection.
@@ -457,8 +461,19 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       ...(ordering ? { ordering } : {}),
       at,
     });
-    this.persistedPresentationDigests.set(instanceId, digest);
+    // A refused report wrote nothing: the next one tries the same content again.
+    if (written.recorded !== false) this.persistedPresentationDigests.set(instanceId, digest);
     if (written.record) this.dependencies.instanceRecords?.remember(parseInstanceRecord(written.record));
+  }
+
+  private machineReachable?: (session: Readonly<AgentInstanceRuntimeSession>) => boolean;
+
+  observeMachineReachability(reachable: (session: Readonly<AgentInstanceRuntimeSession>) => boolean): void {
+    this.machineReachable = reachable;
+  }
+
+  async reproject(session: Readonly<AgentInstanceRuntimeSession>): Promise<void> {
+    await this.persistInstancePresentation(session, session.presentation, false, false, session.run.instanceStatus);
   }
 
   async disconnected(session: Readonly<AgentInstanceRuntimeSession>): Promise<void> {
