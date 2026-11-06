@@ -7,7 +7,7 @@ import {
   RUNTIME_CHANNEL_OBSERVABLE_EVENT_URL,
   runtimeJsonRequest,
 } from "./runtime-transport/runtime-principal-delivery";
-import { channelAgentPresenceDeliveryBody } from "./runtime-transport/channel-agent-presence-delivery";
+import { channelAgentPresenceDeliveryBody, channelInstanceRecordBatches } from "./runtime-transport/channel-agent-presence-delivery";
 import type { Env } from "./types";
 
 /* The Hub's judgments about a Channel's messages, pushed to its live people.
@@ -57,14 +57,15 @@ export async function publishChannelPresenceChanged(env: Env, channelId: string,
   const publish = async () => {
     const { recipientUserIds, memberPresence, instanceRecords } = await withPostgresMessageRequestScope(
       env, (scope) => postgresMessageLiveAgentPresence(env, channelId, scope, instanceIds));
-    const recordsBody = (userId: string) => channelAgentPresenceDeliveryBody({
-      channelId, reason: "update", records: instanceRecords,
-      recipients: [{ userId, digest: false, card: false, channel: false, immediate: [] }],
-    });
-    if (instanceRecords.length > 0 && recipientUserIds.length > 0 && recordsBody(recipientUserIds[0]!)) {
+    for (const records of channelInstanceRecordBatches(instanceRecords)) {
       await deliverToAudience({
         env, label: "Instance records", audience: { humans: recipientUserIds },
-        request: (share) => runtimeJsonRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_URL, recordsBody(share.owner)!),
+        request: share => {
+          const body = channelAgentPresenceDeliveryBody({ channelId, reason: "update", records,
+            recipients: [{ userId: share.owner, digest: false, card: false, channel: false, immediate: [] }] });
+          if (!body) throw new RangeError("Instance records exceed delivery budget");
+          return runtimeJsonRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_URL, body);
+        },
       });
     }
     await publishToChannelPeople(env, channelId, recipientUserIds, "presence_updated",

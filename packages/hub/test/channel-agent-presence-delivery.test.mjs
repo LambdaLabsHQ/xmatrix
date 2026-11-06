@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   channelAgentPresenceDeliveryBody,
+  channelInstanceRecordBatches,
   parseChannelAgentPresenceDelivery,
 } from "../src/runtime-transport/channel-agent-presence-delivery.ts";
 import { serializedAgentsFromPresence } from "../src/live-agent-instance-read.ts";
@@ -96,4 +97,27 @@ test("the online agent list is one row per live instance, ordered and capped", (
   assert.equal(listed[1].model, "gpt-5.4");
   assert.equal(listed[1].email, "zed@example.test");
   assert.deepEqual(listed[1].instances.map((instance) => instance.id), ["instance-b"]);
+});
+
+test("large lifecycle windows preserve every terminal record within receiver item and byte bounds", () => {
+  const records = Array.from({ length: 601 }, (_, index) => ({ id: `${channelId}:${index + 1}`, channelId,
+    channelInstanceId: String(index + 1), agentName: "codex", label: `codex:${index + 1}`,
+    registration: { ownerUserId: "owner", machineId: "machine", harness: "codex" },
+    cwd: "中".repeat(1_900), connectedAt: "2026-11-06T19:00:00Z", lastSeenAt: "2026-11-06T19:00:00Z",
+    status: index === 600 ? "offline" : "busy", revision: { version: 3, sequence: 1 },
+  }));
+  const delivery = { channelId, reason: "update", recipients: [recipient({ card: false, channel: false, digest: false })] };
+  assert.equal(channelAgentPresenceDeliveryBody({ ...delivery, records }), undefined,
+    "one large window cannot fit in the internal delivery");
+  for (const window of [records, records.map(({ cwd: _cwd, ...record }) => record)]) {
+    const delivered = channelInstanceRecordBatches(window).flatMap(batch => {
+      assert.ok(batch.length <= 256);
+      const body = channelAgentPresenceDeliveryBody({ ...delivery, records: batch });
+      assert.ok(Buffer.byteLength(body) <= 256_000);
+      const received = parseChannelAgentPresenceDelivery(JSON.parse(body));
+      assert.ok(received, "every emitted batch satisfies the actual receiving parser");
+      return received.records;
+    });
+    assert.deepEqual(delivered, window, "including the terminal record beyond the first window");
+  }
 });

@@ -501,16 +501,8 @@ const FOCUSED_CHANNEL_AGENTS_READ_TIMEOUT_MS = 1_000;
 function instanceActivityOf(session: Readonly<AgentInstanceRuntimeSession>): InstanceActivity | undefined {
   const version = session.run.connectionVersion;
   if (version === undefined) return undefined;
-  const presentation = session.presentation;
-  return {
-    instanceId: session.run.instanceId,
-    channelId: session.run.channelId,
-    revision: { version, sequence: session.run.presenceSequence ?? 0 },
-    ...(presentation?.activity ? { activity: presentation.activity } : {}),
-    ...(presentation?.intent ? { intent: presentation.intent } : {}),
-    ...(presentation?.files ? { files: presentation.files } : {}),
-    ...(presentation?.runtimeState ? { runtimeState: presentation.runtimeState } : {}),
-  };
+  return liveAgentSnapshotActivity({ ...session.run, presentation: session.presentation,
+    revision: { version, sequence: session.run.presenceSequence ?? 0 } });
 }
 
 /** When the Instance's own provider reading was taken, if it reported one. */

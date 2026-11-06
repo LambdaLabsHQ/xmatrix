@@ -124,7 +124,7 @@ export function liveAgentSessionSnapshots(
 }
 
 /** What a live Instance another cell holds is doing now, at its connection's revision. */
-export function liveAgentSnapshotActivity(snapshot: Readonly<LiveAgentSessionSnapshot>): InstanceActivity | undefined {
+export function liveAgentSnapshotActivity(snapshot: Readonly<Pick<LiveAgentSessionSnapshot, "instanceId" | "channelId" | "revision" | "presentation">>): InstanceActivity | undefined {
   if (!snapshot.revision) return undefined;
   const presentation = snapshot.presentation;
   return {

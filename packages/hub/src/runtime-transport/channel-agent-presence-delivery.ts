@@ -60,6 +60,28 @@ export function channelAgentPresenceDeliveryBody(delivery: ChannelAgentPresenceD
   return utf8ByteLength(body) <= MAX_PRESENCE_BODY_BYTES ? body : undefined;
 }
 
+/** A lifecycle read is a window plus exact ended rows, often larger than one
+ * internal frame. Keep every record while respecting both receiver bounds. */
+export function channelInstanceRecordBatches(records: readonly InstanceRecord[]): InstanceRecord[][] {
+  const batches: InstanceRecord[][] = [];
+  let batch: InstanceRecord[] = [];
+  let bytes = 0;
+  for (const record of records) {
+    const size = utf8ByteLength(JSON.stringify(record)) + 1;
+    // Leave half the body budget for routing and JSON envelope fields.
+    if (size > MAX_PRESENCE_BODY_BYTES / 2) throw new RangeError("Instance record exceeds delivery budget");
+    if (batch.length && (batch.length >= 256 || bytes + size > MAX_PRESENCE_BODY_BYTES / 2)) {
+      batches.push(batch);
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(record);
+    bytes += size;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
 export function parseChannelAgentPresenceDelivery(value: unknown): ChannelAgentPresenceDelivery | undefined {
   if (!isPlainRecord(value)) return undefined;
   const channelId = boundedText(value.channelId, 180);
