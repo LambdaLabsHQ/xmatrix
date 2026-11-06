@@ -11,7 +11,7 @@ import type {
   SerializedChannel,
 } from "@xmatrix/protocol";
 import { channelInstanceQuota } from "../registration-quota-presentation";
-import { runtimeDirectory } from "../runtime";
+import { refreshChannelRoutingQuota, runtimeDirectory } from "../runtime";
 import { deliverQuotaWakes } from "../quota-waits";
 import type { AgentInstanceServerMessage } from "@xmatrix/protocol/connections/agent-instance";
 import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
@@ -111,6 +111,11 @@ export function createProductionRelayRuntimeProductPortFactory(
     storage?: PresenceStorage;
     /** Deliver an owner's quota waits a reading made ready; PostgreSQL by default. */
     deliverQuotaWakes?: (env: Env, ownerUserId: string) => Promise<unknown>;
+    /**
+     * Ask the daemons behind a Channel's Agents to read the quota no current
+     * reading covers, as `actorUserId`; at most once a minute per daemon.
+     */
+    refreshChannelQuota?: (input: { channelId: string; actorUserId: string }) => Promise<unknown>;
   } = {},
 ): RelayRuntimeProductPortFactory {
   const analytics = options.analytics ?? analyticsSinkFromEnv(env);
@@ -252,6 +257,19 @@ export function createProductionRelayRuntimeProductPortFactory(
       const payload = await readChannel(channelId, userId, "agent-presence");
       const instances = payload ? decodeChannelSnapshot(payload.channel).presence?.instances : undefined;
       if (!payload || !instances?.size) return;
+      // A reading lasts fifteen minutes and an idle Agent reads none, so its
+      // card would show no 5h/1w usage. The person looking is the event that
+      // needs one: ask its machine now, and the reading reaches the card when
+      // the probe lands (onRegistrationQuotaChange).
+      if ([...instances.values()].some((instance) => !hasCurrentQuotaReading(instance.usage))) {
+        const refresh = Promise.resolve()
+          .then(() => (options.refreshChannelQuota ?? ((input) => refreshChannelRoutingQuota(env, input)))(
+            { channelId, actorUserId: userId }))
+          .catch((error: unknown) => console.warn("Quota refresh for an opened Channel failed", {
+            errorCode: error instanceof Error ? error.name : "unknown",
+          }));
+        options.scheduleBackground?.(refresh);
+      }
       const owners = new Set([...instances.values()].map((instance) => instance.registration.ownerUserId));
       // Each owner's cell is shown as it answers: one that is slow holds back no other's Agents.
       await Promise.all([...owners].map(async (owner) => {
@@ -748,4 +766,9 @@ function agentLifecycleOfflineFrame(session: Readonly<AgentInstanceRuntimeSessio
     instanceId: session.run.instanceId,
     channelInstanceId: session.run.channelInstanceId || "1",
   };
+}
+
+/** Whether a presented usage carries a registration reading still in force. */
+function hasCurrentQuotaReading(usage: LlmUsage | undefined): boolean {
+  return usage?.quotaState === "observed" || usage?.quotaState === "exhausted";
 }

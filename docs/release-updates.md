@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: An idle Agent's 5h/1w usage comes back when its Channel is opened
+
+A registration's quota reading counts for fifteen minutes, and since idle
+Instances stopped polling their provider (#1328) nothing read it again while
+an Agent sat idle, so its Channel card lost its 5h/1w tags. Opening the
+Channel is now the event that reads it: when the Agents it shows have no
+reading in force, the Hub asks their machines' daemons for one (the existing
+once-a-minute-per-daemon probe), and the reading reaches the owner's card
+when the probe lands. Hub only, no schema or client protocol migration.
+Recovery is a CI-validated Hub reverting the change.
+
 ## Unreleased: Phone conversation heads share state without inspecting the app tree
 
 The phone navigation bar inferred its paper tone from a Summary plaque found
