@@ -88,7 +88,10 @@ test("an action is available only where an official recipe or control exists", (
   assert.equal(harnessActionAvailable(preset("claude"), "auto_update_off"), true);
   // goose has no updater of its own; xMatrix schedules its official update.
   assert.equal(harnessActionAvailable(preset("goose"), "auto_update_on"), true);
+  // The daily release watcher uses the official update recipe without a registry.
+  assert.equal(harnessActionAvailable(preset("goose"), "release"), true);
   assert.equal(harnessActionAvailable(preset("zcode"), "update"), false);
+  assert.equal(harnessActionAvailable(preset("zcode"), "release"), false);
   assert.equal(harnessActionAvailable(preset("codex"), "uninstall"), true);
   // No verified uninstaller upstream: the action is never offered.
   assert.equal(harnessActionAvailable(preset("grok"), "uninstall"), false);

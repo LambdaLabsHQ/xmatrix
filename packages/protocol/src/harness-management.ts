@@ -335,8 +335,8 @@ export function harnessActionAvailable(management: HarnessManagement | undefined
     recipe.unix !== null || recipe.windows !== null;
   switch (action) {
     case "refresh": return true;
-    case "release": return management.latest !== undefined;
     case "install": return any(management.install);
+    case "release":
     case "update": return any(management.update);
     case "uninstall": return any(management.uninstall);
     case "login_start":

@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Socket overloads keep their failed Runtime fetch evidence
+
+HUB-BS/BT reported only an opaque platform error at the Agent and Machine
+Daemon WebSocket routes. The socket router now adds bounded wall duration,
+owner/unassigned routing, the platform remote flag and a fixed message category
+to the single original report, readable through Sentry. These distinguish a
+quick refusal from a slow fetch without retaining owner names or request data;
+they do not establish the cause of the overload. No immediate retry is added,
+and existing 503 responses and client backoff remain. The same investigation
+found daily harness notices rejected for having no version registry despite
+an official update recipe: action admission now matches the daemon and accepts
+those notices. Hub and shared protocol only; no schema or client migration.
+Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: A Codex CLI too old for xMatrix is named instead of started
 
 Codex threads start with the goal tools as one namespaced dynamic tool, which

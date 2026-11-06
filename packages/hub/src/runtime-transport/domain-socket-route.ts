@@ -3,6 +3,8 @@ import {
   RELAY_RUNTIME_HUMAN_CONNECT_PATH,
   RELAY_RUNTIME_MACHINE_DAEMON_CONNECT_PATH,
 } from "./relay-runtime-product-adapter";
+import { recordSocketFetchFailure } from "../durable-object-request-failure";
+import { isRelayRuntimeOwnerCell, RELAY_RUNTIME_CELL_HEADER } from "./runtime-cell-locator";
 
 export const PUBLIC_DOMAIN_SOCKET_PATHS = [
   "/ws/humans",
@@ -24,7 +26,7 @@ export interface DomainSocketTarget {
 }
 
 /** Public WebSocket router: every product socket targets Relay Runtime. */
-export function routeDomainSocket(
+export async function routeDomainSocket(
   request: Request,
   path: PublicDomainSocketPath,
   runtime: DomainSocketTarget,
@@ -34,5 +36,12 @@ export function routeDomainSocket(
   }
   const runtimeUrl = new URL(request.url);
   runtimeUrl.pathname = RELAY_RUNTIME_DOMAIN_SOCKET_PATHS[path];
-  return runtime.fetch(new Request(runtimeUrl, request));
+  const started = Date.now();
+  try {
+    return await runtime.fetch(new Request(runtimeUrl, request));
+  } catch (error) {
+    recordSocketFetchFailure(error,
+      isRelayRuntimeOwnerCell(request.headers.get(RELAY_RUNTIME_CELL_HEADER)) ? "owner" : "unassigned", started);
+    throw error;
+  }
 }
