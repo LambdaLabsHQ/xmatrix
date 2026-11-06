@@ -1,5 +1,5 @@
 "use client";
-import { automaticConversationName, channelPresenceInstances, pageReferenceToken } from "@xmatrix/protocol";
+import { automaticConversationName, channelPresenceInstances, pageReferenceToken, pageTitleLine } from "@xmatrix/protocol";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -85,11 +85,10 @@ const PageDocumentStatic = dynamic(() => import("./page-document-static").then((
   loading: () => null,
 });
 
-/** The top-level heading the document opens with. That heading is the page's name. */
-function openingHeading(blocks: PageDocBlock[], markdown: string | undefined): string | null {
-  if (blocks.length > 0) return blocks[0].pos === 0 && blocks[0].depth === 1 ? blocks[0].title.trim() || null : null;
-  const line = markdown?.trimStart().split("\n", 1)[0]?.trim() ?? "";
-  return /^#[ \t]+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
+/** The page's name as its document has it: the first top-level heading, wherever it stands. */
+function documentTitle(blocks: PageDocBlock[], markdown: string | undefined): string | null {
+  if (blocks.length > 0) return blocks.find((block) => block.depth === 1)?.title.trim() || null;
+  return pageTitleLine(markdown ?? "")?.title || null;
 }
 
 /**
@@ -1209,10 +1208,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (pending && editorReady) setWriteOn((seq) => seq + 1);
   }, [pending, editorReady]);
 
-  // A page's name is the top-level heading its document opens with (pages-live-document.md §4.1).
-  const opening = openingHeading(blocks, document.data?.body);
+  // A page's name is its document's first top-level heading (pages-live-document.md §4.1).
+  const named = documentTitle(blocks, document.data?.body);
   // The tree catches up with a rename the heading made.
-  const renamedInDocument = Boolean(page && opening !== null && opening !== page.title.trim());
+  const renamedInDocument = Boolean(page && named !== null && named !== page.title.trim());
   useEffect(() => {
     if (renamedInDocument) void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   }, [headRevision, queryClient, renamedInDocument]);

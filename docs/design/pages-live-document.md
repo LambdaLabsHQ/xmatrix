@@ -175,14 +175,15 @@ fact is about.
   with `@` in the text. It speaks of saving only when something is wrong:
   edits held while the session is away (*Offline*), a session still
   connecting after two seconds, and a page the reader may only read. The
-  page's name is the document's opening heading (§4.1), so the header never
-  shows it. A document that opens without one reads "Untitled" in its place,
-  as the editor's own h1; clicking it starts that heading. There is no ⋯
+  page's name is the document's first top-level heading (§4.1), so the header
+  never shows it. A document without one reads "Untitled" above its text, as
+  the editor's own h1; clicking it starts that heading. There is no ⋯
   menu: each setting sits where it acts (§7). As Google Docs does with its
   clock icon, hovering History says who changed the page last and when, and
   a dot on it means the page changed since this person last read it.
-- **Byline** (decided by Daniel 2026-10-23): under the title, as a column
-  names its writers, each author of the page by face and name, a hairline
+- **Byline** (decided by Daniel 2026-10-23): under the title, wherever the
+  title stands, as a column names its writers, each author of the page by face
+  and name, a hairline
   between them, and no other words. An author is whoever has words in the
   page now, from its blame (most words first); someone whose words were all
   taken out is no longer one. Pointing at an author marks their words in the
@@ -315,14 +316,18 @@ fact is about.
   update to the fragment in one transaction under the Agent's cursor.
   Revisions store the serialized markdown, so history, git and blame are
   unchanged.
-- **A page's name is the top-level heading its document opens with**, one
-  datum kept in the document. Renaming a page is editing that line, live like
-  any edit; the rename API, the CLI's `page rename` and git pushes all write
-  it there. Lists, search, links and git read it from the head revision
-  (`data.page_name` in SQL, `pageNameFrom` in the Hub, the same rule). A
-  document that opens with anything else has no name and reads as
-  "Untitled"; a page created with a name and a body that does not open with
-  one gets the name written above its text.
+- **A page's name is its document's first top-level heading** (`# Name`,
+  outside fenced code), wherever it stands: one datum kept in the document,
+  with no title stored beside it. A note, an image or a stray line above the
+  heading leaves the name as it is (decided by Daniel 2026-11-06, after
+  `page read` text an Agent left above a heading made two business-line pages
+  read "Untitled"). Renaming a page is editing that line where it stands, live
+  like any edit; the rename API, the CLI's `page rename` and git pushes all
+  write it there. Lists, search, links and git read it from the head revision
+  (`data.page_title` in SQL, `pageTitleLine` in the protocol for the Hub and
+  the Web, the same rule). A document with no such heading, or whose first one
+  is empty, has no name and reads as "Untitled"; a page created with a name
+  and a body without one gets the name written above its text.
 - The Rust side (`yrs`) reads and writes the same fragment when the CLI or
   daemon joins a session.
 
@@ -1045,14 +1050,14 @@ page's top bar.
 Creating a page works as in Notion: the desktop list's + and Ctrl/⌘+N, the
 phone's FAB, the empty list and a parent row's sub-page + each open a new page
 at once, with no dialog or browser prompt, on its title, on a phone as on a
-desktop. The title is the document's first line, drawn as its h1 with an
+desktop. A new page's first line is its title, drawn as its h1 with an
 "Untitled" placeholder; there is no title field, so a new page looks exactly
 like any page. A new page is an ordinary page on screen, with the same editor
 and header, and there is no draft: it is made by its
 first write, like copy-on-write. Until then its live document exists only in
 the browser, and one opened and left empty is not kept anywhere. The first
-write is a keystroke (letters typed on the first line make it the opening
-heading) or calling an Agent. It makes the page under the chosen parent from that document
+write is a keystroke (letters typed on the first line make it the heading
+that names the page, §4.1) or calling an Agent. It makes the page under the chosen parent from that document
 as it stands. The Hub keeps the document's markdown as revision 1 and starts
 the page's live session from the same Yjs document, so the editor joins that
 session without reloading and goes on syncing what is typed meanwhile. Enter after

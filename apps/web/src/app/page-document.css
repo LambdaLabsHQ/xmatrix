@@ -1259,8 +1259,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-
 }
 
 /* The page's byline (pages-live-document.md §3.2): its authors under its title, face and name, a hairline between.
-   The title keeps the byline's room in the preview as in the editor, so nothing moves when the authors arrive. */
-.page-byline-room .page-document > h1:first-child { margin-bottom: 46px; }
+   The title (the first top-level h1, wherever it stands) keeps the byline's room in the preview as in the editor,
+   so nothing moves when the authors arrive. */
+.page-byline-room .page-document > h1:first-of-type { margin-bottom: 46px; }
 .page-byline-rule {
   width: 1px;
   height: 14px;

@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, utf8ByteLength } from "@xmatrix/protocol";
+import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, pageTitleLine, utf8ByteLength } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import { spaceBilling } from "@xmatrix/billing";
 import { readsOnly } from "./space-roles.js";
@@ -94,33 +94,29 @@ export function pageTitle(value: unknown): string {
   return value.trim();
 }
 
-/** What a page is called while its document does not open with a name. */
+/**
+ * What a page is called while its document has no name. A page's name is its document's first
+ * top-level heading (pages-live-document.md §4.1, `pageTitleLine`): one datum, kept in the document
+ * and nowhere else; `data.page_title` reads it the same way in SQL.
+ */
 export const UNNAMED_PAGE = "Untitled";
 
-/**
- * A page's name is the top-level heading its document opens with
- * (pages-live-document.md §4.1): one datum, kept in the document and nowhere
- * else. `data.page_name` reads it the same way in SQL.
- */
-export function pageNameFrom(body: string): string | null {
-  const line = body.trimStart().split("\n", 1)[0]?.trim() ?? "";
-  return /^#[ \t]+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
-}
-
-/** A document that opens with a name: its own, or `name` above it. */
-export function namedPageBody(body: string, name: string): string {
-  if (pageNameFrom(body) !== null) return body;
-  const heading = `# ${pageTitle(name)}\n`;
-  return body.trim() ? `${heading}\n${body.replace(/^\s*\n/u, "")}` : heading;
-}
-
-/** The same document under another name: the heading it opens with is rewritten, or added. */
-export function renamedPageBody(body: string, name: string): string {
+/** `body` named `name`: the heading that names it is rewritten where it stands, or `name` is written above its text. */
+function withName(body: string, name: string, line = pageTitleLine(body)): string {
   const heading = `# ${pageTitle(name)}`;
-  if (pageNameFrom(body) === null) return namedPageBody(body, name);
-  const start = body.length - body.trimStart().length;
-  const end = body.indexOf("\n", start);
-  return `${body.slice(0, start)}${heading}${end < 0 ? "\n" : body.slice(end)}`;
+  if (line) return `${body.slice(0, line.start)}${heading}${line.end < body.length ? body.slice(line.end) : "\n"}`;
+  return body.trim() ? `${heading}\n\n${body.replace(/^\s*\n/u, "")}` : `${heading}\n`;
+}
+
+/** A document with a name: its own, or `name`. */
+export function namedPageBody(body: string, name: string): string {
+  const line = pageTitleLine(body);
+  return line?.title ? body : withName(body, name, line);
+}
+
+/** The same document under another name. */
+export function renamedPageBody(body: string, name: string): string {
+  return withName(body, name);
 }
 
 /** A page row joined to its head revision, whose document carries the page's name. */
@@ -145,13 +141,14 @@ function pageSearchSnippet(text: string, at: number, length: number): string {
 
 /**
  * The section whose text contains the query, or a title hit when only the page's name does: the
- * name is the heading its document opens with, so a match on that line is a title hit. Body wins.
+ * name is the heading that names its document, so a match on that line is a title hit. Body wins.
  */
 function pageSearchHit(title: string, body: string, pageId: string, query: string): PageSearchHit {
   const needle = query.toLocaleLowerCase();
-  const nameLine = body.length - body.trimStart().length;
-  const afterName = pageNameFrom(body) === null ? 0 : (body.indexOf("\n", nameLine) + 1 || body.length);
-  const bodyAt = body.toLocaleLowerCase().indexOf(needle, afterName);
+  const text = body.toLocaleLowerCase();
+  const name = pageTitleLine(body);
+  let bodyAt = text.indexOf(needle);
+  if (name && bodyAt >= name.start && bodyAt < name.end) bodyAt = text.indexOf(needle, name.end);
   if (bodyAt >= 0) {
     const blockId = pageBlockAt(body, bodyAt);
     const block = pageBlocks(body).find((item) => item.id === blockId);
@@ -350,9 +347,9 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
   const detailed = (expression: string) =>
     `CASE WHEN $3::text[] IS NULL OR p.page_id=ANY($3::text[]) THEN ${expression} END`;
   const rows = await tx.query<PageRow & { actor_access: "read" | "edit" | null; is_governance: boolean }>({
-    name: "page_tree_access_v2",
+    name: "page_tree_access_v3",
     text: `SELECT p.page_id,p.parent_page_id,p.access_mode,p.head_revision,p.agent_suggest_only,
-        ${detailed(`(SELECT data.page_name(r.body) FROM data.page_revisions r
+        ${detailed(`(SELECT data.page_title(r.body) FROM data.page_revisions r
           WHERE r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision)`)} AS title,
         ${detailed("p.position")} AS position,${detailed("p.updated_at")} AS updated_at,
         ${detailed("p.version")} AS version,${detailed("p.published_at")} AS published_at,
@@ -632,8 +629,8 @@ export class PostgresPageRepository {
       const tree = await this.accessibleTree(tx, spaceId, actor);
       if (tree.length === 0) return { results: [] };
       const rows = await tx.query<QueryResultRow & { page_id: string; title: string | null; body: string }>({
-        name: "page_search_heads_v2",
-        text: `SELECT p.page_id, data.page_name(r.body) AS title, r.body
+        name: "page_search_heads_v3",
+        text: `SELECT p.page_id, data.page_title(r.body) AS title, r.body
           FROM data.pages p
           JOIN data.page_revisions r
             ON r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision
@@ -690,7 +687,7 @@ export class PostgresPageRepository {
     parentPageId?: string | null; title?: string; body?: string; afterPageId?: string | null;
     accessMode?: "open" | "restricted" }): Promise<{ page: PageSummary }> {
     const spaceId = bounded(input.spaceId, "spaceId");
-    // The name is written into the document, unless the document already opens with one of its own.
+    // The name is written into the document, unless the document already has a name of its own.
     // Without a name the document is as written: a page someone started writing names itself in its text.
     const newBody = pageBody(input.title === undefined ? input.body ?? "" : namedPageBody(input.body ?? "", input.title));
     const accessMode = input.accessMode ?? "open";
@@ -1479,8 +1476,8 @@ export class PostgresPageRepository {
         values: [spaceId], maxRows: 1 });
       if (!space[0]) return null;
       const pages = await tx.query<QueryResultRow & Pick<PageRow, "page_id" | "parent_page_id" | "access_mode" | "title">>({
-        name: "page_pull_request_tree_v1",
-        text: `SELECT p.page_id,p.parent_page_id,p.access_mode,data.page_name(r.body) AS title
+        name: "page_pull_request_tree_v2",
+        text: `SELECT p.page_id,p.parent_page_id,p.access_mode,data.page_title(r.body) AS title
           FROM data.pages p ${HEAD_REVISION} WHERE p.space_id=$1
           ORDER BY p.page_id LIMIT ${MAX_PAGES + 1}`, values: [spaceId], maxRows: MAX_PAGES + 1 });
       const page = pages.find((row) => row.page_id === pageId);
@@ -1534,8 +1531,8 @@ export class PostgresPageRepository {
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.public.read", spaceId, async (tx) => {
       const rows = await tx.query<PageRow>({
-        name: "page_public_tree_v2",
-        text: `SELECT p.page_id,p.parent_page_id,data.page_name(r.body) AS title,p.position,p.access_mode,
+        name: "page_public_tree_v3",
+        text: `SELECT p.page_id,p.parent_page_id,data.page_title(r.body) AS title,p.position,p.access_mode,
             p.head_revision,p.agent_suggest_only,p.updated_at,p.version,p.published_at
           FROM data.pages p ${HEAD_REVISION}
           WHERE p.space_id=$1 ORDER BY p.position, p.page_id LIMIT ${MAX_PAGES + 1}`,

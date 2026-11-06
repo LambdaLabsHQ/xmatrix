@@ -497,7 +497,8 @@ export {
   PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, pageMediaFile, pageMediaReference, pageMediaReferences,
   pageMediaRefId, parsePageMedia,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageEditGlimpses, pageHeadingSlug, pageLineDiff,
-  pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
+  pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, pageTitleLine,
+  parseGitHubFileReference,
 } from "./page-markdown.js";
 export {
   attachmentKind, extensionForMediaType, mediaTypeForName, mediaTypeOf, PAGE_MEDIA_TYPES, playableMediaKind,

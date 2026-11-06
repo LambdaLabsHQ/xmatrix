@@ -233,21 +233,21 @@ export function PageByline({ view, doc, frame, source, writing }: {
     return () => { live = false; window.clearTimeout(timer); };
   }, [head, view]);
 
-  // It stands under the title, wherever the title's lines end.
+  // It stands under the title, wherever the title's lines end: the document's first top-level h1, or the
+  // "Untitled" drawn above a document without one.
   useEffect(() => {
     const current = view;
     const box = frame.current;
     if (!box) return;
     let title: Element | null = null;
     const place = () => {
-      const first = current.dom.firstElementChild;
+      const first = current.dom.querySelector(":scope > h1");
       if (first !== title) {
         if (title) sizes.unobserve(title);
         title = first;
         if (title) sizes.observe(title);
       }
-      setTop(title?.tagName === "H1" ? title.getBoundingClientRect().bottom - box.getBoundingClientRect().top + BYLINE_GAP
-        : null);
+      setTop(title ? title.getBoundingClientRect().bottom - box.getBoundingClientRect().top + BYLINE_GAP : null);
     };
     const sizes = new ResizeObserver(place);
     const children = new MutationObserver(place);
