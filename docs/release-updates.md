@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Transfer proposal lists recover a lost database response
+
+HUB-BW lost its connection at BEGIN while listing Channel transfer proposals.
+This lock-free read now combines the current Human admin check and the bounded
+queue in one placed single read. One lost response retries on a fresh connection,
+rechecking both admin authority and placement; repeated loss stays visible.
+An authorized empty queue remains distinct from a denied reader. Transfer
+confirmation, writes and unknown-COMMIT recovery are unchanged. Hub only, no
+schema or client migration. Recovery is a CI-validated beta Hub reverting this
+change. The underlying connection termination is not attributed.
+
 ## Unreleased: Registration presentation keeps its own clock
 
 The ordered Instance store no longer accepts writes to its derived Channel

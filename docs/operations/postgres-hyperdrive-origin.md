@@ -47,6 +47,12 @@ operator) must bound its own queries.
 
 ## Session features under Hyperdrive
 
+Channel transfer proposal lists combine the current Human admin check and the
+bounded queue in one placed `single_read` (HUB-BW). A lost response retries once
+on a fresh connection and rechecks both membership and placement; repeated loss
+still fails. An outer join distinguishes an authorized empty queue from denied
+access. Transfer confirmations and writes keep their transaction boundaries.
+
 Billing summaries use the client's independent `single_read` statements on one
 request session, including membership and placement checks. Each lost response
 may recover once on a fresh checkout; repeated loss still fails the request.

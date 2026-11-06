@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { PostgresAutomationRepository, PostgresBillingRepository, PostgresChannelCatalogRepository,
-  PostgresPageRepository, PostgresSpaceControlRepository } from "../dist/index.js";
+  PostgresPageRepository } from "../dist/index.js";
 import { integration } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
-import { recoveringDatabase } from "./response-fault-postgres.fixture.mjs";
+import { recoveringDatabase, recoveringSpaceControl } from "./response-fault-postgres.fixture.mjs";
 import { describePageConversations } from "../dist/page-conversations.js";
 
 async function assertReadRecovery(read, expected, clients, injectFault) {
@@ -218,8 +218,7 @@ integration("page awareness and blame recover lost reads with access and placeme
 integration("Channel details recover each lost read and recheck access (XMATRIX-HUB-AR)", async () => {
   const f = await spaceSecretFixture();
   let fault;
-  const { database, clients } = recoveringDatabase(() => fault);
-  const spaces = new PostgresSpaceControlRepository(database, "shard-0");
+  const { spaces, clients } = recoveringSpaceControl(() => fault);
   const read = () => spaces.getChannel({ requestId: crypto.randomUUID(), spaceId: f.ids.space,
     channelId: f.ids.channel, principal: { kind: "user", id: f.ids.owner } });
   const channelRead = /FROM data\.channels c JOIN data\.spaces s/u;

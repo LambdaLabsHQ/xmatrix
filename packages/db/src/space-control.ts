@@ -2843,21 +2843,26 @@ export class PostgresSpaceControlRepository {
     if (input.principal.kind !== "user") throw new SpaceControlError(
       "human_required", 403, "Only human admins may review transfer proposals");
     const placement = await this.placement(requestId, "transfer.list", spaceId);
-    return this.transaction({ requestId, operation: "transfer.list",
+    return this.database.transaction({ requestId, operation: "transfer.list", statement: "single_read",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
     }, async (tx) => {
-      const admins = await tx.query({ name: "transfer_list_admin_v1", text: `SELECT user_id
-        FROM data.space_members WHERE space_id = $1 AND user_id = $2 AND role IN ('owner','admin') LIMIT 1`,
-        values: [spaceId, input.principal.id], maxRows: 1 });
-      if (!admins[0]) throw new SpaceControlError("transfer_admin_required", 403, "Space admin required");
-      const rows = await tx.query<TransferRow>({ name: "transfer_list_v1", text: `SELECT *
-        FROM data.channel_transfer_proposals WHERE (space_id = $1 OR target_space_id = $1)
-          AND ($2::text IS NULL OR channel_id = $2)
-          AND ((status='pending' AND expires_at>clock_timestamp()) OR
-            (status='completed' AND completed_at>clock_timestamp()-interval '1 day'))
-        ORDER BY (status='pending') DESC, created_at DESC, proposal_id DESC LIMIT 100`,
-        values: [spaceId, input.channelId ?? null], maxRows: 100 });
-      return { proposals: rows.map((row) => transferView(row, input.principal.id)) };
+      // Keep current admin authority in the same snapshot as the proposals,
+      // including on the single read's fresh-connection recovery.
+      const rows = await tx.query<TransferRow>({ name: "transfer_list_v2", text: `SELECT p.*
+        FROM (SELECT user_id FROM data.space_members
+          WHERE space_id=$1 AND user_id=$3 AND role IN ('owner','admin') LIMIT 1) admin
+        LEFT JOIN LATERAL (SELECT * FROM data.channel_transfer_proposals
+          WHERE (space_id=$1 OR target_space_id=$1) AND ($2::text IS NULL OR channel_id=$2)
+            AND ((status='pending' AND expires_at>clock_timestamp()) OR
+              (status='completed' AND completed_at>clock_timestamp()-interval '1 day'))
+          ORDER BY (status='pending') DESC, created_at DESC, proposal_id DESC LIMIT 100
+        ) p ON true
+        ORDER BY (p.status='pending') DESC, p.created_at DESC, p.proposal_id DESC`,
+        values: [spaceId, input.channelId ?? null, input.principal.id], maxRows: 100 });
+      if (!rows[0]) throw new SpaceControlError("transfer_admin_required", 403, "Space admin required");
+      // The outer join keeps an authorized empty queue distinct from no access.
+      return { proposals: rows.filter((row) => row.proposal_id !== null)
+        .map((row) => transferView(row, input.principal.id)) };
     });
   }
 
