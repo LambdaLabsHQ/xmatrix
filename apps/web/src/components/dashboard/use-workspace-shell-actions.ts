@@ -3,7 +3,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { appViewSelectionQuery, discussionHead, isAppSelectionView, presenceInstanceId } from "@xmatrix/protocol";
 
-import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
@@ -164,7 +163,6 @@ import {
 } from "./workspace-shell-modules";
 import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
 import { refreshSpaceAllowanceAfterRefusal } from "./space-allowance-notice";
-import { channelEventViews } from "./workspace-shell-presence";
 import { sameValue, shareByKey } from "../../lib/same-value";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
@@ -177,7 +175,6 @@ import { questionnaireAnswerPayload, type QuestionnaireAnswer } from "./question
 import { SCROLLING_MOVES_NO_ROWS, timelineScrollRest } from "./timeline-scroll-rest";
 import { SentUploadFailed, settleSentUploads } from "./sent-upload";
 
-const NO_TIMELINE_EVENTS: readonly ObservabilityEvent[] = [];
 
 export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const fetch = useXMatrixQueryFetch(s.authenticatedUserId);
@@ -407,22 +404,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     });
   }, [s.outgoingMessages, s.renderableHistory]);
 
-  const timelineEventViewsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
-  const timelineEventViews = useMemo(() => {
-    const ids = s.selectedChannel ? [s.selectedChannel.id,
-      metadataString(s.selectedChannel.metadata, "threadRootChannelId")].filter(Boolean) : [];
-    const views = channelEventViews(s.agentStatusEvents, ids, timelineEventViewsRef.current);
-    timelineEventViewsRef.current = views;
-    return views;
-  }, [s.agentStatusEvents, s.selectedChannel]);
-  const timelineEvents = timelineEventViews.get(s.selectedChannel?.id ?? "") ?? NO_TIMELINE_EVENTS;
-  const parentTimelineEvents = timelineEventViews.get(
-    metadataString(s.selectedChannel?.metadata, "threadRootChannelId")) ?? NO_TIMELINE_EVENTS;
-
-  /* The timeline is rebuilt whenever a Channel or Agent presence changes, which
-     in a busy Space is many times a second. Items that say the same keep their
-     identity, so everything keyed on them (row memos, the launch query's
-     per-message key) recomputes only for messages that changed. */
+  // History and author identity build the rows. Live sender status subscribes
+  // at the visible affordance, so activity never rebuilds Markdown models.
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
@@ -431,7 +414,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           s.renderableHistory,
           s.selectedChannel,
           s.channels,
-          timelineEvents,
           s.user,
           s.channelReadCounts,
           renderableHistoryCache,
@@ -447,7 +429,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       return shared;
     },
     [
-      timelineEvents,
       s.currentSpace?.members,
       s.channelReadCounts,
       s.channels,
@@ -485,7 +466,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       [rootMessage],
       parentChannel,
       s.channels,
-      parentTimelineEvents,
       s.user,
       s.channelReadCounts,
       renderableHistoryCache,
@@ -498,7 +478,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const held = threadRootRef.current;
     return { message: (threadRootRef.current = held && sameValue(held, message) ? held : message), channel: parentChannel };
   }, [
-    parentTimelineEvents,
     s.currentSpace?.members,
     s.channelReadCounts,
     s.channels,
@@ -2286,7 +2265,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (!s.token || !s.selectedChannel || !s.canUseSelectedChannel) return;
     if (s.reborningAgentInstanceId || s.stoppingAgentInstanceId) return;
 
-    const rebornBody = rebornBodyForMessageSender(message);
+    const instance = message.senderInstanceId
+      ? s.realtimeChannels.get(message.channelId ?? "")?.presence?.instances.get(presenceInstanceId(message.senderInstanceId))
+      : undefined;
+    const rebornBody = rebornBodyForMessageSender(message, instance?.rest || instance?.offlineReason ? undefined : instance?.status);
     if (!rebornBody) {
       const error = "This message sender cannot be reborn.";
       setAgentsError(error);

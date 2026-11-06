@@ -156,7 +156,7 @@ export function AppWindowPreview() {
   const { channels, history } = useMemo(() => sample(Date.now()), []);
   const selected = channels[0];
   const timeline = useMemo(
-    () => buildTimeline(history, selected, channels, [], { id: viewer.id, email: "alex@acme.dev", name: viewer.name }, {}, undefined, undefined, undefined, space.members),
+    () => buildTimeline(history, selected, channels, { id: viewer.id, email: "alex@acme.dev", name: viewer.name }, {}, undefined, undefined, undefined, space.members),
     [channels, history, selected],
   );
   const catalog = useMemo<SpaceChannelCatalog>(() => {

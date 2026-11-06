@@ -69,9 +69,6 @@ import {
   timelineItemId,
 } from "./workspace-shell-message-model";
 
-import {
-  agentInstanceDisplayStatus,
-} from "./workspace-shell-presence";
 
 import {
   AGENT_SPAWN_HANDOFF_GRACE_MS,
@@ -773,8 +770,7 @@ export function appendOutgoingTimelineItems(
       // Who the confirmed message will be from, so the row is grouped and
       // drawn the same way before and after the server answers.
       senderId: currentUser ? `user:${currentUser.id}` : undefined,
-      senderStatus: "online",
-      sendStatus: message.status,
+        sendStatus: message.status,
       sendError: message.error,
     }));
   if (pendingItems.length === 0) return timeline;
@@ -787,7 +783,6 @@ export function buildTimeline(
   history: ChannelMessage[],
   channel: ChannelSnapshot | null,
   channels: ChannelSnapshot[],
-  events: readonly ObservabilityEvent[],
   currentUser?: { id: string; email: string; name?: string } | null,
   channelReadCounts: Record<string, number> = {},
   historyCache?: Map<string, ChannelHistoryCacheEntry>,
@@ -913,28 +908,6 @@ export function buildTimeline(
               : instance.channelInstanceId === senderChannelInstanceId
         )
       : undefined;
-    // History can arrive before the Channel's presence snapshot. Missing
-    // presence says nothing about whether this exact Instance has left.
-    const senderInstanceStale = Boolean(channel?.presence) &&
-      message.from.kind === "agent" && senderHasInstanceIdentity && !matchedInstance && !linkedSender;
-    const humanPresenceStatus =
-      kindMatchedPresence?.kind === "user" ? kindMatchedPresence.status : undefined;
-    const senderStatus =
-      message.from.kind === "agent"
-        ? senderInstanceStale
-          ? "offline"
-          : !matchedInstance
-            ? undefined
-            : agentInstanceDisplayStatus({
-              agentId: senderIdentityId,
-              channelId: message.channelId,
-              events,
-              instance: matchedInstance,
-              fallbackStatus: matchedInstance?.status || "offline",
-              name: authorLabel,
-              activity: matchedInstance?.activity || kindMatchedPresence?.activity,
-            })
-        : relayedReply ? undefined : humanPresenceStatus || (own ? "online" : "offline");
     const senderGoal =
       message.from.kind === "agent"
         ? message.from.goal
@@ -1050,10 +1023,6 @@ export function buildTimeline(
         : undefined,
       senderInstanceId: reservedSystemAgent ? undefined : matchedInstance?.id || senderInstanceId,
       senderMention,
-      // xMatrix has its own product identity, while the delegated runtime
-      // remains the source of truth for whether it is actively working.
-      senderStatus,
-      senderInstanceStale: reservedSystemAgent ? false : senderInstanceStale,
       ...(linkOrigin ? { linkOrigin } : {}),
       senderGoal: reservedSystemAgent ? undefined : senderGoal,
       senderGitBranch: reservedSystemAgent ? undefined : senderGitBranch,

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Instance status has one ordered source
+
+A newly running Agent could speak while its message said `instance offline`:
+bounded Channel windows replaced the whole roster, while live cards could
+only update an Instance already in it. Messages also cached a second live
+status. Self-contained Instance records now merge by lifecycle version and
+socket sequence; empty or late windows cannot remove a live record. Only an
+explicit ended record means offline, and exact reads reconcile held IDs after
+reconnect or focus. Message headers, avatars, Reborn and the work dock share
+the live state without rebuilding Markdown on activity. Hub, Web and shared
+protocol; capability-negotiated legacy compatibility, no schema migration.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Phone conversation heads share state without inspecting the app tree
 
 The phone navigation bar inferred its paper tone from a Summary plaque found
