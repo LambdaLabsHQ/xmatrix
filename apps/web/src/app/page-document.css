@@ -567,7 +567,23 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-age
   font-size: 0.75rem !important;
 }
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island {
+  max-width: 100%;
   padding-right: 0.625rem;
+}
+/* At the disc's height an island's two lines would fill it edge to edge, so what it is on follows its caption on one
+   line, keeping the room above and below that the Conversations view's island gives its words. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-intent-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.375rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-intent-caption {
+  flex: none;
+}
+/* Its controls shrink with it, so the capsule they open in stays the disc's height, with the same room around them. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-action {
+  height: 1.5rem;
+  padding-inline: 0.5rem;
 }
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island .app-agent-work-avatar .identity-avatar-status {
   top: 0.2rem !important;
