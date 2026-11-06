@@ -3,7 +3,7 @@
 Status: design proposal. No language interpreter, new execution authority or
 production migration is implemented by this document.
 
-[Norn](https://github.com/LambdaLabsHQ/norn) makes coordination programmable at
+[Norn](https://github.com/norn-lang/norn) makes coordination programmable at
 the abstraction level of autonomous people and complete AI agents. Follow-ups,
 decision policies and other coordination patterns become programs and reusable
 libraries rather than separate platform features.
