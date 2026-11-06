@@ -1132,8 +1132,11 @@ export function replaceAutomation(
   automation: SerializedAutomation
 ): SerializedAutomation[] {
   const exists = automations.some((current) => current.id === automation.id);
+  // Outcomes are read with the list; a single record answering a change keeps the list's until it is read again.
   const next = exists
-    ? automations.map((current) => (current.id === automation.id ? automation : current))
+    ? automations.map((current) => (current.id === automation.id
+      ? (automation.outcomes || !current.outcomes ? automation : { ...automation, outcomes: current.outcomes })
+      : current))
     : [...automations, automation];
   return sortAutomations(next);
 }

@@ -183,7 +183,7 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
     await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
     await expect(title).toHaveAttribute("data-placeholder", "Untitled");
     expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
-    // Named, it is made under the page it was opened from, from its document: the name it opens with.
+    // Named, it is made under the page it was opened from, from its document: the name its heading gives it.
     await page.keyboard.type("New notes");
     await page.keyboard.press("Enter");
     await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);

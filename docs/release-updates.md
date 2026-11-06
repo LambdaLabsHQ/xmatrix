@@ -13,6 +13,77 @@ the live state without rebuilding Markdown on activity. Hub, Web and shared
 protocol; capability-negotiated legacy compatibility, no schema migration.
 Recovery is a CI-validated beta reverting this change.
 
+## Unreleased: A page's comment thread no longer hides its own words
+
+An open thread in a page's margin floated the Conversations view's Agent
+disc (46px) and composer over its last lines, a "back to the last person"
+capsule over its first, and showed its Agent again as a chip in the head.
+The same glass disc and composer now stand in flow under the comments at
+the thread's scale (a 32px disc on the comments' avatar column, a 40px
+composer), the head names the conversation on the passage's column without
+the chip, comment avatars drop their status dot, the jump capsule is gone
+from the margin, and text fades at the scroll edges. The Conversations view
+is unchanged. Web only.
+## Unreleased: page edit takes what page read printed, never its header alone
+
+Agents wrote `xmatrix page read`'s header into pages: 62 revisions of 10
+Lambda Labs pages since 2026-10-02 carry its lines, first written by codex,
+claude, opencode and grok. `page edit -f` took a file as the page's text, so
+each Agent cut the header off by hand; a cut one line short or mid-header
+landed above the page's heading. `page edit` and `page create` now take the
+page's text or all of what `page read` printed, whose header is left out. A
+line only that header writes (`pageId:`, `headRevision:`, the `writeLive:`
+hint) elsewhere outside fenced code means it was cut by hand: nothing is
+written, and the refusal names the line and what to give instead. CLI only;
+no Hub, schema or protocol change. Older CLIs write what they are given.
+Recovery is a CI-validated beta CLI reverting this change.
+
+## Unreleased: An idle Agent's 5h/1w usage comes back when its Channel is opened
+
+A registration's quota reading counts for fifteen minutes, and since idle
+Instances stopped polling their provider (#1328) nothing read it again while
+an Agent sat idle, so its Channel card lost its 5h/1w tags. Opening the
+Channel is now the event that reads it: when the Agents it shows have no
+reading in force, the Hub asks their machines' daemons for one (the existing
+once-a-minute-per-daemon probe), and the reading reaches the owner's card
+when the probe lands. Hub only, no schema or client protocol migration.
+Recovery is a CI-validated Hub reverting the change.
+
+## Unreleased: A page's name is its first top-level heading, wherever it stands
+
+Two Lambda Labs business-line pages read "Untitled" in the page tree,
+Schedules and root tables while their documents carried `# NomadCafe` and
+`# 酒店积分数据产品（常旅客）`: an Agent's edit had left `page read` header text
+above the heading, and only a heading a document opened with named it. There
+is no stored title to drift; production history shows 49 revisions of 18
+pages unnamed this way, by notes, stray rules and pasted headers. A page's
+name is now its document's first top-level heading outside fenced code,
+wherever it stands (`data.page_title` in SQL, `pageTitleLine` in the protocol);
+a document without one, or whose first one is empty, still reads "Untitled".
+Rename rewrites that heading where it stands; the editor draws "Untitled" only
+for a document without one, and the byline and the published page stand under
+the title wherever it is. Hub and beta Web with expand migration 0238;
+`data.page_name` stays for the Hub this replaces until a contract migration
+drops it. Recovery is a CI-validated beta Hub and Web reverting this change.
+
+## Unreleased: A schedule says what its latest runs produced
+
+Learning which of a Space's schedules earn their cadence took a manual,
+hours-long audit of their conversations. Each page Automation listed by its
+page or its Space now carries `outcomes`: its ten latest occurrences that were
+not cancelled, newest first, each a pull request it opened, a page it changed,
+nothing, failed to start, or still running. The Hub reads them from each
+occurrence's own conversation (its launches, Runs, page revisions and activity
+entries) in one bounded statement per list; nothing new is stored and merges
+are not shown. `xmatrix page automation list` and `page read` print
+`last 10: 4 PR · 3 page · 2 none · 1 failed to start`, and Schedules shows the
+summary in each row and every run, with its conversation, in its detail.
+Expand migration 0239 adds online indexes for those reads (a GIN index on page
+revision conversations and a partial index on activity entries and failure
+notices). Hub, Web, CLI and shared protocol; older clients ignore the additive
+field. Recovery is a CI-validated beta reverting the change; the indexes may
+stay.
+
 ## Unreleased: Phone conversation heads share state without inspecting the app tree
 
 The phone navigation bar inferred its paper tone from a Summary plaque found

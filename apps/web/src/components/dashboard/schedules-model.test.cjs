@@ -125,3 +125,13 @@ test("a reminder that has reminded is done, not paused; one paused before its ti
   assert.equal(scheduleDone(automation({ enabled: false, lastRunAt: "2026-09-28T12:00:01.000Z" })), false,
     "a paused cadence is not done");
 });
+
+test("a schedule's latest runs are counted strongest first, and say nothing before it has run", () => {
+  const { scheduleOutcomeSummary } = require("./schedules-model.ts");
+  const outcomes = ["running", "page", "pull_request", "none", "failed_to_start", "pull_request", "page",
+    "pull_request", "none", "page"].map((kind) => ({ kind, scheduledFor: "2026-11-06T04:30:00.000Z", conversationId: "c" }));
+  assert.equal(scheduleOutcomeSummary(outcomes), "last 10: 3 PR · 3 page · 2 none · 1 failed to start · 1 running");
+  assert.equal(scheduleOutcomeSummary(outcomes.slice(1, 3)), "last 2: 1 PR · 1 page");
+  assert.equal(scheduleOutcomeSummary([]), null);
+  assert.equal(scheduleOutcomeSummary(undefined), null, "a Hub that does not say");
+});

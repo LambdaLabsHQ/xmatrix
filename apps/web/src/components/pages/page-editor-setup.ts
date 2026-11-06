@@ -407,14 +407,14 @@ function placeholder(hint: () => string | undefined): Plugin {
             class: doc.firstChild!.content.size ? "" : "page-placeholder",
           })]);
         }
-        const first = doc.firstChild!;
-        if (first.type !== nodes.heading || first.attrs.level !== 1) {
-          // A document that opens with anything else has no name: "Untitled" in its place, named by clicking it.
+        const title = titleHeading(doc);
+        if (!title) {
+          // A document without one has no name: "Untitled" above its text, named by clicking it.
           return DecorationSet.create(doc, [Decoration.widget(0, untitled, { side: -1, key: "untitled", stopEvent: () => true })]);
         }
         // A name typed and taken back again reads "Untitled" too.
-        if (!first.content.size) {
-          return DecorationSet.create(doc, [Decoration.node(0, first.nodeSize,
+        if (!title.node.content.size) {
+          return DecorationSet.create(doc, [Decoration.node(title.pos, title.pos + title.node.nodeSize,
             { class: "page-placeholder", "data-placeholder": NEW_PAGE_TITLE })]);
         }
         // A named page with nothing under its name yet shows what to write in the line below.
@@ -443,6 +443,15 @@ function untitled(view: EditorView): HTMLElement {
     view.focus();
   });
   return title;
+}
+
+/** The heading that names the page: its document's first top-level h1, wherever it stands (pages-live-document.md §4.1). */
+function titleHeading(doc: DocNode): { node: DocNode; pos: number } | null {
+  for (let index = 0, pos = 0; index < doc.childCount; pos += doc.child(index).nodeSize, index++) {
+    const node = doc.child(index);
+    if (node.type === nodes.heading && node.attrs.level === 1) return { node, pos };
+  }
+  return null;
 }
 
 function emptyPage(doc: DocNode): boolean {

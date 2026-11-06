@@ -64,6 +64,21 @@ export function matchSchedules<R extends ScheduleRow>(rows: readonly R[], lines:
   return { matches: lines.map((line) => ({ line, row: paired.get(line) })), removed: [...free] };
 }
 
+/**
+ * Whether a reminder already went out for the time its line names: the
+ * Automation was a reminder for that same ⏳ and ran at or after it. A 🔁 line
+ * rewritten as a ⏳ keeps its Automation (matchSchedules), and the runs of its
+ * old cadence are not this reminder's delivery.
+ */
+export function reminderDelivered(row: Record<string, unknown> | undefined,
+  at: string | undefined): boolean {
+  if (!row || row.once !== true || !at || typeof row.lastRunAt !== "string") return false;
+  const payload = row.payload && typeof row.payload === "object" ? row.payload as Record<string, unknown> : {};
+  if (payload.at !== at) return false;
+  const ran = Date.parse(row.lastRunAt);
+  return Number.isFinite(ran) && ran >= Date.parse(at);
+}
+
 export interface ScheduleSyncReport {
   /** Lines that do not run as written, each with why. */
   problems: Array<{ source: string; problem: string }>;
@@ -190,13 +205,12 @@ export async function syncPageSchedules(env: Env, input: {
       else triggers = resolved;
     }
     const storedPayload = (row?.payload ?? {}) as Record<string, unknown>;
-    const delivered = Boolean(row?.lastRunAt);
-    if (!problem && once && line.status === "running" && !(row && storedPayload.at === line.at && delivered)
-      && !scheduleTimeInRange(line.at!, now)) {
+    const delivered = once && reminderDelivered(row, line.at);
+    if (!problem && once && line.status === "running" && !delivered && !scheduleTimeInRange(line.at!, now)) {
       problem = "⏳ is a time ahead, within a year";
     }
     if (problem) problems.push({ source: line.source, problem });
-    const enabled = !problem && line.status === "running" && !(once && delivered && storedPayload.at === line.at);
+    const enabled = !problem && line.status === "running" && !delivered;
     const intervalMinutes = once ? AUTOMATION_MAX_INTERVAL_MINUTES : line.intervalMinutes!;
     const definition = problem && row ? {} : {
       name: scheduleName(line.instruction), intervalMinutes,

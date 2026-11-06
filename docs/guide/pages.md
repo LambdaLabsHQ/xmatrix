@@ -9,7 +9,7 @@ Conversations move fast and are hard to read later. Pages are where a Space keep
 
 ## The page tree
 
-Each Space has one tree of pages. Organize it by what the Space works on, not by who said what. A page is Markdown, and its headings are its sections.
+Each Space has one tree of pages. Organize it by what the Space works on, not by who said what. A page is Markdown, and its headings are its sections. Its first top-level heading (`# Name`) is its name, wherever it stands; renaming a page rewrites that heading.
 
 In the app, open **Pages**. The list starts with recent changes, then the whole tree. From a terminal:
 

@@ -520,6 +520,99 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .rich-me
   font-size: 0.8125rem;
   line-height: 1.45;
 }
+/* The thread reads top to bottom (§4.4): its head, the comments, the Agents at work, and the reply box. They are the
+   Conversations view's own glass disc and composer, at the thread's scale: in that view they float over the
+   timeline's tail, but here they stand in flow under it, so nothing covers what was said, and the timeline keeps no
+   room for them. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-timeline {
+  scroll-padding-bottom: 0.5rem !important;
+  /* What scrolls past the head or down to the Agents fades into the paper instead of being cut. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 0.5rem, black calc(100% - 0.5rem), transparent);
+  mask-image: linear-gradient(to bottom, transparent, black 0.5rem, black calc(100% - 0.5rem), transparent);
+}
+/* A comment's avatar says who wrote it; whether an Agent works now is said once, by its disc under the comments. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar .identity-avatar-status {
+  display: none !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-message-timeline > div,
+  .app-message-timeline-scroll-end, .app-message-timeline-scroll-end-work-dock) {
+  padding-bottom: 0.5rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-agent-work-dock, .app-composer) {
+  position: relative !important;
+  inset: auto !important;
+  z-index: auto !important;
+  flex: none;
+}
+/* The discs start on the comments' avatar column, a third larger than those avatars as in the Conversations view, and
+   tall enough for an island's two lines. The strip keeps no room above it: the controls stand outside it. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-dock {
+  padding: 0.25rem 0.75rem 0.5rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-scroller {
+  width: auto !important;
+  min-height: 0 !important;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open[data-quiet-agents] .app-agent-work-scroller {
+  display: none;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-item {
+  --app-agent-work-disc: 2rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-avatar .identity-avatar-face {
+  font-size: 0.75rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island {
+  max-width: 100%;
+  padding-right: 0.625rem;
+}
+/* At the disc's height an island's two lines would fill it edge to edge, so what it is on follows its caption on one
+   line, keeping the room above and below that the Conversations view's island gives its words. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-intent-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.375rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-intent-caption {
+  flex: none;
+}
+/* Its controls shrink with it, so the capsule they open in stays the disc's height, with the same room around them. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-action {
+  height: 1.5rem;
+  padding-inline: 0.5rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island .app-agent-work-avatar .identity-avatar-status {
+  top: 0.2rem !important;
+  right: 0.35rem !important;
+}
+/* The composer at the thread's scale: 2.5rem tall on the comments' left edge, its controls 2rem, its words 14px. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer {
+  padding: 0 0.75rem 0.75rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box {
+  min-height: 2.5rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-input-row {
+  min-height: 2.5rem !important;
+  padding: 0.25rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-inline-actions {
+  min-height: 2rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-composer-inline-icon, .app-composer-send) {
+  width: 2rem !important;
+  height: 2rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box .composer-textarea {
+  min-height: 2rem !important;
+  padding-top: calc((2rem - 1.38em) / 2 + 0.5px) !important;
+  padding-bottom: calc((2rem - 1.38em) / 2 - 0.5px) !important;
+  font-size: 0.875rem !important;
+}
 /* Beside its page, a conversation's head already names it (the card in the margin, the header docked, the
    sign on a phone), and for a discussion that name is its passage: an empty one just says so. */
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-page-conversation :is(.app-empty-conversation-mark, .app-empty-conversation-title) {
@@ -1159,8 +1252,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 
 /* The page's byline (pages-live-document.md §3.2): its authors under its title, face and name, a hairline between.
-   The title keeps the byline's room in the preview as in the editor, so nothing moves when the authors arrive. */
-.page-byline-room .page-document > h1:first-child { margin-bottom: 46px; }
+   The title (the first top-level h1, wherever it stands) keeps the byline's room in the preview as in the editor,
+   so nothing moves when the authors arrive. */
+.page-byline-room .page-document > h1:first-of-type { margin-bottom: 46px; }
 .page-byline-rule {
   width: 1px;
   height: 14px;

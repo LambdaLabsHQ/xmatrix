@@ -4,7 +4,7 @@ import { useViewSelection } from "./url-query-state";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
   pageBlocks,
   type SerializedAutomation,
@@ -19,10 +19,12 @@ import { formatAutomationCadence, formatAutomationNext, formatAutomationTrigger 
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
+import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { ListSkeleton } from "./content-skeleton";
 import { nextRunPhrase, useScheduleWhere } from "./schedule-list-groups";
 import {
-  scheduleAttention, scheduleDone, scheduleRunning, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
+  scheduleAttention, scheduleDone, scheduleOutcomeLabel, scheduleOutcomeSummary, scheduleRunning, scheduleState,
+  scheduleSummary, scheduleTree, sectionFallbackTitle,
   SCHEDULE_STATES, type ScheduleCounts, type SchedulePageNode, type ScheduleState,
 } from "./schedules-model";
 import { formatRelativeAge } from "./time-display";
@@ -93,6 +95,13 @@ export function SchedulesView({
 
   const summary = useMemo(() => scheduleSummary(automations, executionEnabled), [automations, executionEnabled]);
   const selected = automations.find((automation) => automation.id === selectedId);
+  // A run's outcome settles after the push that announced it ran: opening Schedules reads them as they are now.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!spaceId || !user?.id) return;
+    void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain({ userId: user.id }, "automations", [spaceId]) },
+      { cancelRefetch: false });
+  }, [queryClient, spaceId, user?.id]);
 
   const pageTree = usePageTree(spaceId, token);
   const whereTitle = useScheduleWhere(spaceId, token, channels);
@@ -146,7 +155,8 @@ export function SchedulesView({
       <ScheduleRow key={automation.id} automation={automation} depth={depth} state={state}
         selected={automation.id === selectedId} onSelect={() => select(automation.id)}
         end={state !== "paused" ? whenOf(automation) : scheduleDone(automation) ? "done" : undefined}
-        subtitle={scheduleAttention(automation, executionEnabled) ?? formatAutomationCadence(automation)} />
+        subtitle={scheduleAttention(automation, executionEnabled) ?? [formatAutomationCadence(automation),
+          scheduleOutcomeSummary(automation.outcomes)].filter(Boolean).join(" · ")} />
     );
   };
   const list = (
@@ -189,6 +199,7 @@ export function SchedulesView({
       onDelete={() => onDeleteAutomation(selected)}
       onOpenWhere={() => selected.pageId ? onOpenPage(selected.pageId) : onOpenConversation(selected.channelId)}
       onOpenConversation={() => selected.lastChannelId && onOpenConversation(selected.lastChannelId)}
+      onOpenRun={onOpenConversation}
     />
   ) : automations.length === 0 && !loadingAutomations && !loadError ? (
     <ToolDetailEmpty icon={<Clock />} title="Nothing in this Space runs on a schedule">
@@ -281,7 +292,7 @@ function ScheduleRow({ automation, depth, state, selected, onSelect, end, subtit
             <span className="app-page-row-title app-list-row-title min-w-0 flex-1 truncate">{automation.name}</span>
             {end && <span className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums">{end}</span>}
           </span>
-          <span className="app-list-row-meta truncate">{subtitle}</span>
+          <span className="app-list-row-meta truncate" title={subtitle}>{subtitle}</span>
         </button>
       </PageTreeRow>
     </li>
@@ -392,6 +403,7 @@ function ScheduleDetail({
   onDelete,
   onOpenWhere,
   onOpenConversation,
+  onOpenRun,
 }: {
   automation: SerializedAutomation;
   state: ScheduleState;
@@ -407,6 +419,8 @@ function ScheduleDetail({
   onDelete: () => void;
   onOpenWhere: () => void;
   onOpenConversation: () => void;
+  /** Opens the conversation one of its runs ran in. */
+  onOpenRun: (conversationId: string) => void;
 }) {
   const running = scheduleRunning(automation);
   const attention = scheduleAttention(automation, executionEnabled);
@@ -497,6 +511,28 @@ function ScheduleDetail({
           )}
         </ToolFacts>
       </ToolDetailSection>
+
+      {automation.outcomes && automation.outcomes.length > 0 && (
+        <ToolDetailSection title="Recent runs">
+          <p className="text-sm text-muted-foreground" data-testid="schedule-outcomes">
+            {scheduleOutcomeSummary(automation.outcomes)}
+          </p>
+          <ul className="app-tool-lines">
+            {automation.outcomes.map((outcome) => (
+              <li key={outcome.conversationId}>
+                <button type="button" onClick={() => onOpenRun(outcome.conversationId)}
+                  className="flex w-full min-w-0 items-baseline gap-3 py-2 text-left" title="Open the conversation it ran in">
+                  <span className="w-24 shrink-0 text-sm tabular-nums" title={formatDateTime(outcome.scheduledFor)}>
+                    {formatRelativeAge(outcome.scheduledFor, now) ?? formatDateTime(outcome.scheduledFor)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{scheduleOutcomeLabel(outcome.kind)}</span>
+                  <ChevronRight className="size-4 shrink-0 self-center text-muted-foreground" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </ToolDetailSection>
+      )}
 
       <ToolDetailSection title="History">
         <ToolFacts>

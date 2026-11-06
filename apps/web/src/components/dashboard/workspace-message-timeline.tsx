@@ -491,7 +491,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId,
   threadRootMessage,
   threadRootChannel,
-  foldsDiscussionHead = false,
+  inPageMargin = false,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -528,8 +528,10 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
-  /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
-  foldsDiscussionHead?: boolean;
+  /** A comment thread in a page's margin: its head shows a page discussion's passage, so its first message need
+   * not (selection-discussion.ts), and a thread that short needs no way back to a person's last message, which
+   * would only cover what it says (user 2026-11-06). */
+  inPageMargin?: boolean;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1204,7 +1206,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
-                  foldsDiscussionHead={foldsDiscussionHead}
+                  foldsDiscussionHead={inPageMargin}
                   turnContinued={continuedTurnFailures.has(message.id)}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
@@ -1273,8 +1275,9 @@ export const MessageTimeline = memo(function MessageTimeline({
         settling && "[&_[data-testid=virtuoso-item-list]]:invisible",
       )}
     >
-      <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id} token={token}
-        hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling} onJump={stableOnJumpToMessage} />
+      {!inPageMargin && <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id}
+        token={token} hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling}
+        onJump={stableOnJumpToMessage} />}
       {/* A refresh must not hide already-rendered rows.
           Skeleton only when there is nothing to show yet. */}
       {loading && !hasTimelineContent && (
@@ -3448,8 +3451,12 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   onRebornAgentInstance,
   onHandoffAgentInstance,
   onOpenAgentTrace,
+  inPageMargin = false,
 }: {
   approvals?: ReactNode;
+  /** A comment thread in a page's margin: the dock stands in flow above its reply box instead of floating over
+   * the thread's last lines, so it covers nothing and the timeline keeps no room for it. */
+  inPageMargin?: boolean;
   channel: ChannelSnapshot | null;
   token: string | null;
   timeline: TimelineItem[];
@@ -3556,7 +3563,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
      the newest message, whose hover controls sit at its
      bottom edge. Publish the measured distance and let the padding read it. */
   useLayoutEffect(() => {
-    if (workItems.length === 0 && !approvals) {
+    // In flow, the dock covers nothing, so the timeline keeps no room for it.
+    if (inPageMargin || (workItems.length === 0 && !approvals)) {
       surfaceRef.current?.style.removeProperty("--app-agent-work-dock-clearance");
       return;
     }
@@ -3600,7 +3608,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
       window.removeEventListener("resize", publishClearance);
       surfaceElement.style.removeProperty("--app-agent-work-dock-clearance");
     };
-  }, [workItems.length, approvals]);
+  }, [workItems.length, approvals, inPageMargin]);
 
   if (workItems.length === 0 && !approvals) return null;
 

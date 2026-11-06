@@ -30,6 +30,13 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Wherever a page's schedules are listed (`page automation list`, `page read`,
+Schedules), each says what its ten latest runs produced, as `last 10: 4 PR ·
+3 page · 2 none · 1 failed to start`. Each run's outcome is read from its own
+conversation's launches, Runs, page revisions and activity entries in one
+bounded, indexed statement; nothing is stored for it and merges are not
+shown. See [live documents](../design/pages-live-document.md#64-storage-and-execution).
+
 Runtime WebSocket upgrade failures retain bounded fetch duration, owner versus
 unassigned routing, remote flag and a fixed platform message category, readable
 through Sentry without identities or request data. Overload is not replayed by

@@ -19,7 +19,8 @@ export interface PageBlock {
   end: number;
 }
 
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
+// Keep the whole marker run out of the tail, even when a malformed line fails.
+const FENCE = /^ {0,3}(`{3,}(?!`)|~{3,}(?!~))(.*)$/u;
 const HEADING = /^\s{0,3}(#{1,6})\s(.*)$/u;
 
 /** A heading line's text: no surrounding blanks or closing `#` run. */
@@ -53,6 +54,25 @@ export function* markdownLines(markdown: string): Generator<{ line: string; offs
     yield { line, offset, end, prose: fence === null && !fenceMatch };
     offset = end;
   }
+}
+
+/** A top-level heading line, `# Title`, or `#` alone: a heading with no text. */
+const TITLE_LINE = /^ {0,3}#(?:[ \t]([^\n]*))?$/u;
+
+/**
+ * The line that names a page (pages-live-document.md §4.1): its document's first top-level heading
+ * outside fenced code, wherever it stands, so a note or a stray line above it does not unname the page.
+ * `title` is '' when that heading is empty: the page has no name until it is written. `start` and `end`
+ * bound the line without its newline. `data.page_title` reads the same line in SQL.
+ */
+export function pageTitleLine(markdown: string): { title: string; start: number; end: number } | null {
+  for (const { line, offset, prose } of markdownLines(markdown)) {
+    const heading = prose ? TITLE_LINE.exec(line) : null;
+    if (heading) {
+      return { title: trimEnd((heading[1] ?? "").replace(/^[ \t]+/u, ""), " \t\r"), start: offset, end: offset + line.length };
+    }
+  }
+  return null;
 }
 
 /** The page's sections, in order; duplicate slugs get -1, -2 suffixes as on GitHub. */

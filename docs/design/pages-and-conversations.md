@@ -105,7 +105,8 @@ The production x-matrix Space on 2026-09-26:
   true now, what is in progress and what is blocked. The document proper
   follows: goals, decisions in force, how things work, and open questions.
 - Metadata:
-  - title;
+  - title, read from the document itself: its first top-level heading
+    (`pages-live-document.md` §4.1), never stored beside it;
   - parent and position;
   - permissions (§7);
   - attached configuration: launch targets,
