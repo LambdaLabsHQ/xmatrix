@@ -122,4 +122,8 @@ test("a registration rename has its own Space-scoped version, including on an un
   const shown = store.get("channel").presence.instances.get("channel:1");
   assert.equal(shown.agentName, "After");
   assert.equal(shown.status, "offline");
+  store.set([]);
+  store.set([window([record(4, 1)])]);
+  assert.equal(store.get("channel").presence.instances.get("channel:1").label, "codex:1",
+    "withdrawing access clears registration projections no longer referenced by an authorized Channel");
 });

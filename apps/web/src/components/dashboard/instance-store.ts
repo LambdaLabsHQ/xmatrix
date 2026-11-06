@@ -70,6 +70,11 @@ export function createInstanceStore() {
       if (!ids.size) return;
       records.set(current => current.filter(record => !ids.has(record.channelId)), "live");
       for (const id of ids) { modern.delete(id); byChannel.delete(id); channelSpaces.delete(id); }
+      const kept = records.getSnapshot();
+      const accountKeys = new Set(kept.map(record => registrationKey(record.registration)));
+      const nameKeys = new Set(kept.map(record => presentationKey(channelSpaces.get(record.channelId) ?? "", record.registration)));
+      for (const key of quotas.keys()) if (!accountKeys.has(key)) quotas.delete(key);
+      for (const key of registrations.keys()) if (!nameKeys.has(key)) registrations.delete(key);
     },
     getChannel: (channelId: string) => byChannel.get(channelId),
     hasChannel: (channelId: string) => modern.has(channelId),
