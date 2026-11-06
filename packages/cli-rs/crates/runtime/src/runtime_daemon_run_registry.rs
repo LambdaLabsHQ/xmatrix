@@ -1267,7 +1267,7 @@ const DAEMON_RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 /// does not show yet (it weighs a machine's outstanding Runs).
 const DAEMON_RESOURCE_CHANGE_SPACING: Duration = Duration::from_secs(120);
 /// The longest unsent load history waits when no other report carries it.
-const DAEMON_RESOURCE_HISTORY_FLUSH: Duration = Duration::from_secs(15 * 60);
+const DAEMON_RESOURCE_HISTORY_FLUSH: Duration = Duration::from_secs(5 * 60);
 /// Unsent minute samples kept at most; matches the Hub's per-report bound.
 const DAEMON_RESOURCE_HISTORY_MAX: usize = 120;
 
@@ -2850,7 +2850,8 @@ mod machine_resource_tests {
             reporter.keep_history(at(minute % 60, minute / 60), start);
         }
         assert_eq!(reporter.history.len(), super::DAEMON_RESOURCE_HISTORY_MAX);
-        assert!(super::DAEMON_RESOURCE_HISTORY_FLUSH >= std::time::Duration::from_secs(15 * 60));
+        // The chart breaks a line after three missing minutes; a flush lags at most this.
+        assert_eq!(super::DAEMON_RESOURCE_HISTORY_FLUSH, std::time::Duration::from_secs(5 * 60));
     }
 
     #[test]

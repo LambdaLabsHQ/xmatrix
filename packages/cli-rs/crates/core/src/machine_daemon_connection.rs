@@ -4649,7 +4649,7 @@ mod tests {
         let client = test_machine_daemon_client();
         client.connected.store(true, Ordering::Release);
         client.connection_epoch.store(7, Ordering::Release);
-        let report = MachineDaemonReport::MachineRunSnapshot {
+        let snapshot = || MachineDaemonReport::MachineRunSnapshot {
             request_id: None,
             snapshot_complete: Some(true),
             registry_connection_epoch: None,
@@ -4661,7 +4661,7 @@ mod tests {
             cli_update: None,
             runs: Vec::new(),
         };
-        let first = client.bind_registry_causality(report).unwrap();
+        let first = client.bind_registry_causality(snapshot()).unwrap();
         let first_value = serde_json::to_value(&first).unwrap();
         let replay = client.bind_registry_causality(first).unwrap();
         let replay_value = serde_json::to_value(replay).unwrap();
@@ -4669,20 +4669,7 @@ mod tests {
         assert_eq!(first_value["registryConnectionEpoch"], 7);
         assert_eq!(first_value["registrySequence"], 1);
 
-        let later = client
-            .bind_registry_causality(MachineDaemonReport::MachineRunSnapshot {
-                request_id: None,
-                snapshot_complete: Some(true),
-                registry_connection_epoch: None,
-                registry_sequence: None,
-                captured_at: None,
-                machine_resources: None,
-                machine_resource_history: Vec::new(),
-                harness_inventory: None,
-                cli_update: None,
-                runs: Vec::new(),
-            })
-            .unwrap();
+        let later = client.bind_registry_causality(snapshot()).unwrap();
         assert_eq!(serde_json::to_value(later).unwrap()["registrySequence"], 2);
     }
 
