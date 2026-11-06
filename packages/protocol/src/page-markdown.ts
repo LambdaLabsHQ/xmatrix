@@ -19,7 +19,8 @@ export interface PageBlock {
   end: number;
 }
 
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
+// Keep the whole marker run out of the tail, even when a malformed line fails.
+const FENCE = /^ {0,3}(`{3,}(?!`)|~{3,}(?!~))(.*)$/u;
 const HEADING = /^\s{0,3}(#{1,6})\s(.*)$/u;
 
 /** A heading line's text: no surrounding blanks or closing `#` run. */
@@ -68,7 +69,7 @@ export function pageTitleLine(markdown: string): { title: string; start: number;
   for (const { line, offset, prose } of markdownLines(markdown)) {
     const heading = prose ? TITLE_LINE.exec(line) : null;
     if (heading) {
-      return { title: (heading[1] ?? "").replace(/^[ \t]+|[ \t\r]+$/gu, ""), start: offset, end: offset + line.length };
+      return { title: trimEnd((heading[1] ?? "").replace(/^[ \t]+/u, ""), " \t\r"), start: offset, end: offset + line.length };
     }
   }
   return null;
