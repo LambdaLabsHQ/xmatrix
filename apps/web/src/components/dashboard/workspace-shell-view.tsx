@@ -1282,7 +1282,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onMessageExposed={handleTimelineMessageExposed}
         threadRootMessage={selectedThreadRootContext?.message}
         threadRootChannel={selectedThreadRootContext?.channel}
-        foldsDiscussionHead={placement === "page-margin"}
+        inPageMargin={placement === "page-margin"}
       />
       )}
       <AgentWorkDetailsDock

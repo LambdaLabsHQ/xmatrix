@@ -490,7 +490,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId,
   threadRootMessage,
   threadRootChannel,
-  foldsDiscussionHead = false,
+  inPageMargin = false,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -527,8 +527,10 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
-  /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
-  foldsDiscussionHead?: boolean;
+  /** A comment thread in a page's margin: its head shows a page discussion's passage, so its first message need
+   * not (selection-discussion.ts), and a thread that short needs no way back to a person's last message, which
+   * would only cover what it says (user 2026-11-06). */
+  inPageMargin?: boolean;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1203,7 +1205,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
-                  foldsDiscussionHead={foldsDiscussionHead}
+                  foldsDiscussionHead={inPageMargin}
                   turnContinued={continuedTurnFailures.has(message.id)}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
@@ -1272,8 +1274,9 @@ export const MessageTimeline = memo(function MessageTimeline({
         settling && "[&_[data-testid=virtuoso-item-list]]:invisible",
       )}
     >
-      <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id} token={token}
-        hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling} onJump={stableOnJumpToMessage} />
+      {!inPageMargin && <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id}
+        token={token} hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling}
+        onJump={stableOnJumpToMessage} />}
       {/* A refresh must not hide already-rendered rows.
           Skeleton only when there is nothing to show yet. */}
       {loading && !hasTimelineContent && (

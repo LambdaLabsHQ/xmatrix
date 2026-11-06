@@ -476,6 +476,17 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-act
   --app-message-avatar-size: 1.5rem;
   --app-message-avatar-gap: 0.5rem;
 }
+/* An Agent at work floats over a comment thread's last lines, so its disc is as small as its island's two lines
+   allow, and starts at the comments' own inset (user 2026-11-06: the full-size disc covered too much). */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-dock {
+  padding: 0.25rem 0.75rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-item {
+  --app-agent-work-disc: 2rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-avatar .identity-avatar-face {
+  font-size: 0.75rem !important;
+}
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar {
   width: 1.5rem !important;
   height: 1.5rem !important;

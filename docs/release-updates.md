@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: A page's comment thread covers less of what it says
+
+In a page's margin, an Agent at work floated a full-size disc over the
+thread's last lines, and a "back to the last person" capsule covered its
+first. The thread now drops that capsule, and the disc shrinks from 46px to
+32px at the comments' own inset. The Conversations view keeps both. Web only.
+
 ## Unreleased: System judgments recover a lost database response
 
 HUB-BV lost the outbox INSERT response while recording a Machine result on
