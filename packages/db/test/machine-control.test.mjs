@@ -3,7 +3,7 @@ import { historicalDaemonIds } from "./machine-identity.fixture.mjs";
 import test from "node:test";
 
 import { digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
-import { MachineControlError, PostgresMachineControlRepository } from "../dist/machine-control.js";
+import { MACHINE_RESOURCE_HISTORY_BATCH_MAX, MachineControlError, machineResourceHistorySamples, PostgresMachineControlRepository } from "../dist/machine-control.js";
 import { recordingDatabase as database } from "./recording-database.fixture.mjs";
 
 const daemon = {
@@ -801,10 +801,36 @@ test("Partial snapshots reach only the Channels of the Runs they name, and bind 
   const resources = db.calls.find((call) => call.name === "machine_resource_observation_v2");
   assert.deepEqual(JSON.parse(resources.values[2]), { observedAt, cpuLogicalCount: 8, connectionEpoch: 1 });
   // The same sample is kept as history for the owner's Machine, only while its connection is live.
-  const history = db.calls.find((call) => call.name === "machine_resource_history_sample_v1");
-  assert.deepEqual(history.values.slice(0, 4), ["user-1", "machine-1", "daemon-1", observedAt]);
+  const history = db.calls.find((call) => call.name === "machine_resource_history_samples_v2");
+  const minute = new Date(Date.parse(observedAt) - Date.parse(observedAt) % 60_000).toISOString();
+  assert.deepEqual(history.values.slice(0, 4), ["user-1", "machine-1", "daemon-1", [minute]]);
   assert.equal(history.values.at(-1), 1);
   assert.match(history.text, /status='online'\s+AND connection_epoch=\$13/u);
+});
+
+test("A report's batched minute samples become one history write, one row per minute", () => {
+  const now = Date.parse("2026-11-06T08:00:30.000Z");
+  const at = (offset) => new Date(now - offset).toISOString();
+  const rows = machineResourceHistorySamples(
+    { observedAt: at(0), cpuUsagePercent: 50 },
+    [
+      { observedAt: at(3 * 60_000 + 20_000), cpuUsagePercent: 10 },
+      { observedAt: at(3 * 60_000 + 10_000), cpuUsagePercent: 20 },
+      { observedAt: at(60_000), cpuUsagePercent: 30, loadAverage: [1, 1, 1] },
+      { observedAt: at(-60_000), cpuUsagePercent: 99 },
+      "not a sample",
+    ],
+    now,
+  );
+  // The latest sample of each minute wins; a future or invalid one is dropped.
+  assert.deepEqual(rows.map((row) => [row.minute, row.cpuUsagePercent]), [
+    ["2026-11-06T07:57:00.000Z", 20],
+    ["2026-11-06T07:59:00.000Z", 30],
+    ["2026-11-06T08:00:00.000Z", 50],
+  ]);
+  const flood = Array.from({ length: 500 }, (_, index) => ({ observedAt: at((500 - index) * 60_000), cpuUsagePercent: 1 }));
+  assert.equal(machineResourceHistorySamples(undefined, flood, now).length, MACHINE_RESOURCE_HISTORY_BATCH_MAX);
+  assert.deepEqual(machineResourceHistorySamples(undefined, undefined, now), []);
 });
 
 test("Snapshots persist a valid harness inventory for their connection and drop an invalid one", async () => {

@@ -1216,6 +1216,7 @@ async fn send_daemon_run_snapshot(
             registry_sequence: None,
             captured_at: None,
             machine_resources: resources,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
             cli_update: None,
             runs,
@@ -1239,23 +1240,36 @@ async fn send_daemon_run_snapshot(
 
 /// Reports what changed, when it changes: one partial snapshot naming only the
 /// Runs whose progress moved, and the machine's resources when they moved
-/// materially or once a history interval has passed. The full snapshot is sent
-/// once per connection (see `report_daemon_run_snapshot`).
+/// materially. Load history is kept here, one sample per minute, and rides the
+/// next report that goes out anyway, or one every [`DAEMON_RESOURCE_HISTORY_FLUSH`]
+/// when nothing else does: every report wakes the Hub and writes PostgreSQL, so
+/// an idle machine must not make one a minute. The full snapshot is sent once
+/// per connection (see `report_daemon_run_snapshot`).
 #[derive(Default)]
 struct DaemonRunProgressReporter {
     reported: HashMap<String, MachineRunSnapshotItem>,
     resources: Option<Vec<u64>>,
     resources_at: Option<Instant>,
-    /// When a resource sample last reached the Hub.
+    /// When a current resource observation last reached the Hub.
     resources_reported_at: Option<Instant>,
     /// The Hub connection the last resource report went to.
     connection_epoch: Option<u64>,
+    /// Minute samples not yet sent: the latest of each minute, oldest first.
+    history: Vec<serde_json::Value>,
+    /// When the oldest unsent sample was kept.
+    history_since: Option<Instant>,
 }
 
 const DAEMON_RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
-/// The Hub keeps one sample per interval as the machine's load history, so an
-/// unchanged machine still reports this often.
-const DAEMON_RESOURCE_HISTORY_INTERVAL: Duration = Duration::from_secs(60);
+/// A material change reaches the Hub at most this often; changes in between
+/// are folded into the next report, so a load flapping across a bucket edge
+/// cannot make a report every sample. Placement already allows for load that
+/// does not show yet (it weighs a machine's outstanding Runs).
+const DAEMON_RESOURCE_CHANGE_SPACING: Duration = Duration::from_secs(120);
+/// The longest unsent load history waits when no other report carries it.
+const DAEMON_RESOURCE_HISTORY_FLUSH: Duration = Duration::from_secs(15 * 60);
+/// Unsent minute samples kept at most; matches the Hub's per-report bound.
+const DAEMON_RESOURCE_HISTORY_MAX: usize = 120;
 
 impl DaemonRunProgressReporter {
     async fn report(
@@ -1276,11 +1290,23 @@ impl DaemonRunProgressReporter {
             .into_iter()
             .filter(|item| self.reported.get(&daemon_run_progress_key(item)) != Some(item))
             .collect::<Vec<_>>();
-        let resources = self.changed_resources().await;
-        if changed.is_empty() && resources.is_none() {
+        let now = Instant::now();
+        let resources = match self.sample(now).await {
+            Some(sample) => {
+                self.keep_history(sample.clone(), now);
+                self.resource_report_due(&machine_resource_signature(&sample), now)
+                    .then_some(sample)
+            }
+            None => None,
+        };
+        let history_due = self
+            .history_since
+            .is_some_and(|since| now.duration_since(since) >= DAEMON_RESOURCE_HISTORY_FLUSH);
+        if changed.is_empty() && resources.is_none() && !history_due {
             return;
         }
         let signature = resources.as_ref().map(machine_resource_signature);
+        let history = self.history.clone();
         let report = relay.send_report(MachineDaemonReport::MachineRunSnapshot {
             request_id: None,
             snapshot_complete: Some(false),
@@ -1288,6 +1314,7 @@ impl DaemonRunProgressReporter {
             registry_sequence: None,
             captured_at: None,
             machine_resources: resources,
+            machine_resource_history: history,
             harness_inventory: None,
             cli_update: None,
             runs: changed.clone(),
@@ -1302,16 +1329,19 @@ impl DaemonRunProgressReporter {
         for item in changed {
             self.reported.insert(daemon_run_progress_key(&item), item);
         }
+        self.history.clear();
+        self.history_since = None;
         if signature.is_some() {
             self.resources = signature;
-            self.resources_reported_at = Some(Instant::now());
+            self.resources_reported_at = Some(now);
         }
     }
 
     /// A new Hub connection starts without this machine's load: the Hub keeps
     /// only the observation of the connection that sent it, and reconnecting
     /// replaces it. So the next tick reports the current sample even when it
-    /// sits in the bucket last reported to the previous connection.
+    /// sits in the bucket last reported to the previous connection. Unsent
+    /// history is still this machine's history and goes to the new connection.
     fn observe_connection(&mut self, epoch: Option<u64>) {
         if epoch.is_some() && epoch != self.connection_epoch {
             self.connection_epoch = epoch;
@@ -1321,8 +1351,7 @@ impl DaemonRunProgressReporter {
         }
     }
 
-    async fn changed_resources(&mut self) -> Option<serde_json::Value> {
-        let now = Instant::now();
+    async fn sample(&mut self, now: Instant) -> Option<serde_json::Value> {
         if self
             .resources_at
             .is_some_and(|at| now.duration_since(at) < DAEMON_RESOURCE_SAMPLE_INTERVAL)
@@ -1330,21 +1359,48 @@ impl DaemonRunProgressReporter {
             return None;
         }
         self.resources_at = Some(now);
-        let sample = tokio::task::spawn_blocking(sample_machine_resources)
+        tokio::task::spawn_blocking(sample_machine_resources)
             .await
             .ok()
-            .flatten()?;
-        self.resource_report_due(&machine_resource_signature(&sample), now)
-            .then_some(sample)
+            .flatten()
     }
 
-    /// A sample is news when it left the last reported bucket, and history
-    /// when the last report is an interval old.
+    /// Keep the sample as its minute's history, replacing an earlier one of
+    /// the same minute, and drop the oldest past the bound.
+    fn keep_history(&mut self, sample: serde_json::Value, now: Instant) {
+        let minute = |value: &serde_json::Value| {
+            value
+                .get("observedAt")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|at| at.get(..16))
+                .map(str::to_owned)
+        };
+        let this_minute = minute(&sample);
+        if this_minute.is_some()
+            && self.history.last().and_then(minute) == this_minute
+            && let Some(last) = self.history.last_mut()
+        {
+            *last = sample;
+        } else {
+            self.history.push(sample);
+        }
+        if self.history.len() > DAEMON_RESOURCE_HISTORY_MAX {
+            let excess = self.history.len() - DAEMON_RESOURCE_HISTORY_MAX;
+            self.history.drain(..excess);
+        }
+        self.history_since.get_or_insert(now);
+    }
+
+    /// A sample is news when it left the last reported bucket and the last
+    /// report is old enough, or when this connection has none yet.
     fn resource_report_due(&self, signature: &[u64], now: Instant) -> bool {
-        self.resources.as_deref() != Some(signature)
-            || self.resources_reported_at.is_none_or(|at| {
-                now.duration_since(at) >= DAEMON_RESOURCE_HISTORY_INTERVAL
-            })
+        match self.resources_reported_at {
+            None => true,
+            Some(at) => {
+                self.resources.as_deref() != Some(signature)
+                    && now.duration_since(at) >= DAEMON_RESOURCE_CHANGE_SPACING
+            }
+        }
     }
 }
 
@@ -2762,18 +2818,39 @@ mod machine_resource_tests {
     }
 
     #[test]
-    fn an_unchanged_machine_still_reports_once_per_history_interval() {
+    fn an_unchanged_machine_reports_its_load_once_per_connection() {
         let start = std::time::Instant::now();
         let mut reporter = super::DaemonRunProgressReporter::default();
         assert!(reporter.resource_report_due(&[8, 4], start));
         reporter.resources = Some(vec![8, 4]);
         reporter.resources_reported_at = Some(start);
-        let interval = super::DAEMON_RESOURCE_HISTORY_INTERVAL;
-        let before = start + interval - std::time::Duration::from_secs(1);
-        assert!(!reporter.resource_report_due(&[8, 4], before));
-        // A material change does not wait for the interval.
-        assert!(reporter.resource_report_due(&[8, 5], before));
-        assert!(reporter.resource_report_due(&[8, 4], start + interval));
+        // Unchanged load is never news again, however long it holds.
+        assert!(!reporter.resource_report_due(&[8, 4], start + std::time::Duration::from_secs(86_400)));
+        // A material change waits out the spacing, then goes.
+        let spacing = super::DAEMON_RESOURCE_CHANGE_SPACING;
+        assert!(!reporter.resource_report_due(&[8, 5], start + spacing - std::time::Duration::from_secs(1)));
+        assert!(reporter.resource_report_due(&[8, 5], start + spacing));
+    }
+
+    #[test]
+    fn load_history_keeps_one_sample_per_minute_within_its_bound() {
+        let start = std::time::Instant::now();
+        let mut reporter = super::DaemonRunProgressReporter::default();
+        let at = |minute: u32, second: u32| {
+            serde_json::json!({ "observedAt": format!("2026-11-06T08:{minute:02}:{second:02}Z"),
+                "cpuUsagePercent": second })
+        };
+        reporter.keep_history(at(0, 5), start);
+        reporter.keep_history(at(0, 45), start + std::time::Duration::from_secs(40));
+        reporter.keep_history(at(1, 5), start + std::time::Duration::from_secs(60));
+        assert_eq!(reporter.history, vec![at(0, 45), at(1, 5)]);
+        // The flush clock runs from the oldest unsent sample.
+        assert_eq!(reporter.history_since, Some(start));
+        for minute in 2..(super::DAEMON_RESOURCE_HISTORY_MAX as u32 + 10) {
+            reporter.keep_history(at(minute % 60, minute / 60), start);
+        }
+        assert_eq!(reporter.history.len(), super::DAEMON_RESOURCE_HISTORY_MAX);
+        assert!(super::DAEMON_RESOURCE_HISTORY_FLUSH >= std::time::Duration::from_secs(15 * 60));
     }
 
     #[test]

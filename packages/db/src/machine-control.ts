@@ -8,7 +8,7 @@ import {
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
   MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS,
   MACHINE_SLEEP_CAPABILITY, parseMachineCliUpdateStatus, stableMachineDaemonId,
-  sha256Hex } from "@xmatrix/protocol";
+  sha256Hex, type MachineResourceObservation } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -591,25 +591,12 @@ export class PostgresMachineControlRepository {
           values: [daemonId, connectionEpoch, JSON.stringify({ ...resources, connectionEpoch }),
             resources.observedAt], maxRows: 0 });
         // History keeps one sample per Machine per minute: the latest one the live
-        // connection reported in that minute.
-        if (resources) await tx.query({ name: "machine_resource_history_sample_v1", text: `INSERT INTO
-          data.machine_resource_samples (owner_user_id,machine_id,observed_at,cpu_usage_percent,
-            load_average_1m,memory_total_bytes,memory_available_bytes,swap_total_bytes,swap_free_bytes,
-            disk_total_bytes,disk_available_bytes)
-          SELECT $1,$2,date_trunc('minute',$4::timestamptz),$5,$6,$7,$8,$9,$10,$11,$12
-          WHERE EXISTS (SELECT 1 FROM data.machine_daemons WHERE daemon_id=$3 AND status='online'
-            AND connection_epoch=$13)
-          ON CONFLICT (owner_user_id,machine_id,observed_at) DO UPDATE SET
-            cpu_usage_percent=EXCLUDED.cpu_usage_percent, load_average_1m=EXCLUDED.load_average_1m,
-            memory_total_bytes=EXCLUDED.memory_total_bytes,
-            memory_available_bytes=EXCLUDED.memory_available_bytes,
-            swap_total_bytes=EXCLUDED.swap_total_bytes, swap_free_bytes=EXCLUDED.swap_free_bytes,
-            disk_total_bytes=EXCLUDED.disk_total_bytes, disk_available_bytes=EXCLUDED.disk_available_bytes`,
-          values: [ownerUserId, machineId, daemonId, resources.observedAt, resources.cpuUsagePercent ?? null,
-            resources.loadAverage?.[0] ?? null, resources.memoryTotalBytes ?? null,
-            resources.memoryAvailableBytes ?? null, resources.swapTotalBytes ?? null,
-            resources.swapFreeBytes ?? null, resources.diskTotalBytes ?? null,
-            resources.diskAvailableBytes ?? null, connectionEpoch], maxRows: 0 });
+        // connection reported in that minute. The daemon keeps its minute samples
+        // and sends them in batches with a report it makes anyway, so an idle
+        // Machine's history costs one write every few minutes, not one a minute.
+        const samples = machineResourceHistorySamples(resources, payload.machineResourceHistory, Date.parse(at));
+        if (samples.length) await tx.query(machineResourceHistoryInsert({ ownerUserId, machineId, daemonId,
+          connectionEpoch, samples }));
 
         // A harness inventory is an observation of the connection that sent it.
         // An invalid one is dropped rather than failing the Run snapshot it rides on.
@@ -1672,4 +1659,61 @@ export class PostgresMachineControlRepository {
         }) };
     });
   }
+}
+
+/** At most this many minute samples ride one report: two hours of an offline backlog. */
+export const MACHINE_RESOURCE_HISTORY_BATCH_MAX = 120;
+
+/**
+ * The minute rows one report adds: its batched history and its current sample,
+ * one per minute (the latest observed in it), oldest first. An invalid sample
+ * or one past the batch bound is dropped rather than failing the report.
+ */
+export function machineResourceHistorySamples(current: MachineResourceObservation | undefined,
+  batch: unknown, now: number): Array<MachineResourceObservation & { minute: string }> {
+  const observations = (Array.isArray(batch) ? batch.slice(-MACHINE_RESOURCE_HISTORY_BATCH_MAX) : [])
+    .map(value => machineResourceObservation(value, now))
+    .filter((value): value is MachineResourceObservation => value !== undefined);
+  if (current) observations.push(current);
+  const byMinute = new Map<number, MachineResourceObservation>();
+  for (const observation of observations) {
+    const observed = Date.parse(observation.observedAt);
+    const minute = observed - observed % 60_000;
+    const kept = byMinute.get(minute);
+    if (!kept || Date.parse(kept.observedAt) <= observed) byMinute.set(minute, observation);
+  }
+  return [...byMinute.entries()].sort(([left], [right]) => left - right)
+    .map(([minute, observation]) => ({ ...observation, minute: new Date(minute).toISOString() }));
+}
+
+/** The one statement that writes a report's minute rows, kept only while its connection is live. */
+export function machineResourceHistoryInsert(input: { ownerUserId: string; machineId: string; daemonId: string;
+  connectionEpoch: number | undefined; samples: ReturnType<typeof machineResourceHistorySamples> }) {
+  const { samples } = input;
+  return { name: "machine_resource_history_samples_v2", text: `INSERT INTO
+    data.machine_resource_samples (owner_user_id,machine_id,observed_at,cpu_usage_percent,
+      load_average_1m,memory_total_bytes,memory_available_bytes,swap_total_bytes,swap_free_bytes,
+      disk_total_bytes,disk_available_bytes)
+    SELECT $1,$2,s.observed_at,s.cpu,s.load,s.memory_total,s.memory_available,s.swap_total,s.swap_free,
+      s.disk_total,s.disk_available
+    FROM unnest($4::timestamptz[],$5::real[],$6::real[],$7::bigint[],$8::bigint[],$9::bigint[],
+      $10::bigint[],$11::bigint[],$12::bigint[]) AS s(observed_at,cpu,load,memory_total,memory_available,
+      swap_total,swap_free,disk_total,disk_available)
+    WHERE EXISTS (SELECT 1 FROM data.machine_daemons WHERE daemon_id=$3 AND status='online'
+      AND connection_epoch=$13)
+    ON CONFLICT (owner_user_id,machine_id,observed_at) DO UPDATE SET
+      cpu_usage_percent=EXCLUDED.cpu_usage_percent, load_average_1m=EXCLUDED.load_average_1m,
+      memory_total_bytes=EXCLUDED.memory_total_bytes,
+      memory_available_bytes=EXCLUDED.memory_available_bytes,
+      swap_total_bytes=EXCLUDED.swap_total_bytes, swap_free_bytes=EXCLUDED.swap_free_bytes,
+      disk_total_bytes=EXCLUDED.disk_total_bytes, disk_available_bytes=EXCLUDED.disk_available_bytes`,
+  values: [input.ownerUserId, input.machineId, input.daemonId, samples.map(sample => sample.minute),
+    samples.map(sample => sample.cpuUsagePercent ?? null),
+    samples.map(sample => sample.loadAverage?.[0] ?? null),
+    samples.map(sample => sample.memoryTotalBytes ?? null),
+    samples.map(sample => sample.memoryAvailableBytes ?? null),
+    samples.map(sample => sample.swapTotalBytes ?? null),
+    samples.map(sample => sample.swapFreeBytes ?? null),
+    samples.map(sample => sample.diskTotalBytes ?? null),
+    samples.map(sample => sample.diskAvailableBytes ?? null), input.connectionEpoch], maxRows: 0 };
 }

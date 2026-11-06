@@ -1095,6 +1095,9 @@ pub enum MachineDaemonReport {
         captured_at: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         machine_resources: Option<serde_json::Value>,
+        /// Minute samples kept since the last report, batched onto this one.
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        machine_resource_history: Vec<serde_json::Value>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         harness_inventory: Option<serde_json::Value>,
         /// What this daemon's own CLI update is doing (`MachineCliUpdateStatus`).
@@ -1593,6 +1596,7 @@ impl MachineDaemonConnectionClient {
             registry_sequence: None,
             captured_at: None,
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: Some(inventory),
             cli_update: None,
             runs: Vec::new(),
@@ -1613,6 +1617,7 @@ impl MachineDaemonConnectionClient {
             registry_sequence: None,
             captured_at: None,
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
             cli_update: Some(status),
             runs: Vec::new(),
@@ -3839,6 +3844,7 @@ mod tests {
             registry_sequence: None,
             captured_at: None,
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
             cli_update: Some(serde_json::json!({ "state": "checking", "at": "2026-10-31T14:00:00Z" })),
             runs: Vec::new(),
@@ -4571,6 +4577,7 @@ mod tests {
             registry_sequence: Some(11),
             captured_at: Some("2026-09-05T00:00:00Z".to_string()),
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
             cli_update: None,
             runs: Vec::new(),
@@ -4649,6 +4656,7 @@ mod tests {
             registry_sequence: None,
             captured_at: None,
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
             cli_update: None,
             runs: Vec::new(),
@@ -4669,6 +4677,7 @@ mod tests {
                 registry_sequence: None,
                 captured_at: None,
                 machine_resources: None,
+                machine_resource_history: Vec::new(),
                 harness_inventory: None,
                 cli_update: None,
                 runs: Vec::new(),
