@@ -85,8 +85,8 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
       matches: [/SELECT role FROM data\.space_members/u, /FROM data\.page_links/u,
         /SELECT c\.channel_id, c\.name, c\.activity_at/u], failureMatch: /FROM data\.page_links/u }));
     readCases.push({ read: () => pages.search({ ...input, query: "Recovery" }), evidence: page.pageId,
-      matches: [/SELECT role FROM data\.space_members/u, /data\.page_name\(r.body\) AS title, r.body/u],
-      failureMatch: /data\.page_name\(r.body\) AS title, r.body/u });
+      matches: [/SELECT role FROM data\.space_members/u, /data\.page_title\(r.body\) AS title, r.body/u],
+      failureMatch: /data\.page_title\(r.body\) AS title, r.body/u });
     for (const { read, evidence, matches: stages, failureMatch } of readCases) {
       const expected = await read();
       assert.ok(JSON.stringify(expected).includes(evidence), "the accessible page or live activity is returned");

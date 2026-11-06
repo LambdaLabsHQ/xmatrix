@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
 import {
-  gitHubFileUrl, pageMediaFile, parseGitHubFileReference, parsePageMedia,
+  gitHubFileUrl, pageMediaFile, pageTitleLine, parseGitHubFileReference, parsePageMedia,
   withRoute,
 } from "@xmatrix/protocol";
 import { BrandMark } from "@/components/shared/brand-mark";
@@ -91,10 +91,11 @@ const publicPageComponents: Components = {
   th: cell("th"),
 };
 
-/** A page opens with its title line; the rest is its body. */
-function splitTitle(body: string, fallback: string): { title: string; rest: string } {
-  const match = /^\s*# (.+)\n?/u.exec(body);
-  return match ? { title: match[1].trim(), rest: body.slice(match[0].length) } : { title: fallback, rest: body };
+/** The line that names the page, wherever its document has it (pages-live-document.md §4.1): what stands above it, and the rest. */
+function splitTitle(body: string, fallback: string): { above: string; title: string; rest: string } {
+  const line = pageTitleLine(body);
+  return line?.title ? { above: body.slice(0, line.start), title: line.title, rest: body.slice(line.end + 1) }
+    : { above: "", title: fallback, rest: body };
 }
 
 const PAGE_UPDATED = new Intl.DateTimeFormat("en", {
@@ -117,7 +118,9 @@ export default async function PublicPageView({ params }: Params) {
   const { page, present } = loaded;
   const locale = /[\u3400-\u9fff]/u.test(page.title + page.body.slice(0, 400)) ? "zh" : "en";
   const words = BYLINE[locale];
-  const { title, rest } = splitTitle(page.body, page.title);
+  const { above, title, rest } = splitTitle(page.body, page.title);
+  const text = (markdown: string) => <Markdown remarkPlugins={markdownRemarkPlugins}
+    urlTransform={publicPageUrl(spaceId, pageId)} components={publicPageComponents}>{markdown}</Markdown>;
   const working = present.filter((person) => person.activity === "editing");
   const writers = [...present.filter((person) => person.kind === "agent" || person.activity === "editing"),
     ...page.authors.filter((author) => !present.some((person) => person.name === author.label))
@@ -138,6 +141,7 @@ export default async function PublicPageView({ params }: Params) {
           iconSrc="/brand/xmatrix-icon-transparent-128.png" wordmarkClassName="text-[15px]" />
       </header>
       <main className="public-page-sheet">
+        {above.trim() && <div className="page-document public-page-document">{text(above)}</div>}
         <h1 className="public-page-title">{title}</h1>
         {writers.length > 0 && (
           <p className="public-page-byline" data-testid="public-page-byline">
@@ -149,10 +153,7 @@ export default async function PublicPageView({ params }: Params) {
             </time>
           </p>
         )}
-        <article className="page-document public-page-document">
-          <Markdown remarkPlugins={markdownRemarkPlugins} urlTransform={publicPageUrl(spaceId, pageId)}
-            components={publicPageComponents}>{rest}</Markdown>
-        </article>
+        <article className="page-document public-page-document">{text(rest)}</article>
         {page.children.length > 0 && (
           <nav className="public-page-children" aria-label="Pages below">
             {page.children.map((child) => (
