@@ -520,16 +520,17 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .rich-me
   font-size: 0.8125rem;
   line-height: 1.45;
 }
-/* The thread reads top to bottom on one sheet (§4.4): its head, the comments, the Agents in it on its last line, and
-   the reply box. In the Conversations view the dock and the composer float over the timeline's tail; here they stand
-   in flow under it, so nothing covers what was said, and the timeline keeps no room for them. */
+/* The thread reads top to bottom (§4.4): its head, the comments, the Agents at work, and the reply box. They are the
+   Conversations view's own glass disc and composer, at the thread's scale: in that view they float over the
+   timeline's tail, but here they stand in flow under it, so nothing covers what was said, and the timeline keeps no
+   room for them. */
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-timeline {
   scroll-padding-bottom: 0.5rem !important;
-  /* What scrolls past the head or down to the Agents' line fades into the paper instead of being cut. */
+  /* What scrolls past the head or down to the Agents fades into the paper instead of being cut. */
   -webkit-mask-image: linear-gradient(to bottom, transparent, black 0.5rem, black calc(100% - 0.5rem), transparent);
   mask-image: linear-gradient(to bottom, transparent, black 0.5rem, black calc(100% - 0.5rem), transparent);
 }
-/* A comment's avatar says who wrote it; whether an Agent works now is said once, on the thread's last line. */
+/* A comment's avatar says who wrote it; whether an Agent works now is said once, by its disc under the comments. */
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar .identity-avatar-status {
   display: none !important;
 }
@@ -542,81 +543,59 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app
   inset: auto !important;
   z-index: auto !important;
   flex: none;
-  background: transparent !important;
-  pointer-events: auto !important;
 }
-/* Each Agent is a comment's author line in waiting: its face on the avatars' column at their size, and its name, or
-   what it is doing, where a comment's name starts. The capsule is the paper itself: no glass, no ring. */
+/* The discs start on the comments' avatar column, a third larger than those avatars as in the Conversations view, and
+   tall enough for an island's two lines. The strip keeps no room above it: the controls stand outside it. */
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-dock {
-  padding: 0.375rem 0.75rem 0.5rem !important;
+  padding: 0.25rem 0.75rem 0.5rem !important;
 }
-/* The strip keeps no room above it for the controls, which stand outside it, and lists its Agents one per line. */
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-scroller {
   width: auto !important;
   min-height: 0 !important;
-  flex-direction: column;
-  align-items: flex-start !important;
-  gap: 0.375rem !important;
+  align-items: center !important;
   margin: 0 !important;
   padding: 0 !important;
   overflow: visible !important;
-  pointer-events: auto !important;
 }
-/* The line already names its Agent; its controls are only what may be done to it. */
-.page-margin-open .app-agent-work-instance-name { display: none; }
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open[data-quiet-agents] .app-agent-work-scroller {
   display: none;
 }
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-item {
-  --app-agent-work-disc: 1.5rem;
-}
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island {
-  height: auto;
-  min-height: var(--app-agent-work-disc);
-  max-width: 100%;
-  gap: 0.5rem;
-  padding: 0;
-  border-radius: 0;
+  --app-agent-work-disc: 2rem;
 }
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-avatar .identity-avatar-face {
-  font-size: 0.625rem !important;
+  font-size: 0.75rem !important;
 }
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island .identity-avatar-status {
-  top: 0 !important;
-  right: 0 !important;
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island {
+  padding-right: 0.625rem;
 }
-.page-margin-open .app-agent-work-name {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--foreground);
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island .app-agent-work-avatar .identity-avatar-status {
+  top: 0.2rem !important;
+  right: 0.35rem !important;
 }
-.page-margin-open .app-agent-work-name .page-writer-dots { color: var(--primary); }
-.page-margin-open .app-agent-work-name .page-writer-dots i { width: 3px; height: 3px; }
-/* The reply box is the card's paper a shade deeper, as an Agent's capsule on a card is: no glass and no shadow. Its
-   clip stands on the avatars' column and its caret where the comments' text starts, as in the Conversations view. */
+/* The composer at the thread's scale: 2.5rem tall on the comments' left edge, its controls 2rem, its words 14px. */
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer {
   padding: 0 0.75rem 0.75rem !important;
 }
-.xmatrix-app .page-margin-open .app-composer-box.app-composer-box {
-  --app-liquid-surface-bg: color-mix(in oklab, var(--foreground) 6%, transparent) !important;
-  --app-liquid-shared-surface-bg: var(--app-liquid-surface-bg) !important;
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box {
+  min-height: 2.5rem !important;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .page-margin-open.page-margin-open
-  .app-composer-box.app-composer-box:not(.app-agent-work-card).app-material-liquid-pill {
-  border: none !important;
-  border-radius: 1.125rem !important;
-  box-shadow: none !important;
-  --app-liquid-backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-input-row {
+  min-height: 2.5rem !important;
+  padding: 0.25rem !important;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box::before,
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box::after {
-  display: none !important;
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-inline-actions {
+  min-height: 2rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-composer-inline-icon, .app-composer-send) {
+  width: 2rem !important;
+  height: 2rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box .composer-textarea {
+  min-height: 2rem !important;
+  padding-top: calc((2rem - 1.38em) / 2 + 0.5px) !important;
+  padding-bottom: calc((2rem - 1.38em) / 2 - 0.5px) !important;
+  font-size: 0.875rem !important;
 }
 /* Beside its page, a conversation's head already names it (the card in the margin, the header docked, the
    sign on a phone), and for a discussion that name is its passage: an empty one just says so. */
@@ -653,7 +632,7 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app
 }
 /* The capsule's glass is drawn from the liquid tokens; on the paper they draw nothing. */
 .xmatrix-app .page-comment-box,
-.xmatrix-app :is(.page-comment-box, .page-margin-open) .app-composer-box {
+.xmatrix-app .page-comment-box .app-composer-box {
   --app-liquid-surface-bg: transparent !important;
   --app-liquid-shared-surface-bg: transparent !important;
   --app-liquid-specular-lead: transparent !important;
@@ -687,26 +666,24 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .composer-attach {
   display: none !important;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-comment-box, .page-margin-open) .composer-textarea {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .composer-textarea {
   padding: 0.5rem 0 !important;
   font-size: 0.875rem !important;
   line-height: 1.4 !important;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-comment-box, .page-margin-open) :is(.app-composer-send, .app-composer-send-ready) {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box :is(.app-composer-send, .app-composer-send-ready) {
   width: 1.75rem !important;
   height: 1.75rem !important;
-  /* Level with a one-line reply, whose box is 2.5rem tall. */
-  margin-bottom: 0.375rem;
   background: transparent !important;
   box-shadow: none !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   color: var(--muted-foreground) !important;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-comment-box, .page-margin-open) .app-composer-send-ready {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-send-ready {
   color: var(--foreground) !important;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.page-comment-box, .page-margin-open) .app-composer-send svg {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .app-composer-send svg {
   width: 1rem;
   height: 1rem;
 }

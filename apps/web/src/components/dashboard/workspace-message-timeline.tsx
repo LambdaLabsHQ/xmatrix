@@ -3458,8 +3458,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   inPageMargin = false,
 }: {
   approvals?: ReactNode;
-  /** A comment thread in a page's margin: the dock is the thread's last line, in flow above its reply box, so
-   * nothing floats over what was said, and each Agent is on paper with its name, as a comment's author is. */
+  /** A comment thread in a page's margin: the dock stands in flow above its reply box instead of floating over
+   * the thread's last lines, so it covers nothing and the timeline keeps no room for it. */
   inPageMargin?: boolean;
   channel: ChannelSnapshot | null;
   token: string | null;
@@ -3645,7 +3645,6 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
             onReborn={rebornInstance}
             onHandoff={handoffInstance}
             onOpenAgentTrace={openTrace}
-            onPaper={inPageMargin}
           />
         ))}
       </div>}
@@ -3669,12 +3668,8 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   onReborn,
   onHandoff,
   onOpenAgentTrace,
-  onPaper = false,
 }: {
   item: AgentWorkView;
-  /** On a paper comment thread: the island is the paper itself, not glass, and with nothing to say it carries the
-   * Agent's name, and its dots while it works, as a comment's author line does. */
-  onPaper?: boolean;
   /** When this client first saw the current intent (agent-work-intent.tsx). */
   intentSince?: number;
   now?: number;
@@ -3814,7 +3809,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   }, []);
 
   // On the island the capsule is the one glass.
-  const island = onPaper || Boolean(item.intent || waiting || issue || notice);
+  const island = Boolean(item.intent || waiting || issue || notice);
   const intentCard = Boolean(island && (item.intent || waiting)) && (
     <div className="app-agent-work-action-menu" data-mode="card" role="note">
       <AgentWorkIntentCard intent={item.intent} since={intentSince} now={now ?? Date.now()}
@@ -3830,9 +3825,6 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     </div>
   );
   const hoverCards = hoverPart === "intent" && intentCard ? intentCard : instanceCards;
-  // On paper the island is the paper itself, and its controls open on a slip of it, as a page's own menus do.
-  const IslandSurface = onPaper ? "div" : LiquidGlassPill;
-  const MorphSurface = onPaper ? PaperPopover : LiquidGlassPill;
   const { left: actionLayerLeft, top: actionLayerTop, ...morphGeometry } = actionToolbarPosition;
   const actionLayerPosition = { left: actionLayerLeft, top: actionLayerTop };
   const hasHoverCards = Boolean(hoverCards);
@@ -3986,7 +3978,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       {island ? (
         // The island (docs/design/agent-status.md §2): a glass capsule the
         // avatar's own size, growing straight out of the circular face.
-        <IslandSurface className="app-agent-work-island cursor-pointer" data-waiting={waiting?.kind}
+        <LiquidGlassPill className="app-agent-work-island cursor-pointer" data-waiting={waiting?.kind}
           data-status={displayStatus}
           onClick={(event) => {
             // The disc handles its own click; the rest of the island opens the same trace.
@@ -3995,13 +3987,9 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
           {avatarButton}
           <AgentRuntimeNotice issue={issue} notice={notice} now={now ?? Date.now()}
             onOpenTrace={() => onOpenAgentTrace(item.key)} />
-          {item.intent || waiting ? <AgentWorkIntent intent={item.intent} since={intentSince} now={now ?? Date.now()}
-            busy={displayStatus === "busy"} waiting={waiting} />
-            : onPaper && !issue && !notice && <span className="app-agent-work-name">
-              <span className="truncate">{item.label}</span>
-              {displayStatus === "busy" && <span className="page-writer-dots" aria-hidden="true"><i /><i /><i /></span>}
-            </span>}
-        </IslandSurface>
+          {(item.intent || waiting) && <AgentWorkIntent intent={item.intent} since={intentSince} now={now ?? Date.now()}
+            busy={displayStatus === "busy"} waiting={waiting} />}
+        </LiquidGlassPill>
       ) : avatarButton}
       {hoverCards ? (
         // The island grows up into a panel, as the composer does for its
@@ -4010,12 +3998,12 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
         // has no words to sit under, so it just stretches right into a
         // capsule with its controls beside the face.
         <div ref={actionPopupRef} className="app-agent-work-actions" style={actionLayerPosition}>
-          <MorphSurface className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
+          <LiquidGlassPill className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
             <div ref={morphContentRef} className="app-agent-work-morph-content">
               <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
               <span className="app-agent-work-morph-seat" aria-hidden="true" />
             </div>
-          </MorphSurface>
+          </LiquidGlassPill>
         </div>
       ) : null}
     </div>
