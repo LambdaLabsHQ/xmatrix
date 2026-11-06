@@ -31,6 +31,17 @@ sequence, so a database read and a live frame obey the same rule. Hub forwards
 records constructed by the database mapper; it does not reconstruct facts
 from a live card.
 
+Registration display names and account quota have separate owners and clocks.
+An Instance delivery may carry `registrationPresentation` with its Space key,
+display name and registration version. The Web extracts it into a registration
+projection, merges by that version, and derives the Instance's displayed name;
+an unchanged Instance revision cannot suppress a rename. Existing cold reads,
+focus and reconnect refresh it; configure does not add a push here. Account
+quota uses the provider observation time and expiry withdrawal, keeps one pool
+per registration, and joins per-Instance token counters only in the view.
+Channel read projections and `registration_quota` frames update that pool,
+never an Instance revision or a writable Channel roster.
+
 Temporary `activity`, `intent`, `files` and `runtimeState` belong to the socket,
 not to the durable record. `instance_activity` frames carry its current version
 and report sequence; they cannot establish residency or change durable status.

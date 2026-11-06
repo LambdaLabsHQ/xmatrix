@@ -82,6 +82,10 @@ integration("a Channel window is self-contained versioned records; its exact rea
     assert.equal(record.channelInstanceId, "1");
     assert.equal(record.agentName, "claude");
     assert.equal(record.label, "claude:1");
+    // The registration's display facts ride along at the registration's own version.
+    const named = { key: { spaceId: f.ids.space, ownerUserId: f.ids.owner, machineId: f.ids.machine, harness: "claude" },
+      version: 1, displayName: "claude" };
+    assert.deepEqual(record.registrationPresentation, named);
     // The legacy member-keyed shape is derived from the same records.
     assert.deepEqual(Object.keys(channel.memberPresence).sort(),
       channel.instanceRecords.map((entry) => entry.id).sort());
@@ -106,6 +110,19 @@ integration("a Channel window is self-contained versioned records; its exact rea
       5: { status: "offline", rest: "waking", revision: first },
     });
     assert.deepEqual(exact.channel.missingInstanceIds, [unknown]);
+
+    // A rename moves the registration's version, never the Instance revision:
+    // every read, cold or exact, still carries the new name.
+    await f.client.query(`UPDATE data.space_agent_registrations SET display_name='Builder',version=version+1
+      WHERE space_id=$1 AND owner_user_id=$2 AND machine_id=$3 AND harness='claude'`, [f.ids.space, f.ids.owner, f.ids.machine]);
+    const renamed = await read([added.stopped.instanceId]);
+    for (const entry of renamed.channel.instanceRecords) {
+      assert.deepEqual(entry.registrationPresentation, { ...named, version: 2, displayName: "Builder" });
+      assert.deepEqual(entry.revision, first, "the rename is not an Instance change");
+      assert.equal(entry.agentName, "Builder");
+    }
+    assert.equal(renamed.channel.instanceRecords.find((entry) => entry.id === added.stopped.instanceId).label,
+      "Builder:3", "an ended Instance is renamed without being revived");
 
     // Resolve answers the same way, per resolved Channel.
     const catalog = new PostgresChannelCatalogRepository(f.database);
@@ -152,11 +169,20 @@ integration("a connection's reports are ordered by (version, sequence) and fence
   await f.client.query("INSERT INTO data.space_control_heads(space_id,commit_sequence,updated_at) VALUES($1,0,now())",
     [f.ids.space]);
   try {
-    const written = await ordered(1, 2, "busy");
+    // Before any report names a branch, the record shows the one its Run started on.
+    await f.client.query(`UPDATE data.runs SET metadata_json=metadata_json||'{"gitBranch":"launch"}'::jsonb
+      WHERE run_id=$1`, [f.ids.run]);
+    assert.equal((await read()).gitBranch, "launch");
+    const written = await report({ status: "busy", expectedVersion: 1, runId: f.ids.run, presenceSequence: 2,
+      presentation: { model: "m", gitBranch: "feature/live",
+        goal: { active: true, objective: "ship it", tokensUsed: 5, unknown: "dropped" } } });
     assert.equal(written.recorded, true);
     assert.deepEqual(await current(), { status: "busy", revision: { version: 1, sequence: 2 } });
-    // The write answers with the record any later read returns at that revision.
+    // The write answers with the record any later read returns at that revision,
+    // with the branch and goal the report persisted.
     assert.deepEqual(written.record, await read());
+    assert.equal(written.record.gitBranch, "feature/live");
+    assert.deepEqual(written.record.goal, { active: true, objective: "ship it", tokensUsed: 5 });
     // An overtaken report, a replay, another Run's or another version's: refused, and nothing moves.
     for (const refused of [ordered(1, 1, "idle"), ordered(1, 2, "idle"), ordered(1, 3, "idle", `${f.ids.run}-other`),
       ordered(2, 3, "idle")]) {

@@ -1912,6 +1912,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           setAgentsError(null);
           break;
         case "registration_quota":
+          realtimeChannels.instances.receiveQuota(message.registration, message.usage);
           setChannels((current) => patchChannelsRegistrationQuota(current, message.registration, message.usage));
           // The Agents page shows the same reading: read its catalog again.
           // That read asks no provider; only opening the page does.

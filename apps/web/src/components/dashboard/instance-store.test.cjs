@@ -3,6 +3,7 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 const { decodeChannelSnapshot, channelPresenceInstances } = require("@xmatrix/protocol");
 const { createRealtimeChannels } = require("./instance-store.ts");
+const { patchChannelsRegistrationQuota } = require("./registration-quota-patch.ts");
 const { buildAgentWorkItems } = require("./workspace-shell-recovered.tsx");
 const registration = { ownerUserId: "owner", machineId: "machine", harness: "codex" };
 const record = (version, sequence, extra = {}) => ({ id: "channel:1", channelId: "channel", channelInstanceId: "1",
@@ -74,4 +75,55 @@ test("temporary activity never establishes residency, cannot change status and e
   assert.equal(store.get("channel").presence.instances.get("channel:1").intent, undefined);
   store.instances.receive([record(4, 1, { status: "idle" })]);
   assert.equal(store.get("channel").presence.instances.get("channel:1").intent, undefined);
+});
+
+test("registration quota updates the modern view independently of Instance revisions and keeps local counters", () => {
+  const store = createRealtimeChannels([window([record(2, 7, { usage: { totalTokens: 17 } })])]);
+  const fact = store.instances.get("channel:1");
+  const reading = (percent, at = "2026-11-06T19:00:00Z") => ({ quotaState: "observed",
+    quotaSource: "provider_api", quotaObservedAt: at, quotaUsages: [{ label: "5h", percent }] });
+  // Exercise the pre-refactor frame path too: its view patch used to be lost
+  // when Channel ingestion stripped the now-derived Instance roster.
+  store.set(current => patchChannelsRegistrationQuota(current, registration, reading(40)));
+  assert.equal(store.get("channel").presence.instances.get("channel:1").usage.quotaUsages[0].percent, 40);
+  assert.equal(store.instances.get("channel:1"), fact, "account updates never rewrite Instance facts");
+  store.instances.receive([record(2, 8, { status: "idle", usage: { totalTokens: 18 } })]);
+  store.instances.receiveQuota(registration, reading(10, "2026-11-06T18:00:00Z"));
+  let view = store.get("channel").presence.instances.get("channel:1");
+  assert.equal(view.status, "idle");
+  assert.equal(view.usage.totalTokens, 18);
+  assert.equal(view.usage.quotaUsages[0].percent, 40, "older account observations cannot overwrite the pool");
+  store.instances.receiveQuota(registration, { quotaState: "unknown", quotaObservedAt: "2026-11-06T19:00:00Z" });
+  view = store.get("channel").presence.instances.get("channel:1");
+  assert.equal(view.usage.quotaUsages, undefined);
+  assert.equal(view.usage.totalTokens, 18);
+});
+
+test("a cold Channel read seeds account quota before its Instance facts arrive", () => {
+  const usage = { totalTokens: 17, quotaState: "observed", quotaSource: "provider_api",
+    quotaObservedAt: "2026-11-06T19:00:00Z", quotaUsages: [{ label: "5h", percent: 40 }] };
+  const store = createRealtimeChannels([decodeChannelSnapshot({ id: "channel", instanceRecords: [record(2, 7)],
+    memberPresence: { agent: { kind: "agent", label: "codex", registration,
+      usage, instances: [record(2, 7, { usage })] } } })]);
+  assert.equal(store.get("channel").presence.instances.get("channel:1").usage.quotaUsages[0].percent, 40);
+  assert.equal(store.instances.get("channel:1").usage, undefined);
+});
+
+test("a registration rename has its own Space-scoped version, including on an unchanged terminal Instance", () => {
+  const metadata = (version, displayName, spaceId = "space") => ({ key: { ...registration, spaceId }, version, displayName });
+  const store = createRealtimeChannels([window([record(3, 0, { status: "offline",
+    registrationPresentation: metadata(1, "Before") })])]);
+  const fact = store.instances.get("channel:1");
+  store.instances.receive([record(3, 0, { status: "offline", registrationPresentation: metadata(2, "After") })]);
+  assert.equal(store.get("channel").presence.instances.get("channel:1").label, "After:1");
+  assert.equal(store.instances.get("channel:1"), fact);
+  store.instances.receive([record(2, 999, { registrationPresentation: metadata(1, "Old cache") })]);
+  store.instances.receive([record(3, 0, { registrationPresentation: metadata(99, "Other Space", "elsewhere") })]);
+  const shown = store.get("channel").presence.instances.get("channel:1");
+  assert.equal(shown.agentName, "After");
+  assert.equal(shown.status, "offline");
+  store.set([]);
+  store.set([window([record(4, 1)])]);
+  assert.equal(store.get("channel").presence.instances.get("channel:1").label, "codex:1",
+    "withdrawing access clears registration projections no longer referenced by an authorized Channel");
 });

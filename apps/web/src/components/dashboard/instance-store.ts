@@ -1,5 +1,6 @@
 import { parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity, presenceInstanceId,
-  type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type AgentInstancePresence } from "@xmatrix/protocol";
+  accountQuotaUsageFromCandidates, withRegistrationQuota, mergeRegistrationPresentation,
+  type RegistrationPresentation, type AgentRegistrationKey, type LlmUsage, type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type AgentInstancePresence } from "@xmatrix/protocol";
 import { createRealtimeCollection, type RealtimeCollection, type RealtimeCollectionCommit } from "./realtime-collection";
 
 /** Session-owned Instance facts. Channel lists are only metadata and query
@@ -7,6 +8,11 @@ import { createRealtimeCollection, type RealtimeCollection, type RealtimeCollect
 export function createInstanceStore() {
   const records = createRealtimeCollection<InstanceRecord>();
   const activities = new Map<string, InstanceActivity>();
+  const quotas = new Map<string, LlmUsage>();
+  const registrationKey = (key: AgentRegistrationKey) => JSON.stringify([key.ownerUserId, key.machineId, key.harness]);
+  const registrations = new Map<string, RegistrationPresentation>();
+  const channelSpaces = new Map<string, string>();
+  const presentationKey = (spaceId: string, key: AgentRegistrationKey) => JSON.stringify([spaceId, registrationKey(key)]);
   type InstanceView = InstanceRecord & Pick<InstanceActivity, "activity" | "intent" | "files" | "runtimeState">;
   const byChannel = new Map<string, ReadonlyMap<string, InstanceView>>();
   const channelById = new Map<string, string>();
@@ -31,9 +37,14 @@ export function createInstanceStore() {
           const work = activities.get(id);
           // Work is live-only. A terminal record fences every old activity,
           // even when a trace or an activity packet arrives after the stop.
-          const combined = work && (record.status !== "offline" || record.offlineReason) ? {
+          const active = work && (record.status !== "offline" || record.offlineReason) ? {
             ...record, activity: work.activity, intent: work.intent, files: work.files, runtimeState: work.runtimeState,
           } : record;
+          const quota = quotas.get(registrationKey(record.registration));
+          const named = registrations.get(presentationKey(channelSpaces.get(channelId) ?? "", record.registration));
+          const shown = named ? { ...active, agentName: named.displayName,
+            label: `${named.displayName}:${record.channelInstanceId}` } : active;
+          const combined = quota ? { ...shown, usage: withRegistrationQuota(shown.usage, quota) } : shown;
           next.set(id, combined);
           channelById.set(id, channelId);
         } else {
@@ -57,22 +68,48 @@ export function createInstanceStore() {
     forgetChannels(ids: ReadonlySet<string>) {
       if (!ids.size) return;
       records.set(current => current.filter(record => !ids.has(record.channelId)), "live");
-      for (const id of ids) { modern.delete(id); byChannel.delete(id); }
+      for (const id of ids) { modern.delete(id); byChannel.delete(id); channelSpaces.delete(id); }
+      const kept = records.getSnapshot();
+      const accountKeys = new Set(kept.map(record => registrationKey(record.registration)));
+      const nameKeys = new Set(kept.map(record => presentationKey(channelSpaces.get(record.channelId) ?? "", record.registration)));
+      for (const key of quotas.keys()) if (!accountKeys.has(key)) quotas.delete(key);
+      for (const key of registrations.keys()) if (!nameKeys.has(key)) registrations.delete(key);
     },
     getChannel: (channelId: string) => byChannel.get(channelId),
     hasChannel: (channelId: string) => modern.has(channelId),
+    setChannelSpace(channelId: string, spaceId: string) { channelSpaces.set(channelId, spaceId); },
+    receiveQuota(registration: AgentRegistrationKey, incoming: LlmUsage) {
+      const key = registrationKey(registration);
+      const held = quotas.get(key);
+      const next = accountQuotaUsageFromCandidates(held, incoming);
+      if (!next || JSON.stringify(next) === JSON.stringify(held)) return;
+      quotas.set(key, next);
+      publish(records.getSnapshot().filter(record => registrationKey(record.registration) === key).map(record => record.id));
+    },
     receive(incoming: readonly InstanceRecord[], channelId?: string) {
       const parsed = incoming.map(parseInstanceRecord);
       if (channelId && parsed.some(record => record.channelId !== channelId)) throw new TypeError("Instance escaped its Channel");
       const updates = new Map<string, InstanceRecord>();
+      const renamed = new Set<string>();
       for (const record of parsed) {
+        const presentation = record.registrationPresentation;
+        if (presentation) {
+          const key = presentationKey(presentation.key.spaceId, presentation.key);
+          if (!channelSpaces.has(record.channelId)) channelSpaces.set(record.channelId, presentation.key.spaceId);
+          const held = registrations.get(key);
+          const next = mergeRegistrationPresentation(held, presentation);
+          if (next && next !== held) { registrations.set(key, next); renamed.add(key); }
+        }
         const held = updates.get(record.id) ?? records.get(record.id);
-        const next = mergeInstanceRecord(held, record);
+        const { registrationPresentation: _presentation, ...fact } = record;
+        const next = mergeInstanceRecord(held, fact);
         if (next !== held) updates.set(record.id, next);
       }
       if (channelId) modern.add(channelId);
       for (const record of parsed) modern.add(record.channelId);
       if (updates.size) records.receive([...updates.values()]);
+      if (renamed.size) publish(records.getSnapshot().filter(record => renamed.has(
+        presentationKey(channelSpaces.get(record.channelId) ?? "", record.registration))).map(record => record.id));
     },
     receiveActivity(incoming: readonly InstanceActivity[]) {
       const updates = new Map<string, InstanceActivity>();
@@ -101,7 +138,8 @@ export function createInstanceStore() {
       own.add(notify);
       return () => { own.delete(notify); if (!own.size) listeners.delete(channelId); };
     },
-    clear() { modern.clear(); activities.clear(); records.set([]); byChannel.clear(); channelById.clear(); },
+    clear() { modern.clear(); activities.clear(); quotas.clear(); registrations.clear(); channelSpaces.clear();
+      records.set([]); byChannel.clear(); channelById.clear(); },
   };
 }
 
@@ -131,6 +169,12 @@ export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
     if (held?.view === channel) return held.channel;
     const { instanceRecords, ...rest } = channel;
     delete rest.missingInstanceIds;
+    if (channel.spaceId) instances.setChannelSpace(channel.id, channel.spaceId);
+    // Channel reads carry the registration pool in the compatibility view;
+    // it has its own observation time, independent of Instance revisions.
+    for (const instance of channel.presence?.instances.values() ?? []) {
+      if (instance.registration && instance.usage) instances.receiveQuota(instance.registration, instance.usage);
+    }
     if (instanceRecords) instances.receive(instanceRecords, channel.id);
     if (!instances.hasChannel(channel.id)) return channel;
     return { ...rest, presence: rest.presence ? { ...rest.presence, instances: new Map() } : undefined };
