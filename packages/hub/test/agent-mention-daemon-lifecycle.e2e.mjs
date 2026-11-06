@@ -405,8 +405,8 @@ test("a historical instance reborn mention reuses its durable session key after 
     const restoredInstance = restoredPresence.instances.find(
       (instance) => instance.id === resumed.resumeInstanceId,
     );
-    // GET /api/channels is the Postgres projection. Branch, goal, model catalog,
-    // and commands stay on the live frame. Quota percent is the registration reading.
+    // GET /api/channels shares the persisted branch and goal with live frames;
+    // model catalogs and commands remain connection-owned. Quota is the registration reading.
     assert.equal(restoredPresence.usage.totalTokens, 180);
     assert.equal(restoredInstance.model, "gpt-5.6-sol");
     assert.equal(restoredInstance.effort, "xhigh");
@@ -414,8 +414,10 @@ test("a historical instance reborn mention reuses its durable session key after 
     assert.equal(restoredInstance.usage.totalTokens, 180);
     assert.equal(restoredInstance.usage.quotaUsages[0].label, "5h");
     assert.equal(restoredInstance.usage.quotaUsages[0].percent, 30);
-    assert.equal(restoredInstance.gitBranch, undefined);
-    assert.equal(restoredInstance.goal, undefined);
+    assert.equal(restoredInstance.gitBranch, "fix/reborn-preserve-agent-presentation");
+    assert.deepEqual(restoredInstance.goal, {
+      active: true, objective: "Verify safe Reborn migration", status: "active", tokensUsed: 180,
+    });
     assert.equal(restoredInstance.models, undefined);
     assert.equal(restoredInstance.commands, undefined);
 
