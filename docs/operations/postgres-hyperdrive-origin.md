@@ -217,6 +217,15 @@ Delivery and provider effects stay outside the transaction. An answered database
 or domain rejection is not replayed; a second transport loss retains both
 failures. Unknown COMMIT still escapes to the Hub's existing append receipt
 reconciliation, never to immediate replay.
+System annotations, including Machine command results and other Hub judgments
+(HUB-BV), use the same one-replay database-only boundary. Each fresh session
+relocks the live message and rechecks the annotation payload, so a concurrent
+recall stops the write and a repeated judgment remains idempotent. Publication
+runs only after success; answered rejections, a second loss and unknown COMMIT
+still escape without another immediate replay. This repairs the missing
+recovery without attributing the underlying stall.
+Its operation is `message.system-annotation`, so bounded telemetry retains it
+in the message family instead of collapsing the old hyphenated name to `other`.
 Lock-free page search uses per-statement `single_read` recovery, including its
 membership and accessible-page checks (HUB-99).
 Channel detail reads use the same request-local, per-statement recovery for

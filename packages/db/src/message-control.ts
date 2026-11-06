@@ -2487,8 +2487,15 @@ export class PostgresMessageRepository {
     const annotationId = bounded(input.annotationId, "annotationId");
     const requestDigest = digest(input.requestDigest, "requestDigest");
     const commandKind = "message-system-annotation";
+    const operation = "message.system-annotation";
     const principal = { kind: "system" as const, id: "xmatrix" };
-    return this.inSpace(requestId, commandKind, spaceId, async (transaction) => {
+    const placement = await this.placement(requestId, operation, spaceId);
+    // Only database facts are recorded here; live publication follows outside
+    // this boundary. A fresh attempt rechecks the message and its annotation.
+    return retryTransactionBeforeCommit(this.database, {
+      requestId, operation,
+      placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
+    }, async (transaction) => {
       const rows = await transaction.query<MutableMessageRow>({
         name: "message_system_annotation_candidate_v1",
         text: `SELECT m.* FROM data.messages m WHERE m.space_id = $1 AND m.channel_id = $2
