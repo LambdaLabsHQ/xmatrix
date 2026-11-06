@@ -5,7 +5,7 @@ import { recordHarnessActionInventory } from "../dist/machine-harness-actions.js
 
 const reporting = (login, machineName = "mac-mini") => ({ machine_name: machineName, metadata_json: {
   harnesses: { schemaVersion: 1, capturedAt: "2026-10-18T07:00:00Z",
-    items: [{ id: "codex", installed: true, version: "0.130.0", probeStatus: "ok", ...(login ? { login } : {}) }] } } });
+    items: [{ id: "codex", installed: true, version: "0.159.0", probeStatus: "ok", ...(login ? { login } : {}) }] } } });
 const key = { harness: "codex", machineId: "machine:mac" };
 
 test("routing leaves out a harness its machine reports signed out, naming the program and machine", () => {
@@ -42,7 +42,7 @@ test("a sign-in through xMatrix answers an earlier refusal though only its own i
   } };
   await recordHarnessActionInventory(tx, { ownerUserId: "owner", machineId: "machine:mac", hostId: "mac-mini",
     at: "2026-10-18T07:05:12.000Z", result: { presetId: "codex", action: "login_finish", status: "succeeded",
-      item: { id: "codex", installed: true, version: "0.130.0", probeStatus: "ok", login: "signed_in" } } });
+      item: { id: "codex", installed: true, version: "0.159.0", probeStatus: "ok", login: "signed_in" } } });
   assert.equal(written.capturedAt, "2026-10-18T07:00:00Z", "the rest of the inventory is as old as it was");
   assert.equal(written.items[0].observedAt, "2026-10-18T07:05:12.000Z");
   const daemon = { machine_name: "mac-mini", metadata_json: { harnesses: written } };

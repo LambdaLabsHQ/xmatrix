@@ -6,7 +6,7 @@ import {
 
 /** The machine's harness report, as its daemon stores it. */
 const reporting = (capturedAt, login) => JSON.stringify({ schemaVersion: 1, capturedAt,
-  items: [{ id: "codex", installed: true, probeStatus: "ok", version: "0.130.0", login }] });
+  items: [{ id: "codex", installed: true, probeStatus: "ok", version: "0.159.0", login }] });
 
 test("a summon only a signed-out agent could take is refused naming it, from its report or a refused turn", async () => {
   const userId = `signed-out-e2e-${randomUUID()}`;

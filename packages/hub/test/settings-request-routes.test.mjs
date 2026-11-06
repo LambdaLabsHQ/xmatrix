@@ -90,7 +90,7 @@ const call = (actionId, status, updatedAt) => ({ id: `${actionId}:${updatedAt}`,
 
 const daemon = (login, observedAt = "2026-11-01T10:07:00.000Z") => ({ machineId: "machine:a", machineName: "Laptop",
   metadata: { harnesses: { schemaVersion: 1, capturedAt: "2026-11-01T09:00:00.000Z",
-    items: [{ id: "codex", installed: true, probeStatus: "ok", version: "0.50.0", login, observedAt }] } } });
+    items: [{ id: "codex", installed: true, probeStatus: "ok", version: "0.159.0", login, observedAt }] } } });
 
 test("an Agent Run asks for settings from any domain on one card, worded from what each setting is", async () => {
   const agent = hub(agentUser, { daemons: [daemon("signed_out")] });
