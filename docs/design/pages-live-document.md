@@ -319,13 +319,13 @@ fact is about.
 - **A page's name is its document's first top-level heading** (`# Name`,
   outside fenced code), wherever it stands: one datum kept in the document,
   with no title stored beside it. A note, an image or a stray line above the
-  heading leaves the name as it is (decided by Daniel 2026-11-06, after
-  `page read` text an Agent left above a heading made two business-line pages
-  read "Untitled"). Renaming a page is editing that line where it stands, live
-  like any edit; the rename API, the CLI's `page rename` and git pushes all
-  write it there. Lists, search, links and git read it from the head revision
-  (`data.page_title` in SQL, `pageTitleLine` in the protocol for the Hub and
-  the Web, the same rule). A document with no such heading, or whose first one
+  heading leaves the name as it is (Daniel 2026-11-06: the title follows its
+  H1, after `page read` text an Agent left above a heading made two
+  business-line pages read "Untitled"). Renaming a page is editing that line
+  where it stands, live like any edit; the rename API, the CLI's
+  `page rename` and git pushes all write it there. Lists, search, links and
+  git read it from the head revision (`data.page_title` in SQL,
+  `pageTitleLine` in the protocol for the Hub and the Web, the same rule). A document with no such heading, or whose first one
   is empty, has no name and reads as "Untitled"; a page created with a name
   and a body without one gets the name written above its text.
 - The Rust side (`yrs`) reads and writes the same fragment when the CLI or
