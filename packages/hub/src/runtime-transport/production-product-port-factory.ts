@@ -62,6 +62,7 @@ import {
 } from "./runtime-principal-delivery";
 import { RuntimeClientOperationError, runtimeFailureOrigin } from "./runtime-operation-failure";
 import {
+  liveAgentSnapshotActivity,
   liveAgentSnapshotCard,
   loadLiveAgentPresenceFromRuntime,
   type LiveAgentSessionSnapshot,
@@ -275,12 +276,17 @@ export function createProductionRelayRuntimeProductPortFactory(
           }));
         options.scheduleBackground?.(refresh);
       }
+      // The Channel's Instances as the database answers them, ahead of what their connections say.
+      const records = (payload.channel.instanceRecords ?? []).map(parseInstanceRecord);
+      if (records.length > 0) send({ type: "instance_records", records });
       const owners = new Set([...instances.values()].map((instance) => instance.registration.ownerUserId));
       // Each owner's cell is shown as it answers: one that is slow holds back no other's Agents.
       await Promise.all([...owners].map(async (owner) => {
         for (const snapshot of await liveChannelAgents(owner, channelId)) {
           // Only an Instance the Channel's read names is shown, as a live overlay shows only those.
           if (!instances.has(presenceInstanceId(snapshot.instanceId))) continue;
+          const activity = liveAgentSnapshotActivity(snapshot);
+          if (activity) send({ type: "instance_activity", activities: [activity] });
           send(liveAgentSnapshotCard(snapshot, channelInstanceQuota(payload.channel, snapshot.instanceId)));
         }
       }));
